@@ -5,7 +5,9 @@
 两者都支持远程终端与双向文件传输。
 
 **方案与设计见 [`docs/ferry-运维平台产品与技术方案.md`](docs/ferry-运维平台产品与技术方案.md)。**
-当前仓库是通过构建校验的骨架，业务模块尚未实现。
+
+已经能跑：注册登录、工作空间创建与加入、角色权限、主机组 / 主机 / 标签 / 操作记录、
+仪表盘计数。尚未实现：runner 与 SSH 通道、终端与文件传输、构建与部署模块。
 
 ## 结构
 
@@ -18,13 +20,25 @@
 | `desktop` | Tauri 2 外壳：托盘、连接设置，服务作为 sidecar |
 | `docs` | 产品与技术方案 |
 
+界面只有两个页面组件：`src/components/ResourceTable.tsx`（列表）和
+`ResourceForm.tsx`（表单，详情是它的只读模式）。一个资源页就是
+`src/resources.tsx` 里的一份配置，**不手写表格**；配置契约在
+`src/components/dsl.ts`。服务端对应的一份实现是 `crates/server/src/resource.rs`，
+过滤、排序、分页和列名白名单都只在那里。
+
+主题是 shadcn/ui + Tailwind v4 的语义令牌，两套配色：默认（shadcn zinc）和
+`erp`（沿用 easy-erp 的配色）。加一套配色＝在 `src/style.css` 加两个值块、在
+`src/theme.ts` 加一行，组件不动。
+
 ## 开发
 
 ```sh
 cargo run -p ferry-server          # 127.0.0.1:4290
 npm install && npm run dev         # 5173，/api 代理到 4290
 npm run build                      # 产物进 dist/，被服务内嵌
-cargo check --workspace && npm run typecheck
+
+cargo fmt --all -- --check && cargo check --workspace && cargo test --workspace
+npm run typecheck && npm test
 ```
 
 Docker 部署：`docker compose up -d --build`。

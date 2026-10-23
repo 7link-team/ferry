@@ -27,7 +27,10 @@ impl ApiError {
         Self(StatusCode::UNAUTHORIZED, "请登录后继续操作。".into())
     }
     pub fn forbidden() -> Self {
-        Self(StatusCode::FORBIDDEN, "当前账号没有此操作权限，请联系管理员。".into())
+        Self(
+            StatusCode::FORBIDDEN,
+            "当前账号没有此操作权限，请联系管理员。".into(),
+        )
     }
     pub fn missing() -> Self {
         Self(StatusCode::NOT_FOUND, "记录不存在或已不可用。".into())

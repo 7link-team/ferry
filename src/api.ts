@@ -33,6 +33,19 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "操作失败，请重试。";
 
+export interface Workspace {
+  id: string;
+  slug: string;
+  name: string;
+  role_name: string;
+  permissions: string[];
+}
+
+export interface Identity {
+  user: { id: string; email: string; name: string };
+  workspaces: Workspace[];
+}
+
 export interface Status {
   ok: boolean;
   version: string;

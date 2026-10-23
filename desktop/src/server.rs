@@ -27,7 +27,11 @@ pub async fn connection_settings() -> Result<Preferences, String> {
 /// Opens the business window on the chosen server. Only the launcher may ask.
 #[tauri::command]
 pub async fn open_workspace(app: tauri::AppHandle, server_url: String) -> Result<(), String> {
-    let target = if server_url.is_empty() { LOCAL_URL.to_owned() } else { server_url };
+    let target = if server_url.is_empty() {
+        LOCAL_URL.to_owned()
+    } else {
+        server_url
+    };
     let url = url::Url::parse(&target).map_err(|_| "服务地址格式不正确。".to_string())?;
     tauri::WebviewWindowBuilder::new(&app, "workspace", tauri::WebviewUrl::External(url))
         .title("Ferry")

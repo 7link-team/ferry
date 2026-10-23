@@ -12,3 +12,9 @@ pub struct State {
     pub bind: std::net::SocketAddr,
 }
 pub type AppState = Arc<State>;
+
+impl State {
+    pub fn db(&self) -> &DatabaseConnection {
+        &self.db
+    }
+}

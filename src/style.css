@@ -1,66 +1,189 @@
-/* Shell layout only. The grid rows matter: the content area is the single
-   scroll owner, so a resource page's header, footer and sticky columns can
-   stay put while rows move. */
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Themes
+   Two palettes over one token contract. Every component reads only the
+   semantic names below, so a theme is a set of values and never a code path.
+
+     默认 (shadcn / zinc)  :root                    + .dark
+     erp（沿用 easy-erp）   [data-palette="erp"]     + .dark[data-palette="erp"]
+
+   Switching is one attribute on <html>; see src/theme.ts.
+   Adding a third palette means adding two blocks here and one entry there.
+--------------------------------------------------------------------------- */
+
+@custom-variant dark (&:is(.dark *));
+
 :root {
-  --bg: #0f1115;
-  --panel: #161a21;
-  --line: #262c36;
-  --text: #e6e9ee;
-  --muted: #98a2b3;
-  --accent: #4f9cf9;
-  color-scheme: dark;
+  --radius: 0.625rem;
+
+  /* shadcn new-york / zinc, light */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.596 0.145 163.225);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.666 0.142 75.834);
+  --warning-foreground: oklch(0.141 0.005 285.823);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f7f8fa;
-    --panel: #ffffff;
-    --line: #e3e6ea;
-    --text: #1a1d23;
-    --muted: #5c6672;
-    color-scheme: light;
+
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.696 0.17 162.48);
+  --success-foreground: oklch(0.141 0.005 285.823);
+  --warning: oklch(0.769 0.188 70.08);
+  --warning-foreground: oklch(0.141 0.005 285.823);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+}
+
+/* easy-erp 的配色，作为一个可选主题保留。原项目的 paper/ink/line 刻度
+   映射到同一套语义令牌上，所以组件一行都不用改。 */
+[data-palette="erp"] {
+  --radius: 0.5rem;
+
+  --background: #f7faf9;
+  --foreground: #0e1113;
+  --card: #ffffff;
+  --card-foreground: #0e1113;
+  --popover: #ffffff;
+  --popover-foreground: #0e1113;
+  --primary: #353b3d;
+  --primary-foreground: #f7faf9;
+  --secondary: #eef3f2;
+  --secondary-foreground: #0e1113;
+  --muted: #eef3f2;
+  --muted-foreground: #5a6264;
+  --accent: #f1f9f7;
+  --accent-foreground: #0e1113;
+  --destructive: #d6412f;
+  --destructive-foreground: #ffffff;
+  --success: #0b8f7d;
+  --success-foreground: #ffffff;
+  --warning: #c57f12;
+  --warning-foreground: #ffffff;
+  --border: #d2dbd9;
+  --input: #d2dbd9;
+  --ring: #0b8f7d;
+}
+
+.dark[data-palette="erp"] {
+  --background: #1b1f21;
+  --foreground: #e9ecec;
+  --card: #15181a;
+  --card-foreground: #e9ecec;
+  --popover: #15181a;
+  --popover-foreground: #e9ecec;
+  --primary: #bcc2c3;
+  --primary-foreground: #15181a;
+  --secondary: #23282a;
+  --secondary-foreground: #e9ecec;
+  --muted: #23282a;
+  --muted-foreground: #8a9294;
+  --accent: #1d2224;
+  --accent-foreground: #e9ecec;
+  --destructive: #ff7a62;
+  --destructive-foreground: #15181a;
+  --success: #2ad4b8;
+  --success-foreground: #15181a;
+  --warning: #f0b23f;
+  --warning-foreground: #15181a;
+  --border: #30373a;
+  --input: #434a4d;
+  --ring: #2ad4b8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-}
-a { color: inherit; text-decoration: none; }
-
-.shell { display: grid; grid-template-rows: 48px 1fr; height: 100%; }
-.topbar {
-  display: flex; align-items: center; gap: 20px; padding: 0 16px;
-  background: var(--panel); border-bottom: 1px solid var(--line);
-}
-.brand { font-weight: 600; letter-spacing: 0.02em; }
-.modules { display: flex; gap: 4px; }
-.modules a { padding: 6px 12px; border-radius: 6px; color: var(--muted); }
-.modules a[aria-current="page"] { background: var(--bg); color: var(--text); }
-.spacer { flex: 1; }
-.workspace { color: var(--muted); }
-
-.body { display: grid; grid-template-columns: 180px 1fr; min-height: 0; }
-.sidemenu {
-  display: flex; flex-direction: column; gap: 2px; padding: 12px 8px;
-  background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto;
-}
-.sidemenu a { padding: 7px 10px; border-radius: 6px; color: var(--muted); }
-.sidemenu a[aria-current="page"] { background: var(--bg); color: var(--accent); }
-
-/* auto: breadcrumbs, auto: title, 1fr: the page's own scroll region. */
-.content { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; padding: 12px 16px 0; }
-.breadcrumbs ol { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--muted); }
-.breadcrumbs li + li::before { content: "/"; margin-right: 6px; }
-.page-title { margin: 6px 0 12px; font-size: 20px; font-weight: 600; }
-.page { min-height: 0; overflow: auto; padding-bottom: 16px; }
-.placeholder { color: var(--muted); }
-.muted { color: var(--muted); }
-.notice.error { padding: 8px 12px; border-radius: 6px; background: #3a1d1d; color: #ffb4ab; }
-code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
-
-@media (max-width: 720px) {
-  .body { grid-template-columns: 1fr; }
-  .sidemenu { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    margin: 0;
+    font-synthesis: none;
+  }
+  /* Scrollbars follow the theme instead of the OS default, which is wide and
+     loud on Windows. The standard properties keep the engine's behaviour, so
+     macOS overlay scrollbars stay overlaid rather than taking a gutter. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  /* Tabular digits keep numeric columns from jittering as rows refresh. */
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
 }

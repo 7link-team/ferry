@@ -2,7 +2,7 @@
 
 版本 V0.1，日期 2026-10-23。参考 `easy-erp` 的架构、部署形态与工程约定；业务域、多租户模型、主机通道与统一 DSL 组件是本项目新增的部分。
 
-本轮交付为**方案与设计**，以及一个通过构建校验的空骨架。骨架不含业务逻辑；第 15 节的待确认项确认后才进入业务开发。
+本轮交付为**方案与设计**，以及一个通过构建校验的空骨架。骨架不含业务逻辑；第 16 节的待确认项确认后才进入业务开发。
 
 ---
 
@@ -158,7 +158,7 @@ handler 只能拿到 `Scope`，`workspace_id` 永远来自路径校验结果，*
 | 主机 | 主机组 · 主机 · 标签 · 定时任务 |
 | 维护 | 成员管理 · 角色管理 · 密钥变量（全局） · 配置项 · 字典 · 操作记录 |
 
-> 需求里顶部列了「仪表盘 构建 部署 主机 维护」，又单独描述了「应用」的左侧菜单。本文按**「部署」与「应用」是同一模块**处理，顶栏标签取「部署」，左侧首项「应用部署」。见第 15 节待确认 1。
+> 需求里顶部列了「仪表盘 构建 部署 主机 维护」，又单独描述了「应用」的左侧菜单。本文按**「部署」与「应用」是同一模块**处理，顶栏标签取「部署」，左侧首项「应用部署」。见第 16 节待确认 1。
 
 出现在多个模块下的「定时任务」「密钥变量」是**同一个资源页 + 不同预置参数**，不是多份实现：
 
@@ -563,7 +563,7 @@ runner ── WS /api/runners/sessions/a1b2 ────────────
 - 浏览器到服务的 WS 与服务到主机的通道**对拷字节**，中间不解析、不缓冲整屏。
 - 二进制帧 = pty 字节流；文本帧 = `{"type":"resize","cols":120,"rows":32}`。xterm.js 配 fit addon，窗口变化就发 resize。
 - 开终端要 `hosts.terminal` 权限，开启/关闭都写操作记录（谁、哪台、什么时候、多久）。
-- 会话录像第一版不做，见第 15 节待确认 6。
+- 会话录像第一版不做，见第 16 节待确认 6。
 
 ### 9.5 双向文件传输
 
@@ -595,7 +595,171 @@ FERRY_MASTER_KEY（Docker：环境变量；Desktop：data_dir 下 0600 的密钥
 
 ---
 
-## 10. 共享资源：定时任务与密钥变量
+## 10. 部署：一份通用 manifest，多种部署模式
+
+需求是「一个通用的 manifest，然后可以选择部署模式为 native / docker / docker compose / docker stack / k8s / helm」。这一节是它的落地设计。
+
+### 10.1 结论先行：manifest 描述意图，模式是渲染器
+
+把「要跑什么」和「怎么跑」彻底分开：
+
+```
+应用 manifest（意图：服务、镜像、端口、环境、卷、健康检查、副本）
+        │
+        ├─ 能力校验（这个模式支不支持 manifest 用到的东西）
+        ├─ 渲染（纯函数：manifest + 目标配置 → 产物）
+        │     native  → systemd unit + 环境文件
+        │     docker  → docker run 参数
+        │     compose → compose.yaml
+        │     stack   → stack.yaml（Swarm）
+        │     k8s     → Deployment/Service/Ingress/ConfigMap/Secret
+        │     helm    → values.yaml（+ 指定的 chart）
+        ├─ 预览与差异（apply 前看到逐字产物和与线上的 diff）
+        └─ 应用（native/docker/compose/stack 经 HostChannel；k8s/helm 经集群凭据）
+```
+
+**渲染必须是纯函数**：同样的 manifest 加同样的目标配置，永远渲染出同样的字节。这样预览才可信，差异才有意义，回滚才只是「重新应用上一版产物」。
+
+### 10.2 manifest 长什么样
+
+一份 YAML（库里存 JSON），描述一个应用，不描述它跑在哪：
+
+```yaml
+apiVersion: ferry/v1
+kind: Application
+metadata:
+  name: web-api
+  labels: { team: platform }
+
+services:
+  - name: api
+    # 两种来源二选一：容器镜像，或可执行产物（native 模式用）
+    image: ghcr.io/acme/web-api:1.4.2
+    artifact:
+      source: pipeline            # 来自构建模块的产物
+      pipeline: web-api-release
+      path: dist/web-api
+    command: ["--config", "/etc/web-api.toml"]
+    replicas: 2
+    ports:
+      - { name: http, container: 8080, published: 80, protocol: tcp }
+    env:
+      - { name: LOG_LEVEL, value: info }
+      - { name: DATABASE_URL, valueFrom: variable/db-url }      # 密钥变量引用
+    files:
+      - { path: /etc/web-api.toml, fromTemplate: web-api-config }
+    volumes:
+      - { name: data, path: /var/lib/web-api, size: 10Gi }
+    health:
+      readiness: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+      liveness:  { httpGet: { path: /healthz, port: http }, periodSeconds: 30 }
+    resources:
+      requests: { cpu: 100m, memory: 128Mi }
+      limits:   { cpu: "1",  memory: 512Mi }
+    dependsOn: [redis]
+
+  - name: redis
+    image: redis:7-alpine
+    ports: [{ name: redis, container: 6379 }]
+
+strategy:
+  type: rolling            # rolling | recreate
+  maxUnavailable: 0
+  healthTimeout: 120s
+
+# 逃生舱：渲染结果上的原样合并，按模式分开。没有它，所有抽象迟早被绕开。
+overrides:
+  k8s:
+    spec:
+      template:
+        spec:
+          nodeSelector: { disktype: ssd }
+  compose:
+    services:
+      api:
+        logging: { driver: json-file, options: { max-size: 10m } }
+```
+
+要点：
+
+- **`valueFrom: variable/db-url` 是唯一的取密方式**，manifest 里永不写明文。渲染时按模式落到对应载体（k8s Secret / compose 的 `env_file` / systemd 的 `EnvironmentFile`，文件权限 0600），密文在服务端解开，不进产物预览，不进操作记录。
+- **`artifact` 与 `image` 二选一**，让 native 模式和容器模式共用一份描述。
+- **`overrides` 按模式分开**，是原样合并到渲染结果上的。这是整套设计能不能活下去的关键：任何一个「通用模型」都一定有覆盖不到的字段，没有逃生舱的人会直接放弃这套工具去手写 YAML。
+
+### 10.3 能力矩阵：差异要提前报错，不要悄悄降级
+
+六种模式的能力不一样。**在保存 manifest 的时候就校验，不要等到 apply**；也绝不悄悄按最低能力降级——「我配了 2 个副本，线上只有 1 个」是最难查的那类问题。
+
+| 能力 | native | docker | compose | stack | k8s | helm |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| 多服务 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `replicas > 1` | ✗ | ✗ | ✓¹ | ✓ | ✓ | ✓ |
+| 滚动更新 | ✗ | ✗ | ✗ | ✓ | ✓ | ✓ |
+| 健康检查 | ✓² | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `resources.limits` | ✓³ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 持久卷 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 服务发现 | ✗⁴ | ✗⁴ | ✓ | ✓ | ✓ | ✓ |
+| 部署目标 | 主机 | 主机 | 主机 | Swarm | 集群 | 集群 |
+
+¹ 同主机多实例，端口要用范围或不发布。² systemd 的 `ExecStartPost` + 重启策略，不是真正的就绪探针。³ systemd 的 `CPUQuota` / `MemoryMax`。⁴ 只能用固定地址或主机名。
+
+校验信息要具体：不是「不支持」，而是「native 模式一台主机只跑一个实例；要 2 个副本请改用 compose/stack/k8s，或把副本部署到主机组的多台主机上」。
+
+### 10.4 部署目标不总是主机
+
+这是容易设计错的地方：**native / docker / compose / stack 部署到主机（或主机组），k8s / helm 部署到集群**。所以部署记录上的目标是一个二选一：
+
+```
+deployments.target_kind  ∈ host | host-group | cluster
+deployments.target_ref   → hosts.id | host_groups.id | clusters.id
+```
+
+- 主机类目标经 §9 的 `HostChannel` 执行，runner 和 SSH 两种接入方式都能用，不需要额外通道。
+- 集群类目标需要新增一个 `clusters` 资源（kubeconfig 存进 §9.6 的保管机制），走 Kubernetes API，不经过 `HostChannel`。
+- 部署到**主机组**时，逐台滚动，失败即停，已成功的不自动回滚——自动回滚一半主机会留下更难理解的混合状态，由人决定继续还是回退。
+
+### 10.5 接口
+
+```
+GET    /api/workspaces/{ws}/deployments                      列表
+POST   /api/workspaces/{ws}/deployments                      创建（manifest + 模式 + 目标）
+GET    /api/workspaces/{ws}/deployments/{id}                 详情
+PATCH  /api/workspaces/{ws}/deployments/{id}                 修改
+POST   /api/workspaces/{ws}/deployments/{id}/actions/render  纯渲染，不接触目标
+POST   /api/workspaces/{ws}/deployments/{id}/actions/preview  渲染 + 与线上对比
+POST   /api/workspaces/{ws}/deployments/{id}/actions/apply   执行
+POST   /api/workspaces/{ws}/deployments/{id}/actions/rollback 回滚到指定 revision
+GET    /api/workspaces/{ws}/deployments/{id}/revisions       历史
+```
+
+`render` 不碰目标，所以给所有能读的人用；`apply` 要 `deployments.apply`，`rollback` 要 `deployments.rollback`。
+
+**每次 apply 把渲染产物整份存进 `deployment_revisions`**，不只存 manifest。镜像 tag 会被覆盖、chart 会更新、模板会变——只存 manifest 的「回滚」可能渲染出和当时不一样的东西。存产物，回滚才是确定的。
+
+### 10.6 应用模版与应用市场
+
+- **应用模版**（`app_templates`）＝ 参数化的 manifest。`{{ .Values.image.tag }}` 这类占位符 + 参数定义（类型、默认值、校验、是否密钥）。创建部署时选模版、填参数、生成 manifest。
+- **应用市场**（`marketplace`）＝ 模版的来源目录。第一版建议用**仓库索引**：一个 Git 仓库里放模版清单，工作空间订阅它，定时同步。这样「市场」不需要中心化服务，自建和公共源是同一套机制。见第 16 节待确认 7。
+
+Helm 是个特例：它自己就是模版系统。Ferry 不重新实现它——helm 模式下 manifest 只负责产出 `values.yaml` 和 chart 引用，渲染交给 helm。**不要把 Go template 再包一层。**
+
+### 10.7 实现顺序
+
+能力矩阵上从窄到宽，但每一步都要能真正跑通：
+
+1. `compose` —— 最常用，产物可读，本地就能验证渲染器和 `overrides` 合并逻辑。
+2. `docker` —— 同一渲染器去掉多服务编排，验证单服务路径。
+3. `native` —— systemd，验证非容器路径和 `artifact` 来源。
+4. `k8s` —— 引入 `clusters` 资源和集群通道。
+5. `stack` —— 在 `compose` 渲染器上加 Swarm 字段。
+6. `helm` —— 在 `k8s` 的集群通道上加 helm 客户端。
+
+```
+// ponytail: 渲染器一个模式一个函数，共用一个 manifest 解析和一个 overrides 合并。
+// 不要先造「渲染器插件框架」——六个函数还不值得一个注册表。
+```
+
+## 11. 共享资源：定时任务与密钥变量
 
 需求明确说了「定时任务虽然多个菜单有，但是接口和逻辑都是一套」。落地方式：
 
@@ -633,7 +797,7 @@ GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
 
 ---
 
-## 11. 数据模型
+## 12. 数据模型
 
 全部业务表共有：`id TEXT PK`、`workspace_id TEXT`、`created_at BIGINT`、`updated_at BIGINT`、`version INTEGER`；时间统一毫秒时间戳。骨架已建立身份与租户基座（`users` `sessions` `workspaces` `workspace_roles` `workspace_members` `activity`），其余按模块分批迁移。
 
@@ -646,7 +810,8 @@ GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
 | 主机 | `runner_tokens` | 一次性注册令牌，带 TTL 与使用痕迹 |
 | 构建 | `repositories` `pipelines` `pipeline_templates` `pipeline_runs` `pipeline_steps` | 流水线定义存 JSON，运行实例拆行便于查询 |
 | 构建 | `credentials` | Git 与 SSH 共用；`kind` ∈ password/ssh-key/token，值加密 |
-| 部署 | `deployments` `app_templates` `deployment_revisions` | 每次部署留版本，可回滚 |
+| 部署 | `deployments` `app_templates` `deployment_revisions` | `target_kind`/`target_ref` 指向主机、主机组或集群；revision 存**渲染产物**而非 manifest（§10.5） |
+| 部署 | `clusters` | k8s/helm 的目标；kubeconfig 走 §9.6 的保管机制 |
 | 部署 | `alert_rules` `alert_events` | 规则 + 触发记录 |
 | 共享 | `cron_jobs` `cron_runs` | 一套，`scope` 区分归属 |
 | 共享 | `variables` | 一套，`scope` + `scope_ref` 分层 |
@@ -657,7 +822,7 @@ GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
 
 ---
 
-## 12. 仪表盘
+## 13. 仪表盘
 
 一个接口回全部数据，不让首页发十几个请求：
 
@@ -677,7 +842,7 @@ GET /api/workspaces/{ws}/dashboard
 
 ---
 
-## 13. 安全
+## 14. 安全
 
 沿用 easy-erp 已验证的那套，加上多租户与远程通道特有的部分。
 
@@ -697,16 +862,18 @@ GET /api/workspaces/{ws}/dashboard
 
 ---
 
-## 14. 交付阶段
+## 15. 交付阶段
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | 0 ✅ | 项目骨架：三个 crate + Tauri 外壳 + 界面外壳 + Docker | `cargo check --workspace`、`npm run build`、服务起得来并应答 |
+| 1 ✅ | 注册登录、工作空间创建/加入、角色权限、`Scope` 提取器 | 两个账号互不可见（陌生人访问他人空间返回 404）；内置角色依赖闭包有测试 |
+| 2 ✅ | 列表 DSL + 表单 DSL，shadcn 主题（默认 + erp），主机组/主机/标签/操作记录 | 四边 sticky 浏览器实测通过；URL 含过滤/分页/排序/滚动；分享链接登录后直达原位置 |
 | 1 | 注册登录、工作空间创建/加入、角色权限、`Scope` 提取器 | 两个账号两个空间，互相看不到对方数据 |
 | 2 | 列表 DSL + 表单 DSL 组件，用主机组/标签两个资源验证 | 四边 sticky 在三种窗口宽度下正确；URL 含全部视图状态；分享链接登录后直达含滚动位置 |
 | 3 | 主机 CRUD + runner 接入 + SSH 接入 + 终端 + 文件传输 | 同一台主机两种方式接入，终端与双向传输都通；断网重连；审计齐全 |
 | 4 | 仓库、流水线、流水线模版、授权认证 | 一条真实流水线跑通 |
-| 5 | 应用部署、应用模版、应用市场、报警监控 | 一次部署加一次回滚 |
+| 5 | 应用部署（manifest + 六种模式，按 §10.7 顺序）、应用模版、应用市场、报警监控 | compose 模式一次部署加一次回滚；渲染产物逐字可预览 |
 | 6 | 共享定时任务与密钥变量、字典、配置项、操作记录 | 三个菜单入口确认是同一套接口与逻辑 |
 | 7 | 仪表盘 | 数量/分布/健康与各模块实际数据一致 |
 | 8 | 桌面打包与自动更新、发布流程 | 三平台安装包；升级不丢数据 |
@@ -715,7 +882,7 @@ GET /api/workspaces/{ws}/dashboard
 
 ---
 
-## 15. 待确认项
+## 16. 待确认项
 
 1. **「部署」与「应用」是不是同一个一级菜单？** 需求顶部列的是「部署」，左侧菜单描述的是「应用」。本文按同一模块处理、标签取「部署」。如果是两个独立模块，`nav.ts` 加一组即可，但两者的左侧菜单要重新划分。
 2. **数据库选 PostgreSQL 还是跟 easy-erp 一致的 MySQL？** 骨架按 PostgreSQL 配（JSON 配置、时间与并发语义更顺手，运维场景常见）。要与 erp 保持同构就改 `crates/server/Cargo.toml` 的 feature 与迁移里的方言分支，成本不大但要现在定。

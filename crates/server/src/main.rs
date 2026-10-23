@@ -1,13 +1,21 @@
 mod assets;
-// Bedrock the business modules build on; unused until they land.
-#[allow(dead_code)]
+mod auth;
 mod db;
-#[allow(dead_code)]
 mod error;
+mod hosts;
 mod migration;
+mod resource;
 mod state;
+mod workspace;
 
-use axum::{Router, extract::DefaultBodyLimit, routing::get};
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, Request},
+    http::{StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
 use clap::Parser;
 use fs2::FileExt;
 use sea_orm::{ConnectOptions, Database};
@@ -29,6 +37,9 @@ struct Config {
     server_mode: bool,
     #[arg(long, env = "FERRY_SECURE_COOKIE", default_value_t = false)]
     secure_cookie: bool,
+    /// Hostnames browsers may reach this server on. localhost is always allowed.
+    #[arg(long, env = "FERRY_ALLOWED_HOSTS", value_delimiter = ',')]
+    allowed_hosts: Vec<String>,
 }
 
 #[tokio::main]
@@ -85,18 +96,77 @@ async fn main() -> anyhow::Result<()> {
         bind: cfg.bind,
     });
 
+    let mut hosts = cfg.allowed_hosts;
+    hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
+    let hosts = Arc::new(hosts);
+
+    // Workspace resources all sit under /api/workspaces/{workspace}/..., which
+    // is what makes the Scope extractor the only way to obtain a workspace id.
+    let workspace_api = Router::new()
+        .route("/{workspace}/dashboard", get(hosts::dashboard))
+        .route("/{workspace}/roles", get(workspace::roles))
+        .route("/{workspace}/activity", get(hosts::list_activity))
+        .route(
+            "/{workspace}/host-groups",
+            get(hosts::list_groups).post(hosts::create_group),
+        )
+        .route(
+            "/{workspace}/host-groups/{id}",
+            get(hosts::get_group)
+                .patch(hosts::update_group)
+                .delete(hosts::delete_group),
+        )
+        .route(
+            "/{workspace}/hosts",
+            get(hosts::list_hosts).post(hosts::create_host),
+        )
+        .route(
+            "/{workspace}/hosts/{id}",
+            get(hosts::get_host)
+                .patch(hosts::update_host)
+                .delete(hosts::delete_host),
+        )
+        .route(
+            "/{workspace}/hosts/actions/bulk-delete",
+            post(hosts::bulk_delete_hosts),
+        )
+        .route(
+            "/{workspace}/tags",
+            get(hosts::list_tags).post(hosts::create_tag),
+        )
+        .route(
+            "/{workspace}/tags/{id}",
+            get(hosts::get_tag)
+                .patch(hosts::update_tag)
+                .delete(hosts::delete_tag),
+        );
+
     let app = Router::new()
         .route("/api/status", get(status))
+        .route("/api/permissions", get(workspace::permission_catalogue))
+        .route("/api/users", post(auth::register))
+        .route("/api/sessions", post(auth::login).delete(auth::logout))
+        .route("/api/me", get(auth::me))
+        .route("/api/workspaces", post(workspace::create))
+        .route("/api/workspaces/actions/join", post(workspace::join))
+        .nest("/api/workspaces", workspace_api)
         .fallback(assets::serve)
         .layer(DefaultBodyLimit::max(256 * 1024))
+        .layer(middleware::from_fn(move |req: Request, next: Next| {
+            let hosts = hosts.clone();
+            async move { guard(req, next, &hosts).await }
+        }))
         .layer(TraceLayer::new_for_http())
         .with_state(s.clone());
 
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shutdown())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown())
+    .await?;
     s.db.clone().close().await?;
     drop(lock);
     Ok(())
@@ -123,7 +193,10 @@ fn instance_id(dir: &std::path::Path) -> anyhow::Result<String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             use std::io::Write;
             let value = uuid::Uuid::new_v4().to_string();
-            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
             file.write_all(value.as_bytes())?;
             file.sync_all()?;
             Ok(value)
@@ -141,4 +214,59 @@ async fn shutdown() {
     }
     #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
+}
+
+/// Request-shape defences that belong in one place rather than per handler:
+/// a Host allowlist, a same-origin check, a header no cross-site form can set,
+/// and the response headers.
+async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
+    let host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    let hostname = host
+        .parse::<axum::http::uri::Authority>()
+        .map(|a| a.host().to_string())
+        .unwrap_or_default();
+    if !allowed.iter().any(|h| h.eq_ignore_ascii_case(&hostname)) {
+        return (StatusCode::FORBIDDEN, "此主机地址未在允许列表中。").into_response();
+    }
+    let mutating = !matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    // A cross-site form can issue a POST but cannot add a custom header, and
+    // cannot read the response. Cheaper and harder to get wrong than tokens.
+    if mutating
+        && req
+            .headers()
+            .get("x-ferry-request")
+            .and_then(|v| v.to_str().ok())
+            != Some("1")
+    {
+        return (StatusCode::FORBIDDEN, "缺少操作校验标识。").into_response();
+    }
+    if let Some(origin) = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        && origin != format!("http://{host}")
+        && origin != format!("https://{host}")
+    {
+        return (StatusCode::FORBIDDEN, "不允许此来源发起操作。").into_response();
+    }
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    headers.insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            .parse()
+            .unwrap(),
+    );
+    headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    response
 }

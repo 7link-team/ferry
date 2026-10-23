@@ -25,11 +25,20 @@ pub struct Hello {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
     /// Enrollment accepted; the runner stores `key` and reconnects with it.
-    Welcome { host_id: String, key: String, heartbeat_seconds: u64 },
+    Welcome {
+        host_id: String,
+        key: String,
+        heartbeat_seconds: u64,
+    },
     /// Open a dedicated session connection back to the server.
-    OpenSession { session: String, kind: SessionKind },
+    OpenSession {
+        session: String,
+        kind: SessionKind,
+    },
     Ping,
-    Shutdown { reason: String },
+    Shutdown {
+        reason: String,
+    },
 }
 
 /// Runner -> server on the control connection.
@@ -38,8 +47,17 @@ pub enum Control {
 pub enum Report {
     Pong,
     /// Periodic host facts for the dashboard.
-    Metrics { load1: f64, memory_used: u64, memory_total: u64, disk_used: u64, disk_total: u64 },
-    SessionFailed { session: String, error: String },
+    Metrics {
+        load1: f64,
+        memory_used: u64,
+        memory_total: u64,
+        disk_used: u64,
+        disk_total: u64,
+    },
+    SessionFailed {
+        session: String,
+        error: String,
+    },
 }
 
 /// What a dedicated session connection carries. One connection per session
@@ -62,12 +80,33 @@ pub enum SessionKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Session {
-    TerminalStart { shell: Option<String>, cols: u16, rows: u16 },
-    TerminalResize { cols: u16, rows: u16 },
-    FileStart { path: String, mode: Option<u32> },
-    FileMeta { size: u64, mode: u32, modified_at: i64 },
-    ExecStart { command: String, timeout_seconds: u64 },
-    ExecDone { code: i32 },
+    TerminalStart {
+        shell: Option<String>,
+        cols: u16,
+        rows: u16,
+    },
+    TerminalResize {
+        cols: u16,
+        rows: u16,
+    },
+    FileStart {
+        path: String,
+        mode: Option<u32>,
+    },
+    FileMeta {
+        size: u64,
+        mode: u32,
+        modified_at: i64,
+    },
+    ExecStart {
+        command: String,
+        timeout_seconds: u64,
+    },
+    ExecDone {
+        code: i32,
+    },
     Eof,
-    Failed { error: String },
+    Failed {
+        error: String,
+    },
 }

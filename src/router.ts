@@ -80,8 +80,14 @@ export function useRoute(): Route {
   return parse();
 }
 
+/** `useQueryValue("page", 1)` must give back a `number`, not the literal `1`. */
+type Widen<T> = T extends number ? number : T extends string ? string : T;
+
 /** A filter or pagination value that lives in the URL without adding history. */
-export function useQueryValue<T extends string | number>(key: string, fallback: T) {
+export function useQueryValue<T extends string | number>(
+  key: string,
+  fallback: T,
+): readonly [Widen<T>, (value: Widen<T>) => void] {
   const read = useCallback((): T => {
     const raw = new URLSearchParams(location.search).get(key);
     if (raw === null) return fallback;
@@ -89,7 +95,7 @@ export function useQueryValue<T extends string | number>(key: string, fallback: 
       return (/^\d+$/.test(raw) && Number(raw) > 0 ? Number(raw) : fallback) as T;
     return raw as T;
   }, [key, fallback]);
-  const [value, setValue] = useState<T>(read);
+  const [value, setValue] = useState<Widen<T>>(read as () => Widen<T>);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (value === fallback) params.delete(key);
@@ -99,7 +105,7 @@ export function useQueryValue<T extends string | number>(key: string, fallback: 
     if (next !== snapshot()) history.replaceState(history.state, "", next);
   }, [key, value, fallback]);
   useSyncExternalStore(subscribe, snapshot);
-  useEffect(() => setValue(read()), [read]);
+  useEffect(() => setValue(read() as Widen<T>), [read]);
   return [value, setValue] as const;
 }
 

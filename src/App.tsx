@@ -1,100 +1,282 @@
-import { useEffect, useState } from "react";
-import { api, errorText, type Status } from "./api";
-import { nav, findGroup, findItem } from "./nav";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, LogOut, Moon, Palette, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "cn";
+import { api, errorText, type Identity } from "./api";
+import { ResourceForm } from "./components/ResourceForm";
+import { ResourceTable } from "./components/ResourceTable";
+import { Entry } from "./Entry";
+import { findGroup, findItem, nav } from "./nav";
+import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useRoute } from "./router";
+import { PALETTES, useTheme } from "./theme";
 
-/** Top module bar, left menu, breadcrumbs and page title — the shell every
- *  resource page renders inside. Pages supply content only. */
 export function App() {
-  const route = useRoute();
-  const [status, setStatus] = useState<Status>();
+  const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const reload = () => {
+    setLoading(true);
+    api<Identity>("/me")
+      .then((value) => {
+        setIdentity(value);
+        setError("");
+      })
+      .catch((cause: unknown) => {
+        setIdentity(undefined);
+        // 401 is the normal unauthenticated state, not an error to show.
+        setError(cause instanceof Error && "status" in cause && cause.status === 401 ? "" : errorText(cause));
+      })
+      .finally(() => setLoading(false));
+  };
+  useEffect(reload, []);
   useEffect(() => {
-    api<Status>("/status").then(setStatus, (e: unknown) => setError(errorText(e)));
+    // A session that expires mid-use drops back to the entry screen without
+    // changing the URL, so signing in again lands on the same page.
+    const onUnauthorized = () => setIdentity(undefined);
+    window.addEventListener("ferry:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("ferry:unauthorized", onUnauthorized);
   }, []);
-  // ponytail: the workspace comes from the URL until sessions land.
-  const workspace = route.workspace || "demo";
+
+  if (loading)
+    return (
+      <div className="grid h-full place-items-center text-muted-foreground">
+        <Loader2 className="size-5 animate-spin" />
+      </div>
+    );
+
+  // The URL is never replaced while unauthenticated: that is what makes a
+  // shared link land on its target page after signing in (§5.3).
+  if (!identity?.workspaces) return <Entry onReady={reload} error={error} />;
+  return <Workspace identity={identity} onSignedOut={reload} />;
+}
+
+function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut: () => void }) {
+  const route = useRoute();
+  const theme = useTheme();
+
+  const current =
+    identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
+  const slug = current?.slug ?? "";
+
+  // A URL naming a workspace the account cannot open is corrected once, in
+  // place, rather than showing a dead page. Every hook runs before the early
+  // return below, so the hook order never depends on the data.
+  useEffect(() => {
+    if (slug && route.workspace !== slug)
+      navigate({ ...route, workspace: slug }, {}, { replace: true });
+  }, [route.workspace, slug]);
+
+  const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
+  const lists = useMemo(() => listConfigs(slug), [slug]);
+  const forms = useMemo(() => formConfigs(slug), [slug]);
+
+  // Nothing to show yet: send the user through workspace creation/joining.
+  if (!current) return <Entry onReady={onSignedOut} error="" />;
+
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
 
+  const groups = nav
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => !i.permission || permissions.has(i.permission)),
+    }))
+    .filter((g) => g.items.length);
+
+  const to = (groupKey: string, itemKey: string, params?: Record<string, string>) => ({
+    href: href({ workspace: current.slug, group: groupKey, item: itemKey, mode: "list" }, params ?? {}),
+    onClick: (event: React.MouseEvent) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigate({ workspace: current.slug, group: groupKey, item: itemKey, mode: "list" }, params ?? {});
+    },
+  });
+
+  const listConfig = lists[item.resource];
+  const formConfig = forms[item.resource];
+
   return (
-    <div className="shell">
-      <header className="topbar">
-        <a className="brand" href={href({ workspace, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" })}
-           onClick={link({ workspace, group: nav[0]!.key, item: nav[0]!.items[0]!.key })}>
+    <div className="grid h-full grid-rows-[48px_1fr]">
+      <header className="flex items-center gap-5 border-b border-border bg-card px-4">
+        <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           Ferry
         </a>
-        <nav className="modules" aria-label="模块">
-          {nav.map((g) => (
-            <a key={g.key}
-               href={href({ workspace, group: g.key, item: g.items[0]!.key, mode: "list" })}
-               aria-current={g.key === group.key ? "page" : undefined}
-               onClick={link({ workspace, group: g.key, item: g.items[0]!.key })}>
+        <nav className="flex gap-1" aria-label="模块">
+          {groups.map((g) => (
+            <a
+              key={g.key}
+              {...to(g.key, g.items[0]!.key)}
+              aria-current={g.key === group.key ? "page" : undefined}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground",
+                g.key === group.key && "bg-accent text-foreground",
+              )}
+            >
               {g.label}
             </a>
           ))}
         </nav>
-        <span className="spacer" />
-        <span className="workspace">{workspace}</span>
+        <span className="flex-1" />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" aria-label="主题">
+              <Palette />
+              {PALETTES.find((p) => p.value === theme.palette)?.label}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {PALETTES.map((palette) => (
+              <DropdownMenuItem key={palette.value} onClick={() => theme.set({ palette: palette.value })}>
+                {palette.label}
+                {palette.value === theme.palette && " ✓"}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="深浅模式"
+          onClick={() => theme.set({ mode: theme.resolved === "dark" ? "light" : "dark" })}
+        >
+          {theme.resolved === "dark" ? <Moon /> : <Sun />}
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              {current.name} · {identity.user.name}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {identity.workspaces.map((w) => (
+              <DropdownMenuItem
+                key={w.slug}
+                onClick={() =>
+                  navigate({ workspace: w.slug, group: route.group, item: route.item, mode: "list" }, {})
+                }
+              >
+                {w.name}
+                {w.slug === current.slug && " ✓"}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem
+              onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
+            >
+              <LogOut /> 退出登录
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
-      <div className="body">
-        <nav className="sidemenu" aria-label={group.label}>
-          {group.items.map((i) => (
-            <a key={i.key}
-               href={href({ workspace, group: group.key, item: i.key, mode: "list" }, i.params)}
-               aria-current={i.key === item.key ? "page" : undefined}
-               onClick={link({ workspace, group: group.key, item: i.key }, i.params)}>
-              {i.label}
-            </a>
-          ))}
+      <div className="grid min-h-0 grid-cols-[180px_1fr] max-sm:grid-cols-1">
+        <nav
+          className="flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-card p-3 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b"
+          aria-label={group.label}
+        >
+          {group.items
+            .filter((i) => !i.permission || permissions.has(i.permission))
+            .map((i) => (
+              <a
+                key={i.key}
+                {...to(group.key, i.key, i.params)}
+                aria-current={i.key === item.key ? "page" : undefined}
+                className={cn(
+                  "rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground",
+                  i.key === item.key && "bg-accent text-foreground",
+                )}
+              >
+                {i.label}
+              </a>
+            ))}
         </nav>
 
-        <main className="content">
-          <nav className="breadcrumbs" aria-label="面包屑">
-            <ol>
-              <li><a href={href({ workspace, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" })}
-                     onClick={link({ workspace, group: nav[0]!.key, item: nav[0]!.items[0]!.key })}>工作空间</a></li>
-              <li><a href={href({ workspace, group: group.key, item: group.items[0]!.key, mode: "list" })}
-                     onClick={link({ workspace, group: group.key, item: group.items[0]!.key })}>{group.label}</a></li>
-              <li>{route.mode === "list"
-                ? <span aria-current="page">{item.label}</span>
-                : <a href={href({ workspace, group: group.key, item: item.key, mode: "list" })}
-                     onClick={link({ workspace, group: group.key, item: item.key })}>{item.label}</a>}</li>
+        {/* auto breadcrumbs / auto title / 1fr content — min-h-0 is what lets
+            the content own the scrolling instead of the page. */}
+        <main className="grid min-h-0 grid-rows-[auto_auto_1fr] px-4 pt-3">
+          <nav aria-label="面包屑">
+            <ol className="flex gap-1.5 text-sm text-muted-foreground">
+              <li>
+                <a className="hover:text-foreground" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
+                  {current.name}
+                </a>
+              </li>
+              <li aria-hidden>/</li>
+              <li>
+                <a className="hover:text-foreground" {...to(group.key, group.items[0]!.key)}>
+                  {group.label}
+                </a>
+              </li>
+              <li aria-hidden>/</li>
+              <li>
+                {route.mode === "list" ? (
+                  <span aria-current="page" className="text-foreground">
+                    {item.label}
+                  </span>
+                ) : (
+                  <a className="hover:text-foreground" {...to(group.key, item.key, item.params)}>
+                    {item.label}
+                  </a>
+                )}
+              </li>
               {route.mode !== "list" && (
-                <li><span aria-current="page">
-                  {route.mode === "new" ? "创建" : route.mode === "edit" ? "编辑" : "详情"}
-                </span></li>
+                <>
+                  <li aria-hidden>/</li>
+                  <li aria-current="page" className="text-foreground">
+                    {route.mode === "new" ? "创建" : route.mode === "edit" ? "编辑" : "详情"}
+                  </li>
+                </>
               )}
             </ol>
           </nav>
-          <h1 className="page-title">{item.label}</h1>
+          <h1 className="mt-1.5 mb-3 text-xl font-semibold">
+            {item.label}
+            {route.mode === "new" && " · 创建"}
+            {route.mode === "edit" && " · 编辑"}
+          </h1>
 
-          <section className="page">
-            {error && <p className="notice error">{error}</p>}
-            <p className="placeholder">
-              资源页 <code>{item.resource}</code>
-              {item.params ? `（${new URLSearchParams(item.params)}）` : ""} 还未实现。
-              统一列表与表单组件的设计见 <code>docs/ferry-运维平台产品与技术方案.md</code>。
-            </p>
-            {status && (
-              <p className="muted">
-                服务 v{status.version}，协议 v{status.protocol}，
-                {status.server_mode ? "Docker 部署" : "桌面部署"}
-              </p>
-            )}
-          </section>
+          {route.mode === "list" ? (
+            listConfig ? (
+              <ResourceTable
+                key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
+                config={{ ...listConfig, ...(item.params ? { fixed: item.params } : {}) }}
+                workspace={current.slug}
+                permissions={permissions}
+              />
+            ) : (
+              <Placeholder resource={item.resource} />
+            )
+          ) : formConfig ? (
+            <div className="min-h-0 overflow-auto">
+              <ResourceForm
+                key={`${current.slug}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
+                config={formConfig}
+                workspace={current.slug}
+                permissions={permissions}
+              />
+            </div>
+          ) : (
+            <Placeholder resource={item.resource} />
+          )}
         </main>
       </div>
     </div>
   );
 }
 
-/** Real links that the router intercepts, so middle-click and copy still work. */
-const link =
-  (route: { workspace: string; group: string; item: string }, query?: Record<string, string>) =>
-  (event: React.MouseEvent) => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    navigate({ ...route, mode: "list" }, query ?? {});
-  };
+const Placeholder = ({ resource }: { resource: string }) => (
+  <p className="text-muted-foreground">
+    资源 <code className="rounded bg-muted px-1.5 py-0.5 text-sm">{resource}</code> 还未实现。
+    加一份 <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/resources.tsx</code> 配置
+    和对应的服务端处理即可，不需要新的页面组件。
+  </p>
+);

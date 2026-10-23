@@ -17,10 +17,18 @@ pub async fn serve(uri: Uri) -> Response {
     match file {
         // A client-side route is not a file; the shell resolves it.
         Some(file) => {
-            let mime = mime_guess::from_path(if Web::get(path).is_some() { path } else { "index.html" })
-                .first_or_octet_stream();
+            let mime = mime_guess::from_path(if Web::get(path).is_some() {
+                path
+            } else {
+                "index.html"
+            })
+            .first_or_octet_stream();
             ([(header::CONTENT_TYPE, mime.as_ref())], file.data).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "界面文件未构建，请先运行 npm run build。").into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "界面文件未构建，请先运行 npm run build。",
+        )
+            .into_response(),
     }
 }
