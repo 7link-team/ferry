@@ -32,5 +32,10 @@ fs2 = "0.4"
 bytes = "1"
 futures = "0.3"
 async-trait = "0.1"
-russh = "0.64"
+# ring, not the default aws-lc-rs: aws-lc-sys needs NASM to build on Windows
+# and the desktop installer job has none. ring ships pre-generated MSVC
+# assembly, so it cross-builds without extra tooling. Swapping the crypto
+# backend is not cosmetic — scripts/test-ssh.sh is the check that it still
+# negotiates with a real sshd.
+russh = { version = "0.64", default-features = false, features = ["ring", "flate2", "rsa"] }
 russh-sftp = "3"
