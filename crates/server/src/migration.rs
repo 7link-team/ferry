@@ -13,14 +13,6 @@ use sea_orm_migration::prelude::*;
 /// checked for existence first rather than relying on the clause.
 async fn execute_schema(m: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
     let backend = m.get_connection().get_database_backend();
-    // No backend has `ADD COLUMN IF NOT EXISTS` in a spelling all three share,
-    // so the column is looked up instead. Checked everywhere, not only on
-    // MySQL: a re-run must be a no-op rather than an error on any of them.
-    if let Some((table, column)) = added_column(sql)
-        && m.has_column(&table, &column).await?
-    {
-        return Ok(());
-    }
     if backend == sea_orm::DbBackend::MySql {
         if let Some((table, index)) = dialect::index_target(sql) {
             if m.has_index(&table, &index).await? {
