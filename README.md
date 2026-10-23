@@ -41,7 +41,16 @@ cargo fmt --all -- --check && cargo check --workspace && cargo test --workspace
 npm run typecheck && npm test
 ```
 
-Docker 部署：`docker compose up -d --build`。
+Docker 部署：
+
+```sh
+docker compose up -d                       # 拉 ghcr.io/7link-team/ferry-server
+docker compose up -d --build               # 或本地构建
+```
+
+> GHCR 的包默认是私有的（即使仓库公开）。首次发布后需要在
+> GitHub → Packages → ferry-server → Package settings 里把可见性改成 Public，
+> 匿名 `docker pull` 才能用。
 
 桌面部署：`desktop/` 需要先把 `ferry-server` 可执行文件按目标三元组放进
 `desktop/binaries/`，然后 `npm run desktop:dev`。

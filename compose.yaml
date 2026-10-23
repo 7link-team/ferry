@@ -1,6 +1,8 @@
 services:
   ferry:
-    image: ferry-server:latest
+    # Overridable so a fork or an internal registry needs no edit here.
+    image: ${FERRY_IMAGE:-ghcr.io/7link-team/ferry-server:latest}
+    # Only used by `docker compose build`; `up` pulls the image above.
     build: { context: ., target: runtime }
     restart: unless-stopped
     ports:
