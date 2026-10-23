@@ -9,12 +9,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
+import { HostFiles } from "./components/HostFiles";
+import { HostTerminal } from "./components/HostTerminal";
 import { ResourceForm } from "./components/ResourceForm";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResourceTable } from "./components/ResourceTable";
 import { Entry } from "./Entry";
 import { findGroup, findItem, nav } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
-import { href, navigate, useRoute } from "./router";
+import { href, navigate, useQueryValue, useRoute } from "./router";
 import { PALETTES, useTheme } from "./theme";
 
 export function App() {
@@ -255,6 +258,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             ) : (
               <Placeholder resource={item.resource} />
             )
+          ) : route.mode === "view" && item.resource === "hosts" && route.id ? (
+            // A host's detail page is the form plus the two live panes; the
+            // tab is in the URL so a terminal link can be shared directly.
+            <HostDetail
+              workspace={current.slug}
+              hostId={route.id}
+              permissions={permissions}
+              form={formConfig}
+            />
           ) : formConfig ? (
             <div className="min-h-0 overflow-auto">
               <ResourceForm
@@ -270,6 +282,52 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
         </main>
       </div>
     </div>
+  );
+}
+
+function HostDetail({
+  workspace,
+  hostId,
+  permissions,
+  form,
+}: {
+  workspace: string;
+  hostId: string;
+  permissions: Set<string>;
+  form: ReturnType<typeof formConfigs>[string] | undefined;
+}) {
+  // `?tab=` rather than component state: a shared link should reopen on the
+  // terminal if that is what the sender was looking at.
+  const [tab, setTab] = useQueryValue("tab", "info");
+  const panes = [
+    { value: "info", label: "信息", enabled: true },
+    { value: "terminal", label: "终端", enabled: permissions.has("hosts.terminal") },
+    { value: "files", label: "文件", enabled: permissions.has("hosts.files") },
+  ].filter((pane) => pane.enabled);
+  const active = panes.some((pane) => pane.value === tab) ? tab : "info";
+
+  return (
+    <Tabs value={active} onValueChange={setTab} className="grid min-h-0 grid-rows-[auto_1fr] gap-3">
+      <TabsList>
+        {panes.map((pane) => (
+          <TabsTrigger key={pane.value} value={pane.value}>
+            {pane.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="info" className="min-h-0 overflow-auto">
+        {form && (
+          <ResourceForm config={form} workspace={workspace} permissions={permissions} />
+        )}
+      </TabsContent>
+      {/* Mounted only while selected: an unseen tab must not hold a pty open. */}
+      <TabsContent value="terminal" className="min-h-0">
+        {active === "terminal" && <HostTerminal workspace={workspace} hostId={hostId} />}
+      </TabsContent>
+      <TabsContent value="files" className="min-h-0">
+        {active === "files" && <HostFiles workspace={workspace} hostId={hostId} />}
+      </TabsContent>
+    </Tabs>
   );
 }
 

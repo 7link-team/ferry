@@ -1,10 +1,12 @@
 mod assets;
 mod auth;
+mod channel;
 mod db;
 mod dialect;
 mod error;
 mod hosts;
 mod migration;
+mod remote;
 mod resource;
 mod state;
 mod workspace;
@@ -130,6 +132,24 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/hosts/actions/bulk-delete",
             post(hosts::bulk_delete_hosts),
+        )
+        .route(
+            "/{workspace}/hosts/{id}/actions/test-connection",
+            post(remote::test_connection),
+        )
+        .route("/{workspace}/hosts/{id}/terminal", get(remote::terminal))
+        .route(
+            "/{workspace}/hosts/{id}/files",
+            get(remote::list_dir).delete(remote::delete_file),
+        )
+        .route(
+            "/{workspace}/hosts/{id}/files/content",
+            // The global JSON limit must not apply here: an upload is streamed
+            // straight to the host and is never held in memory, so capping it
+            // at the body limit would cap every file at 256 KiB.
+            get(remote::download)
+                .put(remote::upload)
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/{workspace}/tags",
@@ -270,4 +290,17 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     );
     headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
     response
+}
+
+/// Picks the way to reach a host. The only place that chooses, so a third kind
+/// of connection is one more arm here and no change to any caller.
+pub async fn channel_open(
+    _s: &state::AppState,
+    host: &remote::Host,
+) -> error::Result<Box<dyn channel::HostChannel>> {
+    match host.connection.as_str() {
+        "ssh" => Err(error::ApiError::bad("SSH 通道尚未实现。")),
+        "runner" => Err(error::ApiError::bad("代理通道尚未实现。")),
+        _ => Err(error::ApiError::bad("未知的接入方式。")),
+    }
 }

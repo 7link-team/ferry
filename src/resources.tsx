@@ -6,7 +6,7 @@
  * module means adding entries here plus the server handlers.
  */
 import { Badge } from "@/components/ui/badge";
-import { deleteResource, listResource, runAction } from "./resource";
+import { deleteResource, listResource, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option } from "./components/dsl";
 
 /* The registries are keyed by resource name, so their values have to share one
@@ -145,6 +145,16 @@ export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow
       ],
       actions: [
         { label: "查看", permission: "hosts.read", to: (row: Host) => ({ id: row.id, mode: "view" }) },
+        {
+          label: "测试连接",
+          permission: "hosts.read",
+          action: async (row: Host) => {
+            const result = await runItemAction<{ ok: boolean; stderr: string }>(
+              workspace, "hosts", row.id, "test-connection", {},
+            );
+            if (!result.ok) throw new Error(result.stderr || "连接失败。");
+          },
+        },
         { label: "编辑", permission: "hosts.update", to: (row: Host) => ({ id: row.id, mode: "edit" }) },
         {
           label: "删除",

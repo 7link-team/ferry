@@ -22,7 +22,6 @@ sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlit
 sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "sqlx-mysql", "runtime-tokio-rustls"] }
 # MySQL 8 negotiates caching_sha2_password with RSA on a first non-TLS connection.
 sqlx = { version = "0.9", default-features = false, features = ["mysql-rsa"] }
-async-trait = "0.1"
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
@@ -30,3 +29,8 @@ hex = "0.4"
 rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"
 fs2 = "0.4"
+bytes = "1"
+futures = "0.3"
+async-trait = "0.1"
+russh = "0.64"
+russh-sftp = "3"

@@ -41,3 +41,24 @@ describe("queryString", () => {
     expect(queryString({ q: "a&b=c" })).toBe("?q=a%26b%3Dc");
   });
 });
+
+describe("action URLs", () => {
+  it("separates collection-level from item-level verbs", async () => {
+    // Guards the mistake of threading an id through the collection helper,
+    // which yields /hosts/actions/<id>/actions/<verb>.
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const { runAction, runItemAction } = await import("./resource");
+    await runAction("ws", "hosts", "bulk-delete", {});
+    await runItemAction("ws", "hosts", "h1", "test-connection", {});
+    globalThis.fetch = original;
+    expect(calls).toEqual([
+      "/api/workspaces/ws/hosts/actions/bulk-delete",
+      "/api/workspaces/ws/hosts/h1/actions/test-connection",
+    ]);
+  });
+});

@@ -54,7 +54,8 @@ export const patchResource = <T>(
 export const deleteResource = (workspace: string, resource: string, id: string) =>
   api<void>(`${base(workspace, resource)}/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-/** Non-CRUD verbs live under /actions/, per the REST contract. */
+/** Non-CRUD verbs live under /actions/, per the REST contract.
+ *  Collection-level: POST /{resource}/actions/{verb} */
 export const runAction = <T>(
   workspace: string,
   resource: string,
@@ -62,6 +63,19 @@ export const runAction = <T>(
   body: unknown,
 ) =>
   api<T>(`${base(workspace, resource)}/actions/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+/** Item-level: POST /{resource}/{id}/actions/{verb} */
+export const runItemAction = <T>(
+  workspace: string,
+  resource: string,
+  id: string,
+  action: string,
+  body: unknown,
+) =>
+  api<T>(`${base(workspace, resource)}/${encodeURIComponent(id)}/actions/${action}`, {
     method: "POST",
     body: JSON.stringify(body),
   });
