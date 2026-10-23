@@ -1,0 +1,728 @@
+# Ferry：工作空间制运维平台 · 产品与技术方案
+
+版本 V0.1，日期 2026-10-23。参考 `easy-erp` 的架构、部署形态与工程约定；业务域、多租户模型、主机通道与统一 DSL 组件是本项目新增的部分。
+
+本轮交付为**方案与设计**，以及一个通过构建校验的空骨架。骨架不含业务逻辑；第 15 节的待确认项确认后才进入业务开发。
+
+---
+
+## 1. 产品定位与范围
+
+Ferry 是一个**工作空间制的运维平台**：注册后创建自己的工作空间，或凭邀请码加入别人的工作空间。工作空间内按「仪表盘 / 部署 / 构建 / 主机 / 维护」五个模块组织资源，所有资源共享同一套列表、表单、权限、审计和定时任务机制。
+
+和 `easy-erp` 的关系：**沿用全部工程基座，替换业务域**。
+
+| 维度 | easy-erp | Ferry |
+|---|---|---|
+| 技术栈 | Tauri 2 + Rust/axum + React + SQLite/MySQL | 同 |
+| 部署形态 | 桌面内嵌 + Docker Web | 同 |
+| 租户模型 | 单实例单组织 | **工作空间多租户** |
+| 页面构造 | 每页手写表格 | **列表/表单 DSL 配置驱动** |
+| 外部连接 | 无 | **runner 代理 + SSH 直连** |
+| 新增进程 | — | **`ferry-runner` 主机代理** |
+
+第一版范围：账号与工作空间、角色权限、主机接入（两种方式）、远程终端、双向文件传输、主机组与标签、仓库与流水线、应用部署与模版、共享的定时任务与密钥变量、字典与配置项、操作记录、仪表盘。
+
+不在第一版：多工作空间数据互通、跨云资源编排、日志检索平台、指标时序库、工单审批流。
+
+---
+
+## 2. 两种部署形态
+
+一套界面、一套 API、一份数据。形态只决定「谁拉起服务进程」。
+
+| 形态 | 组成 | 界面入口 | 适用 |
+|---|---|---|---|
+| **Docker** | `ferry-server` 单进程 | 仅浏览器 | 团队共用、放在服务器上 |
+| **Desktop** | Tauri 外壳 + `ferry-server` sidecar | Tauri 内嵌 WebView（也可用浏览器打开同一地址） | 个人使用、无服务器环境 |
+
+```
+Docker 形态                        Desktop 形态
+┌──────────────────────┐          ┌──────────────────────────────┐
+│ ferry-server         │          │ Tauri 外壳（托盘/连接设置）    │
+│  ├ 内嵌 Web 界面      │◀─浏览器   │   └ WebView → 127.0.0.1:4290 │
+│  ├ REST API / WS     │          │ ferry-server（sidecar）       │
+│  └ SQLite / Postgres │          │   └ SQLite                   │
+└──────────────────────┘          └──────────────────────────────┘
+          ▲                                     ▲
+          └────────── ferry-runner（各主机）──────┘
+```
+
+关键约束，与 easy-erp 一致：
+
+- Web 界面构建产物由服务用 `rust-embed` 内嵌，页面与 API 同源，运行时无 Node 依赖。
+- 桌面外壳**只做**托盘、连接设置、服务生命周期；业务逻辑一行都不放在 `desktop/`。
+- 具有原生权限的窗口只有 `launcher`；业务窗口是对服务 origin 的普通 WebView。
+- Desktop 形态也可以只作客户端，连接另一台机器上的服务。
+
+---
+
+## 3. 总体架构
+
+```
+┌─────────────────────────────── crates/server ───────────────────────────────┐
+│ HTTP 层    路由（REST + WS） · 会话中间件 · 工作空间提取器 · CSRF/Host 校验    │
+│ 业务层     hosts groups tags · repositories pipelines · deployments ...      │
+│            cron_jobs（共享） · variables（共享） · members roles activity     │
+│ 通道层     HostChannel trait ── RunnerChannel │ SshChannel                   │
+│ 数据层     db.rs 原生 SQL + migration.rs 迁移 ── SQLite │ PostgreSQL          │
+└──────────────────────────────────────────────────────────────────────────────┘
+          ▲ WS 反向连接                      ▲ SSH 外拨
+┌─────────┴──────────┐              ┌────────┴──────────┐
+│ ferry-runner       │              │ 目标主机 sshd      │
+│ 控制连接 + 会话连接  │              │ 账号密码 / 私钥    │
+└────────────────────┘              └───────────────────┘
+          ▲ 共用 crates/protocol 线上类型
+```
+
+分层规则：
+
+1. **HTTP 层不碰 SQL**，业务层不碰 `axum` 的提取器之外的东西。
+2. **所有主机操作只经过 `HostChannel`**。终端、文件、部署步骤、流水线步骤、定时任务执行，一律调这个 trait；谁都不准直接 `ssh` 或直接写 runner 协议。接第三种接入方式时只改工厂函数。
+3. **`crates/protocol` 是 server 与 runner 的唯一契约**。协议类型不许在任一侧复制一份。
+4. 数据访问全部走 `db.rs` 的 `execute/one/all`，不引入 ORM 实体宏——与 easy-erp 相同的取舍：SQL 看得见，迁移是纯 SQL，两种数据库差异集中在一处。
+
+---
+
+## 4. 账号、工作空间与权限
+
+### 4.1 注册与进入
+
+```
+注册（邮箱 + 密码，argon2）
+   └─ 无工作空间 → 引导页
+        ├─ 创建工作空间（名称 + slug）→ 自己成为 owner，自动创建内置角色
+        └─ 加入工作空间（邀请码）→ 成为成员，获得工作空间的默认角色
+```
+
+- 会话是 Cookie：`ferry_session`，HttpOnly、SameSite=Lax、`Secure` 由配置决定；服务端 `sessions` 表可随时吊销，滑动续期。
+- `sessions.workspace_id` 记住最后使用的工作空间，访问 `/` 时直接跳回去。
+- 一个用户可属于多个工作空间，顶栏右侧切换。切换只改 URL 第一段，不重新登录。
+
+### 4.2 权限模型
+
+扁平权限串 `{资源}.{动作}`，角色是权限集合，成员绑角色。沿用 easy-erp `roles.rs` 的三要素：**权限清单、依赖关系、内置角色**。
+
+```rust
+// 清单：(权限, 分组显示名, 动作显示名)
+("hosts.read", "主机", "查看"),  ("hosts.create", "主机", "新增"),
+("hosts.update", "主机", "修改"), ("hosts.delete", "主机", "删除"),
+("hosts.terminal", "主机", "远程终端"), ("hosts.files", "主机", "文件传输"),
+("hosts.enroll", "主机", "生成接入命令"),
+("pipelines.read", "流水线", "查看"), ("pipelines.run", "流水线", "执行"),
+("variables.reveal", "密钥变量", "查看明文"),
+...
+```
+
+依赖关系自动补全：勾 `hosts.terminal` 自动带上 `hosts.read`；勾 `pipelines.run` 自动带上 `pipelines.read` + `repositories.read`。角色编辑页据此防止配出不可用的组合。
+
+内置角色（每个工作空间创建时生成，可复制后修改，不可删除）：
+
+| 角色 | 范围 |
+|---|---|
+| owner | 全部，含转让与删除工作空间 |
+| admin | 全部业务 + 成员/角色管理 |
+| developer | 构建、部署的读写执行；主机只读 |
+| operator | 主机读写、终端、文件；构建部署只读 |
+| viewer | 全部只读，不含密钥明文 |
+
+### 4.3 多租户隔离：一个提取器管住全部
+
+每张业务表都有 `workspace_id`。隔离**不靠每个 handler 自觉**，而靠一个提取器：
+
+```rust
+// 从路径取 slug → 校验会话用户是该空间的 active 成员 → 加载角色权限
+pub struct Scope { pub workspace_id: String, pub user: User, pub permissions: HashSet<String> }
+impl FromRequestParts<AppState> for Scope { ... }
+
+impl Scope {
+    pub fn require(&self, permission: &str) -> Result<()> { ... }
+}
+```
+
+handler 只能拿到 `Scope`，`workspace_id` 永远来自路径校验结果，**不从请求体读**。这是整个系统最重要的不变量，审查时第一条就查它。
+
+---
+
+## 5. 导航与路由
+
+### 5.1 菜单树即数据
+
+全部菜单在 `src/nav.ts` 一个文件里。**用户已经说明「以后可能把主机/构建/部署合并成一个一级菜单」——这个合并必须是改这一个文件，不是改页面。** 路由由菜单树推导，没有第二份路由表。
+
+| 一级（顶栏） | 左侧菜单 |
+|---|---|
+| 仪表盘 | 仪表盘 |
+| 部署 | 应用部署 · 应用模版 · 应用市场 · 密钥变量 · 报警监控 · 定时任务 |
+| 构建 | 仓库 · 流水线 · 流水线模版 · 授权认证 · 密钥变量 · 定时任务 |
+| 主机 | 主机组 · 主机 · 标签 · 定时任务 |
+| 维护 | 成员管理 · 角色管理 · 密钥变量（全局） · 配置项 · 字典 · 操作记录 |
+
+> 需求里顶部列了「仪表盘 构建 部署 主机 维护」，又单独描述了「应用」的左侧菜单。本文按**「部署」与「应用」是同一模块**处理，顶栏标签取「部署」，左侧首项「应用部署」。见第 15 节待确认 1。
+
+出现在多个模块下的「定时任务」「密钥变量」是**同一个资源页 + 不同预置参数**，不是多份实现：
+
+```ts
+{ key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "host" } }
+```
+
+### 5.2 URL 契约
+
+```
+/{workspace}/{group}/{item}             列表
+/{workspace}/{group}/{item}/new         创建
+/{workspace}/{group}/{item}/{id}        详情（表单的只读模式）
+/{workspace}/{group}/{item}/{id}/edit   编辑
+```
+
+查询串承载**全部视图状态**：
+
+| 参数 | 含义 | 写入方式 |
+|---|---|---|
+| 过滤字段（如 `group_id`、`state`、`q`） | 搜索条件 | `replaceState` |
+| `page` / `page_size` | 分页 | `replaceState` |
+| `sort` | 排序，`-created_at` 表示降序 | `replaceState` |
+| `at` | 列表滚动偏移 | `replaceState`，150ms 防抖 |
+
+**一律 `replaceState`，不进历史**——否则输入框每敲一个字就多一条历史记录，浏览器后退键失效。只有切页面用 `pushState`。
+
+### 5.3 链接分享与登录直达
+
+未登录时**不跳转到登录页**，而是在当前 URL 上原地渲染登录层；登录成功后原地重渲染。URL 从头到尾没变过，所以分享链接 → 登录 → 直达目标页面和滚动位置，中间不丢状态。
+
+滚动恢复的时序：等本页数据 resolve 之后再 `scrollTo(at)`，否则容器还是空的，设了也会被重排抹掉。
+
+```ts
+// ponytail: 用像素。换了页大小或字号会偏；真有人抱怨再换成「首个可见行的 id」。
+export function useScrollSync(ready: boolean) { ... }
+```
+
+**自动刷新间隔不进 URL**——它是观看者的个人偏好，不是要分享的内容，存在 `localStorage` 里按资源区分。选中状态（全选框）是临时状态，两处都不存。
+
+---
+
+## 6. REST 资源契约
+
+### 6.1 命名与方法
+
+所有资源统一在工作空间下，资源名用**复数、小写、连字符**：
+
+```
+GET    /api/workspaces/{ws}/hosts                 列表
+POST   /api/workspaces/{ws}/hosts                 创建       → 201
+GET    /api/workspaces/{ws}/hosts/{id}            详情
+PATCH  /api/workspaces/{ws}/hosts/{id}            局部修改
+PUT    /api/workspaces/{ws}/hosts/{id}            整体替换
+DELETE /api/workspaces/{ws}/hosts/{id}            删除       → 204
+```
+
+非 CRUD 的动作一律挂在 `/actions/` 下，动词只出现在这里，不污染资源路径：
+
+```
+POST   /api/workspaces/{ws}/hosts/{id}/actions/test-connection
+POST   /api/workspaces/{ws}/hosts/actions/bulk-delete        批量（体内带 ids）
+POST   /api/workspaces/{ws}/pipelines/{id}/actions/run
+```
+
+> 批量删除不用带请求体的 `DELETE`——中间代理会丢掉 `DELETE` 的 body，这是实际踩过的坑。
+
+导入导出也是固定形状：
+
+```
+GET    /api/workspaces/{ws}/hosts/template?format=xlsx       下载导入模板
+GET    /api/workspaces/{ws}/hosts/export?format=csv|xlsx     导出（沿用列表的全部过滤条件）
+POST   /api/workspaces/{ws}/hosts/imports                    上传 → 返回预览与逐行错误
+POST   /api/workspaces/{ws}/hosts/imports/{id}/commit        确认写入
+```
+
+导入**永远两步**：先预览再提交。一次性导入无法让人看清将要发生什么。
+
+### 6.2 统一信封
+
+列表响应只有这一种形状，前端 DSL 组件据此解析，任何资源都不许自定义：
+
+```json
+{ "items": [ ... ], "total": 137, "page": 1, "page_size": 20 }
+```
+
+单条响应直接是对象。错误响应沿用 easy-erp 的形状，message 是**给人看的中文整句**：
+
+```json
+{ "error": "主机名称已被占用，请换一个。", "fields": { "name": "已被占用" } }
+```
+
+`fields` 可选，用于把错误直接标在表单字段上。
+
+### 6.3 并发与版本
+
+每张业务表有 `version INTEGER NOT NULL DEFAULT 1`。`PATCH`/`PUT` 必须带 `version`，不一致返回 `409` 与一句「这条记录已被他人修改，请刷新后重试」。这是 easy-erp 已验证的做法，直接沿用。
+
+### 6.4 查询参数约定
+
+| 参数 | 规则 |
+|---|---|
+| `page` | 从 1 开始，缺省 1 |
+| `page_size` | 缺省 20，上限 200 |
+| `sort` | 字段名，前缀 `-` 为降序；只接受白名单字段 |
+| `q` | 资源自定的模糊搜索字段集合 |
+| 其它 | 一个过滤字段一个参数；多值用逗号分隔 |
+
+---
+
+## 7. 统一列表 DSL 组件
+
+### 7.1 为什么是配置而不是组件库
+
+需求里「搜索过滤 / 搜索 / 清空 / 刷新下拉 / 导入 / 导出 / 创建 / 序号列 / 操作列 / 全选 / 分页 / 四边 sticky」是**每个资源都一样**的。手写一遍三十行，手写二十遍就是二十处会各自长歪的实现。所以是一个组件 `<ResourceTable config={...} />`，配置是资源的全部差异。
+
+**这是硬约定：资源页不手写表格。** 表达不了的需求是扩展配置的理由，不是另开一份实现的理由；第二份表格实现算缺陷。
+
+### 7.2 配置契约
+
+```ts
+export interface ListConfig<T> {
+  /** REST 资源名，拼成 /api/workspaces/{ws}/{resource} */
+  resource: string;
+  rowKey: (row: T) => string;
+
+  /** 搜索过滤区。每项自动与 URL 同步，key 即查询参数名 */
+  filters?: Filter[];
+
+  columns: Column<T>[];
+
+  /** 行尾操作列。无权限的项自动不渲染 */
+  actions?: RowAction<T>[];
+  /** 底部批量操作，依赖选中项 */
+  bulk?: BulkAction[];
+
+  toolbar?: {
+    create?: boolean | { label: string };
+    import?: boolean;
+    export?: boolean;
+    /** 定时刷新可选秒数，0 为关闭；默认 [0, 10, 30, 60] */
+    refresh?: number[];
+  };
+
+  /** 预置的固定条件（共享资源的 scope 等），不出现在过滤区 */
+  fixed?: Record<string, string>;
+  /** 空列表时的一句话指引 */
+  empty?: string;
+}
+
+export interface Filter {
+  key: string;
+  label: string;
+  type: "text" | "select" | "multi-select" | "date-range" | "tag";
+  options?: Option[] | (() => Promise<Option[]>);
+  placeholder?: string;
+}
+
+export interface Column<T> {
+  key: string;
+  label: string;
+  /** 固定宽度；省略则参与剩余空间分配 */
+  width?: number;
+  align?: "left" | "right" | "center";
+  sortable?: boolean;
+  /** 自定义渲染：状态徽标、相对时间、标签组等 */
+  render?: (row: T) => ReactNode;
+}
+
+export interface RowAction<T> {
+  label: string;
+  permission?: string;
+  /** 跳转型：去详情/编辑 */
+  to?: (row: T) => Partial<Route>;
+  /** 执行型：调 actions 端点；destructive 的会先确认 */
+  action?: (row: T) => Promise<void>;
+  destructive?: boolean;
+  /** 条件显示，如「已停用的主机不显示终端」 */
+  when?: (row: T) => boolean;
+}
+```
+
+一个资源页因此就是一个常量加一行 JSX：
+
+```tsx
+const hosts: ListConfig<Host> = {
+  resource: "hosts",
+  rowKey: (h) => h.id,
+  filters: [
+    { key: "q", label: "名称/地址", type: "text" },
+    { key: "group_id", label: "主机组", type: "select", options: loadGroups },
+    { key: "connection", label: "接入方式", type: "select",
+      options: [{ value: "runner", label: "代理" }, { value: "ssh", label: "SSH" }] },
+    { key: "state", label: "状态", type: "select", options: hostStates },
+  ],
+  columns: [
+    { key: "name", label: "名称" },
+    { key: "address", label: "地址", width: 180 },
+    { key: "state", label: "状态", width: 100, render: (h) => <State value={h.state} /> },
+    { key: "seen_at", label: "最近心跳", width: 160, sortable: true, render: (h) => <Ago at={h.seen_at} /> },
+  ],
+  actions: [
+    { label: "终端", permission: "hosts.terminal", to: (h) => ({ id: h.id, mode: "view" }) },
+    { label: "编辑", permission: "hosts.update", to: (h) => ({ id: h.id, mode: "edit" }) },
+    { label: "删除", permission: "hosts.delete", destructive: true, action: remove },
+  ],
+  toolbar: { create: true, import: true, export: true },
+};
+
+export const HostsPage = () => <ResourceTable config={hosts} />;
+```
+
+组件自己负责：URL 同步、分页、定时刷新、选中集合、导入导出、加载/空/错误态、权限过滤、以及下面的 sticky 布局。
+
+### 7.3 页面骨架与 sticky 规则
+
+```
+┌─ 顶栏 ─────────────────────────────────────────────────────┐
+│ Ferry │ 仪表盘 部署 构建 主机 维护 │              工作空间 ▾ │
+├───────┬────────────────────────────────────────────────────┤
+│ 主机组 │ 工作空间 / 主机 / 主机            ← 面包屑          │
+│ 主机  │ 主机                              ← 页面标题        │
+│ 标签  │ ┌────────────────────────────────────────────────┐ │
+│ 定时  │ │ 名称 [    ] 组 [ ▾] 状态 [ ▾]                  │ │  ← 过滤区（固定）
+│       │ │ [搜索] [清空]   [刷新|▾] [导入] [导出] [+ 创建]  │ │
+│       │ ├────┬──────────┬────────┬──────────┬───────────┤ │
+│       │ │ #  │ 名称      │ 状态   │ 最近心跳  │ 操作       │ │  ← 表头（sticky top）
+│       │ ├────┼──────────┼────────┼──────────┼───────────┤ │
+│       │ │ 1  │ web-01   │ 在线   │ 3 秒前    │ 终端 编辑… │ │  ← 仅此区域滚动
+│       │ │ 2  │ web-02   │ 离线   │ 2 天前    │ 终端 编辑… │ │
+│       │ │ ↕  │          │        │          │           │ │
+│       │ ├────┴──────────┴────────┴──────────┴───────────┤ │
+│       │ │ ☐ 全选 已选 2 项 [批量删除]   ‹ 1 2 3 … 99 ›  20▾│ │  ← 底部（固定）
+│       │ └────────────────────────────────────────────────┘ │
+└───────┴────────────────────────────────────────────────────┘
+    ↑ 第一列（序号）sticky left，最后一列（操作）sticky right
+```
+
+实现要点，写死在组件的样式里：
+
+```css
+/* 内容区是唯一的滚动所有者：过滤区与底部 auto，表格区 1fr。
+   min-height:0 不能省——grid 子项默认 min-height:auto，省了就不会收缩，
+   整页会一起滚，四边固定全部失效。 */
+.list        { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+.list-scroll { overflow: auto; min-height: 0; }
+
+table        { border-collapse: separate; border-spacing: 0; width: 100%; }
+thead th     { position: sticky; top: 0;    z-index: 3; }
+th:first-child, td:first-child { position: sticky; left: 0;  z-index: 2; }
+th:last-child,  td:last-child  { position: sticky; right: 0; z-index: 2; }
+/* 表头与首/末列的交叉格要盖住两者 */
+thead th:first-child, thead th:last-child { z-index: 4; }
+/* sticky 单元格默认透明，必须给不透明底色，否则滚动时字叠字 */
+th, td:first-child, td:last-child { background: var(--panel); }
+td:first-child { box-shadow: 1px 0 0 var(--line); }
+td:last-child  { box-shadow: -1px 0 0 var(--line); }
+```
+
+「撑满剩余空间」的做法：`table` 宽 100%，固定宽度的列写 `width`，**留一列不写**（通常是名称列）吸收剩余宽度；同时给表格一个 `min-width`（各列最小宽之和），窗口更窄时横向滚动，而不是把列挤变形。
+
+底部是 grid 的第三行，在滚动容器**外面**——用 sticky 做底部在 iOS Safari 的橡皮筋回弹里会抖，放外面没有这个问题。
+
+### 7.4 工具栏行为
+
+| 控件 | 行为 |
+|---|---|
+| 搜索 | 提交过滤区，写 URL，回到第 1 页 |
+| 清空 | 清掉所有过滤参数与 `page`，保留 `page_size` |
+| 刷新 ▾ | 左半立即刷新；右半下拉选「关闭 / 10 秒 / 30 秒 / 1 分钟」，存 `localStorage`，页面不可见时自动暂停 |
+| 导入 | 上传 → 预览（逐行错误）→ 确认提交 |
+| 导出 | 带上当前全部过滤条件，服务端流式生成 |
+| 创建 | 跳 `/new`，同一套表单组件 |
+
+---
+
+## 8. 统一表单 DSL 组件
+
+**详情页就是编辑页的只读模式**，一个组件三种模式，由路由决定：`new` / `edit` / `view`。
+
+```ts
+export interface FormConfig<T> {
+  resource: string;
+  /** 分区标题 + 字段 */
+  sections: { title?: string; fields: FormField[] }[];
+  /** 详情页标题取自哪个字段 */
+  heading: (row: T) => string;
+  /** 详情页下方的关联子列表，直接复用 ListConfig */
+  related?: { label: string; config: ListConfig<unknown> }[];
+}
+
+export interface FormField {
+  key: string;
+  label: string;
+  type: "text" | "textarea" | "number" | "select" | "multi-select" | "switch"
+      | "password" | "secret" | "date" | "code" | "tags" | "key-value";
+  required?: boolean;
+  help?: string;
+  placeholder?: string;
+  options?: Option[] | (() => Promise<Option[]>);
+  /** 条件显示：SSH 接入才显示地址/端口/凭据 */
+  when?: (draft: Partial<T>) => boolean;
+  /** 创建后不可改，如主机的接入方式 */
+  immutable?: boolean;
+  /** 栅格占位，1~2 */
+  span?: 1 | 2;
+}
+```
+
+只读模式**把值渲染成文本，不是渲染成 disabled 的输入框**——禁用态的输入框对比度低、不好读、也不好复制。`secret` 类型在只读模式只显示「已设置」或「未设置」，永不显示明文；要看明文需要 `variables.reveal` 权限并单独调一次接口，这次调用会进操作记录。
+
+离开有未保存内容的表单时弹确认，并拦住浏览器后退键——easy-erp 的 `useNavigation` 已经把这件事做对了（`popstate` 时按历史 index 差值 `history.go(offset)` 回滚），直接搬过来。
+
+---
+
+## 9. 主机接入：runner 与 SSH
+
+这是本项目相对 easy-erp 全新的部分，也是设计上最需要想清楚的地方。
+
+### 9.1 两种方式，一个抽象
+
+| | runner 代理 | SSH 直连 |
+|---|---|---|
+| 连接方向 | 主机 → 服务（反向） | 服务 → 主机 |
+| 能否穿 NAT | 能 | 不能，要求服务可达主机 22 |
+| 主机上要装东西 | 要，一条命令 | 不要 |
+| 凭据存哪 | 主机持有自己的 key | 服务保管密码/私钥 |
+| 终端 / 文件传输 | 支持 | 支持 |
+
+两者的差异**只存在于通道层**。上面所有功能（终端、文件、部署步骤、流水线步骤、定时任务执行）只认一个 trait：
+
+```rust
+#[async_trait]
+pub trait HostChannel: Send + Sync {
+    async fn exec(&self, command: &str, timeout: Duration) -> Result<Output>;
+    async fn pty(&self, cols: u16, rows: u16) -> Result<PtySession>;
+    async fn read_file(&self, path: &str) -> Result<(FileMeta, ByteStream)>;
+    async fn write_file(&self, path: &str, mode: u32, body: ByteStream) -> Result<()>;
+    async fn list_dir(&self, path: &str) -> Result<Vec<DirEntry>>;
+}
+
+/// 唯一的分派点。接第三种接入方式时只改这里。
+pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
+    match host.connection {
+        Connection::Runner => RunnerChannel::open(s, host).await,
+        Connection::Ssh    => SshChannel::open(s, host).await,
+    }
+}
+```
+
+### 9.2 runner：一条命令加主机
+
+主机页「添加主机 → 代理方式」给出一条命令，带一个有时效的一次性注册令牌：
+
+```sh
+curl -fsSL https://ops.example.com/api/runners/install.sh | sudo sh -s -- \
+  --server https://ops.example.com --token 7f3a…
+```
+
+`install.sh` 由服务动态生成（内含 server 地址与令牌），脚本做四件事：识别 os/arch → 从 `/api/runners/binary/{os}-{arch}` 下载对应二进制 → 装到 `/usr/local/bin/ferry-runner` 并写 systemd unit → 启动。
+
+注册与保活：
+
+```
+runner                                    server
+  │── WS /api/runners/connect ───────────▶│
+  │   Hello{version,token,hostname,os,…}  │  校验令牌 → upsert hosts 行
+  │◀── Welcome{host_id, key, heartbeat} ──│  令牌作废，下发长期 key
+  │   （落盘 /var/lib/ferry-runner/runner.json，之后用 key 重连）
+  │◀── Ping ──────────────────────────────│
+  │── Pong / Metrics{load,mem,disk} ─────▶│  仪表盘的健康数据来源
+```
+
+**控制连接不承载任何批量数据。** 需要终端、上传、下载时，服务下发 `OpenSession{session, kind}`，runner 为它**单独拨一条连接**：
+
+```
+server ── OpenSession{session:"a1b2", kind:Terminal} ──▶ runner
+runner ── WS /api/runners/sessions/a1b2 ──────────────▶ server
+          （此后这条连接只跑这一个会话：文本帧是控制，二进制帧是数据）
+```
+
+```rust
+// ponytail: 一会话一连接，不写多路复用器。运维主机同时开的会话是个位数；
+// 真的不够了再上 yamux。
+```
+
+这样换来的好处是实打实的：没有 stream id、没有流控、没有队头阻塞、没有半关闭状态机——这几样是自研多路复用最容易出错的地方，而代价只是多几个 TCP 连接。
+
+### 9.3 SSH 直连
+
+- `hosts` 存 `address`、`port`、`username`、`credential_id`；凭据（密码或私钥）存在 `credentials` 表，加密后落库，见 9.6。
+- 用 `russh` 外拨，`russh-sftp` 做文件；两者都是纯 Rust 异步，不依赖系统 ssh 客户端，容器里不用额外装东西。
+- **主机密钥 TOFU**：首次连接记下指纹存 `hosts.host_key`；之后指纹变了直接拒绝并要求人工确认。不做「永远接受」的开关——那等于关掉中间人防护。
+- 连接按需建立，不长连；带超时和失败退避，失败原因原样回显给操作者（「认证失败」和「网络不可达」要能区分）。
+
+### 9.4 远程终端
+
+```
+浏览器 xterm.js ──WS──▶ /api/workspaces/{ws}/hosts/{id}/terminal ──▶ HostChannel::pty
+```
+
+- 浏览器到服务的 WS 与服务到主机的通道**对拷字节**，中间不解析、不缓冲整屏。
+- 二进制帧 = pty 字节流；文本帧 = `{"type":"resize","cols":120,"rows":32}`。xterm.js 配 fit addon，窗口变化就发 resize。
+- 开终端要 `hosts.terminal` 权限，开启/关闭都写操作记录（谁、哪台、什么时候、多久）。
+- 会话录像第一版不做，见第 15 节待确认 6。
+
+### 9.5 双向文件传输
+
+```
+GET    /api/workspaces/{ws}/hosts/{id}/files?path=/etc            目录列表
+GET    /api/workspaces/{ws}/hosts/{id}/files/content?path=/etc/nginx.conf   下载
+PUT    /api/workspaces/{ws}/hosts/{id}/files/content?path=…        上传
+DELETE /api/workspaces/{ws}/hosts/{id}/files?path=…                删除
+```
+
+- **两个方向都流式**，服务不把整个文件读进内存，也不在服务端落盘中转。大文件传输不应该让服务的内存随文件大小走。
+- 需要 `hosts.files` 权限；每次传输写操作记录（路径、字节数、方向、结果）。
+- 界面是左右双栏文件管理器 + 拖拽上传，和终端同一个页面的两个标签页。
+
+### 9.6 凭据与密钥的保管
+
+密码、私钥、密钥变量走同一个保管机制，不许各自实现一遍：
+
+```
+FERRY_MASTER_KEY（Docker：环境变量；Desktop：data_dir 下 0600 的密钥文件）
+   └─ 包裹每个工作空间的数据密钥
+        └─ 加密 credentials.secret / variables.value
+```
+
+- 密文只在真正要用的那一刻解开，解开的明文不进日志、不进错误消息、不进审计详情。
+- 列表与详情接口**从不返回密文或明文**，只返回 `has_value: true`。
+- 看明文要 `variables.reveal` 权限 + 单独一次接口调用，这次调用必定进操作记录。
+- 没配 `FERRY_MASTER_KEY` 的 Docker 部署，服务启动时就拒绝，不静默退化成明文存储。
+
+---
+
+## 10. 共享资源：定时任务与密钥变量
+
+需求明确说了「定时任务虽然多个菜单有，但是接口和逻辑都是一套」。落地方式：
+
+### 10.1 定时任务
+
+一张表、一个模块、一个 API、一个调度器。三个菜单项是**同一个页面的三种预置过滤**。
+
+```
+GET  /api/workspaces/{ws}/cron-jobs?scope=host|build|deploy
+POST /api/workspaces/{ws}/cron-jobs/{id}/actions/run-now
+GET  /api/workspaces/{ws}/cron-jobs/{id}/runs        执行历史
+```
+
+`scope` 只影响两件事：在哪个菜单下列出，以及创建时可选的动作类型（主机 scope 给「在主机/主机组上执行命令」，构建 scope 给「触发流水线」，部署 scope 给「重启/重新部署应用」）。**调度、并发控制、超时、重试、历史记录、错误通知全部是同一份代码。**
+
+调度器一个 tokio task 轮询 `next_run_at`，到点取任务、乐观加锁（`UPDATE … WHERE next_run_at = ?` 看影响行数）、执行、写 `cron_runs`、算下一次。
+
+```
+// ponytail: 单调度器 + 数据库乐观锁。一个服务实例跑得动；
+// 真要多实例了再换成带租约的抢占。
+```
+
+### 10.2 密钥变量
+
+```
+GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
+```
+
+同一张表、同一套接口。「维护 → 密钥变量（全局）」就是 `scope=global`。读取时按「全局 → 模块 → 具体对象」逐层覆盖合并，越具体的优先；界面在详情里标出每个值来自哪一层，不然排查「为什么这个变量不是我设的值」会很痛苦。
+
+### 10.3 字典与配置项
+
+- **字典**：枚举值的集中管理（主机状态、环境名、应用分类…），其它资源的 `select` 选项从这里取，避免散落的硬编码。
+- **配置项**：工作空间级的运行参数（默认页大小、心跳超时、保留多少执行历史…），键值对 + 类型 + 校验。
+
+---
+
+## 11. 数据模型
+
+全部业务表共有：`id TEXT PK`、`workspace_id TEXT`、`created_at BIGINT`、`updated_at BIGINT`、`version INTEGER`；时间统一毫秒时间戳。骨架已建立身份与租户基座（`users` `sessions` `workspaces` `workspace_roles` `workspace_members` `activity`），其余按模块分批迁移。
+
+| 模块 | 表 | 要点 |
+|---|---|---|
+| 身份 | `users` `sessions` | 全局，不属于任何工作空间 |
+| 租户 | `workspaces` `workspace_members` `workspace_roles` | `join_code` 承载邀请；`permissions` 存 JSON 数组 |
+| 主机 | `hosts` | `connection` ∈ runner/ssh；`state` `seen_at` `host_key` `runner_key_hash` `metrics` |
+| 主机 | `host_groups` `tags` `host_tags` | 组是树（`parent_id`），标签是多对多 |
+| 主机 | `runner_tokens` | 一次性注册令牌，带 TTL 与使用痕迹 |
+| 构建 | `repositories` `pipelines` `pipeline_templates` `pipeline_runs` `pipeline_steps` | 流水线定义存 JSON，运行实例拆行便于查询 |
+| 构建 | `credentials` | Git 与 SSH 共用；`kind` ∈ password/ssh-key/token，值加密 |
+| 部署 | `deployments` `app_templates` `deployment_revisions` | 每次部署留版本，可回滚 |
+| 部署 | `alert_rules` `alert_events` | 规则 + 触发记录 |
+| 共享 | `cron_jobs` `cron_runs` | 一套，`scope` 区分归属 |
+| 共享 | `variables` | 一套，`scope` + `scope_ref` 分层 |
+| 维护 | `settings` `dictionaries` `dictionary_items` | 工作空间级 |
+| 维护 | `activity` | 操作记录，所有写操作与敏感读操作都落这里 |
+
+迁移规则，与 easy-erp 相同：**纯 SQL、按顺序追加、发布后不再改动已有迁移**。两种数据库的 DDL 差异集中在迁移模块一处处理。
+
+---
+
+## 12. 仪表盘
+
+一个接口回全部数据，不让首页发十几个请求：
+
+```
+GET /api/workspaces/{ws}/dashboard
+→ {
+    counts:  { hosts: 42, deployments: 18, pipelines: 7, cron_jobs: 12, ... },
+    states:  { hosts: { online: 38, offline: 3, unknown: 1 }, deployments: {...} },
+    health:  { runner_lag_seconds: 3, failed_cron_runs_24h: 1, alerts_open: 2 },
+    recent:  [ ...最近活动与失败事件... ]
+  }
+```
+
+- 资源数量、状态分布、健康监控三块，对应需求里的「所有资源数量、状态分布、健康监控」。
+- 健康数据来自 runner 上报的 `Metrics` 与各模块的失败计数，不另起采集链路。
+- 页面可见时按配置的间隔刷新，不可见时暂停——和列表的自动刷新用同一个 hook。
+
+---
+
+## 13. 安全
+
+沿用 easy-erp 已验证的那套，加上多租户与远程通道特有的部分。
+
+| 面 | 措施 |
+|---|---|
+| 会话 | Cookie HttpOnly + SameSite=Lax + 可配 Secure；服务端可吊销；滑动续期 |
+| CSRF | 所有非幂等请求必须带 `X-Ferry-Request: 1`；校验 `Origin` 与 `Host` |
+| Host 头 | 允许列表（`FERRY_ALLOWED_HOSTS`），不在列表内直接 403 |
+| 响应头 | CSP、`X-Content-Type-Options`、`Referrer-Policy`、`Cache-Control: no-store` |
+| 租户隔离 | 唯一入口是 `Scope` 提取器；`workspace_id` 绝不取自请求体 |
+| 密码 | argon2；登录失败按来源计数退避 |
+| 密钥 | 分层加密（9.6）；列表/详情不回明文；查看明文要权限且进审计 |
+| 主机密钥 | SSH 首次 TOFU，变更即拒；runner 用长期 key，可在界面吊销重签 |
+| 注册令牌 | 一次性、带 TTL、可撤销；用过即作废 |
+| 审计 | 所有写操作 + 终端开启/关闭 + 文件传输 + 密钥明文查看，全部进 `activity` |
+| 桌面形态 | 只有 `launcher` 窗口有原生权限；业务窗口是普通 WebView |
+
+---
+
+## 14. 交付阶段
+
+| 阶段 | 内容 | 验收 |
+|---|---|---|
+| 0 ✅ | 项目骨架：三个 crate + Tauri 外壳 + 界面外壳 + Docker | `cargo check --workspace`、`npm run build`、服务起得来并应答 |
+| 1 | 注册登录、工作空间创建/加入、角色权限、`Scope` 提取器 | 两个账号两个空间，互相看不到对方数据 |
+| 2 | 列表 DSL + 表单 DSL 组件，用主机组/标签两个资源验证 | 四边 sticky 在三种窗口宽度下正确；URL 含全部视图状态；分享链接登录后直达含滚动位置 |
+| 3 | 主机 CRUD + runner 接入 + SSH 接入 + 终端 + 文件传输 | 同一台主机两种方式接入，终端与双向传输都通；断网重连；审计齐全 |
+| 4 | 仓库、流水线、流水线模版、授权认证 | 一条真实流水线跑通 |
+| 5 | 应用部署、应用模版、应用市场、报警监控 | 一次部署加一次回滚 |
+| 6 | 共享定时任务与密钥变量、字典、配置项、操作记录 | 三个菜单入口确认是同一套接口与逻辑 |
+| 7 | 仪表盘 | 数量/分布/健康与各模块实际数据一致 |
+| 8 | 桌面打包与自动更新、发布流程 | 三平台安装包；升级不丢数据 |
+
+阶段 2 是整个项目的杠杆点：**DSL 组件的配置能力决定后面每个资源页是三十行还是三百行**，宁可在这一阶段多花时间。
+
+---
+
+## 15. 待确认项
+
+1. **「部署」与「应用」是不是同一个一级菜单？** 需求顶部列的是「部署」，左侧菜单描述的是「应用」。本文按同一模块处理、标签取「部署」。如果是两个独立模块，`nav.ts` 加一组即可，但两者的左侧菜单要重新划分。
+2. **数据库选 PostgreSQL 还是跟 easy-erp 一致的 MySQL？** 骨架按 PostgreSQL 配（JSON 配置、时间与并发语义更顺手，运维场景常见）。要与 erp 保持同构就改 `crates/server/Cargo.toml` 的 feature 与迁移里的方言分支，成本不大但要现在定。
+3. **加入工作空间要不要审批？** 本文按「邀请码加入即生效，获得空间默认角色」。要审批就给 `workspace_members.state` 加 `pending` 流程与一个待审列表。
+4. **滚动位置用像素还是首行 id？** 本文用像素（实现简单）。跨设备分享、或页大小不同会有偏差；要精确就改成记首个可见行的 id，组件内部一处改动。
+5. **runner 二进制怎么分发？** 本文按「随服务镜像一起带，由服务提供下载」。另一条路是从 GitHub Release 拉，镜像更小但主机需要外网。
+6. **终端会话录像与命令级审计第一版要不要？** 本文只记开启/关闭，不记录击键与输出。合规场景常要全量录像，加上会影响存储与通道设计，要早定。
+7. **应用市场的内容从哪来？** 内置清单 / 远程索引 / 自建仓库，三种的权限与更新机制都不一样。
+
+第 1、2 条会影响骨架与迁移，建议先定；其余可以在对应阶段开始前定。

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ferry · 连接设置</title>
+    <style>
+      body { font: 14px/1.6 system-ui, "PingFang SC", sans-serif; margin: 0; padding: 28px;
+             background: #0f1115; color: #e6e9ee; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      p { color: #98a2b3; margin: 0 0 20px; }
+      label { display: block; margin-bottom: 6px; }
+      input { width: 100%; padding: 9px 10px; border: 1px solid #262c36; border-radius: 6px;
+              background: #161a21; color: inherit; }
+      button { margin-top: 16px; padding: 9px 18px; border: 0; border-radius: 6px;
+               background: #4f9cf9; color: #06121f; font-weight: 600; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>连接 Ferry 服务</h1>
+    <p>留空则使用本机随应用一起安装的服务。</p>
+    <label for="url">服务地址</label>
+    <input id="url" placeholder="http://127.0.0.1:4290" />
+    <button id="open">打开工作空间</button>
+    <script>
+      document.getElementById("open").addEventListener("click", () => {
+        const server_url = document.getElementById("url").value.trim();
+        window.__TAURI__.core.invoke("open_workspace", { serverUrl: server_url });
+      });
+    </script>
+  </body>
+</html>

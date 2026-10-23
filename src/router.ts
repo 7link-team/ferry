@@ -1,0 +1,145 @@
+/**
+ * Path routing with every piece of view state in the URL, so a pasted link
+ * reopens the same page, the same filters, the same page of rows and the same
+ * scroll offset after login.
+ *
+ *   /{workspace}/{group}/{item}            list
+ *   /{workspace}/{group}/{item}/new        create
+ *   /{workspace}/{group}/{item}/{id}       detail (the form in read-only mode)
+ *   /{workspace}/{group}/{item}/{id}/edit  edit
+ *
+ * Filters, `page`, `page_size` and `at` (scroll offset) live in the query and
+ * are written with replaceState, so typing in a filter never grows history.
+ */
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { nav } from "./nav";
+
+export interface Route {
+  workspace: string;
+  group: string;
+  item: string;
+  id?: string;
+  mode: "list" | "new" | "view" | "edit";
+}
+
+export function parse(pathname = location.pathname): Route {
+  const [workspace = "", group = "", item = "", third = "", fourth = ""] = pathname
+    .replace(/^\/+|\/+$/g, "")
+    .split("/");
+  const fallback = nav[0]!;
+  const resolved = nav.find((g) => g.key === group) ?? fallback;
+  const resolvedItem =
+    resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
+  const mode =
+    third === "new" ? "new" : third ? (fourth === "edit" ? "edit" : "view") : "list";
+  return {
+    workspace,
+    group: resolved.key,
+    item: resolvedItem,
+    ...(mode === "view" || mode === "edit" ? { id: third } : {}),
+    mode,
+  };
+}
+
+export function href(route: Partial<Route>, query?: Record<string, string>) {
+  const current = parse();
+  const r = { ...current, ...route };
+  const tail =
+    r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : "";
+  const params = new URLSearchParams(query ? "" : location.search);
+  for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
+  const search = params.toString();
+  return `/${r.workspace}/${r.group}/${r.item}${tail}${search ? `?${search}` : ""}`;
+}
+
+const listeners = new Set<() => void>();
+const announce = () => listeners.forEach((fn) => fn());
+const subscribe = (fn: () => void) => {
+  listeners.add(fn);
+  window.addEventListener("popstate", fn);
+  return () => {
+    listeners.delete(fn);
+    window.removeEventListener("popstate", fn);
+  };
+};
+const snapshot = () => location.pathname + location.search;
+
+export function navigate(
+  route: Partial<Route>,
+  query?: Record<string, string>,
+  options?: { replace?: boolean },
+) {
+  const target = href(route, query);
+  if (target === snapshot()) return;
+  history[options?.replace ? "replaceState" : "pushState"]({}, "", target);
+  announce();
+}
+
+export function useRoute(): Route {
+  useSyncExternalStore(subscribe, snapshot);
+  return parse();
+}
+
+/** A filter or pagination value that lives in the URL without adding history. */
+export function useQueryValue<T extends string | number>(key: string, fallback: T) {
+  const read = useCallback((): T => {
+    const raw = new URLSearchParams(location.search).get(key);
+    if (raw === null) return fallback;
+    if (typeof fallback === "number")
+      return (/^\d+$/.test(raw) && Number(raw) > 0 ? Number(raw) : fallback) as T;
+    return raw as T;
+  }, [key, fallback]);
+  const [value, setValue] = useState<T>(read);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (value === fallback) params.delete(key);
+    else params.set(key, String(value));
+    const search = params.toString();
+    const next = `${location.pathname}${search ? `?${search}` : ""}`;
+    if (next !== snapshot()) history.replaceState(history.state, "", next);
+  }, [key, value, fallback]);
+  useSyncExternalStore(subscribe, snapshot);
+  useEffect(() => setValue(read()), [read]);
+  return [value, setValue] as const;
+}
+
+/**
+ * Keeps a scroll container's offset in `?at=` so a shared link lands where the
+ * sender was looking. Restoration waits for `ready` — the rows have to exist
+ * before the offset means anything.
+ *
+ * ponytail: pixels, not a row key. Pixels are wrong if the viewer's page size
+ * or font differs; switch to the first visible row's id if that shows up.
+ */
+export function useScrollSync(ready: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const restored = useRef(false);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    let timer = 0;
+    const onScroll = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const params = new URLSearchParams(location.search);
+        if (node.scrollTop > 8) params.set("at", String(Math.round(node.scrollTop)));
+        else params.delete("at");
+        const search = params.toString();
+        history.replaceState(history.state, "", `${location.pathname}${search ? `?${search}` : ""}`);
+      }, 150);
+    };
+    node.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      node.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || !ready || restored.current) return;
+    restored.current = true;
+    const at = Number(new URLSearchParams(location.search).get("at") ?? 0);
+    if (at > 0) node.scrollTo({ top: at });
+  }, [ready]);
+  return ref;
+}

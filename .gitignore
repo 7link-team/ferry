@@ -1,0 +1,15 @@
+node_modules/
+# Anchored: unanchored `data/` and `dist/` also swallow a skill's data directory.
+/data/
+/dist/
+# Unanchored on purpose: also covers desktop/target.
+target/
+build-artifacts/
+.DS_Store
+*.log
+desktop/binaries/*
+!desktop/binaries/README.md
+desktop/gen/
+.env
+.env.local
+tsconfig.tsbuildinfo

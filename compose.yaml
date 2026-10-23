@@ -1,0 +1,18 @@
+services:
+  ferry:
+    image: ferry-server:latest
+    build: { context: ., target: runtime }
+    restart: unless-stopped
+    ports:
+      - "4290:4290"
+    environment:
+      # Leave empty for the bundled SQLite; set for PostgreSQL.
+      FERRY_DATABASE_URL: ${FERRY_DATABASE_URL:-}
+      # The address runners and browsers reach this server on.
+      FERRY_PUBLIC_URL: ${FERRY_PUBLIC_URL:-http://localhost:4290}
+      FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    volumes:
+      - ferry-data:/data
+
+volumes:
+  ferry-data:
