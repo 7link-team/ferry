@@ -93,7 +93,10 @@ pub enum Report {
     },
     /// The runner could not dial the session it was asked for, so the server
     /// can fail the waiting request instead of timing out.
-    SessionFailed { session: String, error: String },
+    SessionFailed {
+        session: String,
+        error: String,
+    },
 }
 
 /// What a dedicated session connection carries.
@@ -250,19 +253,28 @@ mod tests {
         }
 
         for frame in [
-            Session::TerminalStart { cols: 120, rows: 40 },
+            Session::TerminalStart {
+                cols: 120,
+                rows: 40,
+            },
             Session::TerminalResize { cols: 80, rows: 24 },
             Session::ExecStart {
                 command: "echo hi".into(),
                 timeout_seconds: 15,
             },
-            Session::ReadFile { path: "/etc/hosts".into() },
+            Session::ReadFile {
+                path: "/etc/hosts".into(),
+            },
             Session::WriteFile {
                 path: "/tmp/x".into(),
                 mode: 0o644,
             },
-            Session::ListDir { path: "/etc".into() },
-            Session::DeleteFile { path: "/tmp/x".into() },
+            Session::ListDir {
+                path: "/etc".into(),
+            },
+            Session::DeleteFile {
+                path: "/tmp/x".into(),
+            },
             Session::FileMeta {
                 size: 10,
                 mode: 0o644,

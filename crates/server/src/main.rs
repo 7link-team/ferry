@@ -8,6 +8,8 @@ mod hosts;
 mod migration;
 mod remote;
 mod resource;
+mod runner;
+mod ssh;
 mod state;
 mod workspace;
 
@@ -151,6 +153,7 @@ async fn main() -> anyhow::Result<()> {
                 .put(remote::upload)
                 .layer(DefaultBodyLimit::disable()),
         )
+        .route("/{workspace}/runner-tokens", post(runner::create_token))
         .route(
             "/{workspace}/tags",
             get(hosts::list_tags).post(hosts::create_tag),
@@ -164,6 +167,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/status", get(status))
+        // A runner is not a browser: it proves itself with the protocol's Hello
+        // frame, so these two sit outside the session cookie.
+        .route("/api/runners/connect", get(runner::connect))
+        .route("/api/runners/sessions/{session}", get(runner::session))
         .route("/api/permissions", get(workspace::permission_catalogue))
         .route("/api/users", post(auth::register))
         .route("/api/sessions", post(auth::login).delete(auth::logout))
@@ -295,12 +302,12 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
 /// Picks the way to reach a host. The only place that chooses, so a third kind
 /// of connection is one more arm here and no change to any caller.
 pub async fn channel_open(
-    _s: &state::AppState,
+    s: &state::AppState,
     host: &remote::Host,
 ) -> error::Result<Box<dyn channel::HostChannel>> {
     match host.connection.as_str() {
-        "ssh" => Err(error::ApiError::bad("SSH 通道尚未实现。")),
-        "runner" => Err(error::ApiError::bad("代理通道尚未实现。")),
+        "ssh" => ssh::open(s, host).await,
+        "runner" => runner::open(s, host).await,
         _ => Err(error::ApiError::bad("未知的接入方式。")),
     }
 }

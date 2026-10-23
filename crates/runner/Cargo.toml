@@ -14,5 +14,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
 
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
+# Blocking pty, wrapped in dedicated threads: the only cross-platform option
+# that speaks ConPTY on Windows as well as a unix pty.
+portable-pty = "0.9"
+# Load, memory and disk without three per-OS parsers in this crate.
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }

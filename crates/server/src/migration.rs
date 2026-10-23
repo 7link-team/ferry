@@ -13,6 +13,14 @@ use sea_orm_migration::prelude::*;
 /// checked for existence first rather than relying on the clause.
 async fn execute_schema(m: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
     let backend = m.get_connection().get_database_backend();
+    // No backend has `ADD COLUMN IF NOT EXISTS` in a spelling all three share,
+    // so the column is looked up instead. Checked everywhere, not only on
+    // MySQL: a re-run must be a no-op rather than an error on any of them.
+    if let Some((table, column)) = added_column(sql)
+        && m.has_column(&table, &column).await?
+    {
+        return Ok(());
+    }
     if backend == sea_orm::DbBackend::MySql {
         if let Some((table, index)) = dialect::index_target(sql) {
             if m.has_index(&table, &index).await? {
@@ -34,12 +42,28 @@ async fn execute_schema(m: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
     Ok(())
 }
 
+/// `ALTER TABLE t ADD COLUMN c ...` -> `(t, c)`, so the caller can ask whether
+/// the column is already there before issuing it.
+fn added_column(sql: &str) -> Option<(String, String)> {
+    let words: Vec<&str> = sql.split_whitespace().collect();
+    match words.as_slice() {
+        ["ALTER", "TABLE", table, "ADD", "COLUMN", column, ..] => {
+            Some(((*table).to_owned(), (*column).to_owned()))
+        }
+        _ => None,
+    }
+}
+
 pub struct Migrator;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(Initial), Box::new(HostResources)]
+        vec![
+            Box::new(Initial),
+            Box::new(HostResources),
+            Box::new(RunnerEnrolment),
+        ]
     }
 }
 
@@ -183,5 +207,77 @@ impl MigrationTrait for HostResources {
     }
     async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+const RUNNER_ENROLMENT: &[&str] = &[
+    // A host is added to a workspace by running one command on it. The token in
+    // that command is single-use and short-lived, and only its hash is stored,
+    // so the table is not a list of working credentials.
+    //
+    // `host_id` empty means "whichever host enrols with this", which is the
+    // one-command flow for a machine that has no row yet. Non-empty binds the
+    // token to a host the operator already created.
+    "CREATE TABLE IF NOT EXISTS runner_tokens (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        host_id TEXT NOT NULL DEFAULT '',
+        token_hash TEXT NOT NULL,
+        expires_at BIGINT NOT NULL,
+        used_at BIGINT NOT NULL DEFAULT 0,
+        used_by TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        version BIGINT NOT NULL DEFAULT 1)",
+    // Unique so two tokens can never collide, and so consuming one is a single
+    // conditional UPDATE rather than a read followed by a write.
+    "CREATE UNIQUE INDEX IF NOT EXISTS runner_tokens_hash ON runner_tokens (token_hash)",
+    "CREATE INDEX IF NOT EXISTS runner_tokens_workspace ON runner_tokens (workspace_id, created_at)",
+    // Facts the runner reports about itself, for the host page and dashboard.
+    "ALTER TABLE hosts ADD COLUMN os TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE hosts ADD COLUMN arch TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE hosts ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''",
+    // The latest heartbeat's load/memory/disk as a small JSON object. MySQL
+    // maps this to VARCHAR(255) (a TEXT column cannot carry a DEFAULT), which
+    // is why the keys are short — see `runner::metrics_json`.
+    // ponytail: last sample only, no history table. Add one when someone asks
+    // for a graph rather than a number.
+    "ALTER TABLE hosts ADD COLUMN metrics TEXT NOT NULL DEFAULT ''",
+];
+
+struct RunnerEnrolment;
+impl MigrationName for RunnerEnrolment {
+    fn name(&self) -> &str {
+        "runner_enrolment_v1"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for RunnerEnrolment {
+    async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
+        for sql in RUNNER_ENROLMENT {
+            execute_schema(m, sql).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::added_column;
+
+    #[test]
+    fn added_columns_are_recognised_and_nothing_else_is() {
+        assert_eq!(
+            added_column("ALTER TABLE hosts ADD COLUMN metrics TEXT NOT NULL DEFAULT ''"),
+            Some(("hosts".into(), "metrics".into()))
+        );
+        assert!(added_column("CREATE TABLE IF NOT EXISTS hosts (id TEXT)").is_none());
+        assert!(added_column("CREATE INDEX x ON hosts (id)").is_none());
+        assert!(added_column("ALTER TABLE hosts RENAME TO boxes").is_none());
     }
 }
