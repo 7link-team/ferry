@@ -8,7 +8,9 @@ services:
     ports:
       - "4290:4290"
     environment:
-      # Leave empty for the bundled SQLite; set for PostgreSQL.
+      # Empty uses the bundled SQLite in the data volume. Otherwise point at
+      # an external database: mysql://user:pass@host:3306/ferry or
+      # postgres://user:pass@host:5432/ferry
       FERRY_DATABASE_URL: ${FERRY_DATABASE_URL:-}
       # The address runners and browsers reach this server on.
       FERRY_PUBLIC_URL: ${FERRY_PUBLIC_URL:-http://localhost:4290}

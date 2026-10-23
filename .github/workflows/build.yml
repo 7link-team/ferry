@@ -53,6 +53,47 @@ jobs:
           cd desktop
           cargo check --locked
 
+  backends:
+    # The dialect layer's unit tests cannot catch what actually broke here:
+    # Postgres numbers placeholders $1.. and returns i32 for INTEGER. Only a
+    # real server against a real database does, so all three run on every push.
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-only-password
+          MYSQL_DATABASE: ferry
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pintegration-only-password"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: integration-only-password
+          POSTGRES_DB: ferry
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd=pg_isready --health-interval=10s
+          --health-timeout=5s --health-retries=12
+    env:
+      # Without this a missing service would silently reduce the matrix to
+      # SQLite and the job would still pass.
+      FERRY_REQUIRE_ALL: "1"
+      FERRY_TEST_MYSQL: mysql://root:integration-only-password@127.0.0.1:3306/ferry
+      FERRY_TEST_POSTGRES: postgres://postgres:integration-only-password@127.0.0.1:5432/ferry
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: backends
+      # rust-embed needs dist/ to exist, but these checks never load a page, so
+      # build.rs's empty placeholder is enough and the npm build is skipped.
+      - run: cargo build --locked -p ferry-server
+      - run: ./scripts/test-backends.sh
+
   desktop:
     strategy:
       fail-fast: false
@@ -161,7 +202,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [checks, desktop, runner-linux-arm64]
+    needs: [checks, backends, desktop, runner-linux-arm64]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

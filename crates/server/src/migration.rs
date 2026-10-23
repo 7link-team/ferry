@@ -2,7 +2,37 @@
 //! shipped. The full target schema is in docs/ferry-运维平台产品与技术方案.md;
 //! `Initial` carries only the identity and tenancy bedrock every module needs.
 
+use crate::dialect;
 use sea_orm_migration::prelude::*;
+
+/// Applies one canonical (SQLite-flavoured) DDL statement to whichever backend
+/// is connected.
+///
+/// MySQL has no `CREATE INDEX IF NOT EXISTS` and commits DDL independently, so
+/// a migration that fails halfway must stay re-runnable: every statement is
+/// checked for existence first rather than relying on the clause.
+async fn execute_schema(m: &SchemaManager<'_>, sql: &str) -> Result<(), DbErr> {
+    let backend = m.get_connection().get_database_backend();
+    if backend == sea_orm::DbBackend::MySql {
+        if let Some((table, index)) = dialect::index_target(sql) {
+            if m.has_index(&table, &index).await? {
+                return Ok(());
+            }
+        } else if let Some(table) = sql
+            .trim()
+            .strip_prefix("CREATE TABLE IF NOT EXISTS ")
+            .and_then(|rest| rest.split_whitespace().next())
+            && m.has_table(table).await?
+        {
+            return Ok(());
+        }
+    }
+    let Some(sql) = dialect::schema(backend, sql) else {
+        return Ok(());
+    };
+    m.get_connection().execute_unprepared(&sql).await?;
+    Ok(())
+}
 
 pub struct Migrator;
 
@@ -19,7 +49,7 @@ const INITIAL: &[&str] = &[
         email TEXT NOT NULL,
         name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
-        active INTEGER NOT NULL DEFAULT 1,
+        active BIGINT NOT NULL DEFAULT 1,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email)",
@@ -45,7 +75,7 @@ const INITIAL: &[&str] = &[
         workspace_id TEXT NOT NULL,
         name TEXT NOT NULL,
         permissions TEXT NOT NULL,
-        builtin INTEGER NOT NULL DEFAULT 0,
+        builtin BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS workspace_roles_workspace ON workspace_roles (workspace_id)",
@@ -82,7 +112,7 @@ impl MigrationName for Initial {
 impl MigrationTrait for Initial {
     async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
         for sql in INITIAL {
-            m.get_connection().execute_unprepared(sql).await?;
+            execute_schema(m, sql).await?;
         }
         Ok(())
     }
@@ -100,7 +130,7 @@ const HOST_RESOURCES: &[&str] = &[
         parent_id TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1)",
+        version BIGINT NOT NULL DEFAULT 1)",
     "CREATE INDEX IF NOT EXISTS host_groups_workspace ON host_groups (workspace_id, name)",
     "CREATE TABLE IF NOT EXISTS hosts (
         id TEXT PRIMARY KEY,
@@ -118,7 +148,7 @@ const HOST_RESOURCES: &[&str] = &[
         seen_at BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1)",
+        version BIGINT NOT NULL DEFAULT 1)",
     "CREATE INDEX IF NOT EXISTS hosts_workspace ON hosts (workspace_id, name)",
     "CREATE INDEX IF NOT EXISTS hosts_group ON hosts (workspace_id, group_id)",
     "CREATE TABLE IF NOT EXISTS tags (
@@ -128,7 +158,7 @@ const HOST_RESOURCES: &[&str] = &[
         color TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1)",
+        version BIGINT NOT NULL DEFAULT 1)",
     "CREATE UNIQUE INDEX IF NOT EXISTS tags_unique ON tags (workspace_id, name)",
     "CREATE TABLE IF NOT EXISTS host_tags (
         host_id TEXT NOT NULL,
@@ -147,7 +177,7 @@ impl MigrationName for HostResources {
 impl MigrationTrait for HostResources {
     async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
         for sql in HOST_RESOURCES {
-            m.get_connection().execute_unprepared(sql).await?;
+            execute_schema(m, sql).await?;
         }
         Ok(())
     }

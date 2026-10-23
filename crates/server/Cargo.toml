@@ -18,8 +18,10 @@ uuid.workspace = true
 
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["trace", "limit", "set-header"] }
-sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros"] }
-sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls"] }
+sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "sqlx-mysql", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "sqlx-mysql", "runtime-tokio-rustls"] }
+# MySQL 8 negotiates caching_sha2_password with RSA on a first non-TLS connection.
+sqlx = { version = "0.9", default-features = false, features = ["mysql-rsa"] }
 async-trait = "0.1"
 argon2 = "0.5"
 rand = "0.8"

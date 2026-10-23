@@ -1,6 +1,7 @@
 mod assets;
 mod auth;
 mod db;
+mod dialect;
 mod error;
 mod hosts;
 mod migration;

@@ -39,7 +39,25 @@ npm run build                      # 产物进 dist/，被服务内嵌
 
 cargo fmt --all -- --check && cargo check --workspace && cargo test --workspace
 npm run typecheck && npm test
+
+# 三种数据库跑同一套功能测试（不带 URL 则只测 SQLite）
+cargo build -p ferry-server
+FERRY_TEST_MYSQL='mysql://root:pw@127.0.0.1:3306/ferry' \
+FERRY_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:5432/ferry' \
+  ./scripts/test-backends.sh
 ```
+
+## 数据库
+
+SQLite、MySQL、PostgreSQL 都支持,用 `FERRY_DATABASE_URL` 选择:
+
+| 不填 | SQLite,数据在 `FERRY_DATA_DIR/ferry.sqlite`(桌面形态与小型部署的默认) |
+|---|---|
+| `mysql://…` | MySQL 8+ |
+| `postgres://…` | PostgreSQL |
+
+三者的差异只在 `crates/server/src/dialect.rs`:业务代码一律写 SQLite 风味、
+`?` 占位符的 SQL。新增查询请保持可移植,不要在方言层加按查询的特例。
 
 Docker 部署：
 

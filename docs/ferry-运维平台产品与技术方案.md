@@ -65,7 +65,8 @@ Docker 形态                        Desktop 形态
 │ 业务层     hosts groups tags · repositories pipelines · deployments ...      │
 │            cron_jobs（共享） · variables（共享） · members roles activity     │
 │ 通道层     HostChannel trait ── RunnerChannel │ SshChannel                   │
-│ 数据层     db.rs 原生 SQL + migration.rs 迁移 ── SQLite │ PostgreSQL          │
+│ 数据层     db.rs 原生 SQL + dialect.rs 方言 + migration.rs 迁移               │
+│            ── SQLite │ MySQL │ PostgreSQL                                  │
 └──────────────────────────────────────────────────────────────────────────────┘
           ▲ WS 反向连接                      ▲ SSH 外拨
 ┌─────────┴──────────┐              ┌────────┴──────────┐
@@ -80,7 +81,24 @@ Docker 形态                        Desktop 形态
 1. **HTTP 层不碰 SQL**，业务层不碰 `axum` 的提取器之外的东西。
 2. **所有主机操作只经过 `HostChannel`**。终端、文件、部署步骤、流水线步骤、定时任务执行，一律调这个 trait；谁都不准直接 `ssh` 或直接写 runner 协议。接第三种接入方式时只改工厂函数。
 3. **`crates/protocol` 是 server 与 runner 的唯一契约**。协议类型不许在任一侧复制一份。
-4. 数据访问全部走 `db.rs` 的 `execute/one/all`，不引入 ORM 实体宏——与 easy-erp 相同的取舍：SQL 看得见，迁移是纯 SQL，两种数据库差异集中在一处。
+4. 数据访问全部走 `db.rs` 的 `execute/one/all`，不引入 ORM 实体宏——与 easy-erp 相同的取舍：SQL 看得见，迁移是纯 SQL。
+5. **三种数据库的差异只在 `dialect.rs` 一个文件里**。业务代码一律写 SQLite 风味、`?` 占位符的 SQL，由 `dialect` 翻译。见 §3.1。
+
+### 3.1 SQLite / MySQL / PostgreSQL
+
+| | SQLite | MySQL | PostgreSQL |
+|---|---|---|---|
+| 用途 | 桌面形态、小型 Docker 部署的默认 | 已有 MySQL 运维体系的团队 | 多人共用、需要并发写入 |
+| 配置 | 不填 `FERRY_DATABASE_URL` | `mysql://…` | `postgres://…` |
+
+方言层只做两件事，刻意保持小：
+
+- **占位符**：SQLite 和 MySQL 用 `?`，PostgreSQL 要 `$1 $2 …`，按出现顺序改写，字符串字面量里的 `?` 不动（`'it''s ? here'` 这种转义引号也要认对）。
+- **DDL 类型**：MySQL 不能给 `TEXT` 列加索引，所以按列名分配宽度——`id` 和 `*_id` → `VARCHAR(64)`（UUID 36 字符），JSON 列 → `LONGTEXT`，其余 → `VARCHAR(255)`；建表追加 `utf8mb4_bin`，让大小写敏感性和 SQLite 的 BINARY 默认一致，否则 `Admin` 和 `admin` 会在唯一索引里撞车。MySQL 没有 `CREATE INDEX IF NOT EXISTS`，改为先查存在性——它的 DDL 各自提交，迁移中途失败必须能重跑。
+
+**整数宽度是真踩过的坑**：PostgreSQL 的 `INTEGER` 是 i32，SQLite 给 i64，MySQL 的 `COUNT()` 给 u64。所以 (1) 表里所有整数列统一用 `BIGINT`，绑定的 i64 参数才不会和列类型冲突（`WHERE version = ?` 每次更新都会绑）；(2) `db::int` 逐个尝试 i64 / i32 / u64 / u32。单元测试抓不到这类问题，只有真服务连真数据库才会暴露——所以有 `scripts/test-backends.sh`，CI 每次推送都跑三遍。
+
+不加第四种数据库之前，这一层不该再长大。遇到某个查询在某个库上不work，优先把查询改写成可移植的，而不是在方言层加一条特例——easy-erp 的 `mysql.rs` 就是反面教材，它为具体查询堆了几十条 `replace`。
 
 ---
 
@@ -799,7 +817,7 @@ GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
 
 ## 12. 数据模型
 
-全部业务表共有：`id TEXT PK`、`workspace_id TEXT`、`created_at BIGINT`、`updated_at BIGINT`、`version INTEGER`；时间统一毫秒时间戳。骨架已建立身份与租户基座（`users` `sessions` `workspaces` `workspace_roles` `workspace_members` `activity`），其余按模块分批迁移。
+全部业务表共有：`id TEXT PK`、`workspace_id TEXT`、`created_at BIGINT`、`updated_at BIGINT`、`version BIGINT`；时间统一毫秒时间戳。**整数列一律 `BIGINT`**，原因见 §3.1。骨架已建立身份与租户基座（`users` `sessions` `workspaces` `workspace_roles` `workspace_members` `activity`），其余按模块分批迁移。
 
 | 模块 | 表 | 要点 |
 |---|---|---|
@@ -885,11 +903,11 @@ GET /api/workspaces/{ws}/dashboard
 ## 16. 待确认项
 
 1. **「部署」与「应用」是不是同一个一级菜单？** 需求顶部列的是「部署」，左侧菜单描述的是「应用」。本文按同一模块处理、标签取「部署」。如果是两个独立模块，`nav.ts` 加一组即可，但两者的左侧菜单要重新划分。
-2. **数据库选 PostgreSQL 还是跟 easy-erp 一致的 MySQL？** 骨架按 PostgreSQL 配（JSON 配置、时间与并发语义更顺手，运维场景常见）。要与 erp 保持同构就改 `crates/server/Cargo.toml` 的 feature 与迁移里的方言分支，成本不大但要现在定。
+2. ~~数据库选 PostgreSQL 还是 MySQL？~~ **已定：三种都支持**（SQLite / MySQL / PostgreSQL），见 §3.1。`scripts/test-backends.sh` 对三者跑同一套 30 项功能测试，CI 每次推送都跑。
 3. **加入工作空间要不要审批？** 本文按「邀请码加入即生效，获得空间默认角色」。要审批就给 `workspace_members.state` 加 `pending` 流程与一个待审列表。
 4. **滚动位置用像素还是首行 id？** 本文用像素（实现简单）。跨设备分享、或页大小不同会有偏差；要精确就改成记首个可见行的 id，组件内部一处改动。
 5. **runner 二进制怎么分发？** 本文按「随服务镜像一起带，由服务提供下载」。另一条路是从 GitHub Release 拉，镜像更小但主机需要外网。
 6. **终端会话录像与命令级审计第一版要不要？** 本文只记开启/关闭，不记录击键与输出。合规场景常要全量录像，加上会影响存储与通道设计，要早定。
 7. **应用市场的内容从哪来？** 内置清单 / 远程索引 / 自建仓库，三种的权限与更新机制都不一样。
 
-第 1、2 条会影响骨架与迁移，建议先定；其余可以在对应阶段开始前定。
+第 1 条会影响骨架，建议先定；其余可以在对应阶段开始前定。
