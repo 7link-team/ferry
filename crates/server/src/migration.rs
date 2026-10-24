@@ -66,6 +66,7 @@ impl MigratorTrait for Migrator {
             Box::new(Credentials),
             Box::new(Repositories),
             Box::new(Pipelines),
+            Box::new(IdInfrastructure),
         ]
     }
 }
@@ -447,5 +448,71 @@ impl MigrationTrait for Pipelines {
     }
     async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct IdInfrastructure;
+impl MigrationName for IdInfrastructure {
+    fn name(&self) -> &str {
+        "id_infrastructure_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for IdInfrastructure {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        m.create_table(
+            Table::create()
+                .table(Alias::new("locks"))
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Alias::new("name"))
+                        .string_len(64)
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("owner"))
+                        .string_len(64)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("acquired_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("expires_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .to_owned(),
+        )
+        .await?;
+        m.create_table(
+            Table::create()
+                .table(Alias::new("worker_ids"))
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Alias::new("worker_id"))
+                        .big_integer()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("instance_id"))
+                        .string_len(64)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("heartbeat_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .to_owned(),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除 worker 租约".into()))
     }
 }

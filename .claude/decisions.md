@@ -13,3 +13,23 @@
 - Tradeoffs：执行权限及模板替换安全属于后续执行引擎设计。
 - Scope：T2 纯函数校验和对抗测试。
 - Status：已实施并单测通过。
+
+## T3a 数据层基础机制
+- Decision：新 locks / worker_ids 用 SeaORM 实体与 schema builder，追加迁移；保留旧主键、旧迁移及 db::id 调用。
+- Reason：用户明确执行 T3a，其禁止事项限定本次范围；§18.5 全量改造属于后续工作。
+- Alternatives Considered：同步重写全部数据层；超出任务范围，未做。
+- Tradeoffs：仓库暂时并存既有 raw SQL 与新 ORM 查询；新增机制没有 raw SQL。
+- Scope：T3a；Status：实施。
+
+## T3a 租约与分配原子性
+- Decision：10 秒心跳 / 60 秒 TTL；本地使用 Instant，从数据库写入开始时刻计时；等待发号时也检查租约。分配在事务内取得锁，并通过旧 owner/heartbeat 条件更新槽位，避免回收期间覆盖刚恢复的心跳。
+- Reason：墙钟回拨不能延长本地安全期限，慢响应不能额外续命；分配失败或取消必须回滚释放锁。
+- Alternatives Considered：事务外持有 TTL 锁；操作超过 TTL 时无法确保串行分配。
+- Tradeoffs：锁竞争/候选槽位并发续期时明确拒绝启动，不增加隐式重试。跨实例租约仍按设计依赖主机时钟同步；复制数据目录不能同时启动同一个 instance_id。
+- Scope：worker 生命周期；Status：实施。
+
+## T3a 优雅关闭与重启复用
+- Decision：优雅关闭先停心跳/发号，再将本 owner 的 heartbeat_at 置 0，保留槽位映射。
+- Reason：同时满足立即释放槽位和同 instance_id 重启优先复用；若槽位已被其他实例回收，则走最小空闲槽位分配。
+- Alternatives Considered：删除行会丢失重启亲和性；不释放则占用到 TTL。
+- Tradeoffs：保留最多 1024 行；Status：实施。

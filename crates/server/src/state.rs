@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 
 #[allow(dead_code)]
 pub struct State {
+    pub ids: Arc<crate::snowflake::Generator>,
     pub db: DatabaseConnection,
     pub data_dir: PathBuf,
     pub instance_id: String,

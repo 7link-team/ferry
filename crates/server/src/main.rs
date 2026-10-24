@@ -6,15 +6,18 @@ mod db;
 mod dialect;
 mod error;
 mod hosts;
+mod lock;
 mod migration;
 mod pipelines;
 mod remote;
 mod repositories;
 mod resource;
 mod runner;
+mod snowflake;
 mod ssh;
 mod state;
 mod vault;
+mod worker;
 mod workspace;
 
 use axum::{
@@ -96,6 +99,20 @@ async fn main() -> anyhow::Result<()> {
     };
     migration::Migrator::up(&db, None).await?;
 
+    let vault = vault::Vault::open(&cfg.data_dir, cfg.server_mode)?;
+    let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
+    let worker = Arc::new(
+        worker::Worker::allocate(&db, &instance_id)
+            .await
+            .map_err(|error| anyhow::anyhow!("无法分配安全的 worker id，拒绝启动: {error}"))?,
+    );
+    let (heartbeat_stop, heartbeat_rx) = tokio::sync::watch::channel(false);
+    let heartbeat_worker = worker.clone();
+    let heartbeat_db = db.clone();
+    let heartbeat_task = tokio::spawn(async move {
+        heartbeat_worker.run(&heartbeat_db, heartbeat_rx).await;
+    });
+
     let s: state::AppState = Arc::new(state::State {
         db,
         data_dir: cfg.data_dir.clone(),
@@ -103,7 +120,8 @@ async fn main() -> anyhow::Result<()> {
         server_mode: cfg.server_mode,
         secure_cookie: cfg.secure_cookie,
         bind: cfg.bind,
-        vault: vault::Vault::open(&cfg.data_dir, cfg.server_mode)?,
+        vault,
+        ids: worker.generator.clone(),
     });
 
     let mut hosts = cfg.allowed_hosts;
@@ -222,15 +240,21 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http())
         .with_state(s.clone());
 
-    let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
-    axum::serve(
+    let served = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown())
-    .await?;
-    s.db.clone().close().await?;
+    .await;
+    let _ = heartbeat_stop.send(true);
+    let heartbeat_result = heartbeat_task.await;
+    let released = worker.release(&s.db).await;
+    let closed = s.db.clone().close().await;
+    served?;
+    heartbeat_result?;
+    released?;
+    closed?;
     drop(lock);
     Ok(())
 }
