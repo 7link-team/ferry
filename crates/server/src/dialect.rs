@@ -15,7 +15,7 @@ use sea_orm::DbBackend;
 /// MySQL forbids a DEFAULT on a TEXT/LONGTEXT column, so a column only
 /// belongs here when it genuinely needs more than VARCHAR(255) *and* has no
 /// default. `metrics` was promoted here once and broke the migration.
-const LONG_COLUMNS: &[&str] = &["permissions", "details", "secret"];
+const LONG_COLUMNS: &[&str] = &["permissions", "details", "secret", "definition"];
 
 /// Rewrites a parameterized query for the target backend.
 pub fn query(backend: DbBackend, sql: &str) -> String {

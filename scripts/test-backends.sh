@@ -154,6 +154,26 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   repo_cred=$(c -X POST -d '{"name":"git-token","kind":"token","secret":"ghp_example"}' "$B/workspaces/ops/credentials" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   c -X POST -d "{\"name\":\"pinned\",\"url\":\"https://example.com/a.git\",\"credential_id\":\"$repo_cred\"}" "$B/workspaces/ops/repositories" >/dev/null
+  # A pipeline pins its target host; both the single and the batch delete must
+  # refuse, not just the one named in the report. The payload is built with
+  # python because the definition is JSON nested inside JSON and bash quoting
+  # silently produced an empty id the first time.
+  local pinned_host pipeline_payload
+  pinned_host=$(c -X POST -d '{"name":"pipeline-target","connection":"runner"}' "$B/workspaces/ops/hosts" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  [ -n "$pinned_host" ] || { echo "    FAIL could not create the pinned host"; fail=$((fail + 1)); }
+  pipeline_payload=$(python3 -I -c "
+import json,sys
+print(json.dumps({
+  'name': 'pins-host',
+  'definition': json.dumps({'workdir': '/tmp/ferry', 'steps': [{'name': 's', 'run': 'true'}]}),
+  'target_kind': 'host',
+  'target_ref': sys.argv[1],
+}))" "$pinned_host")
+  ck "pipeline pinning a host is created" '"id"' "$(c -X POST -d "$pipeline_payload" "$B/workspaces/ops/pipelines")"
+  ck "host used by a pipeline cannot be deleted"  "条流水线以这台主机为目标"  "$(c -X DELETE "$B/workspaces/ops/hosts/$pinned_host")"
+  ck "nor by the batch delete"                    "条流水线以这台主机为目标"  "$(c -X POST -d "{\"ids\":[\"$pinned_host\"]}" "$B/workspaces/ops/hosts/actions/bulk-delete")"
+
   ck "credential used by a repository cannot be deleted"  "还有 1 个仓库"  "$(c -X DELETE "$B/workspaces/ops/credentials/$repo_cred")"
   # Repositories share credentials but never include credential data in audit details.
   local repo repo_body
@@ -176,6 +196,74 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   ck "repository foreign credential rejected" '"error"' "$(c -X POST -d "{\"name\":\"foreign\",\"url\":\"https://example.com/repo\",\"credential_id\":\"$cred\"}" "$B/workspaces/repo-other/repositories")"
   ck "repository workspace isolation" '"total":0' "$(c "$B/workspaces/repo-other/repositories")"
   ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/ops/activity?resource=repositories")"
+
+
+  # Pipelines: keep the JSON definition a string at the resource boundary.
+  local pipeline pipeline_body pipeline_payload pipeline_repo foreign_repo
+  pipeline_repo=$(c -X POST -d '{"name":"pipeline-repo","url":"https://example.com/pipeline.git"}' "$B/workspaces/ops/repositories" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  foreign_repo=$(c -X POST -d '{"name":"foreign-repo","url":"https://example.com/foreign.git"}' "$B/workspaces/repo-other/repositories" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  pipeline_payload=$(python3 -I -c '
+import json,sys
+definition={"workdir":"/tmp/{{run}}","env":[{"name":"LONG_VALUE","value":"x"*300}],
+            "steps":[{"name":"构建","run":"echo {{branch}} {{repo_url}} {{commit}}","timeout_seconds":1800}]}
+print(json.dumps({"name":"pipeline-build","repository_id":sys.argv[1],"target_kind":"host",
+                  "target_ref":sys.argv[2],"definition":json.dumps(definition),"version":1}))
+' "$pipeline_repo" "$host")
+  pipeline_body=$(c -X POST -d "$pipeline_payload" "$B/workspaces/ops/pipelines")
+  ck "pipeline create" '"id"' "$pipeline_body"
+  pipeline=$(printf '%s' "$pipeline_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "pipeline long definition round trip" '"LONG_VALUE"' "$(c "$B/workspaces/ops/pipelines/$pipeline" |
+    python3 -I -c 'import json,sys;v=json.load(sys.stdin);d=json.loads(v["definition"]);assert d["env"][0]["value"]=="x"*300;print(json.dumps(d))')"
+  # Reuse the valid payload so each refusal exercises exactly one changed field.
+  pipeline_variant() {
+    printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v[sys.argv[1]]=sys.argv[2];print(json.dumps(v))' "$1" "$2"
+  }
+  ck "pipeline malformed JSON" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{')" "$B/workspaces/ops/pipelines")"
+  ck "pipeline foreign repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/ops/pipelines")"
+  ck "pipeline missing repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id missing)" "$B/workspaces/ops/pipelines")"
+  ck "pipeline missing host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref missing)" "$B/workspaces/ops/pipelines")"
+  ck "pipeline invalid target kind" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_kind invalid)" "$B/workspaces/ops/pipelines")"
+  ck "pipeline typo names variable" '{{typo}}.*400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{"workdir":"/tmp","steps":[{"name":"构建","run":"echo {{typo}}"}]}')" "$B/workspaces/ops/pipelines")"
+  ck "pipeline search and filters" '"total":1' "$(c "$B/workspaces/ops/pipelines?q=PIPELINE-BUILD&repository_id=$pipeline_repo&target_kind=host&sort=-updated_at")"
+  ck "pipeline filter excludes" '"total":0' "$(c "$B/workspaces/ops/pipelines?target_kind=host-group")"
+  ck "pipeline unknown sort" '400$' "$(c -w '%{http_code}' "$B/workspaces/ops/pipelines?sort=definition")"
+  ck "pipeline update" '200$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline version incremented" '"version":2' "$(c "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline update validates references" '400$' "$(c -w '%{http_code}' -X PATCH -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline referenced repository protected" '409$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$pipeline_repo")"
+  ck "pipeline isolated list" '"total":0' "$(c "$B/workspaces/repo-other/pipelines")"
+  ck "pipeline isolated detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/pipelines/$pipeline")"
+  ck "pipeline isolated delete" '404$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/repo-other/pipelines/$pipeline")"
+
+  local group_payload group_pipeline other_host other_group other_payload
+  other_host=$(c -X POST -d '{"name":"other-host","connection":"runner"}' "$B/workspaces/repo-other/hosts" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  other_group=$(c -X POST -d '{"name":"other-group"}' "$B/workspaces/repo-other/host-groups" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "pipeline foreign host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref "$other_host")" "$B/workspaces/ops/pipelines")"
+  group_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c '
+import json,sys
+v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind="host-group",target_ref=sys.argv[1]);print(json.dumps(v))
+' "$group")
+  group_pipeline=$(c -X POST -d "$group_payload" "$B/workspaces/ops/pipelines" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "pipeline group and optional repository accepted" '"target_kind":"host-group"' "$(c "$B/workspaces/ops/pipelines/$group_pipeline")"
+  for target in missing "$other_group" "$host"; do
+    local invalid_group
+    invalid_group=$(printf '%s' "$group_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["target_ref"]=sys.argv[1];print(json.dumps(v))' "$target")
+    ck "pipeline missing foreign or wrong-table group" '400$' "$(c -w '%{http_code}' -X POST -d "$invalid_group" "$B/workspaces/ops/pipelines")"
+  done
+  other_payload=$(printf '%s' "$group_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["target_ref"]=sys.argv[1];print(json.dumps(v))' "$other_group")
+  ck "pipeline isolated update" '404$' "$(c -w '%{http_code}' -X PATCH -d "$other_payload" "$B/workspaces/repo-other/pipelines/$pipeline")"
+  ck "pipeline group delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/pipelines/$group_pipeline")"
+  ck "pipeline delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline unreferenced repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$pipeline_repo")"
+  ck "pipeline audit exists" '"resource":"pipelines"' "$(c "$B/workspaces/ops/activity?resource=pipelines")"
+  ckn "pipeline audit omits definition" 'LONG_VALUE' "$(c "$B/workspaces/ops/activity?resource=pipelines")"
 
   ck "roles"            '"拥有者"'      "$(c "$B/workspaces/ops/roles")"
   ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/hosts")"

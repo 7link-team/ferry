@@ -222,7 +222,23 @@ pub async fn remove(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
     scope.require("repositories.delete")?;
-    // Add a reference check here once pipelines can reference repositories.
+    for (table, noun) in [("pipelines", "条流水线")] {
+        let used = one(
+            &s.db,
+            &format!(
+                "SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ? AND repository_id = ?"
+            ),
+            vec![scope.workspace_id.clone().into(), id.clone().into()],
+        )
+        .await?
+        .map(|row| db::int(&row, "total"))
+        .unwrap_or(0);
+        if used > 0 {
+            return Err(ApiError::conflict(format!(
+                "还有 {used} {noun}在用这个仓库，请先改掉再删除。"
+            )));
+        }
+    }
     let affected = execute(
         &s.db,
         "DELETE FROM repositories WHERE workspace_id = ? AND id = ?",

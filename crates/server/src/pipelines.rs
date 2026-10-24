@@ -1,0 +1,573 @@
+use crate::{
+    db::{self, execute, one, text},
+    error::{ApiError, Result},
+    resource::{self, ListQuery, Spec},
+    state::AppState,
+    workspace::Scope,
+};
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+};
+use sea_orm::QueryResult;
+use serde::Deserialize;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+
+const SPEC: Spec = Spec {
+    table: "pipelines",
+    search: &["name"],
+    filters: &["repository_id", "target_kind"],
+    sortable: &["name", "created_at", "updated_at"],
+    default_sort: "name",
+};
+const COLUMNS: &str = "id,name,repository_id,definition,target_kind,target_ref,description,created_at,updated_at,version";
+
+fn to_json(row: &QueryResult) -> Value {
+    json!({
+        "id": text(row, "id"),
+        "name": text(row, "name"),
+        "repository_id": text(row, "repository_id"),
+        "definition": text(row, "definition"),
+        "target_kind": text(row, "target_kind"),
+        "target_ref": text(row, "target_ref"),
+        "description": text(row, "description"),
+        "created_at": db::int(row, "created_at"),
+        "updated_at": db::int(row, "updated_at"),
+        "version": db::int(row, "version"),
+    })
+}
+
+#[derive(Deserialize)]
+pub struct Body {
+    name: String,
+    definition: String,
+    #[serde(default)]
+    repository_id: String,
+    target_kind: String,
+    target_ref: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    version: i64,
+}
+
+async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
+    let name = body.name.trim();
+    if name.is_empty() || name.chars().count() > 60 {
+        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+    }
+    validate_definition(&body.definition)?;
+    let target_table = match body.target_kind.as_str() {
+        "host" => "hosts",
+        "host-group" => "host_groups",
+        _ => return Err(ApiError::bad("流水线目标类型必须是 host 或 host-group。")),
+    };
+    for (table, id, noun) in [
+        ("repositories", body.repository_id.trim(), "仓库"),
+        (target_table, body.target_ref.trim(), "执行目标"),
+    ] {
+        if table == "repositories" && id.is_empty() {
+            continue;
+        }
+        if one(
+            &s.db,
+            &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),
+            vec![scope.workspace_id.clone().into(), id.into()],
+        )
+        .await?
+        .is_none()
+        {
+            return Err(ApiError::bad(format!("所选{noun}不存在于当前工作空间。")));
+        }
+    }
+    Ok(name.to_owned())
+}
+
+pub async fn list(
+    State(s): State<AppState>,
+    scope: Scope,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    scope.require("pipelines.read")?;
+    let query = ListQuery::parse(&SPEC, &raw)?;
+    let (rows, total) = resource::list(&s.db, &SPEC, COLUMNS, &scope.workspace_id, &query).await?;
+    Ok(Json(json!({
+        "items": rows.iter().map(to_json).collect::<Vec<_>>(),
+        "total": total, "page": query.page, "page_size": query.page_size,
+    })))
+}
+
+pub async fn get(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    scope.require("pipelines.read")?;
+    let row = one(
+        &s.db,
+        &format!("SELECT {COLUMNS} FROM pipelines WHERE workspace_id = ? AND id = ?"),
+        vec![scope.workspace_id.into(), id.into()],
+    )
+    .await?
+    .ok_or_else(ApiError::missing)?;
+    Ok(Json(to_json(&row)))
+}
+
+pub async fn create(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<Body>,
+) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("pipelines.create")?;
+    let name = check(&s, &scope, &body).await?;
+    let (id, now) = (db::id(), db::now());
+    execute(
+        &s.db,
+        "INSERT INTO pipelines (id,workspace_id,name,repository_id,definition,target_kind,target_ref,description,created_at,updated_at,version)
+         VALUES (?,?,?,?,?,?,?,?,?,?,1)",
+        vec![
+            id.clone().into(),
+            scope.workspace_id.clone().into(),
+            name.clone().into(),
+            body.repository_id.trim().into(),
+            body.definition.clone().into(),
+            body.target_kind.clone().into(),
+            body.target_ref.trim().into(),
+            body.description.trim().into(),
+            now.into(),
+            now.into(),
+        ],
+    )
+    .await?;
+    // The details of an audit entry are readable by anyone with activity.read,
+    // so they carry the name and never the secret.
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "create",
+        "pipelines",
+        &id,
+        json!({"name": name}),
+    )
+    .await?;
+    Ok((StatusCode::CREATED, Json(json!({"id": id}))))
+}
+
+pub async fn update(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    Json(body): Json<Body>,
+) -> Result<Json<Value>> {
+    scope.require("pipelines.update")?;
+    let name = check(&s, &scope, &body).await?;
+    let affected = execute(
+        &s.db,
+        "UPDATE pipelines SET name=?,repository_id=?,definition=?,target_kind=?,target_ref=?,description=?,updated_at=?,version=version+1
+         WHERE workspace_id=? AND id=? AND version=?",
+        vec![
+            name.clone().into(),
+            body.repository_id.trim().into(),
+            body.definition.clone().into(),
+            body.target_kind.clone().into(),
+            body.target_ref.trim().into(),
+            body.description.trim().into(),
+            db::now().into(),
+            scope.workspace_id.clone().into(),
+            id.clone().into(),
+            body.version.into(),
+        ],
+    ).await?.rows_affected();
+    if affected == 0 {
+        return Err(crate::hosts::stale(&s, "pipelines", &scope.workspace_id, &id).await?);
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "update",
+        "pipelines",
+        &id,
+        json!({"name": name}),
+    )
+    .await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+pub async fn remove(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+) -> Result<StatusCode> {
+    scope.require("pipelines.delete")?;
+    let affected = execute(
+        &s.db,
+        "DELETE FROM pipelines WHERE workspace_id = ? AND id = ?",
+        vec![scope.workspace_id.clone().into(), id.clone().into()],
+    )
+    .await?
+    .rows_affected();
+    if affected == 0 {
+        return Err(ApiError::missing());
+    }
+    crate::hosts::activity(&s, &scope, "delete", "pipelines", &id, json!({})).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Definition {
+    workdir: String,
+    #[serde(default)]
+    env: Vec<Environment>,
+    steps: Vec<Step>,
+}
+
+#[derive(Debug, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Environment {
+    name: String,
+    value: String,
+}
+
+#[derive(Debug, serde::Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Step {
+    name: String,
+    run: String,
+    #[serde(default)]
+    timeout_seconds: Option<u64>,
+}
+
+/// Only exact tokens are supported; no whitespace folding, nesting or expressions.
+fn check_templates(input: &str, context: &str) -> Result<()> {
+    let mut remaining = input;
+    while let Some(start) = remaining.find("{{") {
+        let token = &remaining[start + 2..];
+        let Some(end) = token.find("}}") else {
+            return Err(ApiError::bad(format!(
+                "{context}的模板变量「{{{{{token}」未闭合。"
+            )));
+        };
+        let variable = &token[..end];
+        if !["run", "branch", "repo_url", "commit"].contains(&variable) {
+            return Err(ApiError::bad(format!(
+                "{context}包含不支持的模板变量「{{{{{variable}}}}}」，只允许 run、branch、repo_url 和 commit。"
+            )));
+        }
+        remaining = &token[end + 2..];
+    }
+    Ok(())
+}
+
+pub fn validate_definition(input: &str) -> Result<Definition> {
+    if input.len() > 64 * 1024 {
+        return Err(ApiError::bad("流水线定义不能超过 64KB。"));
+    }
+    let value: Value =
+        serde_json::from_str(input).map_err(|_| ApiError::bad("流水线定义必须是合法的 JSON。"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| ApiError::bad("流水线定义必须是 JSON 对象。"))?;
+    let steps = object
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| !steps.is_empty() && steps.len() <= 50)
+        .ok_or_else(|| ApiError::bad("流水线 steps 必须是包含 1 到 50 个步骤的数组。"))?;
+    for (index, step) in steps.iter().enumerate() {
+        let name = step.get("name").and_then(Value::as_str).unwrap_or("");
+        let context = format!("第 {} 步「{}」", index + 1, name);
+        if name.trim().is_empty() || name.chars().count() > 60 {
+            return Err(ApiError::bad(format!(
+                "{context}的名称必须是 1 到 60 字的非空字符串。"
+            )));
+        }
+        let run = step.get("run").and_then(Value::as_str).unwrap_or("");
+        if run.trim().is_empty() || run.len() > 8 * 1024 || run.contains('\0') {
+            return Err(ApiError::bad(format!(
+                "{context}的命令必须是非空字符串、不含空字符且不能超过 8KB。"
+            )));
+        }
+        if let Some(timeout) = step.get("timeout_seconds")
+            && !timeout.as_u64().is_some_and(|n| (1..=86400).contains(&n))
+        {
+            return Err(ApiError::bad(format!(
+                "{context}的超时时间必须在 1 到 86400 秒之间。"
+            )));
+        }
+        check_templates(name, &context)?;
+        check_templates(run, &context)?;
+        serde_json::from_value::<Step>(step.clone()).map_err(|_| {
+            ApiError::bad(format!(
+                "{context}的字段无效，只支持 name、run 和 timeout_seconds。"
+            ))
+        })?;
+    }
+    let workdir = object
+        .get("workdir")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::bad("流水线 workdir 必须是绝对路径字符串。"))?;
+    crate::channel::check_path(workdir)
+        .map_err(|e| ApiError::bad(format!("流水线工作目录无效：{e}")))?;
+    check_templates(workdir, "流水线工作目录")?;
+    if let Some(env) = object.get("env") {
+        let env = env
+            .as_array()
+            .ok_or_else(|| ApiError::bad("流水线 env 必须是环境变量数组。"))?;
+        let mut names = std::collections::HashSet::new();
+        for (index, item) in env.iter().enumerate() {
+            let context = format!("第 {} 个环境变量", index + 1);
+            let entry: Environment = serde_json::from_value(item.clone()).map_err(|_| {
+                ApiError::bad(format!("{context}必须且只能包含字符串 name 和 value。"))
+            })?;
+            let mut bytes = entry.name.bytes();
+            let valid = bytes
+                .next()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            if !valid {
+                return Err(ApiError::bad(format!(
+                    "{context}的名称必须符合 [A-Za-z_][A-Za-z0-9_]*。"
+                )));
+            }
+            if !names.insert(entry.name.clone()) {
+                return Err(ApiError::bad(format!(
+                    "{context}的名称「{}」重复。",
+                    entry.name
+                )));
+            }
+            if entry.value.contains('\0') {
+                return Err(ApiError::bad(format!("{context}的值不能包含空字符。")));
+            }
+            check_templates(&entry.value, &context)?;
+        }
+    }
+    serde_json::from_value(value)
+        .map_err(|_| ApiError::bad("流水线定义字段无效，只支持 workdir、env 和 steps。"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid() -> Value {
+        json!({"workdir":"/tmp/{{run}}","env":[{"name":"LOG_LEVEL","value":"info"}],
+            "steps":[{"name":"构建","run":"echo {{branch}} {{repo_url}} {{commit}}","timeout_seconds":1800}]})
+    }
+    fn accepts(value: &Value) {
+        validate_definition(&value.to_string()).unwrap();
+    }
+    fn rejects(value: &Value, message: &str) {
+        let error = validate_definition(&value.to_string()).unwrap_err();
+        assert!(error.1.contains(message), "{error}");
+        assert!(error.1.ends_with('。'), "{error}");
+    }
+
+    #[test]
+    fn valid_definition_and_optional_fields() {
+        accepts(&valid());
+        let mut v = valid();
+        v.as_object_mut().unwrap().remove("env");
+        v["steps"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("timeout_seconds");
+        accepts(&v);
+    }
+
+    #[test]
+    fn invalid_json_and_root_shapes() {
+        assert!(validate_definition("{").unwrap_err().1.contains("JSON"));
+        for v in [json!(null), json!([]), json!("text"), json!(1)] {
+            rejects(&v, "对象");
+        }
+    }
+
+    #[test]
+    fn steps_required_array_and_count_boundary() {
+        let mut v = valid();
+        v.as_object_mut().unwrap().remove("steps");
+        rejects(&v, "steps");
+        for bad in [json!(null), json!({}), json!("x"), json!([])] {
+            v["steps"] = bad;
+            rejects(&v, "steps");
+        }
+        v["steps"] = json!(vec![json!({"name":"构建","run":"true"}); 50]);
+        accepts(&v);
+        v["steps"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"name":"第51步","run":"true"}));
+        rejects(&v, "50");
+    }
+
+    #[test]
+    fn step_fields_required_and_typed_with_step_number() {
+        for field in ["name", "run"] {
+            let mut v = valid();
+            v["steps"]
+                .as_array_mut()
+                .unwrap()
+                .insert(0, json!({"name":"第一步","run":"true"}));
+            v["steps"][1].as_object_mut().unwrap().remove(field);
+            rejects(&v, "第 2 步");
+            for bad in [json!(null), json!(1), json!([]), json!(""), json!(" \n\t")] {
+                v["steps"][1][field] = bad;
+                rejects(&v, "第 2 步");
+            }
+        }
+        let mut v = valid();
+        v["steps"][0] = json!(null);
+        rejects(&v, "第 1 步");
+    }
+
+    #[test]
+    fn name_character_and_run_byte_boundaries() {
+        let mut v = valid();
+        v["steps"][0]["name"] = json!("构".repeat(60));
+        v["steps"][0]["run"] = json!("a".repeat(8192));
+        accepts(&v);
+        v["steps"][0]["name"] = json!("构".repeat(61));
+        rejects(&v, "名称");
+        v["steps"][0]["name"] = json!("构建");
+        v["steps"][0]["run"] = json!("a".repeat(8193));
+        rejects(&v, "8KB");
+        v["steps"][0]["run"] = json!("构".repeat(2731));
+        rejects(&v, "8KB");
+        v["steps"][0]["run"] = json!("echo\0x");
+        rejects(&v, "空字符");
+    }
+
+    #[test]
+    fn timeout_integer_and_bounds() {
+        let mut v = valid();
+        for n in [json!(1), json!(86400)] {
+            v["steps"][0]["timeout_seconds"] = n;
+            accepts(&v);
+        }
+        for n in [
+            json!(0),
+            json!(-1),
+            json!(86401),
+            json!(1.5),
+            json!(1.0),
+            json!("10"),
+            json!(null),
+            json!(true),
+            json!(u64::MAX),
+        ] {
+            v["steps"][0]["timeout_seconds"] = n;
+            rejects(&v, "第 1 步「构建」的超时时间");
+        }
+    }
+
+    #[test]
+    fn workdir_uses_shared_path_rules() {
+        let mut v = valid();
+        v.as_object_mut().unwrap().remove("workdir");
+        rejects(&v, "workdir");
+        for path in [
+            "",
+            "relative",
+            "../tmp",
+            "/tmp/../etc",
+            "/tmp/\0x",
+            &format!("/{}", "a".repeat(4096)),
+        ] {
+            v["workdir"] = json!(path);
+            rejects(&v, "工作目录");
+        }
+        v["workdir"] = json!(1);
+        rejects(&v, "workdir");
+    }
+
+    #[test]
+    fn environment_shape_names_duplicates_and_values() {
+        let mut v = valid();
+        for bad in [json!(null), json!({}), json!("x")] {
+            v["env"] = bad;
+            rejects(&v, "env");
+        }
+        for name in ["", "1A", "A-B", "A B", "中文", "A\n", "A=x"] {
+            v["env"] = json!([{"name":name,"value":"x"}]);
+            rejects(&v, "名称");
+        }
+        for bad in [
+            json!({}),
+            json!({"name":"A"}),
+            json!({"name":"A","value":1}),
+        ] {
+            v["env"] = json!([bad]);
+            rejects(&v, "环境变量");
+        }
+        v["env"] = json!([{"name":"A","value":"x"},{"name":"A","value":"y"}]);
+        rejects(&v, "重复");
+        v["env"] = json!([{"name":"_A1","value":"x"},{"name":"a","value":"y"}]);
+        accepts(&v);
+        v["env"][0]["value"] = json!("a\0b");
+        rejects(&v, "空字符");
+    }
+
+    #[test]
+    fn template_whitelist_rejects_adversarial_tokens_everywhere() {
+        for token in [
+            "{{unknown}}",
+            "{{ run }}",
+            "{{RUN}}",
+            "{{a{{b}}}}",
+            "{{}}",
+            "{{run",
+        ] {
+            for field in ["run", "name", "workdir", "env"] {
+                let mut v = valid();
+                match field {
+                    "run" | "name" => v["steps"][0][field] = json!(token),
+                    "workdir" => v["workdir"] = json!(format!("/tmp/{token}")),
+                    _ => v["env"][0]["value"] = json!(token),
+                }
+                let error = validate_definition(&v.to_string()).unwrap_err();
+                assert!(error.1.contains("模板变量"), "{field}: {error}");
+                assert!(error.1.contains(token.trim_end_matches('}')), "{error}");
+                if field == "run" || field == "name" {
+                    assert!(error.1.contains("第 1 步"), "{error}");
+                }
+            }
+        }
+        let mut v = valid();
+        v["steps"][0]["run"] = json!("{{run}}{{branch}}{{repo_url}}{{commit}} {{typo}}");
+        rejects(&v, "{{typo}}");
+    }
+
+    #[test]
+    fn shell_syntax_is_intentionally_allowed() {
+        // run is an operator-authored shell program, not a single argv value.
+        // Newlines, semicolons, backticks and $() must remain usable; banning
+        // them would break normal build scripts, not establish a sandbox.
+        let mut v = valid();
+        v["steps"][0]["run"] = json!("echo hello\necho world; echo `date`; echo $(pwd)");
+        accepts(&v);
+    }
+
+    #[test]
+    fn definition_size_exact_boundary() {
+        let mut v = valid();
+        v["env"][0]["value"] = json!("");
+        let padding = 65536 - v.to_string().len();
+        v["env"][0]["value"] = json!("x".repeat(padding));
+        assert_eq!(v.to_string().len(), 65536);
+        accepts(&v);
+        v["env"][0]["value"] = json!("x".repeat(padding + 1));
+        rejects(&v, "64KB");
+    }
+
+    #[test]
+    fn unknown_fields_are_not_silently_ignored() {
+        let mut v = valid();
+        v["steps"][0]["timeout_second"] = json!(10);
+        rejects(&v, "第 1 步");
+        let mut v = valid();
+        v["parallel"] = json!(true);
+        rejects(&v, "字段");
+    }
+}

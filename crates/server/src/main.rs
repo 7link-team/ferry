@@ -7,6 +7,7 @@ mod dialect;
 mod error;
 mod hosts;
 mod migration;
+mod pipelines;
 mod remote;
 mod repositories;
 mod resource;
@@ -158,6 +159,16 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
+        .route(
+            "/{workspace}/pipelines",
+            get(pipelines::list).post(pipelines::create),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}",
+            get(pipelines::get)
+                .patch(pipelines::update)
+                .delete(pipelines::remove),
+        )
         .route(
             "/{workspace}/repositories",
             get(repositories::list).post(repositories::create),

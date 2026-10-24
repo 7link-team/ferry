@@ -396,12 +396,40 @@ pub async fn update_host(
     Ok(Json(json!({"ok": true})))
 }
 
+/// Refuses to delete a host that something still points at.
+///
+/// Both the single and the batch delete route through here: putting the guard
+/// only on the one the report mentions leaves the sibling path still able to
+/// orphan a pipeline's target.
+async fn host_is_free(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace_id: &str,
+    id: &str,
+) -> Result<()> {
+    let used = one(
+        conn,
+        "SELECT COUNT(*) AS total FROM pipelines
+         WHERE workspace_id = ? AND target_kind = 'host' AND target_ref = ?",
+        vec![workspace_id.into(), id.into()],
+    )
+    .await?
+    .map(|row| db::int(&row, "total"))
+    .unwrap_or(0);
+    if used > 0 {
+        return Err(ApiError::conflict(format!(
+            "还有 {used} 条流水线以这台主机为目标，请先改掉再删除。"
+        )));
+    }
+    Ok(())
+}
+
 pub async fn delete_host(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
     scope.require("hosts.delete")?;
+    host_is_free(&s.db, &scope.workspace_id, &id).await?;
     let affected = execute(
         &s.db,
         "DELETE FROM hosts WHERE workspace_id = ? AND id = ?",
@@ -435,6 +463,10 @@ pub async fn bulk_delete_hosts(
     let transaction = s.db.begin().await?;
     let mut deleted = 0;
     for id in &body.ids {
+        // Inside the transaction, so a pipeline created concurrently either
+        // blocks this delete or is not yet visible to it — and a refusal rolls
+        // back every delete in the batch rather than leaving it half applied.
+        host_is_free(&transaction, &scope.workspace_id, id).await?;
         deleted += crate::db::execute(
             &transaction,
             "DELETE FROM hosts WHERE workspace_id = ? AND id = ?",

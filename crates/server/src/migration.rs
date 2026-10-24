@@ -65,6 +65,7 @@ impl MigratorTrait for Migrator {
             Box::new(RunnerEnrolment),
             Box::new(Credentials),
             Box::new(Repositories),
+            Box::new(Pipelines),
         ]
     }
 }
@@ -336,8 +337,15 @@ mod schema_tests {
             RUNNER_ENROLMENT,
             CREDENTIALS,
             REPOSITORIES,
+            PIPELINES,
         ]
         .concat()
+    }
+
+    #[test]
+    fn pipeline_definition_is_longtext_without_default() {
+        let sql = crate::dialect::mysql_schema(PIPELINES[0]);
+        assert!(sql.contains("definition LONGTEXT NOT NULL,"));
     }
 
     #[test]
@@ -397,6 +405,42 @@ impl MigrationName for Repositories {
 impl MigrationTrait for Repositories {
     async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
         for sql in REPOSITORIES {
+            execute_schema(m, sql).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+const PIPELINES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS pipelines (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        repository_id TEXT NOT NULL DEFAULT '',
+        definition TEXT NOT NULL,
+        target_kind TEXT NOT NULL,
+        target_ref TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        version BIGINT NOT NULL DEFAULT 1)",
+    "CREATE INDEX IF NOT EXISTS pipelines_workspace ON pipelines (workspace_id, name)",
+];
+
+struct Pipelines;
+impl MigrationName for Pipelines {
+    fn name(&self) -> &str {
+        "pipelines_v1"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for Pipelines {
+    async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
+        for sql in PIPELINES {
             execute_schema(m, sql).await?;
         }
         Ok(())
