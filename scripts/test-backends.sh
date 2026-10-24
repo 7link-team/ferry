@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Runs the same functional suite against SQLite, MySQL and PostgreSQL.
 #
-# The dialect layer (crates/server/src/dialect.rs) is unit-tested, but unit
-# tests cannot catch the things that actually broke: Postgres numbering its
-# placeholders differently, and Postgres INTEGER being i32 where SQLite hands
-# back i64. Only a real server against a real database finds those, so this
-# script is the gate that keeps all three working.
+# The migration builders are unit-tested, but unit tests cannot catch all
+# backend differences: Postgres INTEGER is i32 where SQLite hands back i64.
+# Only a real server against a real database finds those, so this script is
+# the gate that keeps all three working.
 #
 #   scripts/test-backends.sh                 # SQLite only
 #   FERRY_TEST_MYSQL=mysql://...  \

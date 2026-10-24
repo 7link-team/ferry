@@ -48,3 +48,11 @@
 - Tradeoffs：host_tags 尚无业务调用者，但任务要求每张表均有镜像，针对该模块以有原因的 expect(dead_code) 标注，不伪造调用。实体不派生 Serialize，HTTP 显式映射 Id。凭据列表/详情通过 Summary 投影只读取公开字段及 has_secret 计算结果，保留原查询层不读取密文的防护；共享list支持类型化投影。
 - Scope：只改数据访问；迁移 DDL/执行逻辑不动，migration.rs 仅 schema 测试移除已删除的 db helper 依赖；SQLite PRAGMA 元数据检查保留注释说明。
 - Status：完成；三库基线及最终各 99/99，全部门槛退出0，两次变异正确失败并恢复验证通过。
+
+## T3d Schema builder
+- Decision：已有迁移全部改为 Table/Index/Alter builder，保留名称与顺序；索引和加列通过 SchemaManager 存在性检查重跑。MySQL 设置 utf8mb4_bin。
+- Reason：任务书要求删除 DDL 字符串转换，同时保留 MySQL 可启动、大小写与幂等保护。
+- Alternatives Considered：直接 .text() 在 MySQL 上会生成 TEXT 而非 LONGTEXT（SeaQuery 1.0.2 源码已确认）；只使用它会缩小原容量且违反无裸 TEXT 保护。
+- Tradeoffs：长列以 .text() 定义，MySQL 专用 builder .custom("longtext") 保留容量；没有 SQL 字符串改写。SQLite 的 BigInteger 正常生成 INTEGER，元数据检查适配，并以实际 MySQL 生成 SQL 验证同一41列仍为 BIGINT，不能退化为32位整数。
+- Scope：T3d 迁移与其保护测试；业务、JSON、错误文案和矩阵断言不变。
+- Status：完成；全部门槛退出0，新建三库各99/99，两库last/all重放无业务数据或结构变化；变异退出101且恢复后通过。

@@ -3,7 +3,6 @@ mod auth;
 mod channel;
 mod credentials;
 mod db;
-mod dialect;
 mod entities;
 mod error;
 mod hosts;
