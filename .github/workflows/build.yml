@@ -154,7 +154,21 @@ jobs:
       # ad-hoc macOS identity ("-"), which needs no account and no keychain.
       - name: Build the desktop installers
         shell: bash
-        run: npm run desktop:build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        run: |
+          # macOS DMG packaging shells out to hdiutil, which intermittently
+          # fails to attach its scratch image on a GitHub runner. The app is
+          # already built and signed by then, so the whole job goes red over a
+          # transient mount. Retry rather than re-running the workflow by hand;
+          # a real failure still fails three times and costs ~2 minutes.
+          for attempt in 1 2 3; do
+            if npm run desktop:build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}; then
+              exit 0
+            fi
+            echo "::warning::desktop bundling attempt $attempt failed"
+            sleep 15
+          done
+          echo "::error::desktop bundling failed three times — not transient"
+          exit 1
       - name: Collect the release assets
         shell: bash
         run: |
