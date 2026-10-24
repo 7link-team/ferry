@@ -36,11 +36,19 @@ pub struct Vault {
 }
 
 impl Vault {
-    /// `FERRY_MASTER_KEY` wins; otherwise a key file beside the database, which
-    /// is generated on first run for the desktop build. `server_mode` is the
-    /// Docker deployment, where generating a key on a throwaway container
-    /// filesystem would silently make every stored secret unreadable after a
-    /// restart — so there it must be supplied.
+    /// `FERRY_MASTER_KEY` wins; otherwise a key file in the data directory,
+    /// generated on first run.
+    ///
+    /// Generating it is safe in every deployment because the key lands beside
+    /// the database it protects: whatever makes the data durable makes the key
+    /// durable, and losing the directory loses both. In Docker that directory
+    /// is the `/data` volume. An earlier version refused to start in server
+    /// mode on the theory that a container restart would lose a generated key
+    /// — it would not, the volume is the whole point — and the only effect was
+    /// that `docker compose up` failed out of the box.
+    ///
+    /// Supplying `FERRY_MASTER_KEY` is still the better operational choice: it
+    /// keeps the key out of the backup that contains the ciphertext.
     pub fn open(data_dir: &Path, server_mode: bool) -> anyhow::Result<Self> {
         if let Ok(configured) = std::env::var("FERRY_MASTER_KEY") {
             let raw = configured.trim();
@@ -71,15 +79,22 @@ impl Vault {
             return Ok(Self { key });
         }
 
-        anyhow::ensure!(
-            !server_mode,
-            "未配置 FERRY_MASTER_KEY。容器重启会丢失自动生成的密钥，届时所有已保存的凭据都无法解密，\
-             因此必须显式提供：用 `openssl rand -hex 32` 生成，再通过环境变量传入。"
-        );
         let mut key = [0u8; KEY_BYTES];
         rand::thread_rng().fill_bytes(&mut key);
         write_private(&path, &hex::encode(key))?;
-        tracing::info!(path = %path.display(), "已生成本机主密钥");
+        if server_mode {
+            // Worth saying out loud once: the key is now inside the same
+            // volume as the ciphertext, so a backup of that volume is also a
+            // backup of the key. An operator who wants them separated sets
+            // FERRY_MASTER_KEY instead.
+            tracing::warn!(
+                path = %path.display(),
+                "已自动生成主密钥并保存在数据目录中。该目录的备份同时包含密文与密钥；\
+                 若要分开保管，请改用 FERRY_MASTER_KEY 环境变量。"
+            );
+        } else {
+            tracing::info!(path = %path.display(), "已生成本机主密钥");
+        }
         Ok(Self { key })
     }
 
@@ -178,6 +193,48 @@ mod tests {
         Vault {
             key: [7u8; KEY_BYTES],
         }
+    }
+
+    /// The property the whole scheme rests on: a restart must find the same
+    /// key, or every stored credential becomes unreadable.
+    #[test]
+    fn a_generated_key_survives_a_restart_and_still_opens_old_secrets() {
+        let dir = std::env::temp_dir().join(format!("ferry-vault-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join("master.key"));
+        // SAFETY: single-threaded test; the variable must be absent so the
+        // file path is exercised rather than the env path.
+        unsafe { std::env::remove_var("FERRY_MASTER_KEY") };
+
+        let first = Vault::open(&dir, true).unwrap();
+        let sealed = first
+            .seal("a-password", &aad("ws", "credentials", "c1"))
+            .unwrap();
+
+        // A second process against the same data directory — i.e. a restart.
+        let second = Vault::open(&dir, true).unwrap();
+        assert_eq!(
+            second
+                .open_secret(&sealed, &aad("ws", "credentials", "c1"))
+                .unwrap(),
+            "a-password"
+        );
+        assert_eq!(first.key, second.key);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join("master.key"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(
+                mode & 0o777,
+                0o600,
+                "the key file must not be world-readable"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -47,6 +47,17 @@ FERRY_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:5432/ferry' \
   ./scripts/test-backends.sh
 ```
 
+## 凭据加密
+
+SSH 密码/私钥、Git 令牌等由服务端加密后落库,任何接口都不会把明文返回。
+
+主密钥优先取 `FERRY_MASTER_KEY`(64 位十六进制,`openssl rand -hex 32` 生成);
+未设置时在数据目录生成 `master.key`(权限 0600)并一直复用。
+
+两种方式都可用,区别在备份边界:生成的密钥和密文在同一个目录里,
+备份该目录等于同时备份了两者;要把密钥和数据分开保管,就用环境变量。
+**无论哪种方式,丢了密钥等于丢了所有已存凭据** —— 数据库里只有密文。
+
 ## 数据库
 
 SQLite、MySQL、PostgreSQL 都支持,用 `FERRY_DATABASE_URL` 选择:
