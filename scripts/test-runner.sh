@@ -18,10 +18,14 @@
 #   "runner" => runner::open(s, host).await,     // in channel_open
 #
 # Every step is judged by an exit code or by a value read back out of the
-# system, and a check that cannot run is reported as SKIP, never as a pass.
+# system. All checks and dependencies are required; nothing may be skipped.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
+# These are mandatory: missing tooling must not look like an empty check.
+for dependency in cargo curl python3 lsof shasum pkill ps; do
+  command -v "$dependency" >/dev/null || { echo "FATAL missing dependency: $dependency"; exit 1; }
+done
 busy() { lsof -ti "TCP@127.0.0.1:$1" -sTCP:LISTEN >/dev/null 2>&1; }
 
 # Pick a free port rather than insisting on one. Two agents share this
@@ -41,7 +45,6 @@ WORK="${TMPDIR:-/tmp}/ferry-runner-check.$$"
 SIZE_MB=${FERRY_TEST_SIZE_MB:-120}
 pass=0
 fail=0
-skip=0
 
 mkdir -p "$WORK"
 
@@ -69,7 +72,7 @@ trap cleanup EXIT
 
 ok()   { pass=$((pass + 1)); printf '  ok   %s\n' "$1"; }
 bad()  { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
-note() { skip=$((skip + 1)); printf '  SKIP %s\n' "$1"; }
+
 
 ck() { # ck <label> <expected-regex> <actual>
   if printf '%s' "$3" | grep -q "$2"; then
@@ -226,22 +229,31 @@ echo "== channel"
 ck "test-connection succeeds (exec round trip, code 0)" '"ok":true' \
   "$(c -X POST "$B/workspaces/ops/hosts/$HOST_A/actions/test-connection")"
 
-# `HostChannel::exec` has no HTTP endpoint in the product — it is for scheduled
-# jobs and deployment steps. If one is ever wired at this path the three checks
-# below start running; until then they are skipped, not quietly passed.
-EXEC=$(c -X POST -d '{"command":"echo out; echo err 1>&2; exit 7"}' \
-  "$B/workspaces/ops/hosts/$HOST_A/actions/exec")
-if printf '%s' "$EXEC" | grep -qi '^<!doctype\|^{"error"'; then
-  note "exec stdout / stderr / non-zero exit code: no HTTP route for HostChannel::exec."
-  printf '       Ask for POST /{workspace}/hosts/{id}/actions/exec to turn these on.\n'
-else
-  ck "exec returns stdout"   '"stdout":"out' "$EXEC"
-  ck "exec returns stderr"   '"stderr":"err' "$EXEC"
-  ck "exec returns the code" '"code":7'      "$EXEC"
-fi
+# Exercise HostChannel::exec through the existing pipeline API. There is no
+# hosts/actions/exec route; skipping that nonexistent route hid these checks.
+EXEC_PIPELINE=$(python3 -I -c 'import json,sys
+print(json.dumps({"name":"runner-exec", "target_kind":"host", "target_ref":sys.argv[1],
+ "definition":json.dumps({"workdir":sys.argv[2], "steps":[{"name":"exec", "run":"echo out; echo err 1>&2; exit 7"}]})}))' "$HOST_A" "$WORK/exec" |
+  c -X POST --data-binary @- "$B/workspaces/ops/pipelines" | field id)
+[ -n "$EXEC_PIPELINE" ] || die "could not create exec pipeline"
+EXEC_RUN=$(c -X POST "$B/workspaces/ops/pipelines/$EXEC_PIPELINE/actions/run" | field id)
+[ -n "$EXEC_RUN" ] || die "could not trigger exec pipeline"
+for _ in $(seq 1 60); do
+  EXEC=$(c "$B/workspaces/ops/pipeline-runs/$EXEC_RUN")
+  [ "$(printf '%s' "$EXEC" | field state)" = failed ] && break
+  sleep 0.5
+done
+EXEC_LOGS=$(c "$B/workspaces/ops/pipeline-runs/$EXEC_RUN/logs?after=0")
+EXEC_STREAMS=$(printf '%s' "$EXEC_LOGS" | python3 -I -c 'import json,sys
+items=json.load(sys.stdin)["items"]
+for stream in ("stdout", "stderr"):
+ print(stream + ":" + "".join(i["chunk"] for i in items if i["stream"] == stream).strip())')
+ck "exec returns stdout" '^stdout:out$' "$EXEC_STREAMS"
+ck "exec returns stderr" '^stderr:err$' "$EXEC_STREAMS"
+ck "exec returns the code" '"exit_code":7' "$EXEC"
 
 # The runner's `Session::Failed` path, which is how every remote error reaches
-# the operator. Reachable without a new route, unlike exec's exit code.
+# the operator. Reachable without adding a route.
 ck "a missing directory reports why" "无法打开目录" \
   "$(c "$B/workspaces/ops/hosts/$HOST_A/files?path=/nonexistent-ferry-path")"
 
@@ -353,7 +365,8 @@ if [ "${PANICS:-0}" -gt 0 ]; then
   grep -m3 -A3 panicked "$SLOG" | sed 's/^/    /'
   bad "$PANICS panic(s) in the server log"
 fi
-printf '\n%d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip"
+if [ "$pass" -lt 35 ]; then bad "expected at least 35 passed checks, got $pass"; fi
+printf '\n%d passed, %d failed, 0 skipped\n' "$pass" "$fail"
 if [ "$fail" -ne 0 ]; then
   echo "--- server log tail"; tail -25 "$SLOG"
   echo "--- runner log tail"; tail -25 "$RLOG"

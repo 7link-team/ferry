@@ -7,6 +7,18 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: { proxy: { "/api": "http://127.0.0.1:4290" } },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("/node_modules/@xterm/")) return "xterm";
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+          if (id.includes("/node_modules/@radix-ui/") || id.includes("/node_modules/radix-ui/")) return "radix";
+        },
+      },
+    },
+  },
   test: { environment: "jsdom" },
 });

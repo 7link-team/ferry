@@ -72,3 +72,12 @@
 - Tradeoffs：当前 API 只返回关联 ID，界面明确标注流水线/主机/触发人 ID。日志先读取状态、再按 next_seq 排空每页200片，终态排空后停止；隐藏abort并暂停，恢复可见立即读取未完成任务；稳定对象+seq+memo保留旧日志DOM，只有在底部才跟随。
 - Scope：T5 前端及验收脚本；没有服务端、依赖、ResourceTable行为改动，无commit/push。
 - Status：完成。23项前端测试通过；真实Chromium→服务端→runner→HTTP Git链路通过；终态继续轮询变异被三项测试捕获，恢复后通过。
+
+## T6 CI / release preparation
+- Decision：使用四个 e2e matrix job，每个连续三轮且任一轮失败立即退出；日志与 Summary 标注轮次/run id/SHA。release needs 包含整个 e2e matrix。
+- Reason：失败按 harness 定位，连续运行覆盖清理竞态；不是失败重试，不能用后续成功掩盖失败。
+- Alternatives Considered：合并单 job 会延长反馈并让前项失败遮住后项；触发三次完整打包成本更高。
+- Tradeoffs：三轮共享同一 runner；只能提供已实际运行的证据，不能数学证明永无 flaky。
+- Scope：T6；runner exec 复用 pipeline API，UI 用临时裸仓库 fixture branch 兼容 detached HEAD；无产品 API 变更。
+- Status：本地四个harness均连续三轮通过；CI 三轮和 dispatch 发布产物收集必须用户提交推送后验证。不 commit/push/tag/release。手动触发即使选择 tag 也不发布，只有 push v tag 调用发布 action。
+- T6 stability finding：本地UI第2轮实际复现状态/日志轮询竞态。用fixture文件屏障同步观察与后续执行，替换固定sleep；保留原断言并重新跑连续三轮。不是重试，不改产品轮询行为。

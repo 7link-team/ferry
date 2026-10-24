@@ -93,7 +93,7 @@ live_tests() { # live_tests <filter> <minimum-tests>
   fi
   if [ "$ran" -lt "$2" ]; then
     echo "FAILED: expected at least $2 test(s) for filter '$1' but $ran ran."
-    echo "        Is `mod ssh;` declared in crates/server/src/main.rs?"
+    echo '        Is `mod ssh;` declared in crates/server/src/main.rs?'
     return 1
   fi
   echo "   ($ran test(s) ran)"

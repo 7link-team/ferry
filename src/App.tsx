@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Loader2, LogOut, Moon, Palette, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +11,6 @@ import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
 import { PipelineRunDetail } from "./components/PipelineRunDetail";
 import { HostFiles } from "./components/HostFiles";
-import { HostTerminal } from "./components/HostTerminal";
 import { ResourceForm } from "./components/ResourceForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResourceTable } from "./components/ResourceTable";
@@ -20,6 +19,10 @@ import { findGroup, findItem, nav } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useQueryValue, useRoute } from "./router";
 import { PALETTES, useTheme } from "./theme";
+
+const HostTerminal = lazy(() =>
+  import("./components/HostTerminal").then((module) => ({ default: module.HostTerminal })),
+);
 
 export function App() {
   const [identity, setIdentity] = useState<Identity>();
@@ -325,7 +328,11 @@ function HostDetail({
       </TabsContent>
       {/* Mounted only while selected: an unseen tab must not hold a pty open. */}
       <TabsContent value="terminal" className="min-h-0">
-        {active === "terminal" && <HostTerminal workspace={workspace} hostId={hostId} />}
+        {active === "terminal" && (
+          <Suspense fallback={<div role="status">正在加载终端…</div>}>
+            <HostTerminal workspace={workspace} hostId={hostId} />
+          </Suspense>
+        )}
       </TabsContent>
       <TabsContent value="files" className="min-h-0">
         {active === "files" && <HostFiles workspace={workspace} hostId={hostId} />}
