@@ -66,6 +66,7 @@ impl MigratorTrait for Migrator {
             Box::new(Repositories),
             Box::new(Pipelines),
             Box::new(IdInfrastructure),
+            Box::new(PipelineExecution),
         ]
     }
 }
@@ -928,6 +929,7 @@ mod schema_tests {
             repositories,
             pipelines,
             id_infrastructure,
+            pipeline_execution,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -965,6 +967,12 @@ mod schema_tests {
             ("credentials", "id workspace_id"),
             ("repositories", "id workspace_id credential_id"),
             ("pipelines", "id workspace_id repository_id target_ref"),
+            (
+                "pipeline_runs",
+                "id workspace_id pipeline_id host_id triggered_by credential_id",
+            ),
+            ("pipeline_run_steps", "id run_id"),
+            ("pipeline_run_logs", "id run_id"),
         ];
         let mysql: Vec<String> = all_statements().into_iter().map(mysql_sql).collect();
         let mut count = 0;
@@ -983,7 +991,8 @@ mod schema_tests {
                 let column = row.try_get::<String>("", "name").unwrap();
                 if column == "id"
                     || column.ends_with("_id")
-                    || ["target_ref", "used_by", "created_by"].contains(&column.as_str())
+                    || ["target_ref", "used_by", "created_by", "triggered_by"]
+                        .contains(&column.as_str())
                 {
                     assert_eq!(
                         row.try_get::<String>("", "type").unwrap(),
@@ -1011,7 +1020,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 41);
+        assert_eq!(count, 51);
     }
 
     #[test]
@@ -1026,7 +1035,10 @@ mod schema_tests {
         // and defaults on neighbouring VARCHAR/BIGINT columns are legitimate.
         for statement in all_statements() {
             let sql = mysql_sql(statement);
-            for clause in sql.split(',') {
+            // Table DEFAULT CHARSET is not a column default (the last column
+            // may itself be LONGTEXT). Inspect only the column clauses.
+            let columns = sql.split(") DEFAULT CHARSET=").next().unwrap();
+            for clause in columns.split(',') {
                 let clause = clause.to_uppercase();
                 assert!(
                     !(clause.contains("TEXT") && clause.contains("DEFAULT")),
@@ -1302,4 +1314,213 @@ fn id_infrastructure(backend: DbBackend) -> Vec<SchemaStatement> {
                 .to_owned(),
         ),
     ]
+}
+
+fn pipeline_execution(backend: DbBackend) -> Vec<SchemaStatement> {
+    vec![
+        SchemaStatement::Column(
+            "workspaces",
+            "pipeline_run_number",
+            Table::alter()
+                .table(Alias::new("workspaces"))
+                .add_column(
+                    ColumnDef::new(Alias::new("pipeline_run_number"))
+                        .big_integer()
+                        .not_null()
+                        .default(0_i64),
+                )
+                .to_owned(),
+        ),
+        SchemaStatement::Table(
+            create_table("pipeline_runs", backend)
+                .col(ColumnDef::new(Alias::new("id")).big_integer().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("workspace_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("pipeline_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("host_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("number"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("state"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("trigger_kind"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("triggered_by"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(long_text("definition", backend).not_null())
+                .col(long_text("repo_url", backend).not_null())
+                .col(
+                    ColumnDef::new(Alias::new("branch"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("commit"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("credential_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("created_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("started_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("finished_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .to_owned(),
+        ),
+        SchemaStatement::Table(
+            create_table("pipeline_run_steps", backend)
+                .col(ColumnDef::new(Alias::new("id")).big_integer().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("run_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("step_index"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("name"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("state"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(ColumnDef::new(Alias::new("exit_code")).integer())
+                .col(
+                    ColumnDef::new(Alias::new("started_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("finished_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .to_owned(),
+        ),
+        SchemaStatement::Table(
+            create_table("pipeline_run_logs", backend)
+                .col(ColumnDef::new(Alias::new("id")).big_integer().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("run_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(Alias::new("seq")).big_integer().not_null())
+                .col(
+                    ColumnDef::new(Alias::new("step_index"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("stream"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(long_text("chunk", backend).not_null())
+                .to_owned(),
+        ),
+        SchemaStatement::Index(
+            "pipeline_runs",
+            "pipeline_runs_number",
+            Index::create()
+                .name("pipeline_runs_number")
+                .table(Alias::new("pipeline_runs"))
+                .unique()
+                .col(Alias::new("workspace_id"))
+                .col(Alias::new("number"))
+                .to_owned(),
+        ),
+        SchemaStatement::Index(
+            "pipeline_runs",
+            "pipeline_runs_queue",
+            Index::create()
+                .name("pipeline_runs_queue")
+                .table(Alias::new("pipeline_runs"))
+                .col(Alias::new("state"))
+                .col(Alias::new("created_at"))
+                .to_owned(),
+        ),
+        SchemaStatement::Index(
+            "pipeline_run_steps",
+            "pipeline_run_steps_order",
+            Index::create()
+                .name("pipeline_run_steps_order")
+                .table(Alias::new("pipeline_run_steps"))
+                .unique()
+                .col(Alias::new("run_id"))
+                .col(Alias::new("step_index"))
+                .to_owned(),
+        ),
+        SchemaStatement::Index(
+            "pipeline_run_logs",
+            "pipeline_run_logs_seq",
+            Index::create()
+                .name("pipeline_run_logs_seq")
+                .table(Alias::new("pipeline_run_logs"))
+                .unique()
+                .col(Alias::new("run_id"))
+                .col(Alias::new("seq"))
+                .to_owned(),
+        ),
+    ]
+}
+struct PipelineExecution;
+impl MigrationName for PipelineExecution {
+    fn name(&self) -> &str {
+        "pipeline_execution_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineExecution {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in pipeline_execution(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
 }

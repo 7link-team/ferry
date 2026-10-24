@@ -267,26 +267,26 @@ pub async fn remove(
 #[derive(Debug, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Definition {
-    workdir: String,
+    pub workdir: String,
     #[serde(default)]
-    env: Vec<Environment>,
-    steps: Vec<Step>,
+    pub env: Vec<Environment>,
+    pub steps: Vec<Step>,
 }
 
 #[derive(Debug, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Environment {
-    name: String,
-    value: String,
+pub struct Environment {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Debug, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Step {
-    name: String,
-    run: String,
+pub struct Step {
+    pub name: String,
+    pub run: String,
     #[serde(default)]
-    timeout_seconds: Option<u64>,
+    pub timeout_seconds: Option<u64>,
 }
 
 /// Only exact tokens are supported; no whitespace folding, nesting or expressions.

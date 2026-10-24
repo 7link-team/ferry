@@ -56,3 +56,11 @@
 - Tradeoffs：长列以 .text() 定义，MySQL 专用 builder .custom("longtext") 保留容量；没有 SQL 字符串改写。SQLite 的 BigInteger 正常生成 INTEGER，元数据检查适配，并以实际 MySQL 生成 SQL 验证同一41列仍为 BIGINT，不能退化为32位整数。
 - Scope：T3d 迁移与其保护测试；业务、JSON、错误文案和矩阵断言不变。
 - Status：完成；全部门槛退出0，新建三库各99/99，两库last/all重放无业务数据或结构变化；变异退出101且恢复后通过。
+
+## T4 执行引擎（进行中）
+- Decision：三张独立表；工作空间行的计数器在事务内 UPDATE + 读取分配 number，唯一索引兜底。触发保存定义、仓库配置与目标主机快照；队列 CAS 领取，线性执行。
+- Reason：工作空间内并发发号、运行历史可复现、单实例调度约束。
+- Alternatives Considered：MAX(number)+1 先查后写有竞态；凭据放 exec/env argv 会泄露，因此拒绝。
+- Tradeoffs：HostChannel 捕获输出后返回（沿用既有单步输出上限），本期按步分片。取消只停止等待，远端可能继续；清理临时目录后再结束执行器。取消状态可早于清理完成。
+- Scope：T4 后端、真实验收脚本与 §17 文档；不改 UI、不加 exec HTTP、不 commit/push。
+- Status：主机组按已告知的最小单目标假设，触发时选直接成员中 ID 最小的在线主机并固定 host_id；无在线成员拒绝，不做多机编排。触发可提供 branch/commit 模板上下文，缺省为仓库默认分支/空字符串。完成：三库原矩阵各99/99，真实执行各44/44，两次变异正确失败并恢复，全部门槛退出0。

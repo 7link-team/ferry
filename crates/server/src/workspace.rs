@@ -360,6 +360,7 @@ pub async fn create(
         name: Set(name.clone()),
         owner_id: Set(i64::from(account.user.id)),
         join_code: Set(code.clone()),
+        pipeline_run_number: Set(0),
         created_at: Set(now),
         updated_at: Set(now),
     })

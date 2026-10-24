@@ -49,6 +49,7 @@ pub mod workspaces {
         pub name: String,
         pub owner_id: i64,
         pub join_code: String,
+        pub pipeline_run_number: i64,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -321,6 +322,72 @@ pub mod worker_ids {
         pub worker_id: i64,
         pub instance_id: String,
         pub heartbeat_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod pipeline_runs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_runs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub pipeline_id: i64,
+        pub host_id: i64,
+        pub number: i64,
+        pub state: String,
+        pub trigger_kind: String,
+        pub triggered_by: i64,
+        pub definition: String,
+        pub repo_url: String,
+        pub branch: String,
+        pub commit: String,
+        pub credential_id: i64,
+        pub created_at: i64,
+        pub started_at: i64,
+        pub finished_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod pipeline_run_steps {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_run_steps")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub run_id: i64,
+        pub step_index: i64,
+        pub name: String,
+        pub state: String,
+        pub exit_code: Option<i32>,
+        pub started_at: i64,
+        pub finished_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod pipeline_run_logs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_run_logs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub run_id: i64,
+        pub seq: i64,
+        pub step_index: i64,
+        pub stream: String,
+        pub chunk: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

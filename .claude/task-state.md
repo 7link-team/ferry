@@ -1,39 +1,42 @@
 # Task State
 ## Task / Objective
-T3d：执行 docs/tasks/T3d-schema-builder.md；已读 CLAUDE.md、设计§3.1/§18.5。不 commit/push。
-## Current Phase
+T4：docs/tasks/T4-execution-engine.md；已先读任务书、设计 §17 与 CLAUDE.md。项目仓库未 commit/push/暂存。用户原未跟踪任务书未改。真实 Git 夹具只在临时仓库创建提交。
+## Current Phase / Result
 ACCEPTANCE — PASS
-## Completed / Design
-- migration.rs：16张表、全部索引和加列使用SeaQuery builder，保留7个迁移名/顺序。Table IF NOT EXISTS；Index/Column通过SchemaManager.has_index/has_column查询再执行，覆盖部分失败后的重跑。
-- 显式big_integer/string_len/text。SeaQuery 1.0.2的Text在MySQL实际生成TEXT，故长列用.text()并仅在MySQL通过.custom("longtext")保留旧容量；没有SQL改写。所有MySQL建表用builder设置utf8mb4/utf8mb4_bin。
-- schema_tests构建生产迁移的真实MySQL SQL（全部7组含ALTER），逐列断言TEXT/LONGTEXT无DEFAULT、无裸TEXT；保留definition容量检查，新增charset/collation检查。
-- SQLite BigInteger生成INTEGER，元数据断言适配为INTEGER，并对同41业务ID列核验MySQL生成SQL仍是BIGINT，避免接受32位列。
-- 删除dialect.rs、main.rs的mod dialect、SQL加列解析及过时解析器测试；脚本仅更新已删除dialect的注释，可执行部分逐字未变。
-## Files Changed
-crates/server/src/migration.rs、crates/server/src/main.rs、scripts/test-backends.sh（仅注释）、.claude/task-state.md、.claude/decisions.md；删除crates/server/src/dialect.rs。
-用户原未跟踪docs/tasks/T3d-schema-builder.md未改。
 ## Execution / Delegation
-Direct；同文件紧耦合实现与验收，无子代理。
-## Verification — 实际命令与退出码
-| 命令 | 退出码 / 结果 | 日志 |
+Direct，无子代理。范围/复用/架构/复杂度/回归/凭据安全/真实验收/状态一致性两轮复核通过。
+## Implemented / Files
+- 新增 crates/server/src/pipeline_runs.rs：5 个 API、标准历史列表、单进程 CAS 调度、线性执行、失败即停、超时 timed_out、取消、日志脱敏/分片、模板/工作目录/env。
+- 修改 entities.rs、migration.rs：3 张表及索引；workspaces.pipeline_run_number 事务内 UPDATE + 读自己的值，唯一索引兜底；迁移保护扩展至新增 ID。
+- 修改 main.rs：路由、调度生命周期；pipelines.rs：复用校验后定义类型；workspace.rs：计数器初始化。
+- 新增 scripts/test-pipelines.sh、test-pipelines.py、pipeline-git-http.py、test-pipeline-mutations.py：真实 Basic Auth HTTP bare Git、runner、Docker SSH、最低40检查、两次源码变异及 finally 恢复。
+- 更新设计 §17、.claude/decisions.md 与本状态文件。
+## Schema
+- pipeline_runs：id/workspace_id/pipeline_id/host_id/credential_id/triggered_by（BIGINT），number，state，trigger_kind，definition/repo_url/branch/commit 快照，created_at/started_at/finished_at。UNIQUE(workspace_id,number)，INDEX(state,created_at)。
+- pipeline_run_steps：id/run_id，step_index，name，state，nullable exit_code，started_at/finished_at；UNIQUE(run_id,step_index)。
+- pipeline_run_logs：id/run_id，seq，step_index，stream，chunk；UNIQUE(run_id,seq)。脱敏后 UTF-8 边界分片，每片≤16KiB，增量接口每页≤200片。
+## Decisions / Boundaries
+所有执行和文件传输经过 HostChannel。0700 随机临时目录，0600 密码/用户名/私钥/步骤文件，0700 askpass；凭据不进入 exec argv。各正常结束路径含失败/超时/取消清理目录。activity 仅记录 ID/序号。
+取消停止服务端等待，远端可能继续；cancelled 状态可能先于清理完成。服务重启不重试遗留 running。复用现有 HostChannel 单步完整捕获/输出上限，未扩展为流式或修改通道上限。
+主机组偏好未获补充后已告知采用最小单目标假设：选直接在线成员中 ID 最小者，固定 host_id；无在线成员拒绝。可选请求 branch/commit 是模板上下文；缺省仓库分支/空 commit，不自动 checkout。
+未做 UI、未加 exec HTTP、未扩展多实例租约或多机编排。前端原有 chunk>500kB 提示未改。
+## Final Gates — executed exit codes
+| Command | Exit / actual result | Log |
 |---|---|---|
-| cargo check --workspace --all-targets（删dialect前） | 0；LONG_COLUMNS/schema/mysql_schema/index_target全部never used | /tmp/t3d-check-before-delete.log |
-| cargo fmt --all -- --check | 0 | /tmp/t3d-fmt.log |
-| cargo check --workspace --all-targets（删后最终） | 0；零警告，额外断言日志无warning: | /tmp/t3d-check-final.log |
-| cargo test --workspace | 0；protocol3/runner7/server73，共83通过 | /tmp/t3d-tests-final.log |
-| npm run typecheck && npm test | 0；11/11 | 工具输出 |
-| npm run build | 0；已有chunk>500kB提示 | /tmp/t3d-npm-build.log |
-| 三库命令（见下） | 0；三库各99/99 | /tmp/t3d-matrix.log |
-| python3 /tmp/t3d-rerun.py | 0；两库最后迁移及全部迁移重放均通过 | /tmp/t3d-rerun.log |
-| python3 /tmp/t3d-audit.py | 0；原DDL与新MySQL的14业务表124列类型/NULL/default、30主键/索引完全相同 | 工具输出 |
-| git diff --check | 0 | 无输出 |
-| 范围/变异恢复/矩阵主体/零警告审计 | 0；无业务修改、LF一致 | 工具输出 |
+| cargo fmt --all -- --check | 0 | /tmp/t4-fmt-final.log |
+| cargo check --workspace --all-targets | 0，零 warning/never-used（额外断言日志无 warning:） | /tmp/t4-check-final.log |
+| cargo test --workspace | 0；protocol3 + runner7 + server76 = 86通过 | /tmp/t4-tests-final.log |
+| npm run typecheck && npm test | 0；11/11 | /tmp/t4-npm-tests.log（typecheck输出在工具结果） |
+| npm run build | 0；已有大chunk提示 | /tmp/t4-npm-build.log |
+| 三库原矩阵，完整命令见下 | 0；SQLite99/99、MySQL99/99、Postgres99/99 | /tmp/t4-matrix.log |
+| ./scripts/test-pipelines.sh | 0；44 passed, 0 failed, 0 skipped | /tmp/t4-live-final.log |
+| FERRY_MASTER_KEY=$(openssl rand -hex 32) FERRY_TEST_DATABASE_URL='mysql://root:devpass@127.0.0.1:13306/ferry_t4_live' ./scripts/test-pipelines.sh | 0；44/44 | /tmp/t4-live-mysql.log |
+| FERRY_MASTER_KEY=$(openssl rand -hex 32) FERRY_TEST_DATABASE_URL='postgres://postgres:devpass@127.0.0.1:15432/ferry_t4_live' ./scripts/test-pipelines.sh | 0；44/44 | /tmp/t4-live-postgres.log |
+| python3 -I scripts/test-pipeline-mutations.py | 0；内部退出码与指定失败证据均断言，见下 | /tmp/t4-mutations.log |
+| git diff --check；脚本语法检查；变异恢复/零警告检查 | 0 | 工具结果 |
 
-全新建库（以下3条分别退出0，SQLite由矩阵创建全新临时目录）：
+三库命令原样执行，未修改 scripts/test-backends.sh，原 ferry 测试库无 users 表所以无需清库；新引擎额外验证使用独立新建 ferry_t4_live 数据库：
 ```sh
-docker exec ferry-my mysql -uroot -pdevpass -e 'DROP DATABASE IF EXISTS ferry; CREATE DATABASE ferry'
-docker exec ferry-pg psql -U postgres -c 'DROP DATABASE IF EXISTS ferry'
-docker exec ferry-pg psql -U postgres -c 'CREATE DATABASE ferry'
 FERRY_REQUIRE_ALL=1 FERRY_MASTER_KEY=$(openssl rand -hex 32) \
 FERRY_TEST_MYSQL='mysql://root:devpass@127.0.0.1:13306/ferry' \
 FERRY_TEST_POSTGRES='postgres://postgres:devpass@127.0.0.1:15432/ferry' \
@@ -46,43 +49,28 @@ MySQL:     99 passed, 0 failed
 Postgres:  99 passed, 0 failed
 All backends passed.
 ```
-## 迁移重跑：实际命令和输出
-执行python3 /tmp/t3d-rerun.py，退出0。脚本通过subprocess逐条检查数据库命令退出码：
-- MySQL前缀：docker exec ferry-my mysql -uroot -pdevpass -BN ferry -e
-- PostgreSQL前缀：docker exec ferry-pg psql -U postgres -d ferry -At -v ON_ERROR_STOP=1 -c
-- 各执行SQL：DELETE FROM seaql_migrations WHERE version='id_infrastructure_v1'（最后迁移）；确认记录数7→6。
-- 使用target/debug/ferry-server启动，环境FERRY_DATABASE_URL为上述对应URL、FERRY_BIND为127.0.0.1:4321/4322、FERRY_DATA_DIR为隔离临时目录、随机FERRY_MASTER_KEY、RUST_LOG=info,sea_orm_migration=info。
-- HTTP /api/status=200；记录6→7，id_infrastructure_v1仅1条；比较information_schema.columns、MySQL statistics/PG pg_indexes以及14业务表SELECT * ORDER BY 1，完全相同。
-- SIGTERM后wait退出0。
-- 额外执行DELETE FROM seaql_migrations，记录7→0，重启验证全部7迁移重放，结果同样通过，实际覆盖has_index和has_column。
-实际输出（两库各一次last及一次all）：
-```
-MySQL delete exit=0; migration records=6
-MySQL restart /api/status HTTP=200
-MySQL migration records=7; last record=1; schema/indexes/14 business tables unchanged
-MySQL service shutdown exit=0
-Applying migration 'id_infrastructure_v1'
-Migration 'id_infrastructure_v1' has been applied
-PostgreSQL delete exit=0; migration records=6
-PostgreSQL restart /api/status HTTP=200
-PostgreSQL migration records=7; last record=1; schema/indexes/14 business tables unchanged
-PostgreSQL service shutdown exit=0
-Applying migration 'id_infrastructure_v1'
-Migration 'id_infrastructure_v1' has been applied
-PASS: both backends replay last and all migrations without changing schema or business rows
-```
-详尽输出/tmp/t3d-rerun.log；4次启动日志/tmp/t3d-rerun-{MySQL,PostgreSQL}-{last,all}.log。
-## Mutation
-执行python3 /tmp/t3d-mutation.py（包装器退出0）：将secret临时替换成ColumnDef::new(Alias::new("secret")).text().not_null().default("")。
-- 变异前cargo test -p ferry-server migration::schema_tests：0，5/5。
-- 同命令变异后：101，3通过/2失败；明确是断言失败而非编译失败：no_long_column_carries_a_default、no_text_column_survives_into_mysql。
-- 断言输出：MySQL rejects a DEFAULT on a TEXT/LONGTEXT column: `SECRET` TEXT NOT NULL DEFAULT ''。
-- finally恢复后同命令：0，5/5；最终工作区测试及矩阵均在恢复后执行。
-- 日志/tmp/t3d-mutation.log、/tmp/t3d-schema-restored.log；源码恢复审计通过。
-## Failures / Resolution
-首次schema测试101：SQLite BigInteger生成INTEGER，旧测试预期BIGINT；新增MySQL宽度校验同时修正SQLite元数据期望。新增collation测试最初使用CHARACTER SET/空格拼法，但builder实际输出DEFAULT CHARSET=/COLLATE=；按实际SQL语法修正。没有放宽列宽、MySQL TEXT或矩阵保护。
-## Self-Review / Final Acceptance
-范围、复用、架构、复杂度、业务/JSON/文案、整数宽度、长文本容量、大小写、迁移幂等、两项保护及变异、全新三库99/99、全部验收退出码、状态一致性：PASS。
-没有git commit/push/暂存；代码和记录留工作区。原设计§3.1的历史描述未做范围外文档重写；已有前端大chunk提示未扩展优化。
-## Remaining Work / Next Action
-无剩余实现或验收；无需用户输入。交付中文报告，保留未提交改动。
+## §17.5 — Actual live evidence (same checks on all 3 databases)
+1. 本地生成 bare Git，经容器 HTTP git-http-backend 提供 Basic Auth：`ok 1 unauthenticated private HTTP Git denied: HTTP 401`；两类主机均 `authenticated clone contains actual Git commit`。真实 SHA 通过 {{commit}} 与 git rev-parse HEAD 比对。
+2. runner：`state=succeeded, steps=['succeeded', 'succeeded']`；stdout/stderr 标记完整，`seq=[1, 2, 3, 4]`；workdir/env 实测正确。
+3. SSH：同样 state/steps/seq；`ok 3 runner and SSH Git/build results match`。
+4. 两主机：`state=failed, steps=['failed', 'skipped'], exit=7`；检查后续日志无 SHOULD_NOT_RUN、文件副作用不存在。
+5. 两主机：`state=failed, step=timed_out, exit=None`；后续 skipped。
+6. 等待真实步骤 running 后取消：两主机均 `state=cancelled, steps=['cancelled', 'skipped']`；后续 barrier run 同步清理完成。
+7. 从凭据文件主动输出密码至 stdout/stderr 再 exit7，检查脱敏和0600；各结束路径检查临时目录删除；目标 ps 连续采样并确认捕获了 /step argv。SQLite最终两主机各32份、第二次变异各69份。日志/activity/server.log 均不含测试用户名或密码。
+8. A引用B仓库/主机均 `HTTP 400`；B读取A run/日志/取消均 `HTTP 404`。
+额外：并发序号 `[12,13,14,15]`，另一工作空间 `number=1`；日志 `chunks=220` 无UTF-8丢失，实际跨增量分页；只读用户查看200、触发/取消403；主机组选定runner、空组400。
+## Mutations — executed before final group/context additions
+Wrapper logs in /var/folders/36/x9500b6s6834kny2k4j8t03c0000gn/T/pipeline-mutations-37d_su7z/.
+- baseline：exit0，42 passed / 0 failed。
+- continue-after-failure：将 `if state != "succeeded"` 改为仅取消才停止；exit1，36 passed / 6 failed。两主机：`FAIL 4 ... state=succeeded, steps=['failed','succeeded'], exit=7`；检查到 forbidden 文件实际出现。超时后继续也被抓住。
+- restored-after-failure：exit0，42/42。
+- credential-in-argv：临时将密码放入远端 shell argv，日志脱敏不变；exit1，40 passed / 2 failed。仅 `FAIL 7 runner target ps contains no credential plaintext` 与同名 SSH 检查失败（各69份真实ps采样）。
+- final-restored：exit0，42/42；finally逐字恢复源码并断言。后续主机组/模板上下文增加后，最终3库真实验收各44/44。最终静态核对 fail-stop guard 和仅路径 command 都已恢复，产品源码无 LEAKED_PASSWORD。
+## Failures resolved honestly
+启动夹具 http.py 遮蔽标准库 → 重命名；用户/空间创建实际200 → 修正夹具期望；Alpine git-http-backend 需要git-daemon包 → 补齐夹具依赖；首轮36项绿但最低40失败 → 添加真实权限检查而非降低下限。
+初次 cargo test exit101：新增 triggered_by 未纳入 ID 测试识别；LONGTEXT 最后一列后的表级 DEFAULT CHARSET 被误判为列默认值。修正清单和检查范围，禁止长文本列默认值的断言保留，最终86测试/三库通过。
+## Cleanup / Review
+失败夹具含测试密码的临时目录已删除，容器/runner/server由脚本回收，保留无明文凭据的验收日志。生成的 scripts/__pycache__ 已删；未改baseline矩阵、未暂存；工作区保留实现与文档。
+Self-review与原始用户请求Final Acceptance：PASS。没有剩余实现或验收。
+## Next Action
+向用户交付中文报告（8条、表结构、文件、命令退出码、变异和边界），保持未提交改动。无需用户操作。

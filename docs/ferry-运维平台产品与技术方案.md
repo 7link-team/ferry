@@ -926,6 +926,13 @@ GET /api/workspaces/{ws}/dashboard
 | `pipeline_run_steps` | 每步的结果 | `index`、`state`、`exit_code`、起止时间 |
 | `pipeline_run_logs` | 日志分片 | `seq` 单调递增，前端按 `seq` 增量拉取 |
 
+T4 落地字段：
+
+- `pipeline_runs`：`id/workspace_id/pipeline_id/host_id/credential_id/triggered_by` 为 BIGINT；`number` 工作空间内递增；`state` 为 queued/running/succeeded/failed/cancelled；`trigger_kind`、定义与仓库 URL/branch/commit 快照、创建/开始/结束时间。唯一索引 `(workspace_id, number)`，队列索引 `(state, created_at)`。
+- `pipeline_run_steps`：雪花 `id`、`run_id`、`step_index`（从 0 开始）、名称、状态、可空 `exit_code`、起止时间；唯一索引 `(run_id, step_index)`。状态包含 `timed_out` 和 `skipped`，超时无退出码。
+- `pipeline_run_logs`：雪花 `id`、`run_id`、`seq`、`step_index`、`stream`、`chunk`；唯一索引 `(run_id, seq)`。脱敏后按 UTF-8 边界切分，每片最多 16 KiB。
+- `workspaces.pipeline_run_number` 初始 0，事务内先原子 `UPDATE counter = counter + 1` 再读取本事务的值，与 run 和步骤一起提交；不使用 `MAX(number)+1`。
+
 日志单独成表而不是塞进 run 的一个大字段：一次构建的日志可以是几十 MB，整行更新会让每次追加都重写整列。分片之后追加是插入，增量读取是一次按 `seq` 的范围查询。
 
 ### 17.2 流水线定义
@@ -942,7 +949,7 @@ GET /api/workspaces/{ws}/dashboard
 ```
 
 - `workdir` **必填**。不给默认值是有意的：默认一个目录意味着两条流水线可能悄悄写到同一处，而「构建产物莫名被另一条流水线覆盖」极难排查。让运维人员明确写出来。
-- **第一版只有线性步骤**，没有并行、条件、矩阵。
+- **第一版只有线性步骤**，没有并行、条件、矩阵。主机组目标在触发时从本组直接成员中按 ID 选第一台在线主机，固定为 run.host_id；不展开成多机执行，空组或没有在线成员时拒绝触发。
 - 模板变量只有 `{{run}}`、`{{branch}}`、`{{repo_url}}`、`{{commit}}` 这几个，由服务端替换；**不做通用模板引擎**。
 - 仓库凭据在执行时由服务端解密，通过 `GIT_ASKPASS` 或临时 `~/.git-credentials` 注入，**不拼进命令行**——命令行会出现在目标主机的进程列表里。
 
@@ -956,7 +963,10 @@ GET /api/workspaces/{ws}/dashboard
 ```
 
 - **失败即停**，不自动重试：构建失败重跑一次通常只是把问题推迟。
-- 每步有超时，超时按失败处理并记录是超时而非普通失败——两者的排查方向不同。
+- 每步有超时（默认 1800 秒），超时步骤记 `timed_out`、run 记 `failed`，不是普通非零退出的 `failed` 步骤。
+- **取消只停止服务端等待并标记 cancelled，不保证远端命令立即停止。** HostChannel 捕获完整输出后返回，远端进程可能继续运行直到自身退出。取消后的临时凭据清理由执行器继续等待完成，因此 cancelled 状态可能先于清理完成；界面不可将其表述为“远端已停止”。
+- 凭据通过 HostChannel 文件传输写入随机的 0700 临时目录；密码/令牌文件权限 0600，GIT_ASKPASS 脚本 0700。私钥同样写入 0600 文件。步骤脚本也上传为文件，exec 参数仅引用路径。成功、失败、超时、取消均清理临时目录，日志在分片前脱敏，activity 只记录 run ID/序号。
+- 单进程每次领取一条 queued run；条件更新防止重复领取。服务重启时将遗留 running 标记失败，不自动重试远端可能已执行的命令。
 - `HostChannel::exec` 捕获完整输出后才返回，所以第一版的日志是**按步落库**，不是边跑边流。实时性由 17.4 的轮询提供。真正的流式需要 `HostChannel` 增加一个流式 exec，等这条路通了再说。
 
 ```
@@ -976,7 +986,9 @@ GET    /api/workspaces/{ws}/pipeline-runs/{id}/logs?after={seq}   增量日志
 POST   /api/workspaces/{ws}/pipeline-runs/{id}/actions/cancel     取消
 ```
 
-`logs` 返回 `{items:[{seq,step_index,stream,chunk}], next_seq}`；前端带着 `next_seq` 轮询，运行中 1 秒一次，结束后停止。这是最小实现；换成 SSE 时接口形状不变。
+触发接口可省略请求体；可传 `{ "branch": "main", "commit": "<sha>" }` 作为模板上下文。branch 缺省使用登记仓库的默认分支，commit 缺省为空字符串；引擎不自动追加 checkout 命令，实际拉取行为由步骤定义控制。
+
+`logs` 返回 `{items:[{seq,step_index,stream,chunk}], next_seq}`，每页最多 200 片，空页保持传入游标；前端带着 `next_seq` 轮询，运行中 1 秒一次，结束后停止。这是最小实现；换成 SSE 时接口形状不变。
 
 ### 17.5 验收标准
 
@@ -987,7 +999,7 @@ POST   /api/workspaces/{ws}/pipeline-runs/{id}/actions/cancel     取消
 3. 同一条流水线在 SSH 主机上跑通，结果一致
 4. 第一步失败时第二步不执行，run 标记为 failed，失败步骤的退出码正确
 5. 超时的步骤被标记为超时，不是普通失败
-6. 取消一个运行中的 run，它停下来并标记为 cancelled
+6. 取消一个运行中的 run，服务端停止等待并标记为 cancelled（不保证远端进程立刻停止）
 7. 凭据明文不出现在日志、不出现在目标主机的进程列表、不出现在操作记录里
 8. 跨工作空间：A 的流水线不能引用 B 的仓库或主机
 

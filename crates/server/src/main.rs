@@ -8,6 +8,7 @@ mod error;
 mod hosts;
 mod lock;
 mod migration;
+mod pipeline_runs;
 mod pipelines;
 mod remote;
 mod repositories;
@@ -124,6 +125,9 @@ async fn main() -> anyhow::Result<()> {
         ids: worker.generator.clone(),
     });
 
+    let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
+    let pipeline_task = tokio::spawn(pipeline_runs::scheduler(s.clone(), pipeline_rx));
+
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
     let hosts = Arc::new(hosts);
@@ -131,6 +135,20 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/pipelines/{id}/actions/run",
+            post(pipeline_runs::trigger),
+        )
+        .route("/{workspace}/pipeline-runs", get(pipeline_runs::list))
+        .route("/{workspace}/pipeline-runs/{id}", get(pipeline_runs::get))
+        .route(
+            "/{workspace}/pipeline-runs/{id}/logs",
+            get(pipeline_runs::log_list),
+        )
+        .route(
+            "/{workspace}/pipeline-runs/{id}/actions/cancel",
+            post(pipeline_runs::cancel),
+        )
         .route("/{workspace}/dashboard", get(hosts::dashboard))
         .route("/{workspace}/roles", get(workspace::roles))
         .route("/{workspace}/activity", get(hosts::list_activity))
@@ -247,6 +265,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_graceful_shutdown(shutdown())
     .await;
+    let _ = pipeline_stop.send(true);
+    pipeline_task.await?;
     let _ = heartbeat_stop.send(true);
     let heartbeat_result = heartbeat_task.await;
     let released = worker.release(&s.db).await;
