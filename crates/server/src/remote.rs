@@ -4,6 +4,8 @@
 //! bytes. No SSH or runner detail appears here, which is what keeps both ways
 //! of reaching a host behaving identically from the browser's point of view.
 
+use crate::snowflake::Id;
+
 use crate::{
     channel::{self, HostChannel, PtySize},
     db::{self, one, text},
@@ -32,7 +34,7 @@ pub struct PathQuery {
 }
 
 /// Loads a host the caller may reach and opens a channel to it.
-async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChannel>> {
+async fn open(s: &AppState, scope: &Scope, id: &Id) -> Result<Box<dyn HostChannel>> {
     let row = one(
         &s.db,
         "SELECT id,name,address,port,username,connection,host_key,credential_id FROM hosts
@@ -42,9 +44,9 @@ async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChann
     .await?
     .ok_or_else(ApiError::missing)?;
     let host = Host {
-        id: text(&row, "id"),
+        id: Id::from(db::int(&row, "id")),
         workspace_id: scope.workspace_id.clone(),
-        credential_id: text(&row, "credential_id"),
+        credential_id: Id::from(db::int(&row, "credential_id")),
         name: text(&row, "name"),
         address: text(&row, "address"),
         port: db::int(&row, "port") as u16,
@@ -57,9 +59,9 @@ async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChann
 
 #[derive(Clone)]
 pub struct Host {
-    pub id: String,
-    pub workspace_id: String,
-    pub credential_id: String,
+    pub id: Id,
+    pub workspace_id: Id,
+    pub credential_id: Id,
     pub name: String,
     pub address: String,
     pub port: u16,
@@ -83,6 +85,7 @@ pub async fn terminal(
     Query(raw): Query<HashMap<String, String>>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.terminal")?;
     let size = PtySize {
         cols: raw.get("cols").and_then(|v| v.parse().ok()).unwrap_or(80),
@@ -123,7 +126,7 @@ pub async fn terminal(
 
 /// The scope is gone by the time the socket closes, so the workspace is looked
 /// up again rather than captured and trusted.
-async fn state_workspace(s: &AppState, host_id: &str) -> Option<String> {
+async fn state_workspace(s: &AppState, host_id: &Id) -> Option<Id> {
     one(
         &s.db,
         "SELECT workspace_id FROM hosts WHERE id = ?",
@@ -132,7 +135,7 @@ async fn state_workspace(s: &AppState, host_id: &str) -> Option<String> {
     .await
     .ok()
     .flatten()
-    .map(|row| text(&row, "workspace_id"))
+    .map(|row| Id::from(db::int(&row, "workspace_id")))
 }
 
 /// Copies bytes both ways until either side stops. The channel is held for the
@@ -193,6 +196,7 @@ pub async fn list_dir(
     Path((_, id)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
     let entries = open(&s, &scope, &id).await?.list_dir(path).await?;
@@ -205,6 +209,7 @@ pub async fn download(
     Path((_, id)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
 ) -> Result<Response> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
     let name = path.rsplit('/').next().unwrap_or("download").to_owned();
@@ -244,6 +249,7 @@ pub async fn upload(
     Query(query): Query<PathQuery>,
     body: Body,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
     let stream = Box::pin(
@@ -272,6 +278,7 @@ pub async fn delete_file(
     Path((_, id)): Path<(String, String)>,
     Query(query): Query<PathQuery>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
     open(&s, &scope, &id).await?.delete_file(path).await?;
@@ -294,6 +301,7 @@ pub async fn test_connection(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.read")?;
     let channel = open(&s, &scope, &id).await?;
     let output = channel

@@ -5,6 +5,8 @@
 //! even to an owner. Reading one happens inside the server, at the moment it
 //! is used, and that use is audited.
 
+use crate::snowflake::Id;
+
 use crate::{
     db::{self, execute, one, text},
     error::{ApiError, Result},
@@ -39,7 +41,7 @@ pub const KINDS: [&str; 3] = ["password", "ssh-key", "token"];
 
 fn to_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
         "kind": text(row, "kind"),
         "username": text(row, "username"),
@@ -108,6 +110,7 @@ pub async fn get(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.read")?;
     let row = one(
         &s.db,
@@ -126,12 +129,16 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("credentials.create")?;
     let name = check(&body, true)?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     // The row's own identity is the associated data, so the id has to exist
     // before the secret is sealed.
     let sealed = s.vault.seal(
         body.secret.as_deref().unwrap_or_default().trim(),
-        &vault::aad(&scope.workspace_id, "credentials", &id),
+        &vault::aad(
+            &scope.workspace_id.to_string(),
+            "credentials",
+            &id.to_string(),
+        ),
     )?;
     execute(
         &s.db,
@@ -170,6 +177,7 @@ pub async fn update(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.update")?;
     let name = check(&body, false)?;
     let rotated = match body
@@ -178,10 +186,14 @@ pub async fn update(
         .map(str::trim)
         .filter(|v| !v.is_empty())
     {
-        Some(secret) => Some(
-            s.vault
-                .seal(secret, &vault::aad(&scope.workspace_id, "credentials", &id))?,
-        ),
+        Some(secret) => Some(s.vault.seal(
+            secret,
+            &vault::aad(
+                &scope.workspace_id.to_string(),
+                "credentials",
+                &id.to_string(),
+            ),
+        )?),
         None => None,
     };
     let affected = match &rotated {
@@ -237,6 +249,7 @@ pub async fn remove(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.delete")?;
     // Refuse rather than leave anything pointing at a credential that is gone:
     // the failure would surface later as an unexplained connection error, far
@@ -276,11 +289,7 @@ pub async fn remove(
 
 /// Decrypts a credential for the server's own use. There is no HTTP route to
 /// this; the caller is a channel that is about to connect somewhere.
-pub async fn unseal(
-    s: &AppState,
-    workspace_id: &str,
-    id: &str,
-) -> Result<(String, String, String)> {
+pub async fn unseal(s: &AppState, workspace_id: &Id, id: &Id) -> Result<(String, String, String)> {
     let row = one(
         &s.db,
         "SELECT kind, username, secret FROM credentials WHERE workspace_id = ? AND id = ?",
@@ -290,7 +299,7 @@ pub async fn unseal(
     .ok_or_else(|| ApiError::bad("这台主机引用的凭据已不存在，请重新选择。"))?;
     let secret = s.vault.open_secret(
         &text(&row, "secret"),
-        &vault::aad(workspace_id, "credentials", id),
+        &vault::aad(&workspace_id.to_string(), "credentials", &id.to_string()),
     )?;
     Ok((text(&row, "kind"), text(&row, "username"), secret))
 }

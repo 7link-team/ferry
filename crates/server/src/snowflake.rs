@@ -10,8 +10,31 @@ use std::{
 pub const EPOCH: i64 = 1_767_225_600_000;
 pub const TTL: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(i64);
+// SQL always binds an integer, while Serialize keeps the HTTP boundary lossless.
+impl From<Id> for sea_orm::Value {
+    fn from(value: Id) -> Self {
+        i64::from(value).into()
+    }
+}
+impl From<&Id> for sea_orm::Value {
+    fn from(value: &Id) -> Self {
+        (*value).into()
+    }
+}
+impl Id {
+    /// Existing optional form fields send an empty string; store no reference as 0.
+    pub fn reference(value: &str) -> crate::error::Result<Self> {
+        if value.trim().is_empty() {
+            return Ok(Self(0));
+        }
+        value
+            .trim()
+            .parse()
+            .map_err(|_| crate::error::ApiError::bad("引用 ID 无效。"))
+    }
+}
 impl From<i64> for Id {
     fn from(value: i64) -> Self {
         Self(value)

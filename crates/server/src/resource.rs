@@ -6,6 +6,8 @@
 //! are only ever taken from the `Spec`'s whitelists, never from the request,
 //! and every value is a bound parameter.
 
+use crate::snowflake::Id;
+
 use crate::{
     db,
     error::{ApiError, Result},
@@ -103,7 +105,7 @@ impl ListQuery {
 }
 
 /// `WHERE` fragment plus its bound values, shared by the count and page reads.
-fn conditions(spec: &Spec, workspace_id: &str, query: &ListQuery) -> (String, Vec<Value>) {
+fn conditions(spec: &Spec, workspace_id: &Id, query: &ListQuery) -> Result<(String, Vec<Value>)> {
     let mut sql = String::from(" WHERE workspace_id = ?");
     let mut values: Vec<Value> = vec![workspace_id.into()];
     if let Some(text) = &query.search {
@@ -122,10 +124,14 @@ fn conditions(spec: &Spec, workspace_id: &str, query: &ListQuery) -> (String, Ve
         let slots = vec!["?"; options.len()].join(",");
         sql.push_str(&format!(" AND {column} IN ({slots})"));
         for option in options {
-            values.push(option.clone().into());
+            values.push(if column.ends_with("_id") {
+                Id::reference(option)?.into()
+            } else {
+                option.clone().into()
+            });
         }
     }
-    (sql, values)
+    Ok((sql, values))
 }
 
 /// Reads one page plus the total. `columns` is a literal select list from the
@@ -134,10 +140,10 @@ pub async fn list(
     conn: &impl ConnectionTrait,
     spec: &Spec,
     columns: &str,
-    workspace_id: &str,
+    workspace_id: &Id,
     query: &ListQuery,
 ) -> Result<(Vec<QueryResult>, u64)> {
-    let (where_sql, values) = conditions(spec, workspace_id, query);
+    let (where_sql, values) = conditions(spec, workspace_id, query)?;
 
     let total = db::one(
         conn,
@@ -211,7 +217,7 @@ mod tests {
     fn every_value_is_bound_and_columns_come_only_from_the_spec() {
         let q =
             ListQuery::parse(&SPEC, &raw(&[("q", "web"), ("state", "online,offline")])).unwrap();
-        let (sql, values) = conditions(&SPEC, "ws-1", &q);
+        let (sql, values) = conditions(&SPEC, &Id::from(1), &q).unwrap();
         assert_eq!(
             sql,
             " WHERE workspace_id = ? AND (LOWER(name) LIKE ? OR LOWER(address) LIKE ?) AND state IN (?,?)"
@@ -228,7 +234,8 @@ mod tests {
         assert!(ListQuery::parse(&SPEC, &raw(&[("workspace_id", "other")])).is_err());
         let q = ListQuery::parse(&SPEC, &raw(&[])).unwrap();
         assert!(
-            conditions(&SPEC, "ws-1", &q)
+            conditions(&SPEC, &Id::from(1), &q)
+                .unwrap()
                 .0
                 .starts_with(" WHERE workspace_id = ?")
         );

@@ -1,3 +1,4 @@
+use crate::snowflake::Id;
 use crate::{
     db::{self, execute, one, text},
     error::{ApiError, Result},
@@ -26,12 +27,12 @@ const COLUMNS: &str = "id,name,repository_id,definition,target_kind,target_ref,d
 
 fn to_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
-        "repository_id": text(row, "repository_id"),
+        "repository_id": Id::from(db::int(row, "repository_id")),
         "definition": text(row, "definition"),
         "target_kind": text(row, "target_kind"),
-        "target_ref": text(row, "target_ref"),
+        "target_ref": Id::from(db::int(row, "target_ref")),
         "description": text(row, "description"),
         "created_at": db::int(row, "created_at"),
         "updated_at": db::int(row, "updated_at"),
@@ -68,13 +69,13 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
         ("repositories", body.repository_id.trim(), "仓库"),
         (target_table, body.target_ref.trim(), "执行目标"),
     ] {
-        if table == "repositories" && id.is_empty() {
+        if table == "repositories" && Id::reference(id)? == Id::from(0) {
             continue;
         }
         if one(
             &s.db,
             &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),
-            vec![scope.workspace_id.clone().into(), id.into()],
+            vec![scope.workspace_id.clone().into(), Id::reference(id)?.into()],
         )
         .await?
         .is_none()
@@ -104,6 +105,7 @@ pub async fn get(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.read")?;
     let row = one(
         &s.db,
@@ -122,7 +124,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.create")?;
     let name = check(&s, &scope, &body).await?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO pipelines (id,workspace_id,name,repository_id,definition,target_kind,target_ref,description,created_at,updated_at,version)
@@ -131,10 +133,10 @@ pub async fn create(
             id.clone().into(),
             scope.workspace_id.clone().into(),
             name.clone().into(),
-            body.repository_id.trim().into(),
+            Id::reference(&body.repository_id)?.into(),
             body.definition.clone().into(),
             body.target_kind.clone().into(),
-            body.target_ref.trim().into(),
+            Id::reference(&body.target_ref)?.into(),
             body.description.trim().into(),
             now.into(),
             now.into(),
@@ -161,6 +163,7 @@ pub async fn update(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.update")?;
     let name = check(&s, &scope, &body).await?;
     let affected = execute(
@@ -169,10 +172,10 @@ pub async fn update(
          WHERE workspace_id=? AND id=? AND version=?",
         vec![
             name.clone().into(),
-            body.repository_id.trim().into(),
+            Id::reference(&body.repository_id)?.into(),
             body.definition.clone().into(),
             body.target_kind.clone().into(),
-            body.target_ref.trim().into(),
+            Id::reference(&body.target_ref)?.into(),
             body.description.trim().into(),
             db::now().into(),
             scope.workspace_id.clone().into(),
@@ -200,6 +203,7 @@ pub async fn remove(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.delete")?;
     let affected = execute(
         &s.db,

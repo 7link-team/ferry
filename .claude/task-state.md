@@ -1,44 +1,49 @@
 # Task State
-## Task
-T3a 雪花 ID、数据库锁、worker 分配；用户要求禁止 commit/push。
+## Task / Objective
+T3b：执行 docs/tasks/T3b-bigint-ids.md；已读设计 §18 与 CLAUDE.md；不 commit/push。
 ## Current Phase
-ACCEPTANCE — PASS
+ACCEPTANCE — 实现及任务验收完成。
 ## Completed Work
-已先读 §18、任务书、db/migration/state/error/CLAUDE。
-直接执行，无子代理。新增 snowflake.rs、lock.rs、worker.rs（12项测试）。
-生成器使用 Mutex、可注入时钟、41/10/12 位、2026 epoch、JSON字符串；10万单调、10线程×1万唯一；4096序列耗尽等待；小回拨等待、大回拨拒绝。
-锁 UPDATE 再 INSERT，无 upsert；release/renew 都限定 owner；真实 SQLite 文件库并发与过期测试。
-worker 事务内分配锁，错误/取消回滚；优先复用，最小空闲/过期槽位，CAS避免覆盖并发恢复的心跳；10秒心跳/60秒TTL，发号和等待期间检查 Instant 租约；被回收不能续期。关闭置心跳0保留重启亲和性。
-新增 ORM schema builder 迁移；main/state 接入，真实启动拒绝/关闭已验证。
-## Changed Files
-crates/server/src/{snowflake,lock,worker,main,state,migration}.rs
-crates/server/Cargo.toml、Cargo.lock（测试用 tempfile 与其传递依赖）
-.claude/task-state.md、.claude/decisions.md
-用户原有设计文档变更和未追踪任务书保留未改；现有业务模块/主键/db::id调用未改。
-## Verification — Commands / Exit Codes
-- cargo fmt --all：0
-- cargo fmt --all -- --check：0，变异恢复后最终复核0
-- cargo check --workspace --all-targets：0，变异恢复后最终复核0，无警告
-- cargo test -p ferry-server --bin ferry-server：0，首轮78项通过
-- cargo test --workspace：0，最终protocol 3 + runner 7 + server 78 = 88项通过
-- npm run typecheck && npm test：0，11项通过
-- npm run build：0，既有chunk超过500kB提示（非本任务改动）
-- FERRY_REQUIRE_ALL=1 FERRY_MASTER_KEY=$(openssl rand -hex 32) FERRY_TEST_MYSQL='mysql://root:devpass@127.0.0.1:13306/ferry' FERRY_TEST_POSTGRES='postgres://postgres:devpass@127.0.0.1:15432/ferry' ./scripts/test-backends.sh：0，SQLite/MySQL/Postgres各90项通过；脚本内cargo build -p ferry-server成功
-- python3 /tmp/ferry-t3a-lifecycle.py：0；独立SQLite文件库实进程验证心跳更新、重启复用、两次优雅退出均0且heartbeat_at=0；填满1024槽位后启动退出1（预期拒绝）、分配锁回滚无残留。临时脚本验证后删除。
-- git diff --check：0
-- git status --short / git diff --stat / git diff --numstat / git diff --cached --stat / git ls-files --eol：0；无暂存内容，相关源码LF
-## Mutation Verification
-1. cargo test -p ferry-server expired_heartbeat_stops_ids_and_recovers：基线0（1通过）；删除心跳过期检查后101（1失败，unwrap_err收到Ok ID）；逐字节恢复后0（1通过）。
-2. cargo test -p ferry-server non_owner_cannot_release_or_renew：基线0（1通过）；删除release owner条件后101（1失败，实际影响1行、期望0）；逐字节恢复后0（1通过）。
-两个Python变异驱动均退出0，finally恢复并校验原字节；最终全量测试通过，无变异残留。
-## Design Differences / Constraints
-按T3a明确范围，不执行§18.5旧表/旧SQL全量重写及§18.6第7项的全仓库清理；新增机制全用ORM，无新增raw SQL。未改旧主键和db::id调用。
-Instant本地租约、事务/CAS、关闭保留映射置0是落实安全与重启要求的细化，详见decisions.md。
-跨实例租约仍依赖设计中的墙钟同步；instance_id必须代表唯一运行实例，不能复制数据目录并同时运行。
-## Reviews
-Self-review PASS：范围/复用/架构/复杂度/回归/状态/无垃圾暂存。
-Final acceptance PASS：所有T3a要求、验收命令、两次变异、中文报告内容已核对；未commit/push。
-## Remaining Work
-无待实现或待验证项。三库矩阵测试数据仍保留于本地测试数据库；工作树包含本次未提交变更及用户原有文档变更。
-## Next Action
-交付中文报告；不提交、不推送，无需用户补充信息。
+- State::next_id -> Result<Id>，发号失败返回 503；删除 db::id，无兼容壳。
+- 14 张业务表共 41 个 TEXT ID 列重写 BIGINT（实数超过任务预估约 39）。保留原生 SQL、Spec 白名单。
+- SQL 绑定 i64，读取 db::int + Id，JSON ID 为字符串；字符串请求体显式解析；空引用存 0；可选引用 "0" 可回传；非数字资源路径 404。
+- 贯通会话、工作空间、资源、审计、runner 注册/重连/心跳、SSH 与凭据 AAD。
+- 新增三库 8 项回归：>2^53 真实雪花完整 CRUD、JSON 字符串、字符串 group_id 关联、非法路径 404。原矩阵脚本除新增段外逐字相同，未改原断言。
+- 新增 SQLite 实际迁移 schema 逐列测试；MySQL/Postgres information_schema 人工逐列查询均为 bigint。
+## ID Inventory（41 列，全部 BIGINT）
+| 表 | 列 | 数量 |
+|---|---|---:|
+| users | id | 1 |
+| sessions | id, user_id, workspace_id | 3 |
+| workspaces | id, owner_id | 2 |
+| workspace_roles | id, workspace_id | 2 |
+| workspace_members | id, workspace_id, user_id, role_id | 4 |
+| activity | id, workspace_id, actor_id, resource_id | 4 |
+| host_groups | id, workspace_id, parent_id | 3 |
+| hosts | id, workspace_id, group_id, credential_id（ALTER） | 4 |
+| tags | id, workspace_id | 2 |
+| host_tags | host_id, tag_id | 2 |
+| runner_tokens | id, workspace_id, host_id, used_by, created_by | 5 |
+| credentials | id, workspace_id | 2 |
+| repositories | id, workspace_id, credential_id | 3 |
+| pipelines | id, workspace_id, repository_id, target_ref | 4 |
+worker_ids.worker_id 原为 BIGINT 不变；worker_ids.instance_id、locks.owner/name 和业务字符串不变。
+## Verification（实际退出码）
+- cargo fmt --all -- --check：0。
+- cargo check --workspace --all-targets：0；无警告。/tmp/t3b-check-final.log。
+- cargo test --workspace：0；protocol 3、runner 7、server 80，0 failed。/tmp/t3b-tests-final.log。
+- npm run typecheck && npm test：0；2 files / 11 tests。/tmp/t3b-npm-final.log。
+- npm run build：0；既有 chunk >500kB 提示，未扩展打包优化。/tmp/t3b-npm-build.log。
+- MySQL DROP/CREATE ferry：0；Postgres DROP ferry：0、CREATE ferry：0；SQLite 每轮临时库自动新建。
+- FERRY_REQUIRE_ALL=1 FERRY_MASTER_KEY=$(openssl rand -hex 32) FERRY_TEST_MYSQL='mysql://root:devpass@127.0.0.1:13306/ferry' FERRY_TEST_POSTGRES='postgres://postgres:devpass@127.0.0.1:15432/ferry' ./scripts/test-backends.sh：首轮及恢复后最终均 0；三库各 98/98（原90+新增8）。/tmp/t3b-matrix1.log、/tmp/t3b-matrix-final.log。
+- 变异：/tmp/t3b-mutation.sh 临时去掉 host_json 的 Id 包装后运行矩阵 SQLite；退出 1，95 passed / 3 failed（新增列表、详情、更新后详情精确字符串检查）。EXIT trap 已恢复源码，最终全绿。/tmp/t3b-mutation.log。
+- git diff --check：0；改动文件 LF；原41个TEXT声明无遗漏、db::id零残留、原矩阵断言逐字保留审计脚本：0。
+- 实现过程中初次 cargo check 有类型贯通错误（101），修正边界后通过；正式矩阵未出现非变异失败，未修改断言迁就。
+## Self-Review / Final Acceptance
+范围、复用（T3a Id/Generator、db::int、现有 SQL/列表）、架构、复杂度、回归、逐列清单、变异恢复、状态一致性均检查通过。Direct 执行，无子代理。
+## Known Issues / Scope
+现有会话直接以 sessions.id 作为 bearer cookie；雪花 ID 可预测，不能提供 UUID 的随机性。任务要求所有主键改雪花，未擅自扩展认证方案；建议后续将随机会话令牌与内部主键分离，部署前处理。
+## Remaining Work / Next Action
+本任务无剩余实现或验收动作；未 git commit/push，修改保留在工作区。原用户未跟踪任务书未改动。会话令牌问题需另行授权认证设计变更。
+## Last Checkpoint
+最终三库各 98/98，EXIT 0；变异源码恢复并重新编译验证。

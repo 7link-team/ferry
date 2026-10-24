@@ -54,9 +54,7 @@ pub fn int(row: &QueryResult, key: &str) -> i64 {
         .or_else(|_| row.try_get::<u32>("", key).map(i64::from))
         .expect("validated integer schema")
 }
-pub fn id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
+
 pub fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }

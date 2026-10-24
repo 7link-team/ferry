@@ -1,6 +1,8 @@
 //! Accounts and sessions. Global, not workspace-scoped: a user exists before
 //! any workspace does, and may belong to several.
 
+use crate::snowflake::Id;
+
 use crate::{
     db::{self, all, execute, one, text},
     error::{ApiError, Result},
@@ -24,7 +26,7 @@ const SESSION_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 
 #[derive(Clone)]
 pub struct User {
-    pub id: String,
+    pub id: Id,
     pub email: String,
     pub name: String,
 }
@@ -33,32 +35,38 @@ pub struct User {
 /// endpoints that choose or create one. Workspace resources take `Scope`.
 pub struct Account {
     pub user: User,
-    pub session_id: String,
+    pub session_id: Id,
 }
 
 impl FromRequestParts<AppState> for Account {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, s: &AppState) -> Result<Self> {
+        // The cookie is a random secret, never the row's primary key: a
+        // snowflake carries its own creation time, so using it here would let
+        // anyone who knows roughly when a user signed in enumerate the few
+        // thousand candidates. Only its hash is stored, so a database leak
+        // does not hand over live sessions either.
         let token = cookie(&parts.headers, COOKIE).ok_or_else(ApiError::unauthorized)?;
+        let hash = crate::runner::fingerprint(&token);
         let row = one(
             &s.db,
             "SELECT s.id AS session_id, u.id, u.email, u.name, u.active, s.expires_at
-             FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?",
-            vec![token.clone().into()],
+             FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+            vec![hash.clone().into()],
         )
         .await?
         .ok_or_else(ApiError::unauthorized)?;
         if db::int(&row, "expires_at") < db::now() || db::int(&row, "active") == 0 {
             execute(
                 &s.db,
-                "DELETE FROM sessions WHERE id = ?",
-                vec![token.into()],
+                "DELETE FROM sessions WHERE token_hash = ?",
+                vec![hash.into()],
             )
             .await?;
             return Err(ApiError::unauthorized());
         }
-        let session_id = text(&row, "session_id");
+        let session_id = Id::from(db::int(&row, "session_id"));
         execute(
             &s.db,
             "UPDATE sessions SET seen_at = ?, expires_at = ? WHERE id = ?",
@@ -71,7 +79,7 @@ impl FromRequestParts<AppState> for Account {
         .await?;
         Ok(Self {
             user: User {
-                id: text(&row, "id"),
+                id: Id::from(db::int(&row, "id")),
                 email: text(&row, "email"),
                 name: text(&row, "name"),
             },
@@ -160,7 +168,7 @@ pub async fn register(
     {
         return Err(ApiError::conflict("该邮箱已注册，请直接登录。"));
     }
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO users (id,email,name,password_hash,active,created_at,updated_at)
@@ -205,7 +213,7 @@ pub async fn login(
     if db::int(&row, "active") == 0 || !verify(&body.password, &text(&row, "password_hash")) {
         return Err(refused());
     }
-    let id = text(&row, "id");
+    let id = Id::from(db::int(&row, "id"));
     let session = start_session(&s, &id).await?;
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
@@ -213,14 +221,18 @@ pub async fn login(
     ))
 }
 
-async fn start_session(s: &AppState, user_id: &str) -> Result<String> {
-    let (id, now) = (db::id(), db::now());
+/// Returns the cookie value. The row keeps only a hash of it, so the secret
+/// exists in exactly one place: the browser that was handed it.
+async fn start_session(s: &AppState, user_id: &Id) -> Result<String> {
+    let (id, now) = (s.next_id()?, db::now());
+    let token = crate::runner::secret();
     execute(
         &s.db,
-        "INSERT INTO sessions (id,user_id,workspace_id,created_at,seen_at,expires_at)
-         VALUES (?,?,'',?,?,?)",
+        "INSERT INTO sessions (id,token_hash,user_id,workspace_id,created_at,seen_at,expires_at)
+         VALUES (?,?,?,0,?,?,?)",
         vec![
-            id.clone().into(),
+            id.into(),
+            crate::runner::fingerprint(&token).into(),
             user_id.into(),
             now.into(),
             now.into(),
@@ -228,7 +240,7 @@ async fn start_session(s: &AppState, user_id: &str) -> Result<String> {
         ],
     )
     .await?;
-    Ok(id)
+    Ok(token)
 }
 
 pub async fn logout(
@@ -260,7 +272,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         .iter()
         .map(|row| {
             json!({
-                "id": text(row, "id"),
+                "id": Id::from(db::int(row, "id")),
                 "slug": text(row, "slug"),
                 "name": text(row, "name"),
                 "role_name": text(row, "role_name"),

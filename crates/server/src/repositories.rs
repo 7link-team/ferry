@@ -1,3 +1,4 @@
+use crate::snowflake::Id;
 use crate::{
     db::{self, execute, one, text},
     error::{ApiError, Result},
@@ -27,11 +28,11 @@ const COLUMNS: &str =
 
 fn to_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
         "url": text(row, "url"),
         "default_branch": text(row, "default_branch"),
-        "credential_id": text(row, "credential_id"),
+        "credential_id": Id::from(db::int(row, "credential_id")),
         "description": text(row, "description"),
         "created_at": db::int(row, "created_at"),
         "updated_at": db::int(row, "updated_at"),
@@ -90,13 +91,13 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
             "请填写有效的远程仓库地址（255 字以内，仅支持 HTTP、HTTPS、SSH 或 git@host:path）。",
         ));
     }
-    if !body.credential_id.trim().is_empty() {
+    if Id::reference(&body.credential_id)? != Id::from(0) {
         let row = one(
             &s.db,
             "SELECT kind FROM credentials WHERE workspace_id = ? AND id = ?",
             vec![
                 scope.workspace_id.clone().into(),
-                body.credential_id.trim().into(),
+                Id::reference(&body.credential_id)?.into(),
             ],
         )
         .await?
@@ -127,6 +128,7 @@ pub async fn get(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.read")?;
     let row = one(
         &s.db,
@@ -145,7 +147,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("repositories.create")?;
     let name = check(&s, &scope, &body).await?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO repositories (id,workspace_id,name,url,default_branch,credential_id,description,created_at,updated_at,version)
@@ -156,7 +158,7 @@ pub async fn create(
             name.clone().into(),
             body.url.trim().into(),
             body.branch().into(),
-            body.credential_id.trim().into(),
+            Id::reference(&body.credential_id)?.into(),
             body.description.trim().into(),
             now.into(),
             now.into(),
@@ -183,6 +185,7 @@ pub async fn update(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.update")?;
     let name = check(&s, &scope, &body).await?;
     let affected = execute(
@@ -193,7 +196,7 @@ pub async fn update(
             name.clone().into(),
             body.url.trim().into(),
             body.branch().into(),
-            body.credential_id.trim().into(),
+            Id::reference(&body.credential_id)?.into(),
             body.description.trim().into(),
             db::now().into(),
             scope.workspace_id.clone().into(),
@@ -221,6 +224,7 @@ pub async fn remove(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.delete")?;
     for (table, noun) in [("pipelines", "条流水线")] {
         let used = one(

@@ -85,6 +85,18 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   ck "duplicate slug"   "已被占用"      "$(c -X POST -d '{"name":"X","slug":"ops"}' "$B/workspaces")"
   ck "identity"         '"拥有者"'      "$(c "$B/me")"
 
+  # The session cookie must be a random secret, not the row's primary key. A
+  # snowflake encodes its creation time and a small counter, so a cookie that
+  # was one would be guessable from roughly when its owner signed in.
+  local cookie_value
+  cookie_value=$(grep -oE 'ferry_session[[:space:]]+[^[:space:]]+$' "$jar" | awk '{print $NF}')
+  if [ "${#cookie_value}" -ge 32 ] && ! echo "$cookie_value" | grep -qE '^[0-9]+$'; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    echo "    FAIL session cookie looks guessable: '${cookie_value}' (len ${#cookie_value})"
+  fi
+
   local group
   group=$(c -X POST -d '{"name":"生产组"}' "$B/workspaces/ops/host-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
@@ -267,6 +279,32 @@ v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind=
 
   ck "roles"            '"拥有者"'      "$(c "$B/workspaces/ops/roles")"
   ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/hosts")"
+
+  # T3b: inspect JSON types, not regexes that accept both numbers and strings.
+  # The real generator is already >2^53; assert that premise rather than
+  # silently letting a small-ID run stand in for the precision regression.
+  ck_json() { # label, Python assertion, JSON, optional comparison arguments
+    local label=$1 assertion=$2 payload=$3
+    shift 3
+    if python3 -I -c 'import json,sys;v=json.loads(sys.argv[1]);exec(sys.argv[2])' "$payload" "$assertion" "$@"; then
+      pass=$((pass + 1))
+    else
+      fail=$((fail + 1))
+      echo "    FAIL $label"
+    fi
+  }
+  local bigint_body bigint_id bigint_detail
+  bigint_body=$(c -X POST -d "{\"name\":\"bigint-roundtrip\",\"connection\":\"runner\",\"group_id\":\"$group\"}" "$B/workspaces/ops/hosts")
+  ck_json "bigint create ID is a string above 2^53" 'assert type(v["id"]) is str and int(v["id"]) > 2**53' "$bigint_body"
+  bigint_id=$(printf '%s' "$bigint_body" | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+  ck_json "bigint list preserves exact string ID and reference" 'assert v["total"] == 1; h=v["items"][0]; assert h["id"] == sys.argv[3] and h["group_id"] == sys.argv[4]' "$(c "$B/workspaces/ops/hosts?q=bigint-roundtrip")" "$bigint_id" "$group"
+  bigint_detail=$(c "$B/workspaces/ops/hosts/$bigint_id")
+  ck_json "bigint detail ID is a string and string group_id associates" 'assert v["id"] == sys.argv[3] and v["group_id"] == sys.argv[4] and v["credential_id"] == "0"' "$bigint_detail" "$bigint_id" "$group"
+  ck "bigint update" '200$' "$(c -w '%{http_code}' -X PATCH -d "{\"name\":\"bigint-updated\",\"group_id\":\"$group\",\"version\":1}" "$B/workspaces/ops/hosts/$bigint_id")"
+  ck_json "bigint updated detail keeps exact ID" 'assert v["id"] == sys.argv[3] and v["name"] == "bigint-updated" and v["version"] == 2' "$(c "$B/workspaces/ops/hosts/$bigint_id")" "$bigint_id"
+  ck "bigint delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/hosts/$bigint_id")"
+  ck "bigint deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/hosts/$bigint_id")"
+  ck "nonnumeric host path" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/hosts/not-a-number")"
 
   kill $pid 2>/dev/null; wait $pid 2>/dev/null
 

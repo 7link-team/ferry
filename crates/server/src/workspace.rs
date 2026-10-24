@@ -6,6 +6,8 @@
 //! workspace id from a request body, and none is expected to remember to
 //! filter — `resource::list` always filters by the scope's id.
 
+use crate::snowflake::Id;
+
 use crate::{
     auth::Account,
     db::{self, all, execute, one, text},
@@ -225,7 +227,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
 /// An authenticated caller acting inside one workspace, with that workspace's
 /// permissions already resolved.
 pub struct Scope {
-    pub workspace_id: String,
+    pub workspace_id: Id,
     pub user: crate::auth::User,
     pub permissions: HashSet<String>,
 }
@@ -272,7 +274,7 @@ impl FromRequestParts<AppState> for Scope {
                 .collect();
         let _ = slug;
         Ok(Self {
-            workspace_id: text(&row, "id"),
+            workspace_id: Id::from(db::int(&row, "id")),
             user: account.user,
             permissions,
         })
@@ -328,7 +330,7 @@ pub async fn create(
     {
         return Err(ApiError::conflict("该标识已被占用，请换一个。"));
     }
-    let (id, now, code) = (db::id(), db::now(), join_code());
+    let (id, now, code) = (s.next_id()?, db::now(), join_code());
     execute(
         &s.db,
         "INSERT INTO workspaces (id,slug,name,owner_id,join_code,created_at,updated_at)
@@ -344,9 +346,9 @@ pub async fn create(
         ],
     )
     .await?;
-    let mut owner_role = String::new();
+    let mut owner_role = Id::default();
     for (key, label) in BUILTIN {
-        let role_id = db::id();
+        let role_id = s.next_id()?;
         if *key == "owner" {
             owner_role = role_id.clone();
         }
@@ -370,7 +372,7 @@ pub async fn create(
         "INSERT INTO workspace_members (id,workspace_id,user_id,role_id,state,created_at,updated_at)
          VALUES (?,?,?,?,'active',?,?)",
         vec![
-            db::id().into(),
+            s.next_id()?.into(),
             id.clone().into(),
             account.user.id.into(),
             owner_role.into(),
@@ -404,7 +406,7 @@ pub async fn join(
     )
     .await?
     .ok_or_else(|| ApiError::bad("邀请码无效或已失效。"))?;
-    let workspace_id = text(&row, "id");
+    let workspace_id = Id::from(db::int(&row, "id"));
     if one(
         &s.db,
         "SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
@@ -429,10 +431,10 @@ pub async fn join(
         "INSERT INTO workspace_members (id,workspace_id,user_id,role_id,state,created_at,updated_at)
          VALUES (?,?,?,?,'active',?,?)",
         vec![
-            db::id().into(),
+            s.next_id()?.into(),
             workspace_id.into(),
             account.user.id.into(),
-            text(&viewer, "id").into(),
+            Id::from(db::int(&viewer, "id")).into(),
             now.into(),
             now.into(),
         ],
@@ -467,7 +469,7 @@ pub async fn roles(State(s): State<AppState>, scope: Scope) -> Result<Json<Value
         .iter()
         .map(|row| {
             json!({
-                "id": text(row, "id"),
+                "id": Id::from(db::int(row, "id")),
                 "name": text(row, "name"),
                 "builtin": db::int(row, "builtin") == 1,
                 "permissions": serde_json::from_str::<Value>(&text(row, "permissions")).unwrap_or(json!([])),

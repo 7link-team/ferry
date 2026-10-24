@@ -8,6 +8,8 @@
 //! 而 `client::Handle` 一 drop 整条 SSH 连接就断开，所以返回的流必须自己持有
 //! 连接，否则下载会在第一个数据块之后断掉。
 
+use crate::snowflake::Id;
+
 use crate::{
     channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output, Pty, PtySize},
     db,
@@ -62,8 +64,8 @@ impl Credential {
     /// use. The plaintext lives only for the length of this connection
     /// attempt: it is never logged, never returned over HTTP, and never
     /// written anywhere.
-    pub async fn load(s: &AppState, workspace_id: &str, credential_id: &str) -> Result<Self> {
-        if credential_id.is_empty() {
+    pub async fn load(s: &AppState, workspace_id: &Id, credential_id: &Id) -> Result<Self> {
+        if *credential_id == Id::from(0) {
             return Err(ApiError::bad(
                 "这台主机还没有选择登录凭据，请在「授权认证」里新建一条，再到主机上选用。",
             ));
@@ -635,9 +637,9 @@ mod tests {
         let (address, port) = address.rsplit_once(':')?;
         Some((
             Host {
-                id: "live".into(),
-                workspace_id: "live".into(),
-                credential_id: String::new(),
+                id: 1.into(),
+                workspace_id: 1.into(),
+                credential_id: Id::default(),
                 name: "live".into(),
                 address: address.into(),
                 port: port.parse().ok()?,

@@ -2,6 +2,8 @@
 //! `resource::list`, writes go through `version` optimistic locking, and every
 //! mutation lands in `activity`.
 
+use crate::snowflake::Id;
+
 use crate::{
     db::{self, execute, one, text},
     error::{ApiError, Result},
@@ -32,10 +34,10 @@ const GROUP_COLUMNS: &str = "id,name,description,parent_id,created_at,updated_at
 
 fn group_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
         "description": text(row, "description"),
-        "parent_id": text(row, "parent_id"),
+        "parent_id": Id::from(db::int(row, "parent_id")),
         "created_at": db::int(row, "created_at"),
         "updated_at": db::int(row, "updated_at"),
         "version": db::int(row, "version"),
@@ -79,6 +81,7 @@ pub async fn get_group(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.read")?;
     let row = one(
         &s.db,
@@ -105,7 +108,7 @@ pub async fn create_group(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("host-groups.create")?;
     let name = check_name(&body.name)?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO host_groups (id,workspace_id,name,description,parent_id,created_at,updated_at,version)
@@ -115,7 +118,7 @@ pub async fn create_group(
             scope.workspace_id.clone().into(),
             name.clone().into(),
             body.description.trim().into(),
-            body.parent_id.clone().into(),
+            Id::reference(&body.parent_id)?.into(),
             now.into(),
             now.into(),
         ],
@@ -139,9 +142,10 @@ pub async fn update_group(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<GroupBody>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.update")?;
     let name = check_name(&body.name)?;
-    if body.parent_id == id {
+    if Id::reference(&body.parent_id)? == id {
         return Err(ApiError::bad("主机组不能把自己作为上级。"));
     }
     let affected = execute(
@@ -151,7 +155,7 @@ pub async fn update_group(
         vec![
             name.clone().into(),
             body.description.trim().into(),
-            body.parent_id.into(),
+            Id::reference(&body.parent_id)?.into(),
             db::now().into(),
             scope.workspace_id.clone().into(),
             id.clone().into(),
@@ -180,6 +184,7 @@ pub async fn delete_group(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.delete")?;
     // Refuse rather than orphan: a host pointing at a deleted group would
     // disappear from every group filter without being gone.
@@ -226,15 +231,15 @@ pub const STATES: [&str; 3] = ["online", "offline", "unknown"];
 
 fn host_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
         "address": text(row, "address"),
         "port": db::int(row, "port"),
         "username": text(row, "username"),
         "connection": text(row, "connection"),
         "state": text(row, "state"),
-        "group_id": text(row, "group_id"),
-        "credential_id": text(row, "credential_id"),
+        "group_id": Id::from(db::int(row, "group_id")),
+        "credential_id": Id::from(db::int(row, "credential_id")),
         "description": text(row, "description"),
         "seen_at": db::int(row, "seen_at"),
         "created_at": db::int(row, "created_at"),
@@ -308,6 +313,7 @@ pub async fn get_host(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.read")?;
     let row = one(
         &s.db,
@@ -326,7 +332,7 @@ pub async fn create_host(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("hosts.create")?;
     let (name, connection) = check_host(&body, true)?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,credential_id,description,seen_at,created_at,updated_at,version)
@@ -339,8 +345,8 @@ pub async fn create_host(
             body.port.into(),
             body.username.trim().into(),
             connection.clone().into(),
-            body.group_id.into(),
-            body.credential_id.into(),
+            Id::reference(&body.group_id)?.into(),
+            Id::reference(&body.credential_id)?.into(),
             body.description.trim().into(),
             now.into(),
             now.into(),
@@ -365,6 +371,7 @@ pub async fn update_host(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<HostBody>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.update")?;
     let (name, _) = check_host(&body, false)?;
     // `connection` is deliberately absent: changing how an enrolled host is
@@ -378,8 +385,8 @@ pub async fn update_host(
             body.address.trim().into(),
             body.port.into(),
             body.username.trim().into(),
-            body.group_id.into(),
-            body.credential_id.into(),
+            Id::reference(&body.group_id)?.into(),
+            Id::reference(&body.credential_id)?.into(),
             body.description.trim().into(),
             db::now().into(),
             scope.workspace_id.clone().into(),
@@ -403,8 +410,8 @@ pub async fn update_host(
 /// orphan a pipeline's target.
 async fn host_is_free(
     conn: &impl sea_orm::ConnectionTrait,
-    workspace_id: &str,
-    id: &str,
+    workspace_id: &Id,
+    id: &Id,
 ) -> Result<()> {
     let used = one(
         conn,
@@ -428,6 +435,7 @@ pub async fn delete_host(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.delete")?;
     host_is_free(&s.db, &scope.workspace_id, &id).await?;
     let affected = execute(
@@ -446,7 +454,7 @@ pub async fn delete_host(
 
 #[derive(Deserialize)]
 pub struct BulkBody {
-    ids: Vec<String>,
+    ids: Vec<Id>,
 }
 
 /// Batch delete as an action, not a `DELETE` with a body — proxies drop the
@@ -481,7 +489,7 @@ pub async fn bulk_delete_hosts(
         &scope,
         "bulk-delete",
         "hosts",
-        "",
+        &Id::from(0),
         json!({"ids": body.ids, "deleted": deleted}),
     )
     .await?;
@@ -501,7 +509,7 @@ const TAG_COLUMNS: &str = "id,name,color,created_at,updated_at,version";
 
 fn tag_json(row: &QueryResult) -> Value {
     json!({
-        "id": text(row, "id"),
+        "id": Id::from(db::int(row, "id")),
         "name": text(row, "name"),
         "color": text(row, "color"),
         "created_at": db::int(row, "created_at"),
@@ -539,6 +547,7 @@ pub async fn get_tag(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.read")?;
     let row = one(
         &s.db,
@@ -557,7 +566,7 @@ pub async fn create_tag(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("tags.create")?;
     let name = check_name(&body.name)?;
-    let (id, now) = (db::id(), db::now());
+    let (id, now) = (s.next_id()?, db::now());
     execute(
         &s.db,
         "INSERT INTO tags (id,workspace_id,name,color,created_at,updated_at,version) VALUES (?,?,?,?,?,?,1)",
@@ -581,6 +590,7 @@ pub async fn update_tag(
     Path((_, id)): Path<(String, String)>,
     Json(body): Json<TagBody>,
 ) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.update")?;
     let name = check_name(&body.name)?;
     let affected = execute(
@@ -610,6 +620,7 @@ pub async fn delete_tag(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.delete")?;
     let affected = execute(
         &s.db,
@@ -629,7 +640,7 @@ pub async fn delete_tag(
 
 /// A zero-row update means the row is gone or someone else saved first. Tell
 /// those apart, because "refresh and retry" is useless advice for a deleted row.
-pub async fn stale(s: &AppState, table: &str, workspace_id: &str, id: &str) -> Result<ApiError> {
+pub async fn stale(s: &AppState, table: &str, workspace_id: &Id, id: &Id) -> Result<ApiError> {
     let exists = one(
         s.db(),
         &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),
@@ -649,7 +660,7 @@ pub async fn activity(
     scope: &Scope,
     action: &str,
     resource: &str,
-    resource_id: &str,
+    resource_id: &Id,
     details: Value,
 ) -> Result<()> {
     execute(
@@ -657,7 +668,7 @@ pub async fn activity(
         "INSERT INTO activity (id,workspace_id,actor_id,actor_name,action,resource,resource_id,details,created_at)
          VALUES (?,?,?,?,?,?,?,?,?)",
         vec![
-            db::id().into(),
+            s.next_id()?.into(),
             scope.workspace_id.clone().into(),
             scope.user.id.clone().into(),
             scope.user.name.clone().into(),
@@ -698,11 +709,11 @@ pub async fn list_activity(
         .iter()
         .map(|row| {
             json!({
-                "id": text(row, "id"),
+                "id": Id::from(db::int(row, "id")),
                 "actor_name": text(row, "actor_name"),
                 "action": text(row, "action"),
                 "resource": text(row, "resource"),
-                "resource_id": text(row, "resource_id"),
+                "resource_id": Id::from(db::int(row, "resource_id")),
                 "details": serde_json::from_str::<Value>(&text(row, "details")).unwrap_or(json!({})),
                 "created_at": db::int(row, "created_at"),
             })

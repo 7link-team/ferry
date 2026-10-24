@@ -18,9 +18,11 @@
 //! tied to its workspace, so enrolling cannot produce a host anywhere else,
 //! and a key only matches the hash on its own host's row.
 
+use crate::snowflake::Id;
+
 use crate::{
     channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output, Pty, PtySize},
-    db::{self, execute, one, text},
+    db::{self, execute, one},
     error::{ApiError, Result},
     remote::Host,
     state::AppState,
@@ -116,11 +118,11 @@ fn claim_pending(session: &str, host_id: &str) -> Option<Pending> {
 /// chose; stretching a random 256-bit secret buys nothing and would be paid on
 /// every reconnect. There is no timing concern in comparing the hashes either:
 /// matching one means finding a preimage, not guessing it byte by byte.
-fn fingerprint(secret: &str) -> String {
+pub fn fingerprint(secret: &str) -> String {
     hex::encode(Sha256::digest(secret.as_bytes()))
 }
 
-fn secret() -> String {
+pub fn secret() -> String {
     use rand::Rng;
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill(&mut bytes[..]);
@@ -227,8 +229,8 @@ pub async fn create_token(
     } else {
         return Err(ApiError::bad("有效期需要在 5 分钟到 24 小时之间。"));
     };
-    let host_id = body.host_id.trim().to_owned();
-    if !host_id.is_empty() {
+    let host_id = Id::reference(&body.host_id)?;
+    if host_id != Id::from(0) {
         // Refuse now rather than burning a token on a host that cannot use it.
         one(
             &s.db,
@@ -239,12 +241,12 @@ pub async fn create_token(
         .ok_or_else(|| ApiError::bad("该主机不存在，或接入方式不是代理。"))?;
     }
 
-    let (id, now, token) = (db::id(), db::now(), secret());
+    let (id, now, token) = (s.next_id()?, db::now(), secret());
     let expires_at = now + minutes * 60 * 1000;
     execute(
         &s.db,
         "INSERT INTO runner_tokens (id,workspace_id,host_id,token_hash,expires_at,used_at,used_by,created_by,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,0,'',?,?,?,1)",
+         VALUES (?,?,?,?,?,0,0,?,?,?,1)",
         vec![
             id.clone().into(),
             scope.workspace_id.clone().into(),
@@ -293,10 +295,7 @@ pub async fn create_token(
 /// One conditional UPDATE does the whole check: unknown, expired and
 /// already-used tokens all affect zero rows, and two runners racing with the
 /// same token cannot both win because only one UPDATE sees `used_at = 0`.
-async fn consume_token(
-    db: &impl sea_orm::ConnectionTrait,
-    token: &str,
-) -> Result<(String, String, String)> {
+async fn consume_token(db: &impl sea_orm::ConnectionTrait, token: &str) -> Result<(Id, Id, Id)> {
     let (hash, now) = (fingerprint(token), db::now());
     let claimed = execute(
         db,
@@ -320,9 +319,9 @@ async fn consume_token(
     .await?
     .ok_or_else(ApiError::missing)?;
     Ok((
-        text(&row, "id"),
-        text(&row, "workspace_id"),
-        text(&row, "host_id"),
+        Id::from(db::int(&row, "id")),
+        Id::from(db::int(&row, "workspace_id")),
+        Id::from(db::int(&row, "host_id")),
     ))
 }
 
@@ -342,12 +341,12 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
     let (key, now) = (secret(), db::now());
     // The key rotates the host's credential, so the row's version moves with
     // it: an operator's open edit form is genuinely stale afterwards.
-    let host_id = if bound_host.is_empty() {
-        let id = db::id();
+    let host_id = if bound_host == Id::from(0) {
+        let id = s.next_id()?;
         execute(
             &s.db,
             "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,description,host_key,runner_key_hash,os,arch,agent_version,metrics,seen_at,created_at,updated_at,version)
-             VALUES (?,?,?,'',0,'','runner','online','','','',?,?,?,?,'',?,?,?,1)",
+             VALUES (?,?,?,'',0,'','runner','online',0,'','',?,?,?,?,'',?,?,?,1)",
             vec![
                 id.clone().into(),
                 workspace_id.clone().into(),
@@ -397,7 +396,7 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
     )
     .await?;
     tracing::info!(%host_id, %workspace_id, hostname = %hello.hostname, "runner 注册成功");
-    Ok((host_id, key))
+    Ok((host_id.to_string(), key))
 }
 
 /// Checks a stored key against the one host it could belong to.
@@ -406,7 +405,7 @@ async fn verify_key(s: &AppState, host_id: &str, key: &str) -> Result<()> {
         &s.db,
         "SELECT id FROM hosts
          WHERE id = ? AND connection = 'runner' AND runner_key_hash <> '' AND runner_key_hash = ?",
-        vec![host_id.into(), fingerprint(key).into()],
+        vec![Id::reference(host_id)?.into(), fingerprint(key).into()],
     )
     .await?
     .ok_or_else(|| {
@@ -457,6 +456,10 @@ async fn control(s: AppState, mut socket: WebSocket) {
         Err(error) => return reject(&mut socket, &error.1).await,
     };
 
+    let row_id = match host_id.parse::<Id>() {
+        Ok(id) => id,
+        Err(_) => return reject(&mut socket, "代理主机 ID 无效。").await,
+    };
     if send_frame(
         &mut socket,
         &wire::Control::Welcome {
@@ -487,7 +490,7 @@ async fn control(s: AppState, mut socket: WebSocket) {
                 hello.os.clone().into(),
                 hello.arch.clone().into(),
                 hello.agent_version.clone().into(),
-                host_id.clone().into(),
+                row_id.into(),
             ],
         )
         .await;
@@ -512,7 +515,7 @@ async fn control(s: AppState, mut socket: WebSocket) {
         let _ = execute(
             &s.db,
             "UPDATE hosts SET state='offline' WHERE id = ?",
-            vec![host_id.clone().into()],
+            vec![row_id.into()],
         )
         .await;
         tracing::info!(%host_id, "runner 控制连接已断开");
@@ -544,6 +547,9 @@ async fn pump_control(
     mut socket: WebSocket,
     mut inbox: mpsc::Receiver<wire::Control>,
 ) {
+    let Ok(row_id) = host_id.parse::<Id>() else {
+        return;
+    };
     let mut probe = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECONDS));
     probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut unanswered = 0;
@@ -571,7 +577,7 @@ async fn pump_control(
                                 vec![
                                     db::now().into(),
                                     metrics_json(load1, memory_used, memory_total, disk_used, disk_total).into(),
-                                    host_id.into(),
+                                    row_id.into(),
                                 ],
                             )
                             .await;
@@ -648,11 +654,11 @@ pub struct RunnerChannel {
 /// not connected, so the operator gets a readable HTTP error instead of a
 /// socket that opens and immediately closes.
 pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
-    if !live().contains_key(&host.id) {
+    if !live().contains_key(&host.id.to_string()) {
         return Err(offline(&host.name));
     }
     Ok(Box::new(RunnerChannel {
-        host_id: host.id.clone(),
+        host_id: host.id.to_string(),
         name: host.name.clone(),
     }))
 }
@@ -1060,7 +1066,8 @@ mod tests {
     }
 
     async fn scratch_db() -> Scratch {
-        let path = std::env::temp_dir().join(format!("ferry-runner-test-{}.sqlite", db::id()));
+        let path =
+            std::env::temp_dir().join(format!("ferry-runner-test-{}.sqlite", uuid::Uuid::new_v4()));
         let mut options = ConnectOptions::new("sqlite://ferry");
         let filename = path.clone();
         options.sqlx_logging(false).map_sqlx_sqlite_opts(move |o| {
@@ -1080,8 +1087,8 @@ mod tests {
         execute(
             db,
             "INSERT INTO runner_tokens (id,workspace_id,host_id,token_hash,expires_at,used_at,used_by,created_by,created_at,updated_at,version)
-             VALUES (?,'ws-1','',?,?,0,'','u-1',0,0,1)",
-            vec![db::id().into(), fingerprint(token).into(), expires_at.into()],
+             VALUES (?,1,0,?,?,0,0,1,0,0,1)",
+            vec![1_i64.into(), fingerprint(token).into(), expires_at.into()],
         )
         .await
         .expect("insert token");
@@ -1095,8 +1102,8 @@ mod tests {
         mint(db, &token, db::now() + 60_000).await;
 
         let (_id, workspace_id, host_id) = consume_token(db, &token).await.expect("first use");
-        assert_eq!(workspace_id, "ws-1");
-        assert_eq!(host_id, "", "unbound token");
+        assert_eq!(workspace_id, Id::from(1));
+        assert_eq!(host_id, Id::from(0), "unbound token");
 
         let again = consume_token(db, &token).await;
         assert!(again.is_err(), "a token must not be reusable");
@@ -1134,29 +1141,26 @@ mod tests {
         let scratch = scratch_db().await;
         let db = &*scratch;
         let (key_a, key_b) = (secret(), secret());
-        for (id, workspace, key) in [("host-a", "ws-a", &key_a), ("host-b", "ws-b", &key_b)] {
+        for (id, workspace, key) in [(1_i64, 11_i64, &key_a), (2_i64, 12_i64, &key_b)] {
             execute(
                 db,
                 "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,description,host_key,runner_key_hash,os,arch,agent_version,metrics,seen_at,created_at,updated_at,version)
-                 VALUES (?,?,?,'',0,'','runner','online','','','',?,'','','','',0,0,0,1)",
-                vec![id.into(), workspace.into(), id.into(), fingerprint(key).into()],
+                 VALUES (?,?,?,'',0,'','runner','online',0,'','',?,'','','','',0,0,0,1)",
+                vec![id.into(), workspace.into(), id.to_string().into(), fingerprint(key).into()],
             )
             .await
             .expect("insert host");
         }
         // Reaching across workspaces means presenting another host's id with
         // your own key, which has to fail.
-        assert!(matches(db, "host-a", &key_a).await);
-        assert!(!matches(db, "host-b", &key_a).await, "cross-host reuse");
-        assert!(!matches(db, "host-a", &key_b).await, "cross-host reuse");
-        assert!(
-            !matches(db, "host-a", "").await,
-            "an empty key matches nothing"
-        );
+        assert!(matches(db, 1, &key_a).await);
+        assert!(!matches(db, 2, &key_a).await, "cross-host reuse");
+        assert!(!matches(db, 1, &key_b).await, "cross-host reuse");
+        assert!(!matches(db, 1, "").await, "an empty key matches nothing");
     }
 
     /// `verify_key` needs an `AppState`; this is the same query it runs.
-    async fn matches(db: &DatabaseConnection, host_id: &str, key: &str) -> bool {
+    async fn matches(db: &DatabaseConnection, host_id: i64, key: &str) -> bool {
         one(
             db,
             "SELECT id FROM hosts

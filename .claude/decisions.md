@@ -33,3 +33,10 @@
 - Reason：同时满足立即释放槽位和同 instance_id 重启优先复用；若槽位已被其他实例回收，则走最小空闲槽位分配。
 - Alternatives Considered：删除行会丢失重启亲和性；不释放则占用到 TTL。
 - Tradeoffs：保留最多 1024 行；Status：实施。
+
+## T3b ID 存储与边界
+- Decision：重写旧迁移的 41 个业务 ID 列为 BIGINT；保留原生 SQL。State::next_id 返回 Result<Id>，失败转 503；Id 绑定为 i64，JSON 序列化为字符串。移除 db::id。
+- Reason：任务书与 §18.2/18.5；逐表核对实际为 41 列（14 表），不是预估约 39 列。
+- Alternatives Considered：兼容迁移、SeaORM 实体改造；均不属于 T3b。
+- Tradeoffs：本地旧测试库重建；可选引用空字符串输入解析为 0，输出为 "0"，校验允许 0 回传；必需引用仍由现有校验拒绝不存在的记录。请求体沿用字符串接收并显式解析，保持既有 400 JSON 错误响应。
+- Scope：T3b；Status：实施，三库首轮各 98/98。

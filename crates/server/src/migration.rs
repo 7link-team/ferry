@@ -71,9 +71,10 @@ impl MigratorTrait for Migrator {
     }
 }
 
+// Optional references use 0, including activity.resource_id for bulk actions.
 const INITIAL: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
+        id BIGINT PRIMARY KEY,
         email TEXT NOT NULL,
         name TEXT NOT NULL,
         password_hash TEXT NOT NULL,
@@ -81,26 +82,33 @@ const INITIAL: &[&str] = &[
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users (email)",
+    // `id` identifies the row; `token_hash` authenticates the caller. They must
+    // stay separate: a snowflake encodes its own creation time and a small
+    // counter, so using it as the cookie would make a session guessable from
+    // roughly when its owner signed in. Only the hash is stored, as with
+    // runner keys.
     "CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL DEFAULT '',
+        id BIGINT PRIMARY KEY,
+        token_hash TEXT NOT NULL,
+        user_id BIGINT NOT NULL,
+        workspace_id BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         seen_at BIGINT NOT NULL,
         expires_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS sessions_token ON sessions (token_hash)",
     "CREATE TABLE IF NOT EXISTS workspaces (
-        id TEXT PRIMARY KEY,
+        id BIGINT PRIMARY KEY,
         slug TEXT NOT NULL,
         name TEXT NOT NULL,
-        owner_id TEXT NOT NULL,
+        owner_id BIGINT NOT NULL,
         join_code TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS workspaces_slug ON workspaces (slug)",
     "CREATE TABLE IF NOT EXISTS workspace_roles (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         permissions TEXT NOT NULL,
         builtin BIGINT NOT NULL DEFAULT 0,
@@ -108,22 +116,22 @@ const INITIAL: &[&str] = &[
         updated_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS workspace_roles_workspace ON workspace_roles (workspace_id)",
     "CREATE TABLE IF NOT EXISTS workspace_members (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        role_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        role_id BIGINT NOT NULL,
         state TEXT NOT NULL DEFAULT 'active',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL)",
     "CREATE UNIQUE INDEX IF NOT EXISTS workspace_members_unique ON workspace_members (workspace_id, user_id)",
     "CREATE TABLE IF NOT EXISTS activity (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        actor_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
+        actor_id BIGINT NOT NULL,
         actor_name TEXT NOT NULL,
         action TEXT NOT NULL,
         resource TEXT NOT NULL,
-        resource_id TEXT NOT NULL,
+        resource_id BIGINT NOT NULL,
         details TEXT NOT NULL,
         created_at BIGINT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS activity_workspace ON activity (workspace_id, created_at)",
@@ -151,25 +159,25 @@ impl MigrationTrait for Initial {
 
 const HOST_RESOURCES: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS host_groups (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
-        parent_id TEXT NOT NULL DEFAULT '',
+        parent_id BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         version BIGINT NOT NULL DEFAULT 1)",
     "CREATE INDEX IF NOT EXISTS host_groups_workspace ON host_groups (workspace_id, name)",
     "CREATE TABLE IF NOT EXISTS hosts (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         address TEXT NOT NULL DEFAULT '',
         port BIGINT NOT NULL DEFAULT 22,
         username TEXT NOT NULL DEFAULT '',
         connection TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'unknown',
-        group_id TEXT NOT NULL DEFAULT '',
+        group_id BIGINT NOT NULL DEFAULT 0,
         description TEXT NOT NULL DEFAULT '',
         host_key TEXT NOT NULL DEFAULT '',
         runner_key_hash TEXT NOT NULL DEFAULT '',
@@ -180,8 +188,8 @@ const HOST_RESOURCES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS hosts_workspace ON hosts (workspace_id, name)",
     "CREATE INDEX IF NOT EXISTS hosts_group ON hosts (workspace_id, group_id)",
     "CREATE TABLE IF NOT EXISTS tags (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         color TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
@@ -189,8 +197,8 @@ const HOST_RESOURCES: &[&str] = &[
         version BIGINT NOT NULL DEFAULT 1)",
     "CREATE UNIQUE INDEX IF NOT EXISTS tags_unique ON tags (workspace_id, name)",
     "CREATE TABLE IF NOT EXISTS host_tags (
-        host_id TEXT NOT NULL,
-        tag_id TEXT NOT NULL,
+        host_id BIGINT NOT NULL,
+        tag_id BIGINT NOT NULL,
         PRIMARY KEY (host_id, tag_id))",
 ];
 
@@ -219,18 +227,18 @@ const RUNNER_ENROLMENT: &[&str] = &[
     // that command is single-use and short-lived, and only its hash is stored,
     // so the table is not a list of working credentials.
     //
-    // `host_id` empty means "whichever host enrols with this", which is the
-    // one-command flow for a machine that has no row yet. Non-empty binds the
+    // `host_id` 0 means "whichever host enrols with this", which is the
+    // one-command flow for a machine that has no row yet. Nonzero binds the
     // token to a host the operator already created.
     "CREATE TABLE IF NOT EXISTS runner_tokens (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
-        host_id TEXT NOT NULL DEFAULT '',
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
+        host_id BIGINT NOT NULL DEFAULT 0,
         token_hash TEXT NOT NULL,
         expires_at BIGINT NOT NULL,
         used_at BIGINT NOT NULL DEFAULT 0,
-        used_by TEXT NOT NULL DEFAULT '',
-        created_by TEXT NOT NULL DEFAULT '',
+        used_by BIGINT NOT NULL DEFAULT 0,
+        created_by BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
         version BIGINT NOT NULL DEFAULT 1)",
@@ -280,7 +288,7 @@ mod tests {
             added_column("ALTER TABLE hosts ADD COLUMN metrics TEXT NOT NULL DEFAULT ''"),
             Some(("hosts".into(), "metrics".into()))
         );
-        assert!(added_column("CREATE TABLE IF NOT EXISTS hosts (id TEXT)").is_none());
+        assert!(added_column("CREATE TABLE IF NOT EXISTS hosts (id BIGINT)").is_none());
         assert!(added_column("CREATE INDEX x ON hosts (id)").is_none());
         assert!(added_column("ALTER TABLE hosts RENAME TO boxes").is_none());
     }
@@ -290,8 +298,8 @@ const CREDENTIALS: &[&str] = &[
     // `secret` holds a sealed SSH private key, so it must not land in MySQL's
     // default VARCHAR(255) — dialect.rs lists it as a long column.
     "CREATE TABLE IF NOT EXISTS credentials (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         kind TEXT NOT NULL,
         username TEXT NOT NULL DEFAULT '',
@@ -302,7 +310,7 @@ const CREDENTIALS: &[&str] = &[
         updated_at BIGINT NOT NULL,
         version BIGINT NOT NULL DEFAULT 1)",
     "CREATE INDEX IF NOT EXISTS credentials_workspace ON credentials (workspace_id, name)",
-    "ALTER TABLE hosts ADD COLUMN credential_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE hosts ADD COLUMN credential_id BIGINT NOT NULL DEFAULT 0",
 ];
 
 struct Credentials;
@@ -341,6 +349,56 @@ mod schema_tests {
             PIPELINES,
         ]
         .concat()
+    }
+
+    /// Check the applied schema (including ALTERs), not just the CREATE text.
+    #[tokio::test]
+    async fn every_business_id_column_is_bigint() {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let inventory = [
+            ("users", "id"),
+            ("sessions", "id user_id workspace_id"),
+            ("workspaces", "id owner_id"),
+            ("workspace_roles", "id workspace_id"),
+            ("workspace_members", "id workspace_id user_id role_id"),
+            ("activity", "id workspace_id actor_id resource_id"),
+            ("host_groups", "id workspace_id parent_id"),
+            ("hosts", "id workspace_id group_id credential_id"),
+            ("tags", "id workspace_id"),
+            ("host_tags", "host_id tag_id"),
+            (
+                "runner_tokens",
+                "id workspace_id host_id used_by created_by",
+            ),
+            ("credentials", "id workspace_id"),
+            ("repositories", "id workspace_id credential_id"),
+            ("pipelines", "id workspace_id repository_id target_ref"),
+        ];
+        let mut count = 0;
+        for (table, columns) in inventory {
+            let rows = crate::db::all(&db, &format!("PRAGMA table_info({table})"), vec![])
+                .await
+                .unwrap();
+            let mut actual = std::collections::BTreeSet::new();
+            for row in rows {
+                let column = crate::db::text(&row, "name");
+                if column == "id"
+                    || column.ends_with("_id")
+                    || ["target_ref", "used_by", "created_by"].contains(&column.as_str())
+                {
+                    assert_eq!(crate::db::text(&row, "type"), "BIGINT", "{table}.{column}");
+                    actual.insert(column);
+                    count += 1;
+                }
+            }
+            assert_eq!(
+                actual,
+                columns.split_whitespace().map(str::to_owned).collect(),
+                "{table}"
+            );
+        }
+        assert_eq!(count, 41);
     }
 
     #[test]
@@ -382,12 +440,12 @@ mod schema_tests {
 
 const REPOSITORIES: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS repositories (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
         url TEXT NOT NULL,
         default_branch TEXT NOT NULL DEFAULT 'main',
-        credential_id TEXT NOT NULL DEFAULT '',
+        credential_id BIGINT NOT NULL DEFAULT 0,
         description TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
@@ -415,15 +473,16 @@ impl MigrationTrait for Repositories {
     }
 }
 
+// target_ref is a polymorphic row ID; 0 means no reference (validation requires a target).
 const PIPELINES: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS pipelines (
-        id TEXT PRIMARY KEY,
-        workspace_id TEXT NOT NULL,
+        id BIGINT PRIMARY KEY,
+        workspace_id BIGINT NOT NULL,
         name TEXT NOT NULL,
-        repository_id TEXT NOT NULL DEFAULT '',
+        repository_id BIGINT NOT NULL DEFAULT 0,
         definition TEXT NOT NULL,
         target_kind TEXT NOT NULL,
-        target_ref TEXT NOT NULL,
+        target_ref BIGINT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
         created_at BIGINT NOT NULL,
         updated_at BIGINT NOT NULL,
