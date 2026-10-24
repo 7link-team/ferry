@@ -18,7 +18,18 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 BINARY=${FERRY_BINARY:-target/debug/ferry-server}
-[ -x "$BINARY" ] || { echo "no server binary at $BINARY; run: cargo build -p ferry-server"; exit 1; }
+# Build here rather than trusting whatever binary happens to be lying around.
+# A failed build used to leave the previous binary in place, and the whole
+# suite then passed against stale code — which is indistinguishable from the
+# change actually working. Set FERRY_BINARY to skip (e.g. a release build).
+if [ -z "${FERRY_BINARY:-}" ]; then
+  echo "building $BINARY"
+  if ! cargo build -p ferry-server; then
+    echo "FAILED: the server did not build; refusing to test a stale binary."
+    exit 1
+  fi
+fi
+[ -x "$BINARY" ] || { echo "no server binary at $BINARY"; exit 1; }
 
 total_fail=0
 
@@ -137,6 +148,35 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   # A host in use pins its credential.
   c -X POST -d "{\"name\":\"ssh-host\",\"connection\":\"ssh\",\"address\":\"10.0.0.99\",\"port\":22,\"username\":\"root\",\"credential_id\":\"$cred\"}" "$B/workspaces/ops/hosts" >/dev/null
   ck "credential in use cannot be deleted"  "还有 1 台主机"  "$(c -X DELETE "$B/workspaces/ops/credentials/$cred")"
+  # A repository pins its credential too; the host check alone used to let a
+  # repository keep a reference to a deleted credential.
+  local repo_cred
+  repo_cred=$(c -X POST -d '{"name":"git-token","kind":"token","secret":"ghp_example"}' "$B/workspaces/ops/credentials" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  c -X POST -d "{\"name\":\"pinned\",\"url\":\"https://example.com/a.git\",\"credential_id\":\"$repo_cred\"}" "$B/workspaces/ops/repositories" >/dev/null
+  ck "credential used by a repository cannot be deleted"  "还有 1 个仓库"  "$(c -X DELETE "$B/workspaces/ops/credentials/$repo_cred")"
+  # Repositories share credentials but never include credential data in audit details.
+  local repo repo_body
+  repo_body=$(c -X POST -d '{"name":"repo-public","url":"https://example.com/a/b.git"}' "$B/workspaces/ops/repositories")
+  ck "create repository" '"id"' "$repo_body"
+  repo=$(printf '%s' "$repo_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "repository default branch" '"default_branch":"main"' "$(c "$B/workspaces/ops/repositories/$repo")"
+  ck "repository local URL rejected" '"error"' "$(c -X POST -d '{"name":"local","url":"file:///etc"}' "$B/workspaces/ops/repositories")"
+  ck "repository missing credential rejected" '"error"' "$(c -X POST -d '{"name":"missing","url":"https://example.com/repo","credential_id":"missing"}' "$B/workspaces/ops/repositories")"
+  ck "repository real credential accepted" '"id"' "$(c -X POST -d "{\"name\":\"repo-private\",\"url\":\"git@github.com:a/b.git\",\"credential_id\":\"$cred\"}" "$B/workspaces/ops/repositories")"
+  ck "repository name search" '"total":1' "$(c "$B/workspaces/ops/repositories?q=repo-public")"
+  ck "repository URL search" '"total":1' "$(c "$B/workspaces/ops/repositories?q=github.com")"
+  ck "repository update" '"ok":true' "$(c -X PATCH -d '{"name":"repo-updated","url":"ssh://git@example.com/repo","version":1}' "$B/workspaces/ops/repositories/$repo")"
+  ck "repository stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"again","url":"https://example.com/repo","version":1}' "$B/workspaces/ops/repositories/$repo")"
+  ck "repository update validates credential" '"error"' "$(c -X PATCH -d '{"name":"again","url":"https://example.com/repo","credential_id":"missing","version":2}' "$B/workspaces/ops/repositories/$repo")"
+  ck "repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$repo")"
+  ck "repository deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/repositories/$repo")"
+  ck "repository audit exists" '"resource":"repositories"' "$(c "$B/workspaces/ops/activity?resource=repositories")"
+  ck "repository second workspace" '"slug":"repo-other"' "$(c -X POST -d '{"name":"Other","slug":"repo-other"}' "$B/workspaces")"
+  ck "repository foreign credential rejected" '"error"' "$(c -X POST -d "{\"name\":\"foreign\",\"url\":\"https://example.com/repo\",\"credential_id\":\"$cred\"}" "$B/workspaces/repo-other/repositories")"
+  ck "repository workspace isolation" '"total":0' "$(c "$B/workspaces/repo-other/repositories")"
+  ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/ops/activity?resource=repositories")"
+
   ck "roles"            '"拥有者"'      "$(c "$B/workspaces/ops/roles")"
   ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/hosts")"
 

@@ -238,20 +238,27 @@ pub async fn remove(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
     scope.require("credentials.delete")?;
-    // Refuse rather than leave hosts pointing at a credential that is gone:
-    // the failure would surface later as an unexplained connection error.
-    let used = one(
-        &s.db,
-        "SELECT COUNT(*) AS total FROM hosts WHERE workspace_id = ? AND credential_id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .map(|row| db::int(&row, "total"))
-    .unwrap_or(0);
-    if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "还有 {used} 台主机在用这条凭据，请先改掉再删除。"
-        )));
+    // Refuse rather than leave anything pointing at a credential that is gone:
+    // the failure would surface later as an unexplained connection error, far
+    // from the deletion that caused it. Every table that can reference a
+    // credential has to be listed here — a new one that is forgotten silently
+    // reintroduces the dangling reference.
+    for (table, noun) in [("hosts", "台主机"), ("repositories", "个仓库")] {
+        let used = one(
+            &s.db,
+            &format!(
+                "SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ? AND credential_id = ?"
+            ),
+            vec![scope.workspace_id.clone().into(), id.clone().into()],
+        )
+        .await?
+        .map(|row| db::int(&row, "total"))
+        .unwrap_or(0);
+        if used > 0 {
+            return Err(ApiError::conflict(format!(
+                "还有 {used} {noun}在用这条凭据，请先改掉再删除。"
+            )));
+        }
     }
     let affected = execute(
         &s.db,

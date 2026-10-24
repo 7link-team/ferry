@@ -64,6 +64,7 @@ impl MigratorTrait for Migrator {
             Box::new(HostResources),
             Box::new(RunnerEnrolment),
             Box::new(Credentials),
+            Box::new(Repositories),
         ]
     }
 }
@@ -329,7 +330,14 @@ mod schema_tests {
     /// Every DDL statement this crate ships, so a new migration is covered by
     /// simply being added to the list below.
     fn all_statements() -> Vec<&'static str> {
-        [INITIAL, HOST_RESOURCES, RUNNER_ENROLMENT, CREDENTIALS].concat()
+        [
+            INITIAL,
+            HOST_RESOURCES,
+            RUNNER_ENROLMENT,
+            CREDENTIALS,
+            REPOSITORIES,
+        ]
+        .concat()
     }
 
     #[test]
@@ -360,5 +368,40 @@ mod schema_tests {
                 "a TEXT column reached MySQL unsized:\n{mysql}"
             );
         }
+    }
+}
+
+const REPOSITORIES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS repositories (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        url TEXT NOT NULL,
+        default_branch TEXT NOT NULL DEFAULT 'main',
+        credential_id TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        version BIGINT NOT NULL DEFAULT 1)",
+    "CREATE INDEX IF NOT EXISTS repositories_workspace ON repositories (workspace_id, name)",
+];
+
+struct Repositories;
+impl MigrationName for Repositories {
+    fn name(&self) -> &str {
+        "repositories_v1"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for Repositories {
+    async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
+        for sql in REPOSITORIES {
+            execute_schema(m, sql).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
     }
 }

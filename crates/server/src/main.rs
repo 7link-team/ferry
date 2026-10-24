@@ -8,6 +8,7 @@ mod error;
 mod hosts;
 mod migration;
 mod remote;
+mod repositories;
 mod resource;
 mod runner;
 mod ssh;
@@ -157,6 +158,16 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
+        .route(
+            "/{workspace}/repositories",
+            get(repositories::list).post(repositories::create),
+        )
+        .route(
+            "/{workspace}/repositories/{id}",
+            get(repositories::get)
+                .patch(repositories::update)
+                .delete(repositories::remove),
+        )
         .route(
             "/{workspace}/credentials",
             get(credentials::list).post(credentials::create),

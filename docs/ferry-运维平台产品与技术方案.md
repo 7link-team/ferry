@@ -911,3 +911,81 @@ GET /api/workspaces/{ws}/dashboard
 7. **应用市场的内容从哪来？** 内置清单 / 远程索引 / 自建仓库，三种的权限与更新机制都不一样。
 
 第 1 条会影响骨架，建议先定；其余可以在对应阶段开始前定。
+
+## 17. 阶段 4 设计：构建模块的最小闭环
+
+目标是跑通一次真实的「拉代码 → 执行步骤 → 产出日志」，而不是先造一套编排抽象。模版、并行、条件、矩阵等能力等这条路通了再加——先造编排容易造出用不上的东西。
+
+### 17.1 数据模型
+
+| 表 | 作用 | 要点 |
+|---|---|---|
+| `repositories` | Git 仓库登记 | `url`、`default_branch`、`credential_id`（复用 §9.6 的凭据保管） |
+| `pipelines` | 流水线定义 | `definition` 存 JSON；`target_kind`/`target_ref` 指向主机或主机组 |
+| `pipeline_runs` | 一次执行 | 工作空间内自增 `number`、`state`、触发方式与触发人 |
+| `pipeline_run_steps` | 每步的结果 | `index`、`state`、`exit_code`、起止时间 |
+| `pipeline_run_logs` | 日志分片 | `seq` 单调递增，前端按 `seq` 增量拉取 |
+
+日志单独成表而不是塞进 run 的一个大字段：一次构建的日志可以是几十 MB，整行更新会让每次追加都重写整列。分片之后追加是插入，增量读取是一次按 `seq` 的范围查询。
+
+### 17.2 流水线定义
+
+```json
+{
+  "workdir": "/tmp/ferry/{{run}}",
+  "env": [{ "name": "LOG_LEVEL", "value": "info" }],
+  "steps": [
+    { "name": "拉取代码", "run": "git clone --depth 1 -b {{branch}} {{repo_url}} ." },
+    { "name": "构建",     "run": "cargo build --release", "timeout_seconds": 1800 }
+  ]
+}
+```
+
+- **第一版只有线性步骤**，没有并行、条件、矩阵。
+- 模板变量只有 `{{run}}`、`{{branch}}`、`{{repo_url}}`、`{{commit}}` 这几个，由服务端替换；**不做通用模板引擎**。
+- 仓库凭据在执行时由服务端解密，通过 `GIT_ASKPASS` 或临时 `~/.git-credentials` 注入，**不拼进命令行**——命令行会出现在目标主机的进程列表里。
+
+### 17.3 执行引擎
+
+执行只经过 §9.1 的 `HostChannel`，所以 runner 主机和 SSH 主机跑同一套逻辑：
+
+```
+排队 → 取一条 run → 打开通道 → 逐步 exec → 每步写 steps 与 logs
+     → 任一步非零退出即停止，后续步骤标记 skipped → 标记 run 结束
+```
+
+- **失败即停**，不自动重试：构建失败重跑一次通常只是把问题推迟。
+- 每步有超时，超时按失败处理并记录是超时而非普通失败——两者的排查方向不同。
+- `HostChannel::exec` 捕获完整输出后才返回，所以第一版的日志是**按步落库**，不是边跑边流。实时性由 17.4 的轮询提供。真正的流式需要 `HostChannel` 增加一个流式 exec，等这条路通了再说。
+
+```
+// ponytail: 单进程调度器 + 数据库乐观锁取任务，和定时任务用同一套思路。
+// 一个服务实例够用；要多实例了再换成带租约的抢占。
+```
+
+### 17.4 接口
+
+```
+GET    /api/workspaces/{ws}/repositories            仓库（标准 CRUD）
+GET    /api/workspaces/{ws}/pipelines               流水线（标准 CRUD）
+POST   /api/workspaces/{ws}/pipelines/{id}/actions/run     触发一次执行
+GET    /api/workspaces/{ws}/pipeline-runs                  执行历史
+GET    /api/workspaces/{ws}/pipeline-runs/{id}             一次执行的详情与各步状态
+GET    /api/workspaces/{ws}/pipeline-runs/{id}/logs?after={seq}   增量日志
+POST   /api/workspaces/{ws}/pipeline-runs/{id}/actions/cancel     取消
+```
+
+`logs` 返回 `{items:[{seq,step_index,stream,chunk}], next_seq}`；前端带着 `next_seq` 轮询，运行中 1 秒一次，结束后停止。这是最小实现；换成 SSE 时接口形状不变。
+
+### 17.5 验收标准
+
+必须用**真实的 Git 仓库和真实的主机**跑通，不接受只有单元测试：
+
+1. 登记一个仓库，用凭据拉取一个私有仓库成功
+2. 一条两步流水线在 runner 主机上跑通，日志完整、顺序正确
+3. 同一条流水线在 SSH 主机上跑通，结果一致
+4. 第一步失败时第二步不执行，run 标记为 failed，失败步骤的退出码正确
+5. 超时的步骤被标记为超时，不是普通失败
+6. 取消一个运行中的 run，它停下来并标记为 cancelled
+7. 凭据明文不出现在日志、不出现在目标主机的进程列表、不出现在操作记录里
+8. 跨工作空间：A 的流水线不能引用 B 的仓库或主机
