@@ -10,6 +10,7 @@ pub struct State {
     pub server_mode: bool,
     pub secure_cookie: bool,
     pub bind: std::net::SocketAddr,
+    pub vault: crate::vault::Vault,
 }
 pub type AppState = Arc<State>;
 

@@ -58,32 +58,28 @@ pub enum Credential {
 }
 
 impl Credential {
-    /// ponytail: 暂时从环境变量取。正式位置是 `credentials` 表（方案 §9.6：
-    /// 分层加密落库、按 `hosts.credential_id` 取），搬过去时只改这个函数，
-    /// `SshChannel::open` 的签名不用动。
-    pub fn from_env() -> Result<Self> {
-        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        if let Some(path) = var("FERRY_SSH_KEY_PATH") {
-            let pem = std::fs::read_to_string(&path).map_err(|error| {
-                ApiError(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("读取私钥文件 {path} 失败：{error}。"),
-                )
-            })?;
-            return Ok(Self::Key {
-                pem,
-                passphrase: var("FERRY_SSH_KEY_PASSPHRASE"),
-            });
+    /// Loads the credential a host references, decrypting it at the moment of
+    /// use. The plaintext lives only for the length of this connection
+    /// attempt: it is never logged, never returned over HTTP, and never
+    /// written anywhere.
+    pub async fn load(s: &AppState, workspace_id: &str, credential_id: &str) -> Result<Self> {
+        if credential_id.is_empty() {
+            return Err(ApiError::bad(
+                "这台主机还没有选择登录凭据，请在「授权认证」里新建一条，再到主机上选用。",
+            ));
         }
-        var("FERRY_SSH_PASSWORD")
-            .map(Self::Password)
-            .ok_or_else(|| {
-                ApiError(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "尚未配置主机登录凭据，请设置 FERRY_SSH_PASSWORD 或 FERRY_SSH_KEY_PATH。"
-                        .into(),
-                )
-            })
+        let (kind, _username, secret) =
+            crate::credentials::unseal(s, workspace_id, credential_id).await?;
+        match kind.as_str() {
+            "password" => Ok(Self::Password(secret)),
+            "ssh-key" => Ok(Self::Key {
+                pem: secret,
+                passphrase: None,
+            }),
+            other => Err(ApiError::bad(format!(
+                "凭据类型「{other}」不能用于 SSH 登录，请改用密码或 SSH 私钥。"
+            ))),
+        }
     }
 }
 
@@ -147,7 +143,8 @@ impl client::Handler for Tofu {
 /// 首次连接到的指纹在这里落库：若等调用方去写，忘了写就等于把 TOFU 降级成
 /// 「永远接受」，所以这一步和建立连接绑在一起，写不成功就不给连接。
 pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
-    let channel = SshChannel::open(host, Credential::from_env()?).await?;
+    let credential = Credential::load(s, &host.workspace_id, &host.credential_id).await?;
+    let channel = SshChannel::open(host, credential).await?;
     if let Some(fingerprint) = &channel.learned_host_key {
         // 只在仍然为空时写：两个并发的首次连接不会互相覆盖。也不动 version，
         // 这不是操作员的编辑，不该让别人正在填的表单失效。
@@ -639,6 +636,8 @@ mod tests {
         Some((
             Host {
                 id: "live".into(),
+                workspace_id: "live".into(),
+                credential_id: String::new(),
                 name: "live".into(),
                 address: address.into(),
                 port: port.parse().ok()?,

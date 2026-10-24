@@ -234,12 +234,24 @@ function Field<T>({
               ))}
             </SelectContent>
           </Select>
-        ) : field.type === "textarea" ? (
+        ) : field.type === "textarea" || field.type === "secret" ? (
+          // A `secret` has to be a textarea, not <input type=password>: an
+          // HTML input cannot hold newlines, so pasting a PEM private key
+          // into one silently strips them and stores an unusable key. The
+          // cost is that the value is visible while typing; for a key being
+          // pasted that is a fair trade, and nothing is ever rendered back.
           <textarea
-            className="min-h-20 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50"
+            className={cn(
+              "min-h-20 rounded-md border border-input bg-transparent px-3 py-2 shadow-xs",
+              "outline-none focus-visible:border-ring focus-visible:ring-[3px]",
+              "focus-visible:ring-ring/50 disabled:opacity-50",
+              field.type === "secret" ? "font-mono text-xs" : "text-sm",
+            )}
             value={text}
             placeholder={field.placeholder}
             readOnly={readOnly}
+            spellCheck={false}
+            autoComplete="off"
             onChange={(event) => onChange(event.target.value)}
           />
         ) : field.type === "switch" ? (

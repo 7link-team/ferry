@@ -62,3 +62,20 @@ describe("action URLs", () => {
     ]);
   });
 });
+
+describe("secret handling", () => {
+  it("a PEM key survives a textarea but not an input", () => {
+    // Why ResourceForm renders `secret` as a textarea: assigning a multi-line
+    // value to an <input> drops the newlines, which corrupts a private key.
+    const pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaA\nAAAA\n-----END OPENSSH PRIVATE KEY-----";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.value = pem;
+    expect(input.value).not.toBe(pem);
+    expect(input.value).not.toContain("\n");
+
+    const textarea = document.createElement("textarea");
+    textarea.value = pem;
+    expect(textarea.value).toBe(pem);
+  });
+});

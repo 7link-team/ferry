@@ -219,7 +219,7 @@ const HOST_SPEC: Spec = Spec {
     sortable: &["name", "address", "state", "seen_at", "created_at"],
     default_sort: "name",
 };
-const HOST_COLUMNS: &str = "id,name,address,port,username,connection,state,group_id,description,seen_at,created_at,updated_at,version";
+const HOST_COLUMNS: &str = "id,name,address,port,username,connection,state,group_id,credential_id,description,seen_at,created_at,updated_at,version";
 
 pub const CONNECTIONS: [&str; 2] = ["runner", "ssh"];
 pub const STATES: [&str; 3] = ["online", "offline", "unknown"];
@@ -234,6 +234,7 @@ fn host_json(row: &QueryResult) -> Value {
         "connection": text(row, "connection"),
         "state": text(row, "state"),
         "group_id": text(row, "group_id"),
+        "credential_id": text(row, "credential_id"),
         "description": text(row, "description"),
         "seen_at": db::int(row, "seen_at"),
         "created_at": db::int(row, "created_at"),
@@ -255,6 +256,8 @@ pub struct HostBody {
     username: String,
     #[serde(default)]
     group_id: String,
+    #[serde(default)]
+    credential_id: String,
     #[serde(default)]
     description: String,
     #[serde(default)]
@@ -326,8 +329,8 @@ pub async fn create_host(
     let (id, now) = (db::id(), db::now());
     execute(
         &s.db,
-        "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,description,seen_at,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,'unknown',?,?,0,?,?,1)",
+        "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,credential_id,description,seen_at,created_at,updated_at,version)
+         VALUES (?,?,?,?,?,?,?,'unknown',?,?,?,0,?,?,1)",
         vec![
             id.clone().into(),
             scope.workspace_id.clone().into(),
@@ -337,6 +340,7 @@ pub async fn create_host(
             body.username.trim().into(),
             connection.clone().into(),
             body.group_id.into(),
+            body.credential_id.into(),
             body.description.trim().into(),
             now.into(),
             now.into(),
@@ -367,7 +371,7 @@ pub async fn update_host(
     // reached would invalidate its key or its stored credential silently.
     let affected = execute(
         &s.db,
-        "UPDATE hosts SET name=?,address=?,port=?,username=?,group_id=?,description=?,updated_at=?,version=version+1
+        "UPDATE hosts SET name=?,address=?,port=?,username=?,group_id=?,credential_id=?,description=?,updated_at=?,version=version+1
          WHERE workspace_id=? AND id=? AND version=?",
         vec![
             name.clone().into(),
@@ -375,6 +379,7 @@ pub async fn update_host(
             body.port.into(),
             body.username.trim().into(),
             body.group_id.into(),
+            body.credential_id.into(),
             body.description.trim().into(),
             db::now().into(),
             scope.workspace_id.clone().into(),
@@ -592,7 +597,7 @@ pub async fn delete_tag(
 
 /// A zero-row update means the row is gone or someone else saved first. Tell
 /// those apart, because "refresh and retry" is useless advice for a deleted row.
-async fn stale(s: &AppState, table: &str, workspace_id: &str, id: &str) -> Result<ApiError> {
+pub async fn stale(s: &AppState, table: &str, workspace_id: &str, id: &str) -> Result<ApiError> {
     let exists = one(
         s.db(),
         &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),

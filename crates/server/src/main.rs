@@ -1,6 +1,7 @@
 mod assets;
 mod auth;
 mod channel;
+mod credentials;
 mod db;
 mod dialect;
 mod error;
@@ -11,6 +12,7 @@ mod resource;
 mod runner;
 mod ssh;
 mod state;
+mod vault;
 mod workspace;
 
 use axum::{
@@ -99,6 +101,7 @@ async fn main() -> anyhow::Result<()> {
         server_mode: cfg.server_mode,
         secure_cookie: cfg.secure_cookie,
         bind: cfg.bind,
+        vault: vault::Vault::open(&cfg.data_dir, cfg.server_mode)?,
     });
 
     let mut hosts = cfg.allowed_hosts;
@@ -154,6 +157,16 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
+        .route(
+            "/{workspace}/credentials",
+            get(credentials::list).post(credentials::create),
+        )
+        .route(
+            "/{workspace}/credentials/{id}",
+            get(credentials::get)
+                .patch(credentials::update)
+                .delete(credentials::remove),
+        )
         .route(
             "/{workspace}/tags",
             get(hosts::list_tags).post(hosts::create_tag),

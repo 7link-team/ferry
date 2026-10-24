@@ -50,6 +50,14 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
 
   local B="http://127.0.0.1:$port/api" pass=0 fail=0
   c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -b "$jar" -c "$jar" "$@"; }
+  ckn() { # ckn <label> <regex-that-must-NOT-appear> <actual>
+    if echo "$3" | grep -q "$2"; then
+      fail=$((fail + 1))
+      echo "    FAIL $1: /$2/ must not appear, got: $(echo "$3" | head -c 200)"
+    else
+      pass=$((pass + 1))
+    fi
+  }
   ck() { # ck <label> <expected-regex> <actual>
     if echo "$3" | grep -q "$2"; then
       pass=$((pass + 1))
@@ -109,6 +117,26 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   ck "activity"         '"resource":"hosts"' "$(c "$B/workspaces/ops/activity?page_size=3")"
   ck "activity sort"    '"page":1'      "$(c "$B/workspaces/ops/activity?sort=-created_at")"
   ck "create tag"       '"id"'          "$(c -X POST -d '{"name":"prod","color":"#4f9cf9"}' "$B/workspaces/ops/tags")"
+
+  # Credentials: the secret goes in and must never come back out. A long
+  # multi-line value is used on purpose — MySQL's default VARCHAR(255) would
+  # truncate a real private key, and the failure would only appear later as
+  # "cannot decrypt".
+  local pem cred
+  pem="-----BEGIN OPENSSH PRIVATE KEY-----\n$(printf 'b3BlbnNzaC1rZXktdjEAAAAA%.0s' $(seq 1 40))\n-----END OPENSSH PRIVATE KEY-----"
+  cred=$(c -X POST -d "{\"name\":\"prod-key\",\"kind\":\"ssh-key\",\"username\":\"root\",\"secret\":\"$pem\"}" "$B/workspaces/ops/credentials" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "create credential"  '"has_secret":true'  "$(c "$B/workspaces/ops/credentials/$cred")"
+  ckn "secret never returned by detail"  'BEGIN OPENSSH'  "$(c "$B/workspaces/ops/credentials/$cred")"
+  ckn "secret never returned by list"    'BEGIN OPENSSH'  "$(c "$B/workspaces/ops/credentials")"
+  ck "credential needs a secret"  "请填写凭据内容"  "$(c -X POST -d '{"name":"empty","kind":"password"}' "$B/workspaces/ops/credentials")"
+  ck "credential needs a known kind"  "请选择凭据类型"  "$(c -X POST -d '{"name":"x","kind":"magic","secret":"y"}' "$B/workspaces/ops/credentials")"
+  # Editing without a secret must keep the stored one rather than blanking it.
+  ck "rename keeps the secret"  '"ok":true'  "$(c -X PATCH -d '{"name":"prod-key-2","version":1}' "$B/workspaces/ops/credentials/$cred")"
+  ck "and it is still set"      '"has_secret":true'  "$(c "$B/workspaces/ops/credentials/$cred")"
+  # A host in use pins its credential.
+  c -X POST -d "{\"name\":\"ssh-host\",\"connection\":\"ssh\",\"address\":\"10.0.0.99\",\"port\":22,\"username\":\"root\",\"credential_id\":\"$cred\"}" "$B/workspaces/ops/hosts" >/dev/null
+  ck "credential in use cannot be deleted"  "还有 1 台主机"  "$(c -X DELETE "$B/workspaces/ops/credentials/$cred")"
   ck "roles"            '"拥有者"'      "$(c "$B/workspaces/ops/roles")"
   ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/hosts")"
 

@@ -35,7 +35,7 @@ pub struct PathQuery {
 async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChannel>> {
     let row = one(
         &s.db,
-        "SELECT id,name,address,port,username,connection,host_key FROM hosts
+        "SELECT id,name,address,port,username,connection,host_key,credential_id FROM hosts
          WHERE workspace_id = ? AND id = ?",
         vec![scope.workspace_id.clone().into(), id.into()],
     )
@@ -43,6 +43,8 @@ async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChann
     .ok_or_else(ApiError::missing)?;
     let host = Host {
         id: text(&row, "id"),
+        workspace_id: scope.workspace_id.clone(),
+        credential_id: text(&row, "credential_id"),
         name: text(&row, "name"),
         address: text(&row, "address"),
         port: db::int(&row, "port") as u16,
@@ -56,6 +58,8 @@ async fn open(s: &AppState, scope: &Scope, id: &str) -> Result<Box<dyn HostChann
 #[derive(Clone)]
 pub struct Host {
     pub id: String,
+    pub workspace_id: String,
+    pub credential_id: String,
     pub name: String,
     pub address: String,
     pub port: u16,

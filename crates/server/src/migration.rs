@@ -63,6 +63,7 @@ impl MigratorTrait for Migrator {
             Box::new(Initial),
             Box::new(HostResources),
             Box::new(RunnerEnrolment),
+            Box::new(Credentials),
         ]
     }
 }
@@ -279,5 +280,85 @@ mod tests {
         assert!(added_column("CREATE TABLE IF NOT EXISTS hosts (id TEXT)").is_none());
         assert!(added_column("CREATE INDEX x ON hosts (id)").is_none());
         assert!(added_column("ALTER TABLE hosts RENAME TO boxes").is_none());
+    }
+}
+
+const CREDENTIALS: &[&str] = &[
+    // `secret` holds a sealed SSH private key, so it must not land in MySQL's
+    // default VARCHAR(255) — dialect.rs lists it as a long column.
+    "CREATE TABLE IF NOT EXISTS credentials (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        username TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        -- No DEFAULT: MySQL forbids one on TEXT, and every insert supplies it.
+        secret TEXT NOT NULL,
+        created_at BIGINT NOT NULL,
+        updated_at BIGINT NOT NULL,
+        version BIGINT NOT NULL DEFAULT 1)",
+    "CREATE INDEX IF NOT EXISTS credentials_workspace ON credentials (workspace_id, name)",
+    "ALTER TABLE hosts ADD COLUMN credential_id TEXT NOT NULL DEFAULT ''",
+];
+
+struct Credentials;
+impl MigrationName for Credentials {
+    fn name(&self) -> &str {
+        "credentials_v1"
+    }
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for Credentials {
+    async fn up(&self, m: &SchemaManager) -> std::result::Result<(), DbErr> {
+        for sql in CREDENTIALS {
+            execute_schema(m, sql).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> std::result::Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+
+    /// Every DDL statement this crate ships, so a new migration is covered by
+    /// simply being added to the list below.
+    fn all_statements() -> Vec<&'static str> {
+        [INITIAL, HOST_RESOURCES, RUNNER_ENROLMENT, CREDENTIALS].concat()
+    }
+
+    #[test]
+    fn no_long_column_carries_a_default() {
+        // MySQL refuses `LONGTEXT ... DEFAULT ''` with error 1101, and the
+        // migration then fails at startup rather than at review time. Columns
+        // listed in dialect::LONG_COLUMNS must therefore declare no DEFAULT.
+        for sql in all_statements() {
+            let mysql = crate::dialect::mysql_schema(sql);
+            for line in mysql.lines() {
+                assert!(
+                    !(line.contains("LONGTEXT") && line.to_uppercase().contains("DEFAULT")),
+                    "MySQL rejects a DEFAULT on a LONGTEXT column:\n  {}\nin:\n{sql}",
+                    line.trim()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_text_column_survives_into_mysql() {
+        // A bare TEXT column cannot be indexed on MySQL; dialect.rs must have
+        // given every one of them a width.
+        for sql in all_statements() {
+            let mysql = crate::dialect::mysql_schema(sql);
+            assert!(
+                !mysql.contains(" TEXT "),
+                "a TEXT column reached MySQL unsized:\n{mysql}"
+            );
+        }
     }
 }

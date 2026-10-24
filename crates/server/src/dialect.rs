@@ -12,7 +12,10 @@
 use sea_orm::DbBackend;
 
 /// Columns whose contents outgrow a MySQL `VARCHAR` key: JSON blobs.
-const LONG_COLUMNS: &[&str] = &["permissions", "details"];
+/// MySQL forbids a DEFAULT on a TEXT/LONGTEXT column, so a column only
+/// belongs here when it genuinely needs more than VARCHAR(255) *and* has no
+/// default. `metrics` was promoted here once and broke the migration.
+const LONG_COLUMNS: &[&str] = &["permissions", "details", "secret"];
 
 /// Rewrites a parameterized query for the target backend.
 pub fn query(backend: DbBackend, sql: &str) -> String {
@@ -24,6 +27,27 @@ pub fn query(backend: DbBackend, sql: &str) -> String {
         // been taught is a configuration error, not something to guess at.
         other => unreachable!("unsupported database backend: {other:?}"),
     }
+}
+
+/// Counts the real placeholders, ignoring any `?` inside a string literal.
+pub fn placeholder_count(sql: &str) -> usize {
+    let mut count = 0;
+    let mut in_literal = false;
+    let mut chars = sql.chars().peekable();
+    while let Some(character) = chars.next() {
+        match character {
+            '\'' => {
+                if in_literal && chars.peek() == Some(&'\'') {
+                    chars.next();
+                    continue;
+                }
+                in_literal = !in_literal;
+            }
+            '?' if !in_literal => count += 1,
+            _ => {}
+        }
+    }
+    count
 }
 
 /// `?, ?, ?` -> `$1, $2, $3`, skipping anything inside a string literal.
@@ -68,7 +92,7 @@ pub fn schema(backend: DbBackend, sql: &str) -> Option<String> {
     }
 }
 
-fn mysql_schema(sql: &str) -> String {
+pub(crate) fn mysql_schema(sql: &str) -> String {
     // MySQL cannot index a TEXT column without a prefix length, and every TEXT
     // column here is either a key, a short label, or a JSON blob.
     let mut out = String::with_capacity(sql.len() + 64);
@@ -152,6 +176,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn placeholders_are_counted_without_counting_literals() {
+        assert_eq!(
+            placeholder_count("SELECT ? WHERE a = ? AND b = 'why? really'"),
+            2
+        );
+        assert_eq!(
+            placeholder_count("INSERT INTO t VALUES (?,?,'unknown',?,0,?,?,1)"),
+            5
+        );
+        assert_eq!(placeholder_count("SELECT 1"), 0);
+        assert_eq!(
+            placeholder_count("SELECT ? WHERE a = 'it''s ? here' AND b = ?"),
+            2
+        );
+    }
+
+    #[test]
     fn sqlite_and_mysql_keep_question_marks() {
         let sql = "SELECT id FROM hosts WHERE workspace_id = ? AND state IN (?,?)";
         assert_eq!(query(DbBackend::Sqlite, sql), sql);
@@ -201,6 +242,16 @@ mod tests {
         assert!(out.ends_with("COLLATE utf8mb4_bin"), "{out}");
         // No bare TEXT may survive, or the index on it fails to create.
         assert!(!out.contains(" TEXT "), "{out}");
+    }
+
+    #[test]
+    fn a_sealed_private_key_does_not_land_in_a_255_byte_column() {
+        // An SSH key seals to several kilobytes of hex; VARCHAR(255) would
+        // truncate it and the credential would fail to decrypt later, far
+        // from the cause.
+        let out = mysql_schema("CREATE TABLE credentials (id TEXT, secret TEXT NOT NULL)");
+        assert!(out.contains("secret LONGTEXT"), "{out}");
+        assert!(!out.contains("secret VARCHAR"), "{out}");
     }
 
     #[test]

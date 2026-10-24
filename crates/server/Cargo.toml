@@ -25,6 +25,7 @@ sqlx = { version = "0.9", default-features = false, features = ["mysql-rsa"] }
 argon2 = "0.5"
 rand = "0.8"
 sha2 = "0.10"
+chacha20poly1305 = "0.11"
 hex = "0.4"
 rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"

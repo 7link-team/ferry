@@ -33,6 +33,7 @@ export interface Host {
   connection: string;
   state: string;
   group_id: string;
+  credential_id: string;
   description: string;
   seen_at: number;
   version: number;
@@ -46,6 +47,18 @@ export interface Activity {
   details: unknown;
   created_at: number;
 }
+export interface Credential {
+  id: string;
+  name: string;
+  kind: string;
+  username: string;
+  description: string;
+  /** The server reports only whether a secret is set, never its value. */
+  has_secret: boolean;
+  /** Write-only: sent when creating or rotating, never returned by any read. */
+  secret?: string;
+  version: number;
+}
 export interface Tag {
   id: string;
   name: string;
@@ -53,6 +66,11 @@ export interface Tag {
   version: number;
 }
 
+const CREDENTIAL_KINDS: Option[] = [
+  { value: "password", label: "密码" },
+  { value: "ssh-key", label: "SSH 私钥" },
+  { value: "token", label: "访问令牌" },
+];
 const CONNECTIONS: Option[] = [
   { value: "runner", label: "代理（runner）" },
   { value: "ssh", label: "SSH 直连" },
@@ -77,6 +95,14 @@ function ago(at: number) {
 }
 
 /** Group options for the filter and the form, loaded once per render pass. */
+/** SSH login needs a password or a key; a token is for Git, not for sshd. */
+const sshCredentialOptions = (workspace: string) => async (): Promise<Option[]> => {
+  const page = await listResource<Credential>(workspace, "credentials", { page_size: 200 });
+  return page.items
+    .filter((c) => c.kind === "password" || c.kind === "ssh-key")
+    .map((c) => ({ value: c.id, label: `${c.name}（${label(CREDENTIAL_KINDS, c.kind)}）` }));
+};
+
 const groupOptions = (workspace: string) => async (): Promise<Option[]> => {
   const page = await listResource<HostGroup>(workspace, "host-groups", { page_size: 200 });
   return page.items.map((group) => ({ value: group.id, label: group.name }));
@@ -212,6 +238,42 @@ export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow
       empty: "还没有标签。",
     }),
 
+    credentials: list({
+      resource: "credentials",
+      rowKey: (row: Credential) => row.id,
+      filters: [
+        { key: "q", label: "名称/账号", type: "text", placeholder: "输入关键字" },
+        { key: "kind", label: "类型", type: "select", options: CREDENTIAL_KINDS },
+      ],
+      columns: [
+        { key: "name", label: "名称" },
+        { key: "kind", label: "类型", width: 120, render: (r: Credential) => label(CREDENTIAL_KINDS, r.kind) },
+        { key: "username", label: "账号", width: 160 },
+        {
+          key: "has_secret",
+          label: "内容",
+          width: 100,
+          render: (r: Credential) =>
+            r.has_secret ? (
+              <Badge variant="secondary">已设置</Badge>
+            ) : (
+              <Badge variant="destructive">未设置</Badge>
+            ),
+        },
+      ],
+      actions: [
+        { label: "编辑", permission: "credentials.update", to: (r: Credential) => ({ id: r.id, mode: "edit" }) },
+        {
+          label: "删除",
+          permission: "credentials.delete",
+          destructive: true,
+          action: (r: Credential) => deleteResource(workspace, "credentials", r.id),
+        },
+      ],
+      toolbar: { import: false, export: false },
+      empty: "还没有凭据。SSH 主机和 Git 仓库都从这里取登录信息。",
+    }),
+
     activity: list({
       resource: "activity",
       rowKey: (row: Activity) => row.id,
@@ -268,7 +330,7 @@ export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow
     hosts: form({
       resource: "hosts",
       heading: (row: Host) => row.name,
-      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", description: "" },
+      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", credential_id: "", description: "" },
       sections: [
         {
           title: "基本信息",
@@ -299,10 +361,51 @@ export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow
             },
             { key: "port", label: "端口", type: "number", required: true, when: (draft: Partial<Host>) => draft.connection === "ssh" },
             { key: "username", label: "登录账号", type: "text", required: true, placeholder: "root", when: (draft: Partial<Host>) => draft.connection === "ssh" },
+            {
+              key: "credential_id",
+              label: "登录凭据",
+              type: "select",
+              required: true,
+              options: sshCredentialOptions(workspace),
+              span: 2,
+              help: "在「构建 → 授权认证」里维护。密钥与密码只存在服务端，连接时才解密。",
+              when: (draft: Partial<Host>) => draft.connection === "ssh",
+            },
           ],
         },
         {
           fields: [{ key: "description", label: "备注", type: "textarea", span: 2 }],
+        },
+      ],
+    }),
+
+    credentials: form({
+      resource: "credentials",
+      heading: (r: Credential) => r.name,
+      blank: { name: "", kind: "password", username: "", description: "", secret: "" },
+      sections: [
+        {
+          fields: [
+            { key: "name", label: "名称", type: "text", required: true, placeholder: "例如 生产机 root" },
+            {
+              key: "kind",
+              label: "类型",
+              type: "select",
+              required: true,
+              options: CREDENTIAL_KINDS,
+              immutable: true,
+              help: "创建后不可更改：改类型等于换一条凭据。",
+            },
+            { key: "username", label: "账号", type: "text", placeholder: "root" },
+            {
+              key: "secret",
+              label: "内容",
+              type: "secret",
+              span: 2,
+              help: "密码、私钥全文或令牌。保存后服务端加密存放，任何接口都不会再返回它；编辑时留空表示不修改。",
+            },
+            { key: "description", label: "备注", type: "textarea", span: 2 },
+          ],
         },
       ],
     }),

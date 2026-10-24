@@ -5,6 +5,18 @@ use crate::error::Result;
 use sea_orm::{ConnectionTrait, ExecResult, QueryResult, Statement, Value};
 
 pub fn statement(db: &impl ConnectionTrait, sql: &str, values: Vec<Value>) -> Statement {
+    // A hand-written INSERT that gains a column is easy to update in three
+    // places and miss the fourth. Without this the symptom is a NOT NULL
+    // violation on whichever column fell off the end — which points at the
+    // wrong column entirely. debug_assert so it fires in every test and dev
+    // run and costs nothing in release.
+    debug_assert_eq!(
+        crate::dialect::placeholder_count(sql),
+        values.len(),
+        "SQL has {} placeholders but {} values were bound:\n{sql}",
+        crate::dialect::placeholder_count(sql),
+        values.len()
+    );
     let backend = db.get_database_backend();
     Statement::from_sql_and_values(backend, crate::dialect::query(backend, sql), values)
 }
