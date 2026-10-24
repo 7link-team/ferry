@@ -64,3 +64,11 @@
 - Tradeoffs：HostChannel 捕获输出后返回（沿用既有单步输出上限），本期按步分片。取消只停止等待，远端可能继续；清理临时目录后再结束执行器。取消状态可早于清理完成。
 - Scope：T4 后端、真实验收脚本与 §17 文档；不改 UI、不加 exec HTTP、不 commit/push。
 - Status：主机组按已告知的最小单目标假设，触发时选直接成员中 ID 最小的在线主机并固定 host_id；无在线成员拒绝，不做多机编排。触发可提供 branch/commit 模板上下文，缺省为仓库默认分支/空字符串。完成：三库原矩阵各99/99，真实执行各44/44，两次变异正确失败并恢复，全部门槛退出0。
+
+## T5 构建界面
+- Decision：仓库、流水线、历史仅配置现有 ResourceTable/ResourceForm；DSL 新增 code 与 resetOnChange，旧字段行为不变。唯一新增页面为 PipelineRunDetail，日志分片为其内部 memo 渲染单元。
+- Reason：任务明确禁止另写资源表格/表单；JSON 需等宽多行，目标切换需清空旧引用。
+- Alternatives Considered：手写资源组件、修改服务端以返回关联名称，均不在范围内。
+- Tradeoffs：当前 API 只返回关联 ID，界面明确标注流水线/主机/触发人 ID。日志先读取状态、再按 next_seq 排空每页200片，终态排空后停止；隐藏abort并暂停，恢复可见立即读取未完成任务；稳定对象+seq+memo保留旧日志DOM，只有在底部才跟随。
+- Scope：T5 前端及验收脚本；没有服务端、依赖、ResourceTable行为改动，无commit/push。
+- Status：完成。23项前端测试通过；真实Chromium→服务端→runner→HTTP Git链路通过；终态继续轮询变异被三项测试捕获，恢复后通过。

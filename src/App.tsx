@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
+import { PipelineRunDetail } from "./components/PipelineRunDetail";
 import { HostFiles } from "./components/HostFiles";
 import { HostTerminal } from "./components/HostTerminal";
 import { ResourceForm } from "./components/ResourceForm";
@@ -258,6 +259,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             ) : (
               <Placeholder resource={item.resource} />
             )
+          ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
+            <PipelineRunDetail key={`${current.slug}/${route.id}`} workspace={current.slug} runId={route.id} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "hosts" && route.id ? (
             // A host's detail page is the form plus the two live panes; the
             // tab is in the URL so a terminal link can be shared directly.

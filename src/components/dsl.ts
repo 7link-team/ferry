@@ -78,7 +78,8 @@ export type FieldType =
   | "select"
   | "switch"
   | "password"
-  | "secret";
+  | "secret"
+  | "code";
 
 export interface FormField<T> {
   key: string;
@@ -92,6 +93,8 @@ export interface FormField<T> {
   when?: (draft: Partial<T>) => boolean;
   /** Settable on create, fixed afterwards. */
   immutable?: boolean;
+  /** Clear dependent selections when this field changes. */
+  resetOnChange?: string[];
   /** 2 makes the field span the whole two-column grid. */
   span?: 1 | 2;
 }

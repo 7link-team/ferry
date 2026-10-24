@@ -5,6 +5,9 @@
  * A page absent from here renders the "not built yet" placeholder, so adding a
  * module means adding entries here plus the server handlers.
  */
+import { duration, stateBadge, type PipelineRun } from "./pipeline";
+import { nav } from "./nav";
+import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
 import { deleteResource, listResource, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option } from "./components/dsl";
@@ -108,8 +111,79 @@ const groupOptions = (workspace: string) => async (): Promise<Option[]> => {
   return page.items.map((group) => ({ value: group.id, label: group.name }));
 };
 
+interface Repository {
+  id: string; name: string; url: string; default_branch: string;
+  credential_id: string; description: string;
+}
+interface Pipeline {
+  id: string; name: string; repository_id: string; target_kind: string;
+  target_ref: string; definition: string; description: string;
+}
+const namedOptions = (workspace: string, resource: string) => async (): Promise<Option[]> => {
+  const items: Option[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await listResource<{ id: string; name: string }>(workspace, resource, { page, page_size: 200 });
+    items.push(...result.items.map((row) => ({ value: row.id, label: row.name })));
+    if (!result.items.length || page * result.page_size >= result.total) return items;
+  }
+};
+const TARGETS = [{ value: "host", label: "主机" }, { value: "host-group", label: "主机组" }];
+
 export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow>> {
   return {
+    repositories: list({
+      resource: "repositories", rowKey: (r: Repository) => r.id,
+      filters: [{ key: "q", label: "名称 / URL", type: "text" }],
+      columns: [
+        { key: "name", label: "名称" }, { key: "url", label: "URL" },
+        { key: "default_branch", label: "默认分支" }, { key: "description", label: "备注" },
+      ],
+      actions: [
+        { label: "查看", permission: "repositories.read", to: (r) => ({ id: r.id, mode: "view" }) },
+        { label: "编辑", permission: "repositories.update", to: (r) => ({ id: r.id, mode: "edit" }) },
+        { label: "删除", permission: "repositories.delete", destructive: true,
+          action: (r) => deleteResource(workspace, "repositories", r.id) },
+      ],
+    }),
+    pipelines: list({
+      resource: "pipelines", rowKey: (r: Pipeline) => r.id,
+      filters: [{ key: "q", label: "名称", type: "text" }],
+      columns: [
+        { key: "name", label: "名称" }, { key: "repository_id", label: "仓库 ID" },
+        { key: "target_kind", label: "目标类型", render: (r) => label(TARGETS, r.target_kind) },
+        { key: "target_ref", label: "目标 ID" }, { key: "description", label: "备注" },
+      ],
+      actions: [
+        { label: "查看", permission: "pipelines.read", to: (r) => ({ id: r.id, mode: "view" }) },
+        { label: "触发", permission: "pipelines.run", action: async (r) => {
+          const run = await runItemAction<{ id: string }>(workspace, "pipelines", r.id, "run", {});
+          const group = nav.find((g) => g.items.some((i) => i.resource === "pipeline-runs"))!;
+          const item = group.items.find((i) => i.resource === "pipeline-runs")!;
+          navigate({ workspace, group: group.key, item: item.key, id: run.id, mode: "view" }, {});
+        } },
+        { label: "编辑", permission: "pipelines.update", to: (r) => ({ id: r.id, mode: "edit" }) },
+        { label: "删除", permission: "pipelines.delete", destructive: true,
+          action: (r) => deleteResource(workspace, "pipelines", r.id) },
+      ],
+    }),
+    "pipeline-runs": list({
+      resource: "pipeline-runs", rowKey: (r: PipelineRun) => r.id,
+      filters: [{ key: "state", label: "状态", type: "select", options:
+        ["queued", "running", "succeeded", "failed", "cancelled"].map((value) => ({ value, label: stateBadge(value).label })) }],
+      columns: [
+        { key: "number", label: "执行序号", sortable: true, render: (r) => `#${r.number}` },
+        { key: "pipeline_id", label: "流水线 ID" },
+        { key: "state", label: "状态", render: (r) => {
+          const { label, ...props } = stateBadge(r.state);
+          return <Badge {...props}>{label}</Badge>;
+        } },
+        { key: "triggered_by", label: "触发人 ID" },
+        { key: "duration", label: "耗时", render: (r) => duration(r.started_at, r.finished_at) },
+        { key: "started_at", label: "开始时间", render: (r) => r.started_at ? new Date(r.started_at).toLocaleString("zh-CN") : "—" },
+      ],
+      actions: [{ label: "查看", permission: "pipelines.read", to: (r) => ({ id: r.id, mode: "view" }) }],
+      toolbar: { create: false, import: false, export: false },
+    }),
     "host-groups": list({
       resource: "host-groups",
       rowKey: (row: HostGroup) => row.id,
@@ -312,6 +386,36 @@ export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow
 
 export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow>> {
   return {
+    repositories: form({
+      resource: "repositories", heading: (r: Repository) => r.name,
+      blank: { name: "", url: "", default_branch: "main", credential_id: "0", description: "" },
+      sections: [{ fields: [
+        { key: "name", label: "名称", type: "text", required: true },
+        { key: "url", label: "URL", type: "text", required: true },
+        { key: "default_branch", label: "默认分支", type: "text", required: true },
+        { key: "credential_id", label: "凭据", type: "select", options: async () => [
+          { value: "0", label: "无凭据" }, ...await namedOptions(workspace, "credentials")(),
+        ] },
+        { key: "description", label: "备注", type: "textarea", span: 2 },
+      ] }],
+    }),
+    pipelines: form({
+      resource: "pipelines", heading: (r: Pipeline) => r.name,
+      blank: { name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
+        definition: JSON.stringify({ workdir: "/tmp/build-{{run}}", steps: [{ name: "构建", run: "echo hello", timeout_seconds: 1800 }] }, null, 2) },
+      sections: [{ fields: [
+        { key: "name", label: "名称", type: "text", required: true },
+        { key: "repository_id", label: "仓库", type: "select", options: namedOptions(workspace, "repositories") },
+        { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, resetOnChange: ["target_ref"] },
+        { key: "target_ref", label: "目标主机", type: "select", required: true,
+          options: namedOptions(workspace, "hosts"), when: (d) => d.target_kind === "host" },
+        { key: "target_ref", label: "目标主机组", type: "select", required: true,
+          options: namedOptions(workspace, "host-groups"), when: (d) => d.target_kind === "host-group" },
+        { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2,
+          help: "逐步执行；服务端会检查定义并返回具体错误。" },
+        { key: "description", label: "备注", type: "textarea", span: 2 },
+      ] }],
+    }),
     "host-groups": form({
       resource: "host-groups",
       heading: (row: HostGroup) => row.name,

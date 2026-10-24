@@ -132,7 +132,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
                   value={draft[field.key]}
                   readOnly={readOnly || (!creating && !!field.immutable)}
                   asText={readOnly}
-                  onChange={(value) => setDraft((d) => ({ ...d, [field.key]: value }) as Partial<T>)}
+                  onChange={(value) => setDraft((d) => ({
+                    ...d,
+                    ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
+                    [field.key]: value,
+                  }) as Partial<T>)}
                 />
               ))}
             </div>
@@ -205,7 +209,7 @@ function Field<T>({
     return (
       <Wrapper field={field}>
         {label}
-        <p className="min-h-5 text-sm break-words">
+        <p className={cn("min-h-5 text-sm break-words", field.type === "code" && "whitespace-pre-wrap font-mono")}>
           {field.type === "switch" ? (
             value ? "是" : "否"
           ) : field.type === "select" ? (
@@ -234,7 +238,7 @@ function Field<T>({
               ))}
             </SelectContent>
           </Select>
-        ) : field.type === "textarea" || field.type === "secret" ? (
+        ) : field.type === "textarea" || field.type === "secret" || field.type === "code" ? (
           // A `secret` has to be a textarea, not <input type=password>: an
           // HTML input cannot hold newlines, so pasting a PEM private key
           // into one silently strips them and stores an unusable key. The
@@ -245,7 +249,7 @@ function Field<T>({
               "min-h-20 rounded-md border border-input bg-transparent px-3 py-2 shadow-xs",
               "outline-none focus-visible:border-ring focus-visible:ring-[3px]",
               "focus-visible:ring-ring/50 disabled:opacity-50",
-              field.type === "secret" ? "font-mono text-xs" : "text-sm",
+              field.type === "code" ? "min-h-64 font-mono text-sm" : field.type === "secret" ? "font-mono text-xs" : "text-sm",
             )}
             value={text}
             placeholder={field.placeholder}
