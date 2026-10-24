@@ -12,17 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "worker_ids")]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub worker_id: i64,
-    pub instance_id: String,
-    pub heartbeat_at: i64,
-}
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-impl ActiveModelBehavior for ActiveModel {}
+use crate::entities::worker_ids::{ActiveModel, Column, Entity, Model};
 
 pub struct Worker {
     pub generator: Arc<Generator>,
@@ -221,7 +211,7 @@ mod tests {
         let error = Worker::allocate(&db, "overflow").await.err().unwrap();
         assert!(error.to_string().contains("1024"));
         assert!(
-            lock::Entity::find_by_id("worker-id")
+            crate::entities::locks::Entity::find_by_id("worker-id")
                 .one(&db)
                 .await
                 .unwrap()

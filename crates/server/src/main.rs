@@ -4,6 +4,7 @@ mod channel;
 mod credentials;
 mod db;
 mod dialect;
+mod entities;
 mod error;
 mod hosts;
 mod lock;

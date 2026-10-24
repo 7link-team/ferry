@@ -8,7 +8,8 @@ use crate::snowflake::Id;
 
 use crate::{
     channel::{self, HostChannel, PtySize},
-    db::{self, one, text},
+    db,
+    entities::hosts,
     error::{ApiError, Result},
     state::AppState,
     workspace::Scope,
@@ -24,6 +25,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use futures::{SinkExt, StreamExt, TryStreamExt};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::HashMap, time::Duration};
@@ -35,24 +37,21 @@ pub struct PathQuery {
 
 /// Loads a host the caller may reach and opens a channel to it.
 async fn open(s: &AppState, scope: &Scope, id: &Id) -> Result<Box<dyn HostChannel>> {
-    let row = one(
-        &s.db,
-        "SELECT id,name,address,port,username,connection,host_key,credential_id FROM hosts
-         WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = hosts::Entity::find_by_id(i64::from(*id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     let host = Host {
-        id: Id::from(db::int(&row, "id")),
+        id: Id::from(row.id),
         workspace_id: scope.workspace_id.clone(),
-        credential_id: Id::from(db::int(&row, "credential_id")),
-        name: text(&row, "name"),
-        address: text(&row, "address"),
-        port: db::int(&row, "port") as u16,
-        username: text(&row, "username"),
-        connection: text(&row, "connection"),
-        host_key: text(&row, "host_key"),
+        credential_id: Id::from(row.credential_id),
+        name: row.name,
+        address: row.address,
+        port: row.port as u16,
+        username: row.username,
+        connection: row.connection,
+        host_key: row.host_key,
     };
     crate::channel_open(s, &host).await
 }
@@ -127,15 +126,12 @@ pub async fn terminal(
 /// The scope is gone by the time the socket closes, so the workspace is looked
 /// up again rather than captured and trusted.
 async fn state_workspace(s: &AppState, host_id: &Id) -> Option<Id> {
-    one(
-        &s.db,
-        "SELECT workspace_id FROM hosts WHERE id = ?",
-        vec![host_id.into()],
-    )
-    .await
-    .ok()
-    .flatten()
-    .map(|row| Id::from(db::int(&row, "workspace_id")))
+    hosts::Entity::find_by_id(i64::from(*host_id))
+        .one(&s.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| Id::from(row.workspace_id))
 }
 
 /// Copies bytes both ways until either side stops. The channel is held for the
@@ -309,16 +305,13 @@ pub async fn test_connection(
         .await?;
     let ok = output.code == 0 && output.stdout.contains("ferry-ok");
     if ok {
-        crate::db::execute(
-            &s.db,
-            "UPDATE hosts SET state='online', seen_at=? WHERE workspace_id=? AND id=?",
-            vec![
-                db::now().into(),
-                scope.workspace_id.clone().into(),
-                id.clone().into(),
-            ],
-        )
-        .await?;
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::State, Expr::value("online"))
+            .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(hosts::Column::Id.eq(id))
+            .exec(&s.db)
+            .await?;
     }
     Ok(Json(
         json!({ "ok": ok, "code": output.code, "stderr": output.stderr }),

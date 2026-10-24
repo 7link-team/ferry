@@ -5,10 +5,11 @@
 //! even to an owner. Reading one happens inside the server, at the moment it
 //! is used, and that use is audited.
 
+use crate::entities::{credentials, hosts, repositories};
 use crate::snowflake::Id;
 
 use crate::{
-    db::{self, execute, one, text},
+    db,
     error::{ApiError, Result},
     resource::{self, ListQuery, Spec},
     state::AppState,
@@ -20,37 +21,67 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use sea_orm::QueryResult;
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, Select,
+    Set,
+    sea_query::{Expr, ExprTrait},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 const SPEC: Spec = Spec {
-    table: "credentials",
     search: &["name", "username"],
     filters: &["kind"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
-/// `secret` is deliberately absent: a column that is never selected cannot be
-/// returned by accident from the shared list path.
-const COLUMNS: &str =
-    "id,name,kind,username,description,created_at,updated_at,version,length(secret) AS secret_len";
 
 pub const KINDS: [&str; 3] = ["password", "ssh-key", "token"];
 
-fn to_json(row: &QueryResult) -> Value {
+// List/detail never select the sealed secret, even inside the server.
+#[derive(FromQueryResult)]
+struct Summary {
+    id: i64,
+    name: String,
+    kind: String,
+    username: String,
+    description: String,
+    has_secret: bool,
+    created_at: i64,
+    updated_at: i64,
+    version: i64,
+}
+
+fn summary_query() -> Select<credentials::Entity> {
+    use credentials::Column;
+    credentials::Entity::find()
+        .select_only()
+        .columns([
+            Column::Id,
+            Column::Name,
+            Column::Kind,
+            Column::Username,
+            Column::Description,
+            Column::CreatedAt,
+            Column::UpdatedAt,
+            Column::Version,
+        ])
+        .expr_as(Column::Secret.ne(""), "has_secret")
+}
+
+fn to_json(row: &Summary) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "kind": text(row, "kind"),
-        "username": text(row, "username"),
-        "description": text(row, "description"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "kind": row.kind,
+        "username": row.username,
+        "description": row.description,
         // Whether a secret exists, never the secret.
-        "has_secret": db::int(row, "secret_len") > 0,
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "has_secret": row.has_secret,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -98,7 +129,8 @@ pub async fn list(
 ) -> Result<Json<Value>> {
     scope.require("credentials.read")?;
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(&s.db, &SPEC, COLUMNS, &scope.workspace_id, &query).await?;
+    let (rows, total) =
+        resource::list(&s.db, &SPEC, summary_query(), &scope.workspace_id, &query).await?;
     Ok(Json(json!({
         "items": rows.iter().map(to_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -112,13 +144,13 @@ pub async fn get(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {COLUMNS} FROM credentials WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = summary_query()
+        .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(credentials::Column::Id.eq(id))
+        .into_model::<Summary>()
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(to_json(&row)))
 }
 
@@ -140,22 +172,20 @@ pub async fn create(
             &id.to_string(),
         ),
     )?;
-    execute(
-        &s.db,
-        "INSERT INTO credentials (id,workspace_id,name,kind,username,description,secret,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            body.kind.trim().into(),
-            body.username.trim().into(),
-            body.description.trim().into(),
-            sealed.into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    credentials::Entity::insert(credentials::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        kind: Set(body.kind.trim().to_owned()),
+        username: Set(body.username.trim().to_owned()),
+        description: Set(body.description.trim().to_owned()),
+        secret: Set(sealed),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
@@ -196,41 +226,36 @@ pub async fn update(
         )?),
         None => None,
     };
-    let affected = match &rotated {
-        Some(sealed) => execute(
-            &s.db,
-            "UPDATE credentials SET name=?,username=?,description=?,secret=?,updated_at=?,version=version+1
-             WHERE workspace_id=? AND id=? AND version=?",
-            vec![
-                name.clone().into(),
-                body.username.trim().into(),
-                body.description.trim().into(),
-                sealed.clone().into(),
-                db::now().into(),
-                scope.workspace_id.clone().into(),
-                id.clone().into(),
-                body.version.into(),
-            ],
-        ),
-        None => execute(
-            &s.db,
-            "UPDATE credentials SET name=?,username=?,description=?,updated_at=?,version=version+1
-             WHERE workspace_id=? AND id=? AND version=?",
-            vec![
-                name.clone().into(),
-                body.username.trim().into(),
-                body.description.trim().into(),
-                db::now().into(),
-                scope.workspace_id.clone().into(),
-                id.clone().into(),
-                body.version.into(),
-            ],
-        ),
+    let mut update = credentials::Entity::update_many()
+        .col_expr(credentials::Column::Name, Expr::value(name.clone()))
+        .col_expr(
+            credentials::Column::Username,
+            Expr::value(body.username.trim()),
+        )
+        .col_expr(
+            credentials::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(credentials::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            credentials::Column::Version,
+            Expr::col(credentials::Column::Version).add(1),
+        )
+        .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(credentials::Column::Id.eq(id))
+        .filter(credentials::Column::Version.eq(body.version));
+    if let Some(sealed) = &rotated {
+        update = update.col_expr(credentials::Column::Secret, Expr::value(sealed.clone()));
     }
-    .await?
-    .rows_affected();
+    let affected = update.exec(&s.db).await?.rows_affected;
     if affected == 0 {
-        return Err(crate::hosts::stale(&s, "credentials", &scope.workspace_id, &id).await?);
+        return Err(crate::hosts::stale(
+            &s,
+            credentials::Entity::find()
+                .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(credentials::Column::Id.eq(id)),
+        )
+        .await?);
     }
     crate::hosts::activity(
         &s,
@@ -256,30 +281,32 @@ pub async fn remove(
     // from the deletion that caused it. Every table that can reference a
     // credential has to be listed here — a new one that is forgotten silently
     // reintroduces the dangling reference.
-    for (table, noun) in [("hosts", "台主机"), ("repositories", "个仓库")] {
-        let used = one(
-            &s.db,
-            &format!(
-                "SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ? AND credential_id = ?"
-            ),
-            vec![scope.workspace_id.clone().into(), id.clone().into()],
-        )
-        .await?
-        .map(|row| db::int(&row, "total"))
-        .unwrap_or(0);
-        if used > 0 {
-            return Err(ApiError::conflict(format!(
-                "还有 {used} {noun}在用这条凭据，请先改掉再删除。"
-            )));
-        }
+    let used = hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::CredentialId.eq(id))
+        .count(&s.db)
+        .await?;
+    if used > 0 {
+        return Err(ApiError::conflict(format!(
+            "还有 {used} 台主机在用这条凭据，请先改掉再删除。"
+        )));
     }
-    let affected = execute(
-        &s.db,
-        "DELETE FROM credentials WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let used = repositories::Entity::find()
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(repositories::Column::CredentialId.eq(id))
+        .count(&s.db)
+        .await?;
+    if used > 0 {
+        return Err(ApiError::conflict(format!(
+            "还有 {used} 个仓库在用这条凭据，请先改掉再删除。"
+        )));
+    }
+    let affected = credentials::Entity::delete_many()
+        .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(credentials::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
@@ -290,16 +317,59 @@ pub async fn remove(
 /// Decrypts a credential for the server's own use. There is no HTTP route to
 /// this; the caller is a channel that is about to connect somewhere.
 pub async fn unseal(s: &AppState, workspace_id: &Id, id: &Id) -> Result<(String, String, String)> {
-    let row = one(
-        &s.db,
-        "SELECT kind, username, secret FROM credentials WHERE workspace_id = ? AND id = ?",
-        vec![workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(|| ApiError::bad("这台主机引用的凭据已不存在，请重新选择。"))?;
+    let row = credentials::Entity::find()
+        .filter(credentials::Column::WorkspaceId.eq(*workspace_id))
+        .filter(credentials::Column::Id.eq(*id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(|| ApiError::bad("这台主机引用的凭据已不存在，请重新选择。"))?;
     let secret = s.vault.open_secret(
-        &text(&row, "secret"),
+        &row.secret,
         &vault::aad(&workspace_id.to_string(), "credentials", &id.to_string()),
     )?;
-    Ok((text(&row, "kind"), text(&row, "username"), secret))
+    Ok((row.kind, row.username, secret))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn summary_does_not_fetch_the_sealed_secret() {
+        struct Projection;
+        impl FromQueryResult for Projection {
+            fn from_query_result(
+                row: &sea_orm::QueryResult,
+                prefix: &str,
+            ) -> std::result::Result<Self, sea_orm::DbErr> {
+                assert!(row.try_get::<String>(prefix, "secret").is_err());
+                assert!(row.try_get::<bool>(prefix, "has_secret")?);
+                Ok(Self)
+            }
+        }
+        let (_dir, db) = crate::lock::tests::database().await;
+        credentials::Entity::insert(credentials::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(1),
+            name: Set("credential".into()),
+            kind: Set("password".into()),
+            username: Set(String::new()),
+            description: Set(String::new()),
+            secret: Set("sealed-value-must-stay-in-database".into()),
+            created_at: Set(1),
+            updated_at: Set(1),
+            version: Set(1),
+        })
+        .exec(&db)
+        .await
+        .unwrap();
+        assert!(
+            summary_query()
+                .into_model::<Projection>()
+                .one(&db)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 }

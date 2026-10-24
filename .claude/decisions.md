@@ -40,3 +40,11 @@
 - Alternatives Considered：兼容迁移、SeaORM 实体改造；均不属于 T3b。
 - Tradeoffs：本地旧测试库重建；可选引用空字符串输入解析为 0，输出为 "0"，校验允许 0 回传；必需引用仍由现有校验拒绝不存在的记录。请求体沿用字符串接收并显式解析，保持既有 400 JSON 错误响应。
 - Scope：T3b；Status：实施，三库首轮各 98/98。
+
+## T3c 强类型数据访问
+- Decision：16 张表的实体集中在 entities.rs；业务读写使用 Entity/ActiveModel/Select，resource::list 泛型查询保留 Spec 白名单后解析实体 Column，Condition 绑定所有值。
+- Reason：任务书和设计 §18.5；不增加继承式公共模型或运行时 SQL 转译层。
+- Alternatives Considered：保留字符串 SQL 辅助层、取消列名白名单；均违背任务要求。
+- Tradeoffs：host_tags 尚无业务调用者，但任务要求每张表均有镜像，针对该模块以有原因的 expect(dead_code) 标注，不伪造调用。实体不派生 Serialize，HTTP 显式映射 Id。凭据列表/详情通过 Summary 投影只读取公开字段及 has_secret 计算结果，保留原查询层不读取密文的防护；共享list支持类型化投影。
+- Scope：只改数据访问；迁移 DDL/执行逻辑不动，migration.rs 仅 schema 测试移除已删除的 db helper 依赖；SQLite PRAGMA 元数据检查保留注释说明。
+- Status：完成；三库基线及最终各 99/99，全部门槛退出0，两次变异正确失败并恢复验证通过。

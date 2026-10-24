@@ -10,7 +10,8 @@ use crate::snowflake::Id;
 
 use crate::{
     auth::Account,
-    db::{self, all, execute, one, text},
+    db,
+    entities::{workspace_members, workspace_roles, workspaces},
     error::{ApiError, Result},
     state::AppState,
 };
@@ -18,6 +19,9 @@ use axum::{
     Json,
     extract::{FromRequestParts, Path, State},
     http::request::Parts,
+};
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -255,26 +259,47 @@ impl FromRequestParts<AppState> for Scope {
             .get("workspace")
             .ok_or_else(ApiError::missing)?
             .clone();
-        let row = one(
-            &s.db,
-            "SELECT w.id, r.permissions FROM workspaces w
-             JOIN workspace_members m ON m.workspace_id = w.id
-             JOIN workspace_roles r ON r.id = m.role_id
-             WHERE w.slug = ? AND m.user_id = ? AND m.state = 'active'",
-            vec![slug.clone().into(), account.user.id.clone().into()],
-        )
-        .await?
-        // A workspace the caller is not a member of is reported as missing,
-        // not forbidden: otherwise the response confirms it exists.
-        .ok_or_else(ApiError::missing)?;
-        let permissions: HashSet<String> =
-            serde_json::from_str::<Vec<String>>(&text(&row, "permissions"))
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+        #[derive(FromQueryResult)]
+        struct Membership {
+            id: i64,
+            permissions: String,
+        }
+        let row = workspaces::Entity::find()
+            .select_only()
+            .column(workspaces::Column::Id)
+            .column(workspace_roles::Column::Permissions)
+            .join(
+                JoinType::InnerJoin,
+                sea_orm::RelationDef::from(
+                    workspace_members::Entity::belongs_to(workspaces::Entity)
+                        .from(workspace_members::Column::WorkspaceId)
+                        .to(workspaces::Column::Id),
+                )
+                .rev(),
+            )
+            .join(
+                JoinType::InnerJoin,
+                workspace_members::Entity::belongs_to(workspace_roles::Entity)
+                    .from(workspace_members::Column::RoleId)
+                    .to(workspace_roles::Column::Id)
+                    .into(),
+            )
+            .filter(workspaces::Column::Slug.eq(slug.clone()))
+            .filter(workspace_members::Column::UserId.eq(i64::from(account.user.id)))
+            .filter(workspace_members::Column::State.eq("active"))
+            .into_model::<Membership>()
+            .one(&s.db)
+            .await?
+            // A workspace the caller is not a member of is reported as missing,
+            // not forbidden: otherwise the response confirms it exists.
+            .ok_or_else(ApiError::missing)?;
+        let permissions: HashSet<String> = serde_json::from_str::<Vec<String>>(&row.permissions)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         let _ = slug;
         Ok(Self {
-            workspace_id: Id::from(db::int(&row, "id")),
+            workspace_id: Id::from(row.id),
             user: account.user,
             permissions,
         })
@@ -320,31 +345,25 @@ pub async fn create(
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写工作空间名称（60 字以内）。"));
     }
-    if one(
-        &s.db,
-        "SELECT id FROM workspaces WHERE slug = ?",
-        vec![slug.clone().into()],
-    )
-    .await?
-    .is_some()
+    if workspaces::Entity::find()
+        .filter(workspaces::Column::Slug.eq(slug.clone()))
+        .one(&s.db)
+        .await?
+        .is_some()
     {
         return Err(ApiError::conflict("该标识已被占用，请换一个。"));
     }
     let (id, now, code) = (s.next_id()?, db::now(), join_code());
-    execute(
-        &s.db,
-        "INSERT INTO workspaces (id,slug,name,owner_id,join_code,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?)",
-        vec![
-            id.clone().into(),
-            slug.clone().into(),
-            name.clone().into(),
-            account.user.id.clone().into(),
-            code.clone().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    workspaces::Entity::insert(workspaces::ActiveModel {
+        id: Set(i64::from(id)),
+        slug: Set(slug.clone()),
+        name: Set(name.clone()),
+        owner_id: Set(i64::from(account.user.id)),
+        join_code: Set(code.clone()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(&s.db)
     .await?;
     let mut owner_role = Id::default();
     for (key, label) in BUILTIN {
@@ -352,34 +371,28 @@ pub async fn create(
         if *key == "owner" {
             owner_role = role_id.clone();
         }
-        execute(
-            &s.db,
-            "INSERT INTO workspace_roles (id,workspace_id,name,permissions,builtin,created_at,updated_at)
-             VALUES (?,?,?,?,1,?,?)",
-            vec![
-                role_id.into(),
-                id.clone().into(),
-                (*label).into(),
-                serde_json::to_string(&builtin_permissions(key)).unwrap().into(),
-                now.into(),
-                now.into(),
-            ],
-        )
+        workspace_roles::Entity::insert(workspace_roles::ActiveModel {
+            id: Set(i64::from(role_id)),
+            workspace_id: Set(i64::from(id)),
+            name: Set((*label).to_owned()),
+            permissions: Set(serde_json::to_string(&builtin_permissions(key)).unwrap()),
+            builtin: Set(1),
+            created_at: Set(now),
+            updated_at: Set(now),
+        })
+        .exec(&s.db)
         .await?;
     }
-    execute(
-        &s.db,
-        "INSERT INTO workspace_members (id,workspace_id,user_id,role_id,state,created_at,updated_at)
-         VALUES (?,?,?,?,'active',?,?)",
-        vec![
-            s.next_id()?.into(),
-            id.clone().into(),
-            account.user.id.into(),
-            owner_role.into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    workspace_members::Entity::insert(workspace_members::ActiveModel {
+        id: Set(i64::from(s.next_id()?)),
+        workspace_id: Set(i64::from(id)),
+        user_id: Set(i64::from(account.user.id)),
+        role_id: Set(i64::from(owner_role)),
+        state: Set("active".to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(&s.db)
     .await?;
     Ok(Json(
         json!({"id": id, "slug": slug, "name": name, "join_code": code}),
@@ -399,50 +412,42 @@ pub async fn join(
     Json(body): Json<JoinRequest>,
 ) -> Result<Json<Value>> {
     let code = body.code.trim().to_uppercase();
-    let row = one(
-        &s.db,
-        "SELECT id, slug, name FROM workspaces WHERE join_code = ? AND join_code <> ''",
-        vec![code.into()],
-    )
-    .await?
-    .ok_or_else(|| ApiError::bad("邀请码无效或已失效。"))?;
-    let workspace_id = Id::from(db::int(&row, "id"));
-    if one(
-        &s.db,
-        "SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-        vec![workspace_id.clone().into(), account.user.id.clone().into()],
-    )
-    .await?
-    .is_some()
+    let row = workspaces::Entity::find()
+        .filter(workspaces::Column::JoinCode.eq(code))
+        .filter(workspaces::Column::JoinCode.ne(""))
+        .one(&s.db)
+        .await?
+        .ok_or_else(|| ApiError::bad("邀请码无效或已失效。"))?;
+    let workspace_id = Id::from(row.id);
+    if workspace_members::Entity::find()
+        .filter(workspace_members::Column::WorkspaceId.eq(i64::from(workspace_id)))
+        .filter(workspace_members::Column::UserId.eq(i64::from(account.user.id)))
+        .one(&s.db)
+        .await?
+        .is_some()
     {
         return Err(ApiError::conflict("你已经是该工作空间的成员。"));
     }
     // New members land on the read-only role; an admin promotes them.
-    let viewer = one(
-        &s.db,
-        "SELECT id FROM workspace_roles WHERE workspace_id = ? AND name = '只读'",
-        vec![workspace_id.clone().into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let viewer = workspace_roles::Entity::find()
+        .filter(workspace_roles::Column::WorkspaceId.eq(i64::from(workspace_id)))
+        .filter(workspace_roles::Column::Name.eq("只读"))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     let now = db::now();
-    execute(
-        &s.db,
-        "INSERT INTO workspace_members (id,workspace_id,user_id,role_id,state,created_at,updated_at)
-         VALUES (?,?,?,?,'active',?,?)",
-        vec![
-            s.next_id()?.into(),
-            workspace_id.into(),
-            account.user.id.into(),
-            Id::from(db::int(&viewer, "id")).into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    workspace_members::Entity::insert(workspace_members::ActiveModel {
+        id: Set(i64::from(s.next_id()?)),
+        workspace_id: Set(i64::from(workspace_id)),
+        user_id: Set(i64::from(account.user.id)),
+        role_id: Set(viewer.id),
+        state: Set("active".to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(&s.db)
     .await?;
-    Ok(Json(
-        json!({"slug": text(&row, "slug"), "name": text(&row, "name")}),
-    ))
+    Ok(Json(json!({"slug": row.slug, "name": row.name})))
 }
 
 /// The permission catalogue the role editor renders. Static, but served so the
@@ -459,20 +464,20 @@ pub async fn permission_catalogue() -> Json<Value> {
 
 pub async fn roles(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     scope.require("roles.read")?;
-    let rows = all(
-        &s.db,
-        "SELECT id, name, permissions, builtin FROM workspace_roles WHERE workspace_id = ? ORDER BY builtin DESC, name ASC",
-        vec![scope.workspace_id.into()],
-    )
-    .await?;
+    let rows = workspace_roles::Entity::find()
+        .filter(workspace_roles::Column::WorkspaceId.eq(i64::from(scope.workspace_id)))
+        .order_by_desc(workspace_roles::Column::Builtin)
+        .order_by_asc(workspace_roles::Column::Name)
+        .all(&s.db)
+        .await?;
     let items: Vec<Value> = rows
         .iter()
         .map(|row| {
             json!({
-                "id": Id::from(db::int(row, "id")),
-                "name": text(row, "name"),
-                "builtin": db::int(row, "builtin") == 1,
-                "permissions": serde_json::from_str::<Value>(&text(row, "permissions")).unwrap_or(json!([])),
+                "id": Id::from(row.id),
+                "name": row.name,
+                "builtin": row.builtin == 1,
+                "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])),
             })
         })
         .collect();

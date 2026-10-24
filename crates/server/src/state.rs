@@ -25,7 +25,4 @@ impl State {
             )
         })
     }
-    pub fn db(&self) -> &DatabaseConnection {
-        &self.db
-    }
 }

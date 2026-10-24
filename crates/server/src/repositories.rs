@@ -1,6 +1,7 @@
+use crate::entities::{credentials, pipelines, repositories};
 use crate::snowflake::Id;
 use crate::{
-    db::{self, execute, one, text},
+    db,
     error::{ApiError, Result},
     resource::{self, ListQuery, Spec},
     state::AppState,
@@ -11,32 +12,32 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use sea_orm::QueryResult;
+use sea_orm::{
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    sea_query::{Expr, ExprTrait},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 const SPEC: Spec = Spec {
-    table: "repositories",
     search: &["name", "url"],
     filters: &[],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
-const COLUMNS: &str =
-    "id,name,url,default_branch,credential_id,description,created_at,updated_at,version";
 
-fn to_json(row: &QueryResult) -> Value {
+fn to_json(row: &repositories::Model) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "url": text(row, "url"),
-        "default_branch": text(row, "default_branch"),
-        "credential_id": Id::from(db::int(row, "credential_id")),
-        "description": text(row, "description"),
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "url": row.url,
+        "default_branch": row.default_branch,
+        "credential_id": Id::from(row.credential_id),
+        "description": row.description,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -92,17 +93,13 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
         ));
     }
     if Id::reference(&body.credential_id)? != Id::from(0) {
-        let row = one(
-            &s.db,
-            "SELECT kind FROM credentials WHERE workspace_id = ? AND id = ?",
-            vec![
-                scope.workspace_id.clone().into(),
-                Id::reference(&body.credential_id)?.into(),
-            ],
-        )
-        .await?
-        .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
-        if !crate::credentials::KINDS.contains(&text(&row, "kind").as_str()) {
+        let row = credentials::Entity::find()
+            .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(credentials::Column::Id.eq(Id::reference(&body.credential_id)?))
+            .one(&s.db)
+            .await?
+            .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+        if !crate::credentials::KINDS.contains(&row.kind.as_str()) {
             return Err(ApiError::bad("仓库凭据必须是密码、SSH 私钥或令牌。"));
         }
     }
@@ -116,7 +113,14 @@ pub async fn list(
 ) -> Result<Json<Value>> {
     scope.require("repositories.read")?;
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(&s.db, &SPEC, COLUMNS, &scope.workspace_id, &query).await?;
+    let (rows, total) = resource::list(
+        &s.db,
+        &SPEC,
+        repositories::Entity::find(),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
     Ok(Json(json!({
         "items": rows.iter().map(to_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -130,13 +134,12 @@ pub async fn get(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {COLUMNS} FROM repositories WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = repositories::Entity::find()
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(repositories::Column::Id.eq(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(to_json(&row)))
 }
 
@@ -148,22 +151,20 @@ pub async fn create(
     scope.require("repositories.create")?;
     let name = check(&s, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO repositories (id,workspace_id,name,url,default_branch,credential_id,description,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            body.url.trim().into(),
-            body.branch().into(),
-            Id::reference(&body.credential_id)?.into(),
-            body.description.trim().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    repositories::Entity::insert(repositories::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        url: Set(body.url.trim().to_owned()),
+        default_branch: Set(body.branch().to_owned()),
+        credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
+        description: Set(body.description.trim().to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
@@ -188,24 +189,40 @@ pub async fn update(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.update")?;
     let name = check(&s, &scope, &body).await?;
-    let affected = execute(
-        &s.db,
-        "UPDATE repositories SET name=?,url=?,default_branch=?,credential_id=?,description=?,updated_at=?,version=version+1
-         WHERE workspace_id=? AND id=? AND version=?",
-        vec![
-            name.clone().into(),
-            body.url.trim().into(),
-            body.branch().into(),
-            Id::reference(&body.credential_id)?.into(),
-            body.description.trim().into(),
-            db::now().into(),
-            scope.workspace_id.clone().into(),
-            id.clone().into(),
-            body.version.into(),
-        ],
-    ).await?.rows_affected();
+    let affected = repositories::Entity::update_many()
+        .col_expr(repositories::Column::Name, Expr::value(name.clone()))
+        .col_expr(repositories::Column::Url, Expr::value(body.url.trim()))
+        .col_expr(
+            repositories::Column::DefaultBranch,
+            Expr::value(body.branch()),
+        )
+        .col_expr(
+            repositories::Column::CredentialId,
+            Expr::value(Id::reference(&body.credential_id)?),
+        )
+        .col_expr(
+            repositories::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(repositories::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            repositories::Column::Version,
+            Expr::col(repositories::Column::Version).add(1),
+        )
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(repositories::Column::Id.eq(id))
+        .filter(repositories::Column::Version.eq(body.version))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
-        return Err(crate::hosts::stale(&s, "repositories", &scope.workspace_id, &id).await?);
+        return Err(crate::hosts::stale(
+            &s,
+            repositories::Entity::find()
+                .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(repositories::Column::Id.eq(id)),
+        )
+        .await?);
     }
     crate::hosts::activity(
         &s,
@@ -226,30 +243,22 @@ pub async fn remove(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.delete")?;
-    for (table, noun) in [("pipelines", "条流水线")] {
-        let used = one(
-            &s.db,
-            &format!(
-                "SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ? AND repository_id = ?"
-            ),
-            vec![scope.workspace_id.clone().into(), id.clone().into()],
-        )
-        .await?
-        .map(|row| db::int(&row, "total"))
-        .unwrap_or(0);
-        if used > 0 {
-            return Err(ApiError::conflict(format!(
-                "还有 {used} {noun}在用这个仓库，请先改掉再删除。"
-            )));
-        }
+    let used = pipelines::Entity::find()
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::RepositoryId.eq(id))
+        .count(&s.db)
+        .await?;
+    if used > 0 {
+        return Err(ApiError::conflict(format!(
+            "还有 {used} 条流水线在用这个仓库，请先改掉再删除。"
+        )));
     }
-    let affected = execute(
-        &s.db,
-        "DELETE FROM repositories WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let affected = repositories::Entity::delete_many()
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(repositories::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }

@@ -8,19 +8,20 @@
 
 use crate::snowflake::Id;
 
-use crate::{
-    db,
-    error::{ApiError, Result},
+use crate::error::{ApiError, Result};
+use sea_orm::sea_query::{Expr, ExprTrait, Func};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Select, Value,
 };
-use sea_orm::{ConnectionTrait, QueryResult, Value};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 pub const DEFAULT_PAGE_SIZE: u64 = 20;
 pub const MAX_PAGE_SIZE: u64 = 200;
 
 /// What a resource allows to be searched, filtered and sorted by.
 pub struct Spec {
-    pub table: &'static str,
     /// Columns that `?q=` matches with a case-insensitive prefix/contains scan.
     pub search: &'static [&'static str],
     /// Columns usable as `?column=value`. A comma in the value means "any of".
@@ -55,7 +56,7 @@ impl ListQuery {
             }
         };
         let page = number("page", 1)?;
-        let page_size = number("page_size", DEFAULT_PAGE_SIZE)?.min(MAX_PAGE_SIZE);
+        let page_size = std::cmp::min(number("page_size", DEFAULT_PAGE_SIZE)?, MAX_PAGE_SIZE);
 
         let requested = raw
             .get("sort")
@@ -104,71 +105,66 @@ impl ListQuery {
     }
 }
 
-/// `WHERE` fragment plus its bound values, shared by the count and page reads.
-fn conditions(spec: &Spec, workspace_id: &Id, query: &ListQuery) -> Result<(String, Vec<Value>)> {
-    let mut sql = String::from(" WHERE workspace_id = ?");
-    let mut values: Vec<Value> = vec![workspace_id.into()];
-    if let Some(text) = &query.search {
-        let clauses: Vec<String> = spec
-            .search
-            .iter()
-            .map(|column| format!("LOWER({column}) LIKE ?"))
-            .collect();
-        sql.push_str(&format!(" AND ({})", clauses.join(" OR ")));
-        let pattern = format!("%{}%", text.to_lowercase());
-        for _ in spec.search {
-            values.push(pattern.clone().into());
-        }
-    }
-    for (column, options) in &query.filters {
-        let slots = vec!["?"; options.len()].join(",");
-        sql.push_str(&format!(" AND {column} IN ({slots})"));
-        for option in options {
-            values.push(if column.ends_with("_id") {
-                Id::reference(option)?.into()
-            } else {
-                option.clone().into()
-            });
-        }
-    }
-    Ok((sql, values))
+/// Resolve only validated Spec names to the entity's typed column enum.
+fn column<E: EntityTrait>(name: &str) -> E::Column {
+    E::Column::from_str(name).unwrap_or_else(|_| panic!("invalid resource column: {name}"))
 }
 
-/// Reads one page plus the total. `columns` is a literal select list from the
-/// resource module, never anything the client sent.
-pub async fn list(
-    conn: &impl ConnectionTrait,
+fn conditions<E: EntityTrait>(
     spec: &Spec,
-    columns: &str,
     workspace_id: &Id,
     query: &ListQuery,
-) -> Result<(Vec<QueryResult>, u64)> {
-    let (where_sql, values) = conditions(spec, workspace_id, query)?;
+) -> Result<Condition> {
+    let mut condition = Condition::all().add(column::<E>("workspace_id").eq(*workspace_id));
+    if let Some(text) = &query.search {
+        let mut search = Condition::any();
+        for name in spec.search {
+            search = search.add(
+                Expr::expr(Func::lower(Expr::col((E::default(), column::<E>(name)))))
+                    .like(format!("%{}%", text.to_lowercase())),
+            );
+        }
+        condition = condition.add(search);
+    }
+    for (name, options) in &query.filters {
+        let values: Vec<Value> = options
+            .iter()
+            .map(|option| {
+                if name.ends_with("_id") {
+                    Ok(Id::reference(option)?.into())
+                } else {
+                    Ok(option.clone().into())
+                }
+            })
+            .collect::<Result<_>>()?;
+        condition = condition.add(column::<E>(name).is_in(values));
+    }
+    Ok(condition)
+}
 
-    let total = db::one(
-        conn,
-        &format!("SELECT COUNT(*) AS total FROM {}{where_sql}", spec.table),
-        values.clone(),
-    )
-    .await?
-    .map(|row| db::int(&row, "total") as u64)
-    .unwrap_or(0);
-
-    // A page past the end returns an empty page rather than an error: a shared
-    // link stays valid after rows are deleted.
-    let direction = if query.descending { "DESC" } else { "ASC" };
-    let mut paged = values;
-    paged.push((query.page_size as i64).into());
-    paged.push((((query.page - 1) * query.page_size) as i64).into());
-    let rows = db::all(
-        conn,
-        &format!(
-            "SELECT {columns} FROM {}{where_sql} ORDER BY {} {direction}, id ASC LIMIT ? OFFSET ?",
-            spec.table, query.sort
-        ),
-        paged,
-    )
-    .await?;
+/// Reads one page plus its total, using the same validated conditions.
+pub async fn list<E: EntityTrait, M: FromQueryResult + Send + Sync>(
+    conn: &impl ConnectionTrait,
+    spec: &Spec,
+    select: Select<E>,
+    workspace_id: &Id,
+    query: &ListQuery,
+) -> Result<(Vec<M>, u64)> {
+    let select = select.filter(conditions::<E>(spec, workspace_id, query)?);
+    let total = select.clone().into_model::<M>().count(conn).await?;
+    let direction = if query.descending {
+        sea_orm::Order::Desc
+    } else {
+        sea_orm::Order::Asc
+    };
+    let rows = select
+        .order_by(column::<E>(&query.sort), direction)
+        .order_by_asc(column::<E>("id"))
+        .limit(query.page_size)
+        .offset((query.page - 1) * query.page_size)
+        .into_model::<M>()
+        .all(conn)
+        .await?;
     Ok((rows, total))
 }
 
@@ -177,7 +173,6 @@ mod tests {
     use super::*;
 
     const SPEC: Spec = Spec {
-        table: "hosts",
         search: &["name", "address"],
         filters: &["state", "group_id"],
         sortable: &["name", "created_at"],
@@ -217,11 +212,20 @@ mod tests {
     fn every_value_is_bound_and_columns_come_only_from_the_spec() {
         let q =
             ListQuery::parse(&SPEC, &raw(&[("q", "web"), ("state", "online,offline")])).unwrap();
-        let (sql, values) = conditions(&SPEC, &Id::from(1), &q).unwrap();
-        assert_eq!(
-            sql,
-            " WHERE workspace_id = ? AND (LOWER(name) LIKE ? OR LOWER(address) LIKE ?) AND state IN (?,?)"
+        use crate::entities::hosts;
+        use sea_orm::QueryTrait;
+        let statement = hosts::Entity::find()
+            .filter(conditions::<hosts::Entity>(&SPEC, &Id::from(1), &q).unwrap())
+            .build(sea_orm::DbBackend::Postgres);
+        let sql = statement.sql;
+        let values = statement.values.unwrap().0;
+        assert!(sql.contains("\"workspace_id\" = $1"));
+        assert!(
+            sql.contains(
+                "LOWER(\"hosts\".\"name\") LIKE $2 OR LOWER(\"hosts\".\"address\") LIKE $3"
+            )
         );
+        assert!(sql.contains("\"state\" IN ($4, $5)"));
         // workspace + two search patterns + two state options.
         assert_eq!(values.len(), 5);
         assert!(!sql.contains("web") && !sql.contains("online"));
@@ -233,11 +237,16 @@ mod tests {
         // cannot widen the scope.
         assert!(ListQuery::parse(&SPEC, &raw(&[("workspace_id", "other")])).is_err());
         let q = ListQuery::parse(&SPEC, &raw(&[])).unwrap();
+        use crate::entities::hosts;
+        use sea_orm::QueryTrait;
+        let statement = hosts::Entity::find()
+            .filter(conditions::<hosts::Entity>(&SPEC, &Id::from(1), &q).unwrap())
+            .build(sea_orm::DbBackend::Postgres);
         assert!(
-            conditions(&SPEC, &Id::from(1), &q)
-                .unwrap()
-                .0
-                .starts_with(" WHERE workspace_id = ?")
+            statement
+                .sql
+                .contains("WHERE \"hosts\".\"workspace_id\" = $1")
         );
+        assert_eq!(statement.values.unwrap().0, vec![1_i64.into()]);
     }
 }

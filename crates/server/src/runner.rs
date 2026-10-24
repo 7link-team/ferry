@@ -22,7 +22,8 @@ use crate::snowflake::Id;
 
 use crate::{
     channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output, Pty, PtySize},
-    db::{self, execute, one},
+    db,
+    entities::{hosts, runner_tokens},
     error::{ApiError, Result},
     remote::Host,
     state::AppState,
@@ -40,6 +41,7 @@ use axum::{
 use bytes::Bytes;
 use ferry_protocol as wire;
 use futures::StreamExt;
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -232,32 +234,30 @@ pub async fn create_token(
     let host_id = Id::reference(&body.host_id)?;
     if host_id != Id::from(0) {
         // Refuse now rather than burning a token on a host that cannot use it.
-        one(
-            &s.db,
-            "SELECT id FROM hosts WHERE workspace_id = ? AND id = ? AND connection = 'runner'",
-            vec![scope.workspace_id.clone().into(), host_id.clone().into()],
-        )
-        .await?
-        .ok_or_else(|| ApiError::bad("该主机不存在，或接入方式不是代理。"))?;
+        hosts::Entity::find_by_id(i64::from(host_id))
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(hosts::Column::Connection.eq("runner"))
+            .one(&s.db)
+            .await?
+            .ok_or_else(|| ApiError::bad("该主机不存在，或接入方式不是代理。"))?;
     }
 
     let (id, now, token) = (s.next_id()?, db::now(), secret());
     let expires_at = now + minutes * 60 * 1000;
-    execute(
-        &s.db,
-        "INSERT INTO runner_tokens (id,workspace_id,host_id,token_hash,expires_at,used_at,used_by,created_by,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,0,0,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            host_id.clone().into(),
-            fingerprint(&token).into(),
-            expires_at.into(),
-            scope.user.id.clone().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    runner_tokens::Entity::insert(runner_tokens::ActiveModel {
+        id: Set(id.into()),
+        workspace_id: Set(scope.workspace_id.into()),
+        host_id: Set(host_id.into()),
+        token_hash: Set(fingerprint(&token)),
+        expires_at: Set(expires_at),
+        used_at: Set(0),
+        used_by: Set(0),
+        created_by: Set(scope.user.id.into()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+    })
+    .exec(&s.db)
     .await?;
     // The token itself is never stored, so it is audited by id only.
     crate::hosts::activity(
@@ -297,31 +297,30 @@ pub async fn create_token(
 /// same token cannot both win because only one UPDATE sees `used_at = 0`.
 async fn consume_token(db: &impl sea_orm::ConnectionTrait, token: &str) -> Result<(Id, Id, Id)> {
     let (hash, now) = (fingerprint(token), db::now());
-    let claimed = execute(
-        db,
-        "UPDATE runner_tokens SET used_at = ?, updated_at = ?
-         WHERE token_hash = ? AND used_at = 0 AND expires_at > ?",
-        vec![now.into(), now.into(), hash.clone().into(), now.into()],
-    )
-    .await?
-    .rows_affected();
+    let claimed = runner_tokens::Entity::update_many()
+        .col_expr(runner_tokens::Column::UsedAt, Expr::value(now))
+        .col_expr(runner_tokens::Column::UpdatedAt, Expr::value(now))
+        .filter(runner_tokens::Column::TokenHash.eq(hash.clone()))
+        .filter(runner_tokens::Column::UsedAt.eq(0_i64))
+        .filter(runner_tokens::Column::ExpiresAt.gt(now))
+        .exec(db)
+        .await?
+        .rows_affected;
     if claimed == 0 {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
             "注册令牌无效、已过期或已被使用，请在主机页重新生成。".into(),
         ));
     }
-    let row = one(
-        db,
-        "SELECT id, workspace_id, host_id FROM runner_tokens WHERE token_hash = ?",
-        vec![hash.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = runner_tokens::Entity::find()
+        .filter(runner_tokens::Column::TokenHash.eq(hash))
+        .one(db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok((
-        Id::from(db::int(&row, "id")),
-        Id::from(db::int(&row, "workspace_id")),
-        Id::from(db::int(&row, "host_id")),
+        Id::from(row.id),
+        Id::from(row.workspace_id),
+        Id::from(row.host_id),
     ))
 }
 
@@ -343,43 +342,54 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
     // it: an operator's open edit form is genuinely stale afterwards.
     let host_id = if bound_host == Id::from(0) {
         let id = s.next_id()?;
-        execute(
-            &s.db,
-            "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,description,host_key,runner_key_hash,os,arch,agent_version,metrics,seen_at,created_at,updated_at,version)
-             VALUES (?,?,?,'',0,'','runner','online',0,'','',?,?,?,?,'',?,?,?,1)",
-            vec![
-                id.clone().into(),
-                workspace_id.clone().into(),
-                reported_name(&hello.hostname).into(),
-                fingerprint(&key).into(),
-                hello.os.clone().into(),
-                hello.arch.clone().into(),
-                hello.agent_version.clone().into(),
-                now.into(),
-                now.into(),
-                now.into(),
-            ],
-        )
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(id.into()),
+            workspace_id: Set(workspace_id.into()),
+            name: Set(reported_name(&hello.hostname)),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("online".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(fingerprint(&key)),
+            os: Set(hello.os.clone()),
+            arch: Set(hello.arch.clone()),
+            agent_version: Set(hello.agent_version.clone()),
+            metrics: Set(String::new()),
+            seen_at: Set(now),
+            created_at: Set(now),
+            updated_at: Set(now),
+            version: Set(1),
+            ..Default::default()
+        })
+        .exec(&s.db)
         .await?;
         id
     } else {
-        let affected = execute(
-            &s.db,
-            "UPDATE hosts SET runner_key_hash=?,os=?,arch=?,agent_version=?,state='online',seen_at=?,updated_at=?,version=version+1
-             WHERE workspace_id=? AND id=? AND connection='runner'",
-            vec![
-                fingerprint(&key).into(),
-                hello.os.clone().into(),
-                hello.arch.clone().into(),
-                hello.agent_version.clone().into(),
-                now.into(),
-                now.into(),
-                workspace_id.clone().into(),
-                bound_host.clone().into(),
-            ],
-        )
-        .await?
-        .rows_affected();
+        let affected = hosts::Entity::update_many()
+            .col_expr(hosts::Column::RunnerKeyHash, Expr::value(fingerprint(&key)))
+            .col_expr(hosts::Column::Os, Expr::value(hello.os.clone()))
+            .col_expr(hosts::Column::Arch, Expr::value(hello.arch.clone()))
+            .col_expr(
+                hosts::Column::AgentVersion,
+                Expr::value(hello.agent_version.clone()),
+            )
+            .col_expr(hosts::Column::State, Expr::value("online"))
+            .col_expr(hosts::Column::SeenAt, Expr::value(now))
+            .col_expr(hosts::Column::UpdatedAt, Expr::value(now))
+            .col_expr(
+                hosts::Column::Version,
+                sea_orm::ExprTrait::add(Expr::col(hosts::Column::Version), 1_i64),
+            )
+            .filter(hosts::Column::WorkspaceId.eq(workspace_id))
+            .filter(hosts::Column::Id.eq(bound_host))
+            .filter(hosts::Column::Connection.eq("runner"))
+            .exec(&s.db)
+            .await?
+            .rows_affected;
         if affected == 0 {
             // The token is spent either way: a token that survives a failed
             // binding would be a token that can be retried.
@@ -389,32 +399,30 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
         }
         bound_host
     };
-    execute(
-        &s.db,
-        "UPDATE runner_tokens SET used_by = ? WHERE id = ?",
-        vec![host_id.clone().into(), token_id.into()],
-    )
-    .await?;
+    runner_tokens::Entity::update_many()
+        .col_expr(runner_tokens::Column::UsedBy, Expr::value(host_id))
+        .filter(runner_tokens::Column::Id.eq(token_id))
+        .exec(&s.db)
+        .await?;
     tracing::info!(%host_id, %workspace_id, hostname = %hello.hostname, "runner 注册成功");
     Ok((host_id.to_string(), key))
 }
 
 /// Checks a stored key against the one host it could belong to.
 async fn verify_key(s: &AppState, host_id: &str, key: &str) -> Result<()> {
-    one(
-        &s.db,
-        "SELECT id FROM hosts
-         WHERE id = ? AND connection = 'runner' AND runner_key_hash <> '' AND runner_key_hash = ?",
-        vec![Id::reference(host_id)?.into(), fingerprint(key).into()],
-    )
-    .await?
-    .ok_or_else(|| {
-        ApiError(
-            StatusCode::UNAUTHORIZED,
-            "代理凭据无效，请在主机页重新生成接入命令。".into(),
-        )
-    })
-    .map(|_| ())
+    hosts::Entity::find_by_id(i64::from(Id::reference(host_id)?))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .filter(hosts::Column::RunnerKeyHash.ne(""))
+        .filter(hosts::Column::RunnerKeyHash.eq(fingerprint(key)))
+        .one(&s.db)
+        .await?
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::UNAUTHORIZED,
+                "代理凭据无效，请在主机页重新生成接入命令。".into(),
+            )
+        })
+        .map(|_| ())
 }
 
 // ------------------------------------------------------------ 控制连接
@@ -482,18 +490,18 @@ async fn control(s: AppState, mut socket: WebSocket) {
     live().insert(host_id.clone(), registration.clone());
     // Enrolment already wrote the facts; a reconnect refreshes them.
     if matches!(hello.auth, wire::Auth::Key { .. }) {
-        let _ = execute(
-            &s.db,
-            "UPDATE hosts SET state='online',seen_at=?,os=?,arch=?,agent_version=? WHERE id=?",
-            vec![
-                db::now().into(),
-                hello.os.clone().into(),
-                hello.arch.clone().into(),
-                hello.agent_version.clone().into(),
-                row_id.into(),
-            ],
-        )
-        .await;
+        let _ = hosts::Entity::update_many()
+            .col_expr(hosts::Column::State, Expr::value("online"))
+            .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
+            .col_expr(hosts::Column::Os, Expr::value(hello.os.clone()))
+            .col_expr(hosts::Column::Arch, Expr::value(hello.arch.clone()))
+            .col_expr(
+                hosts::Column::AgentVersion,
+                Expr::value(hello.agent_version.clone()),
+            )
+            .filter(hosts::Column::Id.eq(row_id))
+            .exec(&s.db)
+            .await;
     }
     tracing::info!(%host_id, hostname = %hello.hostname, "runner 控制连接已建立");
 
@@ -512,12 +520,11 @@ async fn control(s: AppState, mut socket: WebSocket) {
         ours
     };
     if still_ours {
-        let _ = execute(
-            &s.db,
-            "UPDATE hosts SET state='offline' WHERE id = ?",
-            vec![row_id.into()],
-        )
-        .await;
+        let _ = hosts::Entity::update_many()
+            .col_expr(hosts::Column::State, Expr::value("offline"))
+            .filter(hosts::Column::Id.eq(row_id))
+            .exec(&s.db)
+            .await;
         tracing::info!(%host_id, "runner 控制连接已断开");
     }
 }
@@ -571,16 +578,12 @@ async fn pump_control(
                             // No version bump: a heartbeat is not an edit, and
                             // bumping it would invalidate an operator's open form
                             // every thirty seconds.
-                            let _ = execute(
-                                &s.db,
-                                "UPDATE hosts SET state='online',seen_at=?,metrics=? WHERE id=?",
-                                vec![
-                                    db::now().into(),
-                                    metrics_json(load1, memory_used, memory_total, disk_used, disk_total).into(),
-                                    row_id.into(),
-                                ],
-                            )
-                            .await;
+                            let _ = hosts::Entity::update_many()
+                                .col_expr(hosts::Column::State, Expr::value("online"))
+                                .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
+                                .col_expr(hosts::Column::Metrics, Expr::value(metrics_json(load1, memory_used, memory_total, disk_used, disk_total)))
+                                .filter(hosts::Column::Id.eq(row_id))
+                                .exec(&s.db).await;
                         }
                         Ok(wire::Report::SessionFailed { session, error }) => {
                             if let Some(waiting) = claim_pending(&session, host_id) {
@@ -1084,12 +1087,20 @@ mod tests {
     }
 
     async fn mint(db: &DatabaseConnection, token: &str, expires_at: i64) {
-        execute(
-            db,
-            "INSERT INTO runner_tokens (id,workspace_id,host_id,token_hash,expires_at,used_at,used_by,created_by,created_at,updated_at,version)
-             VALUES (?,1,0,?,?,0,0,1,0,0,1)",
-            vec![1_i64.into(), fingerprint(token).into(), expires_at.into()],
-        )
+        runner_tokens::Entity::insert(runner_tokens::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(1),
+            host_id: Set(0),
+            token_hash: Set(fingerprint(token)),
+            expires_at: Set(expires_at),
+            used_at: Set(0),
+            used_by: Set(0),
+            created_by: Set(1),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+        })
+        .exec(db)
         .await
         .expect("insert token");
     }
@@ -1125,15 +1136,13 @@ mod tests {
             "garbage must be refused"
         );
         // A refused token must stay unused, not be quietly burned.
-        let row = one(
-            db,
-            "SELECT used_at FROM runner_tokens WHERE token_hash = ?",
-            vec![fingerprint(&expired).into()],
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(db::int(&row, "used_at"), 0);
+        let row = runner_tokens::Entity::find()
+            .filter(runner_tokens::Column::TokenHash.eq(fingerprint(&expired)))
+            .one(db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.used_at, 0);
     }
 
     #[tokio::test]
@@ -1142,12 +1151,30 @@ mod tests {
         let db = &*scratch;
         let (key_a, key_b) = (secret(), secret());
         for (id, workspace, key) in [(1_i64, 11_i64, &key_a), (2_i64, 12_i64, &key_b)] {
-            execute(
-                db,
-                "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,description,host_key,runner_key_hash,os,arch,agent_version,metrics,seen_at,created_at,updated_at,version)
-                 VALUES (?,?,?,'',0,'','runner','online',0,'','',?,'','','','',0,0,0,1)",
-                vec![id.into(), workspace.into(), id.to_string().into(), fingerprint(key).into()],
-            )
+            hosts::Entity::insert(hosts::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(workspace),
+                name: Set(id.to_string()),
+                address: Set(String::new()),
+                port: Set(0),
+                username: Set(String::new()),
+                connection: Set("runner".into()),
+                state: Set("online".into()),
+                group_id: Set(0),
+                description: Set(String::new()),
+                host_key: Set(String::new()),
+                runner_key_hash: Set(fingerprint(key)),
+                os: Set(String::new()),
+                arch: Set(String::new()),
+                agent_version: Set(String::new()),
+                metrics: Set(String::new()),
+                seen_at: Set(0),
+                created_at: Set(0),
+                updated_at: Set(0),
+                version: Set(1),
+                ..Default::default()
+            })
+            .exec(db)
             .await
             .expect("insert host");
         }
@@ -1161,15 +1188,14 @@ mod tests {
 
     /// `verify_key` needs an `AppState`; this is the same query it runs.
     async fn matches(db: &DatabaseConnection, host_id: i64, key: &str) -> bool {
-        one(
-            db,
-            "SELECT id FROM hosts
-             WHERE id = ? AND connection = 'runner' AND runner_key_hash <> '' AND runner_key_hash = ?",
-            vec![host_id.into(), fingerprint(key).into()],
-        )
-        .await
-        .unwrap()
-        .is_some()
+        hosts::Entity::find_by_id(host_id)
+            .filter(hosts::Column::Connection.eq("runner"))
+            .filter(hosts::Column::RunnerKeyHash.ne(""))
+            .filter(hosts::Column::RunnerKeyHash.eq(fingerprint(key)))
+            .one(db)
+            .await
+            .unwrap()
+            .is_some()
     }
 
     #[test]

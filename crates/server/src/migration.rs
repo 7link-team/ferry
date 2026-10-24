@@ -377,17 +377,27 @@ mod schema_tests {
         ];
         let mut count = 0;
         for (table, columns) in inventory {
-            let rows = crate::db::all(&db, &format!("PRAGMA table_info({table})"), vec![])
+            // SeaORM's entity/query builders do not expose SQLite PRAGMA metadata.
+            // This schema-inspection test intentionally uses the native command.
+            let rows = db
+                .query_all_raw(sea_orm::Statement::from_string(
+                    db.get_database_backend(),
+                    format!("PRAGMA table_info({table})"),
+                ))
                 .await
                 .unwrap();
             let mut actual = std::collections::BTreeSet::new();
             for row in rows {
-                let column = crate::db::text(&row, "name");
+                let column = row.try_get::<String>("", "name").unwrap();
                 if column == "id"
                     || column.ends_with("_id")
                     || ["target_ref", "used_by", "created_by"].contains(&column.as_str())
                 {
-                    assert_eq!(crate::db::text(&row, "type"), "BIGINT", "{table}.{column}");
+                    assert_eq!(
+                        row.try_get::<String>("", "type").unwrap(),
+                        "BIGINT",
+                        "{table}.{column}"
+                    );
                     actual.insert(column);
                     count += 1;
                 }

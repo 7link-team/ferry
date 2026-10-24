@@ -12,7 +12,7 @@ use crate::snowflake::Id;
 
 use crate::{
     channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output, Pty, PtySize},
-    db,
+    entities::hosts,
     error::{ApiError, Result},
     remote::Host,
     state::AppState,
@@ -29,6 +29,7 @@ use russh_sftp::{
     client::{SftpSession, error::Error as SftpError},
     protocol::{FileAttributes, FileType, OpenFlags, StatusCode as SftpStatus},
 };
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -150,12 +151,12 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
     if let Some(fingerprint) = &channel.learned_host_key {
         // 只在仍然为空时写：两个并发的首次连接不会互相覆盖。也不动 version，
         // 这不是操作员的编辑，不该让别人正在填的表单失效。
-        db::execute(
-            &s.db,
-            "UPDATE hosts SET host_key = ? WHERE id = ? AND host_key = ''",
-            vec![fingerprint.clone().into(), host.id.clone().into()],
-        )
-        .await?;
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::HostKey, Expr::value(fingerprint.clone()))
+            .filter(hosts::Column::Id.eq(host.id))
+            .filter(hosts::Column::HostKey.eq(""))
+            .exec(&s.db)
+            .await?;
     }
     Ok(Box::new(channel))
 }

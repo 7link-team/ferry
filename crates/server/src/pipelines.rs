@@ -1,6 +1,7 @@
+use crate::entities::{host_groups, hosts, pipelines, repositories};
 use crate::snowflake::Id;
 use crate::{
-    db::{self, execute, one, text},
+    db,
     error::{ApiError, Result},
     resource::{self, ListQuery, Spec},
     state::AppState,
@@ -11,32 +12,33 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use sea_orm::QueryResult;
+use sea_orm::{
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    sea_query::{Expr, ExprTrait},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
 const SPEC: Spec = Spec {
-    table: "pipelines",
     search: &["name"],
     filters: &["repository_id", "target_kind"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
-const COLUMNS: &str = "id,name,repository_id,definition,target_kind,target_ref,description,created_at,updated_at,version";
 
-fn to_json(row: &QueryResult) -> Value {
+fn to_json(row: &pipelines::Model) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "repository_id": Id::from(db::int(row, "repository_id")),
-        "definition": text(row, "definition"),
-        "target_kind": text(row, "target_kind"),
-        "target_ref": Id::from(db::int(row, "target_ref")),
-        "description": text(row, "description"),
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "repository_id": Id::from(row.repository_id),
+        "definition": row.definition,
+        "target_kind": row.target_kind,
+        "target_ref": Id::from(row.target_ref),
+        "description": row.description,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -72,14 +74,32 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
         if table == "repositories" && Id::reference(id)? == Id::from(0) {
             continue;
         }
-        if one(
-            &s.db,
-            &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),
-            vec![scope.workspace_id.clone().into(), Id::reference(id)?.into()],
-        )
-        .await?
-        .is_none()
-        {
+        let id = Id::reference(id)?;
+        let exists = match table {
+            "repositories" => {
+                repositories::Entity::find()
+                    .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+                    .filter(repositories::Column::Id.eq(id))
+                    .count(&s.db)
+                    .await?
+            }
+            "hosts" => {
+                hosts::Entity::find()
+                    .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+                    .filter(hosts::Column::Id.eq(id))
+                    .count(&s.db)
+                    .await?
+            }
+            "host_groups" => {
+                host_groups::Entity::find()
+                    .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+                    .filter(host_groups::Column::Id.eq(id))
+                    .count(&s.db)
+                    .await?
+            }
+            _ => unreachable!("validated target table"),
+        };
+        if exists == 0 {
             return Err(ApiError::bad(format!("所选{noun}不存在于当前工作空间。")));
         }
     }
@@ -93,7 +113,14 @@ pub async fn list(
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(&s.db, &SPEC, COLUMNS, &scope.workspace_id, &query).await?;
+    let (rows, total) = resource::list(
+        &s.db,
+        &SPEC,
+        pipelines::Entity::find(),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
     Ok(Json(json!({
         "items": rows.iter().map(to_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -107,13 +134,12 @@ pub async fn get(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {COLUMNS} FROM pipelines WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = pipelines::Entity::find()
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::Id.eq(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(to_json(&row)))
 }
 
@@ -125,23 +151,21 @@ pub async fn create(
     scope.require("pipelines.create")?;
     let name = check(&s, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO pipelines (id,workspace_id,name,repository_id,definition,target_kind,target_ref,description,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            Id::reference(&body.repository_id)?.into(),
-            body.definition.clone().into(),
-            body.target_kind.clone().into(),
-            Id::reference(&body.target_ref)?.into(),
-            body.description.trim().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    pipelines::Entity::insert(pipelines::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        repository_id: Set(i64::from(Id::reference(&body.repository_id)?)),
+        definition: Set(body.definition.clone()),
+        target_kind: Set(body.target_kind.clone()),
+        target_ref: Set(i64::from(Id::reference(&body.target_ref)?)),
+        description: Set(body.description.trim().to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
@@ -166,25 +190,47 @@ pub async fn update(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.update")?;
     let name = check(&s, &scope, &body).await?;
-    let affected = execute(
-        &s.db,
-        "UPDATE pipelines SET name=?,repository_id=?,definition=?,target_kind=?,target_ref=?,description=?,updated_at=?,version=version+1
-         WHERE workspace_id=? AND id=? AND version=?",
-        vec![
-            name.clone().into(),
-            Id::reference(&body.repository_id)?.into(),
-            body.definition.clone().into(),
-            body.target_kind.clone().into(),
-            Id::reference(&body.target_ref)?.into(),
-            body.description.trim().into(),
-            db::now().into(),
-            scope.workspace_id.clone().into(),
-            id.clone().into(),
-            body.version.into(),
-        ],
-    ).await?.rows_affected();
+    let affected = pipelines::Entity::update_many()
+        .col_expr(pipelines::Column::Name, Expr::value(name.clone()))
+        .col_expr(
+            pipelines::Column::RepositoryId,
+            Expr::value(Id::reference(&body.repository_id)?),
+        )
+        .col_expr(
+            pipelines::Column::Definition,
+            Expr::value(body.definition.clone()),
+        )
+        .col_expr(
+            pipelines::Column::TargetKind,
+            Expr::value(body.target_kind.clone()),
+        )
+        .col_expr(
+            pipelines::Column::TargetRef,
+            Expr::value(Id::reference(&body.target_ref)?),
+        )
+        .col_expr(
+            pipelines::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(pipelines::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            pipelines::Column::Version,
+            Expr::col(pipelines::Column::Version).add(1),
+        )
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::Id.eq(id))
+        .filter(pipelines::Column::Version.eq(body.version))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
-        return Err(crate::hosts::stale(&s, "pipelines", &scope.workspace_id, &id).await?);
+        return Err(crate::hosts::stale(
+            &s,
+            pipelines::Entity::find()
+                .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(pipelines::Column::Id.eq(id)),
+        )
+        .await?);
     }
     crate::hosts::activity(
         &s,
@@ -205,13 +251,12 @@ pub async fn remove(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.delete")?;
-    let affected = execute(
-        &s.db,
-        "DELETE FROM pipelines WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let affected = pipelines::Entity::delete_many()
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }

@@ -4,7 +4,8 @@
 use crate::snowflake::Id;
 
 use crate::{
-    db::{self, all, execute, one, text},
+    db,
+    entities::{sessions, users, workspace_members, workspace_roles, workspaces},
     error::{ApiError, Result},
     state::AppState,
 };
@@ -16,6 +17,10 @@ use axum::{
     Json,
     extract::{FromRequestParts, State},
     http::{HeaderMap, header, request::Parts},
+};
+use sea_orm::sea_query::Expr;
+use sea_orm::{
+    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect, Set,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -49,39 +54,59 @@ impl FromRequestParts<AppState> for Account {
         // does not hand over live sessions either.
         let token = cookie(&parts.headers, COOKIE).ok_or_else(ApiError::unauthorized)?;
         let hash = crate::runner::fingerprint(&token);
-        let row = one(
-            &s.db,
-            "SELECT s.id AS session_id, u.id, u.email, u.name, u.active, s.expires_at
-             FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
-            vec![hash.clone().into()],
-        )
-        .await?
-        .ok_or_else(ApiError::unauthorized)?;
-        if db::int(&row, "expires_at") < db::now() || db::int(&row, "active") == 0 {
-            execute(
-                &s.db,
-                "DELETE FROM sessions WHERE token_hash = ?",
-                vec![hash.into()],
+        #[derive(FromQueryResult)]
+        struct SessionUser {
+            session_id: i64,
+            id: i64,
+            email: String,
+            name: String,
+            active: i64,
+            expires_at: i64,
+        }
+        let row = sessions::Entity::find()
+            .select_only()
+            .column_as(sessions::Column::Id, "session_id")
+            .columns([sessions::Column::ExpiresAt])
+            .columns([
+                users::Column::Id,
+                users::Column::Email,
+                users::Column::Name,
+                users::Column::Active,
+            ])
+            .join(
+                JoinType::InnerJoin,
+                sessions::Entity::belongs_to(users::Entity)
+                    .from(sessions::Column::UserId)
+                    .to(users::Column::Id)
+                    .into(),
             )
-            .await?;
+            .filter(sessions::Column::TokenHash.eq(hash.clone()))
+            .into_model::<SessionUser>()
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::unauthorized)?;
+        if row.expires_at < db::now() || row.active == 0 {
+            sessions::Entity::delete_many()
+                .filter(sessions::Column::TokenHash.eq(hash))
+                .exec(&s.db)
+                .await?;
             return Err(ApiError::unauthorized());
         }
-        let session_id = Id::from(db::int(&row, "session_id"));
-        execute(
-            &s.db,
-            "UPDATE sessions SET seen_at = ?, expires_at = ? WHERE id = ?",
-            vec![
-                db::now().into(),
-                (db::now() + SESSION_MS).into(),
-                session_id.clone().into(),
-            ],
-        )
-        .await?;
+        let session_id = Id::from(row.session_id);
+        sessions::Entity::update_many()
+            .col_expr(sessions::Column::SeenAt, Expr::value(db::now()))
+            .col_expr(
+                sessions::Column::ExpiresAt,
+                Expr::value(db::now() + SESSION_MS),
+            )
+            .filter(sessions::Column::Id.eq(i64::from(session_id)))
+            .exec(&s.db)
+            .await?;
         Ok(Self {
             user: User {
-                id: Id::from(db::int(&row, "id")),
-                email: text(&row, "email"),
-                name: text(&row, "name"),
+                id: Id::from(row.id),
+                email: row.email,
+                name: row.name,
             },
             session_id,
         })
@@ -158,30 +183,25 @@ pub async fn register(
     Json(body): Json<Credentials>,
 ) -> Result<impl axum::response::IntoResponse> {
     let email = check(&body, true)?;
-    if one(
-        &s.db,
-        "SELECT id FROM users WHERE email = ?",
-        vec![email.clone().into()],
-    )
-    .await?
-    .is_some()
+    if users::Entity::find()
+        .filter(users::Column::Email.eq(email.clone()))
+        .one(&s.db)
+        .await?
+        .is_some()
     {
         return Err(ApiError::conflict("该邮箱已注册，请直接登录。"));
     }
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO users (id,email,name,password_hash,active,created_at,updated_at)
-         VALUES (?,?,?,?,1,?,?)",
-        vec![
-            id.clone().into(),
-            email.clone().into(),
-            body.name.trim().into(),
-            hash(&body.password)?.into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    users::Entity::insert(users::ActiveModel {
+        id: Set(i64::from(id)),
+        email: Set(email.clone()),
+        name: Set(body.name.trim().to_owned()),
+        password_hash: Set(hash(&body.password)?),
+        active: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(&s.db)
     .await?;
     let session = start_session(&s, &id).await?;
     Ok((
@@ -195,12 +215,10 @@ pub async fn login(
     Json(body): Json<Credentials>,
 ) -> Result<impl axum::response::IntoResponse> {
     let email = body.email.trim().to_lowercase();
-    let row = one(
-        &s.db,
-        "SELECT id, password_hash, active FROM users WHERE email = ?",
-        vec![email.clone().into()],
-    )
-    .await?;
+    let row = users::Entity::find()
+        .filter(users::Column::Email.eq(email.clone()))
+        .one(&s.db)
+        .await?;
     // One message and one code path for "no such user" and "wrong password",
     // so the response does not say which emails are registered.
     let refused = || {
@@ -210,10 +228,10 @@ pub async fn login(
         )
     };
     let row = row.ok_or_else(refused)?;
-    if db::int(&row, "active") == 0 || !verify(&body.password, &text(&row, "password_hash")) {
+    if row.active == 0 || !verify(&body.password, &row.password_hash) {
         return Err(refused());
     }
-    let id = Id::from(db::int(&row, "id"));
+    let id = Id::from(row.id);
     let session = start_session(&s, &id).await?;
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
@@ -226,19 +244,16 @@ pub async fn login(
 async fn start_session(s: &AppState, user_id: &Id) -> Result<String> {
     let (id, now) = (s.next_id()?, db::now());
     let token = crate::runner::secret();
-    execute(
-        &s.db,
-        "INSERT INTO sessions (id,token_hash,user_id,workspace_id,created_at,seen_at,expires_at)
-         VALUES (?,?,?,0,?,?,?)",
-        vec![
-            id.into(),
-            crate::runner::fingerprint(&token).into(),
-            user_id.into(),
-            now.into(),
-            now.into(),
-            (now + SESSION_MS).into(),
-        ],
-    )
+    sessions::Entity::insert(sessions::ActiveModel {
+        id: Set(i64::from(id)),
+        token_hash: Set(crate::runner::fingerprint(&token)),
+        user_id: Set(i64::from(*user_id)),
+        workspace_id: Set(0),
+        created_at: Set(now),
+        seen_at: Set(now),
+        expires_at: Set(now + SESSION_MS),
+    })
+    .exec(&s.db)
     .await?;
     Ok(token)
 }
@@ -247,36 +262,60 @@ pub async fn logout(
     State(s): State<AppState>,
     account: Account,
 ) -> Result<impl axum::response::IntoResponse> {
-    execute(
-        &s.db,
-        "DELETE FROM sessions WHERE id = ?",
-        vec![account.session_id.into()],
-    )
-    .await?;
+    sessions::Entity::delete_by_id(i64::from(account.session_id))
+        .exec(&s.db)
+        .await?;
     Ok((set_cookie(&s, "", 0), Json(json!({"ok": true}))))
 }
 
 /// Who am I, and which workspaces can I open. The shell calls this on load.
 pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Value>> {
-    let rows = all(
-        &s.db,
-        "SELECT w.id, w.slug, w.name, r.name AS role_name, r.permissions
-         FROM workspace_members m
-         JOIN workspaces w ON w.id = m.workspace_id
-         JOIN workspace_roles r ON r.id = m.role_id
-         WHERE m.user_id = ? AND m.state = 'active' ORDER BY w.name ASC",
-        vec![account.user.id.clone().into()],
-    )
-    .await?;
+    #[derive(FromQueryResult)]
+    struct WorkspaceRole {
+        id: i64,
+        slug: String,
+        name: String,
+        role_name: String,
+        permissions: String,
+    }
+    let rows = workspace_members::Entity::find()
+        .select_only()
+        .columns([
+            workspaces::Column::Id,
+            workspaces::Column::Slug,
+            workspaces::Column::Name,
+        ])
+        .column_as(workspace_roles::Column::Name, "role_name")
+        .column(workspace_roles::Column::Permissions)
+        .join(
+            JoinType::InnerJoin,
+            workspace_members::Entity::belongs_to(workspaces::Entity)
+                .from(workspace_members::Column::WorkspaceId)
+                .to(workspaces::Column::Id)
+                .into(),
+        )
+        .join(
+            JoinType::InnerJoin,
+            workspace_members::Entity::belongs_to(workspace_roles::Entity)
+                .from(workspace_members::Column::RoleId)
+                .to(workspace_roles::Column::Id)
+                .into(),
+        )
+        .filter(workspace_members::Column::UserId.eq(i64::from(account.user.id)))
+        .filter(workspace_members::Column::State.eq("active"))
+        .order_by_asc(workspaces::Column::Name)
+        .into_model::<WorkspaceRole>()
+        .all(&s.db)
+        .await?;
     let workspaces: Vec<Value> = rows
         .iter()
         .map(|row| {
             json!({
-                "id": Id::from(db::int(row, "id")),
-                "slug": text(row, "slug"),
-                "name": text(row, "name"),
-                "role_name": text(row, "role_name"),
-                "permissions": serde_json::from_str::<Value>(&text(row, "permissions")).unwrap_or(json!([])),
+                "id": Id::from(row.id),
+                "slug": row.slug,
+                "name": row.name,
+                "role_name": row.role_name,
+                "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])),
             })
         })
         .collect();

@@ -2,10 +2,11 @@
 //! `resource::list`, writes go through `version` optimistic locking, and every
 //! mutation lands in `activity`.
 
+use crate::entities::{activity, host_groups, hosts, pipelines, tags};
 use crate::snowflake::Id;
 
 use crate::{
-    db::{self, execute, one, text},
+    db,
     error::{ApiError, Result},
     resource::{self, ListQuery, Spec},
     state::AppState,
@@ -16,7 +17,10 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
-use sea_orm::{QueryResult, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
+    sea_query::{Expr, ExprTrait},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -24,23 +28,21 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------- 主机组
 
 const GROUP_SPEC: Spec = Spec {
-    table: "host_groups",
     search: &["name", "description"],
     filters: &["parent_id"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
-const GROUP_COLUMNS: &str = "id,name,description,parent_id,created_at,updated_at,version";
 
-fn group_json(row: &QueryResult) -> Value {
+fn group_json(row: &host_groups::Model) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "description": text(row, "description"),
-        "parent_id": Id::from(db::int(row, "parent_id")),
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "description": row.description,
+        "parent_id": Id::from(row.parent_id),
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -65,7 +67,7 @@ pub async fn list_groups(
     let (rows, total) = resource::list(
         &s.db,
         &GROUP_SPEC,
-        GROUP_COLUMNS,
+        host_groups::Entity::find(),
         &scope.workspace_id,
         &query,
     )
@@ -83,13 +85,12 @@ pub async fn get_group(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {GROUP_COLUMNS} FROM host_groups WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = host_groups::Entity::find()
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::Id.eq(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(group_json(&row)))
 }
 
@@ -109,20 +110,18 @@ pub async fn create_group(
     scope.require("host-groups.create")?;
     let name = check_name(&body.name)?;
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO host_groups (id,workspace_id,name,description,parent_id,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            body.description.trim().into(),
-            Id::reference(&body.parent_id)?.into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    host_groups::Entity::insert(host_groups::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        description: Set(body.description.trim().to_owned()),
+        parent_id: Set(i64::from(Id::reference(&body.parent_id)?)),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     activity(
         &s,
@@ -148,24 +147,35 @@ pub async fn update_group(
     if Id::reference(&body.parent_id)? == id {
         return Err(ApiError::bad("主机组不能把自己作为上级。"));
     }
-    let affected = execute(
-        &s.db,
-        "UPDATE host_groups SET name=?,description=?,parent_id=?,updated_at=?,version=version+1
-         WHERE workspace_id=? AND id=? AND version=?",
-        vec![
-            name.clone().into(),
-            body.description.trim().into(),
-            Id::reference(&body.parent_id)?.into(),
-            db::now().into(),
-            scope.workspace_id.clone().into(),
-            id.clone().into(),
-            body.version.into(),
-        ],
-    )
-    .await?
-    .rows_affected();
+    let affected = host_groups::Entity::update_many()
+        .col_expr(host_groups::Column::Name, Expr::value(name.clone()))
+        .col_expr(
+            host_groups::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(
+            host_groups::Column::ParentId,
+            Expr::value(Id::reference(&body.parent_id)?),
+        )
+        .col_expr(host_groups::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            host_groups::Column::Version,
+            Expr::col(host_groups::Column::Version).add(1),
+        )
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::Id.eq(id))
+        .filter(host_groups::Column::Version.eq(body.version))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
-        return Err(stale(&s, "host_groups", &scope.workspace_id, &id).await?);
+        return Err(stale(
+            &s,
+            host_groups::Entity::find()
+                .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(host_groups::Column::Id.eq(id)),
+        )
+        .await?);
     }
     activity(
         &s,
@@ -188,26 +198,22 @@ pub async fn delete_group(
     scope.require("host-groups.delete")?;
     // Refuse rather than orphan: a host pointing at a deleted group would
     // disappear from every group filter without being gone.
-    let used = one(
-        &s.db,
-        "SELECT COUNT(*) AS total FROM hosts WHERE workspace_id = ? AND group_id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .map(|row| db::int(&row, "total"))
-    .unwrap_or(0);
+    let used = hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::GroupId.eq(id))
+        .count(&s.db)
+        .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
             "该主机组下还有 {used} 台主机，请先移出再删除。"
         )));
     }
-    let affected = execute(
-        &s.db,
-        "DELETE FROM host_groups WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let affected = host_groups::Entity::delete_many()
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
@@ -218,33 +224,31 @@ pub async fn delete_group(
 // ------------------------------------------------------------------ 主机
 
 const HOST_SPEC: Spec = Spec {
-    table: "hosts",
     search: &["name", "address", "username"],
     filters: &["group_id", "connection", "state"],
     sortable: &["name", "address", "state", "seen_at", "created_at"],
     default_sort: "name",
 };
-const HOST_COLUMNS: &str = "id,name,address,port,username,connection,state,group_id,credential_id,description,seen_at,created_at,updated_at,version";
 
 pub const CONNECTIONS: [&str; 2] = ["runner", "ssh"];
 pub const STATES: [&str; 3] = ["online", "offline", "unknown"];
 
-fn host_json(row: &QueryResult) -> Value {
+fn host_json(row: &hosts::Model) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "address": text(row, "address"),
-        "port": db::int(row, "port"),
-        "username": text(row, "username"),
-        "connection": text(row, "connection"),
-        "state": text(row, "state"),
-        "group_id": Id::from(db::int(row, "group_id")),
-        "credential_id": Id::from(db::int(row, "credential_id")),
-        "description": text(row, "description"),
-        "seen_at": db::int(row, "seen_at"),
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "address": row.address,
+        "port": row.port,
+        "username": row.username,
+        "connection": row.connection,
+        "state": row.state,
+        "group_id": Id::from(row.group_id),
+        "credential_id": Id::from(row.credential_id),
+        "description": row.description,
+        "seen_at": row.seen_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -300,8 +304,14 @@ pub async fn list_hosts(
 ) -> Result<Json<Value>> {
     scope.require("hosts.read")?;
     let query = ListQuery::parse(&HOST_SPEC, &raw)?;
-    let (rows, total) =
-        resource::list(&s.db, &HOST_SPEC, HOST_COLUMNS, &scope.workspace_id, &query).await?;
+    let (rows, total) = resource::list(
+        &s.db,
+        &HOST_SPEC,
+        hosts::Entity::find(),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
     Ok(Json(json!({
         "items": rows.iter().map(host_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -315,13 +325,12 @@ pub async fn get_host(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {HOST_COLUMNS} FROM hosts WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Id.eq(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(host_json(&row)))
 }
 
@@ -333,25 +342,25 @@ pub async fn create_host(
     scope.require("hosts.create")?;
     let (name, connection) = check_host(&body, true)?;
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO hosts (id,workspace_id,name,address,port,username,connection,state,group_id,credential_id,description,seen_at,created_at,updated_at,version)
-         VALUES (?,?,?,?,?,?,?,'unknown',?,?,?,0,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            body.address.trim().into(),
-            body.port.into(),
-            body.username.trim().into(),
-            connection.clone().into(),
-            Id::reference(&body.group_id)?.into(),
-            Id::reference(&body.credential_id)?.into(),
-            body.description.trim().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    hosts::Entity::insert(hosts::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        address: Set(body.address.trim().to_owned()),
+        port: Set(body.port),
+        username: Set(body.username.trim().to_owned()),
+        connection: Set(connection.clone()),
+        state: Set("unknown".to_owned()),
+        group_id: Set(i64::from(Id::reference(&body.group_id)?)),
+        credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
+        description: Set(body.description.trim().to_owned()),
+        seen_at: Set(0),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     activity(
         &s,
@@ -376,28 +385,42 @@ pub async fn update_host(
     let (name, _) = check_host(&body, false)?;
     // `connection` is deliberately absent: changing how an enrolled host is
     // reached would invalidate its key or its stored credential silently.
-    let affected = execute(
-        &s.db,
-        "UPDATE hosts SET name=?,address=?,port=?,username=?,group_id=?,credential_id=?,description=?,updated_at=?,version=version+1
-         WHERE workspace_id=? AND id=? AND version=?",
-        vec![
-            name.clone().into(),
-            body.address.trim().into(),
-            body.port.into(),
-            body.username.trim().into(),
-            Id::reference(&body.group_id)?.into(),
-            Id::reference(&body.credential_id)?.into(),
-            body.description.trim().into(),
-            db::now().into(),
-            scope.workspace_id.clone().into(),
-            id.clone().into(),
-            body.version.into(),
-        ],
-    )
-    .await?
-    .rows_affected();
+    let affected = hosts::Entity::update_many()
+        .col_expr(hosts::Column::Name, Expr::value(name.clone()))
+        .col_expr(hosts::Column::Address, Expr::value(body.address.trim()))
+        .col_expr(hosts::Column::Port, Expr::value(body.port))
+        .col_expr(hosts::Column::Username, Expr::value(body.username.trim()))
+        .col_expr(
+            hosts::Column::GroupId,
+            Expr::value(Id::reference(&body.group_id)?),
+        )
+        .col_expr(
+            hosts::Column::CredentialId,
+            Expr::value(Id::reference(&body.credential_id)?),
+        )
+        .col_expr(
+            hosts::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(hosts::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            hosts::Column::Version,
+            Expr::col(hosts::Column::Version).add(1),
+        )
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Id.eq(id))
+        .filter(hosts::Column::Version.eq(body.version))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
-        return Err(stale(&s, "hosts", &scope.workspace_id, &id).await?);
+        return Err(stale(
+            &s,
+            hosts::Entity::find()
+                .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(hosts::Column::Id.eq(id)),
+        )
+        .await?);
     }
     activity(&s, &scope, "update", "hosts", &id, json!({"name": name})).await?;
     Ok(Json(json!({"ok": true})))
@@ -413,15 +436,12 @@ async fn host_is_free(
     workspace_id: &Id,
     id: &Id,
 ) -> Result<()> {
-    let used = one(
-        conn,
-        "SELECT COUNT(*) AS total FROM pipelines
-         WHERE workspace_id = ? AND target_kind = 'host' AND target_ref = ?",
-        vec![workspace_id.into(), id.into()],
-    )
-    .await?
-    .map(|row| db::int(&row, "total"))
-    .unwrap_or(0);
+    let used = pipelines::Entity::find()
+        .filter(pipelines::Column::WorkspaceId.eq(*workspace_id))
+        .filter(pipelines::Column::TargetKind.eq("host"))
+        .filter(pipelines::Column::TargetRef.eq(*id))
+        .count(conn)
+        .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
             "还有 {used} 条流水线以这台主机为目标，请先改掉再删除。"
@@ -438,13 +458,12 @@ pub async fn delete_host(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.delete")?;
     host_is_free(&s.db, &scope.workspace_id, &id).await?;
-    let affected = execute(
-        &s.db,
-        "DELETE FROM hosts WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let affected = hosts::Entity::delete_many()
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
@@ -475,13 +494,12 @@ pub async fn bulk_delete_hosts(
         // blocks this delete or is not yet visible to it — and a refusal rolls
         // back every delete in the batch rather than leaving it half applied.
         host_is_free(&transaction, &scope.workspace_id, id).await?;
-        deleted += crate::db::execute(
-            &transaction,
-            "DELETE FROM hosts WHERE workspace_id = ? AND id = ?",
-            vec![scope.workspace_id.clone().into(), id.clone().into()],
-        )
-        .await?
-        .rows_affected();
+        deleted += hosts::Entity::delete_many()
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(hosts::Column::Id.eq(id))
+            .exec(&transaction)
+            .await?
+            .rows_affected;
     }
     transaction.commit().await?;
     activity(
@@ -499,22 +517,20 @@ pub async fn bulk_delete_hosts(
 // ------------------------------------------------------------------ 标签
 
 const TAG_SPEC: Spec = Spec {
-    table: "tags",
     search: &["name"],
     filters: &["color"],
     sortable: &["name", "created_at"],
     default_sort: "name",
 };
-const TAG_COLUMNS: &str = "id,name,color,created_at,updated_at,version";
 
-fn tag_json(row: &QueryResult) -> Value {
+fn tag_json(row: &tags::Model) -> Value {
     json!({
-        "id": Id::from(db::int(row, "id")),
-        "name": text(row, "name"),
-        "color": text(row, "color"),
-        "created_at": db::int(row, "created_at"),
-        "updated_at": db::int(row, "updated_at"),
-        "version": db::int(row, "version"),
+        "id": Id::from(row.id),
+        "name": row.name,
+        "color": row.color,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "version": row.version,
     })
 }
 
@@ -534,8 +550,14 @@ pub async fn list_tags(
 ) -> Result<Json<Value>> {
     scope.require("tags.read")?;
     let query = ListQuery::parse(&TAG_SPEC, &raw)?;
-    let (rows, total) =
-        resource::list(&s.db, &TAG_SPEC, TAG_COLUMNS, &scope.workspace_id, &query).await?;
+    let (rows, total) = resource::list(
+        &s.db,
+        &TAG_SPEC,
+        tags::Entity::find(),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
     Ok(Json(json!({
         "items": rows.iter().map(tag_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -549,13 +571,12 @@ pub async fn get_tag(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.read")?;
-    let row = one(
-        &s.db,
-        &format!("SELECT {TAG_COLUMNS} FROM tags WHERE workspace_id = ? AND id = ?"),
-        vec![scope.workspace_id.into(), id.into()],
-    )
-    .await?
-    .ok_or_else(ApiError::missing)?;
+    let row = tags::Entity::find()
+        .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(tags::Column::Id.eq(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
     Ok(Json(tag_json(&row)))
 }
 
@@ -567,18 +588,17 @@ pub async fn create_tag(
     scope.require("tags.create")?;
     let name = check_name(&body.name)?;
     let (id, now) = (s.next_id()?, db::now());
-    execute(
-        &s.db,
-        "INSERT INTO tags (id,workspace_id,name,color,created_at,updated_at,version) VALUES (?,?,?,?,?,?,1)",
-        vec![
-            id.clone().into(),
-            scope.workspace_id.clone().into(),
-            name.clone().into(),
-            body.color.trim().into(),
-            now.into(),
-            now.into(),
-        ],
-    )
+    tags::Entity::insert(tags::ActiveModel {
+        id: Set(i64::from(id)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        name: Set(name.clone()),
+        color: Set(body.color.trim().to_owned()),
+        created_at: Set(now),
+        updated_at: Set(now),
+        version: Set(1),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     activity(&s, &scope, "create", "tags", &id, json!({"name": name})).await?;
     Ok((StatusCode::CREATED, Json(json!({"id": id}))))
@@ -593,23 +613,28 @@ pub async fn update_tag(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.update")?;
     let name = check_name(&body.name)?;
-    let affected = execute(
-        &s.db,
-        "UPDATE tags SET name=?,color=?,updated_at=?,version=version+1
-         WHERE workspace_id=? AND id=? AND version=?",
-        vec![
-            name.clone().into(),
-            body.color.trim().into(),
-            db::now().into(),
-            scope.workspace_id.clone().into(),
-            id.clone().into(),
-            body.version.into(),
-        ],
-    )
-    .await?
-    .rows_affected();
+    let affected = tags::Entity::update_many()
+        .col_expr(tags::Column::Name, Expr::value(name.clone()))
+        .col_expr(tags::Column::Color, Expr::value(body.color.trim()))
+        .col_expr(tags::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            tags::Column::Version,
+            Expr::col(tags::Column::Version).add(1),
+        )
+        .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(tags::Column::Id.eq(id))
+        .filter(tags::Column::Version.eq(body.version))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
-        return Err(stale(&s, "tags", &scope.workspace_id, &id).await?);
+        return Err(stale(
+            &s,
+            tags::Entity::find()
+                .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(tags::Column::Id.eq(id)),
+        )
+        .await?);
     }
     activity(&s, &scope, "update", "tags", &id, json!({"name": name})).await?;
     Ok(Json(json!({"ok": true})))
@@ -622,13 +647,12 @@ pub async fn delete_tag(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.delete")?;
-    let affected = execute(
-        &s.db,
-        "DELETE FROM tags WHERE workspace_id = ? AND id = ?",
-        vec![scope.workspace_id.clone().into(), id.clone().into()],
-    )
-    .await?
-    .rows_affected();
+    let affected = tags::Entity::delete_many()
+        .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(tags::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
@@ -640,14 +664,11 @@ pub async fn delete_tag(
 
 /// A zero-row update means the row is gone or someone else saved first. Tell
 /// those apart, because "refresh and retry" is useless advice for a deleted row.
-pub async fn stale(s: &AppState, table: &str, workspace_id: &Id, id: &Id) -> Result<ApiError> {
-    let exists = one(
-        s.db(),
-        &format!("SELECT id FROM {table} WHERE workspace_id = ? AND id = ?"),
-        vec![workspace_id.into(), id.into()],
-    )
-    .await?
-    .is_some();
+pub async fn stale<E: EntityTrait>(s: &AppState, query: sea_orm::Select<E>) -> Result<ApiError>
+where
+    E::Model: Sync,
+{
+    let exists = query.count(&s.db).await? > 0;
     Ok(if exists {
         ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
     } else {
@@ -663,22 +684,19 @@ pub async fn activity(
     resource_id: &Id,
     details: Value,
 ) -> Result<()> {
-    execute(
-        &s.db,
-        "INSERT INTO activity (id,workspace_id,actor_id,actor_name,action,resource,resource_id,details,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?)",
-        vec![
-            s.next_id()?.into(),
-            scope.workspace_id.clone().into(),
-            scope.user.id.clone().into(),
-            scope.user.name.clone().into(),
-            action.into(),
-            resource.into(),
-            resource_id.into(),
-            details.to_string().into(),
-            db::now().into(),
-        ],
-    )
+    activity::Entity::insert(activity::ActiveModel {
+        id: Set(i64::from(s.next_id()?)),
+        workspace_id: Set(i64::from(scope.workspace_id)),
+        actor_id: Set(i64::from(scope.user.id)),
+        actor_name: Set(scope.user.name.clone()),
+        action: Set(action.to_owned()),
+        resource: Set(resource.to_owned()),
+        resource_id: Set(i64::from(*resource_id)),
+        details: Set(details.to_string()),
+        created_at: Set(db::now()),
+        ..Default::default()
+    })
+    .exec(&s.db)
     .await?;
     Ok(())
 }
@@ -690,17 +708,16 @@ pub async fn list_activity(
 ) -> Result<Json<Value>> {
     scope.require("activity.read")?;
     const SPEC: Spec = Spec {
-        table: "activity",
         search: &["actor_name", "resource", "action"],
         filters: &["resource", "action", "actor_id"],
         sortable: &["created_at"],
         default_sort: "-created_at",
     };
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(
+    let (rows, total) = resource::list::<activity::Entity, activity::Model>(
         &s.db,
         &SPEC,
-        "id,actor_name,action,resource,resource_id,details,created_at",
+        activity::Entity::find(),
         &scope.workspace_id,
         &query,
     )
@@ -709,13 +726,13 @@ pub async fn list_activity(
         .iter()
         .map(|row| {
             json!({
-                "id": Id::from(db::int(row, "id")),
-                "actor_name": text(row, "actor_name"),
-                "action": text(row, "action"),
-                "resource": text(row, "resource"),
-                "resource_id": Id::from(db::int(row, "resource_id")),
-                "details": serde_json::from_str::<Value>(&text(row, "details")).unwrap_or(json!({})),
-                "created_at": db::int(row, "created_at"),
+                "id": Id::from(row.id),
+                "actor_name": row.actor_name,
+                "action": row.action,
+                "resource": row.resource,
+                "resource_id": Id::from(row.resource_id),
+                "details": serde_json::from_str::<Value>(&row.details).unwrap_or(json!({})),
+                "created_at": row.created_at,
             })
         })
         .collect();
@@ -728,29 +745,46 @@ pub async fn list_activity(
 pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     scope.require("dashboard.read")?;
     let mut counts = serde_json::Map::new();
-    for table in ["hosts", "host_groups", "tags"] {
-        let total = one(
-            &s.db,
-            &format!("SELECT COUNT(*) AS total FROM {table} WHERE workspace_id = ?"),
-            vec![scope.workspace_id.clone().into()],
-        )
-        .await?
-        .map(|row| db::int(&row, "total"))
-        .unwrap_or(0);
-        counts.insert(table.replace('_', "-"), json!(total));
+    for (name, total) in [
+        (
+            "hosts",
+            hosts::Entity::find()
+                .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+                .count(&s.db)
+                .await?,
+        ),
+        (
+            "host-groups",
+            host_groups::Entity::find()
+                .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+                .count(&s.db)
+                .await?,
+        ),
+        (
+            "tags",
+            tags::Entity::find()
+                .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+                .count(&s.db)
+                .await?,
+        ),
+    ] {
+        counts.insert(name.into(), json!(total));
     }
-    let rows = db::all(
-        &s.db,
-        "SELECT state, COUNT(*) AS total FROM hosts WHERE workspace_id = ? GROUP BY state",
-        vec![scope.workspace_id.clone().into()],
-    )
-    .await?;
+    let rows = hosts::Entity::find()
+        .select_only()
+        .column(hosts::Column::State)
+        .column_as(hosts::Column::Id.count(), "total")
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .group_by(hosts::Column::State)
+        .into_tuple::<(String, i64)>()
+        .all(&s.db)
+        .await?;
     let mut states = serde_json::Map::new();
     for state in STATES {
         states.insert(state.into(), json!(0));
     }
-    for row in &rows {
-        states.insert(text(row, "state"), json!(db::int(row, "total")));
+    for (state, total) in rows {
+        states.insert(state, json!(total));
     }
     Ok(Json(json!({"counts": counts, "states": {"hosts": states}})))
 }

@@ -2,18 +2,7 @@
 //! the enclosing transaction on error (worker allocation uses that path).
 use sea_orm::{ActiveValue::Set, Condition, IntoActiveModel, QueryFilter, entity::prelude::*};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "locks")]
-pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub name: String,
-    pub owner: String,
-    pub acquired_at: i64,
-    pub expires_at: i64,
-}
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-impl ActiveModelBehavior for ActiveModel {}
+use crate::entities::locks::{ActiveModel, Column, Entity, Model};
 
 pub async fn acquire(
     db: &impl ConnectionTrait,
