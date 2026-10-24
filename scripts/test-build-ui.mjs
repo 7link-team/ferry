@@ -32,12 +32,31 @@ try {
   const serverPort = await port(), gitPort = await port();
   const origin = `http://127.0.0.1:${serverPort}`;
   await mkdir(join(work, 'repos'));
-  // Clone existing history; never create a commit, even in the fixture.
-  execFileSync('git', ['clone', '--bare', '--quiet', '.', join(work, 'repos/source.git')], { windowsHide: true });
-  // checkout@v4 uses detached HEAD on PRs/tags. Give the cloned HEAD a
-  // fixture branch without creating commits or modifying the source checkout.
+  // A self-contained fixture repository, built in the scratch directory.
+  //
+  // This used to clone the project repo itself. That passed locally and failed
+  // on CI: actions/checkout@v4 fetches depth 1, so the bare clone had an
+  // incomplete object graph and the dumb-HTTP fetch could not resolve HEAD's
+  // commit. A fixture must not depend on how deep the outer checkout happens
+  // to be — nor on the project having any history at all. Committing inside a
+  // throwaway directory touches nothing outside it.
   const branch = 'ui-fixture';
-  execFileSync('git', ['--git-dir=' + join(work, 'repos/source.git'), 'branch', '-f', branch, 'HEAD'], { windowsHide: true });
+  const seed = join(work, 'seed');
+  await mkdir(seed);
+  await writeFile(join(seed, 'README.md'), 'ferry ui fixture\n');
+  const git = (...args) =>
+    execFileSync('git', ['-C', seed, ...args], {
+      windowsHide: true,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'ferry', GIT_AUTHOR_EMAIL: 'ferry@example.invalid',
+        GIT_COMMITTER_NAME: 'ferry', GIT_COMMITTER_EMAIL: 'ferry@example.invalid',
+      },
+    });
+  git('init', '--quiet', '--initial-branch', branch);
+  git('add', 'README.md');
+  git('commit', '--quiet', '-m', 'fixture');
+  execFileSync('git', ['clone', '--bare', '--quiet', seed, join(work, 'repos/source.git')], { windowsHide: true });
   execFileSync('git', ['--git-dir=' + join(work, 'repos/source.git'), 'update-server-info'], { windowsHide: true });
   await launch('python3', ['-m', 'http.server', String(gitPort), '--bind', '127.0.0.1', '--directory', join(work, 'repos')]);
   const env = { ...process.env, FERRY_DATA_DIR: join(work, 'data'), FERRY_BIND: `127.0.0.1:${serverPort}` };
@@ -92,7 +111,7 @@ try {
     env: [{ name: 'UI_BARRIER_DIR', value: work }],
     steps: [
       { name: '克隆', run: 'git clone -b {{branch}} {{repo_url}} source && echo CLONE_OK', timeout_seconds: 60 },
-      { name: '构建', run: 'while [ ! -f "$UI_BARRIER_DIR/allow-build" ]; do sleep 0.1; done; test -f source/package.json && echo BUILD_OK', timeout_seconds: 60 },
+      { name: '构建', run: 'while [ ! -f "$UI_BARRIER_DIR/allow-build" ]; do sleep 0.1; done; test -f source/README.md && echo BUILD_OK', timeout_seconds: 60 },
       { name: '完成', run: 'while [ ! -f "$UI_BARRIER_DIR/allow-finish" ]; do sleep 0.1; done; echo FINISH_OK', timeout_seconds: 60 },
     ],
   };
