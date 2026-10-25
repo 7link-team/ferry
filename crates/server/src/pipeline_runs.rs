@@ -549,8 +549,20 @@ async fn execute_private(
             )
             .await?;
             upload(ch, &format!("{private}/password"), secret.clone(), 0o600).await?;
-            upload(ch,&format!("{private}/askpass"),format!("#!/bin/sh\ncase \"$1\" in *Username*) cat {private}/username;; *) cat {private}/password;; esac\n"),0o700).await?;
-            env.push_str(&format!("export GIT_ASKPASS={}\nexport GIT_CONFIG_COUNT=1\nexport GIT_CONFIG_KEY_0=credential.helper\nexport GIT_CONFIG_VALUE_0=''\n",quote(&format!("{private}/askpass"))));
+            // ASKPASS receives Git's prompt as argv, including the credential username
+            // on password prompts. The credential-helper protocol keeps both fields in pipes.
+            upload(
+                ch,
+                &format!("{private}/credential-helper"),
+                format!(
+                    "#!/bin/sh\ncat >/dev/null\n[ \"$1\" = get ] || exit 0\nprintf 'username='\ncat {private}/username\nprintf '\\npassword='\ncat {private}/password\nprintf '\\n\\n'\n"
+                ),
+                0o700,
+            ).await?;
+            env.push_str(&format!(
+                "unset GIT_ASKPASS SSH_ASKPASS\nexport GIT_CONFIG_COUNT=3\nexport GIT_CONFIG_KEY_0=credential.helper\nexport GIT_CONFIG_VALUE_0=''\nexport GIT_CONFIG_KEY_1=credential.helper\nexport GIT_CONFIG_VALUE_1={}\nexport GIT_CONFIG_KEY_2=core.askPass\nexport GIT_CONFIG_VALUE_2=''\n",
+                quote(&format!("{private}/credential-helper"))
+            ));
         }
     }
     let mut seq = 0;

@@ -201,8 +201,10 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         all_runs, successful = [], []
+        # Keep each credential process observable long enough for ps sampling.
+        # The old ASKPASS path includes the username in Git's password-prompt argv.
         success_steps = [
-            {'name': 'clone', 'run': 'set -e; git clone --depth 1 -b {{branch}} {{repo_url}} . && echo CLONE_OK; sleep 1'},
+            {'name': 'clone', 'run': 'set -e; helper="${GIT_CONFIG_VALUE_1:-$GIT_ASKPASS}"; mv "$helper" "$helper.real"; printf \'#!/bin/sh\\nsleep 0.5\\nexec "%s.real" "$@"\\n\' "$helper" > "$helper"; chmod 700 "$helper"; git clone --depth 1 -b {{branch}} {{repo_url}} .; echo CLONE_OK; sleep 1'},
             {'name': 'build {{run}}', 'run': 'set -e; test "$BUILD_VALUE" = "env-main-{{run}}" && cat payload.txt && test "$(git rev-parse HEAD)" = "{{commit}}" && git rev-parse HEAD && printf "BUILD_OK\\n"; printf "BUILD_STDERR\\n" >&2'}]
         for kind, host in [('runner', runner), ('ssh', ssh)]:
             print('== ' + kind, flush=True)
@@ -220,9 +222,15 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
                   and [i['step_index'] for i in entries] == sorted(i['step_index'] for i in entries),
                   f"seq={[i['seq'] for i in entries]}")
             check(f'{kind} workdir and env applied', local_or_ssh(kind, f'cat {root_dir}/{run["number"]}/payload.txt').strip() == 'local-private-repository')
+            bad_credential = create('credentials', {'name': 'denied-'+kind, 'kind': 'password', 'username': username, 'secret': secret+'-wrong'})
+            bad_repository = create('repositories', {'name': 'denied-'+kind, 'url': repo_url, 'credential_id': bad_credential})
+            denied = trigger(pipeline(host, success_steps, repo=bad_repository))['id']; all_runs.append(denied)
+            rejected = done(denied)
+            check(kind+' invalid credentials fail without interactive fallback', rejected['state']=='failed' and rejected['steps'][0]['state']=='failed')
+
             # Deliberately echo the password on both streams from FILE contents;
             # the test itself never injects it into any command's argv.
-            leak_steps = [{'name': 'redaction', 'run': 'd=$(dirname "$GIT_ASKPASS"); cat "$d/password"; cat "$d/password" >&2; stat -c %a "$d/password" 2>/dev/null || stat -f %Lp "$d/password"; sleep 1; exit 7'},
+            leak_steps = [{'name': 'redaction', 'run': 'd=$(dirname "${GIT_CONFIG_VALUE_1:-$GIT_ASKPASS}"); cat "$d/password"; cat "$d/password" >&2; stat -c %a "$d/password" 2>/dev/null || stat -f %Lp "$d/password"; sleep 1; exit 7'},
                           {'name': 'must skip', 'run': 'echo SHOULD_NOT_RUN; touch forbidden'}]
             rid = trigger(pipeline(host, leak_steps))['id']; all_runs.append(rid)
             row = done(rid); text = ''.join(i['chunk'] for i in logs(rid))
@@ -298,7 +306,7 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         for kind, data in samples.items():
             joined = '\n'.join(data)
             check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined
-                  and '/step' in joined, f'samples={len(data)}, observed step argv=True')
+                  and '/step' in joined, f'samples={len(data)}, observed step argv={"/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
         activity = json.dumps(api('/workspaces/ops/activity?page_size=200'))
         all_text = ''.join(i['chunk'] for rid in all_runs for i in logs(rid))
         check('7 all stored logs and activity omit credential plaintext',
