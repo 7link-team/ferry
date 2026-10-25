@@ -36,15 +36,15 @@ pub struct PathQuery {
 }
 
 /// Loads a host the caller may reach and opens a channel to it.
-async fn open(s: &AppState, scope: &Scope, id: &Id) -> Result<Box<dyn HostChannel>> {
+pub(crate) async fn open(s: &AppState, workspace_id: &Id, id: &Id) -> Result<Box<dyn HostChannel>> {
     let row = hosts::Entity::find_by_id(i64::from(*id))
-        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::WorkspaceId.eq(*workspace_id))
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
     let host = Host {
         id: Id::from(row.id),
-        workspace_id: scope.workspace_id.clone(),
+        workspace_id: *workspace_id,
         credential_id: Id::from(row.credential_id),
         name: row.name,
         address: row.address,
@@ -94,7 +94,7 @@ pub async fn terminal(
 
     // The channel is opened before the upgrade so a connection failure is a
     // plain HTTP error with a readable message, not a socket that closes.
-    let channel = open(&s, &scope, &id).await?;
+    let channel = open(&s, &scope.workspace_id, &id).await?;
     let pty = channel.open_pty(size).await?;
 
     crate::hosts::activity(&s, &scope, "terminal-open", "hosts", &id, json!({})).await?;
@@ -195,7 +195,10 @@ pub async fn list_dir(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
-    let entries = open(&s, &scope, &id).await?.list_dir(path).await?;
+    let entries = open(&s, &scope.workspace_id, &id)
+        .await?
+        .list_dir(path)
+        .await?;
     Ok(Json(json!({ "path": path, "items": entries })))
 }
 
@@ -209,7 +212,10 @@ pub async fn download(
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
     let name = path.rsplit('/').next().unwrap_or("download").to_owned();
-    let (meta, stream) = open(&s, &scope, &id).await?.read_file(path).await?;
+    let (meta, stream) = open(&s, &scope.workspace_id, &id)
+        .await?
+        .read_file(path)
+        .await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -252,7 +258,7 @@ pub async fn upload(
         body.into_data_stream()
             .map_err(|error| ApiError(StatusCode::BAD_REQUEST, format!("上传中断：{error}"))),
     );
-    open(&s, &scope, &id)
+    open(&s, &scope.workspace_id, &id)
         .await?
         .write_file(path, 0o644, stream)
         .await?;
@@ -277,7 +283,10 @@ pub async fn delete_file(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
-    open(&s, &scope, &id).await?.delete_file(path).await?;
+    open(&s, &scope.workspace_id, &id)
+        .await?
+        .delete_file(path)
+        .await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -299,7 +308,7 @@ pub async fn test_connection(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.read")?;
-    let channel = open(&s, &scope, &id).await?;
+    let channel = open(&s, &scope.workspace_id, &id).await?;
     let output = channel
         .exec("echo ferry-ok", Duration::from_secs(15))
         .await?;

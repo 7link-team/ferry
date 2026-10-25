@@ -4,6 +4,7 @@
 //! connection settings and the service lifecycle.
 
 mod server;
+mod updater;
 
 pub fn run() {
     tauri::Builder::default()
@@ -18,10 +19,14 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .manage(server::Runtime::default())
         .invoke_handler(tauri::generate_handler![
             server::connection_settings,
             server::open_workspace,
+            updater::check_update,
+            updater::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("run Ferry desktop shell");

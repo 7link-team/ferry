@@ -1,9 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ferry",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "identifier": "com.aspeed.ferry",
-  "build": { "frontendDist": "./ui" },
+  "build": {
+    "frontendDist": "./ui"
+  },
   "app": {
     "withGlobalTauri": true,
     "windows": [
@@ -23,7 +25,14 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/ferry-server"],
+    "windows": {
+      "nsis": {
+        "installMode": "both"
+      }
+    },
+    "externalBin": [
+      "binaries/ferry-server"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -31,6 +40,23 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "signingIdentity": "-" }
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDOEI2NjlGRkNGQjQwMzQKUldRMFFQdjhuMmFMdklOY1NYMTQ4TmlyVzFGeEZlaEV1S1BBT0F2cjJWb0xVZTVncWd3Q0ZlSDgK",
+      "endpoints": [],
+      "windows": {
+        "installMode": "basicUi"
+      },
+      "requireSignedVersion": true
+    },
+    "release": {
+      "repository": "7link-team/ferry",
+      "includePrereleases": true
+    }
   }
 }

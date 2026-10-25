@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "launcher",
+  "description": "Only the bundled connection window can read the app version and receive update progress.",
+  "windows": ["launcher"],
+  "permissions": ["core:app:allow-version", "core:event:allow-listen", "core:event:allow-unlisten"]
+}

@@ -6,6 +6,7 @@
  * module means adding entries here plus the server handlers.
  */
 import { duration, stateBadge, type PipelineRun } from "./pipeline";
+import { deploymentState, type Deployment, type Revision } from "./deployment";
 import { nav } from "./nav";
 import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
@@ -131,6 +132,23 @@ const TARGETS = [{ value: "host", label: "主机" }, { value: "host-group", labe
 
 export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow>> {
   return {
+    deployments: list({
+      resource: "deployments", rowKey: (r: Deployment) => r.id,
+      filters: [{ key: "q", label: "名称", type: "text" }],
+      columns: [{ key: "name", label: "名称", sortable: true }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "target_ref", label: "目标主机 ID" }, { key: "description", label: "备注" }],
+      actions: [
+        { label: "查看", permission: "deployments.read", to: (r) => ({ id: r.id, mode: "view" }) },
+        { label: "编辑", permission: "deployments.update", to: (r) => ({ id: r.id, mode: "edit" }) },
+        { label: "删除记录（保留容器和卷）", permission: "deployments.delete", destructive: true, action: (r) => deleteResource(workspace, "deployments", r.id) },
+      ],
+    }),
+    "deployment-revisions": list({
+      resource: "deployment-revisions", rowKey: (r: Revision) => r.id,
+      filters: [{ key: "deployment_id", label: "应用 ID", type: "text" }],
+      columns: [{ key: "number", label: "Revision", sortable: true }, { key: "deployment_id", label: "应用 ID" }, { key: "action", label: "操作", render: (r) => r.action === "rollback" ? "回滚" : "部署" }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "started_at", label: "开始时间", render: (r) => r.started_at ? new Date(r.started_at).toLocaleString() : "—" }],
+      actions: [{ label: "查看", permission: "deployments.read", to: (r) => ({ id: r.id, mode: "view" }) }],
+      toolbar: { create: false, import: false, export: false },
+    }),
     repositories: list({
       resource: "repositories", rowKey: (r: Repository) => r.id,
       filters: [{ key: "q", label: "名称 / URL", type: "text" }],
@@ -386,6 +404,19 @@ export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow
 
 export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow>> {
   return {
+    deployments: form({
+      resource: "deployments", heading: (r: Deployment) => r.name,
+      blank: { name: "", mode: "compose", target_kind: "host", target_ref: "", workdir: "/opt/deployments", description: "", manifest: "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n" },
+      sections: [{ fields: [
+        { key: "name", label: "名称", type: "text", required: true },
+        { key: "mode", label: "部署模式", type: "select", options: [{ value: "compose", label: "Docker Compose" }], immutable: true },
+        { key: "target_kind", label: "目标类型", type: "select", options: [{ value: "host", label: "单主机" }], immutable: true },
+        { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true },
+        { key: "workdir", label: "部署工作目录", type: "text", required: true, immutable: true, help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。需要 Docker Compose v2+ 和 flock。" },
+        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "首批支持镜像、多服务、端口、普通环境变量、命名卷和依赖；不支持密钥变量、配置模板、artifact 或滚动更新。不要填写密钥明文。" },
+        { key: "description", label: "备注", type: "textarea", span: 2 },
+      ] }],
+    }),
     repositories: form({
       resource: "repositories", heading: (r: Repository) => r.name,
       blank: { name: "", url: "", default_branch: "main", credential_id: "0", description: "" },

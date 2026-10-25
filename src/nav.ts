@@ -32,6 +32,7 @@ export const nav: NavGroup[] = [
     label: "部署",
     items: [
       { key: "apps", label: "应用", resource: "deployments", permission: "deployments.read" },
+      { key: "revisions", label: "部署历史", resource: "deployment-revisions", permission: "deployments.read" },
       { key: "app-templates", label: "应用模版", resource: "app-templates", permission: "app-templates.read" },
       { key: "marketplace", label: "应用市场", resource: "marketplace", permission: "marketplace.read" },
       { key: "variables", label: "密钥变量", resource: "variables", params: { scope: "deploy" }, permission: "variables.read" },

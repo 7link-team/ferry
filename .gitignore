@@ -13,3 +13,6 @@ desktop/gen/
 .env
 .env.local
 tsconfig.tsbuildinfo
+
+# Python acceptance harness cache
+__pycache__/

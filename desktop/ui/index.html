@@ -11,6 +11,12 @@
       label { display: block; margin-bottom: 6px; }
       input { width: 100%; padding: 9px 10px; border: 1px solid #262c36; border-radius: 6px;
               background: #161a21; color: inherit; }
+      button:disabled { opacity: .5; cursor: wait; }
+      button:focus-visible, input:focus-visible { outline: 2px solid #8ec5ff; outline-offset: 3px; }
+      .updates { margin-top: 32px; padding-top: 20px; border-top: 1px solid #262c36; }
+      .updates p { margin: 10px 0; }
+      progress { width: 100%; }
+      pre { white-space: pre-wrap; max-height: 100px; overflow: auto; color: #b9c3d4; }
       button { margin-top: 16px; padding: 9px 18px; border: 0; border-radius: 6px;
                background: #4f9cf9; color: #06121f; font-weight: 600; cursor: pointer; }
     </style>
@@ -21,11 +27,16 @@
     <label for="url">服务地址</label>
     <input id="url" placeholder="http://127.0.0.1:4290" />
     <button id="open">打开工作空间</button>
-    <script>
-      document.getElementById("open").addEventListener("click", () => {
-        const server_url = document.getElementById("url").value.trim();
-        window.__TAURI__.core.invoke("open_workspace", { serverUrl: server_url });
-      });
-    </script>
+    <section class="updates" aria-labelledby="update-title">
+      <h2 id="update-title">应用更新</h2>
+      <p id="version">正在读取当前版本…</p>
+      <button id="check-update">检查更新</button>
+      <button id="install-update" hidden>下载并安装更新</button>
+      <p id="update-status" role="status" aria-live="polite"></p>
+      <progress id="update-progress" hidden aria-label="更新下载进度"></progress>
+      <pre id="update-notes" hidden></pre>
+    </section>
+    <p id="connection-error" role="alert"></p>
+    <script type="module" src="launcher.js"></script>
   </body>
 </html>

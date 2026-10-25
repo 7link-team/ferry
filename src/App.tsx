@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
+import { DeploymentDetail } from "./components/DeploymentDetail";
 import { PipelineRunDetail } from "./components/PipelineRunDetail";
 import { HostFiles } from "./components/HostFiles";
 import { ResourceForm } from "./components/ResourceForm";
@@ -262,6 +263,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             ) : (
               <Placeholder resource={item.resource} />
             )
+          ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
+            <DeploymentDetail key={`${current.slug}/${item.resource}/${route.id}`} workspace={current.slug} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
             <PipelineRunDetail key={`${current.slug}/${route.id}`} workspace={current.slug} runId={route.id} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "hosts" && route.id ? (

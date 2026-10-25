@@ -1,0 +1,45 @@
+import { beforeEach, afterEach, test, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+let invoke, progress;
+beforeEach(async () => {
+  vi.resetModules();
+  document.body.innerHTML = readFileSync('desktop/ui/index.html', 'utf8');
+  invoke = vi.fn();
+  vi.stubGlobal('__TAURI__', { core: { invoke }, app: { getVersion: async () => '0.1.0-alpha.2' }, event: { listen: async (_, fn) => { progress = fn; return () => {}; } } });
+  vi.stubGlobal('confirm', vi.fn(() => true));
+  await import('./ui/launcher.js');
+});
+afterEach(() => { vi.unstubAllGlobals(); });
+const click = async (id) => { document.getElementById(id).click(); await vi.waitFor(() => expect(document.getElementById('check-update').disabled).toBe(false)); };
+test('discovers, confirms and installs update with progress', async () => {
+  invoke.mockResolvedValueOnce({ current_version:'0.1.0-alpha.2', version:'0.1.0-alpha.3', notes:'Fixes' });
+  await click('check-update');
+  expect(document.getElementById('install-update').hidden).toBe(false);
+  expect(document.getElementById('update-notes').textContent).toBe('Fixes');
+  progress({payload:{downloaded:512,total:1024}});
+  expect(document.getElementById('update-progress').value).toBe(512);
+  invoke.mockResolvedValueOnce(undefined);
+  await click('install-update');
+  expect(invoke).toHaveBeenLastCalledWith('install_update');
+  expect(document.getElementById('update-status').textContent).toContain('重启');
+});
+test('latest version and errors leave controls usable', async () => {
+  invoke.mockResolvedValueOnce({current_version:'0.1.0-alpha.2'});
+  await click('check-update');
+  expect(document.getElementById('install-update').hidden).toBe(true);
+  expect(document.getElementById('update-status').textContent).toContain('最新版本');
+  invoke.mockRejectedValueOnce('network unavailable');
+  await click('check-update');
+  expect(document.getElementById('update-status').textContent).toBe('network unavailable');
+});
+test('cancelled confirmation never installs, failed signature is displayed', async () => {
+  invoke.mockResolvedValueOnce({current_version:'0.1.0-alpha.2',version:'0.1.0-alpha.3'});
+  await click('check-update');
+  confirm.mockReturnValueOnce(false);
+  await click('install-update');
+  expect(invoke).toHaveBeenCalledTimes(1);
+  invoke.mockRejectedValueOnce('signature invalid');
+  await click('install-update');
+  expect(document.getElementById('update-status').textContent).toBe('signature invalid');
+  expect(document.getElementById('install-update').hidden).toBe(true);
+});

@@ -3,10 +3,12 @@ mod auth;
 mod channel;
 mod credentials;
 mod db;
+mod deployments;
 mod entities;
 mod error;
 mod hosts;
 mod lock;
+mod manifest;
 mod migration;
 mod pipeline_runs;
 mod pipelines;
@@ -128,6 +130,9 @@ async fn main() -> anyhow::Result<()> {
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
     let pipeline_task = tokio::spawn(pipeline_runs::scheduler(s.clone(), pipeline_rx));
 
+    let (deployment_stop, deployment_rx) = tokio::sync::watch::channel(false);
+    let deployment_task = tokio::spawn(deployments::scheduler(s.clone(), deployment_rx));
+
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
     let hosts = Arc::new(hosts);
@@ -135,6 +140,48 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/deployment-revisions/{id}",
+            get(deployments::revision_get),
+        )
+        .route(
+            "/{workspace}/deployments",
+            get(deployments::list).post(deployments::create),
+        )
+        .route(
+            "/{workspace}/deployments/{id}",
+            get(deployments::get)
+                .patch(deployments::update)
+                .delete(deployments::remove),
+        )
+        .route(
+            "/{workspace}/deployment-revisions",
+            get(deployments::revision_list),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/revisions",
+            get(deployments::revisions_for_deployment),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/actions/render",
+            post(deployments::render),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/actions/preview",
+            post(deployments::preview),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/actions/apply",
+            post(deployments::apply),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/actions/rollback",
+            post(deployments::rollback),
+        )
+        .route(
+            "/{workspace}/deployments/{id}/actions/acknowledge",
+            post(deployments::acknowledge),
+        )
         .route(
             "/{workspace}/pipelines/{id}/actions/run",
             post(pipeline_runs::trigger),
@@ -265,6 +312,8 @@ async fn main() -> anyhow::Result<()> {
     )
     .with_graceful_shutdown(shutdown())
     .await;
+    let _ = deployment_stop.send(true);
+    deployment_task.await?;
     let _ = pipeline_stop.send(true);
     pipeline_task.await?;
     let _ = heartbeat_stop.send(true);

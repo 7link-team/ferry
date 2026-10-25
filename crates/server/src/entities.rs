@@ -393,3 +393,61 @@ pub mod pipeline_run_logs {
     pub enum Relation {}
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+pub mod deployments {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "deployments")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub manifest: String,
+        pub preview_artifact: String,
+        pub mode: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub workdir: String,
+        pub description: String,
+        pub state: String,
+        pub revision_number: i64,
+        pub current_revision: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod deployment_revisions {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "deployment_revisions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub deployment_id: i64,
+        pub number: i64,
+        pub action: String,
+        pub source_revision: i64,
+        pub manifest: String,
+        pub rendered: String,
+        pub artifact: String,
+        pub expected_hash: String,
+        pub state: String,
+        pub output: String,
+        pub triggered_by: i64,
+        pub started_at: i64,
+        pub finished_at: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}

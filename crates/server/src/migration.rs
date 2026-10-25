@@ -67,6 +67,7 @@ impl MigratorTrait for Migrator {
             Box::new(Pipelines),
             Box::new(IdInfrastructure),
             Box::new(PipelineExecution),
+            Box::new(ComposeDeployments),
         ]
     }
 }
@@ -930,6 +931,7 @@ mod schema_tests {
             pipelines,
             id_infrastructure,
             pipeline_execution,
+            compose_deployments,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -973,6 +975,11 @@ mod schema_tests {
             ),
             ("pipeline_run_steps", "id run_id"),
             ("pipeline_run_logs", "id run_id"),
+            ("deployments", "id workspace_id target_ref current_revision"),
+            (
+                "deployment_revisions",
+                "id workspace_id deployment_id source_revision triggered_by",
+            ),
         ];
         let mysql: Vec<String> = all_statements().into_iter().map(mysql_sql).collect();
         let mut count = 0;
@@ -991,8 +998,15 @@ mod schema_tests {
                 let column = row.try_get::<String>("", "name").unwrap();
                 if column == "id"
                     || column.ends_with("_id")
-                    || ["target_ref", "used_by", "created_by", "triggered_by"]
-                        .contains(&column.as_str())
+                    || [
+                        "target_ref",
+                        "used_by",
+                        "created_by",
+                        "triggered_by",
+                        "current_revision",
+                        "source_revision",
+                    ]
+                    .contains(&column.as_str())
                 {
                     assert_eq!(
                         row.try_get::<String>("", "type").unwrap(),
@@ -1020,7 +1034,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 51);
+        assert_eq!(count, 60);
     }
 
     #[test]
@@ -1516,6 +1530,81 @@ impl MigrationName for PipelineExecution {
 impl MigrationTrait for PipelineExecution {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
         for statement in pipeline_execution(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+fn compose_deployments(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut statements = Vec::new();
+    for (name, strings, texts, integers) in [
+        (
+            "deployments",
+            vec!["name", "mode", "target_kind", "workdir", "state"],
+            vec!["manifest", "description", "preview_artifact"],
+            vec!["target_ref", "revision_number", "current_revision"],
+        ),
+        (
+            "deployment_revisions",
+            vec!["action", "state", "expected_hash"],
+            vec!["manifest", "rendered", "artifact", "output"],
+            vec![
+                "deployment_id",
+                "number",
+                "source_revision",
+                "triggered_by",
+                "started_at",
+                "finished_at",
+            ],
+        ),
+    ] {
+        let mut table = create_table(name, backend);
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for field in ["workspace_id", "created_at", "updated_at", "version"]
+            .into_iter()
+            .chain(integers)
+        {
+            table.col(ColumnDef::new(Alias::new(field)).big_integer().not_null());
+        }
+        for field in strings {
+            table.col(
+                ColumnDef::new(Alias::new(field))
+                    .string_len(if field == "workdir" { 1024 } else { 255 })
+                    .not_null(),
+            );
+        }
+        for field in texts {
+            table.col(long_text(field, backend).not_null());
+        }
+        statements.push(SchemaStatement::Table(table));
+    }
+    statements.push(SchemaStatement::Index(
+        "deployment_revisions",
+        "deployment_revision_number",
+        Index::create()
+            .name("deployment_revision_number")
+            .table(Alias::new("deployment_revisions"))
+            .col(Alias::new("deployment_id"))
+            .col(Alias::new("number"))
+            .unique()
+            .to_owned(),
+    ));
+    statements
+}
+struct ComposeDeployments;
+impl MigrationName for ComposeDeployments {
+    fn name(&self) -> &str {
+        "compose_deployments_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ComposeDeployments {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in compose_deployments(m.get_database_backend()) {
             execute_schema(m, statement).await?;
         }
         Ok(())
