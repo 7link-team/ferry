@@ -89,3 +89,6 @@
 ## 2026-10-25 后续确认
 用户“继续”“都要”确认：单应用串行、host/workdir不可变、失败不自动回滚、中断需人工核实、删除仅平台记录；同时做Windows双安装范围、应用内检查/安装更新，并发布alpha.2。
 预览对比远端保存产物，明确不等于实时容器状态；preview解析镜像digest并返回绑定产物、版本、来源revision和目标hash的token；apply验证token后保存并执行原样产物；rollback直接使用已保存产物。更新使用官方Tauri签名及版本绑定；预发布发现走GitHub releases列表，配置仓库来源，不用latest稳定版接口。
+
+## 发布修正
+alpha.2 标签发布时，既有流水线测试捕获 Git ASKPASS 将用户名放入进程参数的问题。改用 credential helper 管道协议并增强采样与错误凭据回归；保留已公开标签，后续使用 alpha.3 预发布。
