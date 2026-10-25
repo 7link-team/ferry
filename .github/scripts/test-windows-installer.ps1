@@ -12,7 +12,7 @@ function Run-Installer($file, $arguments) {
     }
     if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode)" }
 }
-function Check-Scope($scope) {
+function Check-Scope($scope, $expectedVersion = $config.version) {
     $entry = Get-ItemProperty "$($scope.Hive):\$registryPath" -ErrorAction SilentlyContinue
     if (-not $entry) { throw "$($scope.Hive) registration missing" }
     if (Test-Path "$($scope.OtherHive):\$registryPath") { throw 'Installation registered under both scopes' }
@@ -22,17 +22,29 @@ function Check-Scope($scope) {
     if (-not $directory.StartsWith($scope.Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw "Wrong installation scope directory: $directory (expected under $($scope.Root))"
     }
-    if ($entry.DisplayVersion -ne $config.version) { throw "Wrong installed version: $($entry.DisplayVersion)" }
+    if ($entry.DisplayVersion -ne $expectedVersion) { throw "Wrong installed version: $($entry.DisplayVersion)" }
     if (-not (Test-Path (Join-Path $directory $entry.MainBinaryName))) { throw 'Application executable missing' }
     Write-Host "Verified $($scope.Hive) registration and executable at $directory"
     return $entry
 }
+# Pin the previous public release so this exercises a real version upgrade,
+# including the old client's /UPDATE-only invocation, not only a reinstall.
+$previousVersion = '0.1.0-alpha.4'
+$previousRelease = Invoke-RestMethod "https://api.github.com/repos/$($config.plugins.release.repository)/releases/tags/v$previousVersion"
+$previousAsset = $previousRelease.assets | Where-Object { $_.name.EndsWith('_x64-setup.exe') } | Select-Object -First 1
+if (-not $previousAsset) { throw 'Previous Windows installer missing' }
+$previousInstaller = Join-Path $env:RUNNER_TEMP 'previous-desktop-setup.exe'
+Invoke-WebRequest $previousAsset.browser_download_url -OutFile $previousInstaller
 foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM'; Root = $env:LOCALAPPDATA }, @{ Mode = 'AllUsers'; Hive = 'HKLM'; OtherHive = 'HKCU'; Root = $env:ProgramFiles })) {
     Run-Installer $installer @('/S', "/$($scope.Mode)")
     $entry = Check-Scope $scope
     $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
     & node .github/scripts/test-desktop-windows.mjs (Join-Path $directory $entry.MainBinaryName)
     if ($LASTEXITCODE -ne 0) { throw 'Installed desktop launch/lifecycle verification failed' }
+    Run-Installer (Join-Path $directory 'uninstall.exe') @('/S', "_?=$directory")
+    Run-Installer $previousInstaller @('/S', "/$($scope.Mode)")
+    $entry = Check-Scope $scope $previousVersion
+    $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
     # Old basicUi clients pass only /UPDATE. New passive clients add /P /R.
     # Both must finish without a maintenance choice and automatically launch the app.
     foreach ($updateArgs in @(@('/UPDATE'), @('/P', '/R', '/UPDATE'))) {
