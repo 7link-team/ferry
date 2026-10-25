@@ -248,6 +248,7 @@ jobs:
           cp "target/${{ matrix.target }}/release/ferry-server$exe" \
             "desktop/binaries/ferry-server-${{ matrix.target }}$exe"
       - name: Verify bundled service startup and lifecycle
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           exe=""
@@ -282,6 +283,29 @@ jobs:
           done
           echo "::error::desktop bundling failed three times — not transient"
           exit 1
+      - name: Verify Windows service lifecycle with the application manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Tauri embeds Common Controls v6 in the app, but its resource build
+          # targets binaries only. Unit-test executables otherwise fail in the
+          # Windows loader before main (TaskDialogIndirect, 0xc0000139).
+          $target = '${{ matrix.target }}'
+          $env:DESKTOP_TEST_SERVER = (Resolve-Path "target/$target/release/ferry-server.exe").Path
+          $messages = & cargo test --locked --manifest-path desktop/Cargo.toml --target $target --lib --no-run --message-format=json
+          if ($LASTEXITCODE -ne 0) { throw 'Test build failed' }
+          $testExe = $messages | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable } | Select-Object -ExpandProperty executable
+          if (@($testExe).Count -ne 1) { throw 'Expected one library test executable' }
+          $mt = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/mt.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $mt) { throw 'Windows SDK manifest tool missing' }
+          $appExe = (Resolve-Path "desktop/target/$target/release/ferry-desktop.exe").Path
+          $manifest = Join-Path $env:RUNNER_TEMP 'desktop-test.manifest'
+          & $mt '-nologo' "-inputresource:$appExe;#1" "-out:$manifest"
+          if ($LASTEXITCODE -ne 0) { throw 'Extract application manifest failed' }
+          & $mt '-nologo' '-manifest' $manifest "-outputresource:$testExe;#1"
+          if ($LASTEXITCODE -ne 0) { throw 'Embed test manifest failed' }
+          & $testExe 'server::tests' '--include-ignored'
+          if ($LASTEXITCODE -ne 0) { throw 'Service lifecycle tests failed' }
       - name: Collect the release assets
         shell: bash
         run: |
