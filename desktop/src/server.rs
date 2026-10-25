@@ -2,7 +2,10 @@
 use std::{
     path::Path,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tauri::Manager;
@@ -12,9 +15,48 @@ pub const LOCAL_URL: &str = "http://127.0.0.1:4290";
 #[derive(Default)]
 pub struct Runtime {
     child: Mutex<Option<Child>>,
-    opening: tokio::sync::Mutex<()>,
+    draining: AtomicBool,
+    pub(crate) opening: tokio::sync::Mutex<()>,
 }
 impl Runtime {
+    pub async fn drain(&self) -> Result<(), String> {
+        {
+            let mut guard = self.child.lock().unwrap();
+            if let Some(child) = guard.as_mut() {
+                // EOF is the private, cross-platform shutdown signal. No network endpoint.
+                self.draining.store(true, Ordering::Release);
+                child.stdin.take();
+            } else {
+                return Ok(());
+            }
+        }
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            {
+                let mut guard = self.child.lock().unwrap();
+                if let Some(child) = guard.as_mut() {
+                    if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                        guard.take();
+                        self.draining.store(false, Ordering::Release);
+                        return if status.success() {
+                            Ok(())
+                        } else {
+                            Err(format!("本地服务未正常退出（{status}），已取消升级。"))
+                        };
+                    }
+                } else {
+                    return Ok(());
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(
+                    "本地任务仍在结束中，未强制停止服务，也未安装更新。稍后可重新检查更新。".into(),
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     pub fn stop(&self) {
         if let Some(mut child) = self.child.lock().unwrap().take() {
             let _ = child.kill();
@@ -51,10 +93,10 @@ fn spawn_server(executable: &Path, data: &Path, bind: &str) -> Result<Child, Str
         .map_err(|e| format!("无法打开服务日志：{e}"))?;
     let mut command = Command::new(executable);
     command
-        .args(["--bind", bind, "--data-dir"])
+        .args(["--desktop-control", "--bind", bind, "--data-dir"])
         .arg(data)
         .current_dir(data)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(log);
     #[cfg(windows)]
@@ -120,12 +162,6 @@ pub async fn open_workspace(
     }
     let runtime = app.state::<Runtime>();
     let _opening = runtime.opening.lock().await;
-    if let Some(workspace) = app.get_webview_window("workspace") {
-        workspace.show().map_err(|e| e.to_string())?;
-        workspace.set_focus().map_err(|e| e.to_string())?;
-        window.hide().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
     let target = server_url.trim();
     let local = target.is_empty();
     let url = url::Url::parse(if local { LOCAL_URL } else { target })
@@ -133,6 +169,7 @@ pub async fn open_workspace(
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err("服务地址必须是 HTTP 或 HTTPS 地址。".into());
     }
+    let mut restarted = false;
     if local {
         let data = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
         {
@@ -141,7 +178,12 @@ pub async fn open_workspace(
                 Some(child) => child.try_wait().map_err(|e| e.to_string())?.is_none(),
                 None => false,
             };
+            if running && runtime.draining.load(Ordering::Acquire) {
+                return Err("本地服务仍在等待任务结束，请稍后再打开工作空间。".into());
+            }
             if !running {
+                runtime.draining.store(false, Ordering::Release);
+                restarted = true;
                 let exe = std::env::current_exe().map_err(|e| e.to_string())?;
                 let sidecar =
                     exe.with_file_name(format!("ferry-server{}", std::env::consts::EXE_SUFFIX));
@@ -152,6 +194,16 @@ pub async fn open_workspace(
             runtime.stop();
             return Err(error);
         }
+    }
+    if let Some(workspace) = app.get_webview_window("workspace") {
+        if restarted {
+            workspace.reload().map_err(|e| e.to_string())?;
+        }
+        workspace.show().map_err(|e| e.to_string())?;
+        workspace.unminimize().map_err(|e| e.to_string())?;
+        workspace.set_focus().map_err(|e| e.to_string())?;
+        window.hide().map_err(|e| e.to_string())?;
+        return Ok(());
     }
     let workspace =
         tauri::WebviewWindowBuilder::new(&app, "workspace", tauri::WebviewUrl::External(url))
@@ -199,7 +251,7 @@ mod tests {
                 .unwrap_err()
                 .contains("不可用")
         );
-        runtime.stop();
+        runtime.drain().await.unwrap();
         assert!(std::net::TcpStream::connect(&bind).is_err());
         *runtime.child.lock().unwrap() =
             Some(spawn_server(Path::new(&executable), &data, &bind).unwrap());
@@ -208,7 +260,12 @@ mod tests {
             identity,
             std::fs::read_to_string(data.join("instance-id")).unwrap()
         );
-        runtime.stop();
+        runtime.drain().await.unwrap();
+        assert!(
+            std::fs::read_to_string(data.join("server.log"))
+                .unwrap()
+                .contains("服务已安全关闭")
+        );
         std::fs::remove_dir_all(data).unwrap();
     }
 

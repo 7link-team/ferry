@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 const executable = process.argv[2];
 assert.equal(process.platform, 'win32');
@@ -24,11 +26,12 @@ const port = await new Promise(resolve => {
     listener.close(() => resolve(value));
   });
 });
-const app = spawn(executable, [], {
+const startApp = () => spawn(executable, [], {
   windowsHide: true,
   stdio: 'ignore',
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
 });
+let app = startApp();
 app.on('error', error => { throw error; });
 let browser;
 function nativeWindows(closeHandle) {
@@ -44,6 +47,15 @@ public class NativeWindow {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder title, int n);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder name, int n);
+  [StructLayout(LayoutKind.Sequential)] public struct IconId { public uint size; public IntPtr hwnd; public uint id; public Guid guid; }
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left, top, right, bottom; }
+  [DllImport("shell32.dll")] public static extern int Shell_NotifyIconGetRect(ref IconId id, out Rect rect);
+  public static bool HasTrayIcon(IntPtr h) {
+    var id = new IconId { size=(uint)Marshal.SizeOf(typeof(IconId)), hwnd=h, id=1 };
+    Rect rect;
+    return Shell_NotifyIconGetRect(ref id, out rect) == 0;
+  }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
 }
 '@
@@ -55,7 +67,9 @@ $result = [System.Collections.Generic.List[object]]::new()
   if ($owner -eq ${app.pid}) {
     $title = [System.Text.StringBuilder]::new(1024)
     [NativeWindow]::GetWindowText($handle, $title, 1024) | Out-Null
-    if ($title.Length -gt 0) { $result.Add(@{ handle=$handle.ToInt64().ToString(); title=$title.ToString(); visible=[NativeWindow]::IsWindowVisible($handle) }) }
+    $class = [System.Text.StringBuilder]::new(256)
+    [NativeWindow]::GetClassName($handle, $class, 256) | Out-Null
+    if ($title.Length -gt 0 -or $class.ToString() -eq 'tray_icon_app') { $result.Add(@{ handle=$handle.ToInt64().ToString(); title=$title.ToString(); visible=[NativeWindow]::IsWindowVisible($handle); tray=($class.ToString() -eq 'tray_icon_app' -and [NativeWindow]::HasTrayIcon($handle)) }) }
   }
   return $true
 }, [IntPtr]::Zero) | Out-Null
@@ -77,6 +91,7 @@ try {
   });
   const launcherHandle = nativeWindows().find(window => window.visible)?.handle;
   assert.ok(launcherHandle, 'launcher is a visible native window');
+  await until('registered Windows notification icon', () => nativeWindows().some(window => window.tray));
   await launcher.locator('#url').fill('');
   await launcher.locator('#open').click();
   const workspace = await until('local workspace webview', async () => {
@@ -94,6 +109,10 @@ try {
       && all.find(w => w.handle !== launcherHandle && w.visible) && all;
   });
   const workspaceHandle = windows.find(w => w.handle !== launcherHandle && w.visible).handle;
+  // A second launch must focus the workspace without resurfacing settings.
+  const second = spawn(executable, [], { windowsHide: true, stdio: 'ignore' });
+  await until('second instance exits', () => second.exitCode !== null);
+  assert.equal(nativeWindows().find(w => w.handle === launcherHandle).visible, false);
   nativeWindows(workspaceHandle);
   await until('launcher restored after workspace close', () => nativeWindows().find(w => w.handle === launcherHandle && w.visible));
   // Reopening must reuse the service and preserve its identity.
@@ -109,7 +128,32 @@ try {
     try { await fetch('http://127.0.0.1:4290/api/status', { signal: AbortSignal.timeout(1000) }); return false; }
     catch { return true; }
   });
-  console.log('PASS: installed blank-address launch, real login page, launcher hide/restore, reopen, normal exit and service cleanup');
+  await browser.close().catch(() => {});
+  const config = JSON.parse(readFileSync('desktop/tauri.conf.json', 'utf8'));
+  const data = join(process.env.LOCALAPPDATA, config.identifier);
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'update-resume.json'), JSON.stringify({ server_url: '' }));
+  app = startApp();
+  app.on('error', error => { throw error; });
+  await until('restarted WebView2 endpoint', async () => {
+    try { return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok; } catch { return false; }
+  });
+  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const resumed = await until('automatic workspace resume', () => pages().find(page => page.url().startsWith('http://127.0.0.1:4290')));
+  await resumed.locator('input[type="password"]').waitFor();
+  assert.equal((await (await fetch('http://127.0.0.1:4290/api/status')).json()).instance_id, status.instance_id);
+  const resumedWindows = await until('only resumed workspace visible', () => {
+    const all = nativeWindows();
+    return all.filter(w => w.visible).length === 1 && all.some(w => w.title.includes('连接设置') && !w.visible) && all;
+  });
+  nativeWindows(resumedWindows.find(w => w.visible).handle);
+  const settings = await until('resumed settings restored', () => nativeWindows().find(w => w.title.includes('连接设置') && w.visible));
+  nativeWindows(settings.handle);
+  await until('resumed app exit', () => app.exitCode !== null);
+  await until('resumed server exit', async () => {
+    try { await fetch('http://127.0.0.1:4290/api/status', { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; }
+  });
+  console.log('PASS: tray registration, blank-address login, launcher hide/restore, single instance, automatic upgrade resume, persistent identity and service cleanup');
 } catch (error) {
   console.error('Desktop smoke failure:', error);
   console.error('Native windows:', nativeWindows());

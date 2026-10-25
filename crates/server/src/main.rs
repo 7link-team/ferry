@@ -52,6 +52,9 @@ struct Config {
     server_mode: bool,
     #[arg(long, env = "FERRY_SECURE_COOKIE", default_value_t = false)]
     secure_cookie: bool,
+    /// Owned desktop sidecar: closing the private stdin pipe drains work and exits.
+    #[arg(long, hide = true)]
+    desktop_control: bool,
     /// Hostnames browsers may reach this server on. localhost is always allowed.
     #[arg(long, env = "FERRY_ALLOWED_HOSTS", value_delimiter = ',')]
     allowed_hosts: Vec<String>,
@@ -127,11 +130,16 @@ async fn main() -> anyhow::Result<()> {
         ids: worker.generator.clone(),
     });
 
+    let (drain, drain_rx) = tokio::sync::watch::channel(false);
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
-    let pipeline_task = tokio::spawn(pipeline_runs::scheduler(s.clone(), pipeline_rx));
+    let pipeline_task = tokio::spawn(pipeline_runs::scheduler(
+        s.clone(),
+        pipeline_rx,
+        drain_rx.clone(),
+    ));
 
     let (deployment_stop, deployment_rx) = tokio::sync::watch::channel(false);
-    let deployment_task = tokio::spawn(deployments::scheduler(s.clone(), deployment_rx));
+    let deployment_task = tokio::spawn(deployments::scheduler(s.clone(), deployment_rx, drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
@@ -283,6 +291,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(hosts::delete_tag),
         );
 
+    let draining = drain.subscribe();
     let app = Router::new()
         .route("/api/status", get(status))
         // A runner is not a browser: it proves itself with the protocol's Hello
@@ -300,22 +309,54 @@ async fn main() -> anyhow::Result<()> {
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let hosts = hosts.clone();
-            async move { guard(req, next, &hosts).await }
+            let draining = draining.clone();
+            async move {
+                // Runner transport must remain available until all steps and cleanup finish.
+                if *draining.borrow() && !req.uri().path().starts_with("/api/runners/") {
+                    return (
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "服务正在安全关闭，请稍后重试。",
+                    )
+                        .into_response();
+                }
+                guard(req, next, &hosts).await
+            }
         }))
         .layer(TraceLayer::new_for_http())
         .with_state(s.clone());
 
     tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
-    let served = axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown())
-    .await;
-    let _ = deployment_stop.send(true);
+    let (http_stop, http_rx) = tokio::sync::oneshot::channel();
+    let mut http_task = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            let _ = http_rx.await;
+        })
+        .await
+    });
+    let early_result = tokio::select! {
+        result = &mut http_task => Some(result),
+        _ = shutdown() => {
+            let _ = deployment_stop.send(true);
+            let _ = pipeline_stop.send(true);
+            None
+        }
+        _ = desktop_shutdown(cfg.desktop_control) => {
+            tracing::info!("桌面服务正在等待执行中的任务完成");
+            None
+        }
+    };
+    let _ = drain.send(true);
     deployment_task.await?;
-    let _ = pipeline_stop.send(true);
     pipeline_task.await?;
+    let _ = http_stop.send(());
+    let served = match early_result {
+        Some(result) => result?,
+        None => http_task.await?,
+    };
     let _ = heartbeat_stop.send(true);
     let heartbeat_result = heartbeat_task.await;
     let released = worker.release(&s.db).await;
@@ -324,6 +365,7 @@ async fn main() -> anyhow::Result<()> {
     heartbeat_result?;
     released?;
     closed?;
+    tracing::info!("服务已安全关闭");
     drop(lock);
     Ok(())
 }
@@ -359,6 +401,21 @@ fn instance_id(dir: &std::path::Path) -> anyhow::Result<String> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+async fn desktop_shutdown(enabled: bool) {
+    if !enabled {
+        std::future::pending::<()>().await;
+    }
+    // A dedicated thread avoids an uncancellable Tokio stdin read delaying runtime exit.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut byte = [0u8; 1];
+        while matches!(std::io::stdin().read(&mut byte), Ok(1..)) {}
+        let _ = tx.send(());
+    });
+    let _ = rx.await;
 }
 
 async fn shutdown() {

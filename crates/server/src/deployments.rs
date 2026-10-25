@@ -646,7 +646,11 @@ async fn finish(s: &AppState, rev: &revisions::Model, state: &str, output: &str)
     tx.commit().await?;
     Ok(())
 }
-pub async fn scheduler(s: AppState, mut stop: tokio::sync::watch::Receiver<bool>) {
+pub async fn scheduler(
+    s: AppState,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+    mut drain: tokio::sync::watch::Receiver<bool>,
+) {
     // Same single-service-instance execution scope as pipelines. Never replay an uncertain remote mutation.
     let recover = async {
         let rows = revisions::Entity::find()
@@ -670,13 +674,13 @@ pub async fn scheduler(s: AppState, mut stop: tokio::sync::watch::Receiver<bool>
         return;
     }
     loop {
-        if *stop.borrow() {
+        if *stop.borrow() || *drain.borrow() {
             break;
         }
         if let Err(e) = dispatch(&s, &mut stop).await {
             tracing::error!(%e,"部署调度失败");
         }
-        tokio::select! {_=stop.changed()=>break,_=tokio::time::sleep(Duration::from_millis(200))=>{}}
+        tokio::select! {_=drain.changed()=>break,_=stop.changed()=>break,_=tokio::time::sleep(Duration::from_millis(200))=>{}}
     }
 }
 async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -> Result<()> {

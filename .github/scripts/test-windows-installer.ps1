@@ -5,7 +5,11 @@ $config = Get-Content desktop/tauri.conf.json -Raw | ConvertFrom-Json
 $registryPath = "Software\Microsoft\Windows\CurrentVersion\Uninstall\$($config.productName)"
 function Run-Installer($file, $arguments) {
     Write-Output "Run installer: $file $arguments"
-    $process = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+    $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru -WindowStyle Hidden
+    if (-not $process.WaitForExit(120000)) {
+        Stop-Process -Id $process.Id -Force
+        throw 'Installer did not finish unattended within 120 seconds'
+    }
     if ($process.ExitCode -ne 0) { throw "Installer failed with exit code $($process.ExitCode)" }
 }
 function Check-Scope($scope) {
@@ -29,7 +33,21 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
     $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
     & node .github/scripts/test-desktop-windows.mjs (Join-Path $directory $entry.MainBinaryName)
     if ($LASTEXITCODE -ne 0) { throw 'Installed desktop launch/lifecycle verification failed' }
-    Run-Installer $installer @('/S', '/UPDATE')
+    # Old basicUi clients pass only /UPDATE. New passive clients add /P /R.
+    # Both must finish without a maintenance choice and automatically launch the app.
+    foreach ($updateArgs in @(@('/UPDATE'), @('/P', '/R', '/UPDATE'))) {
+        Run-Installer $installer $updateArgs
+        $deadline = (Get-Date).AddSeconds(45)
+        $restarted = $null
+        while ((Get-Date) -lt $deadline) {
+            $restarted = Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($entry.MainBinaryName)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $directory $entry.MainBinaryName) } | Select-Object -First 1
+            if ($restarted -and $restarted.MainWindowHandle -ne 0) { break }
+            Start-Sleep -Milliseconds 200
+        }
+        if (-not $restarted -or $restarted.MainWindowHandle -eq 0) { throw 'Update did not automatically restart application' }
+        if (-not $restarted.CloseMainWindow()) { throw 'Could not close restarted app' }
+        if (-not $restarted.WaitForExit(30000)) { throw 'Restarted app did not exit normally' }
+    }
     $updated = Check-Scope $scope
     if ($updated.InstallLocation -ne $entry.InstallLocation) { throw 'Update changed installation directory' }
     $uninstaller = Join-Path $directory 'uninstall.exe'

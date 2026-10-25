@@ -34,9 +34,14 @@ const unlisten = await event.listen("update-progress", ({ payload }) => {
 });
 window.addEventListener("unload", unlisten, { once: true });
 install.addEventListener("click", async () => {
-  if (!confirm("下载并安装更新？请先结束正在进行的操作，应用将退出并重新启动。")) return;
-  check.disabled = true; install.disabled = true; status.textContent = "正在下载更新…";
+  check.disabled = true; install.disabled = true; byId("open").disabled = true; status.textContent = "正在下载更新…";
   try { await core.invoke("install_update"); status.textContent = "更新已安装，正在重启…"; }
   catch (error) { status.textContent = String(error); install.hidden = true; }
-  finally { check.disabled = false; install.disabled = false; progress.hidden = true; }
+  finally { check.disabled = false; install.disabled = false; byId("open").disabled = false; progress.hidden = true; }
 });
+
+const unlistenStage = await event.listen("update-stage", ({ payload }) => { status.textContent = payload; progress.hidden = true; });
+window.addEventListener("unload", unlistenStage, { once: true });
+
+const unlistenConnection = await event.listen("connection-error", ({ payload }) => { byId("connection-error").textContent = payload; });
+window.addEventListener("unload", unlistenConnection, { once: true });

@@ -323,7 +323,11 @@ async fn active(s: &AppState, id: i64) -> Result<bool> {
         .is_some_and(|r| r.state == "running"))
 }
 
-pub async fn scheduler(s: AppState, mut stop: tokio::sync::watch::Receiver<bool>) {
+pub async fn scheduler(
+    s: AppState,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+    mut drain: tokio::sync::watch::Receiver<bool>,
+) {
     // No leases/multi-instance support yet. Interrupted runs cannot be resumed
     // safely: a remote command might have completed before the server crashed.
     if let Ok(rows) = runs::Entity::find()
@@ -336,14 +340,14 @@ pub async fn scheduler(s: AppState, mut stop: tokio::sync::watch::Receiver<bool>
         }
     }
     loop {
-        if *stop.borrow() {
+        if *stop.borrow() || *drain.borrow() {
             break;
         }
         let result = dispatch(&s, &mut stop).await;
         if result.is_err() {
             tracing::error!("流水线调度失败；稍后检查队列。");
         }
-        tokio::select! { _=stop.changed()=>break, _=tokio::time::sleep(Duration::from_millis(100))=>{} }
+        tokio::select! { _=drain.changed()=>break, _=stop.changed()=>break, _=tokio::time::sleep(Duration::from_millis(100))=>{} }
     }
 }
 async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -> Result<()> {

@@ -80,7 +80,7 @@ def main():
     def launch(args, log, env=None):
         output = open(work / log, 'wb')
         files.append(output)
-        p = subprocess.Popen(args, stdout=output, stderr=output, env=env)
+        p = subprocess.Popen(args, stdout=output, stderr=output, env=env, stdin=subprocess.PIPE if "--desktop-control" in args else None)
         processes.append(p)
         return p
 
@@ -174,7 +174,7 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         env.pop('FERRY_DATABASE_URL', None)
         if os.environ.get('FERRY_TEST_DATABASE_URL'):
             env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
-        server = launch(['target/debug/ferry-server'], 'server.log', env)
+        server = launch(['target/debug/ferry-server', '--desktop-control'], 'server.log', env)
         def ready():
             if server.poll() is not None:
                 raise AssertionError((work / 'server.log').read_text())
@@ -312,6 +312,32 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         check('7 all stored logs and activity omit credential plaintext',
               all(value not in text for value in [secret, username] for text in [activity, all_text]))
         check('server log contains no credential plaintext', secret not in (work / 'server.log').read_text())
+        # A real in-flight command must finish before the owned server exits.
+        # File barriers keep this deterministic instead of relying on command timing.
+        for kind, host in [('runner', runner), ('ssh', ssh)]:
+            marker = root_dir + '/drain-' + kind
+            rid = trigger(pipeline(host, [{'name': 'drain', 'run':
+                f'touch {marker}.started; while [ ! -f {marker}.release ]; do sleep 0.1; done; echo DRAIN_COMPLETED'}, {'name': 'after drain', 'run': 'echo NEXT_STEP_COMPLETED'}]))['id']
+            eventually(lambda: local_or_ssh(kind, f'test -f {marker}.started && echo ready || true').strip() == 'ready')
+            server.stdin.close()
+            def stopped_accepting():
+                try:
+                    api('/status')
+                    return False
+                except AssertionError as error:
+                    return 'HTTP 503' in str(error)
+            eventually(stopped_accepting)
+            check(kind + ' drain waits for active work', server.poll() is None)
+            local_or_ssh(kind, f'touch {marker}.release')
+            check(kind + ' graceful server exit', server.wait(timeout=45) == 0)
+            server = launch(['target/debug/ferry-server', '--desktop-control'], 'server-restart-' + kind + '.log', env)
+            def restarted():
+                try: return api('/status')['ok']
+                except OSError: return False
+            eventually(restarted)
+            row = detail(rid)
+            check(kind + ' active run persisted as succeeded after restart', row['state'] == 'succeeded'
+                  and all(marker in ''.join(i['chunk'] for i in logs(rid)) for marker in ['DRAIN_COMPLETED', 'NEXT_STEP_COMPLETED']))
         # A real read-only membership exercises permission gates, not a mock Scope.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users', {'email': 'viewer@example.invalid', 'password': 'correct-horse-battery', 'name': 'viewer'})

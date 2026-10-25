@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Default)]
@@ -20,6 +20,9 @@ impl Drop for Busy<'_> {
     }
 }
 impl UpdateState {
+    pub fn busy(&self) -> bool {
+        self.busy.load(Ordering::Acquire)
+    }
     fn begin(&self) -> Result<Busy<'_>, String> {
         self.busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -177,8 +180,8 @@ pub async fn install_update(
     let _busy = state.begin()?;
     let update = state.pending.lock().await.take().ok_or("请先检查更新。")?;
     let mut downloaded = 0;
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             |chunk, total| {
                 downloaded += chunk as u64;
                 let _ = window.emit("update-progress", Progress { downloaded, total });
@@ -187,7 +190,46 @@ pub async fn install_update(
         )
         .await
         .map_err(|e| format!("更新未安装：{e}。请重新检查更新后再试。"))?;
+    let runtime = app.state::<crate::server::Runtime>();
+    let _opening = runtime.opening.lock().await;
+    let _ = window.emit("update-stage", "正在等待本地任务完成并安全关闭服务…");
+    let resume = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("update-resume.json");
+    if let Some(workspace) = app.get_webview_window("workspace") {
+        std::fs::create_dir_all(resume.parent().ok_or("更新恢复路径无效。")?)
+            .map_err(|e| e.to_string())?;
+        let target = workspace
+            .url()
+            .map_err(|e| e.to_string())?
+            .origin()
+            .ascii_serialization();
+        std::fs::write(
+            &resume,
+            serde_json::to_vec(&crate::server::Preferences {
+                server_url: if target == crate::server::LOCAL_URL {
+                    String::new()
+                } else {
+                    target
+                },
+            })
+            .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Err(error) = runtime.drain().await {
+        let _ = std::fs::remove_file(&resume);
+        return Err(error);
+    }
+    let _ = window.emit("update-stage", "正在安装更新，完成后将自动启动…");
+    update.install(bytes).map_err(|e| {
+        let _ = std::fs::remove_file(&resume);
+        format!("更新未安装：{e}。可重新打开工作空间或重试更新。")
+    })?;
     // Official updater replaces only the application bundle; service data lives elsewhere.
+    drop(_busy);
     app.restart();
 }
 #[cfg(test)]
