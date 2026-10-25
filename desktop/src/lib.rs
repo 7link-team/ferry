@@ -11,6 +11,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("launcher") {
+                let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
@@ -28,6 +29,12 @@ pub fn run() {
             updater::check_update,
             updater::install_update,
         ])
-        .run(tauri::generate_context!())
-        .expect("run Ferry desktop shell");
+        .build(tauri::generate_context!())
+        .expect("build Ferry desktop shell")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                use tauri::Manager;
+                app.state::<server::Runtime>().stop();
+            }
+        });
 }

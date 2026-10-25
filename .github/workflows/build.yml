@@ -247,6 +247,14 @@ jobs:
           mkdir -p desktop/binaries
           cp "target/${{ matrix.target }}/release/ferry-server$exe" \
             "desktop/binaries/ferry-server-${{ matrix.target }}$exe"
+      - name: Verify bundled service startup and lifecycle
+        shell: bash
+        run: |
+          exe=""
+          if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
+          export DESKTOP_TEST_SERVER="$PWD/target/${{ matrix.target }}/release/ferry-server$exe"
+          if [ "$RUNNER_OS" = Windows ]; then export DESKTOP_TEST_SERVER="$(cygpath -w "$DESKTOP_TEST_SERVER")"; fi
+          cargo test --locked --manifest-path desktop/Cargo.toml --target ${{ matrix.target }} --lib server::tests -- --include-ignored
       # macOS uses ad-hoc code signing; updater payloads use the separate release key.
       - name: Build the desktop installers
         env:

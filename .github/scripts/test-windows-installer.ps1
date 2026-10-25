@@ -27,6 +27,8 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
     Run-Installer $installer @('/S', "/$($scope.Mode)")
     $entry = Check-Scope $scope
     $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
+    & node .github/scripts/test-desktop-windows.mjs (Join-Path $directory $entry.MainBinaryName)
+    if ($LASTEXITCODE -ne 0) { throw 'Installed desktop launch/lifecycle verification failed' }
     Run-Installer $installer @('/S', '/UPDATE')
     $updated = Check-Scope $scope
     if ($updated.InstallLocation -ne $entry.InstallLocation) { throw 'Update changed installation directory' }

@@ -6,8 +6,11 @@ app.getVersion().then((version) => { byId("version").textContent = `当前版本
   .catch(() => { byId("version").textContent = "无法读取当前版本。"; });
 byId("open").addEventListener("click", async () => {
   byId("connection-error").textContent = "";
+  byId("open").disabled = true;
+  byId("open").textContent = "正在连接…";
   try { await core.invoke("open_workspace", { serverUrl: byId("url").value.trim() }); }
   catch (error) { byId("connection-error").textContent = String(error); }
+  finally { byId("open").disabled = false; byId("open").textContent = "打开工作空间"; }
 });
 check.addEventListener("click", async () => {
   check.disabled = true; install.hidden = true; notes.hidden = true; progress.hidden = true;

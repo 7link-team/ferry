@@ -43,3 +43,20 @@ test('cancelled confirmation never installs, failed signature is displayed', asy
   expect(document.getElementById('update-status').textContent).toBe('signature invalid');
   expect(document.getElementById('install-update').hidden).toBe(true);
 });
+test('empty address starts local workspace once and restores controls after failure', async () => {
+  let reject;
+  invoke.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+  document.getElementById('url').value = '   ';
+  document.getElementById('open').click();
+  expect(invoke).toHaveBeenCalledWith('open_workspace', { serverUrl: '' });
+  expect(document.getElementById('open').disabled).toBe(true);
+  document.getElementById('open').click();
+  expect(invoke).toHaveBeenCalledTimes(1);
+  reject('本地服务启动失败');
+  await vi.waitFor(() => expect(document.getElementById('open').disabled).toBe(false));
+  expect(document.getElementById('connection-error').textContent).toBe('本地服务启动失败');
+  invoke.mockResolvedValueOnce(undefined);
+  document.getElementById('open').click();
+  await vi.waitFor(() => expect(document.getElementById('open').disabled).toBe(false));
+  expect(document.getElementById('connection-error').textContent).toBe('');
+});
