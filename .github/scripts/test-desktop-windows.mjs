@@ -48,6 +48,20 @@ public class NativeWindow {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder title, int n);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string title);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string c, string title);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
+  public static void OpenNotificationOverflow() {
+    // Icons in the collapsed Windows overflow have no visible rectangle.
+    // Open the real shell's chevron before asking the shell for their geometry.
+    var overflow = FindWindow("NotifyIconOverflowWindow", null);
+    if (overflow != IntPtr.Zero && IsWindowVisible(overflow)) return;
+    var taskbar = FindWindow("Shell_TrayWnd", null);
+    var notifications = FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
+    var chevron = FindWindowEx(notifications, IntPtr.Zero, "Button", null);
+    if (notifications != IntPtr.Zero && chevron != IntPtr.Zero)
+      SendMessage(chevron, 0x00F5, IntPtr.Zero, IntPtr.Zero);
+  }
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder name, int n);
   [StructLayout(LayoutKind.Sequential)] public struct IconId { public uint size; public IntPtr hwnd; public uint id; public Guid guid; }
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left, top, right, bottom; }
@@ -65,6 +79,7 @@ public class NativeWindow {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
 }
 '@
+[NativeWindow]::OpenNotificationOverflow()
 ${closeHandle ? `[NativeWindow]::PostMessage([IntPtr]${BigInt(closeHandle)}, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null` : ''}
 $result = [System.Collections.Generic.List[object]]::new()
 [NativeWindow]::EnumWindows({ param($handle, $unused)
