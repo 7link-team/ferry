@@ -201,10 +201,10 @@ jobs:
             bundles: nsis
           - runner: macos-15-intel
             target: x86_64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - runner: macos-15
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           # Built on the oldest supported image on purpose: the AppImage and the
           # .deb link against the runner's glibc, which sets the floor for the
           # distributions they install on.
@@ -300,7 +300,7 @@ jobs:
             cp "$archive" "release-assets/updater-${{ matrix.target }}.app.tar.gz"
             cp "$archive.sig" "release-assets/updater-${{ matrix.target }}.app.tar.gz.sig"
           else
-            find "desktop/target/${{ matrix.target }}/release/bundle" -type f               \( -name '*.AppImage.sig' -o -name '*-setup.exe.sig' \) -exec cp {} release-assets/ \;
+            find "desktop/target/${{ matrix.target }}/release/bundle" -type f               \( -name '*.AppImage.sig' -o -name '*.deb.sig' -o -name '*-setup.exe.sig' \) -exec cp {} release-assets/ \;
             test -n "$(find release-assets -name '*.sig')"
           fi
           ls -l release-assets

@@ -10,6 +10,7 @@ export function generate(directory, version, repository) {
     "darwin-aarch64": (f) => f === "updater-aarch64-apple-darwin.app.tar.gz",
     "darwin-x86_64": (f) => f === "updater-x86_64-apple-darwin.app.tar.gz",
     "linux-x86_64": (f) => f.endsWith("_amd64.AppImage"),
+    "linux-x86_64-deb": (f) => f.endsWith("_amd64.deb"),
     "windows-x86_64": (f) => f.endsWith("_x64-setup.exe"),
   };
   const platforms = {};
