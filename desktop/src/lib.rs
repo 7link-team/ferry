@@ -116,7 +116,11 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.app_handle().state::<updater::UpdateState>().busy() {
+                if window
+                    .app_handle()
+                    .state::<updater::UpdateState>()
+                    .installing()
+                {
                     api.prevent_close();
                 } else if window.label() == "launcher"
                     && window
@@ -133,7 +137,7 @@ pub fn run() {
         .expect("build Ferry desktop shell")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                if app.state::<updater::UpdateState>().busy() {
+                if app.state::<updater::UpdateState>().installing() {
                     api.prevent_exit();
                 }
             }

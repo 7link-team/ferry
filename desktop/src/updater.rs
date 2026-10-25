@@ -12,6 +12,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub struct UpdateState {
     pending: tokio::sync::Mutex<Option<Update>>,
     busy: AtomicBool,
+    installing: AtomicBool,
 }
 struct Busy<'a>(&'a AtomicBool);
 impl Drop for Busy<'_> {
@@ -20,8 +21,8 @@ impl Drop for Busy<'_> {
     }
 }
 impl UpdateState {
-    pub fn busy(&self) -> bool {
-        self.busy.load(Ordering::Acquire)
+    pub fn installing(&self) -> bool {
+        self.installing.load(Ordering::Acquire)
     }
     fn begin(&self) -> Result<Busy<'_>, String> {
         self.busy
@@ -178,6 +179,8 @@ pub async fn install_update(
 ) -> Result<(), String> {
     launcher(window.label())?;
     let _busy = state.begin()?;
+    state.installing.store(true, Ordering::Release);
+    let installing = Busy(&state.installing);
     let update = state.pending.lock().await.take().ok_or("请先检查更新。")?;
     let mut downloaded = 0;
     let bytes = update
@@ -229,6 +232,7 @@ pub async fn install_update(
         format!("更新未安装：{e}。可重新打开工作空间或重试更新。")
     })?;
     // Official updater replaces only the application bundle; service data lives elsewhere.
+    drop(installing);
     drop(_busy);
     app.restart();
 }
