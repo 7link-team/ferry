@@ -37,6 +37,7 @@ let browser;
 function nativeWindows(closeHandle) {
   // Numeric PID/handles only; no input paths or user content in PowerShell code.
   const script = `
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type @'
 using System;
 using System.Text;
@@ -52,9 +53,14 @@ public class NativeWindow {
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left, top, right, bottom; }
   [DllImport("shell32.dll")] public static extern int Shell_NotifyIconGetRect(ref IconId id, out Rect rect);
   public static bool HasTrayIcon(IntPtr h) {
-    var id = new IconId { size=(uint)Marshal.SizeOf(typeof(IconId)), hwnd=h, id=1 };
-    Rect rect;
-    return Shell_NotifyIconGetRect(ref id, out rect) == 0;
+    // The builder consumes one counter before allocating the native icon ID.
+    // Discover an actual registered icon on this owned tray window, not a guessed ID.
+    for (uint number = 1; number <= 32; number++) {
+      var id = new IconId { size=(uint)Marshal.SizeOf(typeof(IconId)), hwnd=h, id=number };
+      Rect rect;
+      if (Shell_NotifyIconGetRect(ref id, out rect) == 0) return true;
+    }
+    return false;
   }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
 }
@@ -69,7 +75,7 @@ $result = [System.Collections.Generic.List[object]]::new()
     [NativeWindow]::GetWindowText($handle, $title, 1024) | Out-Null
     $class = [System.Text.StringBuilder]::new(256)
     [NativeWindow]::GetClassName($handle, $class, 256) | Out-Null
-    if ($title.Length -gt 0 -or $class.ToString() -eq 'tray_icon_app') { $result.Add(@{ handle=$handle.ToInt64().ToString(); title=$title.ToString(); visible=[NativeWindow]::IsWindowVisible($handle); tray=($class.ToString() -eq 'tray_icon_app' -and [NativeWindow]::HasTrayIcon($handle)) }) }
+    if ($class.ToString() -eq 'Tauri Window' -or $class.ToString() -eq 'tray_icon_app') { $result.Add(@{ handle=$handle.ToInt64().ToString(); title=$title.ToString(); visible=[NativeWindow]::IsWindowVisible($handle); tray=($class.ToString() -eq 'tray_icon_app' -and [NativeWindow]::HasTrayIcon($handle)) }) }
   }
   return $true
 }, [IntPtr]::Zero) | Out-Null
