@@ -45,10 +45,33 @@ fn one() -> u32 {
     1
 }
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Environment {
     pub name: String,
-    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_from: Option<String>,
+}
+impl Manifest {
+    pub fn references(&self) -> BTreeMap<(String, String), String> {
+        self.services
+            .iter()
+            .flat_map(|service| {
+                service.env.iter().filter_map(|env| {
+                    env.value_from.as_ref().map(|reference| {
+                        (
+                            (service.name.clone(), env.name.clone()),
+                            reference
+                                .strip_prefix("variable/")
+                                .unwrap_or(reference)
+                                .to_owned(),
+                        )
+                    })
+                })
+            })
+            .collect()
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -111,7 +134,7 @@ pub fn parse(input: &str) -> Result<Manifest> {
         return Err(bad("manifest 不能超过64KB或包含空字符。"));
     }
     let m: Manifest = serde_yaml_ng::from_str(input).map_err(|e| bad(format!(
-        "manifest YAML/JSON 无效：{e}。首批不支持 artifact、valueFrom、files、health、resources；请删除未实现的字段。")))?;
+        "manifest YAML/JSON 无效：{e}。首批不支持 artifact、files、health、resources；请删除未实现的字段。")))?;
     if m.api_version != "ferry/v1" || m.kind != "Application" {
         return Err(bad(
             "manifest 必须使用 apiVersion: ferry/v1 和 kind: Application。",
@@ -142,6 +165,16 @@ pub fn parse(input: &str) -> Result<Manifest> {
         }
         let mut env = BTreeSet::new();
         for e in &s.env {
+            if e.value.is_some() == e.value_from.is_some() {
+                return Err(bad("环境变量必须且只能填写 value 或 valueFrom。"));
+            }
+            if e.value_from.as_deref().is_some_and(|reference| {
+                !reference
+                    .strip_prefix("variable/")
+                    .is_some_and(crate::variables::valid_name)
+            }) {
+                return Err(bad("valueFrom 必须是 variable/变量名。"));
+            }
             if !environment_name(&e.name) || !env.insert(&e.name) {
                 return Err(bad("环境变量名无效或重复。"));
             }
@@ -202,7 +235,11 @@ pub fn render(m: &Manifest) -> Result<String> {
         if let Some(command) = &s.command {
             v["command"] = json!(command);
         }
-        let env: BTreeMap<_, _> = s.env.iter().map(|e| (&e.name, &e.value)).collect();
+        let env: BTreeMap<_, _> = s
+            .env
+            .iter()
+            .filter_map(|e| e.value.as_ref().map(|value| (&e.name, value)))
+            .collect();
         if !env.is_empty() {
             v["environment"] = json!(env);
         }
@@ -245,6 +282,27 @@ pub fn render(m: &Manifest) -> Result<String> {
     }
     merge(&mut document, &json!(m.overrides.compose));
     validate_compose(&document)?;
+    for ((service, env), _) in m.references() {
+        if !document["services"][&service].is_object()
+            || document["services"][&service]["environment"]
+                .get(&env)
+                .is_some()
+        {
+            return Err(bad(
+                "Compose overrides 不得删除引用变量的服务或覆盖 valueFrom 环境项。",
+            ));
+        }
+    }
+    let mut references = BTreeMap::<String, BTreeMap<String, String>>::new();
+    for ((service, env), name) in m.references() {
+        references
+            .entry(service)
+            .or_default()
+            .insert(env, format!("variable/{name}"));
+    }
+    if !references.is_empty() {
+        document["x-variable-references"] = json!(references);
+    }
     escape(&mut document);
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
@@ -506,11 +564,37 @@ mod tests {
             fails(&v, key);
         }
         let mut v = sample();
-        v["services"][0]["env"] = json!([{"name":"SECRET","valueFrom":"variable/password"}]);
+        v["services"][0]["env"] = json!([{"name":"SECRET","valueFrom":"template/password"}]);
         fails(&v, "valueFrom");
         let mut v = sample();
         v["strategy"] = json!({"type":"rolling"});
         fails(&v, "滚动");
+    }
+    #[test]
+    fn variable_references_are_explicit_and_overrides_cannot_replace_them() {
+        let mut v = sample();
+        v["services"][0]["env"] = json!([{"name":"SECRET","valueFrom":"variable/db-url"}]);
+        let m = parse(&v.to_string()).unwrap();
+        assert_eq!(m.references().values().next().unwrap(), "db-url");
+        let rendered: Value = serde_json::from_str(&render(&m).unwrap()).unwrap();
+        let service = m.services[0].name.clone();
+        assert_eq!(
+            rendered["x-variable-references"][&service]["SECRET"],
+            "variable/db-url"
+        );
+        assert!(
+            rendered["services"][&service]["environment"]
+                .get("SECRET")
+                .is_none()
+        );
+        v["overrides"] =
+            json!({"compose":{"services":{service:{"environment":{"SECRET":"bypass"}}}}});
+        fails(&v, "valueFrom");
+        v["overrides"] = json!({});
+        v["services"][0]["env"][0]["value"] = json!("literal");
+        fails(&v, "只能");
+        v["services"][0]["env"] = json!([{"name":"SECRET"}]);
+        fails(&v, "只能");
     }
     #[test]
     fn duplicates_and_dependency_cycles_rejected() {

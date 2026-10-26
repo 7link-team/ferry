@@ -251,15 +251,18 @@ pub async fn remove(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    crate::variables::check_object_removal(&tx, scope.workspace_id, "build", id).await?;
     let affected = pipelines::Entity::delete_many()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
+    tx.commit().await?;
     crate::hosts::activity(&s, &scope, "delete", "pipelines", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }

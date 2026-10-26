@@ -297,9 +297,9 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           ) : formConfig ? (
             <div className="min-h-0 overflow-auto">
               <ResourceForm
-                key={`${current.slug}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
+                key={`${current.slug}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
                 {...(item.resource === "roles" || item.resource === "members" ? { onSaved: onSignedOut } : {})}
-                config={formConfig}
+                config={{ ...formConfig, blank: { ...formConfig.blank, ...item.params } }}
                 workspace={current.slug}
                 permissions={permissions}
               />

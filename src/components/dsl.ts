@@ -102,6 +102,12 @@ export interface FormField<T> {
   immutable?: boolean;
   /** Clear dependent selections when this field changes. */
   resetOnChange?: string[];
+  /** Metadata key for a stored secret's presence (never its value). */
+  stored?: string;
+  /** Explicitly opt into replacing an existing write-only value, including with empty text. */
+  replaceOnEdit?: boolean;
+  /** Optional audited plaintext action, only offered on the detail page. */
+  reveal?: { permission: string; action: (row: Partial<T>) => Promise<string> };
   /** 2 makes the field span the whole two-column grid. */
   span?: 1 | 2;
 }

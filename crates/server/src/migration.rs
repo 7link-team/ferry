@@ -69,7 +69,9 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineExecution),
             Box::new(ComposeDeployments),
             Box::new(PlatformInitialization),
+            Box::new(Variables),
             Box::new(WorkspaceAdministration),
+            Box::new(DeploymentVariableSnapshots),
         ]
     }
 }
@@ -934,6 +936,7 @@ mod schema_tests {
             id_infrastructure,
             pipeline_execution,
             compose_deployments,
+            variables,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -969,6 +972,7 @@ mod schema_tests {
                 "id workspace_id host_id used_by created_by",
             ),
             ("credentials", "id workspace_id"),
+            ("variables", "id workspace_id scope_ref"),
             ("repositories", "id workspace_id credential_id"),
             ("pipelines", "id workspace_id repository_id target_ref"),
             (
@@ -1002,6 +1006,7 @@ mod schema_tests {
                     || column.ends_with("_id")
                     || [
                         "target_ref",
+                        "scope_ref",
                         "used_by",
                         "created_by",
                         "triggered_by",
@@ -1036,7 +1041,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 60);
+        assert_eq!(count, 63);
     }
 
     #[test]
@@ -1692,6 +1697,64 @@ impl MigrationTrait for PlatformInitialization {
     }
 }
 
+fn variables(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut table = create_table("variables", backend);
+    table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+    for field in [
+        "workspace_id",
+        "scope_ref",
+        "created_at",
+        "updated_at",
+        "version",
+    ] {
+        table.col(ColumnDef::new(Alias::new(field)).big_integer().not_null());
+    }
+    for (field, length) in [("name", 96), ("scope", 16), ("kind", 16)] {
+        table.col(
+            ColumnDef::new(Alias::new(field))
+                .string_len(length)
+                .not_null(),
+        );
+    }
+    for field in ["description", "value"] {
+        table.col(long_text(field, backend).not_null());
+    }
+    vec![
+        SchemaStatement::Table(table),
+        SchemaStatement::Index(
+            "variables",
+            "variables_scope_name",
+            Index::create()
+                .name("variables_scope_name")
+                .table(Alias::new("variables"))
+                .col(Alias::new("workspace_id"))
+                .col(Alias::new("scope"))
+                .col(Alias::new("scope_ref"))
+                .col(Alias::new("name"))
+                .unique()
+                .to_owned(),
+        ),
+    ]
+}
+struct Variables;
+impl MigrationName for Variables {
+    fn name(&self) -> &str {
+        "variables_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for Variables {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in variables(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
 struct WorkspaceAdministration;
 impl MigrationName for WorkspaceAdministration {
     fn name(&self) -> &str {
@@ -1721,6 +1784,33 @@ impl MigrationTrait for WorkspaceAdministration {
             .await?;
         }
         Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct DeploymentVariableSnapshots;
+impl MigrationName for DeploymentVariableSnapshots {
+    fn name(&self) -> &str {
+        "deployment_variable_snapshots_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DeploymentVariableSnapshots {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "deployment_revisions",
+                "variable_snapshot",
+                Table::alter()
+                    .table(Alias::new("deployment_revisions"))
+                    .add_column(long_text("variable_snapshot", m.get_database_backend()))
+                    .to_owned(),
+            ),
+        )
+        .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

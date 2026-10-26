@@ -22,7 +22,10 @@ use sea_orm::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
 
 const SPEC: Spec = Spec {
     search: &["name"],
@@ -48,11 +51,15 @@ fn revision_json(r: &revisions::Model) -> Value {
         "rendered":r.rendered,"artifact":r.artifact,"triggered_by":Id::from(r.triggered_by),
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
-async fn scoped(s: &AppState, scope: &Scope, id: &str) -> Result<apps::Model> {
+async fn scoped(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    id: &str,
+) -> Result<apps::Model> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     apps::Entity::find_by_id(i64::from(id))
         .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
+        .one(conn)
         .await?
         .ok_or_else(ApiError::missing)
 }
@@ -115,7 +122,7 @@ pub async fn get(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
     scope.require("deployments.read")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let r = scoped(&s.db, &scope, &id).await?;
     let latest = revisions::Entity::find()
         .filter(revisions::Column::DeploymentId.eq(r.id))
         .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
@@ -166,7 +173,7 @@ pub async fn revisions_for_deployment(
     Query(mut raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("deployments.read")?;
-    let app = scoped(&s, &scope, &id).await?;
+    let app = scoped(&s.db, &scope, &id).await?;
     raw.insert("deployment_id".into(), app.id.to_string());
     revision_list(State(s), scope, Query(raw)).await
 }
@@ -178,6 +185,13 @@ pub async fn create(
     scope.require("deployments.create")?;
     let (name, manifest, target_ref) = check(&s, &scope, &b).await?;
     let (id, now) = (s.next_id()?, db::now());
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let names = manifest::parse(&manifest)?
+        .references()
+        .values()
+        .cloned()
+        .collect();
+    crate::variables::resolve(&tx, scope.workspace_id, "deploy", id, &names).await?;
     apps::Entity::insert(
         apps::Model {
             id: id.into(),
@@ -199,8 +213,9 @@ pub async fn create(
         }
         .into_active_model(),
     )
-    .exec(&s.db)
+    .exec(&tx)
     .await?;
+    tx.commit().await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -219,11 +234,18 @@ pub async fn update(
     Json(b): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("deployments.update")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let r = scoped(&s.db, &scope, &id).await?;
     let (name, manifest, host) = check(&s, &scope, &b).await?;
     if i64::from(host) != r.target_ref || b.workdir.trim_end_matches('/') != r.workdir {
         return Err(ApiError::bad("目标主机和工作目录创建后不能修改。"));
     }
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let names = manifest::parse(&manifest)?
+        .references()
+        .values()
+        .cloned()
+        .collect();
+    crate::variables::resolve(&tx, scope.workspace_id, "deploy", r.id.into(), &names).await?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::Name, Expr::value(name.clone()))
         .col_expr(apps::Column::Manifest, Expr::value(manifest))
@@ -238,7 +260,7 @@ pub async fn update(
         .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(apps::Column::Version.eq(b.version))
         .filter(apps::Column::State.is_not_in(["queued", "running", "needs-review"]))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if n == 0 {
@@ -246,6 +268,7 @@ pub async fn update(
             "记录已变化、正在执行或需要核实，请刷新。",
         ));
     }
+    tx.commit().await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -263,8 +286,9 @@ pub async fn remove(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<StatusCode> {
     scope.require("deployments.delete")?;
-    let r = scoped(&s, &scope, &id).await?;
-    let tx = s.db.begin().await?;
+    let r = scoped(&s.db, &scope, &id).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    crate::variables::check_object_removal(&tx, scope.workspace_id, "deploy", r.id.into()).await?;
     let n = apps::Entity::delete_many()
         .filter(apps::Column::Id.eq(r.id))
         .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))
@@ -298,7 +322,7 @@ pub async fn render(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
     scope.require("deployments.read")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let r = scoped(&s.db, &scope, &id).await?;
     Ok(Json(
         json!({"artifact":manifest::render(&manifest::parse(&r.manifest)?)?,"version":r.version}),
     ))
@@ -328,6 +352,150 @@ async fn remote_artifact(ch: &dyn HostChannel, r: &apps::Model) -> Result<String
     }
     Ok(out.stdout)
 }
+// Public bindings contain identities/versions only; values never enter Compose JSON.
+async fn bindings(
+    conn: &impl sea_orm::ConnectionTrait,
+    r: &apps::Model,
+    manifest: &str,
+) -> Result<(Value, BTreeMap<String, crate::entities::variables::Model>)> {
+    let refs = manifest::parse(manifest)?.references();
+    let rows = crate::variables::resolve(
+        conn,
+        r.workspace_id.into(),
+        "deploy",
+        r.id.into(),
+        &refs.values().cloned().collect(),
+    )
+    .await?;
+    let metadata: Vec<Value> = refs.iter().map(|((service, env), name)| {
+        let row = &rows[name];
+        json!({"service":service,"environment":env,"name":name,"id":Id::from(row.id),"version":row.version,
+            "scope":row.scope,"scope_ref":Id::from(row.scope_ref),"secret":row.kind=="secret"})
+    }).collect();
+    Ok((json!(metadata), rows))
+}
+fn artifact_bindings(artifact: &str) -> Result<Value> {
+    let document: Value =
+        serde_json::from_str(artifact).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    Ok(document
+        .get("x-variable-bindings")
+        .cloned()
+        .unwrap_or(json!([])))
+}
+fn environment_path(metadata: &Value, service: &str) -> String {
+    format!(".variables-{}-{service}.env", hash(&metadata.to_string()))
+}
+fn bind_artifact(artifact: &str, metadata: &Value) -> Result<String> {
+    if metadata == &json!([]) {
+        return Ok(artifact.to_owned());
+    }
+    let mut document: Value =
+        serde_json::from_str(artifact).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    for binding in metadata
+        .as_array()
+        .ok_or_else(|| ApiError::bad("变量绑定无效。"))?
+    {
+        let service = binding["service"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("变量服务无效。"))?;
+        if !document["services"][service].is_object() {
+            return Err(ApiError::bad("变量引用的服务不存在。"));
+        }
+        document["services"][service]["env_file"] = json!([environment_path(metadata, service)]);
+    }
+    document["x-variable-bindings"] = metadata.clone();
+    serde_json::to_string_pretty(&document)
+        .map(|s| s + "\n")
+        .map_err(|_| ApiError::bad("无法序列化 Compose 产物。"))
+}
+fn dotenv_value(value: &str) -> String {
+    let mut encoded = String::from("\"");
+    for c in value.chars() {
+        match c {
+            '\\' => encoded.push_str("\\\\"),
+            '"' => encoded.push_str("\\\""),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            '$' => encoded.push_str("$$"),
+            other => encoded.push(other),
+        }
+    }
+    encoded.push('"');
+    encoded
+}
+fn environment_files(
+    s: &AppState,
+    metadata: &Value,
+    rows: &BTreeMap<String, crate::entities::variables::Model>,
+) -> Result<BTreeMap<String, String>> {
+    let mut files = BTreeMap::<String, String>::new();
+    for binding in metadata
+        .as_array()
+        .ok_or_else(|| ApiError::bad("变量绑定无效。"))?
+    {
+        let name = binding["name"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("变量名称无效。"))?;
+        let row = rows
+            .get(name)
+            .ok_or_else(|| ApiError::bad("变量未定义。"))?;
+        let value = s.vault.open_secret(
+            &row.value,
+            &crate::vault::aad(
+                &row.workspace_id.to_string(),
+                "variables",
+                &row.id.to_string(),
+            ),
+        )?;
+        let service = binding["service"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("变量服务无效。"))?;
+        let env = binding["environment"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("环境变量名无效。"))?;
+        // Compose dotenv double quotes use JSON escapes; $$ disables interpolation.
+        let encoded = dotenv_value(&value);
+        files
+            .entry(environment_path(metadata, service))
+            .or_default()
+            .push_str(&format!("{env}={encoded}\n"));
+    }
+    Ok(files)
+}
+fn snapshot_aad(workspace: i64, revision: i64) -> String {
+    crate::vault::aad(
+        &workspace.to_string(),
+        "deployment-variables",
+        &revision.to_string(),
+    )
+}
+fn open_snapshot(
+    vault: &crate::vault::Vault,
+    rev: &revisions::Model,
+) -> Result<BTreeMap<String, String>> {
+    let sealed = rev.variable_snapshot.as_deref().unwrap_or_default();
+    if sealed.is_empty() {
+        if artifact_bindings(&rev.artifact)? != json!([]) {
+            return Err(ApiError::bad("历史变量快照缺失，不能执行。"));
+        }
+        return Ok(BTreeMap::new());
+    }
+    let text = vault.open_secret(sealed, &snapshot_aad(rev.workspace_id, rev.id))?;
+    serde_json::from_str(&text).map_err(|_| ApiError::bad("历史变量快照无效。"))
+}
+fn seal_snapshot(
+    vault: &crate::vault::Vault,
+    workspace: i64,
+    revision: i64,
+    files: &BTreeMap<String, String>,
+) -> Result<String> {
+    if files.is_empty() {
+        return Ok(String::new());
+    }
+    let text = serde_json::to_string(files).map_err(|_| ApiError::bad("无法保存变量快照。"))?;
+    vault.seal(&text, &snapshot_aad(workspace, revision))
+}
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewBody {
@@ -338,7 +506,7 @@ fn preview_token(artifact: &str, expected: &str, version: i64, source: i64) -> S
     hash(&format!("{version}:{source}:{expected}:{artifact}"))
 }
 async fn old_revision(
-    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
     app_id: i64,
     id: &str,
@@ -348,7 +516,7 @@ async fn old_revision(
         .filter(revisions::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(revisions::Column::DeploymentId.eq(app_id))
         .filter(revisions::Column::State.eq("succeeded"))
-        .one(&s.db)
+        .one(conn)
         .await?
         .ok_or_else(|| ApiError::bad("只能回滚本应用已成功的 revision。"))
 }
@@ -359,25 +527,34 @@ pub async fn preview(
     Json(b): Json<PreviewBody>,
 ) -> Result<Json<Value>> {
     scope.require("deployments.read")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let r = scoped(&s.db, &scope, &id).await?;
     let ch = remote::open(&s, &scope.workspace_id, &Id::from(r.target_ref)).await?;
     let (desired, source) = if let Some(id) = b.revision_id {
-        let old = old_revision(&s, &scope, r.id, &id).await?;
+        let old = old_revision(&s.db, &scope, r.id, &id).await?;
         (old.artifact, old.id)
     } else {
+        let (metadata, _) = bindings(&s.db, &r, &r.manifest).await?;
         let rendered = manifest::render(&manifest::parse(&r.manifest)?)?;
-        let artifact = resolve_artifact(&s, ch.as_ref(), &r, &rendered).await?;
+        let artifact = bind_artifact(
+            &resolve_artifact(&s, ch.as_ref(), &r, &rendered).await?,
+            &metadata,
+        )?;
+        let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+        if bindings(&tx, &r, &r.manifest).await?.0 != metadata {
+            return Err(ApiError::conflict("变量已变化，请重新预览。"));
+        }
         let n = apps::Entity::update_many()
             .col_expr(apps::Column::PreviewArtifact, Expr::value(artifact.clone()))
             .filter(apps::Column::Id.eq(r.id))
             .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(apps::Column::Version.eq(r.version))
-            .exec(&s.db)
+            .exec(&tx)
             .await?
             .rows_affected;
         if n == 0 {
             return Err(ApiError::conflict("记录已变化，请刷新后重新预览。"));
         }
+        tx.commit().await?;
         (artifact, 0)
     };
     let current = remote_artifact(ch.as_ref(), &r).await?;
@@ -394,7 +571,8 @@ pub async fn preview(
     Ok(Json(
         json!({"desired":desired,"current":current,"expected_hash":expected,
         "preview_token":preview_token(&desired,&expected,r.version,source),"version":r.version,"changed":current!=desired,
-        "notice":"对比目标主机保存的 Compose 文件，不代表容器实时状态。镜像摘要已固定，执行将使用这份产物。"}),
+        "variables": artifact_bindings(&desired)?,
+        "notice": if source != 0 {"回滚将恢复该历史版本的镜像、配置及变量值；已轮换的旧密钥可能失效。卷数据不会回滚。"} else {"对比目标主机保存的 Compose 文件，不代表容器实时状态。镜像摘要已固定；引用变量在入队时加密保存，后续变量变更不影响已入队执行。"}}),
     ))
 }
 async fn resolve_artifact(
@@ -403,6 +581,14 @@ async fn resolve_artifact(
     r: &apps::Model,
     rendered: &str,
 ) -> Result<String> {
+    let mut public: Value =
+        serde_json::from_str(rendered).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    public
+        .as_object_mut()
+        .ok_or_else(|| ApiError::bad("Compose 产物无效。"))?
+        .remove("x-variable-references");
+    let rendered =
+        serde_json::to_string(&public).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
     let dir = directory(r);
     let path = format!("{dir}/preview-{}.json", s.next_id()?);
     let prepare=ch.exec(&format!("set -eu; command -v flock >/dev/null; command -v sha256sum >/dev/null; docker compose version; umask 077; mkdir -p -- {}",quote(&dir)),Duration::from_secs(30)).await?;
@@ -473,26 +659,40 @@ async fn trigger(
     } else {
         "deployments.apply"
     })?;
-    let r = scoped(s, scope, id).await?;
+    let tx = crate::variables::transaction(s, scope.workspace_id).await?;
+    let r = scoped(&tx, scope, id).await?;
     if b.version != r.version {
         return Err(ApiError::conflict("记录已变化，请刷新后重新预览。"));
     }
     if b.expected_hash.len() != 64 || !b.expected_hash.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(ApiError::bad("请先预览目标主机，再提交部署。"));
     }
-    let (source, manifest, rendered, artifact) = if rollback {
-        let old = old_revision(s, scope, r.id, &b.revision_id).await?;
+    let (source, manifest, rendered, artifact, files) = if rollback {
+        let old = old_revision(&tx, scope, r.id, &b.revision_id).await?;
         let source = Id::from(old.id);
         if old.artifact.is_empty() {
             return Err(ApiError::bad("revision 没有可回滚产物。"));
         }
-        (i64::from(source), old.manifest, old.rendered, old.artifact)
+        let files = open_snapshot(&s.vault, &old)?;
+        (
+            i64::from(source),
+            old.manifest,
+            old.rendered,
+            old.artifact,
+            files,
+        )
     } else {
+        let (metadata, rows) = bindings(&tx, &r, &r.manifest).await?;
+        if r.preview_artifact.is_empty() || artifact_bindings(&r.preview_artifact)? != metadata {
+            return Err(ApiError::conflict("变量或预览已变化，请重新预览后执行。"));
+        }
+        let files = environment_files(s, &metadata, &rows)?;
         (
             0,
             r.manifest.clone(),
             manifest::render(&manifest::parse(&r.manifest)?)?,
             r.preview_artifact.clone(),
+            files,
         )
     };
     if artifact.is_empty()
@@ -502,13 +702,13 @@ async fn trigger(
     }
     let host = hosts::Entity::find_by_id(r.target_ref)
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
+        .one(&tx)
         .await?;
     if host.is_none() {
         return Err(ApiError::bad("目标主机不存在。"));
     }
     let (id, now) = (s.next_id()?, db::now());
-    let tx = s.db.begin().await?;
+    let variable_snapshot = seal_snapshot(&s.vault, r.workspace_id, i64::from(id), &files)?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::State, Expr::value("queued"))
         .col_expr(
@@ -546,6 +746,7 @@ async fn trigger(
             manifest,
             rendered,
             artifact,
+            variable_snapshot: Some(variable_snapshot),
             expected_hash: b.expected_hash,
             state: "queued".into(),
             output: String::new(),
@@ -588,7 +789,7 @@ pub async fn acknowledge(
     if b.note.trim().is_empty() || b.note.chars().count() > 500 {
         return Err(ApiError::bad("请填写核实说明（1到500字）。"));
     }
-    let r = scoped(&s, &scope, &id).await?;
+    let r = scoped(&s.db, &scope, &id).await?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::State, Expr::value("failed"))
         .col_expr(
@@ -745,6 +946,23 @@ async fn upload(ch: &dyn HostChannel, path: &str, text: String) -> Result<()> {
     .await
 }
 async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)> {
+    let protected = rev
+        .variable_snapshot
+        .as_ref()
+        .is_some_and(|v| !v.is_empty())
+        || artifact_bindings(&rev.artifact)? != json!([]);
+    match execute_inner(s, rev, protected).await {
+        Err(_) if protected => Err(ApiError::bad(
+            "引用变量部署结果无法确认，原始错误未保存，请在目标主机核实。",
+        )),
+        result => result,
+    }
+}
+async fn execute_inner(
+    s: &AppState,
+    rev: &revisions::Model,
+    protected: bool,
+) -> Result<(bool, String)> {
     let r = apps::Entity::find_by_id(rev.deployment_id)
         .filter(apps::Column::WorkspaceId.eq(rev.workspace_id))
         .one(&s.db)
@@ -761,10 +979,17 @@ async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)>
     if prepare.code != 0 {
         return Ok((
             false,
-            format!(
-                "目标需要 Docker Compose v2+、flock 和可写工作目录。\n{}{}",
-                prepare.stdout, prepare.stderr
-            ),
+            if protected {
+                format!(
+                    "前置检查失败，退出码：{}。原始输出未保存，请在主机核实。\n",
+                    prepare.code
+                )
+            } else {
+                format!(
+                    "目标需要 Docker Compose v2+、flock 和可写工作目录。\n{}{}",
+                    prepare.stdout, prepare.stderr
+                )
+            },
         ));
     }
     let artifact = rev.artifact.clone();
@@ -779,6 +1004,23 @@ async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)>
         .strategy
         .map(|s| s.health_timeout)
         .unwrap_or(120);
+    let files = open_snapshot(&s.vault, rev)?;
+    let mut uploaded: Vec<String> = Vec::new();
+    for (name, text) in &files {
+        // Snapshot paths are generated internally, never supplied by a client.
+        if name.contains('/') || !name.starts_with(".variables-") || !name.ends_with(".env") {
+            return Err(ApiError::bad("变量快照路径无效。"));
+        }
+        let path = format!("{dir}/{name}");
+        if let Err(error) = upload(ch.as_ref(), &path, text.clone()).await {
+            for path in &uploaded {
+                let _ = ch.delete_file(path).await;
+            }
+            let _ = ch.delete_file(&path).await;
+            return Err(error);
+        }
+        uploaded.push(path);
+    }
     let current_path = format!("{dir}/compose.json");
     // Remote lock survives a lost server connection. An early manual acknowledgement cannot overlap commands.
     let check_hash = format!(
@@ -786,8 +1028,23 @@ async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)>
         path = quote(&current_path),
         expected = quote(&rev.expected_hash)
     );
+    let cleanup = if uploaded.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "trap {} EXIT; ",
+            quote(&format!(
+                "rm -f -- {}",
+                uploaded
+                    .iter()
+                    .map(|p| quote(p))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ))
+        )
+    };
     let inner = format!(
-        "set -eu; {check_hash} docker compose --project-name {} -f {} up -d --wait --wait-timeout {} --remove-orphans; cp -- {} {}",
+        "set -eu; {cleanup}{check_hash} docker compose --project-name {} -f {} up -d --wait --wait-timeout {} --remove-orphans; cp -- {} {}",
         quote(&project(&r)),
         quote(&stage),
         timeout,
@@ -804,8 +1061,137 @@ async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)>
             Duration::from_secs(u64::from(timeout) + 180),
         )
         .await?;
+    if !uploaded.is_empty() {
+        let cleanup = ch
+            .exec(
+                &format!(
+                    "rm -f -- {}",
+                    uploaded
+                        .iter()
+                        .map(|p| quote(p))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+                Duration::from_secs(15),
+            )
+            .await?;
+        if cleanup.code != 0 {
+            return Err(ApiError::bad("环境文件清理未完成，请在目标主机核实。"));
+        }
+    }
     Ok((
         out.code == 0,
-        format!("{}{}\n退出码：{}\n", out.stdout, out.stderr, out.code),
+        if protected {
+            format!(
+                "{}。引用变量的原始命令输出不予保存。\n退出码：{}\n",
+                if out.code == 0 {
+                    "部署成功"
+                } else {
+                    "部署失败"
+                },
+                out.code
+            )
+        } else {
+            format!("{}{}\n退出码：{}\n", out.stdout, out.stderr, out.code)
+        },
     ))
+}
+
+#[cfg(test)]
+mod variable_snapshot_tests {
+    use super::*;
+    fn revision() -> revisions::Model {
+        revisions::Model {
+            id: 10,
+            workspace_id: 20,
+            deployment_id: 30,
+            number: 1,
+            action: "apply".into(),
+            source_revision: 0,
+            manifest: "{}".into(),
+            rendered: "{}".into(),
+            artifact: "{}".into(),
+            variable_snapshot: None,
+            expected_hash: String::new(),
+            state: "succeeded".into(),
+            output: String::new(),
+            triggered_by: 1,
+            started_at: 0,
+            finished_at: 0,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        }
+    }
+    #[test]
+    fn historical_snapshot_is_encrypted_bound_and_resealed_for_rollback() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = crate::vault::Vault::open(directory.path(), false).unwrap();
+        let files = BTreeMap::from([(
+            ".variables-test-web.env".into(),
+            "TOKEN=\"private-fixture\"\n".into(),
+        )]);
+        let mut old = revision();
+        old.variable_snapshot =
+            Some(seal_snapshot(&vault, old.workspace_id, old.id, &files).unwrap());
+        assert!(
+            !old.variable_snapshot
+                .as_ref()
+                .unwrap()
+                .as_str()
+                .contains("private-fixture")
+        );
+        assert_eq!(open_snapshot(&vault, &old).unwrap(), files);
+        let mut moved = old.clone();
+        moved.workspace_id += 1;
+        assert!(open_snapshot(&vault, &moved).is_err());
+        moved = old.clone();
+        moved.id += 1;
+        assert!(open_snapshot(&vault, &moved).is_err());
+        moved.variable_snapshot = Some(
+            seal_snapshot(
+                &vault,
+                moved.workspace_id,
+                moved.id,
+                &open_snapshot(&vault, &old).unwrap(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(open_snapshot(&vault, &moved).unwrap(), files);
+        assert_ne!(moved.variable_snapshot, old.variable_snapshot);
+        assert!(revision_json(&old).get("variable_snapshot").is_none());
+        assert!(!revision_json(&old).to_string().contains("private-fixture"));
+    }
+    #[test]
+    fn legacy_revisions_work_but_missing_or_corrupt_bound_snapshots_are_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = crate::vault::Vault::open(directory.path(), false).unwrap();
+        let mut row = revision();
+        assert!(open_snapshot(&vault, &row).unwrap().is_empty());
+        row.artifact = json!({"x-variable-bindings":[{"service":"web"}]}).to_string();
+        assert!(open_snapshot(&vault, &row).is_err());
+        row.variable_snapshot = Some("corrupt".into());
+        assert!(open_snapshot(&vault, &row).is_err());
+    }
+    #[test]
+    fn public_artifacts_reference_private_files_and_versions_invalidate_preview() {
+        let metadata =
+            json!([{"service":"web","environment":"TOKEN","name":"token","id":"1","version":1}]);
+        let document = r#"{"services":{"web":{"image":"busybox@sha256:fixture"}}}"#;
+        let first = bind_artifact(document, &metadata).unwrap();
+        let parsed: Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(parsed["services"]["web"]["environment"], Value::Null);
+        assert_eq!(artifact_bindings(&first).unwrap(), metadata);
+        let mut rotated = metadata.clone();
+        rotated[0]["version"] = json!(2);
+        let second = bind_artifact(document, &rotated).unwrap();
+        assert_ne!(
+            preview_token(&first, "hash", 1, 0),
+            preview_token(&second, "hash", 1, 0)
+        );
+        assert_ne!(
+            environment_path(&metadata, "web"),
+            environment_path(&rotated, "web")
+        );
+    }
 }

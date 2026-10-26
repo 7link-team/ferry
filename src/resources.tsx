@@ -64,6 +64,13 @@ export interface Credential {
   secret?: string;
   version: number;
 }
+export interface Variable {
+  id: string; name: string; scope: string; scope_ref: string; kind: string;
+  description: string; has_value: boolean; value?: string; version: number;
+}
+const VARIABLE_SCOPES = [{ value: "global", label: "全局" }, { value: "deploy", label: "部署" }, { value: "build", label: "构建" }];
+const VARIABLE_KINDS = [{ value: "secret", label: "密钥" }, { value: "plain", label: "普通" }];
+const variableSource = (row: Variable) => row.scope === "global" ? "全局" : `${label(VARIABLE_SCOPES, row.scope)} · ${row.scope_ref === "0" ? "模块默认" : `对象 ${row.scope_ref}`}`;
 export interface Tag {
   id: string;
   name: string;
@@ -352,6 +359,25 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       empty: "还没有标签。",
     }),
 
+    variables: list({
+      resource: "variables", rowKey: (row: Variable) => row.id,
+      filters: [{ key: "q", label: "名称 / 备注", type: "text" }, { key: "kind", label: "类型", type: "select", options: VARIABLE_KINDS }, { key: "scope_ref", label: "对象 ID", type: "text", placeholder: "0 表示模块默认" }],
+      columns: [
+        { key: "name", label: "名称", sortable: true },
+        { key: "kind", label: "类型", render: (row) => label(VARIABLE_KINDS, row.kind) },
+        { key: "scope", label: "来源层", render: variableSource },
+        { key: "value", label: "值", render: (row) => row.kind === "secret" ? (row.has_value ? "已设置" : "未设置") : <span className="whitespace-pre-wrap break-all">{row.value === "" ? "（空字符串）" : row.value}</span> },
+        { key: "description", label: "备注" },
+      ],
+      actions: [
+        { label: "查看", permission: "variables.read", to: (row) => ({ id: row.id, mode: "view" }) },
+        { label: "编辑", permission: "variables.update", to: (row) => ({ id: row.id, mode: "edit" }) },
+        { label: "删除", permission: "variables.delete", destructive: true, action: (row) => deleteResource(workspace, "variables", row.id) },
+      ],
+      toolbar: { import: false, export: false },
+      empty: "当前作用域没有变量。全局、模块和对象同名时，具体对象优先。",
+    }),
+
     credentials: list({
       resource: "credentials",
       rowKey: (row: Credential) => row.id,
@@ -459,7 +485,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "target_kind", label: "目标类型", type: "select", options: [{ value: "host", label: "单主机" }], immutable: true },
         { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true },
         { key: "workdir", label: "部署工作目录", type: "text", required: true, immutable: true, help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。需要 Docker Compose v2+ 和 flock。" },
-        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "首批支持镜像、多服务、端口、普通环境变量、命名卷和依赖；不支持密钥变量、配置模板、artifact 或滚动更新。不要填写密钥明文。" },
+        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "首批支持镜像、多服务、端口、普通环境变量、命名卷和依赖；环境项可使用 valueFrom: variable/变量名 引用普通或密钥变量，按全局→部署模块→应用专属覆盖。暂不支持配置模板、artifact 或滚动更新；不要填写密钥明文。" },
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),
@@ -558,6 +584,22 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
           fields: [{ key: "description", label: "备注", type: "textarea", span: 2 }],
         },
       ],
+    }),
+
+    variables: form({
+      resource: "variables", heading: (row: Variable) => row.name,
+      blank: { name: "", scope: "global", scope_ref: "0", kind: "secret", value: "", description: "" },
+      sections: [{ fields: [
+        { key: "name", label: "名称", type: "text", required: true, immutable: true, help: "96个以内字母、数字、下划线或连字符；引用写作 variable/名称。" },
+        { key: "kind", label: "类型", type: "select", options: VARIABLE_KINDS, immutable: true },
+        { key: "scope", label: "作用域", type: "select", options: VARIABLE_SCOPES, immutable: true, resetOnChange: ["scope_ref"] },
+        { key: "scope_ref", label: "对象 ID", type: "text", immutable: true, when: (row) => row.scope !== "global", help: "0 或留空为模块默认；部署范围填应用 ID，构建范围填流水线 ID。具体对象覆盖模块，模块覆盖全局。" },
+        { key: "value", label: "变量值", type: "textarea", span: 2, when: (row) => row.kind === "plain", help: "空白和换行会原样保存；留空表示空字符串。" },
+        { key: "value", label: "密钥值", type: "secret", stored: "has_value", replaceOnEdit: true, span: 2, when: (row) => row.kind === "secret",
+          help: "加密保存。编辑时勾选替换后留空，表示设置为空字符串；查看明文会记录审计。",
+          reveal: { permission: "variables.reveal", action: async (row) => (await runItemAction<{value: string}>(workspace, "variables", String(row.id), "reveal", {})).value } },
+        { key: "description", label: "备注", type: "textarea", span: 2 },
+      ] }],
     }),
 
     credentials: form({

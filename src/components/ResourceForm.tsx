@@ -147,6 +147,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
                   field={field}
                   reportOptions={reportOptions}
                   value={draft[field.key]}
+                  stored={!!draft[field.stored ?? `has_${field.key}`]}
+                  creating={creating}
+                  draft={draft}
+                  permissions={permissions}
                   readOnly={readOnly || (!creating && !!field.immutable)}
                   asText={readOnly}
                   onChange={(value) => setDraft((d) => ({
@@ -189,11 +193,51 @@ export function ResourceForm<T extends Record<string, unknown>>({
   );
 }
 
+function SecretField<T>({ field, value, stored, creating, asText, readOnly, draft, permissions, onChange }: {
+  field: FormField<T>; value: unknown; stored: boolean; creating: boolean; asText: boolean;
+  readOnly: boolean; draft: Partial<T>; permissions: Set<string>; onChange: (value: unknown) => void;
+}) {
+  const [revealed, setRevealed] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const canReveal = !!field.reveal && permissions.has(field.reveal.permission);
+  if (asText) return <Wrapper field={field}>
+    <span className="text-sm font-medium">{field.label}</span>
+    <p className="text-sm text-muted-foreground">{stored ? "已设置" : "未设置"}</p>
+    {canReveal && stored && <Button type="button" variant="outline" disabled={busy} onClick={async () => {
+      if (revealed !== undefined) { setRevealed(undefined); return; }
+      setBusy(true); setError("");
+      try { setRevealed(await field.reveal!.action(draft)); }
+      catch (cause) { setError(errorText(cause)); }
+      finally { setBusy(false); }
+    }}>{busy ? "正在读取…" : revealed === undefined ? "查看明文（记录审计）" : "隐藏明文"}</Button>}
+    {canReveal && revealed !== undefined && <pre aria-label="变量明文" className="whitespace-pre-wrap break-all rounded-md border p-3 font-mono text-sm">{revealed === "" ? "（空字符串）" : revealed}</pre>}
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  </Wrapper>;
+  const replacing = creating || value !== undefined;
+  return <Wrapper field={field}>
+    {!creating && <label className="flex items-center gap-2 text-sm">
+      <Checkbox checked={replacing} disabled={readOnly} onCheckedChange={(checked) => onChange(checked ? "" : undefined)} />
+      替换{field.label}（不勾选则保留原值）
+    </label>}
+    {replacing && <label className="flex flex-col gap-1.5 text-sm font-medium">
+      {field.label}
+      <textarea className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} readOnly={readOnly}
+        autoComplete="off" spellCheck={false} placeholder="允许留空；空白和换行会原样保存" />
+    </label>}
+  </Wrapper>;
+}
+
 function Field<T>({
   field,
   value,
   readOnly,
   asText,
+  stored,
+  creating,
+  draft,
+  permissions,
   onChange,
   reportOptions,
 }: {
@@ -201,6 +245,10 @@ function Field<T>({
   value: unknown;
   readOnly: boolean;
   asText: boolean;
+  stored: boolean;
+  creating: boolean;
+  draft: Partial<T>;
+  permissions: Set<string>;
   onChange: (value: unknown) => void;
   reportOptions: (key: string, blocked: boolean) => void;
 }) {
@@ -219,15 +267,9 @@ function Field<T>({
     </span>
   );
 
-  // A stored secret is never sent to the browser; the server reports only
-  // whether one exists, so there is nothing to render but that fact.
-  if (field.type === "secret" && asText)
-    return (
-      <Wrapper field={field}>
-        {label}
-        <p className="text-sm text-muted-foreground">{value ? "已设置" : "未设置"}</p>
-      </Wrapper>
-    );
+  if (field.type === "secret" && (asText || field.replaceOnEdit))
+    return <SecretField field={field} value={value} stored={stored} creating={creating}
+      asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
 
@@ -257,7 +299,7 @@ function Field<T>({
     return (
       <Wrapper field={field}>
         {label}
-        <p className={cn("min-h-5 text-sm break-words", field.type === "code" && "whitespace-pre-wrap font-mono")}>
+        <p className={cn("min-h-5 text-sm break-words", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
           {field.type === "switch" ? (
             value ? "是" : "否"
           ) : field.type === "select" ? (

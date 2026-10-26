@@ -61,7 +61,7 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
   };
   const execute = (rollback: boolean) => {
     if (!app || !preview || preview.version !== app.version) return;
-    if (!confirm(rollback ? `回滚到 revision #${revision?.number}？卷数据不会回滚。` : "执行当前部署？失败不会自动回滚。")) return;
+    if (!confirm(rollback ? `回滚到 revision #${revision?.number}？将恢复当时的变量值，旧密钥可能已经失效；卷数据不会回滚。` : "执行当前部署？失败不会自动回滚。")) return;
     void action(rollback ? "rollback" : "apply", { version: app.version, expected_hash: preview.expected_hash, preview_token: preview.preview_token, ...(rollback ? { revision_id: revision?.id } : {}) });
   };
   if (!app) return <div role={error ? "alert" : "status"}>{error || "正在读取部署…"}{error && <Button onClick={() => setReload((n) => n + 1)}>重试</Button>}</div>;
@@ -89,6 +89,13 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
         <Button disabled={busy || !note.trim()} onClick={() => { if (confirm("已核实远端执行情况，允许后续重新预览和部署？")) void action("acknowledge", { version: app.version, note }); }}>已核实，解除阻止</Button></>}
     </section>}
     {preview && <section className="space-y-3"><h3 className="font-semibold">产物差异</h3><p className="text-sm text-muted-foreground">{preview.notice}</p>
+      {!!preview.variables?.length && <section aria-label="变量引用" className="space-y-2 rounded border p-3">
+        <h4 className="text-sm font-medium">变量引用 · {revisionId ? "历史版本" : "入队时固定"}</h4>
+        <ul className="space-y-1 text-sm">{preview.variables.map(v => <li key={`${v.service}/${v.environment}`}>
+          <span className="font-mono">{v.service}.{v.environment}</span> ← {v.name} · {v.scope_ref !== "0" ? "应用专属" : v.scope === "global" ? "全局" : "部署模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}
+        </li>)}</ul>
+        <p className="text-xs text-muted-foreground">变量值加密保存于部署历史，更新当前变量不会删除历史值。预览和执行日志不显示变量值。</p>
+      </section>}
       <pre className="max-h-96 overflow-auto rounded border bg-muted/30 p-4 text-xs">{artifactDiff(preview.current, revisionId && revision?.artifact ? revision.artifact : preview.desired)}</pre>
       <details><summary className="cursor-pointer text-sm">查看完整待执行产物</summary><pre className="overflow-auto p-4 text-xs">{revisionId && revision?.artifact ? revision.artifact : preview.desired}</pre></details>
     </section>}

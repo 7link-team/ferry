@@ -7,7 +7,8 @@ export interface Revision {
   id: string; deployment_id: string; number: number; action: string; state: string;
   rendered: string; artifact: string; output: string; started_at: number; finished_at: number;
 }
-export interface Preview { desired: string; current: string; expected_hash: string; preview_token: string; version: number; notice: string }
+export interface VariableBinding { service: string; environment: string; name: string; id: string; version: number; scope: string; scope_ref: string; secret: boolean }
+export interface Preview { variables?: VariableBinding[]; desired: string; current: string; expected_hash: string; preview_token: string; version: number; notice: string }
 export const deploymentActive = (state: string) => state === "queued" || state === "running";
 export const deploymentState = (state: string) => ({ idle: "未部署", queued: "排队中", running: "执行中", succeeded: "成功", failed: "失败", "needs-review": "需核实" }[state] ?? state);
 /** A deterministic, contiguous change hunk. No claim of a minimal multi-hunk diff. */

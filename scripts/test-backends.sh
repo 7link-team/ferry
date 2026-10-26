@@ -211,6 +211,32 @@ print(json.dumps({
   ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/ops/activity?resource=repositories")"
 
 
+  # Shared variables: exercise the actual HTTP boundary on every database.
+  local variable variable_body revealed
+  variable_body=$(c -X POST -d '{"name":"db-url","scope":"global","kind":"secret","value":"  variable-test-secret\n$literal  "}' "$B/workspaces/ops/variables")
+  ck "variable create" '"id"' "$variable_body"
+  variable=$(printf '%s' "$variable_body" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')
+  ck "variable presence" '"has_value":true' "$(c "$B/workspaces/ops/variables/$variable")"
+  ckn "variable detail does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/ops/variables/$variable")"
+  ckn "variable list does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/ops/variables?scope=global&scope_ref=0")"
+  ck "variable duplicate" '409$' "$(c -w '%{http_code}' -X POST -d '{"name":"db-url","value":"other"}' "$B/workspaces/ops/variables")"
+  ck "variable other workspace cannot read" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/variables/$variable")"
+  ck "variable other workspace cannot reveal" '404$' "$(c -w '%{http_code}' -X POST -d '{}' "$B/workspaces/repo-other/variables/$variable/actions/reveal")"
+  ck "variable missing scope object" '400$' "$(c -w '%{http_code}' -X POST -d '{"name":"object","scope":"deploy","scope_ref":"999","value":"x"}' "$B/workspaces/ops/variables")"
+  revealed=$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")
+  ck "variable exact whitespace multiline and dollar" '^True$' "$(printf '%s' "$revealed" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"] == "  variable-test-secret\n$literal  ")')"
+  ck "variable reveal audited" '"action":"reveal"' "$(c "$B/workspaces/ops/activity?resource=variables")"
+  ckn "variable audit excludes content" 'variable-test-secret' "$(c "$B/workspaces/ops/activity?resource=variables")"
+  ck "variable reveal is not cacheable" 'no-store' "$(c -D - -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
+  ck "variable update keeps value when omitted" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":1,"description":"updated"}' "$B/workspaces/ops/variables/$variable")"
+  ck "variable value preserved" 'variable-test-secret' "$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
+  ck "variable explicit empty replacement" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":2,"value":""}' "$B/workspaces/ops/variables/$variable")"
+  ck "variable empty reveal" '"value":""' "$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
+  ck "variable stale edit" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":2,"value":"stale"}' "$B/workspaces/ops/variables/$variable")"
+  ck "variable immutable type" '400$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":3,"kind":"plain"}' "$B/workspaces/ops/variables/$variable")"
+  ck "variable deletion" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/variables/$variable")"
+  ck "variable deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/variables/$variable")"
+
   # Pipelines: keep the JSON definition a string at the resource boundary.
   local pipeline pipeline_body pipeline_payload pipeline_repo foreign_repo
   pipeline_repo=$(c -X POST -d '{"name":"pipeline-repo","url":"https://example.com/pipeline.git"}' "$B/workspaces/ops/repositories" |

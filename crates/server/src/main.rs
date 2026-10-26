@@ -20,6 +20,7 @@ mod runner;
 mod snowflake;
 mod ssh;
 mod state;
+mod variables;
 mod vault;
 mod worker;
 mod workspace;
@@ -152,6 +153,20 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/variables",
+            get(variables::list).post(variables::create),
+        )
+        .route(
+            "/{workspace}/variables/{id}",
+            get(variables::get)
+                .patch(variables::update)
+                .delete(variables::remove),
+        )
+        .route(
+            "/{workspace}/variables/{id}/actions/reveal",
+            post(variables::reveal),
+        )
         .route(
             "/{workspace}/deployment-revisions/{id}",
             get(deployments::revision_get),

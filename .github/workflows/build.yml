@@ -141,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [ssh, runner, pipelines, build-ui, deployments]
+        harness: [ssh, runner, pipelines, build-ui, deployments, variables-ui]
     env:
       FERRY_REQUIRE_ALL: "1"
     steps:
@@ -156,26 +156,26 @@ jobs:
           sudo apt-get install -y bc lsof openssh-client python3 git curl libdigest-sha-perl
           docker info
       - uses: actions/setup-node@v4
-        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments'
+        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
         with:
           node-version: "24"
           cache: npm
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments'
+      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
         run: npm ci
       - uses: actions/cache@v4
-        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments'
+        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
         id: playwright
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments'
+      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
         name: Install Chromium and system libraries
         run: |
           npx playwright install-deps chromium
           if [ "${{ steps.playwright.outputs.cache-hit }}" != true ]; then
             npx playwright install chromium
           fi
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments'
+      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
         run: npm run build
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - name: Platform initialization and management in Chromium
@@ -197,8 +197,8 @@ jobs:
           echo '| --- | --- | --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
           for round in 1 2 3; do
             echo "::group::$HARNESS round $round/3"
-            if [ "$HARNESS" = build-ui ]; then
-              command=(node scripts/test-build-ui.mjs)
+            if [ "$HARNESS" = build-ui ] || [ "$HARNESS" = variables-ui ]; then
+              command=(node "scripts/test-$HARNESS.mjs")
             else
               command=(bash "scripts/test-$HARNESS.sh")
             fi

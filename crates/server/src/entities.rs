@@ -457,12 +457,36 @@ pub mod deployment_revisions {
         pub manifest: String,
         pub rendered: String,
         pub artifact: String,
+        pub variable_snapshot: Option<String>,
         pub expected_hash: String,
         pub state: String,
         pub output: String,
         pub triggered_by: i64,
         pub started_at: i64,
         pub finished_at: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod variables {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "variables")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub scope: String,
+        pub scope_ref: i64,
+        pub kind: String,
+        pub description: String,
+        pub value: String,
         pub created_at: i64,
         pub updated_at: i64,
         pub version: i64,
