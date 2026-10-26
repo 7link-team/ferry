@@ -31,12 +31,15 @@ export function App() {
   const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [deferredSetup, setDeferredSetup] = useState(false);
 
   const reload = () => {
     setLoading(true);
-    api<Identity>("/me")
-      .then((value) => {
+    Promise.all([api<Identity>("/me"), api<{ required: boolean }>("/setup", { cache: "no-store" })])
+      .then(([value, setup]) => {
         setIdentity(value);
+        setSetupRequired(setup.required);
         setError("");
       })
       .catch((cause: unknown) => {
@@ -65,6 +68,8 @@ export function App() {
   // The URL is never replaced while unauthenticated: that is what makes a
   // shared link land on its target page after signing in (§5.3).
   if (!identity?.workspaces) return <Entry onReady={reload} error={error} />;
+  if (setupRequired && !deferredSetup)
+    return <Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} />;
   return <Workspace identity={identity} onSignedOut={reload} />;

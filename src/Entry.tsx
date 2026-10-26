@@ -20,8 +20,8 @@ type SetupStatus = { required: boolean; has_users: boolean; registration_enabled
 let desktopSetupToken = new URLSearchParams(location.hash.slice(1)).get("setup") ?? "";
 if (desktopSetupToken) history.replaceState(history.state, "", location.pathname + location.search);
 
-export function Entry({ onReady, error: outerError, signedIn = false }: { onReady: () => void; error: string; signedIn?: boolean }) {
-  const [step, setStep] = useState<Step>(signedIn ? "workspace" : "sign-in");
+export function Entry({ onReady, error: outerError, signedIn = false, initialize = false }: { onReady: () => void; error: string; signedIn?: boolean; initialize?: boolean }) {
+  const [step, setStep] = useState<Step>(initialize ? "setup" : signedIn ? "workspace" : "sign-in");
   const [setup, setSetup] = useState<SetupStatus>();
   const [token, setToken] = useState(desktopSetupToken);
   const [attempt, setAttempt] = useState(0);
@@ -30,10 +30,10 @@ export function Entry({ onReady, error: outerError, signedIn = false }: { onRead
     void api<SetupStatus>("/setup", { cache: "no-store" }).then(status => {
       if (!live) return;
       setSetup(status);
-      if (status.required && !signedIn) setStep("setup");
+      if (status.required && (!signedIn || initialize)) setStep("setup");
     }).catch(cause => { if (live) setError(errorText(cause)); });
     return () => { live = false; };
-  }, [signedIn, attempt]);
+  }, [signedIn, initialize, attempt]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(outerError);
 
@@ -97,7 +97,8 @@ export function Entry({ onReady, error: outerError, signedIn = false }: { onRead
             <div className="space-y-1 text-sm"><label htmlFor="setup-password">密码</label><Input id="setup-password" name="password" type="password" required minLength={10} autoComplete="new-password" aria-describedby="setup-password-help" /><p id="setup-password-help" className="text-xs text-muted-foreground">至少 10 个字符。已有账号请填写原密码。</p></div>
             <label className="block space-y-1 text-sm">确认密码<Input name="confirm_password" type="password" required minLength={10} autoComplete="new-password" /></label>
             <Button type="submit" className="w-full" disabled={busy}>{busy && <Loader2 className="animate-spin" />}初始化并进入平台</Button>
-            {setup.has_users && <Button type="button" variant="link" className="w-full" disabled={busy} onClick={() => { setStep("sign-in"); setError(""); }}>使用已有账号登录</Button>}
+            {signedIn ? <Button type="button" variant="link" className="w-full" disabled={busy} onClick={onReady}>稍后初始化，继续工作空间</Button>
+              : setup.has_users && <Button type="button" variant="link" className="w-full" disabled={busy} onClick={() => { setStep("sign-in"); setError(""); }}>使用已有账号登录</Button>}
           </form>
         )}
 
