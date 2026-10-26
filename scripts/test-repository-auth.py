@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Repository authorization acceptance against isolated HTTP providers; optional empty FERRY_TEST_DATABASE_URL."""
+import http.cookiejar
+import json
+import os
+from pathlib import Path
+import socket
+import shlex
+import subprocess
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import base64,hashlib,uuid
+from urllib.parse import urlparse,parse_qs,urlencode
+codes={};refreshes=[];fail_refresh=False
+class Receiver(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed=urlparse(self.path);query=parse_qs(parsed.query)
+        if parsed.path.endswith('/authorize'):
+            code=uuid.uuid4().hex;codes[code]=query
+            self.send_response(302);self.send_header('Location',query['redirect_uri'][0]+'?'+urlencode({'code':code,'state':query['state'][0]}));self.end_headers();return
+        access=query.get('access_token',[None])[0] or self.headers.get('Authorization','').removeprefix('Bearer ')
+        assert access and ('initial-access' in access or 'renewed-access' in access), 'missing OAuth access token'
+        if not parsed.path.endswith('/user'):assert 'renewed-access' in access, 'market fetch must use refreshed OAuth token'
+        if parsed.path.endswith('/user'):value={'login':'authorized-user','username':'authorized-user'}
+        else:
+            content={'version':1,'templates':[{'key':'web','name':'Authorized app','content':{'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]},'parameters':[]}]}
+            value={'content':base64.b64encode(json.dumps(content).encode()).decode(),'encoding':'base64'}
+        payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+    def do_POST(self):
+        form=parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
+        provider=form['client_id'][0].split('-')[0]
+        assert form['client_secret']==['fixture-client-secret']
+        if form['grant_type']==['refresh_token']:
+            refreshes.append(provider)
+            if fail_refresh:self.send_response(401);self.end_headers();return
+            value={'access_token':provider+'-renewed-access','expires_in':3600,'refresh_token':provider+'-rotated-refresh'}
+        else:
+            auth=codes.pop(form['code'][0]);assert auth['redirect_uri']==form['redirect_uri']
+            if provider!='gitee':assert base64.urlsafe_b64encode(hashlib.sha256(form['code_verifier'][0].encode()).digest()).decode().rstrip('=')==auth['code_challenge'][0]
+            value={'access_token':provider+'-initial-access','expires_in':10,'refresh_token':provider+'-initial-refresh'}
+        payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
+    def log_message(self,*args):pass
+receiver=ThreadingHTTPServer(('127.0.0.1',0),Receiver)
+threading.Thread(target=receiver.serve_forever,daemon=True).start()
+api_base=f'http://127.0.0.1:{receiver.server_port}'
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,*args):return None
+checks = 0
+def check(condition, label):
+    global checks
+    assert condition, label
+    checks += 1
+    print('PASS', label, flush=True)
+
+def client():
+    return urllib.request.build_opener(NoRedirect(), urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
+    data = Path(directory)
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
+    base = f'http://127.0.0.1:{port}/api'
+    env = dict(os.environ, FERRY_DATA_DIR=directory, FERRY_BIND=f'127.0.0.1:{port}')
+    env.pop('FERRY_DATABASE_URL', None)
+    if os.environ.get('FERRY_TEST_DATABASE_URL'): env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
+    env['REPOSITORY_OAUTH_PUBLIC_URL']=base[:-4]
+    for provider in ['github','gitlab','gitee']:
+        prefix='REPOSITORY_OAUTH_'+provider.upper()
+        env[prefix+'_CLIENT_ID']=provider+'-client'
+        env[prefix+'_CLIENT_SECRET']='fixture-client-secret'
+        env[prefix+'_BASE_URL']=api_base;env[prefix+'_API_URL']=api_base
+    binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
+    def request(c, path, body=None, method=None, expected=200):
+        req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+        try: response = c.open(req, timeout=30)
+        except urllib.error.HTTPError as e: response = e
+        if path.startswith("/repository-auth/callback"):assert response.headers["Referrer-Policy"]=="no-referrer"
+        raw = response.read()
+        try: value = json.loads(raw) if raw else None
+        except ValueError: raise AssertionError((path, response.code, raw))
+        if expected is not None: assert response.code == expected, (path, response.code, value)
+        return (response.code, value) if expected is None else value
+    anonymous = client()
+    log = open(data / 'server.log', 'wb')
+    def launch():
+        proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
+        for _ in range(150):
+            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
+            try:
+                if request(anonymous, '/status')['ok']: return proc
+            except OSError: pass
+            time.sleep(.1)
+        raise AssertionError('server startup timed out')
+    runner = None
+    proc = launch()
+    try:
+        admin, owner, guest, outsider = client(), client(), client(), client()
+        password = 'temporary-workspace-password'
+        request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
+        for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
+            request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
+        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
+        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
+        root = '/workspaces/tenant'
+        invitation=request(owner,root+'/members/invitation')['code']
+        request(guest,'/workspaces/actions/join',{'code':invitation})
+        def status(provider):return next(r for r in request(owner,root+'/repository-auth')['items'] if r['id']==provider)
+        def authorize(provider):
+            url=request(owner,root+'/repository-auth/'+provider+'/actions/authorize',{})['url']
+            try:owner.open(url)
+            except urllib.error.HTTPError as response:
+                assert response.code==302;return response.headers['Location'][len(base):]
+            raise AssertionError('provider did not redirect')
+        request(guest,root+'/repository-auth/github/actions/authorize',{},expected=403)
+        role=request(owner,root+'/roles',{'name':'Authorize only','permissions':['credentials.create']})['id']
+        member=request(owner,root+'/members?q=guest')['items'][0]
+        request(owner,root+'/members/'+member['id'],{'version':member['version'],'role_id':role},'PATCH')
+        check(not status('codeup')['web_available'],'Codeup exposes API fallback instead of pretending web authorization')
+        sources=[];repositories=[];credentials=[]
+        for provider in ['github','gitlab','gitee']:
+            callback=authorize(provider)
+            request(guest,callback,expected=400)
+            request(outsider,callback.replace("/workspaces/tenant/","/workspaces/other/"),expected=400)
+            request(owner,callback,expected=303)
+            request(owner,callback,expected=400)
+            connected=status(provider)
+            check(connected['account']=='authorized-user' and connected['credential_id'],provider+' code exchange validates state and records authorized account')
+            check('access' not in json.dumps(connected) and 'refresh' not in connected['last_error'],provider+' connection metadata never exposes tokens')
+            credential=connected['credential_id'];credentials.append(credential)
+            request(owner,root+'/credentials/'+credential,{'name':'Manual override','kind':'token','secret':'replacement','version':1},'PATCH',400)
+            request(owner,root+'/repositories',{'name':'Wrong origin','url':'https://attacker.example.invalid/repo.git','credential_id':credential},expected=400)
+            repo=request(owner,root+'/repositories',{'name':provider,'url':api_base+'/owner/repository.git','credential_id':credential},expected=201)['id'];repositories.append(repo)
+            sid=request(owner,root+'/marketplace-sources',{'name':provider,'repository_id':repo,'provider':provider,'api_base':api_base,'project':'owner/repository','organization':'','branch':'main','index_path':'marketplace.json'},expected=201)['id'];sources.append(sid)
+            request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{})
+            check(provider in refreshes and status(provider)['state']=='connected',provider+' expiring authorization refreshes before real market fetch')
+            before=credential
+            request(owner,authorize(provider),expected=303)
+            check(status(provider)['credential_id']==before,provider+' reauthorization preserves credential references')
+        check(len(request(owner,root+'/credentials')['items'])==3,'reauthorization never duplicates credentials')
+        callback=authorize('github');cancel=callback.split('?')[0]+'?'+urlencode({'state':parse_qs(urlparse(callback).query)['state'][0],'error':'access_denied'})
+        request(owner,cancel,expected=303);request(owner,callback,expected=400)
+        check(True,'cancelled authorization consumes single-use state')
+        if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+            import sqlite3
+            with sqlite3.connect(data/'ferry.sqlite') as conn:
+                stored=conn.execute('SELECT secret FROM credentials').fetchall()+conn.execute('SELECT refresh_secret FROM repository_connections').fetchall()
+                check(all(r[0].startswith('v1.') for r in stored) and 'initial-access' not in str(stored),'access and refresh tokens encrypted at rest')
+            expired_callback=authorize('github')
+            expired_state=parse_qs(urlparse(expired_callback).query)['state'][0]
+            with sqlite3.connect(data/'ferry.sqlite') as conn:
+                conn.execute('UPDATE repository_oauth_flows SET expires_at=0 WHERE state_hash=?', (hashlib.sha256(expired_state.encode()).hexdigest(),))
+            request(owner,expired_callback,expected=400)
+            check(True,'expired authorization state cannot exchange a code')
+            before_refresh=len(refreshes)
+            proc.terminate();proc.wait(timeout=30)
+            with sqlite3.connect(data/'ferry.sqlite') as conn:
+                conn.execute("UPDATE repository_connections SET state='refreshing' WHERE provider='github'")
+            proc=launch()
+            check(status('github')['state']=='reauthorize' and len(refreshes)==before_refresh,'interrupted refresh requires reauthorization without replaying token exchange')
+            request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+            check(len(refreshes)==before_refresh,'execution cannot reuse credentials with uncertain refresh outcome')
+            request(owner,authorize('github'),expected=303)
+            fail_refresh=True
+            request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+            check(status('github')['state']=='reauthorize','refresh rejection reports reauthorization requirement')
+            fail_refresh=False;request(owner,authorize('github'),expected=303)
+            check(status('github')['state']=='connected','new web authorization clears rejected refresh state')
+        # Changing a trusted deployment endpoint must not transfer an existing token.
+        proc.terminate();proc.wait(timeout=30)
+        env['REPOSITORY_OAUTH_GITHUB_API_URL']=api_base+'/changed-api'
+        proc=launch()
+        before_refresh=len(refreshes)
+        request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+        check(len(refreshes)==before_refresh,'changed authorization endpoint rejects old credentials before token refresh or API fetch')
+        env['REPOSITORY_OAUTH_GITHUB_API_URL']=api_base
+        proc.terminate();proc.wait(timeout=30)
+        proc=launch()
+        audit=request(owner,root+'/activity?page_size=200')
+        check(all(secret not in json.dumps(audit) for secret in ['fixture-client-secret','initial-access','initial-refresh']),'authorization audit contains no client secret or tokens')
+        for sid in sources:request(owner,root+'/marketplace-sources/'+sid,method='DELETE',expected=204)
+        for repo in repositories:request(owner,root+'/repositories/'+repo,method='DELETE',expected=204)
+        for credential in credentials:request(owner,root+'/credentials/'+credential,method='DELETE',expected=204)
+        check(all(r['credential_id'] is None for r in request(owner,root+'/repository-auth')['items']),'credential deletion removes linked authorization secrets')
+        print(f'{checks} checks passed (isolated OAuth provider, not live external account acceptance)',flush=True)
+    except Exception:
+        log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
+        raise
+    finally:
+        if proc.poll() is None:proc.terminate();proc.wait(timeout=30)
+        log.close();receiver.shutdown();receiver.server_close()

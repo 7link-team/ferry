@@ -487,6 +487,14 @@ async fn execute(
     let ch = crate::channel_open(s, &host).await?;
     let def = crate::pipelines::validate_definition(&r.definition)?;
     let credential = if r.credential_id != 0 {
+        crate::repository_auth::validate_target(
+            s,
+            r.workspace_id.into(),
+            r.credential_id.into(),
+            &r.repo_url,
+            false,
+        )
+        .await?;
         Some(credentials::unseal(s, &Id::from(r.workspace_id), &Id::from(r.credential_id)).await?)
     } else {
         None

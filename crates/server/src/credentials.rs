@@ -209,6 +209,19 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.update")?;
+    let managed = crate::entities::repository_connections::Entity::find()
+        .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::repository_connections::Column::CredentialId.eq(id))
+        .one(&s.db)
+        .await?
+        .is_some();
+    if managed
+        && (body.kind != "token" || body.secret.as_ref().is_some_and(|v| !v.trim().is_empty()))
+    {
+        return Err(ApiError::bad(
+            "网页授权凭据的令牌由系统维护，请通过仓库授权页面重新授权。",
+        ));
+    }
     let name = check(&body, false)?;
     let rotated = match body
         .secret
@@ -276,6 +289,7 @@ pub async fn remove(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("credentials.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     // Refuse rather than leave anything pointing at a credential that is gone:
     // the failure would surface later as an unexplained connection error, far
     // from the deletion that caused it. Every table that can reference a
@@ -284,7 +298,7 @@ pub async fn remove(
     let used = hosts::Entity::find()
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::CredentialId.eq(id))
-        .count(&s.db)
+        .count(&tx)
         .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
@@ -294,7 +308,7 @@ pub async fn remove(
     let used = repositories::Entity::find()
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(repositories::Column::CredentialId.eq(id))
-        .count(&s.db)
+        .count(&tx)
         .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
@@ -304,19 +318,26 @@ pub async fn remove(
     let affected = credentials::Entity::delete_many()
         .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(credentials::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
-    crate::hosts::activity(&s, &scope, "delete", "credentials", &id, json!({})).await?;
+    crate::entities::repository_connections::Entity::delete_many()
+        .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::repository_connections::Column::CredentialId.eq(id))
+        .exec(&tx)
+        .await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "delete", "credentials", &id, json!({})).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Decrypts a credential for the server's own use. There is no HTTP route to
 /// this; the caller is a channel that is about to connect somewhere.
 pub async fn unseal(s: &AppState, workspace_id: &Id, id: &Id) -> Result<(String, String, String)> {
+    crate::repository_auth::ensure_fresh(s, *workspace_id, *id).await?;
     let row = credentials::Entity::find()
         .filter(credentials::Column::WorkspaceId.eq(*workspace_id))
         .filter(credentials::Column::Id.eq(*id))

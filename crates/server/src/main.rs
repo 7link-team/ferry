@@ -12,12 +12,14 @@ mod hosts;
 mod lock;
 mod maintenance;
 mod manifest;
+mod marketplace;
 mod migration;
 mod pipeline_runs;
 mod pipelines;
 mod platform;
 mod remote;
 mod repositories;
+mod repository_auth;
 mod resource;
 mod runner;
 mod snowflake;
@@ -139,6 +141,15 @@ async fn main() -> anyhow::Result<()> {
 
     platform::prepare(&s).await?;
     maintenance::prepare(&s).await?;
+    workspace::prepare_permissions(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    repository_auth::recover(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    marketplace::recover(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
 
     let (drain, drain_rx) = tokio::sync::watch::channel(false);
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
@@ -165,6 +176,31 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route("/{workspace}/repository-auth", get(repository_auth::list))
+        .route(
+            "/{workspace}/repository-auth/{provider}/actions/authorize",
+            post(repository_auth::start),
+        )
+        .route(
+            "/{workspace}/marketplace-sources",
+            get(marketplace::list_sources).post(marketplace::create_source),
+        )
+        .route(
+            "/{workspace}/marketplace-sources/{id}",
+            get(marketplace::get_source)
+                .patch(marketplace::update_source)
+                .delete(marketplace::delete_source),
+        )
+        .route(
+            "/{workspace}/marketplace-sources/{id}/actions/sync",
+            post(marketplace::sync),
+        )
+        .route("/{workspace}/marketplace", get(marketplace::list))
+        .route("/{workspace}/marketplace/{id}", get(marketplace::get))
+        .route(
+            "/{workspace}/marketplace/{id}/actions/install",
+            post(marketplace::install),
+        )
         .route(
             "/{workspace}/alert-rules",
             get(alerts::list).post(alerts::create),
@@ -455,6 +491,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/users", post(auth::register))
         .route("/api/sessions", post(auth::login).delete(auth::logout))
         .route("/api/me", get(auth::me))
+        .route("/api/repository-auth/callback",get(repository_auth::complete))
         .route("/api/workspaces", post(workspace::create))
         .route("/api/workspaces/actions/join", post(workspace::join))
         .nest("/api/workspaces", workspace_api)
@@ -475,7 +512,7 @@ async fn main() -> anyhow::Result<()> {
                 guard(req, next, &hosts).await
             }
         }))
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%request.uri().path())))
         .with_state(s.clone());
 
     tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
@@ -626,10 +663,20 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     {
         return (StatusCode::FORBIDDEN, "不允许此来源发起操作。").into_response();
     }
+    let oauth_callback = req.uri().path() == "/api/repository-auth/callback";
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
-    headers.insert(header::REFERRER_POLICY, "same-origin".parse().unwrap());
+    headers.insert(
+        header::REFERRER_POLICY,
+        if oauth_callback {
+            "no-referrer"
+        } else {
+            "same-origin"
+        }
+        .parse()
+        .unwrap(),
+    );
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

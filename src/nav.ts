@@ -37,6 +37,7 @@ export const nav: NavGroup[] = [
       { key: "revisions", label: "部署历史", resource: "deployment-revisions", permission: "deployments.read" },
       { key: "app-templates", label: "应用模版", resource: "app-templates", permission: "app-templates.read" },
       { key: "marketplace", label: "应用市场", resource: "marketplace", permission: "marketplace.read" },
+      { key: "marketplace-sources", label: "市场来源", resource: "marketplace-sources", permission: "marketplace-sources.read" },
       { key: "variables", label: "密钥变量", resource: "variables", params: { scope: "deploy" }, permission: "variables.read" },
       { key: "alerts", label: "报警监控", resource: "alert-rules", permission: "alerts.read" },
       { key: "alert-events", label: "告警事件", resource: "alert-events", permission: "alerts.read" },
@@ -49,6 +50,8 @@ export const nav: NavGroup[] = [
     label: "构建",
     items: [
       { key: "repositories", label: "仓库", resource: "repositories", permission: "repositories.read" },
+      { key: "repository-auth", label: "仓库授权", resource: "repository-auth", permission: "credentials.read" },
+      { key: "api-tokens", label: "API 令牌", resource: "credentials", params:{kind:"token"}, permission:"credentials.read", hidden:true },
       { key: "pipelines", label: "流水线", resource: "pipelines", permission: "pipelines.read" },
       { key: "runs", label: "执行历史", resource: "pipeline-runs", permission: "pipelines.read" },
       { key: "pipeline-templates", label: "流水线模版", resource: "pipeline-templates", permission: "pipeline-templates.read" },

@@ -69,3 +69,22 @@ PASS：三库定时任务各20项（命令/组/流水线真实执行、重试、
 PASS：SQLite25项，MySQL/Postgres各19项；真实runner离线/上线、内存阈值和恢复、真实定时命令/流水线失败与成功、持续异常去重、本地HTTP204/503投递且不重试、凭据加密/不回显、权限撤回、事件保留/配置后只清理已恢复事件、重启投递不重放、desktop drain等待正在投递的Webhook并持久化结果。Chromium规则创建/编辑/删除、事件详情与历史保留通过。真实Compose runner+SSH116项含实际部署失败与回滚恢复告警；定时任务20项和浏览器回归；三库原回归各119项；alpha.6三库升级并创建告警规则/读取事件；Rust107通过/1既有忽略、前端44、build/fmt通过。日志 `/tmp/t12-alert-*`，远端CI尚未运行。
 测试修正：浏览器switch实际使用checkbox语义，改按实际可访问角色查询；原轮询反复reload打断页面初始化，改等待真实事件后点击刷新。Compose一次SSH阶段遇到临时连接占用系统随机端口，测试选端口改为默认系统临时端口范围外的20000–29999并防止同harness重复分配；完整116项重新通过，另检验100次分配互不相同。未弱化任何业务断言。
 自审/本阶段验收PASS：Scope隔离、执行身份重新校验、共享表单权限命名空间、加密Webhook/不泄露错误URL、状态转移锁与网络分离、仅配置后清理、优雅退出。T12整体未完成，下一阶段外部仓库索引与应用市场。
+
+### 阶段4设计：外部仓库索引与应用市场
+复用现有repositories（远程URL/branch/credential）与vault，不提供Git托管、编辑或推送。新增marketplace_sources保存repository_id/provider/api_base/project/organization/index_path及同步状态；marketplace_entries保存经现有模板引擎验证的应用模板快照。API以各平台官方contents/files协议读取JSON索引，设置超时、响应大小限制、不跟随重定向，认证按provider发送，错误不含令牌或带token的URL。GitHub/GitLab/Gitee/Codeup支持公共与用户配置令牌的私有源，自托管接入点显式配置；用户URL决定来源，不自动向其他域名转发凭据。
+索引技术格式为version=1及templates数组，每项稳定key/name/description/content/parameters；整个索引验证成功才原子替换本地目录，失败保留上次成功数据并显示错误。来源CRUD使用marketplace-sources标准权限，手动同步需marketplace-sources.sync，定时同步复用共享cron_jobs的deploy动作及执行身份/时区/重叠/重试语义，不另建定时系统。导入动作沿用模板创建校验，创建独立模板快照，不自动部署。源变更/删除与正在同步互斥；关联仓库/定时任务删除有引用保护。已有模板不随目录刷新改变。
+官方协议依据：GitHub REST repos/contents；GitLab API repository_files；Gitee api/v5/swagger_doc（contents endpoint，access_token query/ref）；Codeup官方GetFileBlobs文档（x-yunxiao-token，组织/仓库/files路径，content和encoding字段）。用户进一步确认优先网页授权，不适用时使用API授权；需实现授权状态、失效与重新授权，复用加密凭据。先推进实现，不等待测试仓库输入。真实私有平台兼容验收仍需实际账号；隔离HTTP夹具只能证明请求/安全/原子同步逻辑，不能替代真实提供方验收。
+
+#### 网页授权集成设计（用户追加确认）
+GitHub/GitLab/Gitee采用Authorization Code，GitHub/GitLab启用PKCE S256；Codeup采用官方个人访问令牌API。登录会话绑定发起人、工作空间、单次随机state（数据库只存hash），加密保存短期verifier；回调在事务内消费state后交换令牌，重新核实用户权限，读取账号身份并写入现有credentials。拒绝跨用户/空间回调、重放和过期state；HTTP日志只记录路径，不记录授权query。使用时刷新即将过期token，按workspace锁领取并用版本条件防止并发旧刷新覆盖重新授权；续期失败或进程中断要求重新授权。刷新令牌以vault加密，删除凭据同步删除授权记录；人工不得覆盖网页管理的token。提供仓库授权列表、状态、查看凭据、重新授权和APIfallback入口。
+部署端注册OAuth应用，配置 `REPOSITORY_OAUTH_PUBLIC_URL`、`REPOSITORY_OAUTH_{GITHUB|GITLAB|GITEE}_CLIENT_ID` 与 `_CLIENT_SECRET`；可配置 `_BASE_URL` 和 `_API_URL` 接入自托管平台。回调为 `{PUBLIC_URL}/api/repository-auth/callback`，在提供方登记一次即可服务所有工作空间；秘密不进入前端或版本库。GitHub公开默认github.com/api.github.com，GitLab默认gitlab.com/api/v4，Gitee默认gitee.com/api/v5。网页授权当前同窗口跳转以保留登录会话；实际提供方和安装版WebView兼容性仍需真实账号验收，不把隔离OAuthfixture当成第三方已验收。
+
+
+#### 阶段4本地验证记录
+已实现市场来源/目录/导入、四提供方文件读取协议、三提供方网页授权及Codeup API凭据入口。使用说明见 [外部仓库授权与应用市场](../repository-connections.md)。授权绑定应用ID及网页/API地址，更换接入点必须重新授权；追加迁移为已有未绑定授权提供安全拒绝行为。
+
+最新验证PASS：OAuth SQLite24项、MySQL/Postgres各18项，覆盖单次state/跨用户/过期、PKCE、加密存储、自动续期、引用保持、失败重新授权、配置变化后发请求前拒绝旧令牌；SQLite另覆盖服务中断后的续期不重放。市场SQLite16项、Chromium授权/重新授权/API令牌默认类型、市场来源创建/同步/独立模板导入/删除均通过。Rust111通过、1既有忽略，前端44、typecheck、fmt、diff检查通过；最新二进制alpha.6旧数据升级三库通过。日志 `/tmp/t12-binding-*`、`/tmp/t12-final-frontend.log`。
+
+前轮市场三库各16项、后端三库各119项、真实流水线52项、Compose runner/SSH116项已通过（`/tmp/t12-oauth-*`）。本轮授权配置绑定修改后重跑了上述授权三库、SQLite市场、浏览器、Rust和三库升级；没有重复运行全部执行器测试。自审覆盖Scope隔离、加密与日志保密、授权配置绑定、原子同步及权限迁移，已修复接入点变化后可能复用旧令牌的缺陷。
+
+阶段4代码及本地隔离验收完成，真实第三方账号与安装版WebView仍未验收，因此不标记完整外部平台验收完成。远端CI未运行，未发布。T12原始完整目标仍未完成，继续阶段5–9。

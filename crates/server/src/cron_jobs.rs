@@ -142,6 +142,17 @@ async fn validate(
                 .await?
                 .is_some()
         }
+        ("deploy", "sync-marketplace", "marketplace-source") => {
+            scope.require("marketplace-sources.sync")?;
+            crate::entities::marketplace_sources::Entity::find_by_id(i64::from(id))
+                .filter(
+                    crate::entities::marketplace_sources::Column::WorkspaceId
+                        .eq(scope.workspace_id),
+                )
+                .one(conn)
+                .await?
+                .is_some()
+        }
         ("deploy", "redeploy" | "restart", "deployment") => {
             scope.require("deployments.apply")?;
             deployments::Entity::find_by_id(i64::from(id))
@@ -814,6 +825,27 @@ async fn once(
             "服务正在关闭，尚未触发下游执行。",
             false,
         ));
+    }
+    if b.action == "sync-marketplace" {
+        return match crate::marketplace::synchronize(
+            s,
+            scope,
+            Id::reference(&b.target_ref)?,
+            Duration::from_secs(b.timeout_seconds),
+        )
+        .await
+        {
+            Ok(count) => Ok(Outcome::new(
+                "succeeded",
+                format!("市场目录同步完成，共{count}个模板。"),
+                false,
+            )),
+            Err(_) => Ok(Outcome::new(
+                "failed",
+                "市场目录同步失败，请查看来源同步结果。",
+                true,
+            )),
+        };
     }
     let (id, kind) = if b.scope == "build" {
         let (_, Json(value)) = crate::pipeline_runs::trigger(

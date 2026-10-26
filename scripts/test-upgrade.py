@@ -69,18 +69,28 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # This migration adds a public privilege flag, never elevation.
                     assert after['user'].get('is_superadmin', False) is False
                     before[path]['user']['is_superadmin'] = False
+                    allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']}
+                    old_spaces={w['id']:w for w in before[path]['workspaces']}
+                    for migrated in after['workspaces']:
+                        original=old_spaces[migrated['id']]
+                        added=set(migrated['permissions'])-set(original['permissions'])
+                        assert added<=allowed and set(original['permissions'])<=set(migrated['permissions'])
+                        original['permissions']=migrated['permissions']
                 assert after==before[path], f'Upgrade changed existing resource: {path}'
             roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
             for role in roles_before:
                 migrated = roles_after[role['id']]
-                assert migrated['version'] == 1
-                for field in ('id','name','permissions','builtin'):
+                added=set(migrated['permissions'])-set(role['permissions'])
+                expected={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} if role['name'] in ['拥有者','管理员'] else {'marketplace-sources.read'} if role['name']=='只读' else set()
+                assert added==expected and set(role['permissions'])<=set(migrated['permissions'])
+                assert migrated['version'] == 1+bool(added)
+                for field in ('id','name','builtin'):
                     assert migrated[field] == role[field], f'Upgrade changed role {field}'
             members = api('/workspaces/upgrade/members')['items']
             assert len(members) == 1 and members[0]['owner'] and members[0]['version'] == 1
             custom = create('roles', {'name':'Migrated custom','permissions':['hosts.create']})
             assert 'hosts.read' in api('/workspaces/upgrade/roles/'+custom)['permissions']
-            print('PASS: existing roles/membership preserved with version 1; new role management works after migration')
+            print('PASS: existing grants/membership preserved; only new built-in market permissions appended with version bump')
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
@@ -92,6 +102,11 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert not api('/workspaces/upgrade/alert-rules/'+alert)['has_webhook']
             assert api('/workspaces/upgrade/alert-events')['items']==[]
             print('PASS: alert rules and event history schemas work after upgrade')
+            source=create('marketplace-sources',{'name':'Migrated source','repository_id':repository,'provider':'github','api_base':'https://example.invalid/api','project':'owner/repository','branch':'main','index_path':'marketplace.json'})
+            assert api('/workspaces/upgrade/marketplace-sources/'+source)['state']=='idle'
+            assert api('/workspaces/upgrade/marketplace')['items']==[]
+            assert api('/workspaces/upgrade/repository-auth')['total']==4
+            print('PASS: market catalog and web authorization schemas work after upgrade')
             for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:
                 template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})
                 rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})

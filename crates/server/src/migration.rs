@@ -76,6 +76,9 @@ impl MigratorTrait for Migrator {
             Box::new(WorkspacePreferences),
             Box::new(ScheduledTasks),
             Box::new(AlertMonitoring),
+            Box::new(Marketplace),
+            Box::new(RepositoryAuthorization),
+            Box::new(RepositoryAuthorizationBinding),
         ]
     }
 }
@@ -2032,6 +2035,149 @@ impl MigrationTrait for AlertMonitoring {
             execute_schema(m, SchemaStatement::Table(t)).await?;
         }
         Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct Marketplace;
+impl MigrationName for Marketplace {
+    fn name(&self) -> &str {
+        "external_repository_marketplace_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for Marketplace {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for name in ["marketplace_sources", "marketplace_entries"] {
+            let mut t = create_table(name, backend);
+            t.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in ["workspace_id", "version", "created_at", "updated_at"] {
+                t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            let (numbers, texts): (&[&str], &[&str]) = if name == "marketplace_sources" {
+                (
+                    &["repository_id", "synced_at", "run_as"],
+                    &["name", "config", "state", "last_error"],
+                )
+            } else {
+                (
+                    &["source_id"],
+                    &["entry_key", "name", "description", "content", "parameters"],
+                )
+            };
+            for key in numbers {
+                t.col(ColumnDef::new(Alias::new(*key)).big_integer().not_null());
+            }
+            for key in texts {
+                t.col(long_text(key, backend).not_null());
+            }
+            execute_schema(m, SchemaStatement::Table(t)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct RepositoryAuthorization;
+impl MigrationName for RepositoryAuthorization {
+    fn name(&self) -> &str {
+        "repository_web_authorization_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryAuthorization {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for name in ["repository_oauth_flows", "repository_connections"] {
+            let mut t = create_table(name, backend);
+            t.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in [
+                "workspace_id",
+                "user_id",
+                "version",
+                "expires_at",
+                "created_at",
+                "updated_at",
+            ] {
+                t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            t.col(
+                ColumnDef::new(Alias::new("provider"))
+                    .string_len(20)
+                    .not_null(),
+            );
+            if name == "repository_oauth_flows" {
+                t.col(
+                    ColumnDef::new(Alias::new("state_hash"))
+                        .string_len(64)
+                        .not_null()
+                        .unique_key(),
+                );
+                t.col(long_text("proof", backend).not_null());
+            } else {
+                t.col(
+                    ColumnDef::new(Alias::new("credential_id"))
+                        .big_integer()
+                        .not_null(),
+                );
+                for key in [
+                    "account",
+                    "refresh_secret",
+                    "state",
+                    "last_error",
+                    "client_id",
+                ] {
+                    t.col(long_text(key, backend).not_null());
+                }
+                t.index(
+                    Index::create()
+                        .name("repository_connection_identity")
+                        .unique()
+                        .col(Alias::new("workspace_id"))
+                        .col(Alias::new("user_id"))
+                        .col(Alias::new("provider")),
+                );
+            }
+            execute_schema(m, SchemaStatement::Table(t)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct RepositoryAuthorizationBinding;
+impl MigrationName for RepositoryAuthorizationBinding {
+    fn name(&self) -> &str {
+        "repository_authorization_binding_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryAuthorizationBinding {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "repository_connections",
+                "config_fingerprint",
+                Table::alter()
+                    .table(Alias::new("repository_connections"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("config_fingerprint"))
+                            .string_len(64)
+                            .not_null()
+                            .default(""),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

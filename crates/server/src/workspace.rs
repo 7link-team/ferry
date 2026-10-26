@@ -73,6 +73,11 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     ("app-templates.delete", "应用模版", "删除"),
     ("marketplace.read", "应用市场", "查看"),
     ("marketplace.install", "应用市场", "安装"),
+    ("marketplace-sources.read", "市场来源", "查看"),
+    ("marketplace-sources.create", "市场来源", "新增"),
+    ("marketplace-sources.update", "市场来源", "修改"),
+    ("marketplace-sources.delete", "市场来源", "删除"),
+    ("marketplace-sources.sync", "市场来源", "同步"),
     ("alerts.read", "报警监控", "查看"),
     ("alerts.create", "报警监控", "新增"),
     ("alerts.update", "报警监控", "修改"),
@@ -120,7 +125,14 @@ pub fn dependencies(permission: &str) -> Vec<String> {
         "hosts.terminal" | "hosts.files" | "hosts.enroll" => &["hosts.read"],
         "pipelines.run" => &["repositories.read"],
         "deployments.apply" | "deployments.rollback" => &["hosts.read", "app-templates.read"],
-        "marketplace.install" => &["app-templates.read", "deployments.create"],
+        "marketplace.install" => &[
+            "app-templates.read",
+            "app-templates.create",
+            "deployments.create",
+        ],
+        "marketplace-sources.create"
+        | "marketplace-sources.update"
+        | "marketplace-sources.sync" => &["marketplace-sources.read", "repositories.read"],
         "variables.reveal" => &["variables.read"],
         "cron-jobs.run" => &["hosts.read"],
         "cron-jobs.create" | "cron-jobs.update" => &["cron-jobs.run"],
@@ -225,6 +237,58 @@ fn builtin_permissions(role: &str) -> Vec<String> {
             .filter(|p| p != "variables.read")
             .collect(),
     }
+}
+
+/// New resource permissions must reach existing immutable built-in roles.
+/// Preserve all old grants and never change custom roles.
+pub async fn prepare_permissions(s: &AppState) -> Result<()> {
+    use sea_orm::sea_query::{Expr, ExprTrait};
+    let rows = workspace_roles::Entity::find()
+        .filter(workspace_roles::Column::Builtin.eq(1))
+        .all(&s.db)
+        .await?;
+    for row in rows {
+        let Some((key, _)) = BUILTIN.iter().find(|(_, name)| *name == row.name) else {
+            continue;
+        };
+        let additions = builtin_permissions(key)
+            .into_iter()
+            .filter(|p| p.starts_with("marketplace-sources."))
+            .collect::<Vec<_>>();
+        if additions.is_empty() {
+            continue;
+        }
+        let tx = crate::variables::transaction(s, row.workspace_id.into()).await?;
+        let current = workspace_roles::Entity::find_by_id(row.id)
+            .one(&tx)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        let mut permissions: Vec<String> = serde_json::from_str(&current.permissions)
+            .map_err(|_| ApiError::bad("内置角色权限记录损坏。"))?;
+        let previous = permissions.len();
+        for permission in additions {
+            if !permissions.contains(&permission) {
+                permissions.push(permission);
+            }
+        }
+        if previous != permissions.len() {
+            workspace_roles::Entity::update_many()
+                .col_expr(
+                    workspace_roles::Column::Permissions,
+                    Expr::value(serde_json::to_string(&permissions).unwrap()),
+                )
+                .col_expr(
+                    workspace_roles::Column::Version,
+                    Expr::col(workspace_roles::Column::Version).add(1),
+                )
+                .col_expr(workspace_roles::Column::UpdatedAt, Expr::value(db::now()))
+                .filter(workspace_roles::Column::Id.eq(row.id))
+                .exec(&tx)
+                .await?;
+        }
+        tx.commit().await?;
+    }
+    Ok(())
 }
 
 /// An authenticated caller acting inside one workspace, with that workspace's

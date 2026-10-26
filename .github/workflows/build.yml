@@ -158,6 +158,20 @@ jobs:
           python3 -I scripts/test-alerts.py
           FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/alert_test python3 -I scripts/test-alerts.py
           FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/alert_test python3 -I scripts/test-alerts.py
+      - name: External marketplace and repository authorization on all three databases
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE marketplace_test; CREATE DATABASE oauth_test;'
+          createdb -h 127.0.0.1 -U postgres marketplace_test
+          createdb -h 127.0.0.1 -U postgres oauth_test
+          python3 -I scripts/test-marketplace.py
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/marketplace_test python3 -I scripts/test-marketplace.py
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/marketplace_test python3 -I scripts/test-marketplace.py
+          python3 -I scripts/test-repository-auth.py
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/oauth_test python3 -I scripts/test-repository-auth.py
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/oauth_test python3 -I scripts/test-repository-auth.py
       - name: Upgrade existing data from the previous prerelease on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -237,6 +251,11 @@ jobs:
       - name: Alert rules and event browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-alerts-ui.mjs
+      - name: Marketplace and browser repository authorization
+        if: matrix.harness == 'build-ui'
+        run: |
+          node scripts/test-marketplace-ui.mjs
+          node scripts/test-repository-auth-ui.mjs
       - name: Three consecutive live runs (no retries)
         env:
           HARNESS: ${{ matrix.harness }}

@@ -93,6 +93,14 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
         ));
     }
     if Id::reference(&body.credential_id)? != Id::from(0) {
+        crate::repository_auth::validate_target(
+            s,
+            scope.workspace_id,
+            Id::reference(&body.credential_id)?,
+            body.url.trim(),
+            false,
+        )
+        .await?;
         let row = credentials::Entity::find()
             .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(credentials::Column::Id.eq(Id::reference(&body.credential_id)?))
@@ -243,10 +251,20 @@ pub async fn remove(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    if crate::entities::marketplace_sources::Entity::find()
+        .filter(crate::entities::marketplace_sources::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::marketplace_sources::Column::RepositoryId.eq(id))
+        .one(&tx)
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::conflict("仓库仍被市场来源引用，请先删除来源。"));
+    }
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::RepositoryId.eq(id))
-        .count(&s.db)
+        .count(&tx)
         .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
@@ -256,13 +274,14 @@ pub async fn remove(
     let affected = repositories::Entity::delete_many()
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(repositories::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
-    crate::hosts::activity(&s, &scope, "delete", "repositories", &id, json!({})).await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "delete", "repositories", &id, json!({})).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
