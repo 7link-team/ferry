@@ -165,6 +165,8 @@ echo "== server up on $PORT (pid $SERVER_PID)"
 JAR="$WORK/cookies"
 c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -b "$JAR" -c "$JAR" "$@"; }
 
+python3 scripts/test-setup.py "$B" "$DATA" || die "platform setup failed"
+
 c -X POST -d '{"email":"ops@x.com","password":"correct-horse-battery","name":"运维员"}' "$B/users" >/dev/null
 c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces" >/dev/null
 c -X POST -d '{"name":"另一个","slug":"other"}' "$B/workspaces" >/dev/null

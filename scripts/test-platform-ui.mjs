@@ -1,0 +1,101 @@
+/** Real Chromium acceptance for first-run initialization and platform management. */
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { createServer } from 'node:net';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
+const listener = createServer();
+await new Promise(r => listener.listen(0, '127.0.0.1', r));
+const port = listener.address().port;
+await new Promise(r => listener.close(r));
+const origin = `http://127.0.0.1:${port}`;
+const log = await open(join(work, 'server.log'), 'w');
+const env = { ...process.env, FERRY_DATA_DIR: work, FERRY_BIND: `127.0.0.1:${port}` };
+delete env.FERRY_DATABASE_URL;
+const server = spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'), [], { env, stdio: ['ignore', log.fd, log.fd], windowsHide: true });
+let browser;
+try {
+  for (let i = 0; ; i++) {
+    assert.equal(server.exitCode, null, 'server exited');
+    try { if ((await fetch(`${origin}/api/status`)).ok) break; } catch {}
+    assert(i < 200, 'server startup timed out');
+    await new Promise(r => setTimeout(r, 100));
+  }
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const page = await context.newPage();
+  const errors = [], requests = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('request', r => requests.push(r.url()));
+  await page.goto(origin);
+  await page.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
+  assert.equal(await page.locator('input[name="token"]').count(), 1, 'web operator sees proof field');
+  assert.equal(await page.getByText('还没有账号？注册').count(), 0, 'registration unavailable before setup');
+  const token = (await readFile(join(work, 'setup-token'), 'utf8')).trim();
+  // A full navigation simulates the native owned-sidecar handoff.
+  await page.goto(`${origin}/?desktop=1#setup=${encodeURIComponent(token)}`);
+  await page.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
+  assert.equal(await page.locator('input[name="token"]').count(), 0, 'native proof needs no manual input');
+  assert.equal(new URL(page.url()).hash, '', 'proof immediately removed from history');
+  await page.getByLabel('姓名', { exact: true }).fill('Platform Admin');
+  await page.getByLabel('邮箱', { exact: true }).fill('admin@example.invalid');
+  await page.getByLabel('密码', { exact: true }).fill('temporary-admin-password');
+  await page.getByLabel('确认密码', { exact: true }).fill('temporary-wrong-password');
+  await page.getByRole('button', { name: '初始化并进入平台' }).click();
+  await page.getByText('两次输入的密码不一致。').waitFor();
+  await page.getByLabel('确认密码', { exact: true }).fill('temporary-admin-password');
+  await page.getByRole('button', { name: '初始化并进入平台' }).click();
+  await page.getByRole('heading', { name: '平台管理', exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, '/_platform/workspaces');
+  await page.getByRole('button', { name: '创建工作空间', exact: true }).click();
+  await page.getByLabel('名称', { exact: false }).fill('First workspace');
+  await page.getByLabel('标识', { exact: false }).fill('first');
+  await page.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByRole('cell', { name: 'First workspace', exact: true }).waitFor();
+  await page.screenshot({ path: '/tmp/platform-workspaces.png', fullPage: true });
+  // Shared table actions are links rendered in each row's actions menu.
+  const row = page.getByRole('row').filter({ hasText: 'First workspace' });
+  const enter = row.getByRole('link', { name: '进入工作空间', exact: true });
+  if (!(await enter.isVisible())) await row.getByRole('button').last().click();
+  await page.getByRole('link', { name: '进入工作空间', exact: true }).click();
+  await page.getByRole('button', { name: '平台管理', exact: true }).waitFor();
+  assert(new URL(page.url()).pathname.startsWith('/first/'), 'new workspace can be entered without stale identity redirect');
+  await page.getByRole('button', { name: '平台管理', exact: true }).click();
+  await page.getByRole('cell', { name: 'admin@example.invalid', exact: true }).waitFor();
+  await page.getByRole('row').filter({ hasText: 'admin@example.invalid' }).getByRole('link', { name: '编辑', exact: true }).click();
+  await page.getByRole('checkbox').nth(1).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('必须保留至少一个启用的平台超级管理员。').waitFor();
+  const ordinary = await browser.newContext();
+  const registered = await ordinary.request.post(`${origin}/api/users`, { headers: { 'X-Ferry-Request': '1' }, data: { name: 'Ordinary', email: 'ordinary@example.invalid', password: 'temporary-ordinary-password' } });
+  assert(registered.ok());
+  const ordinaryPage = await ordinary.newPage();
+  await ordinaryPage.goto(`${origin}/_platform/users`);
+  await ordinaryPage.getByText('当前账号没有平台管理权限。').waitFor();
+  assert.equal(await ordinaryPage.getByRole('cell').count(), 0, 'ordinary account cannot view platform table');
+  await page.getByRole('link', { name: '注册设置', exact: true }).click();
+  const toggle = page.getByRole('checkbox');
+  await toggle.waitFor();
+  assert.equal(await toggle.getAttribute('aria-checked'), 'true');
+  await toggle.click();
+  await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/platform/settings/1') && r.request().method() === 'GET'), page.getByRole('button', { name: '保存', exact: true }).click()]);
+  assert.equal((await (await context.request.get(`${origin}/api/setup`)).json()).registration_enabled, false);
+  await page.screenshot({ path: '/tmp/platform-settings.png', fullPage: true });
+  const fresh = await browser.newContext();
+  const visitor = await fresh.newPage();
+  await visitor.goto(origin);
+  await visitor.getByRole('button', { name: '登录', exact: true }).waitFor();
+  assert.equal(await visitor.getByText('还没有账号？注册').count(), 0, 'closed registration hidden');
+  assert(!requests.some(url => url.includes(token)), 'no HTTP URL contains setup token');
+  assert(!(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).includes(token), 'setup proof never stored');
+  assert.deepEqual(errors, []);
+  console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, no secret persistence, no browser errors');
+} finally {
+  if (browser) await browser.close();
+  if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }
+  await log.close();
+  await rm(work, { recursive: true, force: true });
+}

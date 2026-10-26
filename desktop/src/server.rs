@@ -164,7 +164,7 @@ pub async fn open_workspace(
     let _opening = runtime.opening.lock().await;
     let target = server_url.trim();
     let local = target.is_empty();
-    let url = url::Url::parse(if local { LOCAL_URL } else { target })
+    let mut url = url::Url::parse(if local { LOCAL_URL } else { target })
         .map_err(|_| "服务地址格式不正确。".to_string())?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
         return Err("服务地址必须是 HTTP 或 HTTPS 地址。".into());
@@ -194,9 +194,21 @@ pub async fn open_workspace(
             runtime.stop();
             return Err(error);
         }
+        // Only the owned, identity-checked sidecar may supply setup proof.
+        // A fragment is never sent in HTTP requests or server access logs.
+        match std::fs::read_to_string(data.join("setup-token")) {
+            Ok(token) if !token.trim().is_empty() => {
+                url.set_fragment(Some(&format!("setup={}", token.trim())))
+            }
+            Ok(_) => return Err("初始化凭据为空，请重启本地服务。".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("无法读取初始化凭据：{error}")),
+        }
     }
     if let Some(workspace) = app.get_webview_window("workspace") {
-        if restarted {
+        if url.fragment().is_some() {
+            workspace.navigate(url).map_err(|e| e.to_string())?;
+        } else if restarted {
             workspace.reload().map_err(|e| e.to_string())?;
         }
         workspace.show().map_err(|e| e.to_string())?;
@@ -245,6 +257,15 @@ mod tests {
         let identity = std::fs::read_to_string(data.join("instance-id")).unwrap();
         assert!(data.join("ferry.sqlite").exists());
         assert!(data.join("master.key").exists());
+        let token = std::fs::read_to_string(data.join("setup-token")).unwrap();
+        let client = reqwest::Client::new();
+        let initialized = client.post(format!("{target}/api/setup"))
+            .header("X-Ferry-Request", "1")
+            .json(&serde_json::json!({"token": token, "email": "desktop@example.invalid", "name": "Desktop admin", "password": "temporary-desktop-password"}))
+            .send().await.unwrap();
+        assert!(initialized.status().is_success());
+        assert!(initialized.headers().contains_key("set-cookie"));
+        assert!(!data.join("setup-token").exists());
         // A second process cannot silently attach to the already running service.
         assert!(
             spawn_server(Path::new(&executable), &data, &bind)
@@ -260,6 +281,16 @@ mod tests {
             identity,
             std::fs::read_to_string(data.join("instance-id")).unwrap()
         );
+        assert!(!data.join("setup-token").exists());
+        let setup: serde_json::Value = client
+            .get(format!("{target}/api/setup"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(setup["required"], false);
         runtime.drain().await.unwrap();
         assert!(
             std::fs::read_to_string(data.join("server.log"))

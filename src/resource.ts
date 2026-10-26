@@ -31,22 +31,24 @@ export const listResource = <T>(
   resource: string,
   params: Record<string, string | number | undefined>,
   signal?: AbortSignal,
+  endpoint?: string,
 ) =>
-  api<Envelope<T>>(`${base(workspace, resource)}${queryString(params)}`, signal ? { signal } : {});
+  api<Envelope<T>>(`${endpoint ?? base(workspace, resource)}${queryString(params)}`, signal ? { signal } : {});
 
-export const getResource = <T>(workspace: string, resource: string, id: string) =>
-  api<T>(`${base(workspace, resource)}/${encodeURIComponent(id)}`);
+export const getResource = <T>(workspace: string, resource: string, id: string, endpoint?: string) =>
+  api<T>(`${endpoint ?? base(workspace, resource)}/${encodeURIComponent(id)}`);
 
-export const createResource = <T>(workspace: string, resource: string, body: unknown) =>
-  api<T>(base(workspace, resource), { method: "POST", body: JSON.stringify(body) });
+export const createResource = <T>(workspace: string, resource: string, body: unknown, endpoint?: string) =>
+  api<T>(endpoint ?? base(workspace, resource), { method: "POST", body: JSON.stringify(body) });
 
 export const patchResource = <T>(
   workspace: string,
   resource: string,
   id: string,
   body: unknown,
+  endpoint?: string,
 ) =>
-  api<T>(`${base(workspace, resource)}/${encodeURIComponent(id)}`, {
+  api<T>(`${endpoint ?? base(workspace, resource)}/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });

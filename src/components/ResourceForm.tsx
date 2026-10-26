@@ -49,10 +49,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
   config,
   workspace,
   permissions,
+  onSaved,
 }: {
   config: FormConfig<T>;
   workspace: string;
   permissions: Set<string>;
+  onSaved?: () => void;
 }) {
   const route = useRoute();
   const creating = route.mode === "new";
@@ -67,14 +69,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
     if (creating || !route.id) return;
     let live = true;
     setLoading(true);
-    getResource<T>(workspace, config.resource, route.id)
+    getResource<T>(workspace, config.resource, route.id, config.endpoint)
       .then((row) => live && (setDraft(row), setError("")))
       .catch((cause: unknown) => live && setError(errorText(cause)))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [creating, route.id, workspace, config.resource]);
+  }, [creating, route.id, workspace, config.resource, config.endpoint]);
 
   const backToList = href({ ...route, mode: "list" }, {});
   const canEdit = permissions.has(`${config.resource}.${creating ? "create" : "update"}`);
@@ -85,12 +87,13 @@ export function ResourceForm<T extends Record<string, unknown>>({
     setError("");
     try {
       if (creating) {
-        await createResource(workspace, config.resource, draft);
+        await createResource(workspace, config.resource, draft, config.endpoint);
       } else {
         // `version` rides along so the server can refuse a stale write.
-        await patchResource(workspace, config.resource, route.id!, draft);
+        await patchResource(workspace, config.resource, route.id!, draft, config.endpoint);
       }
       navigate({ ...route, mode: "list" }, {});
+      onSaved?.();
     } catch (cause) {
       setError(errorText(cause));
     } finally {

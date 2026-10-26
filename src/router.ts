@@ -26,6 +26,11 @@ export function parse(pathname = location.pathname): Route {
   const [workspace = "", group = "", item = "", third = "", fourth = ""] = pathname
     .replace(/^\/+|\/+$/g, "")
     .split("/");
+  if (workspace === "_platform") {
+    const mode = item === "new" ? "new" : item ? (third === "edit" ? "edit" : "view") : "list";
+    return { workspace, group: "platform", item: ["users", "workspaces", "settings"].includes(group) ? group : "users",
+      mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
+  }
   const fallback = nav[0]!;
   const resolved = nav.find((g) => g.key === group) ?? fallback;
   const resolvedItem =
@@ -49,7 +54,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const search = params.toString();
-  return `/${r.workspace}/${r.group}/${r.item}${tail}${search ? `?${search}` : ""}`;
+  return `${r.workspace === "_platform" ? `/_platform/${r.item}` : `/${r.workspace}/${r.group}/${r.item}`}${tail}${search ? `?${search}` : ""}`;
 }
 
 const listeners = new Set<() => void>();

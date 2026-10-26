@@ -15,6 +15,7 @@ import { HostFiles } from "./components/HostFiles";
 import { ResourceForm } from "./components/ResourceForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResourceTable } from "./components/ResourceTable";
+import { Platform } from "./Platform";
 import { Entry } from "./Entry";
 import { findGroup, findItem, nav } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
@@ -26,6 +27,7 @@ const HostTerminal = lazy(() =>
 );
 
 export function App() {
+  const route = useRoute();
   const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,8 @@ export function App() {
   // The URL is never replaced while unauthenticated: that is what makes a
   // shared link land on its target page after signing in (§5.3).
   if (!identity?.workspaces) return <Entry onReady={reload} error={error} />;
+  if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
+    return <Platform identity={identity} reload={reload} />;
   return <Workspace identity={identity} onSignedOut={reload} />;
 }
 
@@ -87,7 +91,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const forms = useMemo(() => formConfigs(slug), [slug]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
-  if (!current) return <Entry onReady={onSignedOut} error="" />;
+  if (!current) return <Entry onReady={onSignedOut} error="" signedIn />;
 
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
@@ -133,6 +137,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           ))}
         </nav>
         <span className="flex-1" />
+        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "users", mode: "list" }, {})}>平台管理</Button>}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

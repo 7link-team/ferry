@@ -140,6 +140,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         command(['docker','cp',str(runner),name+':/tmp/runner'])
         command(['docker','exec',name,'chmod','+x','/tmp/runner'])
         server=launch_server()
+        command(['python3', 'scripts/test-setup.py', origin + '/api', str(work / 'data')])
         api('/users',{'email':'deploy@example.invalid','password':'correct-horse-battery','name':'deploy'})
         workspace=api('/workspaces',{'name':'ops','slug':'ops'})
         api('/workspaces',{'name':'other','slug':'other'})

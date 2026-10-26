@@ -76,6 +76,7 @@ try {
     assert(response.ok(), `${path}: ${response.status()} ${await response.text()}`);
     return response.json();
   };
+  execFileSync('python3', ['scripts/test-setup.py', `${origin}/api`, join(work, 'data')], { windowsHide: true });
   await api('/users', { email: 'ui@example.invalid', name: 'UI acceptance', password: 'temporary-ui-password' });
   await api('/workspaces', { name: 'UI acceptance', slug: 'ops' });
   const group = await api('/workspaces/ops/host-groups', { name: 'UI group' });

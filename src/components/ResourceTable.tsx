@@ -129,7 +129,7 @@ export function ResourceTable<T>({
   const load = useCallback(
     (signal?: AbortSignal) => {
       setLoading(true);
-      return listResource<T>(workspace, config.resource, params, signal)
+      return listResource<T>(workspace, config.resource, params, signal, config.endpoint)
         .then((envelope) => {
           setData(envelope);
           setError("");
@@ -140,7 +140,7 @@ export function ResourceTable<T>({
         })
         .finally(() => setLoading(false));
     },
-    [workspace, config.resource, params],
+    [workspace, config.resource, config.endpoint, params],
   );
 
   useEffect(() => {

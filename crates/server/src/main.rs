@@ -12,6 +12,7 @@ mod manifest;
 mod migration;
 mod pipeline_runs;
 mod pipelines;
+mod platform;
 mod remote;
 mod repositories;
 mod resource;
@@ -129,6 +130,8 @@ async fn main() -> anyhow::Result<()> {
         vault,
         ids: worker.generator.clone(),
     });
+
+    platform::prepare(&s).await?;
 
     let (drain, drain_rx) = tokio::sync::watch::channel(false);
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
@@ -299,6 +302,27 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/runners/connect", get(runner::connect))
         .route("/api/runners/sessions/{session}", get(runner::session))
         .route("/api/permissions", get(workspace::permission_catalogue))
+        .route(
+            "/api/setup",
+            get(platform::status).post(platform::initialize),
+        )
+        .route("/api/platform/users", get(platform::list_users))
+        .route(
+            "/api/platform/users/{id}",
+            get(platform::get_user).patch(platform::update_user),
+        )
+        .route(
+            "/api/platform/workspaces",
+            get(platform::list_workspaces).post(platform::create_workspace),
+        )
+        .route(
+            "/api/platform/workspaces/{id}",
+            get(platform::get_workspace).patch(platform::update_workspace),
+        )
+        .route(
+            "/api/platform/settings/1",
+            get(platform::get_settings).patch(platform::update_settings),
+        )
         .route("/api/users", post(auth::register))
         .route("/api/sessions", post(auth::login).delete(auth::logout))
         .route("/api/me", get(auth::me))

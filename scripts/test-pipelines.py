@@ -183,6 +183,7 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
             except OSError:
                 return False
         eventually(ready)
+        command(['python3', 'scripts/test-setup.py', base, str(work / 'data')])
         api('/users', {'email': 'test@example.invalid', 'password': 'correct-horse-battery', 'name': 'test'})
         workspace = api('/workspaces', {'name': 'ops', 'slug': 'ops'})
         api('/workspaces', {'name': 'other', 'slug': 'other'})

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 old, new = map(lambda p: str(Path(p).resolve()), sys.argv[1:])
 with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
@@ -47,6 +48,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
     with open(Path(directory)/'server.log', 'wb') as log:
         process = launch(old, log)
         try:
+            subprocess.run(['python3', 'scripts/test-setup.py', origin, directory, '--legacy'], check=True)
             api('/users', {'email':'upgrade@example.invalid','password':'correct-horse-battery','name':'upgrade'})
             api('/workspaces', {'slug':'upgrade','name':'upgrade'})
             host=create('hosts', {'name':'saved-host','connection':'runner'})
@@ -61,10 +63,32 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             process.terminate(); process.wait(timeout=20)
             process=launch(new,log)
             for path in paths:
-                assert api(path)==before[path], f'Upgrade changed existing resource: {path}'
+                after = api(path)
+                if path == '/me':
+                    # This migration adds a public privilege flag, never elevation.
+                    assert after['user'].get('is_superadmin', False) is False
+                    before[path]['user']['is_superadmin'] = False
+                assert after==before[path], f'Upgrade changed existing resource: {path}'
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
+            setup = api('/setup')
+            if setup['required']:
+                assert not api('/me')['user']['is_superadmin'], 'legacy owner must not be automatically promoted'
+                proof = (Path(directory)/'setup-token').read_text().strip()
+                body = {'token': proof, 'email': 'upgrade@example.invalid', 'name': 'must-not-overwrite', 'password': 'incorrect-existing-password'}
+                try:
+                    api('/setup', body)
+                    raise AssertionError('existing account claimed without password proof')
+                except urllib.error.HTTPError as error:
+                    assert error.code == 400
+                assert api('/setup')['required']
+                body['password'] = 'correct-horse-battery'
+                api('/setup', body)
+                identity = api('/me')
+                assert identity['user']['is_superadmin'] and identity['user']['name'] == 'upgrade'
+                assert not (Path(directory)/'setup-token').exists()
+                print('PASS: legacy owner not auto-promoted; operator token plus existing password required; old name/password preserved')
             print('PASS: prior account/session, host, credential metadata, repository, pipeline and run survive; new deployment schema works')
         finally:
             if process.poll() is None: process.terminate(); process.wait(timeout=20)

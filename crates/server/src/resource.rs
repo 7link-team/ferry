@@ -115,7 +115,13 @@ fn conditions<E: EntityTrait>(
     workspace_id: &Id,
     query: &ListQuery,
 ) -> Result<Condition> {
-    let mut condition = Condition::all().add(column::<E>("workspace_id").eq(*workspace_id));
+    Ok(Condition::all()
+        .add(column::<E>("workspace_id").eq(*workspace_id))
+        .add(filters::<E>(spec, query)?))
+}
+
+fn filters<E: EntityTrait>(spec: &Spec, query: &ListQuery) -> Result<Condition> {
+    let mut condition = Condition::all();
     if let Some(text) = &query.search {
         let mut search = Condition::any();
         for name in spec.search {
@@ -151,6 +157,25 @@ pub async fn list<E: EntityTrait, M: FromQueryResult + Send + Sync>(
     query: &ListQuery,
 ) -> Result<(Vec<M>, u64)> {
     let select = select.filter(conditions::<E>(spec, workspace_id, query)?);
+    page(conn, select, query).await
+}
+
+/// Deliberately global: caller must have obtained a platform Admin extractor.
+pub async fn global_list<E: EntityTrait, M: FromQueryResult + Send + Sync>(
+    conn: &impl ConnectionTrait,
+    _admin: &crate::platform::Admin,
+    spec: &Spec,
+    select: Select<E>,
+    query: &ListQuery,
+) -> Result<(Vec<M>, u64)> {
+    page(conn, select.filter(filters::<E>(spec, query)?), query).await
+}
+
+async fn page<E: EntityTrait, M: FromQueryResult + Send + Sync>(
+    conn: &impl ConnectionTrait,
+    select: Select<E>,
+    query: &ListQuery,
+) -> Result<(Vec<M>, u64)> {
     let total = select.clone().into_model::<M>().count(conn).await?;
     let direction = if query.descending {
         sea_orm::Order::Desc

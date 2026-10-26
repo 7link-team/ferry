@@ -68,6 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(IdInfrastructure),
             Box::new(PipelineExecution),
             Box::new(ComposeDeployments),
+            Box::new(PlatformInitialization),
         ]
     }
 }
@@ -1606,6 +1607,82 @@ impl MigrationTrait for ComposeDeployments {
     async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
         for statement in compose_deployments(m.get_database_backend()) {
             execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct PlatformInitialization;
+impl MigrationName for PlatformInitialization {
+    fn name(&self) -> &str {
+        "platform_initialization_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformInitialization {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for (name, default) in [("is_superadmin", 0_i64), ("version", 1_i64)] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    "users",
+                    name,
+                    Table::alter()
+                        .table(Alias::new("users"))
+                        .add_column(
+                            ColumnDef::new(Alias::new(name))
+                                .big_integer()
+                                .not_null()
+                                .default(default),
+                        )
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        m.create_table(
+            create_table("platform_state", m.get_database_backend())
+                .col(ColumnDef::new(Alias::new("id")).big_integer().primary_key())
+                .col(
+                    ColumnDef::new(Alias::new("initialized"))
+                        .big_integer()
+                        .not_null()
+                        .default(0_i64),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("registration_enabled"))
+                        .big_integer()
+                        .not_null()
+                        .default(1_i64),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("version"))
+                        .big_integer()
+                        .not_null()
+                        .default(1_i64),
+                )
+                .to_owned(),
+        )
+        .await?;
+        use sea_orm::{EntityTrait, Set};
+        if crate::entities::platform_state::Entity::find_by_id(1)
+            .one(m.get_connection())
+            .await?
+            .is_none()
+        {
+            crate::entities::platform_state::Entity::insert(
+                crate::entities::platform_state::ActiveModel {
+                    id: Set(1),
+                    initialized: Set(0),
+                    registration_enabled: Set(1),
+                    version: Set(1),
+                },
+            )
+            .exec(m.get_connection())
+            .await?;
         }
         Ok(())
     }

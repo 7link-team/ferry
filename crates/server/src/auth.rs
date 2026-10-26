@@ -27,13 +27,14 @@ use serde_json::{Value, json};
 
 pub const COOKIE: &str = "ferry_session";
 /// Idle timeout. Every authenticated request pushes it out.
-const SESSION_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+pub(crate) const SESSION_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 
 #[derive(Clone)]
 pub struct User {
     pub id: Id,
     pub email: String,
     pub name: String,
+    pub is_superadmin: bool,
 }
 
 /// An authenticated request with no workspace in scope yet — used by the
@@ -61,6 +62,7 @@ impl FromRequestParts<AppState> for Account {
             email: String,
             name: String,
             active: i64,
+            is_superadmin: i64,
             expires_at: i64,
         }
         let row = sessions::Entity::find()
@@ -72,6 +74,7 @@ impl FromRequestParts<AppState> for Account {
                 users::Column::Email,
                 users::Column::Name,
                 users::Column::Active,
+                users::Column::IsSuperadmin,
             ])
             .join(
                 JoinType::InnerJoin,
@@ -107,6 +110,7 @@ impl FromRequestParts<AppState> for Account {
                 id: Id::from(row.id),
                 email: row.email,
                 name: row.name,
+                is_superadmin: row.is_superadmin != 0,
             },
             session_id,
         })
@@ -124,7 +128,11 @@ pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(|(_, value)| value.to_owned())
 }
 
-fn set_cookie(s: &AppState, value: &str, max_age: i64) -> [(header::HeaderName, String); 1] {
+pub(crate) fn set_cookie(
+    s: &AppState,
+    value: &str,
+    max_age: i64,
+) -> [(header::HeaderName, String); 1] {
     let secure = if s.secure_cookie { "; Secure" } else { "" };
     [(
         header::SET_COOKIE,
@@ -134,22 +142,22 @@ fn set_cookie(s: &AppState, value: &str, max_age: i64) -> [(header::HeaderName, 
 
 #[derive(Deserialize)]
 pub struct Credentials {
-    email: String,
-    password: String,
+    pub(crate) email: String,
+    pub(crate) password: String,
     #[serde(default)]
-    name: String,
+    pub(crate) name: String,
 }
 
 /// Argon2 with per-password salt. The cost parameters are the crate defaults,
 /// which are the OWASP-recommended ones.
-fn hash(password: &str) -> Result<String> {
+pub(crate) fn hash(password: &str) -> Result<String> {
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
         .map(|h| h.to_string())
         .map_err(|_| ApiError::bad("无法保存密码，请重试。"))
 }
 
-fn verify(password: &str, stored: &str) -> bool {
+pub(crate) fn verify(password: &str, stored: &str) -> bool {
     PasswordHash::new(stored)
         .map(|parsed| {
             Argon2::default()
@@ -159,7 +167,7 @@ fn verify(password: &str, stored: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn check(credentials: &Credentials, require_name: bool) -> Result<String> {
+pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<String> {
     let email = credentials.email.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {
         return Err(ApiError::bad("请填写有效的邮箱地址。"));
@@ -183,9 +191,15 @@ pub async fn register(
     Json(body): Json<Credentials>,
 ) -> Result<impl axum::response::IntoResponse> {
     let email = check(&body, true)?;
+    use sea_orm::TransactionTrait;
+    let tx = s.db.begin().await?;
+    let platform = crate::platform::lock(&tx).await?;
+    if platform.initialized == 0 || platform.registration_enabled == 0 {
+        return Err(ApiError::forbidden());
+    }
     if users::Entity::find()
         .filter(users::Column::Email.eq(email.clone()))
-        .one(&s.db)
+        .one(&tx)
         .await?
         .is_some()
     {
@@ -198,12 +212,15 @@ pub async fn register(
         name: Set(body.name.trim().to_owned()),
         password_hash: Set(hash(&body.password)?),
         active: Set(1),
+        is_superadmin: Set(0),
+        version: Set(1),
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&s.db)
+    .exec(&tx)
     .await?;
-    let session = start_session(&s, &id).await?;
+    let session = start_session(&s, &id, &tx).await?;
+    tx.commit().await?;
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
         Json(json!({"id": id, "email": email})),
@@ -232,7 +249,7 @@ pub async fn login(
         return Err(refused());
     }
     let id = Id::from(row.id);
-    let session = start_session(&s, &id).await?;
+    let session = start_session(&s, &id, &s.db).await?;
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
         Json(json!({"id": id, "email": email})),
@@ -241,7 +258,11 @@ pub async fn login(
 
 /// Returns the cookie value. The row keeps only a hash of it, so the secret
 /// exists in exactly one place: the browser that was handed it.
-async fn start_session(s: &AppState, user_id: &Id) -> Result<String> {
+pub(crate) async fn start_session(
+    s: &AppState,
+    user_id: &Id,
+    conn: &impl sea_orm::ConnectionTrait,
+) -> Result<String> {
     let (id, now) = (s.next_id()?, db::now());
     let token = crate::runner::secret();
     sessions::Entity::insert(sessions::ActiveModel {
@@ -253,7 +274,7 @@ async fn start_session(s: &AppState, user_id: &Id) -> Result<String> {
         seen_at: Set(now),
         expires_at: Set(now + SESSION_MS),
     })
-    .exec(&s.db)
+    .exec(conn)
     .await?;
     Ok(token)
 }
@@ -307,7 +328,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         .into_model::<WorkspaceRole>()
         .all(&s.db)
         .await?;
-    let workspaces: Vec<Value> = rows
+    let mut workspaces: Vec<Value> = rows
         .iter()
         .map(|row| {
             json!({
@@ -319,8 +340,13 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
             })
         })
         .collect();
+    if account.user.is_superadmin {
+        workspaces = workspaces::Entity::find().order_by_asc(workspaces::Column::Name).all(&s.db).await?
+            .into_iter().map(|row| json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name,
+                "role_name": "平台超级管理员", "permissions": crate::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
+    }
     Ok(Json(json!({
-        "user": {"id": account.user.id, "email": account.user.email, "name": account.user.name},
+        "user": {"id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},
         "workspaces": workspaces,
     })))
 }

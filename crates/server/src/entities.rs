@@ -1,5 +1,21 @@
 //! Table mirrors. HTTP responses explicitly wrap identifiers in `Id`.
 
+pub mod platform_state {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "platform_state")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub initialized: i64,
+        pub registration_enabled: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod users {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -10,6 +26,8 @@ pub mod users {
         pub email: String,
         pub name: String,
         pub password_hash: String,
+        pub is_superadmin: i64,
+        pub version: i64,
         pub active: i64,
         pub created_at: i64,
         pub updated_at: i64,

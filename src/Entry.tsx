@@ -6,17 +6,34 @@
  * link work: sign in and the same URL renders its target page, with its
  * filters and scroll offset intact (§5.3).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, errorText } from "./api";
 import { navigate } from "./router";
 
-type Step = "sign-in" | "register" | "workspace";
+type Step = "setup" | "sign-in" | "register" | "workspace";
 
-export function Entry({ onReady, error: outerError }: { onReady: () => void; error: string }) {
-  const [step, setStep] = useState<Step>("sign-in");
+type SetupStatus = { required: boolean; has_users: boolean; registration_enabled: boolean };
+// Remove the local sidecar proof before any API request; never persist it.
+let desktopSetupToken = new URLSearchParams(location.hash.slice(1)).get("setup") ?? "";
+if (desktopSetupToken) history.replaceState(history.state, "", location.pathname + location.search);
+
+export function Entry({ onReady, error: outerError, signedIn = false }: { onReady: () => void; error: string; signedIn?: boolean }) {
+  const [step, setStep] = useState<Step>(signedIn ? "workspace" : "sign-in");
+  const [setup, setSetup] = useState<SetupStatus>();
+  const [token, setToken] = useState(desktopSetupToken);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void api<SetupStatus>("/setup", { cache: "no-store" }).then(status => {
+      if (!live) return;
+      setSetup(status);
+      if (status.required && !signedIn) setStep("setup");
+    }).catch(cause => { if (live) setError(errorText(cause)); });
+    return () => { live = false; };
+  }, [signedIn, attempt]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(outerError);
 
@@ -53,7 +70,38 @@ export function Entry({ onReady, error: outerError }: { onReady: () => void; err
           </p>
         )}
 
-        {step === "sign-in" && (
+        {!setup && <div role="status"><p>正在检查平台初始化状态…</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>重新检查</Button></div>}
+
+        {setup && step === "setup" && (
+          <form className="space-y-4" onSubmit={event => {
+            event.preventDefault();
+            const body = fields(event.currentTarget);
+            void run(async () => {
+              if (body.password !== body.confirm_password) throw new Error("两次输入的密码不一致。");
+              await api("/setup", { method: "POST", body: JSON.stringify({ email: body.email, name: body.name, password: body.password, token }) });
+              desktopSetupToken = "";
+              setToken("");
+              navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {}, { replace: true });
+              onReady();
+            });
+          }}>
+            <h2 className="text-lg font-semibold">初始化平台超级管理员</h2>
+            <p className="text-sm text-muted-foreground">首次使用需要设置一次超管账号，没有默认账号或密码。超管可管理平台及所有工作空间。</p>
+            {setup.has_users && <p className="text-sm text-muted-foreground">已有账号可填写原邮箱和密码完成授权；原姓名和密码不会被修改。</p>}
+            {!desktopSetupToken && <div className="space-y-1 text-sm"><label htmlFor="setup-token">初始化凭据</label>
+              <Input id="setup-token" name="token" type="password" value={token} onChange={e => setToken(e.target.value)} required autoComplete="off" aria-describedby="setup-token-help" />
+              <p id="setup-token-help" className="text-xs text-muted-foreground">由部署者从服务数据目录的 setup-token 文件读取。</p>
+            </div>}
+            <label className="block space-y-1 text-sm">姓名<Input name="name" required={!setup.has_users} autoComplete="name" /></label>
+            <label className="block space-y-1 text-sm">邮箱<Input name="email" type="email" required autoComplete="username" /></label>
+            <div className="space-y-1 text-sm"><label htmlFor="setup-password">密码</label><Input id="setup-password" name="password" type="password" required minLength={10} autoComplete="new-password" aria-describedby="setup-password-help" /><p id="setup-password-help" className="text-xs text-muted-foreground">至少 10 个字符。已有账号请填写原密码。</p></div>
+            <label className="block space-y-1 text-sm">确认密码<Input name="confirm_password" type="password" required minLength={10} autoComplete="new-password" /></label>
+            <Button type="submit" className="w-full" disabled={busy}>{busy && <Loader2 className="animate-spin" />}初始化并进入平台</Button>
+            {setup.has_users && <Button type="button" variant="link" className="w-full" disabled={busy} onClick={() => { setStep("sign-in"); setError(""); }}>使用已有账号登录</Button>}
+          </form>
+        )}
+
+        {setup && step === "sign-in" && (
           <form
             className="space-y-3"
             onSubmit={(event) => {
@@ -76,14 +124,15 @@ export function Entry({ onReady, error: outerError }: { onReady: () => void; err
             <Button type="submit" className="w-full" disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}登录
             </Button>
-            <Button
+            {setup.registration_enabled && <Button
               type="button"
               variant="link"
               className="w-full"
               onClick={() => (setStep("register"), setError(""))}
             >
               还没有账号？注册
-            </Button>
+            </Button>}
+            {setup.required && <Button type="button" variant="link" className="w-full" onClick={() => setStep("setup")}>初始化平台超级管理员</Button>}
           </form>
         )}
 

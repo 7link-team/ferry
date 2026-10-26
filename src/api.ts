@@ -42,7 +42,7 @@ export interface Workspace {
 }
 
 export interface Identity {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; is_superadmin: boolean };
   workspaces: Workspace[];
 }
 

@@ -259,6 +259,18 @@ impl FromRequestParts<AppState> for Scope {
             .get("workspace")
             .ok_or_else(ApiError::missing)?
             .clone();
+        if account.user.is_superadmin {
+            let row = workspaces::Entity::find()
+                .filter(workspaces::Column::Slug.eq(slug))
+                .one(&s.db)
+                .await?
+                .ok_or_else(ApiError::missing)?;
+            return Ok(Self {
+                workspace_id: Id::from(row.id),
+                user: account.user,
+                permissions: PERMISSIONS.iter().map(|p| p.0.to_owned()).collect(),
+            });
+        }
         #[derive(FromQueryResult)]
         struct Membership {
             id: i64,
@@ -335,6 +347,19 @@ pub async fn create(
     account: Account,
     Json(body): Json<NewWorkspace>,
 ) -> Result<Json<Value>> {
+    use sea_orm::TransactionTrait;
+    let tx = s.db.begin().await?;
+    let value = create_in(&s, account.user.id, body, &tx).await?;
+    tx.commit().await?;
+    Ok(Json(value))
+}
+
+pub(crate) async fn create_in(
+    s: &AppState,
+    user_id: Id,
+    body: NewWorkspace,
+    conn: &impl sea_orm::ConnectionTrait,
+) -> Result<Value> {
     let slug = body.slug.trim().to_lowercase();
     let name = body.name.trim().to_owned();
     if !valid_slug(&slug) {
@@ -347,7 +372,7 @@ pub async fn create(
     }
     if workspaces::Entity::find()
         .filter(workspaces::Column::Slug.eq(slug.clone()))
-        .one(&s.db)
+        .one(conn)
         .await?
         .is_some()
     {
@@ -358,13 +383,13 @@ pub async fn create(
         id: Set(i64::from(id)),
         slug: Set(slug.clone()),
         name: Set(name.clone()),
-        owner_id: Set(i64::from(account.user.id)),
+        owner_id: Set(i64::from(user_id)),
         join_code: Set(code.clone()),
         pipeline_run_number: Set(0),
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&s.db)
+    .exec(conn)
     .await?;
     let mut owner_role = Id::default();
     for (key, label) in BUILTIN {
@@ -381,23 +406,21 @@ pub async fn create(
             created_at: Set(now),
             updated_at: Set(now),
         })
-        .exec(&s.db)
+        .exec(conn)
         .await?;
     }
     workspace_members::Entity::insert(workspace_members::ActiveModel {
         id: Set(i64::from(s.next_id()?)),
         workspace_id: Set(i64::from(id)),
-        user_id: Set(i64::from(account.user.id)),
+        user_id: Set(i64::from(user_id)),
         role_id: Set(i64::from(owner_role)),
         state: Set("active".to_owned()),
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&s.db)
+    .exec(conn)
     .await?;
-    Ok(Json(
-        json!({"id": id, "slug": slug, "name": name, "join_code": code}),
-    ))
+    Ok(json!({"id": id, "slug": slug, "name": name, "join_code": code}))
 }
 
 #[derive(Deserialize)]

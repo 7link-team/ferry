@@ -684,6 +684,18 @@ pub async fn activity(
     resource_id: &Id,
     details: Value,
 ) -> Result<()> {
+    activity_in(s, &s.db, scope, action, resource, resource_id, details).await
+}
+
+pub(crate) async fn activity_in(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    action: &str,
+    resource: &str,
+    resource_id: &Id,
+    details: Value,
+) -> Result<()> {
     activity::Entity::insert(activity::ActiveModel {
         id: Set(i64::from(s.next_id()?)),
         workspace_id: Set(i64::from(scope.workspace_id)),
@@ -696,7 +708,7 @@ pub async fn activity(
         created_at: Set(db::now()),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(conn)
     .await?;
     Ok(())
 }

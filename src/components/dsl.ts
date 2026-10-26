@@ -54,6 +54,8 @@ export interface BulkAction {
 export interface ListConfig<T> {
   /** REST resource name; the URL is /api/workspaces/{ws}/{resource}. */
   resource: string;
+  /** Explicit API path for global resources (without /api). */
+  endpoint?: string;
   rowKey: (row: T) => string;
   filters?: Filter[];
   columns: Column<T>[];
@@ -101,6 +103,8 @@ export interface FormField<T> {
 
 export interface FormConfig<T> {
   resource: string;
+  /** Explicit API path for global resources (without /api). */
+  endpoint?: string;
   sections: { title?: string; fields: FormField<T>[] }[];
   /** Heading for the detail and edit pages. */
   heading: (row: T) => string;

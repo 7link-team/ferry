@@ -77,6 +77,8 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
     fi
   }
 
+  python3 scripts/test-setup.py "$B" "$dir" || { kill "$pid"; wait "$pid"; return 1; }
+
   c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"测试员"}' "$B/users" >/dev/null
   ck "duplicate email"  "已注册"        "$(c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"x"}' "$B/users")"
   ck "weak password"    "至少 10"       "$(c -X POST -d '{"email":"w@x.com","password":"short","name":"W"}' "$B/users")"
