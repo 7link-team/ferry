@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, errorText } from "./api";
+import { api, ApiError, errorText } from "./api";
 import { navigate } from "./router";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
@@ -30,6 +30,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
     void api<SetupStatus>("/setup", { cache: "no-store" }).then(status => {
       if (!live) return;
       setSetup(status);
+      if (!status.required) { desktopSetupToken = ""; setToken(""); }
       if (status.required && (!signedIn || initialize)) setStep("setup");
     }).catch(cause => { if (live) setError(errorText(cause)); });
     return () => { live = false; };
@@ -78,7 +79,20 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             const body = fields(event.currentTarget);
             void run(async () => {
               if (body.password !== body.confirm_password) throw new Error("两次输入的密码不一致。");
-              await api("/setup", { method: "POST", body: JSON.stringify({ email: body.email, name: body.name, password: body.password, token }) });
+              try {
+                await api("/setup", { method: "POST", body: JSON.stringify({ email: body.email, name: body.name, password: body.password, token }) });
+              } catch (cause) {
+                if (cause instanceof ApiError && cause.status === 409) {
+                  const status = await api<SetupStatus>("/setup", { cache: "no-store" });
+                  if (!status.required) {
+                    desktopSetupToken = "";
+                    setToken("");
+                    setSetup(status);
+                    setStep("sign-in");
+                  }
+                }
+                throw cause;
+              }
               desktopSetupToken = "";
               setToken("");
               navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {}, { replace: true });
