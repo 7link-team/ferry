@@ -89,6 +89,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})
                 assert rendered['template_version']==1
             print('PASS: both template schemas can create and render after upgrade')
+            assert api('/workspaces/upgrade/preferences')['default_page_size']==20
+            assert api('/workspaces/upgrade/settings')['total']==3
+            assert api('/workspaces/upgrade/dictionaries')['total']==3
+            print('PASS: existing workspace gets typed settings and dictionary defaults after upgrade')
             setup = api('/setup')
             if setup['required']:
                 assert not api('/me')['user']['is_superadmin'], 'legacy owner must not be automatically promoted'

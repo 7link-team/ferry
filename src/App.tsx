@@ -94,8 +94,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
       navigate({ ...route, workspace: slug }, {}, { replace: true });
   }, [route.workspace, slug]);
 
+  const [preferences, setPreferences] = useState<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>();
+  const [preferencesError, setPreferencesError] = useState("");
+  useEffect(() => {
+    let live=true; setPreferences(undefined); setPreferencesError("");
+    if (slug) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>(`/workspaces/${slug}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError("工作空间显示配置加载失败，暂用默认值。");});
+    return ()=>{live=false;};
+  },[slug,route.item,route.mode]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(slug, permissions, onSignedOut), [slug, permissions, onSignedOut]);
+  const lists = useMemo(() => listConfigs(slug, permissions, onSignedOut, preferences?.dictionaries["host-state"]), [slug, permissions, onSignedOut, preferences]);
   const forms = useMemo(() => formConfigs(slug, permissions), [slug, permissions]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
@@ -267,16 +274,17 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             {route.mode === "edit" && " · 编辑"}
           </h1>
 
+          {preferencesError && <p role="alert">{preferencesError}</p>}
           {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
               <div className="flex min-h-0 flex-col">
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.slug} workspace={current.slug} />}
-              <ResourceTable
+              {(preferences || preferencesError) ? <ResourceTable
                 key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
-                config={{ ...listConfig, ...(item.params ? { fixed: item.params } : {}) }}
+                config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
                 workspace={current.slug}
                 permissions={permissions}
-              />
+              /> : <p role="status">正在加载工作空间配置…</p>}
               </div>
             ) : (
               <Placeholder resource={item.resource} />

@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => {
     if (url === "/api/setup") return { required, has_users: true, registration_enabled: !required };
+    if (url === "/api/workspaces/ops/preferences") return {default_page_size:20,dictionaries:{}};
     if (url === "/api/me") return { user: { id: "1", name: "Existing owner", email: "owner@example.invalid", is_superadmin: false }, workspaces: [{ id: "2", name: "Existing workspace", slug: "ops", role_name: "拥有者", permissions: ["hosts.read"] }] };
     return { items: [], total: 0, page: 1, page_size: 20 };
   } })));

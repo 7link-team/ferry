@@ -60,6 +60,7 @@ export interface ListConfig<T> {
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
+  defaultPageSize?: number;
   rowKey: (row: T) => string;
   filters?: Filter[];
   columns: Column<T>[];

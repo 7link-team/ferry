@@ -339,9 +339,16 @@ pub async fn scheduler(
             let _ = finish(&s, r.id, "failed").await;
         }
     }
+    let mut next_cleanup = std::time::Instant::now();
     loop {
         if *stop.borrow() || *drain.borrow() {
             break;
+        }
+        if std::time::Instant::now() >= next_cleanup {
+            if let Err(error) = crate::maintenance::prune_history(&s, false).await {
+                tracing::error!(%error,"历史清理失败");
+            }
+            next_cleanup = std::time::Instant::now() + Duration::from_secs(60);
         }
         let result = dispatch(&s, &mut stop).await;
         if result.is_err() {

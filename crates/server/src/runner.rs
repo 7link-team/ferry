@@ -559,6 +559,12 @@ async fn pump_control(
     };
     let mut probe = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECONDS));
     probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let workspace = hosts::Entity::find_by_id(i64::from(row_id))
+        .one(&s.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|h| Id::from(h.workspace_id));
     let mut unanswered = 0;
     loop {
         tokio::select! {
@@ -599,8 +605,11 @@ async fn pump_control(
                 }
             }
             _ = probe.tick() => {
-                if unanswered >= MISSED_PROBES {
-                    tracing::warn!(%host_id, "runner 连续 {MISSED_PROBES} 次心跳无响应，断开连接");
+                let allowed = if let Some(workspace) = workspace {
+                    crate::maintenance::setting(&s.db,workspace,"heartbeat_timeout_seconds").await.map(|n|(n as u64).div_ceil(HEARTBEAT_SECONDS) as u32).unwrap_or(MISSED_PROBES)
+                } else { MISSED_PROBES };
+                if unanswered >= allowed {
+                    tracing::warn!(%host_id, "runner 连续 {allowed} 次心跳无响应，断开连接");
                     break;
                 }
                 unanswered += 1;

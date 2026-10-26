@@ -874,9 +874,16 @@ pub async fn scheduler(
         tracing::error!(%e,"部署恢复失败，暂停调度");
         return;
     }
+    let mut next_cleanup = std::time::Instant::now();
     loop {
         if *stop.borrow() || *drain.borrow() {
             break;
+        }
+        if std::time::Instant::now() >= next_cleanup {
+            if let Err(error) = crate::maintenance::prune_history(&s, true).await {
+                tracing::error!(%error,"历史清理失败");
+            }
+            next_cleanup = std::time::Instant::now() + Duration::from_secs(60);
         }
         if let Err(e) = dispatch(&s, &mut stop).await {
             tracing::error!(%e,"部署调度失败");

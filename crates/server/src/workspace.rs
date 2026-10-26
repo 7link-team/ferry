@@ -420,6 +420,7 @@ pub(crate) async fn create_in(
     })
     .exec(conn)
     .await?;
+    crate::maintenance::seed(s, conn, id).await?;
     Ok(json!({"id": id, "slug": slug, "name": name, "join_code": code}))
 }
 

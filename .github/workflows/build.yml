@@ -127,6 +127,16 @@ jobs:
           python3 -I scripts/test-templates.py
           FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/template_test python3 -I scripts/test-templates.py
           FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/template_test python3 -I scripts/test-templates.py
+      - name: Workspace preferences and dictionaries on all three databases
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE maintenance_test;'
+          createdb -h 127.0.0.1 -U postgres maintenance_test
+          python3 -I scripts/test-maintenance.py
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/maintenance_test python3 -I scripts/test-maintenance.py
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/maintenance_test python3 -I scripts/test-maintenance.py
       - name: Upgrade existing data from the previous prerelease on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -197,6 +207,9 @@ jobs:
       - name: Template browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-templates-ui.mjs
+      - name: Preferences, dictionaries and heartbeat browser acceptance
+        if: matrix.harness == 'build-ui'
+        run: node scripts/test-maintenance-ui.mjs
       - name: Three consecutive live runs (no retries)
         env:
           HARNESS: ${{ matrix.harness }}

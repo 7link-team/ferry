@@ -696,14 +696,37 @@ pub(crate) async fn activity_in(
     resource_id: &Id,
     details: Value,
 ) -> Result<()> {
+    activity_record(
+        s,
+        conn,
+        scope.workspace_id,
+        (scope.user.id.into(), &scope.user.name),
+        action,
+        resource,
+        *resource_id,
+        details,
+    )
+    .await
+}
+
+pub(crate) async fn activity_record(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    actor: (Id, &str),
+    action: &str,
+    resource: &str,
+    resource_id: Id,
+    details: Value,
+) -> Result<()> {
     activity::Entity::insert(activity::ActiveModel {
         id: Set(i64::from(s.next_id()?)),
-        workspace_id: Set(i64::from(scope.workspace_id)),
-        actor_id: Set(i64::from(scope.user.id)),
-        actor_name: Set(scope.user.name.clone()),
+        workspace_id: Set(i64::from(workspace)),
+        actor_id: Set(i64::from(actor.0)),
+        actor_name: Set(actor.1.to_owned()),
         action: Set(action.to_owned()),
         resource: Set(resource.to_owned()),
-        resource_id: Set(i64::from(*resource_id)),
+        resource_id: Set(i64::from(resource_id)),
         details: Set(details.to_string()),
         created_at: Set(db::now()),
         ..Default::default()

@@ -97,7 +97,7 @@ export function ResourceTable<T>({
 }) {
   const route = useRoute();
   const [page, setPage] = useQueryValue("page", 1);
-  const [pageSize, setPageSize] = useQueryValue("page_size", 20);
+  const [pageSize, setPageSize] = useQueryValue("page_size", config.defaultPageSize ?? 20);
   const [sort, setSort] = useQueryValue("sort", "");
 
   // Two layers: `draft` is what the inputs show, the URL is what has been
@@ -565,7 +565,7 @@ export function ResourceTable<T>({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PAGE_SIZES.map((size) => (
+            {Array.from(new Set([...PAGE_SIZES, pageSize])).sort((a,b) => a-b).map((size) => (
               <SelectItem key={size} value={String(size)}>
                 {size} 条/页
               </SelectItem>

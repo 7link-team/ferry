@@ -8,6 +8,7 @@ mod entities;
 mod error;
 mod hosts;
 mod lock;
+mod maintenance;
 mod manifest;
 mod migration;
 mod pipeline_runs;
@@ -135,6 +136,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     platform::prepare(&s).await?;
+    maintenance::prepare(&s).await?;
 
     let (drain, drain_rx) = tokio::sync::watch::channel(false);
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
@@ -154,6 +156,22 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route("/{workspace}/preferences", get(maintenance::preferences))
+        .route("/{workspace}/settings", get(maintenance::list_settings))
+        .route(
+            "/{workspace}/settings/{id}",
+            get(maintenance::get_setting).patch(maintenance::update_setting),
+        )
+        .route(
+            "/{workspace}/dictionaries",
+            get(maintenance::list_dictionaries).post(maintenance::create_dictionary),
+        )
+        .route(
+            "/{workspace}/dictionaries/{id}",
+            get(maintenance::get_dictionary)
+                .patch(maintenance::update_dictionary)
+                .delete(maintenance::delete_dictionary),
+        )
         .route(
             "/{workspace}/variables",
             get(variables::list).post(variables::create),

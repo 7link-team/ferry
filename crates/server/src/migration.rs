@@ -73,6 +73,7 @@ impl MigratorTrait for Migrator {
             Box::new(WorkspaceAdministration),
             Box::new(DeploymentVariableSnapshots),
             Box::new(ResourceTemplates),
+            Box::new(WorkspacePreferences),
         ]
     }
 }
@@ -1843,6 +1844,68 @@ impl MigrationTrait for ResourceTemplates {
                 table.col(long_text(key, backend).not_null());
             }
             execute_schema(m, SchemaStatement::Table(table)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct WorkspacePreferences;
+impl MigrationName for WorkspacePreferences {
+    fn name(&self) -> &str {
+        "workspace_preferences_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for WorkspacePreferences {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for name in ["settings", "dictionaries", "dictionary_items"] {
+            let mut t = create_table(name, backend);
+            t.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in ["workspace_id", "version", "created_at", "updated_at"] {
+                t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            if name == "dictionary_items" {
+                for key in ["dictionary_id", "position"] {
+                    t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+                }
+                for key in ["value", "label"] {
+                    t.col(ColumnDef::new(Alias::new(key)).string_len(100).not_null());
+                }
+                t.index(
+                    Index::create()
+                        .unique()
+                        .col(Alias::new("dictionary_id"))
+                        .col(Alias::new("value")),
+                );
+            } else {
+                t.col(ColumnDef::new(Alias::new("key")).string_len(60).not_null());
+                t.index(
+                    Index::create()
+                        .unique()
+                        .col(Alias::new("workspace_id"))
+                        .col(Alias::new("key")),
+                );
+                if name == "settings" {
+                    t.col(ColumnDef::new(Alias::new("value")).big_integer().not_null());
+                } else {
+                    t.col(
+                        ColumnDef::new(Alias::new("name"))
+                            .string_len(100)
+                            .not_null(),
+                    );
+                    t.col(long_text("description", backend).not_null());
+                    t.col(
+                        ColumnDef::new(Alias::new("builtin"))
+                            .big_integer()
+                            .not_null(),
+                    );
+                }
+            }
+            execute_schema(m, SchemaStatement::Table(t)).await?;
         }
         Ok(())
     }

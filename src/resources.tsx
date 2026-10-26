@@ -187,8 +187,10 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
   },
 });
 
-export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void): Record<string, ListConfig<AnyRow>> {
+export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void, hostStates: Option[] = STATES): Record<string, ListConfig<AnyRow>> {
   return {
+    settings: list<Setting>({resource:"settings",rowKey:r=>r.id,filters:[{key:"q",label:"配置键",type:"text"}],columns:[{key:"name",label:"配置项"},{key:"key",label:"键",sortable:true},{key:"value",label:"当前值"},{key:"default",label:"默认值"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"settings.update",to:r=>({id:r.id,mode:"edit"})}],toolbar:{create:false,import:false,export:false}}),
+    dictionaries: list<Dictionary>({resource:"dictionaries",rowKey:r=>r.id,filters:[{key:"q",label:"标识 / 名称",type:"text"}],columns:[{key:"key",label:"标识",sortable:true},{key:"name",label:"名称",sortable:true},{key:"description",label:"说明"},{key:"builtin",label:"类型",render:r=>r.builtin?"系统字典":"自定义"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"dictionaries.update",to:r=>({id:r.id,mode:"edit"})},{label:"复制",permission:"dictionaries.create",to:()=>({mode:"new"}),query:r=>({copy:r.id})},{label:"删除",permission:"dictionaries.delete",when:r=>!r.builtin,destructive:true,action:r=>deleteResource(workspace,"dictionaries",r.id)}],toolbar:{import:false,export:false}}),
     "app-templates": templateList(workspace, "app-templates", "deployments", "deploy", "apps"),
     "pipeline-templates": templateList(workspace, "pipeline-templates", "pipelines", "build", "pipelines"),
     members: list({
@@ -310,7 +312,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
         { key: "q", label: "名称/地址/账号", type: "text", placeholder: "输入关键字" },
         { key: "group_id", label: "主机组", type: "select", options: groupOptions(workspace) },
         { key: "connection", label: "接入方式", type: "select", options: CONNECTIONS },
-        { key: "state", label: "状态", type: "select", options: STATES },
+        { key: "state", label: "状态", type: "select", options: hostStates },
       ],
       columns: [
         { key: "name", label: "名称" },
@@ -335,7 +337,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
                     : "secondary"
               }
             >
-              {label(STATES, row.state)}
+              {label(hostStates, row.state)}
             </Badge>
           ),
         },
@@ -503,6 +505,8 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
 export function formConfigs(workspace: string, permissions?: Set<string>): Record<string, FormConfig<AnyRow>> {
   return {
+    settings: form<Setting>({resource:"settings",heading:r=>r.name,blank:{},sections:[{fields:[{key:"name",label:"配置项",type:"text",immutable:true},{key:"key",label:"键",type:"text",immutable:true},{key:"type",label:"类型",type:"text",immutable:true},{key:"value",label:"值",type:"number",required:true,help:"分页范围 1–200；心跳超时 40–600 秒；历史保留 0 为永久，1–36500 为天数。历史清理保留应用当前版本，不删除运行中的记录。"}]}]}),
+    dictionaries: form<Dictionary>({resource:"dictionaries",heading:r=>r.name,blank:{key:"",name:"",description:"",items:JSON.stringify([{value:"value",label:"显示名称"}],null,2)},copy:r=>({key:r.key+"-copy",name:r.name+"（副本）",description:r.description,items:r.items}),sections:[{fields:[{key:"key",label:"标识",type:"text",required:true,immutable:true},{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea",span:2},{key:"items",label:"字典项（JSON 数组）",type:"code",required:true,span:2,help:"每项填写唯一 value 和显示 label；数组顺序即选项顺序。主机状态的值由系统控制，只能修改标签与排序。"}]}]}),
     "app-templates": templateForm("app-templates", true),
     "pipeline-templates": templateForm("pipeline-templates", false),
     members: form({
@@ -706,3 +710,6 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
 
 interface Role { id: string; name: string; builtin: boolean; permissions: string[]; version: number }
 interface Member { id: string; name: string; email: string; role_id: string; role_name: string; owner: boolean; active: boolean; state: string; version: number }
+
+interface Setting { id:string; key:string; name:string; type:string; value:number; default:number; version:number }
+interface Dictionary {id:string; key:string; name:string; description:string; builtin:boolean; items:string; version:number}
