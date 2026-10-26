@@ -82,28 +82,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             setup_tray(app)?;
-            let resume = app.path().app_local_data_dir()?.join("update-resume.json");
-            if let Ok(bytes) = std::fs::read(&resume) {
-                std::fs::remove_file(&resume)?;
-                if let Ok(settings) = serde_json::from_slice::<server::Preferences>(&bytes) {
-                    let handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        if let Some(window) = handle.get_webview_window("launcher") {
-                            if let Err(error) = server::open_workspace(
-                                handle.clone(),
-                                window.clone(),
-                                settings.server_url,
-                            )
-                            .await
-                            {
-                                use tauri::Emitter;
-                                let _ = window.emit("connection-error", error);
-                                let _ = window.show();
-                            }
-                        }
-                    });
-                }
-            }
             Ok(())
         })
         .manage(updater::UpdateState::default())

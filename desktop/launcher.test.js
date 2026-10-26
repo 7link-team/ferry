@@ -9,6 +9,7 @@ beforeEach(async () => {
   vi.stubGlobal('__TAURI__', { core: { invoke }, app: { getVersion: async () => '0.1.0-alpha.2' }, event: { listen: async (name, fn) => { events[name] = fn; return () => {}; } } });
   vi.stubGlobal('confirm', vi.fn(() => true));
   await import('./ui/launcher.js');
+  invoke.mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 const click = async (id) => { document.getElementById(id).click(); await vi.waitFor(() => expect(document.getElementById('check-update').disabled).toBe(false)); };
@@ -74,4 +75,30 @@ test('upgrade locks controls through drain and installation and exposes failure'
   reject('本地任务仍在结束中，未安装更新');
   await vi.waitFor(() => expect(document.getElementById('open').disabled).toBe(false));
   expect(document.getElementById('update-status').textContent).toContain('未安装更新');
+});
+
+for (const server_url of ['', 'https://service.example.invalid']) {
+  test(`restores saved connection and opens automatically: ${server_url || 'local'}`, async () => {
+    vi.resetModules();
+    invoke.mockResolvedValueOnce({ server_url }).mockResolvedValueOnce(undefined);
+    await import('./ui/launcher.js');
+    expect(invoke.mock.calls).toEqual([
+      ['connection_settings'], ['open_workspace', { serverUrl: server_url }],
+    ]);
+    expect(document.getElementById('url').value).toBe(server_url);
+  });
+}
+test('first launch does not implicitly select local service', async () => {
+  vi.resetModules();
+  invoke.mockResolvedValueOnce(null);
+  await import('./ui/launcher.js');
+  expect(invoke.mock.calls).toEqual([['connection_settings']]);
+});
+test('failed startup retains saved address and allows manual retry', async () => {
+  vi.resetModules();
+  invoke.mockResolvedValueOnce({server_url: 'https://service.example.invalid'}).mockRejectedValueOnce('连接失败');
+  await import('./ui/launcher.js');
+  expect(document.getElementById('url').value).toBe('https://service.example.invalid');
+  expect(document.getElementById('connection-error').textContent).toBe('连接失败');
+  expect(document.getElementById('open').disabled).toBe(false);
 });

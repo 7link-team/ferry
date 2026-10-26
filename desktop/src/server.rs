@@ -75,9 +75,49 @@ pub struct Preferences {
     pub server_url: String,
 }
 
+fn read_preferences(data: &Path) -> Result<Option<Preferences>, String> {
+    // Prefer the durable selection; the marker also migrates older updater resumes.
+    for name in ["connection.json", "update-resume.json"] {
+        match std::fs::read(data.join(name)) {
+            Ok(bytes) => {
+                return serde_json::from_slice(&bytes)
+                    .map(Some)
+                    .map_err(|e| format!("无法读取已保存的连接设置，请重新选择：{e}"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("无法读取连接设置：{e}")),
+        }
+    }
+    Ok(None)
+}
+fn save_preferences(data: &Path, settings: &Preferences) -> Result<(), String> {
+    std::fs::create_dir_all(data).map_err(|e| e.to_string())?;
+    std::fs::write(
+        data.join("connection.json"),
+        serde_json::to_vec(settings).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("无法保存连接设置：{e}"))?;
+    let _ = std::fs::remove_file(data.join("update-resume.json"));
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn connection_settings() -> Result<Preferences, String> {
-    Ok(Preferences::default())
+pub async fn connection_settings(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<Preferences>, String> {
+    if window.label() != "launcher" {
+        return Err("只能从连接设置窗口读取连接设置。".into());
+    }
+    let result = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())
+        .and_then(|data| read_preferences(&data));
+    if !matches!(&result, Ok(Some(_))) {
+        window.show().map_err(|e| e.to_string())?;
+    }
+    result
 }
 
 fn spawn_server(executable: &Path, data: &Path, bind: &str) -> Result<Child, String> {
@@ -160,6 +200,18 @@ pub async fn open_workspace(
     if window.label() != "launcher" {
         return Err("只能从连接设置窗口打开工作空间。".into());
     }
+    let result = open_workspace_inner(&app, &window, server_url).await;
+    if result.is_err() {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    result
+}
+async fn open_workspace_inner(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    server_url: String,
+) -> Result<(), String> {
     let runtime = app.state::<Runtime>();
     let _opening = runtime.opening.lock().await;
     let target = server_url.trim();
@@ -206,7 +258,10 @@ pub async fn open_workspace(
         }
     }
     if let Some(workspace) = app.get_webview_window("workspace") {
-        if url.fragment().is_some() {
+        if !local
+            || url.fragment().is_some()
+            || workspace.url().map_err(|e| e.to_string())?.origin() != url.origin()
+        {
             workspace.navigate(url).map_err(|e| e.to_string())?;
         } else if restarted {
             workspace.reload().map_err(|e| e.to_string())?;
@@ -214,11 +269,17 @@ pub async fn open_workspace(
         workspace.show().map_err(|e| e.to_string())?;
         workspace.unminimize().map_err(|e| e.to_string())?;
         workspace.set_focus().map_err(|e| e.to_string())?;
+        save_preferences(
+            &app.path().app_local_data_dir().map_err(|e| e.to_string())?,
+            &Preferences {
+                server_url: target.to_owned(),
+            },
+        )?;
         window.hide().map_err(|e| e.to_string())?;
         return Ok(());
     }
     let workspace =
-        tauri::WebviewWindowBuilder::new(&app, "workspace", tauri::WebviewUrl::External(url))
+        tauri::WebviewWindowBuilder::new(app, "workspace", tauri::WebviewUrl::External(url))
             .title("Ferry")
             .inner_size(1280.0, 800.0)
             .build()
@@ -232,6 +293,12 @@ pub async fn open_workspace(
             }
         }
     });
+    save_preferences(
+        &app.path().app_local_data_dir().map_err(|e| e.to_string())?,
+        &Preferences {
+            server_url: target.to_owned(),
+        },
+    )?;
     window.hide().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -239,6 +306,38 @@ pub async fn open_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_selection_survives_reload_and_migrates_update_resume() {
+        let data = std::env::temp_dir().join(format!("desktop-preferences-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        assert!(read_preferences(&data).unwrap().is_none());
+        std::fs::write(
+            data.join("update-resume.json"),
+            br#"{"server_url":"https://old.example.invalid"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_preferences(&data).unwrap().unwrap().server_url,
+            "https://old.example.invalid"
+        );
+        for target in ["", "https://remote.example.invalid/base", ""] {
+            save_preferences(
+                &data,
+                &Preferences {
+                    server_url: target.into(),
+                },
+            )
+            .unwrap();
+            assert!(!data.join("update-resume.json").exists());
+            assert_eq!(read_preferences(&data).unwrap().unwrap().server_url, target);
+        }
+        std::fs::write(data.join("connection.json"), "broken").unwrap();
+        assert!(read_preferences(&data).is_err());
+        save_preferences(&data, &Preferences::default()).unwrap();
+        assert_eq!(read_preferences(&data).unwrap().unwrap().server_url, "");
+        std::fs::remove_dir_all(data).unwrap();
+    }
 
     // Run against the real built server, including migrations and restart persistence.
     #[tokio::test]

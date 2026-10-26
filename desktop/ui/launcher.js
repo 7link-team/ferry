@@ -4,14 +4,15 @@ const check = byId("check-update"), install = byId("install-update");
 const status = byId("update-status"), progress = byId("update-progress"), notes = byId("update-notes");
 app.getVersion().then((version) => { byId("version").textContent = `当前版本 ${version}`; })
   .catch(() => { byId("version").textContent = "无法读取当前版本。"; });
-byId("open").addEventListener("click", async () => {
+async function openWorkspace() {
   byId("connection-error").textContent = "";
   byId("open").disabled = true;
   byId("open").textContent = "正在连接…";
   try { await core.invoke("open_workspace", { serverUrl: byId("url").value.trim() }); }
   catch (error) { byId("connection-error").textContent = String(error); }
   finally { byId("open").disabled = false; byId("open").textContent = "打开工作空间"; }
-});
+}
+byId("open").addEventListener("click", openWorkspace);
 check.addEventListener("click", async () => {
   check.disabled = true; install.hidden = true; notes.hidden = true; progress.hidden = true;
   status.textContent = "正在检查更新…";
@@ -45,3 +46,14 @@ window.addEventListener("unload", unlistenStage, { once: true });
 
 const unlistenConnection = await event.listen("connection-error", ({ payload }) => { byId("connection-error").textContent = payload; });
 window.addEventListener("unload", unlistenConnection, { once: true });
+
+// Restore after listeners are ready so startup failures stay visible.
+try {
+  const settings = await core.invoke("connection_settings");
+  if (settings) {
+    byId("url").value = settings.server_url;
+    await openWorkspace();
+  }
+} catch (error) {
+  byId("connection-error").textContent = String(error);
+}
