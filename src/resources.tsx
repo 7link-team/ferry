@@ -187,8 +187,26 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
   },
 });
 
+interface CronJob {id:string;name:string;description:string;scope:string;schedule:string;timezone:string;enabled:boolean;action:string;target_kind:string;target_ref:string;command:string;timeout_seconds:number;max_retries:number;retry_delay_seconds:number;next_run_at:number;run_as_name:string;version:number}
+interface CronRun {id:string;job_id:string;job_name:string;scope:string;state:string;scheduled_at:number;started_at:number;finished_at:number;attempt:number;output:string;config:string;downstream_id:string;downstream_kind:string;version:number;trigger_kind:string}
+const cronState=(state:string)=>({queued:"排队中",running:"执行中",succeeded:"成功",failed:"失败",skipped:"已跳过","needs-review":"需核实"}[state]??state);
+const cronDate=(value:number)=>value?new Date(value).toLocaleString():"—";
+const cronReview=(workspace:string)=>async(row:CronRun)=>{const note=prompt("确认远端及下游执行已结束后，填写核实说明；解除阻塞不会停止远端进程。");if(note===null)return;await runItemAction(workspace,"cron-runs",row.id,"acknowledge",{version:row.version,note});};
+const cronLinks=(workspace:string)=>[
+ {label:"返回任务",to:(r:CronRun)=>({group:r.scope,item:"cron-jobs",id:r.job_id,mode:"view" as const})},
+ {label:"查看下游执行",when:(r:CronRun)=>r.downstream_id!=="0",to:(r:CronRun)=>({group:r.downstream_kind==="pipeline-runs"?"build":"deploy",item:r.downstream_kind==="pipeline-runs"?"runs":"revisions",id:r.downstream_id,mode:"view" as const})},
+ {label:"核实并解除阻塞",permission:"cron-jobs.run",when:(r:CronRun)=>r.state==="needs-review",action:cronReview(workspace)},
+];
+
 export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void, hostStates: Option[] = STATES): Record<string, ListConfig<AnyRow>> {
   return {
+    "cron-jobs": list<CronJob>({resource:"cron-jobs",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"}],columns:[{key:"name",label:"名称",sortable:true},{key:"schedule",label:"Cron 表达式"},{key:"timezone",label:"时区"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"next_run_at",label:"下次执行",sortable:true,render:r=>cronDate(r.next_run_at)},{key:"run_as_name",label:"执行身份"}],actions:[
+      {label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"cron-jobs.update",to:r=>({id:r.id,mode:"edit"})},
+      {label:"立即执行",permission:"cron-jobs.run",action:async r=>{const result=await runItemAction<{id:string}>(workspace,"cron-jobs",r.id,"run-now",{});navigate({group:r.scope,item:"cron-runs",id:result.id,mode:"view"},{});}},
+      {label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})},
+      {label:"删除",permission:"cron-jobs.delete",destructive:true,action:r=>deleteResource(workspace,"cron-jobs",r.id)}
+    ],toolbar:{import:false,export:false}}),
+    "cron-runs": list<CronRun>({resource:"cron-runs",rowKey:r=>r.id,filters:[{key:"job_id",label:"任务 ID",type:"text"},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))}],columns:[{key:"job_name",label:"任务"},{key:"state",label:"状态",render:r=>cronState(r.state)},{key:"scheduled_at",label:"计划时间",sortable:true,render:r=>cronDate(r.scheduled_at)},{key:"attempt",label:"尝试次数"},{key:"trigger_kind",label:"触发方式",render:r=>r.trigger_kind==="manual"?"手动":"计划"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},...cronLinks(workspace)],toolbar:{create:false,import:false,export:false}}),
     settings: list<Setting>({resource:"settings",rowKey:r=>r.id,filters:[{key:"q",label:"配置键",type:"text"}],columns:[{key:"name",label:"配置项"},{key:"key",label:"键",sortable:true},{key:"value",label:"当前值"},{key:"default",label:"默认值"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"settings.update",to:r=>({id:r.id,mode:"edit"})}],toolbar:{create:false,import:false,export:false}}),
     dictionaries: list<Dictionary>({resource:"dictionaries",rowKey:r=>r.id,filters:[{key:"q",label:"标识 / 名称",type:"text"}],columns:[{key:"key",label:"标识",sortable:true},{key:"name",label:"名称",sortable:true},{key:"description",label:"说明"},{key:"builtin",label:"类型",render:r=>r.builtin?"系统字典":"自定义"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"dictionaries.update",to:r=>({id:r.id,mode:"edit"})},{label:"复制",permission:"dictionaries.create",to:()=>({mode:"new"}),query:r=>({copy:r.id})},{label:"删除",permission:"dictionaries.delete",when:r=>!r.builtin,destructive:true,action:r=>deleteResource(workspace,"dictionaries",r.id)}],toolbar:{import:false,export:false}}),
     "app-templates": templateList(workspace, "app-templates", "deployments", "deploy", "apps"),
@@ -505,6 +523,25 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
 export function formConfigs(workspace: string, permissions?: Set<string>): Record<string, FormConfig<AnyRow>> {
   return {
+    "cron-jobs": form<CronJob>({resource:"cron-jobs",heading:r=>r.name,blank:{name:"",description:"",scope:"host",schedule:"0 * * * *",timezone:"",enabled:false,action:"",target_kind:"",target_ref:"",command:"",timeout_seconds:1800,max_retries:0,retry_delay_seconds:30},viewActions:[{label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})}],sections:[{fields:[
+      {key:"name",label:"名称",type:"text",required:true},{key:"scope",label:"所属模块",type:"select",resetOnChange:["action","target_kind","target_ref","command"],options:[{value:"host",label:"主机"},{value:"build",label:"构建"},{value:"deploy",label:"部署"}],immutable:true},
+      {key:"enabled",label:"启用定时执行",type:"switch"},{key:"schedule",label:"Cron 表达式",type:"text",required:true,help:"5字段：分 时 日 月 周；6字段在最前面增加秒。停机错过的触发不补跑，同任务重叠时跳过并记录。"},
+      {key:"timezone",label:"时区",type:"text",required:true,placeholder:"Asia/Shanghai",help:"必须明确填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore、UTC。"},
+      {key:"action",label:"动作",type:"select",required:true,when:d=>d.scope==="host",options:[{value:"command",label:"执行命令"}]},
+      {key:"action",label:"动作",type:"select",required:true,when:d=>d.scope==="build",options:[{value:"pipeline",label:"触发流水线"}]},
+      {key:"action",label:"动作",type:"select",required:true,when:d=>d.scope==="deploy",options:[{value:"redeploy",label:"重新部署当前配置"},{value:"restart",label:"重启当前成功版本"}]},
+      {key:"target_kind",label:"目标类型",type:"select",required:true,resetOnChange:["target_ref"],when:d=>d.scope==="host",options:TARGETS},
+      {key:"target_kind",label:"目标类型",type:"select",required:true,when:d=>d.scope==="build",options:[{value:"pipeline",label:"流水线"}]},
+      {key:"target_kind",label:"目标类型",type:"select",required:true,when:d=>d.scope==="deploy",options:[{value:"deployment",label:"应用"}]},
+      ...([['host','hosts','主机'],['host-group','host-groups','主机组'],['pipeline','pipelines','流水线'],['deployment','deployments','应用']] as const).map(([kind,resource,label])=>({key:"target_ref",label:`目标${label}`,type:"select" as const,required:true,when:(d:Partial<CronJob>)=>d.target_kind===kind,options:namedOptions(workspace,resource)})),
+      {key:"command",label:"命令",type:"code",span:2,required:true,when:d=>d.scope==="host",help:"通过所选主机通道执行；主机组逐台执行，失败即停。不要把密钥写进脚本。"},
+      {key:"timeout_seconds",label:"超时（秒）",type:"number",required:true,help:"1–86400；下游执行等待超时不会强制停止远端，会标记需核实。"},
+      {key:"max_retries",label:"失败重试次数",type:"number",required:true,help:"默认0；仅对确定失败重试，最多10次。命令必须允许重复执行。"},
+      {key:"retry_delay_seconds",label:"重试间隔（秒）",type:"number",required:true},
+      {key:"run_as_name",label:"执行身份",type:"text",immutable:true,when:d=>!!d.run_as_name,help:"保存后使用保存者身份；每次执行重新核实账号和权限。"},
+      {key:"description",label:"说明",type:"textarea",span:2}
+    ]}]}),
+    "cron-runs": form<CronRun>({resource:"cron-runs",heading:r=>r.job_name,blank:{},readOnly:()=>true,pollMs:r=>r.state==="queued"||r.state==="running"?1000:0,viewActions:cronLinks(workspace),sections:[{fields:[{key:"job_name",label:"任务",type:"text"},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))},{key:"attempt",label:"尝试次数",type:"number"},{key:"downstream_id",label:"下游执行 ID",type:"text"},{key:"output",label:"执行输出",type:"code",span:2},{key:"config",label:"本次配置快照",type:"code",span:2}]}]}),
     settings: form<Setting>({resource:"settings",heading:r=>r.name,blank:{},sections:[{fields:[{key:"name",label:"配置项",type:"text",immutable:true},{key:"key",label:"键",type:"text",immutable:true},{key:"type",label:"类型",type:"text",immutable:true},{key:"value",label:"值",type:"number",required:true,help:"分页范围 1–200；心跳超时 40–600 秒；历史保留 0 为永久，1–36500 为天数。历史清理保留应用当前版本，不删除运行中的记录。"}]}]}),
     dictionaries: form<Dictionary>({resource:"dictionaries",heading:r=>r.name,blank:{key:"",name:"",description:"",items:JSON.stringify([{value:"value",label:"显示名称"}],null,2)},copy:r=>({key:r.key+"-copy",name:r.name+"（副本）",description:r.description,items:r.items}),sections:[{fields:[{key:"key",label:"标识",type:"text",required:true,immutable:true},{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea",span:2},{key:"items",label:"字典项（JSON 数组）",type:"code",required:true,span:2,help:"每项填写唯一 value 和显示 label；数组顺序即选项顺序。主机状态的值由系统控制，只能修改标签与排序。"}]}]}),
     "app-templates": templateForm("app-templates", true),

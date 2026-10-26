@@ -123,6 +123,7 @@ pub fn dependencies(permission: &str) -> Vec<String> {
         "marketplace.install" => &["app-templates.read", "deployments.create"],
         "variables.reveal" => &["variables.read"],
         "cron-jobs.run" => &["hosts.read"],
+        "cron-jobs.create" | "cron-jobs.update" => &["cron-jobs.run"],
         _ => &[],
     };
     result.extend(extra.iter().map(|v| v.to_string()));
@@ -228,6 +229,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
 
 /// An authenticated caller acting inside one workspace, with that workspace's
 /// permissions already resolved.
+#[derive(Clone)]
 pub struct Scope {
     pub workspace_id: Id,
     pub user: crate::auth::User,
@@ -257,7 +259,37 @@ impl FromRequestParts<AppState> for Scope {
             .get("workspace")
             .ok_or_else(ApiError::missing)?
             .clone();
-        if account.user.is_superadmin {
+        Self::for_user(s, slug, account.user).await
+    }
+}
+
+impl Scope {
+    /// Scheduled work re-resolves account activity, membership and current permissions.
+    pub async fn for_actor(s: &AppState, workspace: Id, actor: Id) -> Result<Self> {
+        use crate::entities::users;
+        let row = users::Entity::find_by_id(i64::from(actor))
+            .filter(users::Column::Active.eq(1))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::forbidden)?;
+        let ws = workspaces::Entity::find_by_id(i64::from(workspace))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        Self::for_user(
+            s,
+            ws.slug,
+            crate::auth::User {
+                id: row.id.into(),
+                email: row.email,
+                name: row.name,
+                is_superadmin: row.is_superadmin == 1,
+            },
+        )
+        .await
+    }
+    async fn for_user(s: &AppState, slug: String, user: crate::auth::User) -> Result<Self> {
+        if user.is_superadmin {
             let row = workspaces::Entity::find()
                 .filter(workspaces::Column::Slug.eq(slug))
                 .one(&s.db)
@@ -265,7 +297,7 @@ impl FromRequestParts<AppState> for Scope {
                 .ok_or_else(ApiError::missing)?;
             return Ok(Self {
                 workspace_id: Id::from(row.id),
-                user: account.user,
+                user: user,
                 permissions: PERMISSIONS.iter().map(|p| p.0.to_owned()).collect(),
             });
         }
@@ -295,7 +327,7 @@ impl FromRequestParts<AppState> for Scope {
                     .into(),
             )
             .filter(workspaces::Column::Slug.eq(slug.clone()))
-            .filter(workspace_members::Column::UserId.eq(i64::from(account.user.id)))
+            .filter(workspace_members::Column::UserId.eq(i64::from(user.id)))
             .filter(workspace_members::Column::State.eq("active"))
             .into_model::<Membership>()
             .one(&s.db)
@@ -310,7 +342,7 @@ impl FromRequestParts<AppState> for Scope {
         let _ = slug;
         Ok(Self {
             workspace_id: Id::from(row.id),
-            user: account.user,
+            user: user,
             permissions,
         })
     }

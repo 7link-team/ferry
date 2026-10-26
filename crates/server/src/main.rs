@@ -2,6 +2,7 @@ mod assets;
 mod auth;
 mod channel;
 mod credentials;
+mod cron_jobs;
 mod db;
 mod deployments;
 mod entities;
@@ -147,7 +148,13 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let (deployment_stop, deployment_rx) = tokio::sync::watch::channel(false);
-    let deployment_task = tokio::spawn(deployments::scheduler(s.clone(), deployment_rx, drain_rx));
+    let deployment_task = tokio::spawn(deployments::scheduler(
+        s.clone(),
+        deployment_rx,
+        drain_rx.clone(),
+    ));
+    let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
+    let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
@@ -156,6 +163,27 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/cron-jobs",
+            get(cron_jobs::list).post(cron_jobs::create),
+        )
+        .route(
+            "/{workspace}/cron-jobs/{id}",
+            get(cron_jobs::get)
+                .patch(cron_jobs::update)
+                .delete(cron_jobs::delete),
+        )
+        .route(
+            "/{workspace}/cron-jobs/{id}/actions/run-now",
+            post(cron_jobs::run_now),
+        )
+        .route("/{workspace}/cron-jobs/{id}/runs", get(cron_jobs::history))
+        .route("/{workspace}/cron-runs", get(cron_jobs::list_runs))
+        .route("/{workspace}/cron-runs/{id}", get(cron_jobs::get_run))
+        .route(
+            "/{workspace}/cron-runs/{id}/actions/acknowledge",
+            post(cron_jobs::acknowledge),
+        )
         .route("/{workspace}/preferences", get(maintenance::preferences))
         .route("/{workspace}/settings", get(maintenance::list_settings))
         .route(
@@ -451,6 +479,7 @@ async fn main() -> anyhow::Result<()> {
     let early_result = tokio::select! {
         result = &mut http_task => Some(result),
         _ = shutdown() => {
+            let _ = cron_stop.send(true);
             let _ = deployment_stop.send(true);
             let _ = pipeline_stop.send(true);
             None
@@ -461,6 +490,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let _ = drain.send(true);
+    cron_task.await?;
     deployment_task.await?;
     pipeline_task.await?;
     let _ = http_stop.send(());

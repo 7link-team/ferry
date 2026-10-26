@@ -557,8 +557,8 @@ pub async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json
 /// Called between executions by the owning scheduler, never during remote cleanup.
 pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
     use crate::entities::{
-        deployment_revisions as revisions, deployments as apps, pipeline_run_logs as logs,
-        pipeline_run_steps as steps, pipeline_runs as runs,
+        cron_runs, deployment_revisions as revisions, deployments as apps,
+        pipeline_run_logs as logs, pipeline_run_steps as steps, pipeline_runs as runs,
     };
     use sea_orm::{QuerySelect, QueryTrait};
     for setting in settings::Entity::find()
@@ -579,6 +579,21 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
         if deployments {
             let rows = revisions::Entity::find()
                 .filter(revisions::Column::WorkspaceId.eq(workspace))
+                .filter(
+                    Expr::col(revisions::Column::Id).not_in_subquery(
+                        cron_runs::Entity::find()
+                            .select_only()
+                            .column(cron_runs::Column::DownstreamId)
+                            .filter(cron_runs::Column::WorkspaceId.eq(workspace))
+                            .filter(cron_runs::Column::DownstreamKind.eq("deployment-revisions"))
+                            .filter(cron_runs::Column::State.is_in([
+                                "queued",
+                                "running",
+                                "needs-review",
+                            ]))
+                            .into_query(),
+                    ),
+                )
                 .filter(revisions::Column::FinishedAt.gt(0))
                 .filter(revisions::Column::FinishedAt.lt(cutoff))
                 .filter(revisions::Column::State.is_in(["succeeded", "failed"]))
@@ -620,6 +635,21 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
         } else {
             let rows = runs::Entity::find()
                 .filter(runs::Column::WorkspaceId.eq(workspace))
+                .filter(
+                    Expr::col(runs::Column::Id).not_in_subquery(
+                        cron_runs::Entity::find()
+                            .select_only()
+                            .column(cron_runs::Column::DownstreamId)
+                            .filter(cron_runs::Column::WorkspaceId.eq(workspace))
+                            .filter(cron_runs::Column::DownstreamKind.eq("pipeline-runs"))
+                            .filter(cron_runs::Column::State.is_in([
+                                "queued",
+                                "running",
+                                "needs-review",
+                            ]))
+                            .into_query(),
+                    ),
+                )
                 .filter(runs::Column::FinishedAt.gt(0))
                 .filter(runs::Column::FinishedAt.lt(cutoff))
                 .filter(runs::Column::State.is_in(["succeeded", "failed", "cancelled"]))

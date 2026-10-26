@@ -74,6 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(DeploymentVariableSnapshots),
             Box::new(ResourceTemplates),
             Box::new(WorkspacePreferences),
+            Box::new(ScheduledTasks),
         ]
     }
 }
@@ -1904,6 +1905,69 @@ impl MigrationTrait for WorkspacePreferences {
                             .not_null(),
                     );
                 }
+            }
+            execute_schema(m, SchemaStatement::Table(t)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct ScheduledTasks;
+impl MigrationName for ScheduledTasks {
+    fn name(&self) -> &str {
+        "scheduled_tasks_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ScheduledTasks {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for name in ["cron_jobs", "cron_runs"] {
+            let mut t = create_table(name, backend);
+            t.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in ["workspace_id", "version", "created_at", "updated_at"] {
+                t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            t.col(
+                ColumnDef::new(Alias::new("scope"))
+                    .string_len(20)
+                    .not_null(),
+            );
+            t.col(long_text("config", backend).not_null());
+            if name == "cron_jobs" {
+                for key in ["name", "run_as_name", "target_kind"] {
+                    t.col(ColumnDef::new(Alias::new(key)).string_len(100).not_null());
+                }
+                t.col(long_text("description", backend).not_null());
+                for key in ["enabled", "run_as", "next_run_at", "target_ref"] {
+                    t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+                }
+            } else {
+                for key in [
+                    "job_name",
+                    "state",
+                    "trigger_kind",
+                    "downstream_kind",
+                    "target_kind",
+                ] {
+                    t.col(ColumnDef::new(Alias::new(key)).string_len(100).not_null());
+                }
+                for key in [
+                    "target_ref",
+                    "job_id",
+                    "triggered_by",
+                    "scheduled_at",
+                    "started_at",
+                    "finished_at",
+                    "attempt",
+                    "downstream_id",
+                ] {
+                    t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+                }
+                t.col(long_text("output", backend).not_null());
             }
             execute_schema(m, SchemaStatement::Table(t)).await?;
         }

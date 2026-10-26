@@ -288,6 +288,8 @@ pub async fn remove(
     scope.require("deployments.delete")?;
     let r = scoped(&s.db, &scope, &id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "deployment", &[Id::from(r.id)])
+        .await?;
     crate::variables::check_object_removal(&tx, scope.workspace_id, "deploy", r.id.into()).await?;
     let n = apps::Entity::delete_many()
         .filter(apps::Column::Id.eq(r.id))
@@ -637,7 +639,39 @@ pub async fn apply(
     Path((_, id)): Path<(String, String)>,
     Json(b): Json<RunBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    trigger(&s, &scope, &id, b, false).await
+    trigger(&s, &scope, &id, b, false, false).await
+}
+/// Reuses exact preview/version/variable checks for an authorized scheduled action.
+pub async fn scheduled(s: &AppState, scope: Scope, id: &str, restart: bool) -> Result<Id> {
+    scope.require("deployments.apply")?;
+    let row = scoped(&s.db, &scope, id).await?;
+    if restart && row.current_revision == 0 {
+        return Err(ApiError::bad("应用尚无成功版本，不能重启。"));
+    }
+    let revision_id = if restart {
+        Some(Id::from(row.current_revision).to_string())
+    } else {
+        None
+    };
+    let Json(preview) = preview(
+        State(s.clone()),
+        scope.clone(),
+        Path((String::new(), id.to_owned())),
+        Json(PreviewBody {
+            revision_id: revision_id.clone(),
+        }),
+    )
+    .await?;
+    let body = RunBody {
+        version: preview["version"]
+            .as_i64()
+            .ok_or_else(|| ApiError::bad("预览版本缺失。"))?,
+        expected_hash: preview["expected_hash"].as_str().unwrap_or_default().into(),
+        preview_token: preview["preview_token"].as_str().unwrap_or_default().into(),
+        revision_id: revision_id.unwrap_or_default(),
+    };
+    let (_, Json(result)) = trigger(s, &scope, id, body, false, restart).await?;
+    Id::reference(result["id"].as_str().unwrap_or_default())
 }
 pub async fn rollback(
     State(s): State<AppState>,
@@ -645,7 +679,7 @@ pub async fn rollback(
     Path((_, id)): Path<(String, String)>,
     Json(b): Json<RunBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    trigger(&s, &scope, &id, b, true).await
+    trigger(&s, &scope, &id, b, true, false).await
 }
 async fn trigger(
     s: &AppState,
@@ -653,6 +687,7 @@ async fn trigger(
     id: &str,
     b: RunBody,
     rollback: bool,
+    restart: bool,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require(if rollback {
         "deployments.rollback"
@@ -667,8 +702,11 @@ async fn trigger(
     if b.expected_hash.len() != 64 || !b.expected_hash.bytes().all(|c| c.is_ascii_hexdigit()) {
         return Err(ApiError::bad("请先预览目标主机，再提交部署。"));
     }
-    let (source, manifest, rendered, artifact, files) = if rollback {
+    let (source, manifest, rendered, artifact, files) = if rollback || restart {
         let old = old_revision(&tx, scope, r.id, &b.revision_id).await?;
+        if restart && old.id != r.current_revision {
+            return Err(ApiError::conflict("当前运行版本已变化，请重新预览。"));
+        }
         let source = Id::from(old.id);
         if old.artifact.is_empty() {
             return Err(ApiError::bad("revision 没有可回滚产物。"));
@@ -734,7 +772,13 @@ async fn trigger(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let action = if rollback { "rollback" } else { "apply" };
+    let action = if restart {
+        "restart"
+    } else if rollback {
+        "rollback"
+    } else {
+        "apply"
+    };
     revisions::Entity::insert(
         revisions::Model {
             id: id.into(),
@@ -1050,14 +1094,24 @@ async fn execute_inner(
             ))
         )
     };
-    let inner = format!(
-        "set -eu; {cleanup}{check_hash} docker compose --project-name {} -f {} up -d --wait --wait-timeout {} --remove-orphans; cp -- {} {}",
-        quote(&project(&r)),
-        quote(&stage),
-        timeout,
-        quote(&stage),
-        quote(&current_path)
-    );
+    let inner = if rev.action == "restart" {
+        format!(
+            "set -eu; {cleanup}{check_hash} docker compose --project-name {} -f {} restart; cp -- {} {}",
+            quote(&project(&r)),
+            quote(&stage),
+            quote(&stage),
+            quote(&current_path)
+        )
+    } else {
+        format!(
+            "set -eu; {cleanup}{check_hash} docker compose --project-name {} -f {} up -d --wait --wait-timeout {} --remove-orphans; cp -- {} {}",
+            quote(&project(&r)),
+            quote(&stage),
+            timeout,
+            quote(&stage),
+            quote(&current_path)
+        )
+    };
     let out = ch
         .exec(
             &format!(

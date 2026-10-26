@@ -84,6 +84,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
+            scheduled=create('cron-jobs', {'name':'Migrated schedule','scope':'host','schedule':'0 * * * *','timezone':'UTC','enabled':False,'action':'command','target_kind':'host','target_ref':host,'command':'true','timeout_seconds':10})
+            assert api('/workspaces/upgrade/cron-jobs/'+scheduled)['next_run_at']==0
+            assert api('/workspaces/upgrade/cron-jobs/'+scheduled+'/runs')['items']==[]
+            print('PASS: scheduled task and execution history schemas work after upgrade')
             for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:
                 template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})
                 rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})

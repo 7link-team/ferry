@@ -598,3 +598,63 @@ pub mod dictionary_items {
     pub enum Relation {}
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+pub mod cron_jobs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "cron_jobs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub description: String,
+        pub scope: String,
+        pub config: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub enabled: i64,
+        pub run_as: i64,
+        pub run_as_name: String,
+        pub next_run_at: i64,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod cron_runs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "cron_runs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub job_id: i64,
+        pub job_name: String,
+        pub scope: String,
+        pub config: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub state: String,
+        pub trigger_kind: String,
+        pub triggered_by: i64,
+        pub scheduled_at: i64,
+        pub started_at: i64,
+        pub finished_at: i64,
+        pub attempt: i64,
+        pub output: String,
+        pub downstream_id: i64,
+        pub downstream_kind: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}

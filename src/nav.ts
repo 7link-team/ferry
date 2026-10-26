@@ -6,6 +6,8 @@
 export interface NavItem {
   key: string;
   label: string;
+  /** Detail/history routes available through resource actions, not extra menu entries. */
+  hidden?: boolean;
   /** Resource page this item opens. Several items may share one resource. */
   resource: string;
   /** Preset query applied on entry, e.g. the scope of a shared resource. */
@@ -38,6 +40,7 @@ export const nav: NavGroup[] = [
       { key: "variables", label: "密钥变量", resource: "variables", params: { scope: "deploy" }, permission: "variables.read" },
       { key: "alerts", label: "报警监控", resource: "alert-rules", permission: "alerts.read" },
       { key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "deploy" }, permission: "cron-jobs.read" },
+      { key: "cron-runs", label: "定时任务执行历史", resource: "cron-runs", params: {scope:"deploy"}, permission:"cron-jobs.read", hidden:true },
     ],
   },
   {
@@ -51,6 +54,7 @@ export const nav: NavGroup[] = [
       { key: "credentials", label: "授权认证", resource: "credentials", permission: "credentials.read" },
       { key: "variables", label: "密钥变量", resource: "variables", params: { scope: "build" }, permission: "variables.read" },
       { key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "build" }, permission: "cron-jobs.read" },
+      { key: "cron-runs", label: "定时任务执行历史", resource: "cron-runs", params: {scope:"build"}, permission:"cron-jobs.read", hidden:true },
     ],
   },
   {
@@ -61,6 +65,7 @@ export const nav: NavGroup[] = [
       { key: "hosts", label: "主机", resource: "hosts", permission: "hosts.read" },
       { key: "tags", label: "标签", resource: "tags", permission: "tags.read" },
       { key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "host" }, permission: "cron-jobs.read" },
+      { key: "cron-runs", label: "定时任务执行历史", resource: "cron-runs", params: {scope:"host"}, permission:"cron-jobs.read", hidden:true },
     ],
   },
   {

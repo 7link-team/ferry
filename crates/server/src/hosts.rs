@@ -18,7 +18,7 @@ use axum::{
     http::StatusCode,
 };
 use sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set, TransactionTrait,
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set,
     sea_query::{Expr, ExprTrait},
 };
 use serde::Deserialize;
@@ -196,12 +196,14 @@ pub async fn delete_group(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "host-group", &[id]).await?;
     // Refuse rather than orphan: a host pointing at a deleted group would
     // disappear from every group filter without being gone.
     let used = hosts::Entity::find()
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::GroupId.eq(id))
-        .count(&s.db)
+        .count(&tx)
         .await?;
     if used > 0 {
         return Err(ApiError::conflict(format!(
@@ -211,12 +213,13 @@ pub async fn delete_group(
     let affected = host_groups::Entity::delete_many()
         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(host_groups::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
+    tx.commit().await?;
     activity(&s, &scope, "delete", "host-groups", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -436,6 +439,7 @@ async fn host_is_free(
     workspace_id: &Id,
     id: &Id,
 ) -> Result<()> {
+    crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(*workspace_id))
         .filter(pipelines::Column::TargetKind.eq("host"))
@@ -457,16 +461,18 @@ pub async fn delete_host(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.delete")?;
-    host_is_free(&s.db, &scope.workspace_id, &id).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    host_is_free(&tx, &scope.workspace_id, &id).await?;
     let affected = hosts::Entity::delete_many()
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
+    tx.commit().await?;
     activity(&s, &scope, "delete", "hosts", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -487,7 +493,7 @@ pub async fn bulk_delete_hosts(
     if body.ids.is_empty() || body.ids.len() > 200 {
         return Err(ApiError::bad("一次最多删除 200 项，且至少选择一项。"));
     }
-    let transaction = s.db.begin().await?;
+    let transaction = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut deleted = 0;
     for id in &body.ids {
         // Inside the transaction, so a pipeline created concurrently either

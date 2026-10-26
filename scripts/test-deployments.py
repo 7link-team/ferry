@@ -295,6 +295,25 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             start(id,secret_rev)
             check(kind+' history remains usable after current variables deleted',done(id)['state']=='succeeded' and container_env()['BOUND_SECRET']==secret)
             check(kind+' historical files cleaned again',env_paths()==[])
+            cron={'name':'scheduled-'+kind,'scope':'deploy','schedule':'0 * * * *','timezone':'UTC','enabled':False,'action':'restart','target_kind':'deployment','target_ref':id,'command':'','timeout_seconds':60,'max_retries':0,'retry_delay_seconds':1}
+            cron_id=create('cron-jobs',cron)
+            def scheduled():
+                run_id=api('/workspaces/ops/cron-jobs/'+cron_id+'/actions/run-now',{},status=202)['id']
+                def finished():
+                    result=api('/workspaces/ops/cron-runs/'+run_id)
+                    return result if result['state'] not in ('queued','running') else None
+                return eventually(finished,90)
+            result=scheduled()
+            check(kind+' scheduled restart succeeds: '+result['output'],result['state']=='succeeded')
+            check(kind+' restart keeps historical secret after current variable deletion',container_env()['BOUND_SECRET']==secret)
+            check(kind+' restart revision explicitly recorded',app(id)['latest_revision']['action']=='restart')
+            cron_row=api('/workspaces/ops/cron-jobs/'+cron_id)
+            api('/workspaces/ops/cron-jobs/'+cron_id,dict(cron_row,action='redeploy'),method='PATCH')
+            result=scheduled()
+            check(kind+' scheduled redeployment succeeds: '+result['output'],result['state']=='succeeded' and response(web_port)=='v2')
+            check(kind+' redeploy uses current manifest', 'BOUND_SECRET' not in container_env())
+            api('/workspaces/ops/deployments/'+id,method='DELETE',status=409)
+            api('/workspaces/ops/cron-jobs/'+cron_id,method='DELETE',status=204)
             # Delete metadata only: the existing v2 HTTP service keeps running.
             api('/workspaces/ops/deployments/'+id,method='DELETE',status=204)
             check(kind+' deletion keeps containers running',response(web_port)=='v2')

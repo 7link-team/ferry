@@ -115,7 +115,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const groups = nav
     .map((g) => ({
       ...g,
-      items: g.items.filter((i) => !i.permission || permissions.has(i.permission)),
+      items: g.items.filter((i) => !i.hidden && (!i.permission || permissions.has(i.permission))),
     }))
     .filter((g) => g.items.length);
 

@@ -90,6 +90,19 @@ export function ResourceForm<T extends Record<string, unknown>>({
     };
   }, [creating, copyId, route.id, workspace, config]);
 
+  useEffect(() => {
+    const delay=route.mode === "view" ? config.pollMs?.(draft) : 0;
+    if (!delay || !route.id) return;
+    let live=true;
+    let timer:ReturnType<typeof setTimeout>;
+    const load=async()=>{
+      try {const value=await getResource<T>(workspace,config.resource,route.id!,config.endpoint);if(live){setDraft(value);setError("");}}
+      catch(cause){if(live)setError(errorText(cause));}
+      finally {if(live)timer=setTimeout(load,delay);}
+    };
+    timer=setTimeout(load,delay);
+    return ()=>{live=false;clearTimeout(timer);};
+  },[route.mode,route.id,workspace,config,draft]);
   const backToList = href({ ...route, mode: "list" }, {});
   const canEdit = permissions.has(`${config.resource}.${creating ? "create" : "update"}`);
 
@@ -132,6 +145,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
 
       {creating && config.generator && <FormGenerator config={config.generator} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
+      {readOnly && config.viewActions && <div className="flex flex-wrap gap-2">{config.viewActions.filter(action=>(!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T))).map(action=>action.to ? <Button key={action.label} variant="outline" asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.label}</a></Button> : <Button key={action.label} type="button" variant="outline" disabled={saving} onClick={async()=>{
+        if(action.destructive && !confirm(`${action.label}？`))return;
+        setSaving(true);setError("");
+        try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
+        catch(cause){setError(errorText(cause));}finally{setSaving(false);}
+      }}>{action.label}</Button>)}</div>}
       {config.sections.map((section, index) => {
         const fields = section.fields.filter((field) => !field.when || field.when(draft));
         if (!fields.length) return null;
