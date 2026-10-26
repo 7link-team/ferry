@@ -90,9 +90,14 @@ def main():
     def pipeline(host, steps, ws='ops', repo=None, target_kind='host'):
         definition = {'workdir': root_dir + '/{{run}}',
                       'env': [{'name': 'BUILD_VALUE', 'value': 'env-{{branch}}-{{run}}'}], 'steps': steps}
+        first_command=definition['steps'][0]['run']
+        definition['steps']=[dict(step) for step in steps]
+        definition['steps'][0]['run']='{{ .Values.command }}'
+        template=create('pipeline-templates',{'name':'live-template','content':json.dumps(definition),'parameters':json.dumps([{'name':'command','type':'string'}])},ws)
+        generated=api(f'/workspaces/{ws}/pipeline-templates/{template}/actions/render',{'version':1,'values':{'command':first_command}})['definition']
         return create('pipelines', {'name': 'live-' + uuid.uuid4().hex[:8], 'target_kind': target_kind,
             'target_ref': host, 'repository_id': repo if repo is not None else repo_id,
-            'definition': json.dumps(definition)}, ws)
+            'definition': generated}, ws)
 
     def trigger(pid, ws='ops', values=None):
         return api(f'/workspaces/{ws}/pipelines/{pid}/actions/run', body=values, method='POST', status=201)

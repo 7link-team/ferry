@@ -130,6 +130,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
         </p>
       )}
 
+      {creating && config.generator && <FormGenerator config={config.generator} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
+
       {config.sections.map((section, index) => {
         const fields = section.fields.filter((field) => !field.when || field.when(draft));
         if (!fields.length) return null;
@@ -191,6 +193,55 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </div>
     </form>
   );
+}
+
+function FormGenerator<T>({ config, report, onGenerated }: {
+  config: NonNullable<FormConfig<T>["generator"]>;
+  report: (key: string, blocked: boolean) => void;
+  onGenerated: (value: Partial<T>) => void;
+}) {
+  const [id, setId] = useState(() => new URLSearchParams(location.search).get("template") ?? "");
+  const [attempt, setAttempt] = useState(0);
+  const [template, setTemplate] = useState<Awaited<ReturnType<typeof config.load>>>();
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [busy, setBusy] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [error, setError] = useState("");
+  const { options, error: optionsError, loading: optionsLoading } = useOptions(config.options);
+  const ignoreOptions = useCallback(() => {}, []);
+  useEffect(() => {
+    let live = true;
+    setTemplate(undefined); setGenerated(false); setError("");
+    if (!id) { setBusy(false); return; }
+    setBusy(true);
+    void config.load(id).then(value => { if (live) { setTemplate(value); setValues(value.values); } })
+      .catch(cause => { if (live) setError(errorText(cause)); })
+      .finally(() => { if (live) setBusy(false); });
+    return () => { live = false; };
+  }, [id, attempt, config]);
+  useEffect(() => { report("$generator", !!id && (!generated || busy)); return () => report("$generator", false); }, [id, generated, busy, report]);
+  return <section aria-label="从模板生成" className="space-y-4 rounded-md border p-4">
+    <h2 className="font-medium">从模板生成配置</h2>
+    <label className="flex flex-col gap-2 text-sm">模板
+      <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
+        <SelectTrigger><SelectValue placeholder="选择模板" /></SelectTrigger>
+        <SelectContent><SelectItem value="__none">不使用模板</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+      </Select>
+    </label>
+    {(error || optionsError) && <p role="alert" className="text-sm text-destructive">{error || optionsError}</p>}
+    {id && <>
+      {template && <><p className="text-sm text-muted-foreground">{template.name} · 版本 {template.version}</p>
+        <div className="grid gap-4 sm:grid-cols-2">{template.fields.map(field => <Field key={`${id}/${template.version}/${field.key}`} field={field} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={new Set<string>()} reportOptions={ignoreOptions} onChange={value => { setGenerated(false); setValues(current => ({ ...current, [field.key]: value })); }} />)}</div>
+      </>}
+      <div className="flex gap-2"><Button type="button" disabled={busy || !template} onClick={async () => {
+        if (!template) return; setBusy(true); setError("");
+        try { const result = await config.generate(id, template.version, values); onGenerated(result); setGenerated(true); }
+        catch (cause) { setError(errorText(cause)); setGenerated(false); }
+        finally { setBusy(false); }
+      }}>{busy ? "处理中…" : "生成配置"}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>重新载入模板</Button></div>
+      <p role="status" className="text-sm text-muted-foreground">{generated ? "配置已填入下方编辑器，请检查并确认创建。后续修改模板不会影响已创建对象。" : "填写参数并生成配置后，再确认创建。"}</p>
+    </>}
+  </section>;
 }
 
 function SecretField<T>({ field, value, stored, creating, asText, readOnly, draft, permissions, onChange }: {
@@ -365,7 +416,7 @@ function Field<T>({
             required={field.required}
             autoComplete={field.type === "password" ? "new-password" : undefined}
             onChange={(event) =>
-              onChange(field.type === "number" ? Number(event.target.value) : event.target.value)
+              onChange(field.type === "number" && event.target.value !== "" ? Number(event.target.value) : event.target.value)
             }
           />
         )}

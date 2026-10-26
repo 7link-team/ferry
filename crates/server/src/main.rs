@@ -20,6 +20,7 @@ mod runner;
 mod snowflake;
 mod ssh;
 mod state;
+mod templates;
 mod variables;
 mod vault;
 mod worker;
@@ -222,6 +223,34 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/pipeline-runs/{id}/actions/cancel",
             post(pipeline_runs::cancel),
+        )
+        .route(
+            "/{workspace}/app-templates",
+            get(templates::apps::list).post(templates::apps::create),
+        )
+        .route(
+            "/{workspace}/app-templates/{id}",
+            get(templates::apps::get)
+                .patch(templates::apps::update)
+                .delete(templates::apps::delete),
+        )
+        .route(
+            "/{workspace}/app-templates/{id}/actions/render",
+            post(templates::apps::render),
+        )
+        .route(
+            "/{workspace}/pipeline-templates",
+            get(templates::pipelines::list).post(templates::pipelines::create),
+        )
+        .route(
+            "/{workspace}/pipeline-templates/{id}",
+            get(templates::pipelines::get)
+                .patch(templates::pipelines::update)
+                .delete(templates::pipelines::delete),
+        )
+        .route(
+            "/{workspace}/pipeline-templates/{id}/actions/render",
+            post(templates::pipelines::render),
         )
         .route("/{workspace}/dashboard", get(hosts::dashboard))
         .route(

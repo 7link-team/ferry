@@ -84,6 +84,11 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
+            for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:
+                template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})
+                rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})
+                assert rendered['template_version']==1
+            print('PASS: both template schemas can create and render after upgrade')
             setup = api('/setup')
             if setup['required']:
                 assert not api('/me')['user']['is_superadmin'], 'legacy owner must not be automatically promoted'

@@ -138,8 +138,59 @@ const namedOptions = (workspace: string, resource: string) => async (): Promise<
 };
 const TARGETS = [{ value: "host", label: "主机" }, { value: "host-group", label: "主机组" }];
 
+interface Template { id: string; name: string; description: string; content: string; parameters: string; version: number }
+interface TemplateParameter { name: string; label?: string; type: "string" | "integer" | "boolean"; default?: unknown; enum?: string[]; min?: number; max?: number; min_length?: number; max_length?: number; secret?: boolean }
+const templateList = (workspace: string, resource: string, target: string, group: string, item: string) => list<Template>({
+  resource, rowKey: r => r.id, filters: [{ key: "q", label: "名称 / 说明", type: "text" }],
+  columns: [{ key: "name", label: "名称", sortable: true }, { key: "description", label: "说明" }, { key: "version", label: "版本" }],
+  actions: [
+    { label: "查看", to: r => ({ id: r.id, mode: "view" }) },
+    { label: "使用模板", permission: `${target}.create`, to: () => ({ group, item, mode: "new" }), query: r => ({ template: r.id }) },
+    { label: "复制", permission: `${resource}.create`, to: () => ({ mode: "new" }), query: r => ({ copy: r.id }) },
+    { label: "编辑", permission: `${resource}.update`, to: r => ({ id: r.id, mode: "edit" }) },
+    { label: "删除模板", permission: `${resource}.delete`, destructive: true, action: r => deleteResource(workspace, resource, r.id) },
+  ], toolbar: { create: true, import: false, export: false },
+});
+const templateForm = (resource: string, application: boolean) => form<Template>({
+  resource, heading: r => r.name,
+  blank: { name: "", description: "", content: application ? JSON.stringify({apiVersion:"ferry/v1",kind:"Application",metadata:{name:"web"},services:[{name:"web",image:"{{ .Values.image }}"}]},null,2) : JSON.stringify({workdir:"/tmp/build/{{run}}",steps:[{name:"构建",run:"{{ .Values.command }}"}]},null,2),
+    parameters: JSON.stringify([{name: application ? "image" : "command",label: application ? "镜像" : "构建命令",type:"string",default:application ? "nginx:alpine" : "echo build",min_length:1}],null,2) },
+  copy: r => ({ name: `${r.name}（副本）`, description: r.description, content: r.content, parameters: r.parameters }),
+  sections: [{ fields: [
+    { key: "name", label: "名称", type: "text", required: true },
+    { key: "description", label: "说明", type: "textarea" },
+    { key: "parameters", label: "参数定义（JSON 数组）", type: "code", span: 2, required: true, help: '每项包含 name、type（string/integer/boolean），可选 label、default、enum（字符串）、min/max（整数）、min_length/max_length。无 default 时必填。' },
+    { key: "content", label: application ? "应用模板（YAML / JSON）" : "流水线模板（JSON / YAML）", type: "code", span: 2, required: true, help: application ? '使用 "{{ .Values.image }}" 等占位符；secret: true 参数填写变量名，只能作为 valueFrom 的完整值。保存校验模板语法，生成时校验完整配置。' : '使用 "{{ .Values.command }}" 等创建参数；保留 {{run}}、{{branch}}、{{repo_url}}、{{commit}} 运行时变量。当前不支持 secret 参数。' },
+  ] }],
+});
+const templateGenerator = (workspace: string, resource: string, field: string): NonNullable<FormConfig<AnyRow>["generator"]> => ({
+  options: namedOptions(workspace, resource),
+  load: async id => {
+    const row = await api<Template>(`/workspaces/${workspace}/${resource}/${id}`);
+    const parameters = JSON.parse(row.parameters) as TemplateParameter[];
+    return { name: row.name, version: row.version, values: Object.fromEntries(parameters.filter(p => p.default !== undefined).map(p => [p.name, p.type === "boolean" ? String(p.default) : p.default])),
+      fields: parameters.map(p => ({ key: p.name, label: `${p.label || p.name}${p.secret ? "（密钥变量名）" : ""}`, type: p.enum || p.type === "boolean" ? "select" as const : p.type === "integer" ? "number" as const : "text" as const,
+        required: p.default === undefined,
+        ...(p.enum ? { options: p.enum.map(value => ({value,label:value})) } : p.type === "boolean" ? { options: [{value:"true",label:"是"},{value:"false",label:"否"}] } : {}),
+        help: p.secret ? "填写已存在的变量名，不要填写密钥明文。生成后仍需配置目标主机。" : `${p.name}${p.min !== undefined ? ` · 最小 ${p.min}` : ""}${p.max !== undefined ? ` · 最大 ${p.max}` : ""}${p.min_length !== undefined ? ` · 至少 ${p.min_length} 字符` : ""}${p.max_length !== undefined ? ` · 最多 ${p.max_length} 字符` : ""}`,
+      })),
+    };
+  },
+  generate: async (id, version, values) => {
+    // The displayed template version is checked by the server; metadata fetch
+    // here is only for typed controls, never an implicit version upgrade.
+    const row = await api<Template>(`/workspaces/${workspace}/${resource}/${id}`);
+    const parameters = JSON.parse(row.parameters) as TemplateParameter[];
+    const typed = Object.fromEntries(Object.entries(values).filter(([key,value]) => !(parameters.find(p => p.name === key)?.type === "integer" && value === "")).map(([key,value]) => [key, parameters.find(p => p.name === key)?.type === "boolean" ? value === "true" : value]));
+    const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/actions/render`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
+    return { [field]: result[field] };
+  },
+});
+
 export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void): Record<string, ListConfig<AnyRow>> {
   return {
+    "app-templates": templateList(workspace, "app-templates", "deployments", "deploy", "apps"),
+    "pipeline-templates": templateList(workspace, "pipeline-templates", "pipelines", "build", "pipelines"),
     members: list({
       resource: "members", rowKey: (r: Member) => r.id,
       filters: [{ key: "q", label: "姓名或邮箱", type: "text" }],
@@ -452,6 +503,8 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
 export function formConfigs(workspace: string, permissions?: Set<string>): Record<string, FormConfig<AnyRow>> {
   return {
+    "app-templates": templateForm("app-templates", true),
+    "pipeline-templates": templateForm("pipeline-templates", false),
     members: form({
       resource: "members", heading: (r: Member) => r.name, blank: {}, readOnly: r => !!r.owner,
       sections: [{ fields: [
@@ -477,6 +530,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       ] }],
     }),
     deployments: form({
+      ...(permissions?.has("app-templates.read") ? { generator: templateGenerator(workspace, "app-templates", "manifest") } : {}),
       resource: "deployments", heading: (r: Deployment) => r.name,
       blank: { name: "", mode: "compose", target_kind: "host", target_ref: "", workdir: "/opt/deployments", description: "", manifest: "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n" },
       sections: [{ fields: [
@@ -503,6 +557,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       ] }],
     }),
     pipelines: form({
+      ...(permissions?.has("pipeline-templates.read") ? { generator: templateGenerator(workspace, "pipeline-templates", "definition") } : {}),
       resource: "pipelines", heading: (r: Pipeline) => r.name,
       blank: { name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
         definition: JSON.stringify({ workdir: "/tmp/build-{{run}}", steps: [{ name: "构建", run: "echo hello", timeout_seconds: 1800 }] }, null, 2) },

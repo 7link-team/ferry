@@ -72,6 +72,7 @@ impl MigratorTrait for Migrator {
             Box::new(Variables),
             Box::new(WorkspaceAdministration),
             Box::new(DeploymentVariableSnapshots),
+            Box::new(ResourceTemplates),
         ]
     }
 }
@@ -1811,6 +1812,39 @@ impl MigrationTrait for DeploymentVariableSnapshots {
             ),
         )
         .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct ResourceTemplates;
+impl MigrationName for ResourceTemplates {
+    fn name(&self) -> &str {
+        "resource_templates_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ResourceTemplates {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for name in ["app_templates", "pipeline_templates"] {
+            let backend = m.get_database_backend();
+            let mut table = create_table(name, backend);
+            table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in ["workspace_id", "version", "created_at", "updated_at"] {
+                table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            table.col(
+                ColumnDef::new(Alias::new("name"))
+                    .string_len(255)
+                    .not_null(),
+            );
+            for key in ["description", "content", "parameters"] {
+                table.col(long_text(key, backend).not_null());
+            }
+            execute_schema(m, SchemaStatement::Table(table)).await?;
+        }
+        Ok(())
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

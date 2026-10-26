@@ -158,7 +158,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         for kind,host in [('runner',runner_id),('ssh',ssh_id)]:
             print('== '+kind,flush=True)
             web_port=port()
-            body={'name':kind,'mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/deployments','manifest':json.dumps(manifest('v1',web_port))}
+            source=manifest('v1',web_port)
+            image_value=source['services'][0]['image']; source['services'][0]['image']='{{ .Values.image }}'
+            template=create('app-templates',{'name':'live-'+kind,'content':json.dumps(source),'parameters':json.dumps([{'name':'image','type':'string'}])})
+            generated=api('/workspaces/ops/app-templates/'+template+'/actions/render',{'version':1,'values':{'image':image_value}})['manifest']
+            body={'name':kind,'mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/deployments','manifest':generated}
             id=create('deployments',body)
             project=f"deployment-{workspace['id']}-{id}"; projects.append(project)
             check(kind+' render is deterministic',action(id,'render')['artifact']==action(id,'render')['artifact'])
@@ -239,6 +243,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             empty_id=create('variables',{'name':'empty-'+kind,'scope':'deploy','kind':'plain','value':''})
             bound=manifest('v2',web_port)
             bound['services'][0]['env'] += [{'name':'BOUND_SECRET','valueFrom':'variable/'+key},{'name':'BOUND_EMPTY','valueFrom':'variable/empty-'+kind}]
+            bound['services'][0]['env'][-2]['valueFrom']='{{ .Values.token }}'
+            secret_template=create('app-templates',{'name':'secret-'+kind,'content':json.dumps(bound),'parameters':json.dumps([{'name':'token','type':'string','secret':True}])})
+            bound=json.loads(api('/workspaces/ops/app-templates/'+secret_template+'/actions/render',{'version':1,'values':{'token':key}})['manifest'])
             update(id,bound)
             inherited=preview(id)
             check(kind+' module overrides global',next(v for v in inherited['variables'] if v['name']==key)['scope']=='deploy')

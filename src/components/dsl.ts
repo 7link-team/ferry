@@ -123,4 +123,9 @@ export interface FormConfig<T> {
   blank: Partial<T>;
   readOnly?: (row: Partial<T>) => boolean;
   copy?: (row: T) => Partial<T>;
+  generator?: {
+    options: Options;
+    load: (id: string) => Promise<{ name: string; version: number; fields: FormField<Record<string, unknown>>[]; values: Record<string, unknown> }>;
+    generate: (id: string, version: number, values: Record<string, unknown>) => Promise<Partial<T>>;
+  };
 }
