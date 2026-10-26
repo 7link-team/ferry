@@ -209,8 +209,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             target='aarch64-unknown-linux-gnu' if arch in ('aarch64','arm64') else 'x86_64-unknown-linux-gnu'
             runner=work/'runner'
             command(['gh','release','download','v0.1.0-alpha.1','--pattern',f'ferry-runner-{target}','--output',str(runner)])
-        command(['docker','cp',str(runner),name+':/tmp/runner'])
-        command(['docker','exec',name,'chmod','+x','/tmp/runner'])
+        # systemd can mount /tmp during boot; keep the executable outside it.
+        command(['docker','cp',str(runner),name+':/usr/local/bin/fixture-runner'])
+        command(['docker','exec',name,'chmod','+x','/usr/local/bin/fixture-runner'])
         server=launch_server()
         command(['python3', 'scripts/test-setup.py', origin + '/api', str(work / 'data')])
         api('/users',{'email':'deploy@example.invalid','password':'correct-horse-battery','name':'deploy'})
@@ -221,7 +222,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         api('/workspaces/actions/join',{'code':workspace['join_code']},client=viewer)
         runner_id=create('hosts',{'name':'runner','connection':'runner'})
         token=api('/workspaces/ops/runner-tokens',{'host_id':runner_id},status=201)['token']
-        command(['docker','exec','-d',name,'/tmp/runner','--server',f'http://host.docker.internal:{server_port}','--token',token,'--state-dir','/tmp/runner-state'])
+        command(['docker','exec','-d',name,'/usr/local/bin/fixture-runner','--server',f'http://host.docker.internal:{server_port}','--token',token,'--state-dir','/tmp/runner-state'])
         eventually(lambda:api('/workspaces/ops/hosts/'+runner_id)['state']=='online')
         credential=create('credentials',{'name':'ssh','kind':'password','username':'root','secret':'fixture-pass'})
         ssh_id=create('hosts',{'name':'ssh','connection':'ssh','address':'127.0.0.1','port':ssh_port,'username':'root','credential_id':credential})

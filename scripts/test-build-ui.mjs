@@ -97,14 +97,14 @@ try {
   await page.getByRole('link', { name: '流水线', exact: true }).click();
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
-  await page.getByRole('combobox').nth(0).click(); await page.getByRole('option', { name: 'UI repository', exact: true }).click();
-  await page.getByRole('combobox').nth(2).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
-  await page.getByRole('combobox').nth(1).click(); await page.getByRole('option', { name: '主机组', exact: true }).click();
-  assert.equal(await page.getByRole('combobox').nth(2).innerText(), '请选择');
-  await page.getByRole('combobox').nth(2).click(); await page.getByRole('option', { name: 'UI group', exact: true }).click();
-  await page.getByRole('combobox').nth(1).click(); await page.getByRole('option', { name: '主机', exact: true }).click();
-  assert.equal(await page.getByRole('combobox').nth(2).innerText(), '请选择');
-  await page.getByRole('combobox').nth(2).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
+  await page.getByRole('combobox', { name: /^仓库/ }).click(); await page.getByRole('option', { name: 'UI repository', exact: true }).click();
+  await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
+  await page.getByRole('combobox', { name: /^目标类型/ }).click(); await page.getByRole('option', { name: '主机组', exact: true }).click();
+  assert.equal(await page.getByRole('combobox', { name: /^目标主机组/ }).innerText(), '请选择');
+  await page.getByRole('combobox', { name: /^目标主机组/ }).click(); await page.getByRole('option', { name: 'UI group', exact: true }).click();
+  await page.getByRole('combobox', { name: /^目标类型/ }).click(); await page.getByRole('option', { name: '主机', exact: true }).click();
+  assert.equal(await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).innerText(), '请选择');
+  await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
   const definition = {
     workdir: join(work, 'build-{{run}}'),
     // Hold each following step until the browser observes the preceding log.
