@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const executable = process.argv[2];
@@ -31,6 +31,16 @@ const startApp = () => spawn(executable, [], {
   stdio: 'ignore',
   env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` },
 });
+// Each installation scope starts with an unselected connection; preserve any
+// preferences left by the previous scope's upgrade checks and restore afterward.
+const config = JSON.parse(readFileSync('desktop/tauri.conf.json', 'utf8'));
+const data = join(process.env.LOCALAPPDATA, config.identifier);
+const originalPreferences = new Map(['connection.json', 'update-resume.json'].map(name => {
+  const path = join(data, name);
+  const original = existsSync(path) ? readFileSync(path) : null;
+  rmSync(path, { force: true });
+  return [path, original];
+}));
 let app = startApp();
 app.on('error', error => { throw error; });
 let browser;
@@ -153,8 +163,6 @@ try {
     catch { return true; }
   });
   await browser.close().catch(() => {});
-  const config = JSON.parse(readFileSync('desktop/tauri.conf.json', 'utf8'));
-  const data = join(process.env.LOCALAPPDATA, config.identifier);
   mkdirSync(data, { recursive: true });
   for (const restartKind of ['saved connection', 'upgrade resume']) {
     if (restartKind === 'upgrade resume') writeFileSync(join(data, 'update-resume.json'), JSON.stringify({ server_url: '' }));
@@ -192,5 +200,9 @@ try {
   await browser?.close().catch(() => {});
   if (app.exitCode === null) {
     execFileSync('taskkill.exe', ['/PID', String(app.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  }
+  for (const [path, original] of originalPreferences) {
+    if (original) writeFileSync(path, original);
+    else rmSync(path, { force: true });
   }
 }
