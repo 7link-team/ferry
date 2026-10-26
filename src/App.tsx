@@ -16,6 +16,8 @@ import { ResourceForm } from "./components/ResourceForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResourceTable } from "./components/ResourceTable";
 import { Platform } from "./Platform";
+import { Dashboard } from "./components/Dashboard";
+import { Invitation } from "./components/Invitation";
 import { Entry } from "./Entry";
 import { findGroup, findItem, nav } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
@@ -78,6 +80,7 @@ export function App() {
 function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut: () => void }) {
   const route = useRoute();
   const theme = useTheme();
+  const [joining, setJoining] = useState(false);
 
   const current =
     identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
@@ -92,10 +95,11 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   }, [route.workspace, slug]);
 
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(slug), [slug]);
-  const forms = useMemo(() => formConfigs(slug), [slug]);
+  const lists = useMemo(() => listConfigs(slug, permissions, onSignedOut), [slug, permissions, onSignedOut]);
+  const forms = useMemo(() => formConfigs(slug, permissions), [slug, permissions]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
+  if (joining) return <div className="h-full"><Button className="absolute top-4 left-4" variant="outline" onClick={() => setJoining(false)}>返回工作空间</Button><Entry onReady={() => { setJoining(false); onSignedOut(); }} error="" signedIn /></div>;
   if (!current) return <Entry onReady={onSignedOut} error="" signedIn />;
 
   const group = findGroup(route.group)!;
@@ -187,6 +191,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                 {w.slug === current.slug && " ✓"}
               </DropdownMenuItem>
             ))}
+            <DropdownMenuItem onClick={() => setJoining(true)}>创建/加入工作空间</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
             >
@@ -262,14 +267,17 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             {route.mode === "edit" && " · 编辑"}
           </h1>
 
-          {route.mode === "list" ? (
-            listConfig ? (
+          {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (
+            item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
+              <div className="flex min-h-0 flex-col">
+              {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.slug} workspace={current.slug} />}
               <ResourceTable
                 key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
                 config={{ ...listConfig, ...(item.params ? { fixed: item.params } : {}) }}
                 workspace={current.slug}
                 permissions={permissions}
               />
+              </div>
             ) : (
               <Placeholder resource={item.resource} />
             )
@@ -290,6 +298,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             <div className="min-h-0 overflow-auto">
               <ResourceForm
                 key={`${current.slug}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
+                {...(item.resource === "roles" || item.resource === "members" ? { onSaved: onSignedOut } : {})}
                 config={formConfig}
                 workspace={current.slug}
                 permissions={permissions}

@@ -12,6 +12,9 @@ import type { Route } from "../router";
 export interface Option {
   value: string;
   label: string;
+  group?: string;
+  requires?: string[];
+  disabled?: boolean;
 }
 export type Options = Option[] | (() => Promise<Option[]>);
 
@@ -38,6 +41,7 @@ export interface RowAction<T> {
   permission?: string;
   /** Navigating action: becomes a real link. */
   to?: (row: T) => Partial<Route>;
+  query?: (row: T) => Record<string, string>;
   /** Executing action: destructive ones confirm first. */
   action?: (row: T) => Promise<void>;
   destructive?: boolean;
@@ -81,7 +85,8 @@ export type FieldType =
   | "switch"
   | "password"
   | "secret"
-  | "code";
+  | "code"
+  | "multiselect";
 
 export interface FormField<T> {
   key: string;
@@ -110,4 +115,6 @@ export interface FormConfig<T> {
   heading: (row: T) => string;
   /** Values a create form starts from. */
   blank: Partial<T>;
+  readOnly?: (row: Partial<T>) => boolean;
+  copy?: (row: T) => Partial<T>;
 }

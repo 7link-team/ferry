@@ -23,6 +23,7 @@ mod state;
 mod vault;
 mod worker;
 mod workspace;
+mod workspace_admin;
 
 use axum::{
     Router,
@@ -208,7 +209,31 @@ async fn main() -> anyhow::Result<()> {
             post(pipeline_runs::cancel),
         )
         .route("/{workspace}/dashboard", get(hosts::dashboard))
-        .route("/{workspace}/roles", get(workspace::roles))
+        .route(
+            "/{workspace}/roles",
+            get(workspace_admin::roles).post(workspace_admin::create_role),
+        )
+        .route(
+            "/{workspace}/roles/{id}",
+            get(workspace_admin::get_role)
+                .patch(workspace_admin::update_role)
+                .delete(workspace_admin::delete_role),
+        )
+        .route("/{workspace}/members", get(workspace_admin::members))
+        .route(
+            "/{workspace}/members/invitation",
+            get(workspace_admin::invitation).post(workspace_admin::rotate_invitation),
+        )
+        .route(
+            "/{workspace}/members/role-options",
+            get(workspace_admin::role_options),
+        )
+        .route(
+            "/{workspace}/members/{id}",
+            get(workspace_admin::get_member)
+                .patch(workspace_admin::update_member)
+                .delete(workspace_admin::delete_member),
+        )
         .route("/{workspace}/activity", get(hosts::list_activity))
         .route(
             "/{workspace}/host-groups",

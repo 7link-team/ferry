@@ -69,6 +69,7 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineExecution),
             Box::new(ComposeDeployments),
             Box::new(PlatformInitialization),
+            Box::new(WorkspaceAdministration),
         ]
     }
 }
@@ -1682,6 +1683,41 @@ impl MigrationTrait for PlatformInitialization {
                 },
             )
             .exec(m.get_connection())
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct WorkspaceAdministration;
+impl MigrationName for WorkspaceAdministration {
+    fn name(&self) -> &str {
+        "workspace_administration_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for WorkspaceAdministration {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for table in ["workspace_members", "workspace_roles"] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    table,
+                    "version",
+                    Table::alter()
+                        .table(Alias::new(table))
+                        .add_column(
+                            ColumnDef::new(Alias::new("version"))
+                                .big_integer()
+                                .not_null()
+                                .default(1_i64),
+                        )
+                        .to_owned(),
+                ),
+            )
             .await?;
         }
         Ok(())

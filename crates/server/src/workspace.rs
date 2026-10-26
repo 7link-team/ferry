@@ -20,9 +20,7 @@ use axum::{
     extract::{FromRequestParts, Path, State},
     http::request::Parts,
 };
-use sea_orm::{
-    ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder, QuerySelect, Set,
-};
+use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, Set};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;
@@ -327,7 +325,7 @@ fn valid_slug(slug: &str) -> bool {
         && !matches!(slug, "api" | "assets" | "new" | "login" | "register" | "join" | "settings")
 }
 
-fn join_code() -> String {
+pub(crate) fn join_code() -> String {
     use rand::Rng;
     const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let mut rng = rand::thread_rng();
@@ -405,6 +403,7 @@ pub(crate) async fn create_in(
             builtin: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
+            version: Set(1),
         })
         .exec(conn)
         .await?;
@@ -417,6 +416,7 @@ pub(crate) async fn create_in(
         state: Set("active".to_owned()),
         created_at: Set(now),
         updated_at: Set(now),
+        version: Set(1),
     })
     .exec(conn)
     .await?;
@@ -437,16 +437,22 @@ pub async fn join(
 ) -> Result<Json<Value>> {
     let code = body.code.trim().to_uppercase();
     let row = workspaces::Entity::find()
-        .filter(workspaces::Column::JoinCode.eq(code))
+        .filter(workspaces::Column::JoinCode.eq(code.clone()))
         .filter(workspaces::Column::JoinCode.ne(""))
         .one(&s.db)
         .await?
         .ok_or_else(|| ApiError::bad("邀请码无效或已失效。"))?;
+    use sea_orm::TransactionTrait;
+    let tx = s.db.begin().await?;
+    let row = crate::workspace_admin::lock_workspace(&tx, Id::from(row.id)).await?;
+    if row.join_code != code {
+        return Err(ApiError::bad("邀请码无效或已失效。"));
+    }
     let workspace_id = Id::from(row.id);
     if workspace_members::Entity::find()
         .filter(workspace_members::Column::WorkspaceId.eq(i64::from(workspace_id)))
         .filter(workspace_members::Column::UserId.eq(i64::from(account.user.id)))
-        .one(&s.db)
+        .one(&tx)
         .await?
         .is_some()
     {
@@ -456,7 +462,8 @@ pub async fn join(
     let viewer = workspace_roles::Entity::find()
         .filter(workspace_roles::Column::WorkspaceId.eq(i64::from(workspace_id)))
         .filter(workspace_roles::Column::Name.eq("只读"))
-        .one(&s.db)
+        .filter(workspace_roles::Column::Builtin.eq(1))
+        .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
     let now = db::now();
@@ -468,9 +475,11 @@ pub async fn join(
         state: Set("active".to_owned()),
         created_at: Set(now),
         updated_at: Set(now),
+        version: Set(1),
     })
-    .exec(&s.db)
+    .exec(&tx)
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"slug": row.slug, "name": row.name})))
 }
 
@@ -484,31 +493,6 @@ pub async fn permission_catalogue() -> Json<Value> {
         })
         .collect();
     Json(json!({"items": items}))
-}
-
-pub async fn roles(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
-    scope.require("roles.read")?;
-    let rows = workspace_roles::Entity::find()
-        .filter(workspace_roles::Column::WorkspaceId.eq(i64::from(scope.workspace_id)))
-        .order_by_desc(workspace_roles::Column::Builtin)
-        .order_by_asc(workspace_roles::Column::Name)
-        .all(&s.db)
-        .await?;
-    let items: Vec<Value> = rows
-        .iter()
-        .map(|row| {
-            json!({
-                "id": Id::from(row.id),
-                "name": row.name,
-                "builtin": row.builtin == 1,
-                "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])),
-            })
-        })
-        .collect();
-    let total = items.len() as u64;
-    Ok(Json(
-        json!({"items": items, "total": total, "page": 1, "page_size": total.max(1)}),
-    ))
 }
 
 #[cfg(test)]

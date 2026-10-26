@@ -756,47 +756,108 @@ pub async fn list_activity(
 /// Resource counts and state distribution for the dashboard, in one round trip.
 pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     scope.require("dashboard.read")?;
+    use crate::entities::{
+        credentials, deployment_revisions, deployments, pipeline_runs, repositories,
+        workspace_members, workspace_roles,
+    };
+    use sea_orm::QueryOrder;
     let mut counts = serde_json::Map::new();
-    for (name, total) in [
-        (
-            "hosts",
-            hosts::Entity::find()
-                .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-                .count(&s.db)
-                .await?,
-        ),
-        (
-            "host-groups",
-            host_groups::Entity::find()
-                .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
-                .count(&s.db)
-                .await?,
-        ),
-        (
-            "tags",
-            tags::Entity::find()
-                .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
-                .count(&s.db)
-                .await?,
-        ),
-    ] {
-        counts.insert(name.into(), json!(total));
-    }
-    let rows = hosts::Entity::find()
-        .select_only()
-        .column(hosts::Column::State)
-        .column_as(hosts::Column::Id.count(), "total")
-        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .group_by(hosts::Column::State)
-        .into_tuple::<(String, i64)>()
-        .all(&s.db)
-        .await?;
     let mut states = serde_json::Map::new();
-    for state in STATES {
-        states.insert(state.into(), json!(0));
+    let mut failures = serde_json::Map::new();
+    macro_rules! count {
+        ($entity:ident, $key:literal, $permission:literal) => {
+            if scope.permissions.contains($permission) {
+                counts.insert(
+                    $key.into(),
+                    json!(
+                        $entity::Entity::find()
+                            .filter($entity::Column::WorkspaceId.eq(scope.workspace_id))
+                            .count(&s.db)
+                            .await?
+                    ),
+                );
+            }
+        };
     }
-    for (state, total) in rows {
-        states.insert(state, json!(total));
+    count!(hosts, "hosts", "hosts.read");
+    count!(host_groups, "host-groups", "host-groups.read");
+    count!(tags, "tags", "tags.read");
+    count!(credentials, "credentials", "credentials.read");
+    count!(repositories, "repositories", "repositories.read");
+    count!(pipelines, "pipelines", "pipelines.read");
+    count!(deployments, "deployments", "deployments.read");
+    count!(workspace_members, "members", "members.read");
+    count!(workspace_roles, "roles", "roles.read");
+    macro_rules! distribution {
+        ($entity:ident, $key:literal, $permission:literal) => {
+            if scope.permissions.contains($permission) {
+                let rows = $entity::Entity::find()
+                    .select_only()
+                    .column($entity::Column::State)
+                    .column_as($entity::Column::Id.count(), "total")
+                    .filter($entity::Column::WorkspaceId.eq(scope.workspace_id))
+                    .group_by($entity::Column::State)
+                    .into_tuple::<(String, i64)>()
+                    .all(&s.db)
+                    .await?;
+                states.insert(
+                    $key.into(),
+                    json!(
+                        rows.into_iter()
+                            .collect::<std::collections::BTreeMap<_, _>>()
+                    ),
+                );
+            }
+        };
     }
-    Ok(Json(json!({"counts": counts, "states": {"hosts": states}})))
+    distribution!(hosts, "hosts", "hosts.read");
+    if let Some(Value::Object(host_states)) = states.get_mut("hosts") {
+        for state in STATES {
+            host_states.entry(state).or_insert(json!(0));
+        }
+    }
+    distribution!(deployments, "deployments", "deployments.read");
+    distribution!(pipeline_runs, "pipeline-runs", "pipelines.read");
+    let now = db::now();
+    macro_rules! failed {
+        ($entity:ident, $key:literal, $permission:literal) => {
+            if scope.permissions.contains($permission) {
+                failures.insert(
+                    $key.into(),
+                    json!(
+                        $entity::Entity::find()
+                            .filter($entity::Column::WorkspaceId.eq(scope.workspace_id))
+                            .filter($entity::Column::State.eq("failed"))
+                            .filter($entity::Column::CreatedAt.gte(now - 86_400_000))
+                            .count(&s.db)
+                            .await?
+                    ),
+                );
+            }
+        };
+    }
+    failed!(pipeline_runs, "pipeline-runs", "pipelines.read");
+    failed!(
+        deployment_revisions,
+        "deployment-revisions",
+        "deployments.read"
+    );
+    let runners = if scope.permissions.contains("hosts.read") {
+        Some(hosts::Entity::find().select_only().columns([hosts::Column::Id,hosts::Column::Name,hosts::Column::SeenAt])
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id)).filter(hosts::Column::Connection.eq("runner"))
+            .order_by_asc(hosts::Column::SeenAt).limit(10).into_tuple::<(i64,String,i64)>().all(&s.db).await?
+            .into_iter().map(|(id,name,seen)| json!({"id":Id::from(id),"name":name,"seen_at": if seen > 0 {Some(seen)} else {None}, "lag_ms": if seen > 0 {Some(std::cmp::max(now-seen,0))} else {None}})).collect::<Vec<_>>())
+    } else {
+        None
+    };
+    let recent = if scope.permissions.contains("activity.read") {
+        Some(activity::Entity::find().filter(activity::Column::WorkspaceId.eq(scope.workspace_id))
+            .order_by_desc(activity::Column::CreatedAt).order_by_desc(activity::Column::Id).limit(10).all(&s.db).await?
+            .into_iter().map(|a| json!({"id":Id::from(a.id),"actor_name":a.actor_name,"action":a.action,"resource":a.resource,"created_at":a.created_at})).collect::<Vec<_>>())
+    } else {
+        None
+    };
+    Ok(Json(
+        json!({"counts":counts,"states":states,"failures_24h":failures,"runners":runners,"recent":recent,"as_of":now}),
+    ))
 }

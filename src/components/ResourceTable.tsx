@@ -433,10 +433,10 @@ export function ResourceTable<T>({
                                 label={action.label}
                                 destructive={action.destructive}
                                 {...(action.to
-                                  ? { to: href({ ...route, ...action.to(row) }) }
+                                  ? { to: href({ ...route, ...action.to(row) }, action.query?.(row) ?? {}) }
                                   : {})}
                                 {...(action.to
-                                  ? { onNavigate: () => navigate({ ...route, ...action.to!(row) }, {}) }
+                                  ? { onNavigate: () => navigate({ ...route, ...action.to!(row) }, action.query?.(row) ?? {}) }
                                   : {})}
                                 {...(action.action
                                   ? {

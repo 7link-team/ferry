@@ -1,3 +1,4 @@
+import { api } from "./api";
 /**
  * Every resource page in one place: a `ListConfig` and a `FormConfig` per
  * resource. This is the whole of a page — there is no per-resource component.
@@ -130,8 +131,29 @@ const namedOptions = (workspace: string, resource: string) => async (): Promise<
 };
 const TARGETS = [{ value: "host", label: "主机" }, { value: "host-group", label: "主机组" }];
 
-export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow>> {
+export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void): Record<string, ListConfig<AnyRow>> {
   return {
+    members: list({
+      resource: "members", rowKey: (r: Member) => r.id,
+      filters: [{ key: "q", label: "姓名或邮箱", type: "text" }],
+      columns: [{ key: "name", label: "姓名" }, { key: "email", label: "邮箱" }, { key: "role_name", label: "角色" }, { key: "state", label: "状态", render: r => r.owner ? "拥有者" : !r.active ? "账号已停用" : r.state === "active" ? "正常" : r.state }],
+      actions: [
+        { label: "查看", to: r => ({ id: r.id, mode: "view" }) },
+        { label: "调整角色", permission: "members.update", when: r => !r.owner, to: r => ({ id: r.id, mode: "edit" }) },
+        { label: "移除", permission: "members.delete", when: r => !r.owner, destructive: true, action: async r => { await deleteResource(workspace, "members", r.id); onChanged?.(); } },
+      ], toolbar: { create: false, import: false, export: false, refresh: [0, 30] },
+    }),
+    roles: list({
+      resource: "roles", rowKey: (r: Role) => r.id,
+      filters: [{ key: "q", label: "名称", type: "text" }],
+      columns: [{ key: "name", label: "名称", sortable: true }, { key: "builtin", label: "类型", render: r => r.builtin ? "内置角色" : "自定义角色" }, { key: "permissions", label: "权限数", render: r => r.permissions.length }],
+      actions: [
+        { label: "查看", to: r => ({ id: r.id, mode: "view" }) },
+        { label: "复制", permission: "roles.create", when: r => r.permissions.every(p => permissions?.has(p) ?? true), to: () => ({ mode: "new" }), query: r => ({ copy: r.id }) },
+        { label: "编辑", permission: "roles.update", when: r => !r.builtin, to: r => ({ id: r.id, mode: "edit" }) },
+        { label: "删除", permission: "roles.delete", when: r => !r.builtin, destructive: true, action: async r => { await deleteResource(workspace, "roles", r.id); onChanged?.(); } },
+      ], toolbar: { create: true, import: false, export: false, refresh: [0, 30] },
+    }),
     deployments: list({
       resource: "deployments", rowKey: (r: Deployment) => r.id,
       filters: [{ key: "q", label: "名称", type: "text" }],
@@ -402,8 +424,32 @@ export function listConfigs(workspace: string): Record<string, ListConfig<AnyRow
   };
 }
 
-export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow>> {
+export function formConfigs(workspace: string, permissions?: Set<string>): Record<string, FormConfig<AnyRow>> {
   return {
+    members: form({
+      resource: "members", heading: (r: Member) => r.name, blank: {}, readOnly: r => !!r.owner,
+      sections: [{ fields: [
+        { key: "name", label: "姓名", type: "text", immutable: true },
+        { key: "email", label: "邮箱", type: "text", immutable: true },
+        { key: "role_name", label: "当前角色", type: "text", immutable: true },
+        { key: "role_id", label: "角色", type: "select", required: true, when: r => !r.owner, options: async () => {
+          if (permissions && !permissions.has("members.update")) return [];
+          const result = await api<{items: Role[]}>(`/workspaces/${workspace}/members/role-options`);
+          return result.items.map(r => ({ value: r.id, label: r.name }));
+        } },
+      ] }],
+    }),
+    roles: form({
+      resource: "roles", heading: (r: Role) => r.name, blank: { name: "", permissions: [] }, readOnly: r => !!r.builtin,
+      copy: r => ({ name: `${r.name}（副本）`, permissions: [...r.permissions] }),
+      sections: [{ fields: [
+        { key: "name", label: "名称", type: "text", required: true },
+        { key: "permissions", label: "权限", type: "multiselect", span: 2, help: "勾选操作会自动包含依赖权限；取消依赖权限会同时取消依赖它的操作。", options: async () => {
+          const result = await api<{items: {key: string; group: string; action: string; requires: string[]}[]}>("/permissions");
+          return result.items.map(p => ({ value: p.key, label: p.action, group: p.group, requires: p.requires, disabled: permissions ? !permissions.has(p.key) : false }));
+        } },
+      ] }],
+    }),
     deployments: form({
       resource: "deployments", heading: (r: Deployment) => r.name,
       blank: { name: "", mode: "compose", target_kind: "host", target_ref: "", workdir: "/opt/deployments", description: "", manifest: "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n" },
@@ -560,3 +606,6 @@ export function formConfigs(workspace: string): Record<string, FormConfig<AnyRow
     }),
   };
 }
+
+interface Role { id: string; name: string; builtin: boolean; permissions: string[]; version: number }
+interface Member { id: string; name: string; email: string; role_id: string; role_name: string; owner: boolean; active: boolean; state: string; version: number }

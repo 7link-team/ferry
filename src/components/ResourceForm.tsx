@@ -11,7 +11,7 @@
  * `secret` field never shows a stored value in any mode, only whether one is
  * set (§8 of the design doc).
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,19 +30,23 @@ import { href, navigate, useRoute } from "../router";
 import type { FormConfig, FormField, Option, Options } from "./dsl";
 
 function useOptions(source: Options | undefined) {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(typeof source === "function");
   const [options, setOptions] = useState<Option[]>(Array.isArray(source) ? source : []);
   useEffect(() => {
     if (typeof source !== "function") {
       setOptions(Array.isArray(source) ? source : []);
+      setError(""); setLoading(false);
       return;
     }
     let live = true;
-    void source().then((loaded) => live && setOptions(loaded));
+    setError(""); setLoading(true);
+    void source().then((loaded) => live && setOptions(loaded)).catch(cause => live && setError(errorText(cause))).finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
   }, [source]);
-  return options;
+  return { options, error, loading };
 }
 
 export function ResourceForm<T extends Record<string, unknown>>({
@@ -58,31 +62,40 @@ export function ResourceForm<T extends Record<string, unknown>>({
 }) {
   const route = useRoute();
   const creating = route.mode === "new";
-  const readOnly = route.mode === "view";
+  const copyId = creating ? new URLSearchParams(location.search).get("copy") : null;
 
   const [draft, setDraft] = useState<Partial<T>>(config.blank);
-  const [loading, setLoading] = useState(!creating);
+  const protectedRow = !creating && !!config.readOnly?.(draft);
+  const readOnly = route.mode === "view" || protectedRow;
+  const [loading, setLoading] = useState(!creating || !!copyId);
   const [saving, setSaving] = useState(false);
+  const [unavailableOptions, setUnavailableOptions] = useState<Record<string, boolean>>({});
+  const reportOptions = useCallback((key: string, blocked: boolean) => {
+    setUnavailableOptions(current => current[key] === blocked ? current : { ...current, [key]: blocked });
+  }, []);
+  const optionsBlocked = Object.values(unavailableOptions).some(Boolean);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (creating || !route.id) return;
+    const id = creating ? (config.copy ? copyId : null) : route.id;
+    if (!id) { setDraft(config.blank); setLoading(false); return; }
     let live = true;
     setLoading(true);
-    getResource<T>(workspace, config.resource, route.id, config.endpoint)
-      .then((row) => live && (setDraft(row), setError("")))
+    getResource<T>(workspace, config.resource, id, config.endpoint)
+      .then((row) => live && (setDraft(creating && config.copy ? config.copy(row) : row), setError("")))
       .catch((cause: unknown) => live && setError(errorText(cause)))
       .finally(() => live && setLoading(false));
     return () => {
       live = false;
     };
-  }, [creating, route.id, workspace, config.resource, config.endpoint]);
+  }, [creating, copyId, route.id, workspace, config]);
 
   const backToList = href({ ...route, mode: "list" }, {});
   const canEdit = permissions.has(`${config.resource}.${creating ? "create" : "update"}`);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (readOnly || !canEdit || loading || optionsBlocked) return;
     setSaving(true);
     setError("");
     try {
@@ -132,6 +145,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
                 <Field
                   key={field.key}
                   field={field}
+                  reportOptions={reportOptions}
                   value={draft[field.key]}
                   readOnly={readOnly || (!creating && !!field.immutable)}
                   asText={readOnly}
@@ -153,7 +167,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <Button asChild variant="outline">
               <a href={backToList}>返回列表</a>
             </Button>
-            {permissions.has(`${config.resource}.update`) && route.id && (
+            {!protectedRow && permissions.has(`${config.resource}.update`) && route.id && (
               <Button asChild>
                 <a href={href({ ...route, mode: "edit" }, {})}>编辑</a>
               </Button>
@@ -161,7 +175,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
           </>
         ) : (
           <>
-            <Button type="submit" disabled={saving || !canEdit}>
+            <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
               {creating ? "创建" : "保存"}
             </Button>
@@ -181,15 +195,22 @@ function Field<T>({
   readOnly,
   asText,
   onChange,
+  reportOptions,
 }: {
   field: FormField<T>;
   value: unknown;
   readOnly: boolean;
   asText: boolean;
   onChange: (value: unknown) => void;
+  reportOptions: (key: string, blocked: boolean) => void;
 }) {
-  const options = useOptions(field.options);
+  const { options, error: optionsError, loading: optionsLoading } = useOptions(field.options);
+  useEffect(() => {
+    reportOptions(field.key, optionsLoading || !!optionsError);
+    return () => reportOptions(field.key, false);
+  }, [field.key, optionsLoading, optionsError, reportOptions]);
   const text = String(value ?? "");
+  if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}，请刷新页面重试。</p></Wrapper>;
 
   const label = (
     <span className="text-sm font-medium">
@@ -207,6 +228,30 @@ function Field<T>({
         <p className="text-sm text-muted-foreground">{value ? "已设置" : "未设置"}</p>
       </Wrapper>
     );
+
+  if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
+
+  if (field.type === "multiselect") {
+    const selected = new Set(Array.isArray(value) ? value as string[] : []);
+    const toggle = (key: string, checked: boolean) => {
+      const next = new Set(selected);
+      if (checked) {
+        const add = (key: string) => { if (next.has(key)) return; next.add(key); options.find(o => o.value === key)?.requires?.forEach(add); };
+        add(key);
+      } else {
+        next.delete(key);
+        let changed = true;
+        while (changed) { changed = false; for (const option of options) if (next.has(option.value) && option.requires?.some(key => !next.has(key))) { next.delete(option.value); changed = true; } }
+      }
+      onChange([...next]);
+    };
+    return <Wrapper field={field}><fieldset className="space-y-3"><legend>{label}</legend>
+      {[...new Set(options.map(o => o.group ?? "选项"))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
+        {options.filter(o => (o.group ?? "选项") === group).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.label}</label>)}
+      </div></div>)}
+      {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+    </fieldset></Wrapper>;
+  }
 
   if (asText)
     return (

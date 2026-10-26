@@ -89,6 +89,7 @@ pub mod workspace_roles {
         pub builtin: i64,
         pub created_at: i64,
         pub updated_at: i64,
+        pub version: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -108,6 +109,7 @@ pub mod workspace_members {
         pub state: String,
         pub created_at: i64,
         pub updated_at: i64,
+        pub version: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

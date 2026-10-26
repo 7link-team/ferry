@@ -60,6 +60,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             wait(lambda:api('/workspaces/upgrade/pipeline-runs/'+run)['state'] not in ('queued','running'))
             paths=['/me']+['/workspaces/upgrade/'+resource+'/'+id for resource,id in [('hosts',host),('credentials',credential),('repositories',repository),('pipelines',pipeline),('pipeline-runs',run)]]
             before={path:api(path) for path in paths}
+            roles_before = api('/workspaces/upgrade/roles')['items']
             process.terminate(); process.wait(timeout=20)
             process=launch(new,log)
             for path in paths:
@@ -69,6 +70,17 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     assert after['user'].get('is_superadmin', False) is False
                     before[path]['user']['is_superadmin'] = False
                 assert after==before[path], f'Upgrade changed existing resource: {path}'
+            roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
+            for role in roles_before:
+                migrated = roles_after[role['id']]
+                assert migrated['version'] == 1
+                for field in ('id','name','permissions','builtin'):
+                    assert migrated[field] == role[field], f'Upgrade changed role {field}'
+            members = api('/workspaces/upgrade/members')['items']
+            assert len(members) == 1 and members[0]['owner'] and members[0]['version'] == 1
+            custom = create('roles', {'name':'Migrated custom','permissions':['hosts.create']})
+            assert 'hosts.read' in api('/workspaces/upgrade/roles/'+custom)['permissions']
+            print('PASS: existing roles/membership preserved with version 1; new role management works after migration')
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
