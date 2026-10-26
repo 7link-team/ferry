@@ -344,6 +344,7 @@ pub async fn delete(
     scope.require("cron-jobs.delete")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     scoped(&tx, &scope, id).await?;
+    crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "cron-job", &[id]).await?;
     if busy(&tx, scope.workspace_id, id).await? {
         return Err(ApiError::conflict("任务仍有排队/执行中或待核实记录。"));
     }

@@ -104,7 +104,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     return ()=>{live=false;clearTimeout(timer);};
   },[route.mode,route.id,workspace,config,draft]);
   const backToList = href({ ...route, mode: "list" }, {});
-  const canEdit = permissions.has(`${config.resource}.${creating ? "create" : "update"}`);
+  const canEdit = permissions.has(`${config.permissionResource ?? config.resource}.${creating ? "create" : "update"}`);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -192,7 +192,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <Button asChild variant="outline">
               <a href={backToList}>返回列表</a>
             </Button>
-            {!protectedRow && permissions.has(`${config.resource}.update`) && route.id && (
+            {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && (
               <Button asChild>
                 <a href={href({ ...route, mode: "edit" }, {})}>编辑</a>
               </Button>

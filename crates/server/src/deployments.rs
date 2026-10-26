@@ -288,6 +288,8 @@ pub async fn remove(
     scope.require("deployments.delete")?;
     let r = scoped(&s.db, &scope, &id).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "deployment", &[Id::from(r.id)])
+        .await?;
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "deployment", &[Id::from(r.id)])
         .await?;
     crate::variables::check_object_removal(&tx, scope.workspace_id, "deploy", r.id.into()).await?;

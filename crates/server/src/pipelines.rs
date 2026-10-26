@@ -253,6 +253,7 @@ pub async fn remove(
     scope.require("pipelines.delete")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id]).await?;
+    crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id]).await?;
     crate::variables::check_object_removal(&tx, scope.workspace_id, "build", id).await?;
     let affected = pipelines::Entity::delete_many()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))

@@ -26,6 +26,16 @@ interface Summary {
   as_of: number;
 }
 const labels: Record<string, string> = {
+  "alert-rules": "告警规则",
+  "alert-events": "告警事件",
+  "cron-jobs": "定时任务",
+  "cron-runs": "定时任务执行",
+  firing: "未恢复",
+  recovered: "已恢复",
+  "alert-triggered": "告警触发",
+  "alert-recovered": "告警恢复",
+  "needs-review": "需核实",
+  skipped: "已跳过",
   hosts: "主机",
   "host-groups": "主机组",
   tags: "标签",

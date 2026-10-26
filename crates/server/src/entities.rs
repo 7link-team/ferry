@@ -658,3 +658,57 @@ pub mod cron_runs {
     pub enum Relation {}
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+pub mod alert_rules {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "alert_rules")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub description: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub metric: String,
+        pub threshold: i64,
+        pub enabled: i64,
+        pub run_as: i64,
+        pub webhook: String,
+        pub last_error: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod alert_events {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "alert_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub rule_id: i64,
+        pub rule_name: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub state: String,
+        pub message: String,
+        pub triggered_at: i64,
+        pub recovered_at: i64,
+        pub trigger_delivery: String,
+        pub recovery_delivery: String,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}

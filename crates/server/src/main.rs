@@ -1,3 +1,4 @@
+mod alerts;
 mod assets;
 mod auth;
 mod channel;
@@ -154,7 +155,8 @@ async fn main() -> anyhow::Result<()> {
         drain_rx.clone(),
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
-    let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx));
+    let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
+    let alerts_task = tokio::spawn(alerts::scheduler(s.clone(), drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
@@ -163,6 +165,18 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/alert-rules",
+            get(alerts::list).post(alerts::create),
+        )
+        .route(
+            "/{workspace}/alert-rules/{id}",
+            get(alerts::get)
+                .patch(alerts::update)
+                .delete(alerts::delete),
+        )
+        .route("/{workspace}/alert-events", get(alerts::history))
+        .route("/{workspace}/alert-events/{id}", get(alerts::detail))
         .route(
             "/{workspace}/cron-jobs",
             get(cron_jobs::list).post(cron_jobs::create),
@@ -490,6 +504,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let _ = drain.send(true);
+    alerts_task.await?;
     cron_task.await?;
     deployment_task.await?;
     pipeline_task.await?;

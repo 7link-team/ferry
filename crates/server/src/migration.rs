@@ -75,6 +75,7 @@ impl MigratorTrait for Migrator {
             Box::new(ResourceTemplates),
             Box::new(WorkspacePreferences),
             Box::new(ScheduledTasks),
+            Box::new(AlertMonitoring),
         ]
     }
 }
@@ -1968,6 +1969,65 @@ impl MigrationTrait for ScheduledTasks {
                     t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
                 }
                 t.col(long_text("output", backend).not_null());
+            }
+            execute_schema(m, SchemaStatement::Table(t)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct AlertMonitoring;
+impl MigrationName for AlertMonitoring {
+    fn name(&self) -> &str {
+        "alert_monitoring_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AlertMonitoring {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for name in ["alert_rules", "alert_events"] {
+            let mut t = create_table(name, backend);
+            t.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in [
+                "workspace_id",
+                "target_ref",
+                "version",
+                "created_at",
+                "updated_at",
+            ] {
+                t.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            t.col(
+                ColumnDef::new(Alias::new("target_kind"))
+                    .string_len(30)
+                    .not_null(),
+            );
+            let (numbers, texts): (&[&str], &[&str]) = if name == "alert_rules" {
+                (
+                    &["threshold", "enabled", "run_as"],
+                    &["name", "description", "metric", "webhook", "last_error"],
+                )
+            } else {
+                (
+                    &["rule_id", "triggered_at", "recovered_at"],
+                    &[
+                        "rule_name",
+                        "state",
+                        "message",
+                        "trigger_delivery",
+                        "recovery_delivery",
+                    ],
+                )
+            };
+            for key in numbers {
+                t.col(ColumnDef::new(Alias::new(*key)).big_integer().not_null());
+            }
+            for key in texts {
+                t.col(long_text(key, backend).not_null());
             }
             execute_schema(m, SchemaStatement::Table(t)).await?;
         }

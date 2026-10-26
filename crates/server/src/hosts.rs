@@ -440,6 +440,7 @@ async fn host_is_free(
     id: &Id,
 ) -> Result<()> {
     crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
+    crate::alerts::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(*workspace_id))
         .filter(pipelines::Column::TargetKind.eq("host"))
@@ -786,8 +787,8 @@ pub async fn list_activity(
 pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     scope.require("dashboard.read")?;
     use crate::entities::{
-        credentials, deployment_revisions, deployments, pipeline_runs, repositories,
-        workspace_members, workspace_roles,
+        alert_events, alert_rules, credentials, cron_jobs, cron_runs, deployment_revisions,
+        deployments, pipeline_runs, repositories, workspace_members, workspace_roles,
     };
     use sea_orm::QueryOrder;
     let mut counts = serde_json::Map::new();
@@ -808,6 +809,8 @@ pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<V
             }
         };
     }
+    count!(alert_rules, "alert-rules", "alerts.read");
+    count!(cron_jobs, "cron-jobs", "cron-jobs.read");
     count!(hosts, "hosts", "hosts.read");
     count!(host_groups, "host-groups", "host-groups.read");
     count!(tags, "tags", "tags.read");
@@ -839,6 +842,8 @@ pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<V
             }
         };
     }
+    distribution!(alert_events, "alert-events", "alerts.read");
+    distribution!(cron_runs, "cron-runs", "cron-jobs.read");
     distribution!(hosts, "hosts", "hosts.read");
     if let Some(Value::Object(host_states)) = states.get_mut("hosts") {
         for state in STATES {

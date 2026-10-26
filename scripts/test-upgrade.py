@@ -88,6 +88,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert api('/workspaces/upgrade/cron-jobs/'+scheduled)['next_run_at']==0
             assert api('/workspaces/upgrade/cron-jobs/'+scheduled+'/runs')['items']==[]
             print('PASS: scheduled task and execution history schemas work after upgrade')
+            alert=create('alert-rules', {'name':'Migrated monitor','target_kind':'host','target_ref':host,'metric':'offline','enabled':False})
+            assert not api('/workspaces/upgrade/alert-rules/'+alert)['has_webhook']
+            assert api('/workspaces/upgrade/alert-events')['items']==[]
+            print('PASS: alert rules and event history schemas work after upgrade')
             for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:
                 template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})
                 rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})

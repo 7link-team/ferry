@@ -187,6 +187,11 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
   },
 });
 
+interface AlertRule {id:string;name:string;description:string;target_kind:string;target_ref:string;metric:string;threshold:number;enabled:boolean;has_webhook:boolean;webhook?:string;clear_webhook?:boolean;last_error:string;version:number}
+interface AlertEvent {id:string;rule_id:string;rule_name:string;state:string;message:string;triggered_at:number;recovered_at:number;trigger_delivery:string;recovery_delivery:string;version:number}
+const alertTargets=[{value:"host",label:"主机"},{value:"pipeline",label:"流水线"},{value:"deployment",label:"应用"},{value:"cron-job",label:"定时任务"}];
+const alertMetrics=[{value:"offline",label:"离线"},{value:"load1",label:"一分钟负载"},{value:"memory-percent",label:"内存使用率（%）"},{value:"disk-percent",label:"磁盘使用率（%）"},{value:"execution-failed",label:"最近执行失败"}];
+const alertEventLink={label:"告警事件",to:()=>({group:"deploy",item:"alert-events",mode:"list" as const})};
 interface CronJob {id:string;name:string;description:string;scope:string;schedule:string;timezone:string;enabled:boolean;action:string;target_kind:string;target_ref:string;command:string;timeout_seconds:number;max_retries:number;retry_delay_seconds:number;next_run_at:number;run_as_name:string;version:number}
 interface CronRun {id:string;job_id:string;job_name:string;scope:string;state:string;scheduled_at:number;started_at:number;finished_at:number;attempt:number;output:string;config:string;downstream_id:string;downstream_kind:string;version:number;trigger_kind:string}
 const cronState=(state:string)=>({queued:"排队中",running:"执行中",succeeded:"成功",failed:"失败",skipped:"已跳过","needs-review":"需核实"}[state]??state);
@@ -200,6 +205,8 @@ const cronLinks=(workspace:string)=>[
 
 export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void, hostStates: Option[] = STATES): Record<string, ListConfig<AnyRow>> {
   return {
+    "alert-rules": list<AlertRule>({resource:"alert-rules",permissionResource:"alerts",rowKey:r=>r.id,filters:[{key:"q",label:"名称",type:"text"},{key:"target_kind",label:"目标类型",type:"select",options:alertTargets}],columns:[{key:"name",label:"名称",sortable:true},{key:"metric",label:"指标",render:r=>alertMetrics.find(m=>m.value===r.metric)?.label??r.metric},{key:"threshold",label:"阈值"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"has_webhook",label:"Webhook",render:r=>r.has_webhook?"已配置":"未配置"},{key:"last_error",label:"检查异常"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"alerts.update",to:r=>({id:r.id,mode:"edit"})},{...alertEventLink,query:(r:AlertRule)=>({rule_id:r.id})},{label:"删除",permission:"alerts.delete",destructive:true,action:r=>deleteResource(workspace,"alert-rules",r.id)}],toolbar:{create:true,import:false,export:false}}),
+    "alert-events": list<AlertEvent>({resource:"alert-events",rowKey:r=>r.id,filters:[{key:"rule_id",label:"规则 ID",type:"text"},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]}],columns:[{key:"rule_name",label:"规则"},{key:"state",label:"状态",render:r=>r.state==="firing"?"未恢复":"已恢复"},{key:"triggered_at",label:"触发时间",sortable:true,render:r=>cronDate(r.triggered_at)},{key:"recovered_at",label:"恢复时间",render:r=>cronDate(r.recovered_at)},{key:"trigger_delivery",label:"触发通知"},{key:"recovery_delivery",label:"恢复通知"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})}],toolbar:{create:false,import:false,export:false}}),
     "cron-jobs": list<CronJob>({resource:"cron-jobs",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"}],columns:[{key:"name",label:"名称",sortable:true},{key:"schedule",label:"Cron 表达式"},{key:"timezone",label:"时区"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"next_run_at",label:"下次执行",sortable:true,render:r=>cronDate(r.next_run_at)},{key:"run_as_name",label:"执行身份"}],actions:[
       {label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"cron-jobs.update",to:r=>({id:r.id,mode:"edit"})},
       {label:"立即执行",permission:"cron-jobs.run",action:async r=>{const result=await runItemAction<{id:string}>(workspace,"cron-jobs",r.id,"run-now",{});navigate({group:r.scope,item:"cron-runs",id:result.id,mode:"view"},{});}},
@@ -523,6 +530,19 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
 export function formConfigs(workspace: string, permissions?: Set<string>): Record<string, FormConfig<AnyRow>> {
   return {
+    "alert-rules": form<AlertRule>({resource:"alert-rules",permissionResource:"alerts",heading:r=>r.name,blank:{name:"",description:"",target_kind:"host",target_ref:"",metric:"offline",threshold:0,enabled:false,webhook:"",clear_webhook:false},viewActions:[alertEventLink],sections:[{fields:[
+      {key:"name",label:"名称",type:"text",required:true},{key:"enabled",label:"启用",type:"switch"},
+      {key:"target_kind",label:"目标类型",type:"select",required:true,immutable:true,options:alertTargets,resetOnChange:["target_ref","metric"]},
+      ...([['host','hosts','主机'],['pipeline','pipelines','流水线'],['deployment','deployments','应用'],['cron-job','cron-jobs','定时任务']] as const).map(([kind,resource,label])=>({key:"target_ref",label:`目标${label}`,type:"select" as const,required:true,immutable:true,when:(d:Partial<AlertRule>)=>d.target_kind===kind,options:namedOptions(workspace,resource)})),
+      {key:"metric",label:"指标",type:"select",required:true,immutable:true,when:d=>d.target_kind==="host",options:alertMetrics.filter(m=>m.value!=="execution-failed")},
+      {key:"metric",label:"指标",type:"select",required:true,immutable:true,when:d=>d.target_kind!=="host",options:alertMetrics.filter(m=>m.value==="execution-failed")},
+      {key:"threshold",label:"阈值",type:"number",required:true,when:d=>!!d.metric&&!['offline','execution-failed'].includes(d.metric),help:"指标严格大于阈值时触发；内存和磁盘范围0–100，负载为非负整数。"},
+      {key:"webhook",label:"Webhook 地址",type:"password",stored:"has_webhook",help:"可选HTTP(S)地址；加密保存、不回显。编辑留空保留原地址。触发和恢复各尝试一次，失败不自动重试。"},
+      {key:"clear_webhook",label:"清除已有 Webhook",type:"switch",when:d=>!!d.has_webhook},
+      {key:"description",label:"说明",type:"textarea",span:2},
+      {key:"last_error",label:"检查异常",type:"text",immutable:true,when:d=>!!d.last_error,help:"检查执行身份的账号权限和目标是否仍然有效。"}
+    ]}]}),
+    "alert-events": form<AlertEvent>({resource:"alert-events",heading:r=>r.rule_name,blank:{},readOnly:()=>true,pollMs:r=>r.state==="firing"||r.trigger_delivery==="投递中"||r.recovery_delivery==="投递中"?2000:0,viewActions:[{label:"返回规则",to:()=>({group:"deploy",item:"alerts",mode:"list"})}],sections:[{fields:[{key:"rule_name",label:"规则",type:"text"},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]},{key:"message",label:"触发信息",type:"textarea",span:2},{key:"trigger_delivery",label:"触发通知",type:"text"},{key:"recovery_delivery",label:"恢复通知",type:"text"}]}]}),
     "cron-jobs": form<CronJob>({resource:"cron-jobs",heading:r=>r.name,blank:{name:"",description:"",scope:"host",schedule:"0 * * * *",timezone:"",enabled:false,action:"",target_kind:"",target_ref:"",command:"",timeout_seconds:1800,max_retries:0,retry_delay_seconds:30},viewActions:[{label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})}],sections:[{fields:[
       {key:"name",label:"名称",type:"text",required:true},{key:"scope",label:"所属模块",type:"select",resetOnChange:["action","target_kind","target_ref","command"],options:[{value:"host",label:"主机"},{value:"build",label:"构建"},{value:"deploy",label:"部署"}],immutable:true},
       {key:"enabled",label:"启用定时执行",type:"switch"},{key:"schedule",label:"Cron 表达式",type:"text",required:true,help:"5字段：分 时 日 月 周；6字段在最前面增加秒。停机错过的触发不补跑，同任务重叠时跳过并记录。"},

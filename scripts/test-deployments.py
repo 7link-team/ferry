@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import random
 import shutil
 import socket
 import subprocess
@@ -24,10 +25,24 @@ def command(args, **kw):
         raise
 
 
+allocated_ports = set()
+
+
 def port():
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
+    # Docker binds later, potentially in a Linux VM. An OS-selected ephemeral
+    # port can be reused by an outgoing connection between preview and deploy.
+    # Stay below the default Linux/macOS ephemeral ranges and check local use.
+    for candidate in random.SystemRandom().sample(range(20000, 30000), 100):
+        if candidate in allocated_ports:
+            continue
+        with socket.socket() as s:
+            try:
+                s.bind(('0.0.0.0', candidate))
+            except OSError:
+                continue
+            allocated_ports.add(candidate)
+            return candidate
+    raise AssertionError('no free fixture port in 20000–29999')
 
 
 def eventually(fn, seconds=90):
@@ -284,17 +299,23 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             check(kind+' queued snapshot not changed by later rotation',done(id)['state']=='succeeded' and container_env()['BOUND_SECRET']=='fixture-secret-v2')
             start(id,secret_rev)
             check(kind+' rollback restores historical secret',done(id)['state']=='succeeded' and container_env()['BOUND_SECRET']==secret)
+            alert_id=create('alert-rules',{'name':'Deployment failure '+kind,'target_kind':'deployment','target_ref':id,'metric':'execution-failed','enabled':True})
+            def alert_state(state):
+                return any(e['state']==state for e in api('/workspaces/ops/alert-events?rule_id='+alert_id)['items'])
             command(['docker','exec',name,'touch','/tmp/deployment-fail','/tmp/deployment-leak'])
             start(id); failed=done(id)
             check(kind+' secret-bearing command error output suppressed',failed['state']=='failed' and 'fixture-secret' not in json.dumps(failed) and 'fixture-command-failed' not in json.dumps(failed))
             command(['docker','exec',name,'rm','/tmp/deployment-fail','/tmp/deployment-leak'])
             check(kind+' failed execution cleans secret files',env_paths()==[])
+            check(kind+' actual deployment failure triggers alert',eventually(lambda:alert_state('firing')))
             update(id,manifest('v2',web_port))
             for variable in [object_id,module_id,global_id,empty_id]:
                 api('/workspaces/ops/variables/'+variable,method='DELETE',status=204)
             start(id,secret_rev)
             check(kind+' history remains usable after current variables deleted',done(id)['state']=='succeeded' and container_env()['BOUND_SECRET']==secret)
             check(kind+' historical files cleaned again',env_paths()==[])
+            check(kind+' actual successful rollback recovers alert',eventually(lambda:alert_state('recovered')))
+            api('/workspaces/ops/alert-rules/'+alert_id,method='DELETE',status=204)
             cron={'name':'scheduled-'+kind,'scope':'deploy','schedule':'0 * * * *','timezone':'UTC','enabled':False,'action':'restart','target_kind':'deployment','target_ref':id,'command':'','timeout_seconds':60,'max_retries':0,'retry_delay_seconds':1}
             cron_id=create('cron-jobs',cron)
             def scheduled():

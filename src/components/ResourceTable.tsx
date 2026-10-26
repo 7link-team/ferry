@@ -197,7 +197,7 @@ export function ResourceTable<T>({
   const visibleBulk = (config.bulk ?? []).filter(
     (action) => !action.permission || permissions.has(action.permission),
   );
-  const canCreate = config.toolbar?.create !== false && permissions.has(`${config.resource}.create`);
+  const canCreate = config.toolbar?.create !== false && permissions.has(`${config.permissionResource ?? config.resource}.create`);
 
   const allOnPageSelected = rows.length > 0 && rows.every((row) => selected.has(config.rowKey(row)));
   const toggleAll = () => {
@@ -304,7 +304,7 @@ export function ResourceTable<T>({
 
           <span className="flex-1" />
 
-          {config.toolbar?.import !== false && permissions.has(`${config.resource}.create`) && (
+          {config.toolbar?.import !== false && permissions.has(`${config.permissionResource ?? config.resource}.create`) && (
             <Button size="sm" variant="outline" disabled title="导入待实现">
               <Upload /> 导入
             </Button>

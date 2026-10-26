@@ -39,6 +39,7 @@ export const nav: NavGroup[] = [
       { key: "marketplace", label: "应用市场", resource: "marketplace", permission: "marketplace.read" },
       { key: "variables", label: "密钥变量", resource: "variables", params: { scope: "deploy" }, permission: "variables.read" },
       { key: "alerts", label: "报警监控", resource: "alert-rules", permission: "alerts.read" },
+      { key: "alert-events", label: "告警事件", resource: "alert-events", permission: "alerts.read" },
       { key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "deploy" }, permission: "cron-jobs.read" },
       { key: "cron-runs", label: "定时任务执行历史", resource: "cron-runs", params: {scope:"deploy"}, permission:"cron-jobs.read", hidden:true },
     ],

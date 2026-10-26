@@ -56,6 +56,7 @@ export interface BulkAction {
 }
 
 export interface ListConfig<T> {
+  permissionResource?: string;
   /** REST resource name; the URL is /api/workspaces/{ws}/{resource}. */
   resource: string;
   /** Explicit API path for global resources (without /api). */
@@ -114,6 +115,7 @@ export interface FormField<T> {
 }
 
 export interface FormConfig<T> {
+  permissionResource?: string;
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
