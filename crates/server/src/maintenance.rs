@@ -408,14 +408,24 @@ pub async fn create_dictionary(
     scope: Scope,
     Json(body): Json<DictionaryBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_dictionary_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_dictionary_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: DictionaryBody,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("dictionaries.create")?;
     let values = validate(&body)?;
-    let tx = s.db.begin().await?;
-    lock(&tx, scope.workspace_id).await?;
+    lock(tx, scope.workspace_id).await?;
     if dictionaries::Entity::find()
         .filter(dictionaries::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(dictionaries::Column::Key.eq(&body.key))
-        .one(&tx)
+        .one(tx)
         .await?
         .is_some()
     {
@@ -434,12 +444,12 @@ pub async fn create_dictionary(
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&tx)
+    .exec(tx)
     .await?;
-    write_items(&s, &tx, scope.workspace_id, id, &values).await?;
+    write_items(&s, tx, scope.workspace_id, id, &values).await?;
     crate::hosts::activity_in(
         &s,
-        &tx,
+        tx,
         &scope,
         "create",
         "dictionaries",
@@ -447,7 +457,6 @@ pub async fn create_dictionary(
         json!({"items":values.len()}),
     )
     .await?;
-    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 pub async fn update_dictionary(
@@ -576,6 +585,7 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
         }
         let cutoff = db::now() - days * 86_400_000;
         let mut removed = 0;
+        let mut artifact_dirs = Vec::new();
         if deployments {
             let rows = revisions::Entity::find()
                 .filter(revisions::Column::WorkspaceId.eq(workspace))
@@ -591,6 +601,20 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
                                 "running",
                                 "needs-review",
                             ]))
+                            .into_query(),
+                    ),
+                )
+                .filter(
+                    revisions::Column::Id.not_in_subquery(
+                        crate::entities::deployment_target_states::Entity::find()
+                            .select_only()
+                            .column(
+                                crate::entities::deployment_target_states::Column::CurrentRevision,
+                            )
+                            .filter(
+                                crate::entities::deployment_target_states::Column::WorkspaceId
+                                    .eq(workspace),
+                            )
                             .into_query(),
                     ),
                 )
@@ -625,6 +649,22 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
                 .all(&tx)
                 .await?;
             for row in rows {
+                crate::entities::deployment_revision_targets::Entity::delete_many()
+                    .filter(
+                        crate::entities::deployment_revision_targets::Column::RevisionId.eq(row.id),
+                    )
+                    .filter(
+                        crate::entities::deployment_revision_targets::Column::WorkspaceId
+                            .eq(workspace),
+                    )
+                    .exec(&tx)
+                    .await?;
+                crate::entities::deployment_artifact_refs::Entity::delete_many()
+                    .filter(
+                        crate::entities::deployment_artifact_refs::Column::RevisionId.eq(row.id),
+                    )
+                    .exec(&tx)
+                    .await?;
                 removed += revisions::Entity::delete_many()
                     .filter(revisions::Column::WorkspaceId.eq(workspace))
                     .filter(revisions::Column::Id.eq(row.id))
@@ -635,6 +675,18 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
         } else {
             let rows = runs::Entity::find()
                 .filter(runs::Column::WorkspaceId.eq(workspace))
+                .filter(
+                    runs::Column::Id.not_in_subquery(
+                        crate::entities::deployment_artifact_refs::Entity::find()
+                            .select_only()
+                            .column(crate::entities::deployment_artifact_refs::Column::RunId)
+                            .filter(
+                                crate::entities::deployment_artifact_refs::Column::WorkspaceId
+                                    .eq(workspace),
+                            )
+                            .into_query(),
+                    ),
+                )
                 .filter(
                     Expr::col(runs::Column::Id).not_in_subquery(
                         cron_runs::Entity::find()
@@ -658,6 +710,11 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
                 .all(&tx)
                 .await?;
             for row in rows {
+                crate::entities::pipeline_artifacts::Entity::delete_many()
+                    .filter(crate::entities::pipeline_artifacts::Column::RunId.eq(row.id))
+                    .exec(&tx)
+                    .await?;
+                artifact_dirs.push(crate::artifacts::directory(s, row.id));
                 logs::Entity::delete_many()
                     .filter(logs::Column::RunId.eq(row.id))
                     .exec(&tx)
@@ -692,6 +749,13 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
             .await?;
         }
         tx.commit().await?;
+        for directory in artifact_dirs {
+            if let Err(error) = tokio::fs::remove_dir_all(&directory).await {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(path=%directory.display(), %error, "无法清理已删除构建历史的产物");
+                }
+            }
+        }
     }
     Ok(())
 }

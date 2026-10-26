@@ -35,6 +35,7 @@ export const nav: NavGroup[] = [
     items: [
       { key: "apps", label: "应用", resource: "deployments", permission: "deployments.read" },
       { key: "revisions", label: "部署历史", resource: "deployment-revisions", permission: "deployments.read" },
+      { key: "config-templates", label: "配置文件模板", resource: "config-templates", permission: "config-templates.read" },
       { key: "app-templates", label: "应用模版", resource: "app-templates", permission: "app-templates.read" },
       { key: "marketplace", label: "应用市场", resource: "marketplace", permission: "marketplace.read" },
       { key: "marketplace-sources", label: "市场来源", resource: "marketplace-sources", permission: "marketplace-sources.read" },
@@ -53,6 +54,7 @@ export const nav: NavGroup[] = [
       { key: "repository-auth", label: "仓库授权", resource: "repository-auth", permission: "credentials.read" },
       { key: "api-tokens", label: "API 令牌", resource: "credentials", params:{kind:"token"}, permission:"credentials.read", hidden:true },
       { key: "pipelines", label: "流水线", resource: "pipelines", permission: "pipelines.read" },
+      { key: "artifacts", label: "构建产物", resource: "pipeline-artifacts", permission: "pipelines.read" },
       { key: "runs", label: "执行历史", resource: "pipeline-runs", permission: "pipelines.read" },
       { key: "pipeline-templates", label: "流水线模版", resource: "pipeline-templates", permission: "pipeline-templates.read" },
       { key: "credentials", label: "授权认证", resource: "credentials", permission: "credentials.read" },

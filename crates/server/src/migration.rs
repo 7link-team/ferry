@@ -79,6 +79,11 @@ impl MigratorTrait for Migrator {
             Box::new(Marketplace),
             Box::new(RepositoryAuthorization),
             Box::new(RepositoryAuthorizationBinding),
+            Box::new(PipelineArtifacts),
+            Box::new(ConfigTemplates),
+            Box::new(DeploymentArtifacts),
+            Box::new(DeploymentGroups),
+            Box::new(ResourceImports),
         ]
     }
 }
@@ -2178,6 +2183,176 @@ impl MigrationTrait for RepositoryAuthorizationBinding {
             ),
         )
         .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct PipelineArtifacts;
+impl MigrationName for PipelineArtifacts {
+    fn name(&self) -> &str {
+        "pipeline_artifacts_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineArtifacts {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let mut table = create_table("pipeline_artifacts", m.get_database_backend());
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for name in [
+            "workspace_id",
+            "pipeline_id",
+            "run_id",
+            "size",
+            "mode",
+            "created_at",
+        ] {
+            table.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+        }
+        table.col(long_text("path", m.get_database_backend()).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("sha256"))
+                .string_len(64)
+                .not_null(),
+        );
+        execute_schema(m, SchemaStatement::Table(table)).await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct ConfigTemplates;
+impl MigrationName for ConfigTemplates {
+    fn name(&self) -> &str {
+        "configuration_templates_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ConfigTemplates {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for name in ["config_templates"] {
+            let backend = m.get_database_backend();
+            let mut table = create_table(name, backend);
+            table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+            for key in ["workspace_id", "version", "created_at", "updated_at"] {
+                table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+            }
+            table.col(
+                ColumnDef::new(Alias::new("name"))
+                    .string_len(255)
+                    .not_null(),
+            );
+            for key in ["description", "content", "parameters"] {
+                table.col(long_text(key, backend).not_null());
+            }
+            execute_schema(m, SchemaStatement::Table(table)).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct DeploymentArtifacts;
+impl MigrationName for DeploymentArtifacts {
+    fn name(&self) -> &str {
+        "deployment_artifact_refs_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DeploymentArtifacts {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let mut table = create_table("deployment_artifact_refs", m.get_database_backend());
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for key in ["workspace_id", "revision_id", "artifact_id", "run_id"] {
+            table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+        }
+        execute_schema(m, SchemaStatement::Table(table)).await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct DeploymentGroups;
+impl MigrationName for DeploymentGroups {
+    fn name(&self) -> &str {
+        "deployment_group_targets_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DeploymentGroups {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let mut table = create_table("deployment_revision_targets", m.get_database_backend());
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for key in [
+            "workspace_id",
+            "revision_id",
+            "host_id",
+            "position",
+            "started_at",
+            "finished_at",
+        ] {
+            table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+        }
+        for key in ["artifact", "expected_hash", "state", "output"] {
+            table.col(long_text(key, m.get_database_backend()).not_null());
+        }
+        execute_schema(m, SchemaStatement::Table(table)).await?;
+        let mut table = create_table("deployment_target_states", m.get_database_backend());
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for key in [
+            "workspace_id",
+            "deployment_id",
+            "host_id",
+            "current_revision",
+        ] {
+            table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+        }
+        execute_schema(m, SchemaStatement::Table(table)).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "deployment_target_states",
+                "deployment_target_current_unique",
+                Index::create()
+                    .name("deployment_target_current_unique")
+                    .table(Alias::new("deployment_target_states"))
+                    .col(Alias::new("deployment_id"))
+                    .col(Alias::new("host_id"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct ResourceImports;
+impl MigrationName for ResourceImports {
+    fn name(&self) -> &str {
+        "resource_imports_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ResourceImports {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        let mut table = create_table("resource_imports", backend);
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for key in ["workspace_id", "actor_id", "created_at", "committed_at"] {
+            table.col(ColumnDef::new(Alias::new(key)).big_integer().not_null());
+        }
+        for key in ["resource", "payload", "result"] {
+            table.col(long_text(key, backend).not_null());
+        }
+        execute_schema(m, SchemaStatement::Table(table)).await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

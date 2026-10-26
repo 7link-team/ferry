@@ -89,16 +89,11 @@ async fn summary(db: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<Sum
         .ok_or_else(ApiError::missing)
 }
 
-/// Serialize scope mutations and snapshot selection using the existing portable lock.
-/// The database write lock is retained until commit even after releasing the row.
+/// Serialize scope mutations using the stable workspace row. Inserting a
+/// temporary lock into an empty index can deadlock concurrent MySQL requests.
 pub async fn transaction(s: &AppState, workspace: Id) -> Result<DatabaseTransaction> {
     let tx = s.db.begin().await?;
-    let name = format!("variables:{workspace}");
-    let owner = s.next_id()?.to_string();
-    if !crate::lock::acquire(&tx, &name, &owner, db::now(), 60_000).await? {
-        return Err(ApiError::conflict("变量配置正在变化，请稍后重试。"));
-    }
-    crate::lock::release(&tx, &name, &owner).await?;
+    crate::workspace_admin::lock_workspace(&tx, workspace).await?;
     Ok(tx)
 }
 
@@ -201,6 +196,17 @@ pub async fn create(
     scope: Scope,
     Json(body): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("variables.create")?;
     if !valid_name(&body.name) {
         return Err(ApiError::bad("变量名限96个字母、数字、下划线或连字符。"));
@@ -225,8 +231,7 @@ pub async fn create(
             &id.to_string(),
         ),
     )?;
-    let tx = transaction(&s, scope.workspace_id).await?;
-    check_scope(&tx, scope.workspace_id, layer, reference).await?;
+    check_scope(tx, scope.workspace_id, layer, reference).await?;
     let result = variables::Entity::insert(variables::ActiveModel {
         id: Set(id.into()),
         workspace_id: Set(scope.workspace_id.into()),
@@ -240,7 +245,7 @@ pub async fn create(
         updated_at: Set(now),
         version: Set(1),
     })
-    .exec(&tx)
+    .exec(tx)
     .await;
     if let Err(error) = result {
         if matches!(
@@ -251,9 +256,9 @@ pub async fn create(
         }
         return Err(error.into());
     }
-    tx.commit().await?;
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "variables",
@@ -441,16 +446,10 @@ pub async fn remove(
             if row.scope == "deploy" && row.scope_ref != 0 && row.scope_ref != app.id {
                 continue;
             }
-            let manifest = crate::manifest::parse(&app.manifest)?;
-            if manifest.references().values().any(|name| name == &row.name) {
-                let names = std::collections::BTreeSet::from([row.name.clone()]);
-                let chosen =
-                    resolve(&tx, scope.workspace_id, "deploy", app.id.into(), &names).await?;
-                if chosen[&row.name].id == row.id {
-                    return Err(ApiError::conflict(
-                        "应用配置仍引用此变量，请先修改引用再删除。",
-                    ));
-                }
+            if crate::deployments::references_variable(&tx, &app, row.id).await? {
+                return Err(ApiError::conflict(
+                    "应用配置仍引用此变量，请先修改引用再删除。",
+                ));
             }
         }
     }
@@ -507,6 +506,21 @@ mod tests {
     };
     async fn fixture() -> (tempfile::TempDir, AppState) {
         let (dir, db) = crate::lock::tests::database().await;
+        for id in [1i64, 2] {
+            crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
+                id: Set(id),
+                slug: Set(format!("test-{id}")),
+                name: Set(format!("Test {id}")),
+                owner_id: Set(1),
+                join_code: Set(format!("join-{id}")),
+                pipeline_run_number: Set(0),
+                created_at: Set(0),
+                updated_at: Set(0),
+            })
+            .exec(&db)
+            .await
+            .unwrap();
+        }
         let state = Arc::new(crate::state::State {
             ids: Arc::new(crate::snowflake::Generator::new(1, Instant::now()).unwrap()),
             db,

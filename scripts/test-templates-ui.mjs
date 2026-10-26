@@ -123,6 +123,19 @@ try {
     assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
     console.log(`PASS ${resource}: UI create/copy/edit/delete, template selection, parameters, generate, conflict/reload, real resource creation`);
   }
+  await p.goto(`${origin}/tenant/deploy/config-templates`);
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.getByLabel('名称',{exact:false}).fill('Runtime file');
+  await p.getByLabel('配置文件模板',{exact:false}).fill('port={{ .Values.port }}\n');
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('link',{name:'编辑',exact:true}).click();
+  await p.getByLabel('配置文件模板',{exact:false}).fill('listen={{ .Values.port }}\n');
+  await p.getByRole('button',{name:'保存',exact:true}).click();
+  const configs=await get(root+'/config-templates');
+  assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');
+  await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('button',{name:'删除模板',exact:true}).click();
+  await p.waitForFunction(()=>!document.body.innerText.includes('Runtime file'));
+  console.log('PASS configuration template UI create/edit/delete with plain text content');
   assert.deepEqual(errors,[]);
   console.log('PASS no browser errors');
 } finally {

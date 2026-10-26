@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 enum Kind {
     App,
     Pipeline,
+    Config,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -111,7 +112,7 @@ fn parameters(text: &str, kind: Kind) -> Result<BTreeMap<String, Parameter>> {
         {
             return Err(ApiError::bad("参数名称、标签或类型无效。"));
         }
-        if (p.secret && (kind != Kind::App || p.kind != "string"))
+        if (p.secret && (kind == Kind::Pipeline || p.kind != "string"))
             || (p.kind != "string"
                 && (p.choices.is_some() || p.min_length.is_some() || p.max_length.is_some()))
             || (p.kind != "integer" && (p.min.is_some() || p.max.is_some()))
@@ -122,7 +123,7 @@ fn parameters(text: &str, kind: Kind) -> Result<BTreeMap<String, Parameter>> {
                 .is_some_and(|v| v.is_empty() || v.len() > 100 || v.iter().any(|s| s.is_empty()))
         {
             return Err(ApiError::bad(
-                "参数校验规则无效；secret仅用于应用模板的变量引用。",
+                "参数校验规则无效；secret仅用于应用或配置模板的变量引用。",
             ));
         }
         if let Some(value) = &p.default {
@@ -212,13 +213,24 @@ fn expand(
                         .ok_or_else(|| ApiError::bad(format!("模板引用了未声明的参数 {name}。")))?;
                     used.insert(name.to_owned());
                     let whole = start == 0 && end + 2 == text.len();
-                    if p.secret && (!whole || field != "/services/*/env/*/valueFrom") {
+                    if p.secret
+                        && kind != Kind::Config
+                        && (!whole || field != "/services/*/env/*/valueFrom")
+                    {
                         return Err(ApiError::bad(
                             "secret参数只能作为valueFrom的完整值，不能拼入命令或普通环境值。",
                         ));
                     }
                     if let Some(values) = values {
                         let replacement = &values[name];
+                        if p.secret && kind == Kind::Config {
+                            output.push_str(&format!(
+                                "\0variable/{}\0",
+                                replacement.as_str().unwrap()
+                            ));
+                            offset = end + 2;
+                            continue;
+                        }
                         if p.secret {
                             return Ok(json!(format!(
                                 "variable/{}",
@@ -261,7 +273,14 @@ fn validate_template(
     kind: Kind,
 ) -> Result<(Value, BTreeMap<String, Parameter>)> {
     let definitions = parameters(text, kind)?;
-    let doc = document(content)?;
+    let doc = if kind == Kind::Config {
+        if content.len() > 262144 || content.contains('\0') {
+            return Err(ApiError::bad("配置模板不能超过256KiB或包含空字符。"));
+        }
+        json!(content)
+    } else {
+        document(content)?
+    };
     let mut used = BTreeSet::new();
     expand(&doc, &definitions, None, kind, "", &mut used, 0)?;
     if definitions.keys().any(|name| !used.contains(name)) {
@@ -297,6 +316,12 @@ fn render_content(
         &mut BTreeSet::new(),
         0,
     )?;
+    if kind == Kind::Config {
+        return Ok(out
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| out.to_string()));
+    }
     let text = serde_json::to_string_pretty(&out).map_err(|_| ApiError::bad("无法生成配置。"))?;
     match kind {
         Kind::App => {
@@ -305,6 +330,7 @@ fn render_content(
         Kind::Pipeline => {
             crate::pipelines::validate_definition(&text)?;
         }
+        Kind::Config => unreachable!(),
     }
     Ok(text)
 }
@@ -342,6 +368,32 @@ const SPEC: Spec = Spec {
     default_sort: "name",
 };
 
+async fn config_unreferenced(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    id: Id,
+    name: &str,
+) -> Result<()> {
+    use crate::entities::deployments;
+    for row in deployments::Entity::find()
+        .filter(deployments::Column::WorkspaceId.eq(workspace))
+        .all(conn)
+        .await?
+    {
+        let manifest = crate::manifest::parse(&row.manifest)?;
+        if manifest
+            .services
+            .iter()
+            .flat_map(|s| &s.files)
+            .any(|f| f.from_template == id.to_string() || f.from_template == name)
+        {
+            return Err(ApiError::conflict(
+                "配置模板仍被应用引用，请先修改应用配置。",
+            ));
+        }
+    }
+    Ok(())
+}
 // Both resources have the same contract, but distinct tenant tables and permissions.
 macro_rules! template_api {
     ($module:ident,$entity:ident,$resource:literal,$kind:expr,$field:literal) => {
@@ -362,15 +414,21 @@ macro_rules! template_api {
                 scope.require(concat!($resource,".read"))?; Ok(Json(json_row(&scoped(&s.db,&scope,id).await?)))
             }
             pub async fn create(State(s):State<AppState>,scope:Scope,Json(body):Json<Body>) -> Result<(StatusCode,Json<Value>)> {
+                let tx=crate::variables::transaction(&s,scope.workspace_id).await?;
+                let result=create_in(&s,&tx,&scope,body).await?;
+                tx.commit().await?; Ok(result)
+            }
+            pub(crate) async fn create_in(s:&AppState,tx:&sea_orm::DatabaseTransaction,scope:&Scope,body:Body) -> Result<(StatusCode,Json<Value>)> {
                 scope.require(concat!($resource,".create"))?; validate_body(&body,$kind)?;
-                let id=s.next_id()?; let now=db::now(); let tx=s.db.begin().await?;
-                rows::Entity::insert(rows::ActiveModel {id:Set(id.into()),workspace_id:Set(scope.workspace_id.into()),name:Set(body.name.trim().to_owned()),description:Set(body.description),content:Set(body.content),parameters:Set(body.parameters),version:Set(1),created_at:Set(now),updated_at:Set(now)}).exec(&tx).await?;
-                crate::hosts::activity_in(&s,&tx,&scope,"create",$resource,&id,json!({"name":body.name})).await?; tx.commit().await?;
+                let id=s.next_id()?; let now=db::now();
+                rows::Entity::insert(rows::ActiveModel {id:Set(id.into()),workspace_id:Set(scope.workspace_id.into()),name:Set(body.name.trim().to_owned()),description:Set(body.description),content:Set(body.content),parameters:Set(body.parameters),version:Set(1),created_at:Set(now),updated_at:Set(now)}).exec(tx).await?;
+                crate::hosts::activity_in(&s,tx,&scope,"create",$resource,&id,json!({"name":body.name})).await?;
                 Ok((StatusCode::CREATED,Json(json!({"id":id,"version":1}))))
             }
             pub async fn update(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<Body>) -> Result<Json<Value>> {
                 scope.require(concat!($resource,".update"))?; validate_body(&body,$kind)?;
-                let tx=s.db.begin().await?;
+                let tx=if $kind==Kind::Config {crate::variables::transaction(&s,scope.workspace_id).await?} else {s.db.begin().await?};
+                if $kind==Kind::Config {let old=scoped(&tx,&scope,id).await?; if old.name!=body.name.trim() {config_unreferenced(&tx,scope.workspace_id,id,&old.name).await?;} }
                 let n=rows::Entity::update_many().col_expr(rows::Column::Name,Expr::value(body.name.trim().to_owned()))
                     .col_expr(rows::Column::Description,Expr::value(body.description)).col_expr(rows::Column::Content,Expr::value(body.content))
                     .col_expr(rows::Column::Parameters,Expr::value(body.parameters)).col_expr(rows::Column::UpdatedAt,Expr::value(db::now()))
@@ -381,7 +439,8 @@ macro_rules! template_api {
                 Ok(Json(json!({"id":id,"version":body.version+1})))
             }
             pub async fn delete(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<StatusCode> {
-                scope.require(concat!($resource,".delete"))?; let tx=s.db.begin().await?;
+                scope.require(concat!($resource,".delete"))?; let tx=if $kind==Kind::Config {crate::variables::transaction(&s,scope.workspace_id).await?} else {s.db.begin().await?};
+                if $kind==Kind::Config {let old=scoped(&tx,&scope,id).await?; config_unreferenced(&tx,scope.workspace_id,id,&old.name).await?;}
                 let n=rows::Entity::delete_many().filter(rows::Column::WorkspaceId.eq(scope.workspace_id)).filter(rows::Column::Id.eq(id)).exec(&tx).await?.rows_affected;
                 if n==0 {return Err(ApiError::missing());}
                 crate::hosts::activity_in(&s,&tx,&scope,"delete",$resource,&id,json!({})).await?; tx.commit().await?; Ok(StatusCode::NO_CONTENT)
@@ -390,10 +449,38 @@ macro_rules! template_api {
                 scope.require(concat!($resource,".read"))?; let row=scoped(&s.db,&scope,id).await?;
                 if row.version!=body.version {return Err(ApiError::conflict("模板已变化，请重新载入模板并确认参数。"));}
                 let text=render_content(&row.content,&row.parameters,&body.values,$kind)?;
+                let text=if $kind==Kind::Config { config_preview(&text) } else { text };
                 Ok(Json(json!({$field:text,"template_id":id,"template_version":row.version})))
             }
         }
     }
+}
+template_api!(
+    configs,
+    config_templates,
+    "config-templates",
+    Kind::Config,
+    "content"
+);
+/// NUL-delimited references are internal tokens, never accepted as literal input.
+pub(crate) fn config_preview(text: &str) -> String {
+    text.split('\0')
+        .enumerate()
+        .map(|(index, part)| {
+            if index % 2 == 1 {
+                format!("<{}>", part)
+            } else {
+                part.to_owned()
+            }
+        })
+        .collect()
+}
+pub(crate) fn config_content(
+    content: &str,
+    parameters: &str,
+    values: &BTreeMap<String, Value>,
+) -> Result<String> {
+    render_content(content, parameters, values, Kind::Config)
 }
 template_api!(apps, app_templates, "app-templates", Kind::App, "manifest");
 template_api!(
@@ -530,6 +617,30 @@ mod tests {
         doc["metadata"]["labels"] = json!({"valueFrom":"{{ .Values.token }}"});
         assert!(validate_template(&doc.to_string(), defs, Kind::App).is_err());
         assert!(parameters(defs, Kind::Pipeline).is_err());
+    }
+    #[test]
+    fn config_secrets_are_references_and_literals_cannot_forge_markers() {
+        let params = r#"[{"name":"password","type":"string","secret":true},{"name":"port","type":"integer","default":8080}]"#;
+        let output = config_content(
+            "port={{ .Values.port }}\npassword={{ .Values.password }}",
+            params,
+            &BTreeMap::from([("password".into(), json!("db-password"))]),
+        )
+        .unwrap();
+        assert_eq!(output, "port=8080\npassword=\0variable/db-password\0");
+        assert_eq!(
+            config_preview(&output),
+            "port=8080\npassword=<variable/db-password>"
+        );
+        assert!(config_content("bad\0text", "[]", &BTreeMap::new()).is_err());
+        assert!(
+            config_content(
+                "{{ .Values.password }}",
+                params,
+                &BTreeMap::from([("password".into(), json!("bad\0value"))])
+            )
+            .is_err()
+        );
     }
     #[test]
     fn boolean_defaults_and_no_recursive_expansion() {

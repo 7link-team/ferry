@@ -97,6 +97,18 @@ jobs:
       # build.rs's empty placeholder is enough and the npm build is skipped.
       - run: cargo build --locked -p ferry-server
       - run: ./scripts/test-backends.sh
+      - name: CSV and XLSX import/export on all three databases
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          python3 -m venv "$RUNNER_TEMP/transfer-venv"
+          "$RUNNER_TEMP/transfer-venv/bin/pip" install openpyxl==3.1.5
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE transfer_test;'
+          createdb -h 127.0.0.1 -U postgres transfer_test
+          "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/transfer_test "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/transfer_test "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py
       - name: Platform initialization and authorization on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -196,7 +208,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [ssh, runner, pipelines, build-ui, deployments, variables-ui]
+        harness: [ssh, runner, pipelines, build-ui, deployments, deployments-docker, deployments-native, deployments-stack, deployments-groups, variables-ui]
     env:
       FERRY_REQUIRE_ALL: "1"
     steps:
@@ -211,26 +223,26 @@ jobs:
           sudo apt-get install -y bc lsof openssh-client python3 git curl libdigest-sha-perl
           docker info
       - uses: actions/setup-node@v4
-        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
+        if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         with:
           node-version: "24"
           cache: npm
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
+      - if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         run: npm ci
       - uses: actions/cache@v4
-        if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
+        if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         id: playwright
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
+      - if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         name: Install Chromium and system libraries
         run: |
           npx playwright install-deps chromium
           if [ "${{ steps.playwright.outputs.cache-hit }}" != true ]; then
             npx playwright install chromium
           fi
-      - if: matrix.harness == 'build-ui' || matrix.harness == 'deployments' || matrix.harness == 'variables-ui'
+      - if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         run: npm run build
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - name: Platform initialization and management in Chromium
@@ -239,6 +251,9 @@ jobs:
       - name: Workspace management browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-workspace-admin-ui.mjs
+      - name: Import/export browser acceptance
+        if: matrix.harness == 'build-ui'
+        run: node scripts/test-transfers-ui.mjs
       - name: Template browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-templates-ui.mjs
@@ -264,6 +279,12 @@ jobs:
           # SSH's strict flag is presence-based, even "0" would enable it.
           # Other jobs do not supply sshd coordinates to workspace unit tests.
           if [ "$HARNESS" = ssh ]; then export FERRY_REQUIRE_LIVE=1; fi
+          case "$HARNESS" in
+            deployments-docker) export FERRY_TEST_DEPLOY_MODE=docker ;;
+            deployments-native) export FERRY_TEST_DEPLOY_MODE=native ;;
+            deployments-stack) export FERRY_TEST_DEPLOY_MODE=stack ;;
+            deployments-groups) export FERRY_TEST_DEPLOY_MODE=native FERRY_TEST_GROUPS=1 ;;
+          esac
           mkdir -p harness-logs
           echo '| Harness | Round | Result | Run ID | Commit |' >> "$GITHUB_STEP_SUMMARY"
           echo '| --- | --- | --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
@@ -271,6 +292,8 @@ jobs:
             echo "::group::$HARNESS round $round/3"
             if [ "$HARNESS" = build-ui ] || [ "$HARNESS" = variables-ui ]; then
               command=(node "scripts/test-$HARNESS.mjs")
+            elif [[ "$HARNESS" == deployments-* ]]; then
+              command=(bash scripts/test-deployments.sh)
             else
               command=(bash "scripts/test-$HARNESS.sh")
             fi
@@ -352,7 +375,7 @@ jobs:
           exe=""
           if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
           export DESKTOP_TEST_SERVER="$PWD/target/${{ matrix.target }}/release/ferry-server$exe"
-          if [ "$RUNNER_OS" = Windows ]; then export DESKTOP_TEST_SERVER="$(cygpath -w "$DESKTOP_TEST_SERVER")"; fi
+          if [ "$RUNNER_OS" = Windows ]; then DESKTOP_TEST_SERVER="$(cygpath -w "$DESKTOP_TEST_SERVER")"; export DESKTOP_TEST_SERVER; fi
           cargo test --locked --manifest-path desktop/Cargo.toml --target ${{ matrix.target }} --lib server::tests -- --include-ignored
       # macOS uses ad-hoc code signing; updater payloads use the separate release key.
       - name: Build the desktop installers

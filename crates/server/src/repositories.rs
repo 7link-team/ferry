@@ -82,7 +82,7 @@ fn valid_url(url: &str) -> bool {
         .is_some_and(|(host, path)| !host.is_empty() && !host.contains('/') && !path.is_empty())
 }
 
-async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
+async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
@@ -94,7 +94,7 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
     }
     if Id::reference(&body.credential_id)? != Id::from(0) {
         crate::repository_auth::validate_target(
-            s,
+            conn,
             scope.workspace_id,
             Id::reference(&body.credential_id)?,
             body.url.trim(),
@@ -104,7 +104,7 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
         let row = credentials::Entity::find()
             .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(credentials::Column::Id.eq(Id::reference(&body.credential_id)?))
-            .one(&s.db)
+            .one(conn)
             .await?
             .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
         if !crate::credentials::KINDS.contains(&row.kind.as_str()) {
@@ -156,8 +156,19 @@ pub async fn create(
     scope: Scope,
     Json(body): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("repositories.create")?;
-    let name = check(&s, &scope, &body).await?;
+    let name = check(tx, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
     repositories::Entity::insert(repositories::ActiveModel {
         id: Set(i64::from(id)),
@@ -172,12 +183,13 @@ pub async fn create(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "repositories",
@@ -196,7 +208,7 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.update")?;
-    let name = check(&s, &scope, &body).await?;
+    let name = check(&s.db, &scope, &body).await?;
     let affected = repositories::Entity::update_many()
         .col_expr(repositories::Column::Name, Expr::value(name.clone()))
         .col_expr(repositories::Column::Url, Expr::value(body.url.trim()))

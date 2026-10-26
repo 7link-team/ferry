@@ -475,9 +475,19 @@ pub async fn create_source(
     scope: Scope,
     Json(b): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    scope.require("marketplace-sources.create")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    validate(&tx, &scope, &b).await?;
+    let result = create_source_in(&s, &tx, &scope, b).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_source_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    b: Body,
+) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("marketplace-sources.create")?;
+    validate(tx, &scope, &b).await?;
     let id = s.next_id()?;
     let now = db::now();
     sources::Entity::insert(sources::ActiveModel {
@@ -494,11 +504,11 @@ pub async fn create_source(
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&tx)
+    .exec(tx)
     .await?;
     crate::hosts::activity_in(
         &s,
-        &tx,
+        tx,
         &scope,
         "create",
         "marketplace-sources",
@@ -506,7 +516,6 @@ pub async fn create_source(
         json!({"name":b.name}),
     )
     .await?;
-    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 pub async fn update_source(
@@ -672,7 +681,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         validate_origin(&config, &repository.url)?;
         let token = if repository.credential_id != 0 {
             crate::repository_auth::validate_target(
-                s,
+                &s.db,
                 scope.workspace_id,
                 repository.credential_id.into(),
                 &config.api_base,

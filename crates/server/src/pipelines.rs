@@ -56,7 +56,7 @@ pub struct Body {
     version: i64,
 }
 
-async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
+async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
@@ -80,21 +80,21 @@ async fn check(s: &AppState, scope: &Scope, body: &Body) -> Result<String> {
                 repositories::Entity::find()
                     .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
                     .filter(repositories::Column::Id.eq(id))
-                    .count(&s.db)
+                    .count(conn)
                     .await?
             }
             "hosts" => {
                 hosts::Entity::find()
                     .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
                     .filter(hosts::Column::Id.eq(id))
-                    .count(&s.db)
+                    .count(conn)
                     .await?
             }
             "host_groups" => {
                 host_groups::Entity::find()
                     .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
                     .filter(host_groups::Column::Id.eq(id))
-                    .count(&s.db)
+                    .count(conn)
                     .await?
             }
             _ => unreachable!("validated target table"),
@@ -148,8 +148,19 @@ pub async fn create(
     scope: Scope,
     Json(body): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.create")?;
-    let name = check(&s, &scope, &body).await?;
+    let name = check(tx, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
     pipelines::Entity::insert(pipelines::ActiveModel {
         id: Set(i64::from(id)),
@@ -165,12 +176,13 @@ pub async fn create(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "pipelines",
@@ -189,7 +201,7 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.update")?;
-    let name = check(&s, &scope, &body).await?;
+    let name = check(&s.db, &scope, &body).await?;
     let affected = pipelines::Entity::update_many()
         .col_expr(pipelines::Column::Name, Expr::value(name.clone()))
         .col_expr(
@@ -255,6 +267,20 @@ pub async fn remove(
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id]).await?;
     crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id]).await?;
     crate::variables::check_object_removal(&tx, scope.workspace_id, "build", id).await?;
+    for app in crate::entities::deployments::Entity::find()
+        .filter(crate::entities::deployments::Column::WorkspaceId.eq(scope.workspace_id))
+        .all(&tx)
+        .await?
+    {
+        let manifest = crate::manifest::parse_for(&app.manifest, &app.mode)?;
+        if manifest.services.iter().any(|s| {
+            s.artifact
+                .as_ref()
+                .is_some_and(|a| a.pipeline == id.to_string())
+        }) {
+            return Err(ApiError::conflict("流水线仍被应用的构建产物引用。"));
+        }
+    }
     let affected = pipelines::Entity::delete_many()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::Id.eq(id))
@@ -276,6 +302,8 @@ pub struct Definition {
     #[serde(default)]
     pub env: Vec<Environment>,
     pub steps: Vec<Step>,
+    #[serde(default)]
+    pub artifacts: Vec<String>,
 }
 
 #[derive(Debug, serde::Serialize, Deserialize)]
@@ -397,8 +425,11 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
             check_templates(&entry.value, &context)?;
         }
     }
-    serde_json::from_value(value)
-        .map_err(|_| ApiError::bad("流水线定义字段无效，只支持 workdir、env 和 steps。"))
+    let definition: Definition = serde_json::from_value(value).map_err(|_| {
+        ApiError::bad("流水线定义字段无效，只支持 workdir、env、steps 和 artifacts。")
+    })?;
+    crate::artifacts::validate_paths(&definition.artifacts)?;
+    Ok(definition)
 }
 
 #[cfg(test)]

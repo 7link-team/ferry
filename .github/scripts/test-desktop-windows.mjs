@@ -156,28 +156,32 @@ try {
   const config = JSON.parse(readFileSync('desktop/tauri.conf.json', 'utf8'));
   const data = join(process.env.LOCALAPPDATA, config.identifier);
   mkdirSync(data, { recursive: true });
-  writeFileSync(join(data, 'update-resume.json'), JSON.stringify({ server_url: '' }));
-  app = startApp();
-  app.on('error', error => { throw error; });
-  await until('restarted WebView2 endpoint', async () => {
-    try { return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok; } catch { return false; }
-  });
-  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-  const resumed = await until('automatic workspace resume', () => pages().find(page => page.url().startsWith('http://127.0.0.1:4290')));
-  await resumed.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
-  assert.equal(await resumed.locator('input[name="token"]').count(), 0, 'resumed sidecar supplies setup proof');
-  assert.equal((await (await fetch('http://127.0.0.1:4290/api/status')).json()).instance_id, status.instance_id);
-  const resumedWindows = await until('only resumed workspace visible', () => {
-    const all = nativeWindows();
-    return all.filter(w => w.visible).length === 1 && all.some(w => w.title.includes('连接设置') && !w.visible) && all;
-  });
-  nativeWindows(resumedWindows.find(w => w.visible).handle);
-  const settings = await until('resumed settings restored', () => nativeWindows().find(w => w.title.includes('连接设置') && w.visible));
-  nativeWindows(settings.handle);
-  await until('resumed app exit', () => app.exitCode !== null);
-  await until('resumed server exit', async () => {
-    try { await fetch('http://127.0.0.1:4290/api/status', { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; }
-  });
+  for (const restartKind of ['saved connection', 'upgrade resume']) {
+    if (restartKind === 'upgrade resume') writeFileSync(join(data, 'update-resume.json'), JSON.stringify({ server_url: '' }));
+    app = startApp();
+    app.on('error', error => { throw error; });
+    await until('restarted WebView2 endpoint', async () => {
+      try { return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok; } catch { return false; }
+    });
+    browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+    const resumed = await until('automatic workspace resume', () => pages().find(page => page.url().startsWith('http://127.0.0.1:4290')));
+    await resumed.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
+    assert.equal(await resumed.locator('input[name="token"]').count(), 0, 'resumed sidecar supplies setup proof');
+    assert.equal((await (await fetch('http://127.0.0.1:4290/api/status')).json()).instance_id, status.instance_id);
+    const resumedWindows = await until('only resumed workspace visible', () => {
+      const all = nativeWindows();
+      return all.filter(w => w.visible).length === 1 && all.some(w => w.title.includes('连接设置') && !w.visible) && all;
+    });
+    nativeWindows(resumedWindows.find(w => w.visible).handle);
+    const settings = await until('resumed settings restored', () => nativeWindows().find(w => w.title.includes('连接设置') && w.visible));
+    nativeWindows(settings.handle);
+    await until('resumed app exit', () => app.exitCode !== null);
+    await until('resumed server exit', async () => {
+      try { await fetch('http://127.0.0.1:4290/api/status', { signal: AbortSignal.timeout(1000) }); return false; } catch { return true; }
+    });
+    await browser.close().catch(() => {});
+    console.log(`PASS: automatic ${restartKind} without reopening connection settings`);
+  }
   console.log('PASS: tray registration, blank-address login, launcher hide/restore, single instance, automatic upgrade resume, persistent identity and service cleanup');
 } catch (error) {
   console.error('Desktop smoke failure:', error);

@@ -131,6 +131,25 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         logs=[r for r in activities if r['resource'] in ('app-templates','pipeline-templates')]
         check(len(logs)==10 and all('content' not in json.dumps(r) and 'never-copy-this-secret' not in json.dumps(r) for r in logs),'template CRUD audited without configuration or secret values')
         check(request(owner,root+'/pipeline-runs')['total']==0,'render/create does not execute pipeline')
+        config_body={'name':'Runtime config','content':'port={{ .Values.port }}\nsecret={{ .Values.secret }}','parameters':json.dumps([{'name':'port','type':'integer','default':8080},{'name':'secret','type':'string','secret':True,'default':'token'}])}
+        config_path=root+'/config-templates'
+        config_id=request(owner,config_path,config_body,expected=201)['id']
+        rendered=request(owner,config_path+'/'+config_id+'/actions/render',{'version':1})['content']
+        check(rendered=='port=8080\nsecret=<variable/token>','config render exposes reference, never secret plaintext')
+        request(guest,config_path,config_body,expected=403)
+        request(outsider,'/workspaces/other/config-templates/'+config_id,expected=404)
+        check(True,'config templates enforce role and workspace boundaries')
+        config_manifest={'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'configured'},'services':[{'name':'web','image':'busybox:1.36','files':[{'path':'/etc/app.conf','fromTemplate':config_id}]}]}
+        config_app=request(owner,root+'/deployments',{'name':'Configured app','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/config-app','manifest':json.dumps(config_manifest)},expected=201)['id']
+        request(owner,config_path+'/'+config_id,method='DELETE',expected=409)
+        request(owner,config_path+'/'+config_id,dict(config_body,name='Renamed',version=1),method='PATCH',expected=409)
+        check(True,'referenced config templates cannot be removed or renamed')
+        request(owner,config_path+'/'+config_id,dict(config_body,version=1,content='new={{ .Values.port }}:{{ .Values.secret }}'),method='PATCH')
+        request(owner,config_path+'/'+config_id,dict(config_body,version=1),method='PATCH',expected=409)
+        check(True,'config content updates use optimistic version checks')
+        request(owner,root+'/deployments/'+config_app,method='DELETE',expected=204)
+        request(owner,config_path+'/'+config_id,method='DELETE',expected=204)
+        check(True,'config template removable after current references are removed')
         print(f'{checks} checks passed',flush=True)
     finally:
         proc.terminate(); proc.wait(timeout=20); log.close()

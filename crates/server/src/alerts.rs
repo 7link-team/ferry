@@ -182,10 +182,20 @@ pub async fn create(
     scope: Scope,
     Json(b): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, b).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    b: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("alerts.create")?;
     let id = s.next_id()?;
-    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    validate(&tx, &scope, &b).await?;
+    validate(tx, &scope, &b).await?;
     let now = db::now();
     rules::Entity::insert(rules::ActiveModel {
         id: Set(id.into()),
@@ -204,11 +214,11 @@ pub async fn create(
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&tx)
+    .exec(tx)
     .await?;
     crate::hosts::activity_in(
         &s,
-        &tx,
+        tx,
         &scope,
         "create",
         "alert-rules",
@@ -216,7 +226,6 @@ pub async fn create(
         json!({"name":b.name}),
     )
     .await?;
-    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 pub async fn update(

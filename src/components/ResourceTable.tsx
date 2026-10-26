@@ -21,12 +21,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  Download,
   Loader2,
   Plus,
   RefreshCw,
   Search,
-  Upload,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -57,6 +55,7 @@ import {
 } from "../resource";
 import { href, navigate, useQueryValue, useRoute, useScrollSync } from "../router";
 import type { ListConfig, Option } from "./dsl";
+import { ResourceTransfer } from "./ResourceTransfer";
 
 const REFRESH_KEY = (resource: string) => `ferry.refresh.${resource}`;
 
@@ -304,16 +303,9 @@ export function ResourceTable<T>({
 
           <span className="flex-1" />
 
-          {config.toolbar?.import !== false && permissions.has(`${config.permissionResource ?? config.resource}.create`) && (
-            <Button size="sm" variant="outline" disabled title="导入待实现">
-              <Upload /> 导入
-            </Button>
-          )}
-          {config.toolbar?.export !== false && (
-            <Button size="sm" variant="outline" disabled title="导出待实现">
-              <Download /> 导出
-            </Button>
-          )}
+          <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
+            canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
+            canExport={config.toolbar?.export === true} onChanged={() => { void load(); }} />
           {canCreate && (
             <Button
               size="sm"
@@ -638,7 +630,7 @@ function FilterField({
       <span className="text-xs text-muted-foreground">{filter.label}</span>
       {filter.type === "select" ? (
         <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
-          <SelectTrigger size="sm" className="w-40">
+          <SelectTrigger aria-label={filter.label} size="sm" className="w-40">
             <SelectValue placeholder="全部" />
           </SelectTrigger>
           <SelectContent>

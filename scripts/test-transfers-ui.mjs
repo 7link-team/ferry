@@ -1,0 +1,135 @@
+/** Real Chromium acceptance for template management and generated resources. */
+import assert from 'node:assert/strict';
+import { nav } from '../src/nav.ts';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { createServer } from 'node:net';
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
+const listener = createServer();
+await new Promise(r => listener.listen(0, '127.0.0.1', r));
+const port = listener.address().port;
+await new Promise(r => listener.close(r));
+const origin = `http://127.0.0.1:${port}`;
+const log = await open(join(work, 'server.log'), 'w');
+const env = { ...process.env, FERRY_DATA_DIR: work, FERRY_BIND: `127.0.0.1:${port}` };
+delete env.FERRY_DATABASE_URL;
+const server = spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'), [], { env, stdio: ['ignore', log.fd, log.fd], windowsHide: true });
+let browser;
+try {
+  for (let i = 0; ; i++) {
+    assert.equal(server.exitCode, null, 'server exited');
+    try { if ((await fetch(`${origin}/api/status`)).ok) break; } catch {}
+    assert(i < 200, 'server startup timed out');
+    await new Promise(r => setTimeout(r, 100));
+  }
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const errors = [];
+
+  const headers = { 'X-Ferry-Request': '1' };
+  const post = async (ctx, path, data) => {
+    const response = await ctx.request.post(`${origin}/api${path}`, { headers, data });
+    assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
+  };
+  await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
+  const owner = await browser.newContext();
+  await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
+  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const p = await owner.newPage();
+  p.on('pageerror', e => errors.push(e.message));
+  p.on('dialog', d => d.accept());
+  const root='/workspaces/tenant';
+  const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
+  await p.goto(`${origin}/tenant/host/tags`);
+  await p.getByRole('button',{name:'导入',exact:true}).click();
+  const dialog=p.getByRole('dialog');
+  await dialog.getByRole('heading',{name:'导入数据'}).waitFor();
+  assert(await dialog.getByRole('button',{name:'预览导入'}).isDisabled());
+  const templateDownload=p.waitForEvent('download');
+  await dialog.getByRole('button',{name:'下载 XLSX 模板'}).click();
+  assert.equal((await templateDownload).suggestedFilename(),'tags-template.xlsx');
+  const file=dialog.getByLabel('选择导入文件');
+  await file.setInputFiles({name:'tags.csv',mimeType:'text/csv',buffer:Buffer.from('name,color\r\n"UI imported",#123456\r\n')});
+  await dialog.getByRole('button',{name:'预览导入'}).click();
+  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  assert.equal((await get(root+'/tags')).total,0);
+  await dialog.getByRole('button',{name:'确认新增 1 项'}).click();
+  await dialog.waitFor({state:'hidden'});
+  await p.getByRole('row').filter({hasText:'UI imported'}).waitFor();
+  assert.equal((await get(root+'/tags')).total,1);
+  console.log('PASS import dialog template download, CSV preview without mutation, confirmation and list refresh');
+  await p.getByRole('button',{name:'导入',exact:true}).click();
+  await file.setInputFiles({name:'invalid.csv',mimeType:'text/csv',buffer:Buffer.from('name,color\n,#123456\n')});
+  await dialog.getByRole('button',{name:'预览导入'}).click();
+  await dialog.getByText(/校验未通过/).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:/确认新增/}).count(),0);
+  await dialog.getByRole('button',{name:'重新选择文件'}).click();
+  await file.setInputFiles({name:'cancel.csv',mimeType:'text/csv',buffer:Buffer.from('name\nCancelled via keyboard\n')});
+  await dialog.getByRole('button',{name:'预览导入'}).click();
+  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  await p.keyboard.press('Escape');
+  await dialog.waitFor({state:'hidden'});
+  assert.equal((await get(root+'/tags')).total,1);
+  assert.equal(await p.evaluate(()=>document.activeElement.textContent.trim()),'导入');
+  console.log('PASS invalid rows prevent confirmation; Escape cancels pending import and restores focus');
+  await p.getByRole('button',{name:'导出',exact:true}).click();
+  const exported=p.waitForEvent('download');
+  await p.getByRole('menuitem',{name:'导出 CSV（当前筛选全部记录）'}).click();
+  const csv=await exported;
+  assert.equal(csv.suggestedFilename(),'tags.csv');
+  assert((await readFile(await csv.path(),'utf8')).includes('UI imported'));
+  console.log('PASS export menu downloads real CSV with imported data');
+  await p.goto(`${origin}/tenant/build/credentials`);
+  await p.getByRole('button',{name:'导入',exact:true}).click();
+  await file.setInputFiles({name:'secret.csv',mimeType:'text/csv',buffer:Buffer.from('name,kind,secret\nPrivate token,token,never-visible-secret\n')});
+  await dialog.getByRole('button',{name:'预览导入'}).click();
+  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  assert(!(await dialog.innerText()).includes('never-visible-secret'));
+  await dialog.getByRole('button',{name:'确认新增 1 项'}).click();
+  await dialog.waitFor({state:'hidden'});
+  assert.equal((await get(root+'/credentials')).total,1);
+  await p.goto(`${origin}/tenant/host/hosts`);
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.getByLabel('名称',{exact:false}).fill('Tagged in browser');
+  await p.getByRole('checkbox',{name:'UI imported',exact:true}).check();
+  const creatingHost=p.waitForResponse(r=>r.url().endsWith('/hosts')&&r.request().method()==='POST');
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  const createdHost=await creatingHost; assert.equal(createdHost.status(),201,await createdHost.text());
+  const hostBody=await createdHost.json();
+  assert.equal((await get(root+'/hosts/'+hostBody.id)).tags[0]?.name,'UI imported');
+  await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByText('UI imported',{exact:true}).waitFor();
+  await post(owner,root+'/hosts',{name:'Not tagged',connection:'runner'});
+  await p.getByRole('combobox',{name:'标签',exact:true}).click();
+  await p.getByRole('option',{name:'UI imported',exact:true}).click();
+  await p.getByRole('button',{name:'搜索',exact:true}).click();
+  await p.getByRole('row').filter({hasText:'Tagged in browser'}).waitFor();
+  assert.equal(await p.getByRole('row').filter({hasText:'Not tagged'}).count(),0);
+  await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByRole('link',{name:'编辑',exact:true}).click();
+  await p.getByRole('checkbox',{name:'UI imported',exact:true}).uncheck();
+  await p.getByRole('button',{name:'保存',exact:true}).click();
+  const tagged=(await get(root+'/hosts?q=Tagged in browser')).items[0];
+  assert.deepEqual(tagged.tag_ids,[]);
+  console.log('PASS real host tag multiselect, list labels, filter and removal');
+  let pagesChecked=0;
+  for (const group of nav) for (const item of group.items.filter(item=>!item.hidden)) {
+    const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${item.resource}` && r.request().method()==='GET');
+    await p.goto(`${origin}/tenant/${group.key}/${item.key}`);
+    const response=await loaded;
+    assert(response.ok(),`${item.resource}: ${await response.text()}`);
+    await p.locator('main').waitFor();
+    assert(!(await p.locator('main').innerText()).includes('还未实现'),item.resource);
+    pagesChecked++;
+  }
+  assert(pagesChecked>=25);
+  console.log(`PASS ${pagesChecked} visible navigation pages use real APIs without placeholders`);
+  assert.deepEqual(errors,[]);
+  console.log('PASS sensitive import preview is masked and no browser errors');
+} finally {
+  if (browser) await browser.close();
+  if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }
+  await log.close();
+  await rm(work, { recursive: true, force: true });
+}

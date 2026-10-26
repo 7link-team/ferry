@@ -62,7 +62,7 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
   const execute = (rollback: boolean) => {
     if (!app || !preview || preview.version !== app.version) return;
     if (!confirm(rollback ? `回滚到 revision #${revision?.number}？将恢复当时的变量值，旧密钥可能已经失效；卷数据不会回滚。` : "执行当前部署？失败不会自动回滚。")) return;
-    void action(rollback ? "rollback" : "apply", { version: app.version, expected_hash: preview.expected_hash, preview_token: preview.preview_token, ...(rollback ? { revision_id: revision?.id } : {}) });
+    void action(rollback ? "rollback" : "apply", { version: app.version, expected_hash: preview.expected_hash, preview_token: preview.preview_token, ...(preview.target_hashes ? { target_hashes: preview.target_hashes } : {}), ...(rollback ? { revision_id: revision?.id } : {}) });
   };
   if (!app) return <div role={error ? "alert" : "status"}>{error || "正在读取部署…"}{error && <Button onClick={() => setReload((n) => n + 1)}>重试</Button>}</div>;
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
@@ -91,8 +91,8 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
     {preview && <section className="space-y-3"><h3 className="font-semibold">产物差异</h3><p className="text-sm text-muted-foreground">{preview.notice}</p>
       {!!preview.variables?.length && <section aria-label="变量引用" className="space-y-2 rounded border p-3">
         <h4 className="text-sm font-medium">变量引用 · {revisionId ? "历史版本" : "入队时固定"}</h4>
-        <ul className="space-y-1 text-sm">{preview.variables.map(v => <li key={`${v.service}/${v.environment}`}>
-          <span className="font-mono">{v.service}.{v.environment}</span> ← {v.name} · {v.scope_ref !== "0" ? "应用专属" : v.scope === "global" ? "全局" : "部署模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}
+        <ul className="space-y-1 text-sm">{preview.variables.map(v => <li key={`${v.service}/${v.environment ?? v.path}/${v.kind ?? "env"}/${v.name ?? "file"}`}>
+          {v.kind === "file" ? <span>配置文件 {v.service}:{v.path} · 模板 v{v.template_version}</span> : <><span className="font-mono">{v.service}.{v.environment ?? v.path}</span> ← {v.name} · {v.scope_ref !== "0" ? "应用专属" : v.scope === "global" ? "全局" : "部署模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</>}
         </li>)}</ul>
         <p className="text-xs text-muted-foreground">变量值加密保存于部署历史，更新当前变量不会删除历史值。预览和执行日志不显示变量值。</p>
       </section>}
@@ -100,9 +100,11 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
       <details><summary className="cursor-pointer text-sm">查看完整待执行产物</summary><pre className="overflow-auto p-4 text-xs">{revisionId && revision?.artifact ? revision.artifact : preview.desired}</pre></details>
     </section>}
     {rendered !== undefined && <section><h3 className="mb-2 font-semibold">当前 manifest 渲染产物</h3><pre className="max-h-96 overflow-auto rounded border p-4 text-xs">{rendered}</pre></section>}
+    {!!app.current_targets?.length && <details><summary className="cursor-pointer text-sm">各主机当前成功版本</summary><ul className="mt-2 space-y-1 text-sm">{app.current_targets.map((target) => <li key={target.host_id}>主机 {target.host_id} · revision {target.current_revision}</li>)}</ul></details>}
     {revision && <section className="space-y-3"><h3 className="font-semibold">Revision #{revision.number} · {revision.action === "rollback" ? "回滚" : "部署"} · {deploymentState(revision.state)}</h3>
       <pre aria-label="执行输出" className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/30 p-4 text-xs">{revision.output || "执行结果尚未返回。"}</pre>
-      <details><summary className="cursor-pointer text-sm">保存的执行产物（镜像摘要已固定）</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || "尚未生成执行产物。"}</pre></details>
+      {!!revision.targets?.length && <section aria-label="逐台执行结果" className="space-y-2"><h4 className="text-sm font-medium">目标主机 · 按顺序执行</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">主机 {target.host_id} · {deploymentState(target.state)}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || "等待执行。"}</pre></details></li>)}</ol></section>}
+      <details><summary className="cursor-pointer text-sm">保存的执行产物（版本摘要已固定）</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || "尚未生成执行产物。"}</pre></details>
     </section>}
   </div>;
 }

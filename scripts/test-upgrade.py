@@ -69,19 +69,28 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # This migration adds a public privilege flag, never elevation.
                     assert after['user'].get('is_superadmin', False) is False
                     before[path]['user']['is_superadmin'] = False
-                    allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']}
+                    allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
                         added=set(migrated['permissions'])-set(original['permissions'])
                         assert added<=allowed and set(original['permissions'])<=set(migrated['permissions'])
                         original['permissions']=migrated['permissions']
+                if path == '/workspaces/upgrade/pipeline-runs/'+run:
+                    # New archive metadata is additive; old runs have no archived files.
+                    assert after.get('artifacts') == []
+                    before[path]['artifacts'] = []
+                if '/hosts/' in path:
+                    assert after.get('tag_ids') == [] and after.get('tags') == []
+                    before[path]['tag_ids'] = []
+                    before[path]['tags'] = []
                 assert after==before[path], f'Upgrade changed existing resource: {path}'
             roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
             for role in roles_before:
                 migrated = roles_after[role['id']]
                 added=set(migrated['permissions'])-set(role['permissions'])
                 expected={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} if role['name'] in ['拥有者','管理员'] else {'marketplace-sources.read'} if role['name']=='只读' else set()
+                expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions'])
                 assert migrated['version'] == 1+bool(added)
                 for field in ('id','name','builtin'):

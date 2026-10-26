@@ -41,7 +41,11 @@ pub(crate) async fn lock_workspace(
         .await?
         .ok_or_else(ApiError::missing)
 }
-async fn authorize(conn: &impl ConnectionTrait, scope: &Scope, permission: &str) -> Result<Scope> {
+pub(crate) async fn authorize(
+    conn: &impl ConnectionTrait,
+    scope: &Scope,
+    permission: &str,
+) -> Result<Scope> {
     // Re-read after acquiring the lock: a queued request must not use a role
     // or platform privilege that another administrator has just revoked.
     let (active, admin) = users::Entity::find_by_id(i64::from(scope.user.id))
@@ -188,11 +192,21 @@ pub async fn create_role(
     scope: Scope,
     Json(body): Json<RoleBody>,
 ) -> Result<Json<Value>> {
-    let tx = s.db.begin().await?;
-    lock_workspace(&tx, scope.workspace_id).await?;
-    let scope = authorize(&tx, &scope, "roles.create").await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_role_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_role_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: RoleBody,
+) -> Result<Json<Value>> {
+    lock_workspace(tx, scope.workspace_id).await?;
+    let scope = authorize(tx, &scope, "roles.create").await?;
     let (name, permissions) = validate_role(&scope, &body)?;
-    unique_name(&tx, scope.workspace_id, &name, None).await?;
+    unique_name(tx, scope.workspace_id, &name, None).await?;
     let (id, now) = (s.next_id()?, db::now());
     roles::Entity::insert(roles::ActiveModel {
         id: Set(id.into()),
@@ -204,11 +218,11 @@ pub async fn create_role(
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&tx)
+    .exec(tx)
     .await?;
     crate::hosts::activity_in(
         &s,
-        &tx,
+        tx,
         &scope,
         "create",
         "roles",
@@ -216,7 +230,6 @@ pub async fn create_role(
         json!({"name":name,"permissions":permissions}),
     )
     .await?;
-    tx.commit().await?;
     Ok(Json(json!({"id":id,"version":1})))
 }
 pub async fn update_role(

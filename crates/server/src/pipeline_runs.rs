@@ -83,6 +83,7 @@ pub async fn get(
             )
             .collect::<Vec<_>>()
     );
+    v["artifacts"] = crate::artifacts::for_run(s.as_ref(), r.workspace_id, r.id).await?;
     Ok(Json(v))
 }
 pub async fn log_list(
@@ -488,7 +489,7 @@ async fn execute(
     let def = crate::pipelines::validate_definition(&r.definition)?;
     let credential = if r.credential_id != 0 {
         crate::repository_auth::validate_target(
-            s,
+            &s.db,
             r.workspace_id.into(),
             r.credential_id.into(),
             &r.repo_url,
@@ -656,6 +657,10 @@ async fn execute_private(
             });
         }
     }
+    if !active(s, r.id).await? || *stop.borrow() {
+        return Ok("cancelled");
+    }
+    crate::artifacts::collect(s, r, ch, &expand(&def.workdir, r), &def.artifacts, stop).await?;
     Ok("succeeded")
 }
 fn redact(mut text: String, credential: Option<&(String, String, String)>) -> String {

@@ -236,11 +236,21 @@ pub async fn create(
     scope: Scope,
     Json(b): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, b).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    b: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("cron-jobs.create")?;
     let id = s.next_id()?;
     let now = db::now();
-    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    validate(&tx, &scope, &b, true).await?;
+    validate(tx, &scope, &b, true).await?;
     jobs::Entity::insert(jobs::ActiveModel {
         id: Set(id.into()),
         workspace_id: Set(scope.workspace_id.into()),
@@ -258,11 +268,11 @@ pub async fn create(
         created_at: Set(now),
         updated_at: Set(now),
     })
-    .exec(&tx)
+    .exec(tx)
     .await?;
     crate::hosts::activity_in(
         &s,
-        &tx,
+        tx,
         &scope,
         "create",
         "cron-jobs",
@@ -270,7 +280,6 @@ pub async fn create(
         json!({"name":b.name,"enabled":b.enabled}),
     )
     .await?;
-    tx.commit().await?;
     Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 pub async fn update(
@@ -865,7 +874,19 @@ async fn once(
         )
     } else {
         (
-            crate::deployments::scheduled(s, scope, &b.target_ref, b.action == "restart").await?,
+            match crate::deployments::scheduled(s, scope, &b.target_ref, b.action == "restart")
+                .await
+            {
+                Ok(id) => id,
+                Err(error) if error.0.is_client_error() => {
+                    return Ok(Outcome::new(
+                        "failed",
+                        format!("部署请求未入队：{}", error.1),
+                        false,
+                    ));
+                }
+                Err(error) => return Err(error),
+            },
             "deployment-revisions",
         )
     };

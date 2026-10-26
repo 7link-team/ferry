@@ -2,15 +2,17 @@ export interface Deployment {
   id: string; name: string; manifest: string; mode: string; target_kind: string;
   target_ref: string; workdir: string; description: string; state: string;
   version: number; current_revision: string; latest_revision?: Revision;
+  current_targets?: { host_id: string; current_revision: string }[];
 }
 export interface Revision {
   id: string; deployment_id: string; number: number; action: string; state: string;
   rendered: string; artifact: string; output: string; started_at: number; finished_at: number;
+  targets?: { id: string; host_id: string; state: string; output: string; artifact: string }[];
 }
-export interface VariableBinding { service: string; environment: string; name: string; id: string; version: number; scope: string; scope_ref: string; secret: boolean }
-export interface Preview { variables?: VariableBinding[]; desired: string; current: string; expected_hash: string; preview_token: string; version: number; notice: string }
+export interface VariableBinding { kind?: string; path?: string; template_version?: number; service: string; environment: string; name: string; id: string; version: number; scope: string; scope_ref: string; secret: boolean }
+export interface Preview { target_hashes?: Record<string, string>; variables?: VariableBinding[]; desired: string; current: string; expected_hash: string; preview_token: string; version: number; notice: string }
 export const deploymentActive = (state: string) => state === "queued" || state === "running";
-export const deploymentState = (state: string) => ({ idle: "未部署", queued: "排队中", running: "执行中", succeeded: "成功", failed: "失败", "needs-review": "需核实" }[state] ?? state);
+export const deploymentState = (state: string) => ({ pending: "未开始", skipped: "已跳过", idle: "未部署", queued: "排队中", running: "执行中", succeeded: "成功", failed: "失败", "needs-review": "需核实" }[state] ?? state);
 /** A deterministic, contiguous change hunk. No claim of a minimal multi-hunk diff. */
 export function artifactDiff(before: string, after: string): string {
   if (before === after) return "产物内容一致。";

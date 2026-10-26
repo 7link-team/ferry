@@ -67,6 +67,10 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     ("deployments.delete", "应用部署", "删除"),
     ("deployments.apply", "应用部署", "执行部署"),
     ("deployments.rollback", "应用部署", "回滚"),
+    ("config-templates.read", "配置模板", "查看"),
+    ("config-templates.create", "配置模板", "新增"),
+    ("config-templates.update", "配置模板", "修改"),
+    ("config-templates.delete", "配置模板", "删除"),
     ("app-templates.read", "应用模版", "查看"),
     ("app-templates.create", "应用模版", "新增"),
     ("app-templates.update", "应用模版", "修改"),
@@ -196,6 +200,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 "credentials",
                 "deployments",
                 "app-templates",
+                "config-templates",
                 "marketplace",
                 "alerts",
                 "cron-jobs",
@@ -253,7 +258,7 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
         };
         let additions = builtin_permissions(key)
             .into_iter()
-            .filter(|p| p.starts_with("marketplace-sources."))
+            .filter(|p| p.starts_with("marketplace-sources.") || p.starts_with("config-templates."))
             .collect::<Vec<_>>();
         if additions.is_empty() {
             continue;

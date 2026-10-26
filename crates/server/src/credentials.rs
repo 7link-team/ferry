@@ -159,6 +159,17 @@ pub async fn create(
     scope: Scope,
     Json(body): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: Body,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("credentials.create")?;
     let name = check(&body, true)?;
     let (id, now) = (s.next_id()?, db::now());
@@ -185,12 +196,13 @@ pub async fn create(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "credentials",

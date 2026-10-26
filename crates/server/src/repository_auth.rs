@@ -657,7 +657,7 @@ pub async fn recover(s: &AppState) -> Result<()> {
 
 /// A web-authorized credential is usable only with its configured provider.
 pub async fn validate_target(
-    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
     workspace: Id,
     credential: Id,
     address: &str,
@@ -666,7 +666,7 @@ pub async fn validate_target(
     let Some(row) = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(workspace))
         .filter(connections::Column::CredentialId.eq(credential))
-        .one(&s.db)
+        .one(conn)
         .await?
     else {
         return Ok(());

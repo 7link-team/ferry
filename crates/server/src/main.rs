@@ -1,10 +1,12 @@
 mod alerts;
+mod artifacts;
 mod assets;
 mod auth;
 mod channel;
 mod credentials;
 mod cron_jobs;
 mod db;
+mod deployment_modes;
 mod deployments;
 mod entities;
 mod error;
@@ -26,6 +28,7 @@ mod snowflake;
 mod ssh;
 mod state;
 mod templates;
+mod transfers;
 mod variables;
 mod vault;
 mod worker;
@@ -310,6 +313,25 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/pipelines/{id}/actions/run",
             post(pipeline_runs::trigger),
         )
+        .route(
+            "/{workspace}/config-templates",
+            get(templates::configs::list).post(templates::configs::create),
+        )
+        .route(
+            "/{workspace}/config-templates/{id}",
+            get(templates::configs::get)
+                .patch(templates::configs::update)
+                .delete(templates::configs::delete),
+        )
+        .route(
+            "/{workspace}/config-templates/{id}/actions/render",
+            post(templates::configs::render),
+        )
+        .route("/{workspace}/pipeline-artifacts", get(artifacts::list))
+        .route(
+            "/{workspace}/pipeline-artifacts/{id}/download",
+            get(artifacts::download),
+        )
         .route("/{workspace}/pipeline-runs", get(pipeline_runs::list))
         .route("/{workspace}/pipeline-runs/{id}", get(pipeline_runs::get))
         .route(
@@ -458,6 +480,8 @@ async fn main() -> anyhow::Result<()> {
                 .patch(hosts::update_tag)
                 .delete(hosts::delete_tag),
         );
+
+    let workspace_api = workspace_api.merge(transfers::routes());
 
     let draining = drain.subscribe();
     let app = Router::new()

@@ -2,7 +2,7 @@
 //! `resource::list`, writes go through `version` optimistic locking, and every
 //! mutation lands in `activity`.
 
-use crate::entities::{activity, host_groups, hosts, pipelines, tags};
+use crate::entities::{activity, host_groups, host_tags, hosts, pipelines, tags};
 use crate::snowflake::Id;
 
 use crate::{
@@ -23,7 +23,7 @@ use sea_orm::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------- 主机组
 
@@ -107,9 +107,21 @@ pub async fn create_group(
     scope: Scope,
     Json(body): Json<GroupBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_group_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_group_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: GroupBody,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("host-groups.create")?;
     let name = check_name(&body.name)?;
     let (id, now) = (s.next_id()?, db::now());
+    validate_parent(tx, scope, id, &body.parent_id).await?;
     host_groups::Entity::insert(host_groups::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
@@ -121,10 +133,11 @@ pub async fn create_group(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
-    activity(
+    activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "host-groups",
@@ -144,9 +157,8 @@ pub async fn update_group(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("host-groups.update")?;
     let name = check_name(&body.name)?;
-    if Id::reference(&body.parent_id)? == id {
-        return Err(ApiError::bad("主机组不能把自己作为上级。"));
-    }
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    validate_parent(&tx, &scope, id, &body.parent_id).await?;
     let affected = host_groups::Entity::update_many()
         .col_expr(host_groups::Column::Name, Expr::value(name.clone()))
         .col_expr(
@@ -165,20 +177,24 @@ pub async fn update_group(
         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(host_groups::Column::Id.eq(id))
         .filter(host_groups::Column::Version.eq(body.version))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
-        return Err(stale(
-            &s,
-            host_groups::Entity::find()
-                .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
-                .filter(host_groups::Column::Id.eq(id)),
-        )
-        .await?);
+        let exists = host_groups::Entity::find_by_id(i64::from(id))
+            .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&tx)
+            .await?
+            .is_some();
+        return Err(if exists {
+            ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
+        } else {
+            ApiError::missing()
+        });
     }
-    activity(
+    activity_in(
         &s,
+        &tx,
         &scope,
         "update",
         "host-groups",
@@ -186,6 +202,7 @@ pub async fn update_group(
         json!({"name": name}),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -198,6 +215,29 @@ pub async fn delete_group(
     scope.require("host-groups.delete")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "host-group", &[id]).await?;
+    if crate::entities::deployments::Entity::find()
+        .filter(crate::entities::deployments::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::deployments::Column::TargetKind.eq("host-group"))
+        .filter(crate::entities::deployments::Column::TargetRef.eq(id))
+        .count(&tx)
+        .await?
+        > 0
+    {
+        return Err(ApiError::conflict("主机组仍被应用部署引用。"));
+    }
+
+    if pipelines::Entity::find()
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::TargetKind.eq("host-group"))
+        .filter(pipelines::Column::TargetRef.eq(id))
+        .count(&tx)
+        .await?
+        > 0
+    {
+        return Err(ApiError::conflict(
+            "主机组仍被流水线引用，请先修改流水线目标。",
+        ));
+    }
     // Refuse rather than orphan: a host pointing at a deleted group would
     // disappear from every group filter without being gone.
     let used = hosts::Entity::find()
@@ -209,6 +249,15 @@ pub async fn delete_group(
         return Err(ApiError::conflict(format!(
             "该主机组下还有 {used} 台主机，请先移出再删除。"
         )));
+    }
+    if host_groups::Entity::find()
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::ParentId.eq(id))
+        .count(&tx)
+        .await?
+        > 0
+    {
+        return Err(ApiError::conflict("主机组下还有子组，请先移动或删除子组。"));
     }
     let affected = host_groups::Entity::delete_many()
         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
@@ -259,6 +308,8 @@ fn host_json(row: &hosts::Model) -> Value {
 pub struct HostBody {
     name: String,
     #[serde(default)]
+    tag_ids: Option<Vec<Id>>,
+    #[serde(default)]
     connection: String,
     #[serde(default)]
     address: String,
@@ -303,20 +354,28 @@ fn check_host(body: &HostBody, creating: bool) -> Result<(String, String)> {
 pub async fn list_hosts(
     State(s): State<AppState>,
     scope: Scope,
-    Query(raw): Query<HashMap<String, String>>,
+    Query(mut raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("hosts.read")?;
+    let tag_filter = raw.remove("tag_id");
     let query = ListQuery::parse(&HOST_SPEC, &raw)?;
-    let (rows, total) = resource::list(
-        &s.db,
-        &HOST_SPEC,
-        hosts::Entity::find(),
-        &scope.workspace_id,
-        &query,
-    )
-    .await?;
+    let mut select = hosts::Entity::find();
+    if let Some(tag) = tag_filter.as_ref().filter(|v| !v.is_empty()) {
+        let tag = Id::reference(tag)?;
+        select = select.filter(
+            hosts::Column::Id.in_subquery(
+                sea_orm::sea_query::Query::select()
+                    .column(host_tags::Column::HostId)
+                    .from(host_tags::Entity)
+                    .and_where(Expr::col(host_tags::Column::TagId).eq(i64::from(tag)))
+                    .to_owned(),
+            ),
+        );
+    }
+    let (rows, total) =
+        resource::list(&s.db, &HOST_SPEC, select, &scope.workspace_id, &query).await?;
     Ok(Json(json!({
-        "items": rows.iter().map(host_json).collect::<Vec<_>>(),
+        "items": hosts_with_tags(&s.db,scope.workspace_id,&rows).await?,
         "total": total, "page": query.page, "page_size": query.page_size,
     })))
 }
@@ -334,7 +393,36 @@ pub async fn get_host(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    Ok(Json(host_json(&row)))
+    Ok(Json(
+        hosts_with_tags(&s.db, scope.workspace_id, &[row])
+            .await?
+            .remove(0),
+    ))
+}
+
+async fn membership_transaction(
+    s: &AppState,
+    scope: &Scope,
+    group: &str,
+) -> Result<sea_orm::DatabaseTransaction> {
+    let tx = crate::variables::transaction(s, scope.workspace_id).await?;
+    validate_membership(&tx, scope, group).await?;
+    Ok(tx)
+}
+async fn validate_membership(
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    group: &str,
+) -> Result<()> {
+    let id = Id::reference(group)?;
+    if i64::from(id) != 0 {
+        host_groups::Entity::find_by_id(i64::from(id))
+            .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(tx)
+            .await?
+            .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
+    }
+    Ok(())
 }
 
 pub async fn create_host(
@@ -342,9 +430,21 @@ pub async fn create_host(
     scope: Scope,
     Json(body): Json<HostBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_host_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_host_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: HostBody,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("hosts.create")?;
     let (name, connection) = check_host(&body, true)?;
     let (id, now) = (s.next_id()?, db::now());
+    validate_membership(tx, scope, &body.group_id).await?;
     hosts::Entity::insert(hosts::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
@@ -363,10 +463,12 @@ pub async fn create_host(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
-    activity(
+    replace_tags(tx, scope, id, body.tag_ids.as_deref()).await?;
+    activity_in(
         &s,
+        tx,
         &scope,
         "create",
         "hosts",
@@ -388,6 +490,7 @@ pub async fn update_host(
     let (name, _) = check_host(&body, false)?;
     // `connection` is deliberately absent: changing how an enrolled host is
     // reached would invalidate its key or its stored credential silently.
+    let tx = membership_transaction(&s, &scope, &body.group_id).await?;
     let affected = hosts::Entity::update_many()
         .col_expr(hosts::Column::Name, Expr::value(name.clone()))
         .col_expr(hosts::Column::Address, Expr::value(body.address.trim()))
@@ -413,19 +516,33 @@ pub async fn update_host(
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::Id.eq(id))
         .filter(hosts::Column::Version.eq(body.version))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
-        return Err(stale(
-            &s,
-            hosts::Entity::find()
-                .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-                .filter(hosts::Column::Id.eq(id)),
-        )
-        .await?);
+        let exists = hosts::Entity::find_by_id(i64::from(id))
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&tx)
+            .await?
+            .is_some();
+        return Err(if exists {
+            ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
+        } else {
+            ApiError::missing()
+        });
     }
-    activity(&s, &scope, "update", "hosts", &id, json!({"name": name})).await?;
+    replace_tags(&tx, &scope, id, body.tag_ids.as_deref()).await?;
+    activity_in(
+        &s,
+        &tx,
+        &scope,
+        "update",
+        "hosts",
+        &id,
+        json!({"name": name}),
+    )
+    .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -441,6 +558,37 @@ async fn host_is_free(
 ) -> Result<()> {
     crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
     crate::alerts::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
+    use crate::entities::{deployment_revision_targets, deployment_target_states, deployments};
+    if deployments::Entity::find()
+        .filter(deployments::Column::WorkspaceId.eq(*workspace_id))
+        .filter(deployments::Column::TargetKind.eq("host"))
+        .filter(deployments::Column::TargetRef.eq(*id))
+        .count(conn)
+        .await?
+        > 0
+        || deployment_target_states::Entity::find()
+            .filter(deployment_target_states::Column::WorkspaceId.eq(*workspace_id))
+            .filter(deployment_target_states::Column::HostId.eq(*id))
+            .count(conn)
+            .await?
+            > 0
+        || deployment_revision_targets::Entity::find()
+            .filter(deployment_revision_targets::Column::WorkspaceId.eq(*workspace_id))
+            .filter(deployment_revision_targets::Column::HostId.eq(*id))
+            .filter(deployment_revision_targets::Column::State.is_in([
+                "pending",
+                "running",
+                "needs-review",
+            ]))
+            .count(conn)
+            .await?
+            > 0
+    {
+        return Err(ApiError::conflict(
+            "主机仍被应用或待执行/未确认的部署目标引用。",
+        ));
+    }
+
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(*workspace_id))
         .filter(pipelines::Column::TargetKind.eq("host"))
@@ -473,6 +621,10 @@ pub async fn delete_host(
     if affected == 0 {
         return Err(ApiError::missing());
     }
+    host_tags::Entity::delete_many()
+        .filter(host_tags::Column::HostId.eq(id))
+        .exec(&tx)
+        .await?;
     tx.commit().await?;
     activity(&s, &scope, "delete", "hosts", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -501,12 +653,19 @@ pub async fn bulk_delete_hosts(
         // blocks this delete or is not yet visible to it — and a refusal rolls
         // back every delete in the batch rather than leaving it half applied.
         host_is_free(&transaction, &scope.workspace_id, id).await?;
-        deleted += hosts::Entity::delete_many()
+        let affected = hosts::Entity::delete_many()
             .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(hosts::Column::Id.eq(id))
             .exec(&transaction)
             .await?
             .rows_affected;
+        if affected > 0 {
+            host_tags::Entity::delete_many()
+                .filter(host_tags::Column::HostId.eq(*id))
+                .exec(&transaction)
+                .await?;
+        }
+        deleted += affected;
     }
     transaction.commit().await?;
     activity(
@@ -592,6 +751,17 @@ pub async fn create_tag(
     scope: Scope,
     Json(body): Json<TagBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_tag_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn create_tag_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: TagBody,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("tags.create")?;
     let name = check_name(&body.name)?;
     let (id, now) = (s.next_id()?, db::now());
@@ -605,9 +775,9 @@ pub async fn create_tag(
         version: Set(1),
         ..Default::default()
     })
-    .exec(&s.db)
+    .exec(tx)
     .await?;
-    activity(&s, &scope, "create", "tags", &id, json!({"name": name})).await?;
+    activity_in(&s, tx, &scope, "create", "tags", &id, json!({"name": name})).await?;
     Ok((StatusCode::CREATED, Json(json!({"id": id}))))
 }
 
@@ -654,16 +824,33 @@ pub async fn delete_tag(
 ) -> Result<StatusCode> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("tags.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    tags::Entity::find_by_id(i64::from(id))
+        .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if host_tags::Entity::find()
+        .filter(host_tags::Column::TagId.eq(id))
+        .count(&tx)
+        .await?
+        > 0
+    {
+        return Err(ApiError::conflict(
+            "标签仍被主机引用，请先在主机中移除标签。",
+        ));
+    }
     let affected = tags::Entity::delete_many()
         .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(tags::Column::Id.eq(id))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
         return Err(ApiError::missing());
     }
-    activity(&s, &scope, "delete", "tags", &id, json!({})).await?;
+    activity_in(&s, &tx, &scope, "delete", "tags", &id, json!({})).await?;
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -894,4 +1081,114 @@ pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<V
     Ok(Json(
         json!({"counts":counts,"states":states,"failures_24h":failures,"runners":runners,"recent":recent,"as_of":now}),
     ))
+}
+
+async fn validate_parent(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    id: Id,
+    parent: &str,
+) -> Result<()> {
+    let mut cursor = Id::reference(parent)?;
+    let mut seen = HashSet::new();
+    while cursor != Id::from(0) {
+        if cursor == id || !seen.insert(i64::from(cursor)) {
+            return Err(ApiError::bad("上级主机组不能是自己或自己的子组。"));
+        }
+        let row = host_groups::Entity::find_by_id(i64::from(cursor))
+            .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(conn)
+            .await?
+            .ok_or_else(|| ApiError::bad("上级主机组不存在于当前工作空间。"))?;
+        cursor = row.parent_id.into();
+    }
+    Ok(())
+}
+async fn replace_tags(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    host: Id,
+    values: Option<&[Id]>,
+) -> Result<()> {
+    let Some(values) = values else {
+        return Ok(());
+    };
+    let ids: HashSet<i64> = values.iter().map(|id| i64::from(*id)).collect();
+    if ids.len() != values.len() {
+        return Err(ApiError::bad("标签不能重复。"));
+    }
+    if !ids.is_empty()
+        && tags::Entity::find()
+            .filter(tags::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(tags::Column::Id.is_in(ids.iter().copied()))
+            .count(conn)
+            .await?
+            != ids.len() as u64
+    {
+        return Err(ApiError::bad("所选标签不存在于当前工作空间。"));
+    }
+    host_tags::Entity::delete_many()
+        .filter(host_tags::Column::HostId.eq(host))
+        .exec(conn)
+        .await?;
+    if !ids.is_empty() {
+        host_tags::Entity::insert_many(ids.into_iter().map(|tag| host_tags::ActiveModel {
+            host_id: Set(host.into()),
+            tag_id: Set(tag),
+        }))
+        .exec(conn)
+        .await?;
+    }
+    Ok(())
+}
+async fn hosts_with_tags(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    rows: &[hosts::Model],
+) -> Result<Vec<Value>> {
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let links = host_tags::Entity::find()
+        .filter(host_tags::Column::HostId.is_in(rows.iter().map(|r| r.id)))
+        .all(conn)
+        .await?;
+    let ids: HashSet<i64> = links.iter().map(|r| r.tag_id).collect();
+    let labels = if ids.is_empty() {
+        Vec::new()
+    } else {
+        tags::Entity::find()
+            .filter(tags::Column::WorkspaceId.eq(workspace))
+            .filter(tags::Column::Id.is_in(ids))
+            .all(conn)
+            .await?
+    };
+    let labels: HashMap<i64, Value> = labels
+        .iter()
+        .map(|r| {
+            (
+                r.id,
+                json!({"id":Id::from(r.id),"name":r.name,"color":r.color}),
+            )
+        })
+        .collect();
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let mut result = host_json(row);
+            let mut ids: Vec<i64> = links
+                .iter()
+                .filter(|r| r.host_id == row.id && labels.contains_key(&r.tag_id))
+                .map(|r| r.tag_id)
+                .collect();
+            ids.sort_unstable();
+            result["tags"] = json!(
+                ids.iter()
+                    .filter_map(|id| labels.get(id))
+                    .collect::<Vec<_>>()
+            );
+            result["tag_ids"] = json!(ids.into_iter().map(Id::from).collect::<Vec<_>>());
+            result
+        })
+        .collect())
 }

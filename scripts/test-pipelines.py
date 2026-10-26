@@ -87,9 +87,10 @@ def main():
     def create(resource, body, ws='ops'):
         return api(f'/workspaces/{ws}/{resource}', body, status=201)['id']
 
-    def pipeline(host, steps, ws='ops', repo=None, target_kind='host'):
+    def pipeline(host, steps, ws='ops', repo=None, target_kind='host', artifacts=None):
         definition = {'workdir': root_dir + '/{{run}}',
                       'env': [{'name': 'BUILD_VALUE', 'value': 'env-{{branch}}-{{run}}'}], 'steps': steps}
+        if artifacts is not None: definition['artifacts'] = artifacts
         first_command=definition['steps'][0]['run']
         definition['steps']=[dict(step) for step in steps]
         definition['steps'][0]['run']='{{ .Values.command }}'
@@ -214,7 +215,7 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
             {'name': 'build {{run}}', 'run': 'set -e; test "$BUILD_VALUE" = "env-main-{{run}}" && cat payload.txt && test "$(git rev-parse HEAD)" = "{{commit}}" && git rev-parse HEAD && printf "BUILD_OK\\n"; printf "BUILD_STDERR\\n" >&2'}]
         for kind, host in [('runner', runner), ('ssh', ssh)]:
             print('== ' + kind, flush=True)
-            pid = pipeline(host, success_steps)
+            pid = pipeline(host, success_steps, artifacts=["payload.txt"])
             run = trigger(pid, values={'branch': 'main', 'commit': commit}); rid = run['id']; all_runs.append(rid)
             row = done(rid); entries = logs(rid); text = ''.join(i['chunk'] for i in entries)
             successful.append(text)
@@ -228,6 +229,19 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
                   and [i['step_index'] for i in entries] == sorted(i['step_index'] for i in entries),
                   f"seq={[i['seq'] for i in entries]}")
             check(f'{kind} workdir and env applied', local_or_ssh(kind, f'cat {root_dir}/{run["number"]}/payload.txt').strip() == 'local-private-repository')
+            artifacts = row['artifacts']
+            check(kind+' successful build archives declared output with content hash', len(artifacts)==1 and artifacts[0]['path']=='payload.txt' and len(artifacts[0]['sha256'])==64)
+            artifact=artifacts[0]
+            with opener.open(base+'/workspaces/ops/pipeline-artifacts/'+artifact['id']+'/download') as response:
+                archived=response.read()
+            import hashlib
+            check(kind+' artifact download matches original bytes and sha256', archived.strip()==b'local-private-repository' and hashlib.sha256(archived).hexdigest()==artifact['sha256'] and len(archived)==artifact['size'])
+            local_or_ssh(kind, f"printf changed > {root_dir}/{run['number']}/payload.txt")
+            with opener.open(base+'/workspaces/ops/pipeline-artifacts/'+artifact['id']+'/download') as response:
+                check(kind+' archived output is independent of mutable build directory', response.read()==archived)
+            missing=trigger(pipeline(host,[{'name':'build','run':'true'}],artifacts=['missing.bin']))['id']; all_runs.append(missing)
+            missing_row=done(missing)
+            check(kind+' missing declared artifact fails the build without publishing partial output',missing_row['state']=='failed' and missing_row['artifacts']==[])
             bad_credential = create('credentials', {'name': 'denied-'+kind, 'kind': 'password', 'username': username, 'secret': secret+'-wrong'})
             bad_repository = create('repositories', {'name': 'denied-'+kind, 'url': repo_url, 'credential_id': bad_credential})
             denied = trigger(pipeline(host, success_steps, repo=bad_repository))['id']; all_runs.append(denied)

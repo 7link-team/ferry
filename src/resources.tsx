@@ -1,3 +1,4 @@
+import { importResources, exportResources } from "./components/ResourceTransfer";
 import { api } from "./api";
 /**
  * Every resource page in one place: a `ListConfig` and a `FormConfig` per
@@ -19,7 +20,7 @@ import type { FormConfig, ListConfig, Option } from "./components/dsl";
    helpers do exactly that: the argument is checked, the return is erased. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRow = any;
-const list = <T,>(config: ListConfig<T>): ListConfig<AnyRow> => config;
+const list = <T,>(config: ListConfig<T>): ListConfig<AnyRow> => ({ ...config, toolbar: { ...config.toolbar, import: !config.endpoint && importResources.has(config.resource), export: !config.endpoint && exportResources.has(config.resource) } });
 const form = <T,>(config: FormConfig<T>): FormConfig<AnyRow> => config;
 
 export interface HostGroup {
@@ -38,6 +39,8 @@ export interface Host {
   connection: string;
   state: string;
   group_id: string;
+  tag_ids: string[];
+  tags: { id: string; name: string; color: string }[];
   credential_id: string;
   description: string;
   seen_at: number;
@@ -115,10 +118,8 @@ const sshCredentialOptions = (workspace: string) => async (): Promise<Option[]> 
     .map((c) => ({ value: c.id, label: `${c.name}（${label(CREDENTIAL_KINDS, c.kind)}）` }));
 };
 
-const groupOptions = (workspace: string) => async (): Promise<Option[]> => {
-  const page = await listResource<HostGroup>(workspace, "host-groups", { page_size: 200 });
-  return page.items.map((group) => ({ value: group.id, label: group.name }));
-};
+const groupOptions = (workspace: string) => namedOptions(workspace, "host-groups");
+const tagOptions = (workspace: string) => namedOptions(workspace, "tags");
 
 interface Repository {
   id: string; name: string; url: string; default_branch: string;
@@ -153,14 +154,14 @@ const templateList = (workspace: string, resource: string, target: string, group
 });
 const templateForm = (resource: string, application: boolean) => form<Template>({
   resource, heading: r => r.name,
-  blank: { name: "", description: "", content: application ? JSON.stringify({apiVersion:"ferry/v1",kind:"Application",metadata:{name:"web"},services:[{name:"web",image:"{{ .Values.image }}"}]},null,2) : JSON.stringify({workdir:"/tmp/build/{{run}}",steps:[{name:"构建",run:"{{ .Values.command }}"}]},null,2),
-    parameters: JSON.stringify([{name: application ? "image" : "command",label: application ? "镜像" : "构建命令",type:"string",default:application ? "nginx:alpine" : "echo build",min_length:1}],null,2) },
+  blank: { name: "", description: "", content: resource === "config-templates" ? "port={{ .Values.port }}\n" : application ? JSON.stringify({apiVersion:"ferry/v1",kind:"Application",metadata:{name:"web"},services:[{name:"web",image:"{{ .Values.image }}"}]},null,2) : JSON.stringify({workdir:"/tmp/build/{{run}}",steps:[{name:"构建",run:"{{ .Values.command }}"}]},null,2),
+    parameters: resource === "config-templates" ? JSON.stringify([{name:"port",type:"integer",default:8080,min:1,max:65535}],null,2) : JSON.stringify([{name: application ? "image" : "command",label: application ? "镜像" : "构建命令",type:"string",default:application ? "nginx:alpine" : "echo build",min_length:1}],null,2) },
   copy: r => ({ name: `${r.name}（副本）`, description: r.description, content: r.content, parameters: r.parameters }),
   sections: [{ fields: [
     { key: "name", label: "名称", type: "text", required: true },
     { key: "description", label: "说明", type: "textarea" },
     { key: "parameters", label: "参数定义（JSON 数组）", type: "code", span: 2, required: true, help: '每项包含 name、type（string/integer/boolean），可选 label、default、enum（字符串）、min/max（整数）、min_length/max_length。无 default 时必填。' },
-    { key: "content", label: application ? "应用模板（YAML / JSON）" : "流水线模板（JSON / YAML）", type: "code", span: 2, required: true, help: application ? '使用 "{{ .Values.image }}" 等占位符；secret: true 参数填写变量名，只能作为 valueFrom 的完整值。保存校验模板语法，生成时校验完整配置。' : '使用 "{{ .Values.command }}" 等创建参数；保留 {{run}}、{{branch}}、{{repo_url}}、{{commit}} 运行时变量。当前不支持 secret 参数。' },
+    { key: "content", label: resource === "config-templates" ? "配置文件模板" : application ? "应用模板（YAML / JSON）" : "流水线模板（JSON / YAML）", type: "code", span: 2, required: true, help: resource === "config-templates" ? '填写文件文本，使用 {{ .Values.参数名 }}；secret参数填写变量名，部署时加密保存历史值。通过 manifest.files 的 fromTemplate 引用模板ID或唯一名称，values 传入参数。' : application ? '使用 "{{ .Values.image }}" 等占位符；secret: true 参数填写变量名，只能作为 valueFrom 的完整值。保存校验模板语法，生成时校验完整配置。' : '使用 "{{ .Values.command }}" 等创建参数；保留 {{run}}、{{branch}}、{{repo_url}}、{{commit}} 运行时变量。当前不支持 secret 参数。' },
   ] }],
 });
 const templateGenerator = (workspace: string, resource: string, field: string): NonNullable<FormConfig<AnyRow>["generator"]> => ({
@@ -225,6 +226,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     "cron-runs": list<CronRun>({resource:"cron-runs",rowKey:r=>r.id,filters:[{key:"job_id",label:"任务 ID",type:"text"},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))}],columns:[{key:"job_name",label:"任务"},{key:"state",label:"状态",render:r=>cronState(r.state)},{key:"scheduled_at",label:"计划时间",sortable:true,render:r=>cronDate(r.scheduled_at)},{key:"attempt",label:"尝试次数"},{key:"trigger_kind",label:"触发方式",render:r=>r.trigger_kind==="manual"?"手动":"计划"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},...cronLinks(workspace)],toolbar:{create:false,import:false,export:false}}),
     settings: list<Setting>({resource:"settings",rowKey:r=>r.id,filters:[{key:"q",label:"配置键",type:"text"}],columns:[{key:"name",label:"配置项"},{key:"key",label:"键",sortable:true},{key:"value",label:"当前值"},{key:"default",label:"默认值"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"settings.update",to:r=>({id:r.id,mode:"edit"})}],toolbar:{create:false,import:false,export:false}}),
     dictionaries: list<Dictionary>({resource:"dictionaries",rowKey:r=>r.id,filters:[{key:"q",label:"标识 / 名称",type:"text"}],columns:[{key:"key",label:"标识",sortable:true},{key:"name",label:"名称",sortable:true},{key:"description",label:"说明"},{key:"builtin",label:"类型",render:r=>r.builtin?"系统字典":"自定义"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"dictionaries.update",to:r=>({id:r.id,mode:"edit"})},{label:"复制",permission:"dictionaries.create",to:()=>({mode:"new"}),query:r=>({copy:r.id})},{label:"删除",permission:"dictionaries.delete",when:r=>!r.builtin,destructive:true,action:r=>deleteResource(workspace,"dictionaries",r.id)}],toolbar:{import:false,export:false}}),
+    "config-templates": { ...templateList(workspace, "config-templates", "deployments", "deploy", "apps"), actions: templateList(workspace, "config-templates", "deployments", "deploy", "apps").actions?.filter(a => a.label !== "使用模板") ?? [] },
     "app-templates": templateList(workspace, "app-templates", "deployments", "deploy", "apps"),
     "pipeline-templates": templateList(workspace, "pipeline-templates", "pipelines", "build", "pipelines"),
     members: list({
@@ -300,6 +302,17 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
           action: (r) => deleteResource(workspace, "pipelines", r.id) },
       ],
     }),
+    "pipeline-artifacts": list({
+      resource: "pipeline-artifacts", permissionResource: "pipelines", rowKey: (r: { id: string }) => r.id,
+      filters: [{ key: "q", label: "文件路径", type: "text" }, { key: "run_id", label: "执行 ID", type: "text" }, { key: "pipeline_id", label: "流水线 ID", type: "text" }],
+      columns: [
+        { key: "path", label: "文件路径" }, { key: "run_id", label: "执行 ID" },
+        { key: "size", label: "大小（字节）", sortable: true }, { key: "sha256", label: "SHA-256" },
+        { key: "download", label: "下载", render: (r: { id: string; path: string }) => <a className="text-primary underline" href={`/api/workspaces/${encodeURIComponent(workspace)}/pipeline-artifacts/${r.id}/download`} download>下载 {r.path}</a> },
+      ],
+      toolbar: { create: false, import: false, export: false },
+      empty: "还没有构建产物。在流水线定义的 artifacts 中声明相对文件路径，构建成功后会自动归档。",
+    }),
     "pipeline-runs": list({
       resource: "pipeline-runs", rowKey: (r: PipelineRun) => r.id,
       filters: [{ key: "state", label: "状态", type: "select", options:
@@ -343,6 +356,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       resource: "hosts",
       rowKey: (row: Host) => row.id,
       filters: [
+        { key: "tag_id", label: "标签", type: "select", options: tagOptions(workspace) },
         { key: "q", label: "名称/地址/账号", type: "text", placeholder: "输入关键字" },
         { key: "group_id", label: "主机组", type: "select", options: groupOptions(workspace) },
         { key: "connection", label: "接入方式", type: "select", options: CONNECTIONS },
@@ -350,6 +364,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       ],
       columns: [
         { key: "name", label: "名称" },
+        { key: "tags", label: "标签", render: (row: Host) => <span className="flex flex-wrap gap-1">{row.tags?.map(tag => <Badge variant="secondary" key={tag.id}>{tag.name}</Badge>)}</span> },
         { key: "address", label: "地址", width: 180 },
         {
           key: "connection",
@@ -577,6 +592,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     "cron-runs": form<CronRun>({resource:"cron-runs",heading:r=>r.job_name,blank:{},readOnly:()=>true,pollMs:r=>r.state==="queued"||r.state==="running"?1000:0,viewActions:cronLinks(workspace),sections:[{fields:[{key:"job_name",label:"任务",type:"text"},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))},{key:"attempt",label:"尝试次数",type:"number"},{key:"downstream_id",label:"下游执行 ID",type:"text"},{key:"output",label:"执行输出",type:"code",span:2},{key:"config",label:"本次配置快照",type:"code",span:2}]}]}),
     settings: form<Setting>({resource:"settings",heading:r=>r.name,blank:{},sections:[{fields:[{key:"name",label:"配置项",type:"text",immutable:true},{key:"key",label:"键",type:"text",immutable:true},{key:"type",label:"类型",type:"text",immutable:true},{key:"value",label:"值",type:"number",required:true,help:"分页范围 1–200；心跳超时 40–600 秒；历史保留 0 为永久，1–36500 为天数。历史清理保留应用当前版本，不删除运行中的记录。"}]}]}),
     dictionaries: form<Dictionary>({resource:"dictionaries",heading:r=>r.name,blank:{key:"",name:"",description:"",items:JSON.stringify([{value:"value",label:"显示名称"}],null,2)},copy:r=>({key:r.key+"-copy",name:r.name+"（副本）",description:r.description,items:r.items}),sections:[{fields:[{key:"key",label:"标识",type:"text",required:true,immutable:true},{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea",span:2},{key:"items",label:"字典项（JSON 数组）",type:"code",required:true,span:2,help:"每项填写唯一 value 和显示 label；数组顺序即选项顺序。主机状态的值由系统控制，只能修改标签与排序。"}]}]}),
+    "config-templates": templateForm("config-templates", false),
     "app-templates": templateForm("app-templates", true),
     "pipeline-templates": templateForm("pipeline-templates", false),
     members: form({
@@ -609,11 +625,12 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       blank: { name: "", mode: "compose", target_kind: "host", target_ref: "", workdir: "/opt/deployments", description: "", manifest: "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n" },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
-        { key: "mode", label: "部署模式", type: "select", options: [{ value: "compose", label: "Docker Compose" }], immutable: true },
-        { key: "target_kind", label: "目标类型", type: "select", options: [{ value: "host", label: "单主机" }], immutable: true },
-        { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true },
-        { key: "workdir", label: "部署工作目录", type: "text", required: true, immutable: true, help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。需要 Docker Compose v2+ 和 flock。" },
-        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "首批支持镜像、多服务、端口、普通环境变量、命名卷和依赖；环境项可使用 valueFrom: variable/变量名 引用普通或密钥变量，按全局→部署模块→应用专属覆盖。暂不支持配置模板、artifact 或滚动更新；不要填写密钥明文。" },
+        { key: "mode", label: "部署模式", type: "select", options: [{ value: "compose", label: "Docker Compose" }, { value: "docker", label: "Docker" }, { value: "native", label: "Native（systemd）" }, { value: "stack", label: "Docker Swarm" }], immutable: true },
+        { key: "target_kind", label: "目标类型", type: "select", options: [{ value: "host", label: "单主机" }, { value: "host-group", label: "主机组（逐台执行）" }], immutable: true },
+        { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true, when: (d) => d.target_kind === "host" },
+        { key: "target_ref", label: "目标主机组", type: "select", options: namedOptions(workspace, "host-groups"), required: true, immutable: true, when: (d) => d.target_kind === "host-group", help: "部署全部直接成员，按主机 ID 排序；失败停止，已成功主机不自动回滚。" },
+        { key: "workdir", label: "部署工作目录", type: "text", required: true, immutable: true, help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。容器模式需要 Docker，Compose 另需 Compose v2+；Native 需要 systemd 及管理服务的权限。所有模式需要 flock、sha256sum。" },
+        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "支持镜像、多服务、端口、环境变量、命名卷、依赖、HTTP健康检查和CPU/内存资源限制；环境项可使用 valueFrom: variable/变量名 引用普通或密钥变量，按全局→部署模块→应用专属覆盖。files 可引用配置模板；Native 使用 artifact: {source: pipeline, pipeline: 流水线ID, path: 产物相对路径}，可选 run 固定构建执行；Swarm 支持 strategy.type: rolling 和 maxUnavailable。不要填写密钥明文。" },
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),
@@ -666,13 +683,14 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     hosts: form({
       resource: "hosts",
       heading: (row: Host) => row.name,
-      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", credential_id: "", description: "" },
+      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", tag_ids: [], credential_id: "", description: "" },
       sections: [
         {
           title: "基本信息",
           fields: [
             { key: "name", label: "名称", type: "text", required: true, placeholder: "例如 web-01" },
             { key: "group_id", label: "主机组", type: "select", options: groupOptions(workspace) },
+            { key: "tag_ids", label: "标签", type: "multiselect", options: tagOptions(workspace), span: 2, help: "可选择多个标签；取消全部选择会清空关联。" },
             {
               key: "connection",
               label: "接入方式",

@@ -8,7 +8,28 @@ try {
   assert.equal(login.status(), 200);
   const page = await context.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
-  if (process.argv[5] === 'variables') {
+  if (process.argv[5] === 'groups') {
+    await page.goto(`${origin}/ops/deploy/apps/${id}`);
+    const targets=page.getByRole('region',{name:'逐台执行结果'});
+    await targets.waitFor();
+    assert.equal(await targets.getByRole('listitem').count(),3);
+    const text=await targets.textContent();
+    assert(text.includes('成功') && text.includes('失败') && text.includes('已跳过'));
+    assert(!(await page.locator('body').textContent()).includes('group-secret-v2'));
+    await page.goto(`${origin}/ops/deploy/revisions/${revision}`);
+    await page.getByRole('region',{name:'逐台执行结果'}).waitFor();
+    await page.getByRole('button',{name:'预览目标差异',exact:true}).click();
+    await page.getByRole('heading',{name:'产物差异',exact:true}).waitFor();
+    assert((await page.locator('body').textContent()).includes('历史目标列表'));
+    await page.goto(`${origin}/ops/deploy/apps/new`);
+    await page.getByLabel('目标类型',{exact:false}).click();
+    await page.getByRole('option',{name:'主机组（逐台执行）',exact:true}).click();
+    await page.getByLabel('目标主机组',{exact:false}).click();
+    await page.getByRole('option',{name:'Deployment group',exact:true}).click();
+    assert.equal(await page.getByLabel('目标主机',{exact:true}).count(),0);
+    assert.deepEqual(errors,[]);
+    console.log('PASS: shared group selector, per-host results, historical preview, secret-free group UI');
+  } else if (process.argv[5] === 'variables') {
     await page.goto(`${origin}/ops/deploy/apps/${id}`);
     await page.getByRole('button', { name: '预览目标差异', exact: true }).click();
     const bindings = page.getByRole('region', { name: '变量引用' });

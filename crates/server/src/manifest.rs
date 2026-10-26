@@ -27,7 +27,16 @@ pub struct Metadata {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Service {
     pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub image: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact: Option<BuildArtifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resources: Option<Resources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<Health>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<ConfigFile>,
     #[serde(default)]
     pub command: Option<Vec<String>>,
     #[serde(default = "one")]
@@ -40,6 +49,187 @@ pub struct Service {
     pub volumes: Vec<Volume>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildArtifact {
+    pub source: String,
+    pub pipeline: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConfigFile {
+    pub path: String,
+    pub from_template: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Health {
+    #[serde(default)]
+    pub readiness: Option<Probe>,
+    #[serde(default)]
+    pub liveness: Option<Probe>,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Probe {
+    pub http_get: HttpGet,
+    #[serde(default = "probe_period")]
+    pub period_seconds: u32,
+    #[serde(default = "one")]
+    pub timeout_seconds: u32,
+    #[serde(default = "probe_failures")]
+    pub failure_threshold: u32,
+}
+fn probe_period() -> u32 {
+    10
+}
+fn probe_failures() -> u32 {
+    3
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpGet {
+    pub path: String,
+    pub port: Value,
+}
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+fn probe_command(service: &Service, probe: &Probe) -> Result<String> {
+    let port = probe
+        .http_get
+        .port
+        .as_u64()
+        .filter(|p| (1..=65535).contains(p))
+        .or_else(|| {
+            let name = probe.http_get.port.as_str()?;
+            service
+                .ports
+                .iter()
+                .find(|p| p.name.as_deref() == Some(name))
+                .map(|p| u64::from(p.container))
+        })
+        .ok_or_else(|| bad("健康检查端口必须是1到65535的端口号或已声明的端口名称。"))?;
+    if !probe.http_get.path.starts_with('/')
+        || probe.http_get.path.starts_with("//")
+        || probe.http_get.path.len() > 2048
+        || probe
+            .http_get
+            .path
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
+        || probe.http_get.path.contains('#')
+        || !(1..=3600).contains(&probe.period_seconds)
+        || !(1..=600).contains(&probe.timeout_seconds)
+        || !(1..=100).contains(&probe.failure_threshold)
+    {
+        return Err(bad("健康检查路径或周期/超时/失败阈值无效。"));
+    }
+    let url = shell_quote(&format!("http://127.0.0.1:{port}{}", probe.http_get.path));
+    Ok(format!(
+        "if command -v curl >/dev/null 2>&1; then curl --noproxy '*' -fsS --max-time {} -- {url} >/dev/null; else http_proxy= https_proxy= HTTP_PROXY= HTTPS_PROXY= wget -q -T {} -O /dev/null {url}; fi",
+        probe.timeout_seconds, probe.timeout_seconds
+    ))
+}
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Resources {
+    #[serde(default)]
+    pub requests: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub limits: BTreeMap<String, Value>,
+}
+fn quantity(value: &Value, cpu: bool) -> Result<u64> {
+    let text = match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => return Err(bad("资源数量必须是数字或数量字符串。")),
+    };
+    let (number, multiplier) = if cpu {
+        match text.strip_suffix('m') {
+            Some(n) => (n, 1_000_000u64),
+            None => (text.as_str(), 1_000_000_000),
+        }
+    } else {
+        let units = [
+            ("Ki", 1024u64),
+            ("Mi", 1024u64.pow(2)),
+            ("Gi", 1024u64.pow(3)),
+            ("Ti", 1024u64.pow(4)),
+            ("K", 1000),
+            ("M", 1000u64.pow(2)),
+            ("G", 1000u64.pow(3)),
+            ("T", 1000u64.pow(4)),
+        ];
+        units
+            .iter()
+            .find_map(|(unit, n)| text.strip_suffix(unit).map(|v| (v, *n)))
+            .unwrap_or((text.as_str(), 1))
+    };
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+        || fraction.len() > 9
+    {
+        return Err(bad(
+            "资源数量必须为正数，CPU可使用m，内存可使用Ki/Mi/Gi/Ti或K/M/G/T。",
+        ));
+    }
+    let scale = 10u128.pow(fraction.len() as u32);
+    let numerator = whole
+        .parse::<u128>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .and_then(|n| fraction.parse::<u128>().unwrap_or(0).checked_add(n));
+    let scaled = numerator
+        .and_then(|n| n.checked_mul(u128::from(multiplier)))
+        .filter(|n| *n > 0 && n % scale == 0)
+        .and_then(|n| u64::try_from(n / scale).ok());
+    scaled.ok_or_else(|| bad("资源数量过大、为零或精度超出支持范围。"))
+}
+fn resource_values(values: &BTreeMap<String, Value>) -> Result<BTreeMap<String, Value>> {
+    let mut out = BTreeMap::new();
+    for (name, value) in values {
+        match name.as_str() {
+            "cpu" => {
+                let nanos = quantity(value, true)?;
+                out.insert(
+                    "cpus".into(),
+                    json!(format!(
+                        "{}.{:09}",
+                        nanos / 1_000_000_000,
+                        nanos % 1_000_000_000
+                    )),
+                );
+            }
+            "memory" => {
+                out.insert("memory".into(), json!(quantity(value, false)?.to_string()));
+            }
+            _ => return Err(bad("resources 仅支持 cpu 和 memory。")),
+        }
+    }
+    Ok(out)
+}
+fn validate_resources(resources: &Resources) -> Result<()> {
+    resource_values(&resources.requests)?;
+    resource_values(&resources.limits)?;
+    for name in ["cpu", "memory"] {
+        if let (Some(request), Some(limit)) =
+            (resources.requests.get(name), resources.limits.get(name))
+        {
+            if quantity(request, name == "cpu")? > quantity(limit, name == "cpu")? {
+                return Err(bad("资源 requests 不能大于 limits。"));
+            }
+        }
+    }
+    Ok(())
 }
 fn one() -> u32 {
     1
@@ -100,6 +290,8 @@ pub struct Strategy {
     pub kind: String,
     #[serde(default = "health_timeout")]
     pub health_timeout: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_unavailable: Option<u32>,
 }
 fn health_timeout() -> u32 {
     120
@@ -109,6 +301,12 @@ fn health_timeout() -> u32 {
 pub struct Overrides {
     #[serde(default)]
     pub compose: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub docker: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub native: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub stack: BTreeMap<String, Value>,
 }
 
 fn bad(message: impl Into<String>) -> ApiError {
@@ -130,11 +328,18 @@ fn environment_name(v: &str) -> bool {
 }
 /// Deserialize directly to typed structs: duplicate keys and unknown fields are errors.
 pub fn parse(input: &str) -> Result<Manifest> {
+    parse_for(input, "auto")
+}
+pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
     if input.len() > 64 * 1024 || input.contains('\0') {
         return Err(bad("manifest 不能超过64KB或包含空字符。"));
     }
-    let m: Manifest = serde_yaml_ng::from_str(input).map_err(|e| bad(format!(
-        "manifest YAML/JSON 无效：{e}。首批不支持 artifact、files、health、resources；请删除未实现的字段。")))?;
+    let m: Manifest = serde_yaml_ng::from_str(input).map_err(|e| {
+        bad(format!(
+            "manifest YAML/JSON 无效：{e}。字段不符合应用描述格式；请删除未实现的字段。"
+        ))
+    })?;
+    let mode = effective_mode(&m, mode);
     if m.api_version != "ferry/v1" || m.kind != "Application" {
         return Err(bad(
             "manifest 必须使用 apiVersion: ferry/v1 和 kind: Application。",
@@ -146,10 +351,15 @@ pub fn parse(input: &str) -> Result<Manifest> {
         ));
     }
     if let Some(s) = &m.strategy {
-        if s.kind != "recreate" {
+        if s.kind != "recreate" && !(mode == "stack" && s.kind == "rolling") {
             return Err(bad(
                 "Compose 不支持滚动更新；strategy.type 仅支持 recreate。",
             ));
+        }
+        if s.max_unavailable.is_some_and(|n| n > 100)
+            || (mode != "stack" && s.max_unavailable.is_some())
+        {
+            return Err(bad("maxUnavailable仅用于Swarm，范围0到100。"));
         }
         if !(1..=600).contains(&s.health_timeout) {
             return Err(bad("healthTimeout 必须为1到600秒的整数。"));
@@ -159,6 +369,25 @@ pub fn parse(input: &str) -> Result<Manifest> {
     for s in &m.services {
         if !identifier(&s.name) || !names.insert(&s.name) {
             return Err(bad("服务名必须是唯一的小写标识符。"));
+        }
+        if let Some(resources) = &s.resources {
+            validate_resources(resources)?;
+        }
+        if s.image.is_empty() == s.artifact.is_none() {
+            return Err(bad("每个服务必须且只能指定image或artifact。"));
+        }
+        if let Some(artifact) = &s.artifact {
+            if artifact.source != "pipeline" || artifact.pipeline.trim().is_empty() {
+                return Err(bad("artifact必须引用构建流水线。"));
+            }
+            crate::artifacts::validate_paths(&[artifact.path.clone()])?;
+            if artifact
+                .run
+                .as_ref()
+                .is_some_and(|r| r.parse::<crate::snowflake::Id>().is_err())
+            {
+                return Err(bad("artifact.run必须是构建执行ID。"));
+            }
         }
         if s.replicas == 0 || s.replicas > 100 {
             return Err(bad("replicas 必须在1到100之间。"));
@@ -180,6 +409,19 @@ pub fn parse(input: &str) -> Result<Manifest> {
             }
         }
         let mut paths = BTreeSet::new();
+        if s.files.len() > 20 {
+            return Err(bad("每个服务最多挂载20个配置文件。"));
+        }
+        for file in &s.files {
+            if crate::channel::check_path(&file.path).is_err()
+                || file.path == "/"
+                || !paths.insert(&file.path)
+                || file.from_template.trim().is_empty()
+                || file.from_template.chars().count() > 60
+            {
+                return Err(bad("配置文件路径无效、重复或模板引用无效。"));
+            }
+        }
         for v in &s.volumes {
             if !identifier(&v.name)
                 || crate::channel::check_path(&v.path).is_err()
@@ -203,7 +445,7 @@ pub fn parse(input: &str) -> Result<Manifest> {
         return Err(bad("manifest 字段不能包含空字符。"));
     }
     // Validating the effective document also covers changes made by overrides.
-    render(&m)?;
+    render_for(&m, mode)?;
     Ok(m)
 }
 
@@ -216,7 +458,7 @@ fn merge(base: &mut Value, overlay: &Value) {
         *base = overlay.clone();
     }
 }
-fn escape(value: &mut Value) {
+pub(crate) fn escape(value: &mut Value) {
     match value {
         Value::String(s) => *s = s.replace('$', "$$"),
         Value::Array(items) => items.iter_mut().for_each(escape),
@@ -227,11 +469,113 @@ fn escape(value: &mut Value) {
 
 /// JSON is a YAML subset accepted by Compose; sorted maps yield stable bytes.
 /// Dollar signs are always literal input, never host environment substitutions.
+#[cfg(test)]
 pub fn render(m: &Manifest) -> Result<String> {
+    render_for(m, "compose")
+}
+fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
+    if mode != "auto" {
+        return mode;
+    }
+    if m.services.iter().any(|s| s.artifact.is_some()) {
+        "native"
+    } else if !m.overrides.stack.is_empty()
+        || m.strategy
+            .as_ref()
+            .is_some_and(|s| s.kind == "rolling" || s.max_unavailable.is_some())
+    {
+        "stack"
+    } else {
+        "compose"
+    }
+}
+pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
+    let mode = effective_mode(m, mode);
+    if mode == "native" {
+        return render_native(m);
+    }
+    if m.services.iter().any(|s| s.artifact.is_some()) {
+        return Err(bad("容器模式需要image，可执行artifact请使用native模式。"));
+    }
+    if !["compose", "docker", "stack"].contains(&mode) {
+        return Err(bad("部署模式尚未实现。"));
+    }
+    if mode == "docker" && m.services.iter().any(|s| s.replicas != 1) {
+        return Err(bad(
+            "Docker模式每台主机的每个服务只能运行一个实例，请使用Compose或主机组。",
+        ));
+    }
+    if mode == "docker"
+        && m.services.iter().any(|s| {
+            s.resources
+                .as_ref()
+                .is_some_and(|r| r.requests.contains_key("cpu"))
+        })
+    {
+        return Err(bad(
+            "Docker模式不提供CPU资源预留，请使用limits.cpu限制上限。",
+        ));
+    }
+
     let mut services = BTreeMap::new();
     let mut volumes = BTreeMap::new();
     for s in &m.services {
+        if mode == "stack" && !s.depends_on.is_empty() {
+            return Err(bad(
+                "Swarm不保证dependsOn启动顺序，请移除该约束并让服务自行重连依赖。",
+            ));
+        }
         let mut v = json!({"image":s.image,"deploy":{"replicas":s.replicas}});
+        if mode == "stack" {
+            let rolling = m.strategy.as_ref().is_some_and(|s| s.kind == "rolling");
+            let unavailable = m
+                .strategy
+                .as_ref()
+                .and_then(|s| s.max_unavailable)
+                .unwrap_or(1);
+            v["deploy"]["update_config"] = json!({"parallelism":if rolling {unavailable.max(1)} else {0},"order":if rolling && unavailable==0 {"start-first"} else {"stop-first"},"failure_action":"pause"});
+        }
+        if let Some(health) = &s.health {
+            if health.readiness.is_none() && health.liveness.is_none() {
+                return Err(bad("health 至少声明 readiness 或 liveness。"));
+            }
+            if let Some(probe) = &health.readiness {
+                probe_command(s, probe)?;
+            }
+            if let Some(probe) = health.liveness.as_ref().or(health.readiness.as_ref()) {
+                let command = if mode == "stack" && health.readiness.is_some() {
+                    let readiness = probe_command(s, health.readiness.as_ref().unwrap())?;
+                    let live = health
+                        .liveness
+                        .as_ref()
+                        .map(|p| probe_command(s, p))
+                        .transpose()?
+                        .unwrap_or_else(|| "true".into());
+                    format!(
+                        "marker=/tmp/.deployment-ready-$(cat /etc/hostname); if [ ! -f \"$marker\" ]; then ({readiness}) && touch \"$marker\" || exit 1; fi; {live}"
+                    )
+                } else {
+                    probe_command(s, probe)?
+                };
+                v["healthcheck"] = json!({"test":["CMD-SHELL",command],"interval":format!("{}s",probe.period_seconds),"timeout":format!("{}s",probe.timeout_seconds),"retries":probe.failure_threshold});
+            }
+        }
+        if let Some(resources) = &s.resources {
+            validate_resources(resources)?;
+            let mut values = serde_json::Map::new();
+            if !resources.limits.is_empty() {
+                values.insert("limits".into(), json!(resource_values(&resources.limits)?));
+            }
+            if !resources.requests.is_empty() {
+                values.insert(
+                    "reservations".into(),
+                    json!(resource_values(&resources.requests)?),
+                );
+            }
+            if !values.is_empty() {
+                v["deploy"]["resources"] = Value::Object(values);
+            }
+        }
         if let Some(command) = &s.command {
             v["command"] = json!(command);
         }
@@ -280,8 +624,42 @@ pub fn render(m: &Manifest) -> Result<String> {
     if !volumes.is_empty() {
         document["volumes"] = json!(volumes);
     }
-    merge(&mut document, &json!(m.overrides.compose));
-    validate_compose(&document)?;
+    merge(
+        &mut document,
+        &json!(if mode == "docker" {
+            &m.overrides.docker
+        } else if mode == "stack" {
+            &m.overrides.stack
+        } else {
+            &m.overrides.compose
+        }),
+    );
+    validate_compose(&document, mode)?;
+    for config in document["services"].as_object_mut().unwrap().values_mut() {
+        if let Some(resources) = config["deploy"]
+            .get_mut("resources")
+            .and_then(Value::as_object_mut)
+        {
+            for values in resources.values_mut() {
+                let input = values
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            if key == "cpus" {
+                                "cpu".to_owned()
+                            } else {
+                                key.clone()
+                            },
+                            value.clone(),
+                        )
+                    })
+                    .collect();
+                *values = json!(resource_values(&input)?);
+            }
+        }
+    }
     for ((service, env), _) in m.references() {
         if !document["services"][&service].is_object()
             || document["services"][&service]["environment"]
@@ -303,13 +681,166 @@ pub fn render(m: &Manifest) -> Result<String> {
     if !references.is_empty() {
         document["x-variable-references"] = json!(references);
     }
-    escape(&mut document);
+    let configs: BTreeMap<_, _> = m
+        .services
+        .iter()
+        .filter(|s| !s.files.is_empty())
+        .map(|s| (&s.name, &s.files))
+        .collect();
+    if !configs.is_empty() {
+        document["x-config-references"] = json!(configs);
+    }
+    if mode == "docker" {
+        for service in document["services"].as_object().unwrap().values() {
+            if service["deploy"]["replicas"].as_u64().unwrap_or(1) != 1 {
+                return Err(bad("Docker模式每个服务只支持一个实例。"));
+            }
+            if service["deploy"]["resources"]["reservations"]
+                .get("cpus")
+                .is_some()
+            {
+                return Err(bad("Docker模式不支持CPU资源预留。"));
+            }
+        }
+    }
+    if mode == "compose" {
+        escape(&mut document);
+    }
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
         .map_err(|_| bad("无法序列化 Compose 产物。"))
 }
 
-fn validate_compose(doc: &Value) -> Result<()> {
+fn render_native(m: &Manifest) -> Result<String> {
+    let mut services = BTreeMap::new();
+    let mut volumes = BTreeMap::new();
+    for service in &m.services {
+        if service.artifact.is_none() || !service.image.is_empty() || service.replicas != 1 {
+            return Err(bad(
+                "native模式每个服务只支持一个可执行产物实例；不能使用镜像或多副本。",
+            ));
+        }
+        if service
+            .ports
+            .iter()
+            .any(|p| p.published.is_some_and(|port| port != p.container))
+        {
+            return Err(bad(
+                "native模式不提供端口映射，请让程序直接监听声明的端口。",
+            ));
+        }
+        if service
+            .resources
+            .as_ref()
+            .is_some_and(|r| !r.requests.is_empty())
+        {
+            return Err(bad("native模式支持资源limits，不提供资源requests预留。"));
+        }
+        if let Some(health) = &service.health {
+            for probe in [&health.readiness, &health.liveness].into_iter().flatten() {
+                probe_command(service, probe)?;
+            }
+        }
+        let environment: BTreeMap<_, _> = service
+            .env
+            .iter()
+            .filter_map(|e| e.value.as_ref().map(|v| (&e.name, v)))
+            .collect();
+        let mounts: Vec<_> = service
+            .volumes
+            .iter()
+            .map(|v| {
+                volumes.insert(v.name.clone(), json!({}));
+                json!({"type":"volume","source":v.name,"target":v.path})
+            })
+            .collect();
+        if let Some(cpu) = service.resources.as_ref().and_then(|r| r.limits.get("cpu")) {
+            if quantity(cpu, true)? % 100_000 != 0 {
+                return Err(bad("native CPU限制精度最多为0.0001核（0.01%）。"));
+            }
+        }
+        let limits = service
+            .resources
+            .as_ref()
+            .map(|r| resource_values(&r.limits))
+            .transpose()?
+            .unwrap_or_default();
+        services.insert(service.name.clone(),json!({"artifact":service.artifact,"command":service.command.clone().unwrap_or_default(),"environment":environment,"volumes":mounts,"depends_on":service.depends_on,"limits":limits}));
+    }
+    let mut remaining: BTreeSet<_> = services.keys().cloned().collect();
+    for service in &m.services {
+        if service
+            .depends_on
+            .iter()
+            .any(|name| !services.contains_key(name))
+        {
+            return Err(bad("依赖服务不存在。"));
+        }
+    }
+    while !remaining.is_empty() {
+        let ready: Vec<_> = m
+            .services
+            .iter()
+            .filter(|s| {
+                remaining.contains(&s.name) && s.depends_on.iter().all(|d| !remaining.contains(d))
+            })
+            .map(|s| s.name.clone())
+            .collect();
+        if ready.is_empty() {
+            return Err(bad("服务依赖包含循环。"));
+        }
+        for name in ready {
+            remaining.remove(&name);
+        }
+    }
+    if m.overrides.native.keys().any(|key| key != "units") {
+        return Err(bad("native overrides仅支持按服务名覆盖units完整文本。"));
+    }
+    if let Some(units) = m.overrides.native.get("units") {
+        let units = units
+            .as_object()
+            .ok_or_else(|| bad("native.units必须是服务名到unit文本的映射。"))?;
+        if units
+            .iter()
+            .any(|(name, value)| !services.contains_key(name) || !value.is_string())
+        {
+            return Err(bad("native unit覆盖必须引用已有服务，内容为字符串。"));
+        }
+    }
+    serde_json::to_string_pretty(
+        &json!({"services":services,"volumes":volumes,"x-native-overrides":m.overrides.native}),
+    )
+    .map(|s| s + "\n")
+    .map_err(|_| bad("无法渲染native产物。"))
+}
+pub(crate) fn native_probes(m: &Manifest) -> Result<Vec<(String, String, u32)>> {
+    m.services
+        .iter()
+        .flat_map(|s| {
+            s.health.iter().flat_map(move |h| {
+                [&h.readiness, &h.liveness]
+                    .into_iter()
+                    .flatten()
+                    .map(move |p| (s, p))
+            })
+        })
+        .map(|(s, p)| Ok((s.name.clone(), probe_command(s, p)?, p.period_seconds)))
+        .collect()
+}
+/// Readiness checks run after reconciliation, separately from ongoing liveness.
+pub fn readiness(m: &Manifest) -> Result<Vec<(String, String, u32)>> {
+    m.services
+        .iter()
+        .filter_map(|s| {
+            s.health
+                .as_ref()
+                .and_then(|h| h.readiness.as_ref())
+                .map(|p| (s, p))
+        })
+        .map(|(s, p)| Ok((s.name.clone(), probe_command(s, p)?, p.period_seconds)))
+        .collect()
+}
+fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
     let root = doc
         .as_object()
         .ok_or_else(|| bad("Compose 产物必须是对象。"))?;
@@ -356,6 +887,7 @@ fn validate_compose(doc: &Value) -> Result<()> {
                 "labels",
                 "logging",
                 "restart",
+                "healthcheck",
             ]
             .contains(&key.as_str())
             {
@@ -363,6 +895,61 @@ fn validate_compose(doc: &Value) -> Result<()> {
                     "首批 Compose overrides 不支持服务字段 {key}。"
                 )));
             }
+        }
+        if let Some(check) = service.get("healthcheck") {
+            let check = check
+                .as_object()
+                .ok_or_else(|| bad("healthcheck 必须是对象。"))?;
+            if check.keys().any(|k| {
+                ![
+                    "test",
+                    "interval",
+                    "timeout",
+                    "retries",
+                    "start_period",
+                    "start_interval",
+                    "disable",
+                ]
+                .contains(&k.as_str())
+            }) {
+                return Err(bad("healthcheck 字段无效。"));
+            }
+            if let Some(test) = check.get("test") {
+                let test = test
+                    .as_array()
+                    .ok_or_else(|| bad("healthcheck.test 必须为字符串数组。"))?;
+                if test.is_empty()
+                    || !test.iter().all(Value::is_string)
+                    || !["CMD", "CMD-SHELL", "NONE"].contains(&test[0].as_str().unwrap_or(""))
+                {
+                    return Err(bad("healthcheck.test 必须使用 CMD、CMD-SHELL 或 NONE。"));
+                }
+            }
+            for key in ["interval", "timeout", "start_period", "start_interval"] {
+                if check.get(key).is_some_and(|v| {
+                    !v.as_str().is_some_and(|v| {
+                        !v.is_empty()
+                            && v.bytes()
+                                .all(|c| c.is_ascii_digit() || b".nsumh".contains(&c))
+                    })
+                }) {
+                    return Err(bad("healthcheck 时间必须是有效的时长字符串。"));
+                }
+            }
+            if check
+                .get("retries")
+                .is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=100).contains(&n)))
+                || check.get("disable").is_some_and(|v| !v.is_boolean())
+            {
+                return Err(bad("healthcheck 阈值或开关无效。"));
+            }
+        }
+        if mode == "stack"
+            && (service.contains_key("depends_on") || service.contains_key("restart"))
+        {
+            return Err(bad(
+                "Swarm不支持depends_on/restart字段，请使用服务重连和Swarm重启策略。",
+            ));
         }
         let image = config["image"].as_str().unwrap_or("");
         if image.is_empty()
@@ -377,10 +964,57 @@ fn validate_compose(doc: &Value) -> Result<()> {
             let d = deploy
                 .as_object()
                 .ok_or_else(|| bad("deploy 必须是对象。"))?;
-            if d.keys().any(|k| k != "replicas") {
+            if d.keys().any(|k| {
+                k != "replicas" && k != "resources" && !(mode == "stack" && k == "update_config")
+            }) {
                 return Err(bad(
-                    "首批 deploy 仅支持 replicas；不支持滚动更新或资源限制。",
+                    "Compose deploy 仅支持 replicas、resources；不支持滚动更新。",
                 ));
+            }
+            if let Some(update) = d.get("update_config") {
+                let update = update
+                    .as_object()
+                    .ok_or_else(|| bad("update_config必须是对象。"))?;
+                if update
+                    .keys()
+                    .any(|k| !["parallelism", "order", "failure_action"].contains(&k.as_str()))
+                    || update
+                        .get("parallelism")
+                        .is_some_and(|v| !v.as_u64().is_some_and(|n| n <= 100))
+                    || update.get("order").is_some_and(|v| {
+                        ![Some("start-first"), Some("stop-first")].contains(&v.as_str())
+                    })
+                    || update.get("failure_action").is_some_and(|v| v != "pause")
+                {
+                    return Err(bad(
+                        "Swarm更新配置仅支持parallelism(0–100)、order(start-first/stop-first)、failure_action(pause)。",
+                    ));
+                }
+            }
+            if let Some(resources) = d.get("resources") {
+                let resources = resources
+                    .as_object()
+                    .ok_or_else(|| bad("deploy.resources 必须为对象。"))?;
+                let mut normalized = Resources::default();
+                for (kind, values) in resources {
+                    let target = match kind.as_str() {
+                        "limits" => &mut normalized.limits,
+                        "reservations" => &mut normalized.requests,
+                        _ => return Err(bad("资源字段仅支持 limits/reservations。")),
+                    };
+                    for (name, value) in values
+                        .as_object()
+                        .ok_or_else(|| bad("资源配置必须为对象。"))?
+                    {
+                        let name = match name.as_str() {
+                            "cpus" => "cpu",
+                            "memory" => "memory",
+                            _ => return Err(bad("Compose资源仅支持cpus/memory。")),
+                        };
+                        target.insert(name.into(), value.clone());
+                    }
+                }
+                validate_resources(&normalized)?;
             }
             match d.get("replicas") {
                 Some(v) => v
@@ -441,7 +1075,9 @@ fn validate_compose(doc: &Value) -> Result<()> {
                         .and_then(|s| s.parse::<u16>().ok())
                         .filter(|n| *n > 0)
                         .ok_or_else(|| bad("published 必须是1到65535的端口字符串。"))?;
-                    if replicas > 1 || !published.insert((port, protocol.to_owned())) {
+                    if (mode != "stack" && replicas > 1)
+                        || !published.insert((port, protocol.to_owned()))
+                    {
                         return Err(bad("固定宿主端口不能重复，也不能用于多副本服务。"));
                     }
                 }
@@ -553,12 +1189,7 @@ mod tests {
     }
     #[test]
     fn capabilities_fail_instead_of_dropping_fields() {
-        for (key, value) in [
-            ("artifact", json!({})),
-            ("files", json!([])),
-            ("health", json!({})),
-            ("resources", json!({})),
-        ] {
+        for (key, value) in [("artifact", json!({})), ("health", json!({}))] {
             let mut v = sample();
             v["services"][0][key] = value;
             fails(&v, key);
@@ -568,7 +1199,8 @@ mod tests {
         fails(&v, "valueFrom");
         let mut v = sample();
         v["strategy"] = json!({"type":"rolling"});
-        fails(&v, "滚动");
+        assert!(parse_for(&v.to_string(), "compose").is_err());
+        assert!(parse_for(&v.to_string(), "stack").is_ok());
     }
     #[test]
     fn variable_references_are_explicit_and_overrides_cannot_replace_them() {
@@ -595,6 +1227,33 @@ mod tests {
         fails(&v, "只能");
         v["services"][0]["env"] = json!([{"name":"SECRET"}]);
         fails(&v, "只能");
+    }
+    #[test]
+    fn resources_preserve_limits_and_validate_effective_overrides() {
+        let mut v = sample();
+        v["services"][0]["resources"] = json!({"requests":{"cpu":"100m","memory":"16Mi"},"limits":{"cpu":"0.5","memory":"64Mi"}});
+        let rendered: Value =
+            serde_json::from_str(&render(&parse(&v.to_string()).unwrap()).unwrap()).unwrap();
+        assert_eq!(
+            rendered["services"]["web"]["deploy"]["resources"]["limits"],
+            json!({"cpus":"0.500000000","memory":"67108864"})
+        );
+        v["services"][0]["resources"]["requests"]["cpu"] = json!("1");
+        fails(&v, "requests");
+        v["services"][0]["resources"]["requests"]["cpu"] = json!("100m");
+        v["overrides"] = json!({"compose":{"services":{"web":{"deploy":{"resources":{"limits":{"memory":0}}}}}}});
+        fails(&v, "资源数量");
+        for value in [
+            json!("-1"),
+            json!("NaN"),
+            json!("0"),
+            json!("999999999999999999999Gi"),
+            json!(true),
+        ] {
+            assert!(quantity(&value, false).is_err());
+        }
+        assert_eq!(quantity(&json!("128Mi"), false).unwrap(), 134217728);
+        assert_eq!(quantity(&json!("100m"), true).unwrap(), 100000000);
     }
     #[test]
     fn duplicates_and_dependency_cycles_rejected() {
@@ -703,5 +1362,25 @@ mod tests {
             String::from_utf8(run.stdout).unwrap().trim(),
             "${RENDER_TEST_VALUE} $literal $$"
         );
+    }
+    #[test]
+    fn native_requires_an_artifact_and_rejects_container_only_capabilities() {
+        let mut v = sample();
+        v["services"][0].as_object_mut().unwrap().remove("image");
+        v["services"][0]["artifact"] =
+            json!({"source":"pipeline","pipeline":"build","path":"dist/server"});
+        v["services"][0]["ports"] = json!([]);
+        let m = parse_for(&v.to_string(), "native").unwrap();
+        assert!(render_for(&m, "native").is_ok());
+        assert!(render_for(&m, "docker").is_err());
+        assert!(render_for(&m, "compose").is_err());
+        v["services"][0]["replicas"] = json!(2);
+        assert!(parse_for(&v.to_string(), "native").is_err());
+        v["services"][0]["replicas"] = json!(1);
+        v["services"][0]["image"] = json!("busybox:1.36");
+        assert!(parse_for(&v.to_string(), "native").is_err());
+        v["services"][0].as_object_mut().unwrap().remove("image");
+        v["services"][0]["artifact"]["path"] = json!("../server");
+        assert!(parse_for(&v.to_string(), "native").is_err());
     }
 }

@@ -3,6 +3,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { api, errorText } from "../api";
 import { base } from "../resource";
+import { href } from "../router";
 import { duration, isActive, mergeLogs, stateBadge, type LogPage, type PipelineRun, type RunLog } from "../pipeline";
 
 const CANCEL_NOTICE = "停止等待并标记为已取消；目标主机上的命令可能继续执行完毕。";
@@ -123,6 +124,7 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
               <dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd>
             </div>)}
           </dl>
+          <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>查看构建产物</a>
           <p className="text-xs text-muted-foreground">{CANCEL_NOTICE}</p>
         </section>
         <section aria-label="步骤" className="shrink-0">

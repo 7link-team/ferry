@@ -27,14 +27,16 @@ function Check-Scope($scope, $expectedVersion = $config.version) {
     Write-Host "Verified $($scope.Hive) registration and executable at $directory"
     return $entry
 }
-# Pin the previous public release so this exercises a real version upgrade,
-# including the old client's /UPDATE-only invocation, not only a reinstall.
-$previousVersion = '0.1.0-alpha.4'
-$previousRelease = Invoke-RestMethod "https://api.github.com/repos/$($config.plugins.release.repository)/releases/tags/v$previousVersion"
-$previousAsset = $previousRelease.assets | Where-Object { $_.name.EndsWith('_x64-setup.exe') } | Select-Object -First 1
-if (-not $previousAsset) { throw 'Previous Windows installer missing' }
-$previousInstaller = Join-Path $env:RUNNER_TEMP 'previous-desktop-setup.exe'
-Invoke-WebRequest $previousAsset.browser_download_url -OutFile $previousInstaller
+# Exercise both the original /UPDATE-only client and the latest published alpha.
+$previousInstallers = @{}
+foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6')) {
+    $previousRelease = Invoke-RestMethod "https://api.github.com/repos/$($config.plugins.release.repository)/releases/tags/v$previousVersion"
+    $previousAsset = $previousRelease.assets | Where-Object { $_.name.EndsWith('_x64-setup.exe') } | Select-Object -First 1
+    if (-not $previousAsset) { throw "Previous Windows installer missing: $previousVersion" }
+    $previousInstaller = Join-Path $env:RUNNER_TEMP "previous-$previousVersion-setup.exe"
+    Invoke-WebRequest $previousAsset.browser_download_url -OutFile $previousInstaller
+    $previousInstallers[$previousVersion] = $previousInstaller
+}
 foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM'; Root = $env:LOCALAPPDATA }, @{ Mode = 'AllUsers'; Hive = 'HKLM'; OtherHive = 'HKCU'; Root = $env:ProgramFiles })) {
     Run-Installer $installer @('/S', "/$($scope.Mode)")
     $entry = Check-Scope $scope
@@ -42,29 +44,38 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
     & node .github/scripts/test-desktop-windows.mjs (Join-Path $directory $entry.MainBinaryName)
     if ($LASTEXITCODE -ne 0) { throw 'Installed desktop launch/lifecycle verification failed' }
     Run-Installer (Join-Path $directory 'uninstall.exe') @('/S', "_?=$directory")
-    Run-Installer $previousInstaller @('/S', "/$($scope.Mode)")
-    $entry = Check-Scope $scope $previousVersion
-    $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
-    # Old basicUi clients pass only /UPDATE. New passive clients add /P /R.
-    # Both must finish without a maintenance choice and automatically launch the app.
-    foreach ($updateArgs in @(@('/UPDATE'), @('/P', '/R', '/UPDATE'))) {
-        Run-Installer $installer $updateArgs
-        $deadline = (Get-Date).AddSeconds(45)
-        $restarted = $null
-        while ((Get-Date) -lt $deadline) {
-            $restarted = Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($entry.MainBinaryName)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $directory $entry.MainBinaryName) } | Select-Object -First 1
-            if ($restarted -and $restarted.MainWindowHandle -ne 0) { break }
-            Start-Sleep -Milliseconds 200
+    foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6')) {
+        $previousInstaller = $previousInstallers[$previousVersion]
+        Run-Installer $previousInstaller @('/S', "/$($scope.Mode)")
+        $entry = Check-Scope $scope $previousVersion
+        $directory = $entry.InstallLocation.Trim('"').TrimEnd('\')
+        # Old basicUi clients pass only /UPDATE. New passive clients add /P /R.
+        # Both must finish without a maintenance choice and automatically launch the app.
+        foreach ($updateArgs in @(@('/UPDATE'), @('/P', '/R', '/UPDATE'))) {
+            Run-Installer $installer $updateArgs
+            $deadline = (Get-Date).AddSeconds(45)
+            $restarted = $null
+            while ((Get-Date) -lt $deadline) {
+                $restarted = Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($entry.MainBinaryName)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $directory $entry.MainBinaryName) } | Select-Object -First 1
+                if ($restarted -and $restarted.MainWindowHandle -ne 0) { break }
+                Start-Sleep -Milliseconds 200
+            }
+            if (-not $restarted -or $restarted.MainWindowHandle -eq 0) { throw 'Update did not automatically restart application' }
+            # Closing the remembered workspace restores settings; close that window as well.
+            $closeDeadline = (Get-Date).AddSeconds(30)
+            while (-not $restarted.HasExited -and (Get-Date) -lt $closeDeadline) {
+                $restarted.Refresh()
+                if ($restarted.MainWindowHandle -ne 0) { [void]$restarted.CloseMainWindow() }
+                if ($restarted.WaitForExit(500)) { break }
+            }
+            if (-not $restarted.HasExited) { throw 'Restarted app did not exit normally' }
         }
-        if (-not $restarted -or $restarted.MainWindowHandle -eq 0) { throw 'Update did not automatically restart application' }
-        if (-not $restarted.CloseMainWindow()) { throw 'Could not close restarted app' }
-        if (-not $restarted.WaitForExit(30000)) { throw 'Restarted app did not exit normally' }
+        $updated = Check-Scope $scope
+        if ($updated.InstallLocation -ne $entry.InstallLocation) { throw 'Update changed installation directory' }
+        $uninstaller = Join-Path $directory 'uninstall.exe'
+        if (-not (Test-Path $uninstaller)) { throw 'Uninstaller missing' }
+        Run-Installer $uninstaller @('/S', "_?=$directory")
+        if (Test-Path "$($scope.Hive):\$registryPath") { throw 'Uninstall registration was not removed' }
+        Write-Output "PASS: $($scope.Mode) install, update and uninstall"
     }
-    $updated = Check-Scope $scope
-    if ($updated.InstallLocation -ne $entry.InstallLocation) { throw 'Update changed installation directory' }
-    $uninstaller = Join-Path $directory 'uninstall.exe'
-    if (-not (Test-Path $uninstaller)) { throw 'Uninstaller missing' }
-    Run-Installer $uninstaller @('/S', "_?=$directory")
-    if (Test-Path "$($scope.Hive):\$registryPath") { throw 'Uninstall registration was not removed' }
-    Write-Output "PASS: $($scope.Mode) install, update and uninstall"
 }
