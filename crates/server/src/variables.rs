@@ -453,6 +453,36 @@ pub async fn remove(
             }
         }
     }
+    if row.scope != "deploy" {
+        let builds = pipelines::Entity::find()
+            .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+            .all(&tx)
+            .await?;
+        for build in builds {
+            if row.scope == "build" && row.scope_ref != 0 && row.scope_ref != build.id {
+                continue;
+            }
+            let definition = crate::pipelines::validate_definition(&build.definition)?;
+            if crate::pipelines::variable_names(&definition).contains(&row.name) {
+                let resolved = resolve(
+                    &tx,
+                    scope.workspace_id,
+                    "build",
+                    build.id.into(),
+                    &std::collections::BTreeSet::from([row.name.clone()]),
+                )
+                .await?;
+                if resolved
+                    .get(&row.name)
+                    .is_some_and(|selected| selected.id == row.id)
+                {
+                    return Err(ApiError::conflict(
+                        "流水线仍引用此变量，请先修改引用再删除。",
+                    ));
+                }
+            }
+        }
+    }
     variables::Entity::delete_many()
         .filter(variables::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(variables::Column::Id.eq(id))

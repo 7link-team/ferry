@@ -310,7 +310,10 @@ pub struct Definition {
 #[serde(deny_unknown_fields)]
 pub struct Environment {
     pub name: String,
-    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, rename = "valueFrom", skip_serializing_if = "Option::is_none")]
+    pub value_from: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize, Deserialize)]
@@ -401,7 +404,9 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
         for (index, item) in env.iter().enumerate() {
             let context = format!("第 {} 个环境变量", index + 1);
             let entry: Environment = serde_json::from_value(item.clone()).map_err(|_| {
-                ApiError::bad(format!("{context}必须且只能包含字符串 name 和 value。"))
+                ApiError::bad(format!(
+                    "{context}必须包含字符串 name，且 value 和 valueFrom 二选一。"
+                ))
             })?;
             let mut bytes = entry.name.bytes();
             let valid = bytes
@@ -419,10 +424,23 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
                     entry.name
                 )));
             }
-            if entry.value.contains('\0') {
-                return Err(ApiError::bad(format!("{context}的值不能包含空字符。")));
+            match (&entry.value, &entry.value_from) {
+                (Some(value), None) => {
+                    if value.contains('\0') {
+                        return Err(ApiError::bad(format!("{context}的值不能包含空字符。")));
+                    }
+                    check_templates(value, &context)?;
+                }
+                (None, Some(reference))
+                    if reference
+                        .strip_prefix("variable/")
+                        .is_some_and(crate::variables::valid_name) => {}
+                _ => {
+                    return Err(ApiError::bad(format!(
+                        "{context}必须使用 value 或 valueFrom: variable/变量名，不能同时填写。"
+                    )));
+                }
             }
-            check_templates(&entry.value, &context)?;
         }
     }
     let definition: Definition = serde_json::from_value(value).map_err(|_| {
@@ -430,6 +448,19 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
     })?;
     crate::artifacts::validate_paths(&definition.artifacts)?;
     Ok(definition)
+}
+
+pub fn variable_names(definition: &Definition) -> std::collections::BTreeSet<String> {
+    definition
+        .env
+        .iter()
+        .filter_map(|env| {
+            env.value_from
+                .as_deref()
+                .and_then(|reference| reference.strip_prefix("variable/"))
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -592,6 +623,26 @@ mod tests {
         accepts(&v);
         v["env"][0]["value"] = json!("a\0b");
         rejects(&v, "空字符");
+    }
+
+    #[test]
+    fn variable_references_are_explicit_and_exclusive() {
+        let mut v = valid();
+        for invalid in [
+            json!({"name":"A","value":"x","valueFrom":"variable/token"}),
+            json!({"name":"A","valueFrom":"token"}),
+            json!({"name":"A","valueFrom":"variable/"}),
+            json!({"name":"A","valueFrom":"variable/token with spaces"}),
+        ] {
+            v["env"] = json!([invalid]);
+            rejects(&v, "环境变量");
+        }
+        v["env"] = json!([{"name":"A","valueFrom":"variable/token"},{"name":"B","value":""}]);
+        let definition = validate_definition(&v.to_string()).unwrap();
+        assert_eq!(
+            variable_names(&definition),
+            std::collections::BTreeSet::from(["token".into()])
+        );
     }
 
     #[test]

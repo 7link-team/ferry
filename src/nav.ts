@@ -8,6 +8,9 @@ export interface NavItem {
   label: string;
   /** Detail/history routes available through resource actions, not extra menu entries. */
   hidden?: boolean;
+  /** Related page shown inside this parent menu entry. */
+  parent?: string;
+  description?: string;
   /** Resource page this item opens. Several items may share one resource. */
   resource: string;
   /** Preset query applied on entry, e.g. the scope of a shared resource. */
@@ -33,9 +36,9 @@ export const nav: NavGroup[] = [
     key: "deploy",
     label: "部署",
     items: [
-      { key: "apps", label: "应用", resource: "deployments", permission: "deployments.read" },
-      { key: "revisions", label: "部署历史", resource: "deployment-revisions", permission: "deployments.read" },
-      { key: "config-templates", label: "配置文件模板", resource: "config-templates", permission: "config-templates.read" },
+      { key: "apps", label: "应用部署", resource: "deployments", permission: "deployments.read" },
+      { key: "revisions", label: "部署历史", resource: "deployment-revisions", hidden: true, parent: "apps", permission: "deployments.read" },
+      { key: "config-templates", label: "应用配置文件", resource: "config-templates", hidden: true, parent: "apps", description: "为应用生成 nginx.conf、application.yml、.toml 等配置文件。这里保存文件内容和参数，应用部署时通过 files 引用，并写入指定路径；不是平台设置，也不是整套应用部署模板。", permission: "config-templates.read" },
       { key: "app-templates", label: "应用模版", resource: "app-templates", permission: "app-templates.read" },
       { key: "marketplace", label: "应用市场", resource: "marketplace", permission: "marketplace.read" },
       { key: "marketplace-sources", label: "市场来源", resource: "marketplace-sources", permission: "marketplace-sources.read" },
@@ -51,8 +54,8 @@ export const nav: NavGroup[] = [
     label: "构建",
     items: [
       { key: "repositories", label: "仓库", resource: "repositories", permission: "repositories.read" },
-      { key: "repository-auth", label: "仓库授权", resource: "repository-auth", permission: "credentials.read" },
-      { key: "api-tokens", label: "API 令牌", resource: "credentials", params:{kind:"token"}, permission:"credentials.read", hidden:true },
+      { key: "repository-auth", label: "平台授权", resource: "repository-auth", hidden: true, parent: "repositories", description: "连接 GitHub、GitLab、Gitee 或 Codeup 后，在仓库中选择对应访问凭据。网页授权需部署管理员先配置该平台的 OAuth 应用；个人访问令牌是另一种仓库授权方式。", permission: "credentials.read" },
+      { key: "api-tokens", label: "仓库访问令牌", resource: "credentials", parent: "repositories", description: "填写 GitHub、GitLab、Gitee 或 Codeup 签发的个人访问令牌，用于读取私有仓库；不是调用本平台 API 的令牌。保存后在仓库中选择此凭据。", params:{kind:"token"}, permission:"credentials.read", hidden:true },
       { key: "pipelines", label: "流水线", resource: "pipelines", permission: "pipelines.read" },
       { key: "artifacts", label: "构建产物", resource: "pipeline-artifacts", permission: "pipelines.read" },
       { key: "runs", label: "执行历史", resource: "pipeline-runs", permission: "pipelines.read" },

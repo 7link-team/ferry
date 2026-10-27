@@ -46,6 +46,9 @@ export interface RowAction<T> {
   action?: (row: T) => Promise<void>;
   destructive?: boolean;
   when?: (row: T) => boolean;
+  /** Keep unavailable actions discoverable and explain why. */
+  disabled?: (row: T) => boolean;
+  disabledReason?: (row: T) => string;
 }
 
 export interface BulkAction {

@@ -60,6 +60,7 @@ def main():
     sample_errors = []
     sampler = None
     secret = 'private-' + uuid.uuid4().hex
+    variable_secrets = []
     username = 'user-' + uuid.uuid4().hex
     root_dir = '/tmp/' + name
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
@@ -208,6 +209,57 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         all_runs, successful = [], []
+        # Managed build variables must be consumed, not merely editable in CRUD.
+        global_var=create('variables',{'name':'build-token','scope':'global','kind':'secret','value':'global-build-secret'})
+        build_var=create('variables',{'name':'build-token','scope':'build','kind':'secret','value':'module-build-secret'})
+        for kind, host in [('runner',runner),('ssh',ssh)]:
+            value='build-secret-'+uuid.uuid4().hex+"' $HOME {{run}}\nsecond-line"
+            variable_secrets.append(value)
+            variable_secrets.append(value.split('\n')[0])
+            # Check value through a digest: no secret literal appears in commands.
+            import hashlib
+            digest=hashlib.sha256(value.encode()).hexdigest()
+            build=pipeline(host,[{'name':'variables','run':f'test "$(printf %s "$TOKEN" | python3 -c \'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())\' )" = {digest}; result=$?; printf "%s" "$TOKEN"; printf "%s" "$TOKEN" >&2; exit $result'}])
+            object_var=create('variables',{'name':'build-token','scope':'build','scope_ref':build,'kind':'secret','value':value})
+            definition=json.loads(api('/workspaces/ops/pipelines/'+build)['definition'])
+            definition['env']=[{'name':'TOKEN','valueFrom':'variable/build-token'}]
+            row=api('/workspaces/ops/pipelines/'+build); row['definition']=json.dumps(definition)
+            api('/workspaces/ops/pipelines/'+build,row,method='PATCH')
+            marker=root_dir+'/variables-'+kind
+            blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
+            blocked=trigger(blocker)['id']; all_runs.append(blocked)
+            eventually(lambda: local_or_ssh(kind, f'if [ -f {marker}-entered ]; then echo yes; fi').strip()=='yes')
+            rid=trigger(build)['id']; all_runs.append(rid)
+            check(kind+' variable run waits in queue',detail(rid)['state']=='queued')
+            rotated=api('/workspaces/ops/variables/'+object_var); rotated['value']='rotated-'+kind
+            api('/workspaces/ops/variables/'+object_var,rotated,method='PATCH')
+            local_or_ssh(kind,f'touch {marker}-release')
+            done(blocked)
+            result=done(rid); output=''.join(v['chunk'] for v in logs(rid))
+            check(kind+' managed variables prefer pipeline scope and preserve literal bytes',result['state']=='succeeded')
+            check(kind+' managed variables redact stdout/stderr before storage',value not in output and value.split('\n')[0] not in output and '[REDACTED]' in output)
+            check(kind+' variable provenance records scope and original version',result['variables'][0]['scope_ref']==build and result['variables'][0]['version']==1)
+            check(kind+' run API never exposes encrypted or plaintext variable snapshots','variable_snapshot' not in json.dumps(result) and value not in json.dumps(result))
+            api('/workspaces/ops/variables/'+object_var,method='DELETE',status=409)
+            check(kind+' referenced build variable cannot be deleted',True)
+            # The captured value is encrypted at rest, not embedded in the run definition.
+            if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+                import sqlite3
+                dbfiles=list((work/'data').glob('*.sqlite'))
+                assert len(dbfiles)==1,dbfiles
+                with sqlite3.connect(dbfiles[0]) as db:
+                    saved=db.execute('SELECT definition, variable_snapshot FROM pipeline_runs WHERE id=?',(int(rid),)).fetchone()
+                check(kind+' history keeps encrypted variable snapshot',bool(saved[1]) and value not in ''.join(saved))
+            definition['env']=[{'name':'TOKEN','valueFrom':'variable/missing-token'}]
+            row=api('/workspaces/ops/pipelines/'+build); row['definition']=json.dumps(definition)
+            api('/workspaces/ops/pipelines/'+build,row,method='PATCH')
+            api('/workspaces/ops/pipelines/'+build+'/actions/run',{},status=400)
+            check(kind+' undefined build variable refuses enqueue',True)
+            api('/workspaces/ops/variables/'+object_var,method='DELETE',status=204)
+            api('/workspaces/ops/pipelines/'+build,method='DELETE',status=204)
+        api('/workspaces/ops/variables/'+build_var,method='DELETE',status=204)
+        api('/workspaces/ops/variables/'+global_var,method='DELETE',status=204)
+
         # Keep each credential process observable long enough for ps sampling.
         # The old ASKPASS path includes the username in Git's password-prompt argv.
         success_steps = [
@@ -325,12 +377,12 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
               all(len(v) >= 10 for v in samples.values()), f"samples={ {k: len(v) for k,v in samples.items()} }")
         for kind, data in samples.items():
             joined = '\n'.join(data)
-            check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined
+            check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined and all(value not in joined for value in variable_secrets)
                   and '/step' in joined, f'samples={len(data)}, observed step argv={"/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
         activity = json.dumps(api('/workspaces/ops/activity?page_size=200'))
         all_text = ''.join(i['chunk'] for rid in all_runs for i in logs(rid))
         check('7 all stored logs and activity omit credential plaintext',
-              all(value not in text for value in [secret, username] for text in [activity, all_text]))
+              all(value not in text for value in [secret, username, *variable_secrets] for text in [activity, all_text]))
         check('server log contains no credential plaintext', secret not in (work / 'server.log').read_text())
         # A real in-flight command must finish before the owned server exits.
         # File barriers keep this deterministic instead of relying on command timing.

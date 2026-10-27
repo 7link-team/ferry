@@ -127,6 +127,10 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
           <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>查看构建产物</a>
           <p className="text-xs text-muted-foreground">{CANCEL_NOTICE}</p>
         </section>
+        {!!run.variables?.length && <section aria-label="执行变量" className="rounded border p-3 text-sm">
+          <h2 className="font-medium">执行变量</h2><p className="text-muted-foreground">使用触发时的加密快照，修改当前变量不会改变本次执行。</p>
+          <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope_ref !== "0" ? "流水线专属" : v.scope === "global" ? "全局" : "构建模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</li>)}</ul>
+        </section>}
         <section aria-label="步骤" className="shrink-0">
           <h2 className="mb-2 text-sm font-medium">步骤</h2>
           <ol className="divide-y divide-border rounded-lg border border-border bg-card">

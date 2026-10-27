@@ -19,7 +19,7 @@ import { Platform } from "./Platform";
 import { Dashboard } from "./components/Dashboard";
 import { Invitation } from "./components/Invitation";
 import { Entry } from "./Entry";
-import { findGroup, findItem, nav } from "./nav";
+import { findGroup, findItem, nav, type NavItem, type NavGroup } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useQueryValue, useRoute } from "./router";
 import { PALETTES, useTheme } from "./theme";
@@ -112,10 +112,13 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
 
+  const canVisit = (i: NavItem) => !i.permission || permissions.has(i.permission);
+  const menuTarget = (g: NavGroup, i: NavItem) => canVisit(i) ? i : g.items.find(child => child.parent === i.key && canVisit(child)) ?? i;
+  const menuVisible = (g: NavGroup, i: NavItem) => !i.hidden && (canVisit(i) || g.items.some(child => child.parent === i.key && canVisit(child)));
   const groups = nav
     .map((g) => ({
       ...g,
-      items: g.items.filter((i) => !i.hidden && (!i.permission || permissions.has(i.permission))),
+      items: g.items.filter((i) => menuVisible(g, i)),
     }))
     .filter((g) => g.items.length);
 
@@ -128,6 +131,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     },
   });
 
+  const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
+  const relatedItems = group.items.filter(i => (i.key === parentItem.key || i.parent === parentItem.key) && i.key !== "api-tokens" && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.resource];
   const formConfig = forms[item.resource];
 
@@ -141,7 +146,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           {groups.map((g) => (
             <a
               key={g.key}
-              {...to(g.key, g.items[0]!.key)}
+              {...to(g.key, menuTarget(findGroup(g.key)!, g.items[0]!).key)}
               aria-current={g.key === group.key ? "page" : undefined}
               className={cn(
                 "rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground",
@@ -214,15 +219,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           aria-label={group.label}
         >
           {group.items
-            .filter((i) => !i.permission || permissions.has(i.permission))
+            .filter((i) => menuVisible(group, i))
             .map((i) => (
               <a
                 key={i.key}
-                {...to(group.key, i.key, i.params)}
-                aria-current={i.key === item.key ? "page" : undefined}
+                {...to(group.key, menuTarget(group, i).key, menuTarget(group, i).params)}
+                aria-current={i.key === parentItem.key ? "page" : undefined}
                 className={cn(
                   "rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground",
-                  i.key === item.key && "bg-accent text-foreground",
+                  i.key === parentItem.key && "bg-accent text-foreground",
                 )}
               >
                 {i.label}
@@ -232,7 +237,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
 
         {/* auto breadcrumbs / auto title / 1fr content — min-h-0 is what lets
             the content own the scrolling instead of the page. */}
-        <main className="grid min-h-0 grid-rows-[auto_auto_1fr] px-4 pt-3">
+        <main className="grid min-h-0 grid-rows-[auto_1fr] px-4 pt-3">
+          <div>
           <nav aria-label="面包屑">
             <ol className="flex gap-1.5 text-sm text-muted-foreground">
               <li>
@@ -274,7 +280,13 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             {route.mode === "edit" && " · 编辑"}
           </h1>
 
+          {relatedItems.length > 1 && <nav aria-label={`${parentItem.label}页面`} className="mb-3 flex flex-wrap gap-3">
+            {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
+          </nav>}
+          {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
+          {item.resource === "repository-auth" && identity.user.is_superadmin && <details className="mb-3 text-sm"><summary className="cursor-pointer">配置网页授权</summary><p className="my-2">在 GitHub、GitLab 或 Gitee 创建 OAuth 应用，将回调地址设置为当前服务公开地址加 /api/repository-auth/callback。服务端设置以下变量并重启；将 GITHUB 替换为 GITLAB 或 GITEE 即可配置对应平台。</p><pre className="overflow-auto rounded border p-3">{"REPOSITORY_OAUTH_PUBLIC_URL=https://你的平台地址\nREPOSITORY_OAUTH_GITHUB_CLIENT_ID=应用 ID\nREPOSITORY_OAUTH_GITHUB_CLIENT_SECRET=应用密钥"}</pre><p className="mt-2">应用密钥仅保存在服务端。桌面内置服务也需配置与已登记回调地址一致的 OAuth 应用。Codeup 使用个人访问令牌。</p></details>}
           {preferencesError && <p role="alert">{preferencesError}</p>}
+          </div>
           {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
               <div className="flex min-h-0 flex-col">
@@ -287,7 +299,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               /> : <p role="status">正在加载工作空间配置…</p>}
               </div>
             ) : (
-              <Placeholder resource={item.resource} />
+              <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
             )
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
             <DeploymentDetail key={`${current.slug}/${item.resource}/${route.id}`} workspace={current.slug} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
@@ -313,7 +325,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               />
             </div>
           ) : (
-            <Placeholder resource={item.resource} />
+            <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
           )}
         </main>
       </div>
@@ -371,10 +383,6 @@ function HostDetail({
   );
 }
 
-const Placeholder = ({ resource }: { resource: string }) => (
-  <p className="text-muted-foreground">
-    资源 <code className="rounded bg-muted px-1.5 py-0.5 text-sm">{resource}</code> 还未实现。
-    加一份 <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/resources.tsx</code> 配置
-    和对应的服务端处理即可，不需要新的页面组件。
-  </p>
+const UnavailablePage = ({ onBack }: { onBack: () => void }) => (
+  <div role="alert"><p>此页面不支持当前操作，请返回列表选择可用操作。</p><Button variant="outline" onClick={onBack}>返回列表</Button></div>
 );

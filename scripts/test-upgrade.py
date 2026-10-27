@@ -91,8 +91,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 added=set(migrated['permissions'])-set(role['permissions'])
                 expected={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} if role['name'] in ['拥有者','管理员'] else {'marketplace-sources.read'} if role['name']=='只读' else set()
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
+                expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions'])
-                assert migrated['version'] == 1+bool(added)
+                assert migrated['version'] == role['version']+bool(added)
                 for field in ('id','name','builtin'):
                     assert migrated[field] == role[field], f'Upgrade changed role {field}'
             members = api('/workspaces/upgrade/members')['items']

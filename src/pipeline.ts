@@ -10,6 +10,7 @@ export interface PipelineRun {
   started_at: number;
   finished_at: number;
   steps: PipelineStep[];
+  variables?: { environment: string; name: string; scope: string; scope_ref: string; version: number; secret: boolean }[];
 }
 export interface PipelineStep {
   index: number;

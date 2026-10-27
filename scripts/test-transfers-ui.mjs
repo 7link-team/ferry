@@ -114,17 +114,17 @@ try {
   assert.deepEqual(tagged.tag_ids,[]);
   console.log('PASS real host tag multiselect, list labels, filter and removal');
   let pagesChecked=0;
-  for (const group of nav) for (const item of group.items.filter(item=>!item.hidden)) {
+  for (const group of nav) for (const item of group.items) {
     const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${item.resource}` && r.request().method()==='GET');
     await p.goto(`${origin}/tenant/${group.key}/${item.key}`);
     const response=await loaded;
     assert(response.ok(),`${item.resource}: ${await response.text()}`);
     await p.locator('main').waitFor();
-    assert(!(await p.locator('main').innerText()).includes('还未实现'),item.resource);
+    assert(!/还未实现|此页面不支持当前操作/.test(await p.locator('main').innerText()),item.resource);
     pagesChecked++;
   }
   assert(pagesChecked>=25);
-  console.log(`PASS ${pagesChecked} visible navigation pages use real APIs without placeholders`);
+  console.log(`PASS ${pagesChecked} navigation and internal pages use real APIs without placeholders`);
   assert.deepEqual(errors,[]);
   console.log('PASS sensitive import preview is masked and no browser errors');
 } finally {

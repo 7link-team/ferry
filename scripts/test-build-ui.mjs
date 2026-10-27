@@ -79,6 +79,7 @@ try {
   execFileSync('python3', ['scripts/test-setup.py', `${origin}/api`, join(work, 'data')], { windowsHide: true });
   await api('/users', { email: 'ui@example.invalid', name: 'UI acceptance', password: 'temporary-ui-password' });
   await api('/workspaces', { name: 'UI acceptance', slug: 'ops' });
+  await api('/workspaces/ops/variables', { name: 'build-ui-secret', scope: 'build', kind: 'secret', value: 'browser-managed-build-secret' });
   const group = await api('/workspaces/ops/host-groups', { name: 'UI group' });
   const host = await api('/workspaces/ops/hosts', { name: 'UI runner', connection: 'runner', group_id: group.id });
   const token = await api('/workspaces/ops/runner-tokens', { host_id: host.id });
@@ -109,7 +110,7 @@ try {
     workdir: join(work, 'build-{{run}}'),
     // Hold each following step until the browser observes the preceding log.
     // Fixed sleeps raced independent detail/log polling on fast or busy hosts.
-    env: [{ name: 'UI_BARRIER_DIR', value: work }],
+    env: [{ name: 'UI_BARRIER_DIR', value: work }, { name: 'MANAGED_SECRET', valueFrom: 'variable/build-ui-secret' }],
     steps: [
       { name: '克隆', run: 'git clone -b {{branch}} {{repo_url}} source && echo CLONE_OK', timeout_seconds: 60 },
       { name: '构建', run: 'while [ ! -f "$UI_BARRIER_DIR/allow-build" ]; do sleep 0.1; done; test -f source/README.md && echo BUILD_OK', timeout_seconds: 60 },
@@ -131,6 +132,8 @@ try {
   await page.getByLabel('执行日志', { exact: true }).getByText(/CLONE_OK/).waitFor();
   await page.getByLabel('步骤', { exact: true }).getByText('运行中', { exact: true }).waitFor();
   assert((await page.getByLabel('步骤', { exact: true }).innerText()).includes('运行中'));
+  assert((await page.getByLabel('执行变量', { exact: true }).innerText()).includes('MANAGED_SECRET ← build-ui-secret · 构建模块 · v1 · 密钥'));
+  assert(!(await page.locator('body').innerText()).includes('browser-managed-build-secret'));
   const firstCount = await page.locator('[data-seq]').count();
   await writeFile(join(work, 'allow-build'), '');
   await page.getByLabel('执行日志', { exact: true }).getByText(/BUILD_OK/).waitFor();

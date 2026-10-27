@@ -84,6 +84,7 @@ impl MigratorTrait for Migrator {
             Box::new(DeploymentArtifacts),
             Box::new(DeploymentGroups),
             Box::new(ResourceImports),
+            Box::new(PipelineVariableSnapshots),
         ]
     }
 }
@@ -2353,6 +2354,33 @@ impl MigrationTrait for ResourceImports {
             table.col(long_text(key, backend).not_null());
         }
         execute_schema(m, SchemaStatement::Table(table)).await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct PipelineVariableSnapshots;
+impl MigrationName for PipelineVariableSnapshots {
+    fn name(&self) -> &str {
+        "pipeline_variable_snapshots_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineVariableSnapshots {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_runs",
+                "variable_snapshot",
+                Table::alter()
+                    .table(Alias::new("pipeline_runs"))
+                    .add_column(long_text("variable_snapshot", m.get_database_backend()))
+                    .to_owned(),
+            ),
+        )
+        .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

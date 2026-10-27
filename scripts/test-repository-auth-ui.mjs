@@ -66,7 +66,16 @@ try {
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root='/workspaces/tenant';
-  await p.goto(`${origin}/tenant/build/repository-auth`);
+  await p.goto(`${origin}/tenant/build/repositories`);
+  assert.equal(await p.locator('nav[aria-label="构建"]').getByRole('link',{name:'平台授权',exact:true}).count(),0);
+  assert.equal(await p.locator('nav[aria-label="构建"]').getByRole('link',{name:'API 令牌',exact:true}).count(),0);
+  await p.getByRole('navigation',{name:'仓库页面',exact:true}).getByRole('link',{name:'平台授权',exact:true}).click();
+  for (const name of ['GitLab','Gitee']) {
+    const row=p.getByRole('row').filter({hasText:name});
+    assert(await row.getByRole('button',{name:'网页授权',exact:true}).isDisabled());
+    assert((await row.innerText()).includes('尚未配置'));
+  }
+  if (process.env.UI_SCREENSHOT) await p.screenshot({ path: process.env.UI_SCREENSHOT });
   await p.getByRole('row').filter({hasText:'GitHub'}).getByRole('button',{name:'网页授权',exact:true}).click();
   await p.waitForURL('**/build/repository-auth?authorization=connected');
   await p.getByRole('cell',{name:'browser-authorized-user',exact:true}).waitFor();
@@ -79,8 +88,9 @@ try {
   await p.waitForURL('**/build/credentials/*');
   assert(!(await p.locator('body').innerText()).includes('fixture-browser-access-token'));
   await p.goto(`${origin}/tenant/build/repository-auth`);
-  await p.getByRole('row').filter({hasText:'Codeup'}).getByRole('link',{name:'使用 API 令牌',exact:true}).click();
+  await p.getByRole('row').filter({hasText:'Codeup'}).getByRole('link',{name:'使用个人访问令牌',exact:true}).click();
   await p.waitForURL('**/build/api-tokens/new');
+  assert((await p.locator('main').innerText()).includes('不是调用本平台 API 的令牌'));
   assert((await p.getByLabel('类型',{exact:false}).innerText()).includes('令牌'));
   assert.deepEqual(errors,[]);
   const logs=await readFile(join(work,'server.log'),'utf8');

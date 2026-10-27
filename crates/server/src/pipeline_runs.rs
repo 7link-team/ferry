@@ -26,7 +26,33 @@ use sea_orm::{
     sea_query::{Expr, ExprTrait},
 };
 use serde_json::{Value, json};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct VariableSnapshot {
+    values: BTreeMap<String, String>,
+    sources: Vec<Value>,
+}
+fn snapshot_aad(workspace: i64, run: i64) -> String {
+    crate::vault::aad(
+        &workspace.to_string(),
+        "pipeline-run-variables",
+        &run.to_string(),
+    )
+}
+fn open_variables(s: &AppState, run: &runs::Model) -> Result<VariableSnapshot> {
+    match &run.variable_snapshot {
+        Some(sealed) => serde_json::from_str(
+            &s.vault
+                .open_secret(sealed, &snapshot_aad(run.workspace_id, run.id))?,
+        )
+        .map_err(|_| ApiError::bad("流水线变量快照无效。")),
+        None => Ok(VariableSnapshot::default()),
+    }
+}
 
 const SPEC: Spec = Spec {
     search: &[],
@@ -75,6 +101,9 @@ pub async fn get(
         .all(&s.db)
         .await?;
     let mut v = run_json(&r);
+    if r.variable_snapshot.is_some() {
+        v["variables"] = json!(open_variables(&s, &r)?.sources);
+    }
     v["steps"] = json!(
         rows.iter()
             .map(
@@ -212,6 +241,46 @@ pub async fn trigger(
         .await?
         .ok_or_else(ApiError::missing)?
         .pipeline_run_number;
+    let variable_rows = crate::variables::resolve(
+        &tx,
+        scope.workspace_id,
+        "build",
+        id,
+        &crate::pipelines::variable_names(&definition),
+    )
+    .await?;
+    let mut snapshot = VariableSnapshot::default();
+    for (name, row) in variable_rows {
+        let value = s.vault.open_secret(
+            &row.value,
+            &crate::vault::aad(
+                &row.workspace_id.to_string(),
+                "variables",
+                &row.id.to_string(),
+            ),
+        )?;
+        for environment in &definition.env {
+            if environment.value_from.as_deref() == Some(&format!("variable/{name}")) {
+                snapshot.sources.push(json!({"environment":environment.name,"name":name,"scope":row.scope,"scope_ref":Id::from(row.scope_ref),"version":row.version,"secret":row.kind=="secret"}));
+            }
+        }
+        snapshot.values.insert(name, value);
+    }
+    let variable_snapshot = if snapshot.values.is_empty() {
+        None
+    } else {
+        Some(
+            s.vault.seal(
+                &serde_json::to_string(&snapshot)
+                    .map_err(|_| ApiError::bad("无法保存流水线变量快照。"))?,
+                &crate::vault::aad(
+                    &scope.workspace_id.to_string(),
+                    "pipeline-run-variables",
+                    &run_id.to_string(),
+                ),
+            )?,
+        )
+    };
     let run = runs::Model {
         id: run_id,
         workspace_id: i64::from(scope.workspace_id),
@@ -222,6 +291,7 @@ pub async fn trigger(
         trigger_kind: "manual".into(),
         triggered_by: i64::from(scope.user.id),
         definition: p.definition,
+        variable_snapshot,
         repo_url: repo_url,
         branch: branch,
         commit,
@@ -487,6 +557,7 @@ async fn execute(
     };
     let ch = crate::channel_open(s, &host).await?;
     let def = crate::pipelines::validate_definition(&r.definition)?;
+    let variables = open_variables(s, r)?.values;
     let credential = if r.credential_id != 0 {
         crate::repository_auth::validate_target(
             &s.db,
@@ -512,8 +583,17 @@ async fn execute(
     if made.code != 0 {
         return Err(ApiError::bad("无法建立临时凭据目录。"));
     }
-    let result =
-        execute_private(s, r, &def, ch.as_ref(), &private, credential.as_ref(), stop).await;
+    let result = execute_private(
+        s,
+        r,
+        &def,
+        ch.as_ref(),
+        &private,
+        credential.as_ref(),
+        &variables,
+        stop,
+    )
+    .await;
     // This is outside the cancellable future. HostChannel cannot promise the
     // remote command stopped; deleting credentials still revokes future reads.
     let cleaned = ch
@@ -535,15 +615,20 @@ async fn execute_private(
     ch: &dyn HostChannel,
     private: &str,
     credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<&'static str> {
     let mut env = String::new();
     for e in &def.env {
-        env.push_str(&format!(
-            "export {}={}\n",
-            e.name,
-            quote(&expand(&e.value, r))
-        ));
+        let value = match (&e.value, &e.value_from) {
+            (Some(value), None) => expand(value, r),
+            (None, Some(reference)) => variables
+                .get(reference.strip_prefix("variable/").unwrap_or(""))
+                .cloned()
+                .ok_or_else(|| ApiError::bad("流水线变量快照缺失。"))?,
+            _ => return Err(ApiError::bad("流水线环境变量配置无效。")),
+        };
+        env.push_str(&format!("export {}={}\n", e.name, quote(&value)));
     }
     env.push_str("export GIT_TERMINAL_PROMPT=0\n");
     if let Some((kind, user, secret)) = credential {
@@ -637,7 +722,7 @@ async fn execute_private(
             stderr: format!("{state}\n"),
         });
         for (stream, text) in [("stdout", output.stdout), ("stderr", output.stderr)] {
-            let text = redact(text, credential);
+            let text = redact(text, credential, variables);
             append(s, r.id, index, &mut seq, stream, &text).await?;
         }
         steps::Entity::update_many()
@@ -663,12 +748,20 @@ async fn execute_private(
     crate::artifacts::collect(s, r, ch, &expand(&def.workdir, r), &def.artifacts, stop).await?;
     Ok("succeeded")
 }
-fn redact(mut text: String, credential: Option<&(String, String, String)>) -> String {
+fn redact(
+    mut text: String,
+    credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
+) -> String {
+    let mut values: Vec<&String> = variables.values().collect();
     if let Some((_, user, secret)) = credential {
-        for value in [secret, user] {
-            if !value.is_empty() {
-                text = text.replace(value, "[REDACTED]");
-            }
+        values.extend([secret, user]);
+    }
+    values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    values.dedup();
+    for value in values {
+        if !value.is_empty() {
+            text = text.replace(value, "[REDACTED]");
         }
     }
     text
@@ -691,7 +784,7 @@ mod tests {
             "private-secret".into(),
         );
         let text = format!("{}private-secret\nprivate-user", "界".repeat(5460));
-        let masked = redact(text, Some(&c));
+        let masked = redact(text, Some(&c), &BTreeMap::new());
         assert!(!masked.contains("private-secret"));
         assert!(!masked.contains("private-user"));
         assert_eq!(masked.matches("[REDACTED]").count(), 2);
@@ -709,6 +802,7 @@ mod tests {
             trigger_kind: "manual".into(),
             triggered_by: 1,
             definition: String::new(),
+            variable_snapshot: None,
             repo_url: "https://example.invalid/{{run}}".into(),
             branch: "main".into(),
             commit: "abc123".into(),

@@ -98,7 +98,7 @@ fn value_check(p: &Parameter, value: &Value) -> Result<()> {
     }
     Ok(())
 }
-fn parameters(text: &str, kind: Kind) -> Result<BTreeMap<String, Parameter>> {
+fn parameters(text: &str, _kind: Kind) -> Result<BTreeMap<String, Parameter>> {
     let items: Vec<Parameter> = serde_json::from_str(text)
         .map_err(|_| ApiError::bad("参数定义必须是 JSON 数组，且只能包含支持的字段。"))?;
     if items.len() > 64 {
@@ -112,7 +112,7 @@ fn parameters(text: &str, kind: Kind) -> Result<BTreeMap<String, Parameter>> {
         {
             return Err(ApiError::bad("参数名称、标签或类型无效。"));
         }
-        if (p.secret && (kind == Kind::Pipeline || p.kind != "string"))
+        if (p.secret && p.kind != "string")
             || (p.kind != "string"
                 && (p.choices.is_some() || p.min_length.is_some() || p.max_length.is_some()))
             || (p.kind != "integer" && (p.min.is_some() || p.max.is_some()))
@@ -122,9 +122,7 @@ fn parameters(text: &str, kind: Kind) -> Result<BTreeMap<String, Parameter>> {
                 .as_ref()
                 .is_some_and(|v| v.is_empty() || v.len() > 100 || v.iter().any(|s| s.is_empty()))
         {
-            return Err(ApiError::bad(
-                "参数校验规则无效；secret仅用于应用或配置模板的变量引用。",
-            ));
+            return Err(ApiError::bad("参数校验规则无效；secret仅用于变量引用。"));
         }
         if let Some(value) = &p.default {
             value_check(&p, value)?;
@@ -215,7 +213,13 @@ fn expand(
                     let whole = start == 0 && end + 2 == text.len();
                     if p.secret
                         && kind != Kind::Config
-                        && (!whole || field != "/services/*/env/*/valueFrom")
+                        && (!whole
+                            || field
+                                != if kind == Kind::Pipeline {
+                                    "/env/*/valueFrom"
+                                } else {
+                                    "/services/*/env/*/valueFrom"
+                                })
                     {
                         return Err(ApiError::bad(
                             "secret参数只能作为valueFrom的完整值，不能拼入命令或普通环境值。",
@@ -616,7 +620,11 @@ mod tests {
         doc["services"][0]["env"] = json!([]);
         doc["metadata"]["labels"] = json!({"valueFrom":"{{ .Values.token }}"});
         assert!(validate_template(&doc.to_string(), defs, Kind::App).is_err());
-        assert!(parameters(defs, Kind::Pipeline).is_err());
+        let pipeline = json!({"workdir":"/tmp/{{run}}","env":[{"name":"TOKEN","valueFrom":"{{ .Values.token }}"}],"steps":[{"name":"build","run":"true"}]});
+        let rendered =
+            render_content(&pipeline.to_string(), defs, &values, Kind::Pipeline).unwrap();
+        let value: Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(value["env"][0]["valueFrom"], "variable/db-token");
     }
     #[test]
     fn config_secrets_are_references_and_literals_cannot_forge_markers() {

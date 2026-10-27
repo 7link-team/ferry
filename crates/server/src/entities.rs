@@ -360,6 +360,7 @@ pub mod pipeline_runs {
         pub trigger_kind: String,
         pub triggered_by: i64,
         pub definition: String,
+        pub variable_snapshot: Option<String>,
         pub repo_url: String,
         pub branch: String,
         pub commit: String,

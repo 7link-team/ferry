@@ -423,6 +423,8 @@ export function ResourceTable<T>({
                               <RowActionButton
                                 key={action.label}
                                 label={action.label}
+                                disabled={busy || action.disabled?.(row)}
+                                disabledReason={action.disabledReason?.(row)}
                                 destructive={action.destructive}
                                 {...(action.to
                                   ? { to: href({ ...route, ...action.to(row) }, action.query?.(row) ?? {}) }
@@ -575,8 +577,12 @@ function RowActionButton({
   to,
   onNavigate,
   onRun,
+  disabled,
+  disabledReason,
 }: {
   label: string;
+  disabled?: boolean | undefined;
+  disabledReason?: string | undefined;
   destructive?: boolean | undefined;
   to?: string | undefined;
   onNavigate?: (() => void) | undefined;
@@ -584,12 +590,12 @@ function RowActionButton({
 }) {
   // A navigating action stays a real link: middle-click, copy-link and
   // open-in-new-tab all keep working.
-  if (to)
+  if (to && !disabled)
     return (
       <a
         href={to}
         className={cn(
-          "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline",
+          "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
           destructive ? "text-destructive" : "text-primary",
         )}
         onClick={(event) => {
@@ -605,9 +611,11 @@ function RowActionButton({
     <button
       type="button"
       className={cn(
-        "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline",
+        "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
         destructive ? "text-destructive" : "text-primary",
       )}
+      disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       onClick={() => void onRun?.()}
     >
       {label}
