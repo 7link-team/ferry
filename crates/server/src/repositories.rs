@@ -181,6 +181,35 @@ async fn check(
     Ok(name.to_owned())
 }
 
+/// Reuse a validated binding, or materialize the selection in the caller's transaction.
+pub(crate) async fn bind_selection(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: Body,
+) -> Result<String> {
+    scope.require("repositories.create")?;
+    check(s, tx, scope, &body).await?;
+    if body.inline_credential.is_none() {
+        if let Some(row) = repositories::Entity::find()
+            .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(repositories::Column::Provider.eq(&body.provider))
+            .filter(repositories::Column::Url.eq(body.url.trim()))
+            .filter(repositories::Column::CredentialId.eq(Id::reference(&body.credential_id)?))
+            .filter(repositories::Column::DefaultBranch.eq(body.branch()))
+            .one(tx)
+            .await?
+        {
+            return Ok(row.id.to_string());
+        }
+    }
+    let (_, Json(saved)) = create_in(s, tx, scope, body).await?;
+    Ok(saved["id"]
+        .as_str()
+        .ok_or_else(|| ApiError::bad("保存仓库失败。"))?
+        .to_owned())
+}
+
 pub async fn list(
     State(s): State<AppState>,
     scope: Scope,

@@ -84,6 +84,7 @@ export interface ListConfig<T> {
 
 export type FieldType =
   | "repository-source"
+  | "pipeline-repository"
   | "text"
   | "textarea"
   | "number"

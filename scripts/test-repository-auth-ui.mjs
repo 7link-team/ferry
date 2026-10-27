@@ -1,9 +1,9 @@
-/** Real Chromium acceptance for scheduled tasks and real execution. */
+/** Real Chromium platform connection -> private Git checkout -> build acceptance. */
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, open, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -25,17 +25,33 @@ const provider=createHttpServer(async(request,response)=>{
     assert.equal(form.get('client_secret'),'fixture-client-secret');
     response.setHeader('Content-Type','application/json');response.end(JSON.stringify({access_token:'fixture-browser-access-token',refresh_token:'fixture-browser-refresh-token',expires_in:3600}));return;
   }
+  if(url.pathname.startsWith('/team/test-repo.git/')) {
+    const expected='Basic '+Buffer.from('browser-authorized-user:valid-personal-token').toString('base64');
+    if(request.headers.authorization!==expected) {response.writeHead(401,{'WWW-Authenticate':'Basic realm="private"'});response.end();return;}
+    const path=url.pathname.slice('/team/test-repo.git/'.length);
+    if(path.includes('..')) {response.writeHead(400);response.end();return;}
+    try {response.end(await readFile(join(work,'repository.git',path)));}
+    catch {response.writeHead(404);response.end();}
+    return;
+  }
   const token=url.searchParams.get('access_token') || request.headers['private-token'] || request.headers['x-yunxiao-token'] || (request.headers.authorization ?? '').replace(/^(Bearer|token) /,'');
   if (!['fixture-browser-access-token','valid-personal-token'].includes(token)) {response.writeHead(401);response.end();return;}
   response.setHeader('Content-Type','application/json');
   if (url.pathname.endsWith('/user')) response.end(JSON.stringify({login:'browser-authorized-user'}));
-  else if (url.pathname.endsWith('/repos') || url.pathname.endsWith('/projects') || url.pathname.endsWith('/repositories')) response.end(JSON.stringify([{name:'test-repo',full_name:'team/test-repo',clone_url:providerOrigin+'/team/test-repo.git',default_branch:'develop'}]));
+  else if (url.pathname.endsWith('/repos') || url.pathname.endsWith('/projects') || url.pathname.endsWith('/repositories')) response.end(JSON.stringify([{name:'repo-'.repeat(15),full_name:'team/test-repo',clone_url:providerOrigin+'/team/test-repo.git',default_branch:'develop'}]));
   else {response.writeHead(404);response.end();}
 
 });
 await new Promise(r=>provider.listen(0,'127.0.0.1',r));
 const providerOrigin=`http://127.0.0.1:${provider.address().port}`;
 const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
+const seed=join(work,'seed');await mkdir(seed);
+await writeFile(join(seed,'build.sh'),'set -eu\nmkdir -p output\nprintf "built-from-private-repository\\n" > output/result.txt\ngit rev-parse HEAD >> output/result.txt\n');
+const git=(...args)=>execFileSync('git',['-C',seed,...args],{windowsHide:true,env:{...process.env,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'}});
+git('init','--quiet','--initial-branch','develop');git('add','build.sh');git('commit','--quiet','-m','fixture');
+const sourceCommit=git('rev-parse','HEAD').toString().trim();
+execFileSync('git',['clone','--bare','--quiet',seed,join(work,'repository.git')],{windowsHide:true});
+execFileSync('git',['--git-dir='+join(work,'repository.git'),'update-server-info'],{windowsHide:true});
 const listener = createServer();
 await new Promise(r => listener.listen(0, '127.0.0.1', r));
 const port = listener.address().port;
@@ -152,6 +168,50 @@ try {
   await p.waitForURL('**/tenant/build/repositories');
   rows=await (await owner.request.get(`${origin}/api${root}/repositories`)).json();
   assert(rows.items.some(row=>row.provider==='git'&&row.name==='Generic with password'&&row.credential_id!=='0'));
+
+  const buildHost=await post(owner,root+'/hosts',{name:'Connected build host',connection:'runner'});
+  const runnerToken=await post(owner,root+'/runner-tokens',{host_id:buildHost.id});
+  runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',runnerToken.token,'--state-dir',join(work,'runner')],{stdio:'ignore',windowsHide:true});
+  for(let i=0;;i++) {
+    const host=await (await owner.request.get(origin+'/api'+root+'/hosts/'+buildHost.id)).json();
+    if(host.state==='online')break;
+    assert(i<100,'runner connection timed out');await new Promise(r=>setTimeout(r,100));
+  }
+  await p.goto(origin+'/tenant/build/pipelines/new');
+  await p.getByLabel(/^名称/).fill('Build from connection');
+  await p.getByLabel('构建代码来源',{exact:true}).selectOption('connection');
+  assert.equal(await p.getByLabel('代码来源',{exact:true}).locator('option[value=git]').count(),0,'connection source only lists platforms; generic Git uses saved repository');
+  await p.getByLabel('代码来源',{exact:true}).selectOption('gitee');
+  await p.getByRole('button',{name:/使用已有连接/}).click();
+  await p.getByLabel('选择平台仓库',{exact:true}).selectOption(providerOrigin+'/team/test-repo.git');
+  assert.equal(await p.getByLabel(/^名称/).inputValue(),'Build from connection');
+  const definition=JSON.parse(await p.getByLabel(/^定义（JSON）/).inputValue());
+  assert.equal(definition.steps[0].checkout,true);
+  assert.equal(definition.steps[1].run,'echo hello');
+  definition.workdir=join(work,'build-{{run}}');
+  definition.steps[1].run='sh build.sh';definition.artifacts=['output/result.txt'];
+  await p.getByLabel(/^定义（JSON）/).fill(JSON.stringify(definition));
+  await p.getByRole('combobox',{name:/目标主机/}).click();
+  await p.getByRole('option',{name:'Connected build host',exact:true}).click();
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL('**/tenant/build/pipelines');
+  const builds=await (await owner.request.get(origin+'/api'+root+'/pipelines')).json();
+  const build=builds.items.find(row=>row.name==='Build from connection');
+  assert(build);
+  const bound=await (await owner.request.get(origin+'/api'+root+'/repositories/'+build.repository_id)).json();
+  assert.equal(bound.provider,'gitee');assert.equal(bound.url,providerOrigin+'/team/test-repo.git');
+  const run=await post(owner,root+'/pipelines/'+build.id+'/actions/run',{});
+  let result;
+  for(let i=0;;i++) {
+    result=await (await owner.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();
+    if(!['queued','running'].includes(result.state))break;
+    assert(i<200,'build timed out');await new Promise(r=>setTimeout(r,100));
+  }
+  assert.equal(result.state,'succeeded',JSON.stringify(result.steps));
+  assert.equal(await readFile(join(work,'build-'+result.number,'output/result.txt'),'utf8'),'built-from-private-repository\n'+sourceCommit+'\n');
+  assert.equal(result.artifacts.length,1);
+  console.log('PASS: browser-selected connection -> authenticated private Git checkout -> checked-in build script -> exact commit artifact');
+  console.log('PASS: build form browses existing connection, binds selected platform repository and preserves commands/name with explicit checkout');
   console.log('PASS: dynamic platform settings, secret nonreturn, popup OAuth preserves draft, Gitee PAT validates and binds selected repository, no auth tabs, generic Git inline credentials, mobile form');
   assert.deepEqual(errors,[]);
   const logs=await readFile(join(work,'server.log'),'utf8');

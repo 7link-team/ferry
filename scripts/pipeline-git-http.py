@@ -6,12 +6,16 @@ import json
 import os
 import subprocess
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 root, config, port = sys.argv[1:]
 credentials = json.load(open(config))
 expected = 'Basic ' + base64.b64encode(
     (credentials['username'] + ':' + credentials['secret']).encode()).decode()
+
+
+provider_expected = 'Basic ' + base64.b64encode(
+    ('connected-git-user:' + credentials['secret']).encode()).decode()
 
 
 class Git(http.server.BaseHTTPRequestHandler):
@@ -25,7 +29,15 @@ class Git(http.server.BaseHTTPRequestHandler):
         self.serve()
 
     def serve(self):
-        if self.headers.get('Authorization') != expected:
+        url = urlsplit(self.path)
+        if url.path in ['/user','/user/repos','/projects'] or url.path.startswith('/oapi/v1/codeup/'):
+            token = parse_qs(url.query).get('access_token',[''])[0] or self.headers.get('PRIVATE-TOKEN') or self.headers.get('x-yunxiao-token') or self.headers.get('Authorization','').removeprefix('Bearer ').removeprefix('token ')
+            if token != credentials['secret']:
+                self.send_response(401);self.end_headers();return
+            if url.path=='/user': value={'login':'connected-git-user','username':'connected-git-user'}
+            else:value=[{'name':'private','full_name':'team/private','clone_url':f'http://127.0.0.1:{port}/private.git','default_branch':'main'}]
+            payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
+        if self.headers.get('Authorization') not in [expected, provider_expected]:
             self.send_response(401)
             self.send_header('WWW-Authenticate', 'Basic realm="local-git"')
             self.end_headers()

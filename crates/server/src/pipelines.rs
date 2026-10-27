@@ -48,6 +48,8 @@ pub struct Body {
     definition: String,
     #[serde(default)]
     repository_id: String,
+    #[serde(default)]
+    repository_selection: Option<crate::repositories::Body>,
     target_kind: String,
     target_ref: String,
     #[serde(default)]
@@ -61,7 +63,12 @@ async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body)
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
     }
-    validate_definition(&body.definition)?;
+    let definition = validate_definition(&body.definition)?;
+    if definition.steps.iter().any(|step| step.checkout)
+        && Id::reference(&body.repository_id)? == Id::from(0)
+    {
+        return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+    }
     let target_table = match body.target_kind.as_str() {
         "host" => "hosts",
         "host-group" => "host_groups",
@@ -157,9 +164,12 @@ pub(crate) async fn create_in(
     s: &AppState,
     tx: &sea_orm::DatabaseTransaction,
     scope: &Scope,
-    body: Body,
+    mut body: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.create")?;
+    if let Some(selection) = body.repository_selection.take() {
+        body.repository_id = crate::repositories::bind_selection(s, tx, scope, selection).await?;
+    }
     let name = check(tx, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
     pipelines::Entity::insert(pipelines::ActiveModel {
@@ -197,11 +207,25 @@ pub async fn update(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
-    Json(body): Json<Body>,
+    Json(mut body): Json<Body>,
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.update")?;
-    let name = check(&s.db, &scope, &body).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let current = pipelines::Entity::find()
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::Id.eq(id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if current.version != body.version {
+        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+    }
+    if let Some(selection) = body.repository_selection.take() {
+        body.repository_id =
+            crate::repositories::bind_selection(&s, &tx, &scope, selection).await?;
+    }
+    let name = check(&tx, &scope, &body).await?;
     let affected = pipelines::Entity::update_many()
         .col_expr(pipelines::Column::Name, Expr::value(name.clone()))
         .col_expr(
@@ -232,7 +256,7 @@ pub async fn update(
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::Id.eq(id))
         .filter(pipelines::Column::Version.eq(body.version))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
@@ -244,8 +268,9 @@ pub async fn update(
         )
         .await?);
     }
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        &tx,
         &scope,
         "update",
         "pipelines",
@@ -253,6 +278,7 @@ pub async fn update(
         json!({"name": name}),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -320,8 +346,11 @@ pub struct Environment {
 #[serde(deny_unknown_fields)]
 pub struct Step {
     pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub run: String,
     #[serde(default)]
+    pub checkout: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
 }
 
@@ -369,7 +398,16 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
             )));
         }
         let run = step.get("run").and_then(Value::as_str).unwrap_or("");
-        if run.trim().is_empty() || run.len() > 8 * 1024 || run.contains('\0') {
+        let checkout = step
+            .get("checkout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if checkout && step.get("run").is_some() {
+            return Err(ApiError::bad(format!(
+                "{context}的 checkout 与 run 不能同时填写。"
+            )));
+        }
+        if !checkout && (run.trim().is_empty() || run.len() > 8 * 1024 || run.contains('\0')) {
             return Err(ApiError::bad(format!(
                 "{context}的命令必须是非空字符串、不含空字符且不能超过 8KB。"
             )));
@@ -385,7 +423,7 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
         check_templates(run, &context)?;
         serde_json::from_value::<Step>(step.clone()).map_err(|_| {
             ApiError::bad(format!(
-                "{context}的字段无效，只支持 name、run 和 timeout_seconds。"
+                "{context}的字段无效，只支持 name、run、checkout 和 timeout_seconds。"
             ))
         })?;
     }
@@ -490,6 +528,22 @@ mod tests {
             .unwrap()
             .remove("timeout_seconds");
         accepts(&v);
+    }
+
+    #[test]
+    fn checkout_steps_round_trip_and_exclude_commands() {
+        let mut value = valid();
+        value["steps"][0] = json!({"name":"拉取代码","checkout":true});
+        let parsed = validate_definition(&value.to_string()).unwrap();
+        assert!(parsed.steps[0].checkout);
+        accepts(&serde_json::to_value(parsed).unwrap());
+        value["steps"][0]["run"] = json!("echo forbidden");
+        rejects(&value, "不能同时填写");
+        value["steps"][0].as_object_mut().unwrap().remove("run");
+        value["steps"][0]["checkout"] = json!(false);
+        rejects(&value, "命令");
+        value["steps"][0]["checkout"] = json!("true");
+        rejects(&value, "命令");
     }
 
     #[test]

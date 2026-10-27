@@ -609,6 +609,30 @@ async fn execute(
     let state = result?;
     finish(s, r.id, state).await
 }
+fn checkout_script(r: &runs::Model) -> Result<String> {
+    if r.repo_url.is_empty() {
+        return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+    }
+    let target = if r.commit.is_empty() {
+        format!("refs/remotes/origin/{}^{{commit}}", r.branch)
+    } else {
+        "FETCH_HEAD^{commit}".into()
+    };
+    let fetch = if r.commit.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "git fetch --no-tags -- origin {} || exit $?\n",
+            quote(&r.commit)
+        )
+    };
+    Ok(format!(
+        "git clone --no-checkout -- {} . || exit $?\n{fetch}revision=$(git rev-parse --verify --end-of-options {}) || exit $?\ngit checkout --detach \"$revision\" --\n",
+        quote(&r.repo_url),
+        quote(&target)
+    ))
+}
+
 async fn execute_private(
     s: &AppState,
     r: &runs::Model,
@@ -693,7 +717,11 @@ async fn execute_private(
         let wd = quote(&expand(&def.workdir, r));
         let script = format!(
             "{env}mkdir -p -- {wd} && cd -- {wd} || exit 1\n{}\n",
-            expand(&step.run, r)
+            if step.checkout {
+                checkout_script(r)?
+            } else {
+                expand(&step.run, r)
+            }
         );
         upload(ch, &format!("{private}/step"), script, 0o600).await?;
         let command = format!("sh {}", quote(&format!("{private}/step")));

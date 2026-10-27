@@ -152,7 +152,8 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         command(['docker', 'build', '-q', '-t', 'pipeline-live-test', '-'], input=dockerfile)
         command(['git', 'init', '-b', 'main', str(work / 'source')])
         (work / 'source' / 'payload.txt').write_text('local-private-repository\n')
-        command(['git', '-C', str(work / 'source'), 'add', 'payload.txt'])
+        (work / 'source' / 'build.sh').write_text('set -eu\nmkdir -p output\ncat payload.txt > output/result.txt\ngit rev-parse HEAD >> output/result.txt\n')
+        command(['git', '-C', str(work / 'source'), 'add', 'payload.txt', 'build.sh'])
         command(['git', '-C', str(work / 'source'), '-c', 'user.name=fixture', '-c',
                  'user.email=fixture@example.invalid', 'commit', '-m', 'fixture'])
         commit = command(['git', '-C', str(work / 'source'), 'rev-parse', 'HEAD']).decode().strip()
@@ -209,6 +210,66 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         all_runs, successful = [], []
+        # New path: provider connection -> choose visible repo in build -> real private checkout/build.
+        for provider in ['github','gitlab','gitee','gitea','codeup']:
+            connection=api('/workspaces/ops/repository-auth/'+provider+'/actions/connect',{'token':secret,'username':'connected-git-user','base_url':f'http://127.0.0.1:{git_port}','api_url':f'http://127.0.0.1:{git_port}','organization':'fixture'})
+            selected=connection['items'][0]
+            selection=dict(selected,provider=provider,credential_id=connection['credential_id'])
+            no_checkout={'workdir':root_dir+'/binding-{{run}}','steps':[{'name':'binding','run':'true'}]}
+            bound=create('pipelines',{'name':'Connected binding '+provider,'target_kind':'host','target_ref':runner,'repository_selection':selection,'definition':json.dumps(no_checkout)})
+            bound_repo=api('/workspaces/ops/pipelines/'+bound)['repository_id']
+            check(provider+' pipeline materializes connected repository without a separate create',bound_repo!='0')
+            definition={'workdir':root_dir+'/connected-{{run}}','steps':[{'name':'Checkout','checkout':True,'timeout_seconds':30},{'name':'Build checked-in script','run':'sh build.sh'}],'artifacts':['output/result.txt']}
+            for kind, host in [('runner',runner),('ssh',ssh)]:
+                pid=create('pipelines',{'name':'Connected '+provider+' '+kind,'target_kind':'host','target_ref':host,'repository_selection':selection,'definition':json.dumps(definition)})
+                check(provider+' '+kind+' pipeline reuses exact repository binding',api('/workspaces/ops/pipelines/'+pid)['repository_id']==bound_repo)
+                rid=trigger(pid)['id'];all_runs.append(rid)
+                result=done(rid)
+                check(provider+' '+kind+' actual private checkout and build succeeds',result['state']=='succeeded',str(result['steps']))
+                payload=local_or_ssh(kind,'cat '+root_dir+'/connected-'+str(result['number'])+'/output/result.txt')
+                check(provider+' '+kind+' build output comes from selected Git commit',payload=='local-private-repository\n'+commit+'\n' and len(result['artifacts'])==1)
+                failed=trigger(pid,values={'branch':'missing-fixture-branch'})['id'];all_runs.append(failed)
+                bad=done(failed)
+                check(provider+' '+kind+' failed checkout prevents build',bad['state']=='failed' and bad['steps'][0]['state']=='failed' and bad['steps'][1]['state']=='skipped')
+
+
+        # Atomic source binding: validation/stale writes never leave orphan repositories.
+        counts=lambda: api('/workspaces/ops/repositories')['total']
+        before=counts()
+        selection=dict(selection,name='Never materialized',url=repo_url+'-not-created')
+        source_body={'name':'Invalid bound build','target_kind':'host','target_ref':runner,'repository_selection':selection,'definition':'{}'}
+        api('/workspaces/ops/pipelines',source_body,status=400)
+        check('invalid pipeline rolls back newly bound repository',counts()==before)
+        existing=api('/workspaces/ops/pipelines/'+pid)
+        api('/workspaces/ops/pipelines/'+pid,dict(existing,version=0,repository_selection=selection),method='PATCH',status=409)
+        check('stale pipeline update creates no repository',counts()==before)
+        foreign=create('hosts',{'name':'foreign-runner','connection':'runner'},'other')
+        api('/workspaces/other/pipelines',dict(source_body,target_ref=foreign,definition=json.dumps(definition)),status=400)
+        check('cross-workspace platform selection rejected',api('/workspaces/other/repositories')['total']==0)
+        api('/workspaces/ops/pipelines',{'name':'No source checkout','target_kind':'host','target_ref':runner,'definition':json.dumps(definition)},status=400)
+        invalid_credential=create('credentials',{'name':'Revoked checkout credential','kind':'password','username':username,'secret':'invalid-fixture-token'})
+        invalid_repo=create('repositories',{'name':'Revoked checkout repository','url':repo_url,'credential_id':invalid_credential,'default_branch':'main'})
+        for kind, host in [('runner',runner),('ssh',ssh)]:
+            body={'name':'Checkout edge '+kind,'target_kind':'host','target_ref':host,'repository_id':repo_id,'definition':json.dumps(definition)}
+            rejected=create('pipelines',dict(body,name='Invalid checkout credential '+kind,repository_id=invalid_repo))
+            rejected_run=trigger(rejected)['id'];all_runs.append(rejected_run)
+            rejected_result=done(rejected_run)
+            check(kind+' invalid Git credential fails checkout and skips build',rejected_result['state']=='failed' and rejected_result['steps'][1]['state']=='skipped')
+            edge=create('pipelines',body)
+            rid=trigger(edge,values={'commit':commit,'branch':'missing-branch-ignored-for-commit'})['id'];all_runs.append(rid)
+            check(kind+' checkout explicit commit succeeds',done(rid)['state']=='succeeded')
+            for value in ["main; touch INJECTED", "$(touch INJECTED)", "-c core.sshCommand=touch"]:
+                rid=trigger(edge,values={'branch':value})['id'];all_runs.append(rid)
+                failed=done(rid)
+                check(kind+' shell-sensitive branch is treated as data',failed['state']=='failed' and failed['steps'][1]['state']=='skipped')
+                check(kind+' branch did not execute shell code',local_or_ssh(kind,'test ! -e '+root_dir+'/connected-'+str(failed['number'])+'/INJECTED && echo safe').strip()=='safe')
+            occupied=root_dir+'/occupied-'+kind
+            local_or_ssh(kind,'mkdir -p '+occupied+' && echo preserved > '+occupied+'/keep')
+            busy=dict(definition,workdir=occupied)
+            occupied_id=create('pipelines',dict(body,name='Nonempty workdir '+kind,definition=json.dumps(busy)))
+            rid=trigger(occupied_id)['id'];all_runs.append(rid)
+            check(kind+' nonempty checkout fails without deleting data',done(rid)['state']=='failed' and local_or_ssh(kind,'cat '+occupied+'/keep').strip()=='preserved')
+
         # Managed build variables must be consumed, not merely editable in CRUD.
         global_var=create('variables',{'name':'build-token','scope':'global','kind':'secret','value':'global-build-secret'})
         build_var=create('variables',{'name':'build-token','scope':'build','kind':'secret','value':'module-build-secret'})

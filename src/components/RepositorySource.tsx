@@ -10,8 +10,8 @@ type Repositories = { items: Remote[]; page: number; has_more: boolean; credenti
 const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
 
 /** Repository connection is an input of the shared resource form, never a separate credential page. */
-export function RepositorySource({ workspace, draft, readOnly, onChange, onValidityChange }: {
-  workspace: string; draft: Record<string, unknown>; readOnly: boolean;
+export function RepositorySource({ workspace, draft, readOnly, onChange, onValidityChange, platformOnly = false }: {
+  workspace: string; draft: Record<string, unknown>; readOnly: boolean; platformOnly?: boolean;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void;
 }) {
   const provider = String(draft.provider ?? "git");
@@ -111,7 +111,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
   if (readOnly) return <dl className="space-y-2 text-sm"><div><dt className="text-muted-foreground">代码来源</dt><dd>{platforms.find(([key]) => key === provider)?.[1] ?? provider}</dd></div><div><dt className="text-muted-foreground">仓库地址</dt><dd className="break-all">{String(draft.url ?? "")}</dd></div><div><dt className="text-muted-foreground">授权</dt><dd>{draft.credential_id && draft.credential_id !== "0" ? "已绑定加密访问凭据" : "无凭据（公开仓库）"}</dd></div></dl>;
 
   return <div className="space-y-4">
-    <label className="block space-y-2"><span className="text-sm font-medium">代码来源</span><select aria-label="代码来源" className={selectClass} value={provider} onChange={e => selectProvider(e.target.value)}><option value="">请选择平台或普通 Git</option>{platforms.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+    <label className="block space-y-2"><span className="text-sm font-medium">代码来源</span><select aria-label="代码来源" className={selectClass} value={provider} onChange={e => selectProvider(e.target.value)}><option value="">请选择平台或普通 Git</option>{platforms.filter(([key]) => !platformOnly || key !== "git").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
     {provider === "git" ? <>
       <label className="block space-y-2"><span className="text-sm font-medium">Git 仓库地址</span><Input value={String(draft.url ?? "")} placeholder="https://git.example.com/team/repo.git 或 git@git.example.com:team/repo.git" onChange={e => change.current({ url: e.target.value })} required /></label>
       <label className="block space-y-2"><span className="text-sm font-medium">Git 授权方式</span><select aria-label="Git 授权方式" className={selectClass} value={gitMethod} onChange={e => {

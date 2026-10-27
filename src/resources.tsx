@@ -649,7 +649,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         definition: JSON.stringify({ workdir: "/tmp/build-{{run}}", steps: [{ name: "构建", run: "echo hello", timeout_seconds: 1800 }] }, null, 2) },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
-        { key: "repository_id", label: "仓库", type: "select", options: namedOptions(workspace, "repositories") },
+        { key: "repository_id", label: "仓库", type: "pipeline-repository", options: namedOptions(workspace, "repositories"), span: 2 },
         { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, resetOnChange: ["target_ref"] },
         { key: "target_ref", label: "目标主机", type: "select", required: true,
           options: namedOptions(workspace, "hosts"), when: (d) => d.target_kind === "host" },
