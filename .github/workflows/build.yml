@@ -257,6 +257,13 @@ jobs:
       - name: Template browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-templates-ui.mjs
+      - name: Deployment form browser acceptance (three consecutive runs)
+        if: matrix.harness == 'build-ui'
+        run: |
+          for round in 1 2 3; do
+            echo "Deployment form acceptance round $round/3"
+            node scripts/test-manifest-ui.mjs
+          done
       - name: Preferences, dictionaries and heartbeat browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-maintenance-ui.mjs

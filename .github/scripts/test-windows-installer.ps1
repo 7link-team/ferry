@@ -29,7 +29,7 @@ function Check-Scope($scope, $expectedVersion = $config.version) {
 }
 # Exercise both the original /UPDATE-only client and the latest published alpha.
 $previousInstallers = @{}
-foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6')) {
+foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6', '0.1.0-alpha.7')) {
     $previousRelease = Invoke-RestMethod "https://api.github.com/repos/$($config.plugins.release.repository)/releases/tags/v$previousVersion"
     $previousAsset = $previousRelease.assets | Where-Object { $_.name.EndsWith('_x64-setup.exe') } | Select-Object -First 1
     if (-not $previousAsset) { throw "Previous Windows installer missing: $previousVersion" }
@@ -44,7 +44,7 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
     & node .github/scripts/test-desktop-windows.mjs (Join-Path $directory $entry.MainBinaryName)
     if ($LASTEXITCODE -ne 0) { throw 'Installed desktop launch/lifecycle verification failed' }
     Run-Installer (Join-Path $directory 'uninstall.exe') @('/S', "_?=$directory")
-    foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6')) {
+    foreach ($previousVersion in @('0.1.0-alpha.4', '0.1.0-alpha.6', '0.1.0-alpha.7')) {
         $previousInstaller = $previousInstallers[$previousVersion]
         Run-Installer $previousInstaller @('/S', "/$($scope.Mode)")
         $entry = Check-Scope $scope $previousVersion
