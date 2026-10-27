@@ -681,6 +681,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         validate_origin(&config, &repository.url)?;
         let token = if repository.credential_id != 0 {
             crate::repository_auth::validate_target(
+                s,
                 &s.db,
                 scope.workspace_id,
                 repository.credential_id.into(),
@@ -704,6 +705,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             None
         };
         let oauth = crate::entities::repository_connections::Entity::find()
+            .filter(crate::entities::repository_connections::Column::TokenConfig.is_null())
             .filter(
                 crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id),
             )

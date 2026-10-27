@@ -85,6 +85,7 @@ impl MigratorTrait for Migrator {
             Box::new(DeploymentGroups),
             Box::new(ResourceImports),
             Box::new(PipelineVariableSnapshots),
+            Box::new(PlatformRepositoryOAuth),
         ]
     }
 }
@@ -1686,8 +1687,11 @@ impl MigrationTrait for PlatformInitialization {
                 .to_owned(),
         )
         .await?;
-        use sea_orm::{EntityTrait, Set};
+        use sea_orm::{EntityTrait, QuerySelect, Set};
         if crate::entities::platform_state::Entity::find_by_id(1)
+            .select_only()
+            .column(crate::entities::platform_state::Column::Id)
+            .into_tuple::<i64>()
             .one(m.get_connection())
             .await?
             .is_none()
@@ -1698,6 +1702,7 @@ impl MigrationTrait for PlatformInitialization {
                     initialized: Set(0),
                     registration_enabled: Set(1),
                     version: Set(1),
+                    ..Default::default()
                 },
             )
             .exec(m.get_connection())
@@ -2377,6 +2382,62 @@ impl MigrationTrait for PipelineVariableSnapshots {
                 Table::alter()
                     .table(Alias::new("pipeline_runs"))
                     .add_column(long_text("variable_snapshot", m.get_database_backend()))
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct PlatformRepositoryOAuth;
+impl MigrationName for PlatformRepositoryOAuth {
+    fn name(&self) -> &str {
+        "platform_repository_oauth_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformRepositoryOAuth {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "repository_connections",
+                "token_config",
+                Table::alter()
+                    .table(Alias::new("repository_connections"))
+                    .add_column(long_text("token_config", m.get_database_backend()))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "repositories",
+                "provider",
+                Table::alter()
+                    .table(Alias::new("repositories"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("provider"))
+                            .string_len(32)
+                            .not_null()
+                            .default("git"),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "platform_state",
+                "repository_oauth",
+                Table::alter()
+                    .table(Alias::new("platform_state"))
+                    .add_column(long_text("repository_oauth", m.get_database_backend()))
                     .to_owned(),
             ),
         )

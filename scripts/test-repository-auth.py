@@ -23,8 +23,16 @@ class Receiver(BaseHTTPRequestHandler):
         if parsed.path.endswith('/authorize'):
             code=uuid.uuid4().hex;codes[code]=query
             self.send_response(302);self.send_header('Location',query['redirect_uri'][0]+'?'+urlencode({'code':code,'state':query['state'][0]}));self.end_headers();return
-        access=query.get('access_token',[None])[0] or self.headers.get('Authorization','').removeprefix('Bearer ')
-        assert access and ('initial-access' in access or 'renewed-access' in access), 'missing OAuth access token'
+        access=query.get('access_token',[None])[0] or self.headers.get('PRIVATE-TOKEN') or self.headers.get('x-yunxiao-token') or self.headers.get('Authorization','').removeprefix('Bearer ').removeprefix('token ')
+        if not access or not any(v in access for v in ['initial-access','renewed-access','valid-personal-token']):
+            self.send_response(401);self.end_headers();return
+        listing=parsed.path.endswith('/user/repos') or parsed.path.endswith('/projects') or parsed.path.endswith('/repositories')
+        if listing:
+            if query.get('page',['1'])[0]=='2':value=[]
+            else:value=[{'name':'repository','full_name':'owner/repository','clone_url':api_base+'/owner/repository.git','webUrl':api_base+'/owner/repository','default_branch':'develop'}]
+            if '/codeup/' in parsed.path:
+                for row in value:row.pop('clone_url',None)
+            payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
         if not parsed.path.endswith('/user'):assert 'renewed-access' in access, 'market fetch must use refreshed OAuth token'
         if parsed.path.endswith('/user'):value={'login':'authorized-user','username':'authorized-user'}
         else:
@@ -181,11 +189,76 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         env['REPOSITORY_OAUTH_GITHUB_API_URL']=api_base
         proc.terminate();proc.wait(timeout=30)
         proc=launch()
+        # Dynamic platform configuration: permission, encryption, atomic validation, live changes.
+        request(owner,'/platform/settings/1',expected=403)
+        settings=request(admin,'/platform/settings/1')
+        check('fixture-client-secret' not in json.dumps(settings) and settings['oauth_github_has_client_secret'],'platform settings report presence but never return application secret')
+        request(owner,'/platform/settings/1',{'version':settings['version'],'registration_enabled':True},'PATCH',403)
+        patch={'version':settings['version'],'registration_enabled':True,'oauth_public_url':base[:-4],
+            'oauth_gitea_enabled':True,'oauth_gitea_client_id':'gitea-client','oauth_gitea_client_secret':'fixture-client-secret',
+            'oauth_gitea_base_url':api_base,'oauth_gitea_api_url':api_base}
+        request(admin,'/platform/settings/1',dict(patch,oauth_public_url='javascript:bad'),'PATCH',400)
+        check(request(admin,'/platform/settings/1')['version']==settings['version'],'invalid platform settings do not change version or stored values')
+        request(admin,'/platform/settings/1',patch,'PATCH')
+        request(admin,'/platform/settings/1',patch,'PATCH',409)
+        settings=request(admin,'/platform/settings/1')
+        check(settings['oauth_source'].startswith('平台设置') and status('gitea')['web_available'],'new Gitea OAuth configuration is effective without restart')
+        request(owner,authorize('gitea'),expected=303)
+        browse=request(owner,root+'/repository-auth/gitea/repositories')
+        check(browse['account']=='authorized-user' and browse['items'][0]['default_branch']=='develop','Gitea browser authorization returns selectable repositories')
+        request(admin,'/platform/settings/1',{'version':settings['version'],'registration_enabled':True,'oauth_github_enabled':False,'oauth_github_client_secret':''},'PATCH')
+        request(owner,root+'/repository-auth/github/actions/authorize',{},expected=400)
+        check(not status('github')['web_available'],'disable applies immediately without falling back to environment variables')
+        settings=request(admin,'/platform/settings/1')
+        check(settings['oauth_github_has_client_secret'],'blank secret retains existing encrypted application secret')
+        request(admin,'/platform/settings/1',{'version':settings['version'],'registration_enabled':True,'oauth_github_enabled':True},'PATCH')
+        callback=authorize('github')
+        settings=request(admin,'/platform/settings/1')
+        request(admin,'/platform/settings/1',{'version':settings['version'],'registration_enabled':True,'oauth_github_client_id':'github-changed'},'PATCH')
+        request(owner,callback,expected=400)
+        check(True,'pending browser authorization rejects changed application configuration')
+        # A stored setting remains authoritative after restart and environment changes.
+        env['REPOSITORY_OAUTH_GITHUB_CLIENT_ID']='environment-must-not-win'
+        proc.terminate();proc.wait(timeout=30);proc=launch()
+        check(request(admin,'/platform/settings/1')['oauth_github_client_id']=='github-changed','saved platform settings persist and override environment after restart')
+        created_repos=[]
+        for provider in ['github','gitlab','gitee','gitea','codeup']:
+            before=request(owner,root+'/credentials')['total']
+            connection_body={'token':'invalid-token','base_url':api_base,'api_url':api_base,'organization':'test-org','username':'codeup-user'}
+            request(owner,root+'/repository-auth/'+provider+'/actions/connect',connection_body,expected=400)
+            check(request(owner,root+'/credentials')['total']==before,provider+' rejects invalid token without saving a credential')
+            connection_body['token']='valid-personal-token'
+            result=request(owner,root+'/repository-auth/'+provider+'/actions/connect',connection_body)
+            check(result['credential_id'] and len(result['items'])==1,provider+' PAT verifies actual repository access and creates a connection')
+            repo=result['items'][0]
+            rid=request(owner,root+'/repositories',{'name':provider+' connected','provider':provider,'url':repo['url'],'default_branch':repo['default_branch'],'credential_id':result['credential_id']},expected=201)['id'];created_repos.append(rid)
+            saved=request(owner,root+'/repositories/'+rid)
+            check(saved['provider']==provider and saved['credential_id']==result['credential_id'],provider+' repository is saved with its connected authorization')
+            request(owner,root+'/repositories/'+rid,{'name':saved['name'],'url':saved['url'],'credential_id':saved['credential_id'],'version':saved['version']},'PATCH')
+            check(request(owner,root+'/repositories/'+rid)['provider']==provider,provider+' legacy update without provider preserves source binding')
+            request(outsider,'/workspaces/other/repositories',{'name':'Stolen','provider':provider,'url':repo['url'],'credential_id':result['credential_id']},expected=400)
+            request(owner,root+'/repositories',{'name':'Wrong host','provider':provider,'url':'https://attacker.example.invalid/repo.git','credential_id':result['credential_id']},expected=400)
+            check(request(owner,root+'/repository-auth/'+provider+'/repositories?page=2')['items']==[],provider+' pagination remains in the same connection')
+        before=request(owner,root+'/credentials')['total']
+        inline={'kind':'password','username':'git-user','secret':'inline-private-password'}
+        request(owner,root+'/repositories',{'name':'','provider':'git','url':api_base+'/generic.git','inline_credential':inline},expected=400)
+        check(request(owner,root+'/credentials')['total']==before,'failed generic Git creation rolls back inline credential')
+        for kind,url in [('password',api_base+'/password.git'),('token',api_base+'/token.git'),('ssh-key','git@example.invalid:team/repository.git')]:
+            rid=request(owner,root+'/repositories',{'name':'Generic '+kind,'provider':'git','url':url,'inline_credential':dict(inline,kind=kind)},expected=201)['id'];created_repos.append(rid)
+            saved=request(owner,root+'/repositories/'+rid)
+            check(saved['credential_id']!='0' and 'inline-private-password' not in json.dumps(saved),'generic Git '+kind+' saves encrypted authorization with repository')
+        if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+            with sqlite3.connect(data/'ferry.sqlite') as conn:
+                stored=conn.execute('SELECT repository_oauth FROM platform_state').fetchone()[0]
+                check(stored.startswith('v1.') and 'fixture-client-secret' not in stored,'platform OAuth application configuration encrypted at rest')
+                check(all(v not in (data/'server.log').read_text() for v in ['fixture-client-secret','valid-personal-token','inline-private-password']),'secrets absent from server logs')
+        for rid in created_repos:request(owner,root+'/repositories/'+rid,method='DELETE',expected=204)
         audit=request(owner,root+'/activity?page_size=200')
+
         check(all(secret not in json.dumps(audit) for secret in ['fixture-client-secret','initial-access','initial-refresh']),'authorization audit contains no client secret or tokens')
         for sid in sources:request(owner,root+'/marketplace-sources/'+sid,method='DELETE',expected=204)
         for repo in repositories:request(owner,root+'/repositories/'+repo,method='DELETE',expected=204)
-        for credential in credentials:request(owner,root+'/credentials/'+credential,method='DELETE',expected=204)
+        for credential in request(owner,root+'/credentials')['items']:request(owner,root+'/credentials/'+credential['id'],method='DELETE',expected=204)
         check(all(r['credential_id'] is None for r in request(owner,root+'/repository-auth')['items']),'credential deletion removes linked authorization secrets')
         print(f'{checks} checks passed (isolated OAuth provider, not live external account acceptance)',flush=True)
     except Exception:

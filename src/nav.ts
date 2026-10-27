@@ -54,8 +54,6 @@ export const nav: NavGroup[] = [
     label: "构建",
     items: [
       { key: "repositories", label: "仓库", resource: "repositories", permission: "repositories.read" },
-      { key: "repository-auth", label: "平台授权", resource: "repository-auth", hidden: true, parent: "repositories", description: "连接 GitHub、GitLab、Gitee 或 Codeup 后，在仓库中选择对应访问凭据。网页授权需部署管理员先配置该平台的 OAuth 应用；个人访问令牌是另一种仓库授权方式。", permission: "credentials.read" },
-      { key: "api-tokens", label: "仓库访问令牌", resource: "credentials", parent: "repositories", description: "填写 GitHub、GitLab、Gitee 或 Codeup 签发的个人访问令牌，用于读取私有仓库；不是调用本平台 API 的令牌。保存后在仓库中选择此凭据。", params:{kind:"token"}, permission:"credentials.read", hidden:true },
       { key: "pipelines", label: "流水线", resource: "pipelines", permission: "pipelines.read" },
       { key: "artifacts", label: "构建产物", resource: "pipeline-artifacts", permission: "pipelines.read" },
       { key: "runs", label: "执行历史", resource: "pipeline-runs", permission: "pipelines.read" },

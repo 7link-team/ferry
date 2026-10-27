@@ -560,6 +560,7 @@ async fn execute(
     let variables = open_variables(s, r)?.values;
     let credential = if r.credential_id != 0 {
         crate::repository_auth::validate_target(
+            s,
             &s.db,
             r.workspace_id.into(),
             r.credential_id.into(),

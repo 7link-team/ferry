@@ -80,6 +80,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # New archive metadata is additive; old runs have no archived files.
                     assert after.get('artifacts') == []
                     before[path]['artifacts'] = []
+                if '/repositories/' in path:
+                    assert after['provider'] == before[path].get('provider', 'git')
+                    before[path]['provider'] = before[path].get('provider', 'git')
                 if '/hosts/' in path:
                     assert after.get('tag_ids') == [] and after.get('tags') == []
                     before[path]['tag_ids'] = []
@@ -115,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             source=create('marketplace-sources',{'name':'Migrated source','repository_id':repository,'provider':'github','api_base':'https://example.invalid/api','project':'owner/repository','branch':'main','index_path':'marketplace.json'})
             assert api('/workspaces/upgrade/marketplace-sources/'+source)['state']=='idle'
             assert api('/workspaces/upgrade/marketplace')['items']==[]
-            assert api('/workspaces/upgrade/repository-auth')['total']==4
+            assert {row['provider'] for row in api('/workspaces/upgrade/repository-auth')['items']}=={'github','gitlab','gitee','gitea','codeup'}
             print('PASS: market catalog and web authorization schemas work after upgrade')
             for resource, content in [('app-templates', {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]}), ('pipeline-templates', {'workdir':'/tmp/upgrade','steps':[{'name':'test','run':'true'}]})]:
                 template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})

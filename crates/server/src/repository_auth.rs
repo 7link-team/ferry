@@ -2,7 +2,8 @@
 use crate::{
     db,
     entities::{
-        credentials, repository_connections as connections, repository_oauth_flows as flows,
+        credentials, platform_state, repository_connections as connections,
+        repository_oauth_flows as flows,
     },
     error::{ApiError, Result},
     snowflake::Id,
@@ -21,7 +22,7 @@ use sea_orm::{
     ColumnTrait, EntityTrait, QueryFilter, Set,
     sea_query::{Expr, ExprTrait},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -40,50 +41,233 @@ fn endpoint(base: &reqwest::Url, path: &str) -> Result<reqwest::Url> {
         .extend(path.split('/'));
     Ok(url)
 }
-fn provider(kind: &str) -> Result<Provider> {
-    let default = match kind {
+const SETTINGS_AAD: &str = "platform-repository-oauth:1";
+const PROVIDERS: [&str; 4] = ["github", "gitlab", "gitee", "gitea"];
+
+#[derive(Default, Serialize, Deserialize)]
+struct ProviderSettings {
+    enabled: bool,
+    client_id: String,
+    client_secret: String,
+    base_url: String,
+    api_url: String,
+}
+#[derive(Serialize, Deserialize)]
+pub(crate) struct OAuthSettings {
+    public_url: String,
+    providers: std::collections::BTreeMap<String, ProviderSettings>,
+}
+fn default_base(kind: &str) -> &str {
+    match kind {
         "github" => "https://github.com",
         "gitlab" => "https://gitlab.com",
-        "gitee" => "https://gitee.com",
-        _ => return Err(ApiError::bad("该平台请使用API令牌授权。")),
-    };
-    let prefix = format!("REPOSITORY_OAUTH_{}", kind.to_ascii_uppercase());
-    let client_id = std::env::var(format!("{prefix}_CLIENT_ID")).unwrap_or_default();
-    let client_secret = std::env::var(format!("{prefix}_CLIENT_SECRET")).unwrap_or_default();
-    if client_id.is_empty() || client_secret.is_empty() {
+        "gitea" => "",
+        _ => "https://gitee.com",
+    }
+}
+fn parse_endpoint(value: &str) -> Result<reqwest::Url> {
+    let url = reqwest::Url::parse(value).map_err(|_| ApiError::bad("授权接入点无效。"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(ApiError::bad(
-            "部署端尚未配置该平台的网页授权应用，可先使用API令牌。",
+            "授权接入点必须为不带凭据或查询参数的HTTP(S)地址。",
         ));
     }
-    let parse = |value: &str| -> Result<reqwest::Url> {
-        let url = reqwest::Url::parse(value).map_err(|_| ApiError::bad("授权接入点无效。"))?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
+    Ok(url)
+}
+impl OAuthSettings {
+    pub(crate) fn read(s: &AppState, stored: Option<&str>) -> Result<Self> {
+        if let Some(stored) = stored {
+            let mut config: Self =
+                serde_json::from_str(&s.vault.open_secret(stored, SETTINGS_AAD)?)
+                    .map_err(|_| ApiError::bad("平台网页授权配置损坏。"))?;
+            for kind in PROVIDERS {
+                config.providers.entry(kind.into()).or_default();
+            }
+            return Ok(config);
+        }
+        let mut providers = std::collections::BTreeMap::new();
+        for kind in PROVIDERS {
+            let prefix = format!("REPOSITORY_OAUTH_{}", kind.to_ascii_uppercase());
+            let value = |key: &str| std::env::var(format!("{prefix}_{key}")).unwrap_or_default();
+            let client_id = value("CLIENT_ID");
+            let client_secret = value("CLIENT_SECRET");
+            providers.insert(
+                kind.into(),
+                ProviderSettings {
+                    enabled: !client_id.is_empty() && !client_secret.is_empty(),
+                    client_id,
+                    client_secret,
+                    base_url: value("BASE_URL"),
+                    api_url: value("API_URL"),
+                },
+            );
+        }
+        Ok(Self {
+            public_url: std::env::var("REPOSITORY_OAUTH_PUBLIC_URL").unwrap_or_default(),
+            providers,
+        })
+    }
+    pub(crate) async fn load(s: &AppState, conn: &impl sea_orm::ConnectionTrait) -> Result<Self> {
+        let row = platform_state::Entity::find_by_id(1)
+            .one(conn)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        Self::read(s, row.repository_oauth.as_deref())
+    }
+    pub(crate) fn view(&self, s: &AppState, saved: bool) -> Value {
+        let mut view = json!({"oauth_public_url":self.public_url,
+            "oauth_callback_url":self.callback(s).unwrap_or_default(),
+            "oauth_source":if saved { "平台设置（保存后立即生效）" } else { "服务端环境变量（网页保存后以平台设置为准）" }});
+        for (kind, value) in &self.providers {
+            for (key, field) in [
+                ("enabled", json!(value.enabled)),
+                ("client_id", json!(value.client_id)),
+                ("has_client_secret", json!(!value.client_secret.is_empty())),
+                ("base_url", json!(value.base_url)),
+                ("api_url", json!(value.api_url)),
+            ] {
+                view[format!("oauth_{kind}_{key}")] = field;
+            }
+        }
+        view
+    }
+    pub(crate) fn update(
+        &mut self,
+        s: &AppState,
+        patch: &serde_json::Map<String, Value>,
+    ) -> Result<()> {
+        fn text(
+            patch: &serde_json::Map<String, Value>,
+            key: &str,
+            target: &mut String,
+            secret: bool,
+        ) -> Result<()> {
+            if let Some(value) = patch.get(key) {
+                let value = value
+                    .as_str()
+                    .ok_or_else(|| ApiError::bad("网页授权配置字段类型无效。"))?;
+                if value.len() > 8192 || value.chars().any(char::is_control) {
+                    return Err(ApiError::bad("网页授权配置字段过长或包含控制字符。"));
+                }
+                if !secret || !value.is_empty() {
+                    *target = if secret {
+                        value.into()
+                    } else {
+                        value.trim().into()
+                    };
+                }
+            }
+            Ok(())
+        }
+        text(patch, "oauth_public_url", &mut self.public_url, false)?;
+        if !self.public_url.is_empty() {
+            self.callback(s)?;
+        }
+        for kind in PROVIDERS {
+            let value = self
+                .providers
+                .get_mut(kind)
+                .ok_or_else(|| ApiError::bad("平台网页授权配置损坏。"))?;
+            let prefix = format!("oauth_{kind}_");
+            if let Some(enabled) = patch.get(&(prefix.clone() + "enabled")) {
+                value.enabled = enabled
+                    .as_bool()
+                    .ok_or_else(|| ApiError::bad("网页授权启用状态无效。"))?;
+            }
+            text(
+                patch,
+                &(prefix.clone() + "client_id"),
+                &mut value.client_id,
+                false,
+            )?;
+            text(
+                patch,
+                &(prefix.clone() + "client_secret"),
+                &mut value.client_secret,
+                true,
+            )?;
+            text(
+                patch,
+                &(prefix.clone() + "base_url"),
+                &mut value.base_url,
+                false,
+            )?;
+            text(patch, &(prefix + "api_url"), &mut value.api_url, false)?;
+            for url in [&value.base_url, &value.api_url] {
+                if !url.is_empty() {
+                    parse_endpoint(url)?;
+                }
+            }
+            if value.enabled {
+                self.callback(s)?;
+                self.provider(kind)?;
+            }
+        }
+        Ok(())
+    }
+    pub(crate) fn seal(&self, s: &AppState) -> Result<String> {
+        s.vault.seal(
+            &serde_json::to_string(self).map_err(|_| ApiError::bad("网页授权配置编码失败。"))?,
+            SETTINGS_AAD,
+        )
+    }
+    fn provider(&self, kind: &str) -> Result<Provider> {
+        let value = self
+            .providers
+            .get(kind)
+            .ok_or_else(|| ApiError::bad("该平台请使用API令牌授权。"))?;
+        if !value.enabled || value.client_id.is_empty() || value.client_secret.is_empty() {
             return Err(ApiError::bad(
-                "授权接入点必须为不带凭据或查询参数的HTTP(S)地址。",
+                "平台尚未启用或配置该网页授权应用，请联系平台管理员。",
             ));
         }
-        Ok(url)
-    };
-    let base = parse(&std::env::var(format!("{prefix}_BASE_URL")).unwrap_or(default.into()))?;
-    let api_default = match kind {
-        "github" if base.host_str() == Some("github.com") => "https://api.github.com".to_owned(),
-        "github" => endpoint(&base, "api/v3")?.to_string(),
-        "gitlab" => endpoint(&base, "api/v4")?.to_string(),
-        _ => endpoint(&base, "api/v5")?.to_string(),
-    };
-    let api = parse(&std::env::var(format!("{prefix}_API_URL")).unwrap_or(api_default))?;
-    Ok(Provider {
-        client_id,
-        client_secret,
-        base,
-        api,
-    })
+        let base = parse_endpoint(if value.base_url.is_empty() {
+            default_base(kind)
+        } else {
+            &value.base_url
+        })?;
+        let api_default = match kind {
+            "github" if base.host_str() == Some("github.com") => {
+                "https://api.github.com".to_owned()
+            }
+            "github" => endpoint(&base, "api/v3")?.to_string(),
+            "gitlab" => endpoint(&base, "api/v4")?.to_string(),
+            "gitea" => endpoint(&base, "api/v1")?.to_string(),
+            _ => endpoint(&base, "api/v5")?.to_string(),
+        };
+        let api = parse_endpoint(if value.api_url.is_empty() {
+            &api_default
+        } else {
+            &value.api_url
+        })?;
+        Ok(Provider {
+            client_id: value.client_id.clone(),
+            client_secret: value.client_secret.clone(),
+            base,
+            api,
+        })
+    }
+    fn callback(&self, s: &AppState) -> Result<String> {
+        let base = if self.public_url.is_empty() {
+            format!("http://{}", s.bind)
+        } else {
+            self.public_url.clone()
+        };
+        let url = parse_endpoint(&base)?;
+        if url
+            .host_str()
+            .is_none_or(|h| matches!(h, "0.0.0.0" | "[::]"))
+        {
+            return Err(ApiError::bad("请在平台设置中配置有效公开访问地址。"));
+        }
+        Ok(endpoint(&url, "api/repository-auth/callback")?.to_string())
+    }
 }
 fn config_fingerprint(config: &Provider) -> String {
     hash(&json!([config.client_id, config.base.as_str(), config.api.as_str()]).to_string())
@@ -93,26 +277,6 @@ fn require_same_config(config: &Provider, fingerprint: &str) -> Result<()> {
         return Err(ApiError::bad("授权应用或接入点已变化，请重新授权。"));
     }
     Ok(())
-}
-fn callback(s: &AppState) -> Result<String> {
-    let base = std::env::var("REPOSITORY_OAUTH_PUBLIC_URL")
-        .unwrap_or_else(|_| format!("http://{}", s.bind));
-    let url =
-        reqwest::Url::parse(&base).map_err(|_| ApiError::bad("请配置网页授权的公开访问地址。"))?;
-    if !matches!(url.scheme(), "http" | "https")
-        || url
-            .host_str()
-            .is_none_or(|h| matches!(h, "0.0.0.0" | "[::]"))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(ApiError::bad(
-            "请使用REPOSITORY_OAUTH_PUBLIC_URL配置有效公开访问地址。",
-        ));
-    }
-    Ok(endpoint(&url, "api/repository-auth/callback")?.to_string())
 }
 fn random_token() -> String {
     let mut bytes = [0u8; 32];
@@ -194,14 +358,15 @@ fn token_data(value: &Value) -> Result<(&str, i64, Option<&str>)> {
 pub async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     scope.require("credentials.read")?;
     let mut rows = Vec::new();
-    for kind in ["github", "gitlab", "gitee", "codeup"] {
+    let settings = OAuthSettings::load(&s, &s.db).await?;
+    for kind in ["github", "gitlab", "gitee", "gitea", "codeup"] {
         let row = connections::Entity::find()
             .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(connections::Column::UserId.eq(scope.user.id))
             .filter(connections::Column::Provider.eq(kind))
             .one(&s.db)
             .await?;
-        let configured = provider(kind).is_ok() && callback(&s).is_ok();
+        let configured = settings.provider(kind).is_ok() && settings.callback(&s).is_ok();
         let state = row
             .as_ref()
             .map(|r| {
@@ -221,22 +386,39 @@ pub async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>
         rows.push(json!({"id":kind,"provider":kind,"web_available":configured,"state":state,"credential_id":row.as_ref().map(|r|Id::from(r.credential_id)),"account":row.as_ref().map(|r|r.account.as_str()).unwrap_or(""),"expires_at":row.as_ref().map(|r|r.expires_at).unwrap_or(0),"last_error":row.as_ref().map(|r|r.last_error.as_str()).unwrap_or(""),"setup":if configured{""}else if kind=="codeup"{"使用Codeup个人访问令牌。"}else{"尚未配置网页授权应用，请联系平台管理员；也可使用API令牌。"}}));
     }
     Ok(Json(
-        json!({"items":rows,"total":4,"page":1,"page_size":20}),
+        json!({"items":rows,"total":5,"page":1,"page_size":20}),
     ))
+}
+#[derive(Default, Deserialize)]
+pub struct StartOptions {
+    #[serde(default)]
+    popup: bool,
+    #[serde(default)]
+    channel: String,
 }
 pub async fn start(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, kind)): Path<(String, String)>,
+    Query(options): Query<StartOptions>,
 ) -> Result<Json<Value>> {
     scope.require("credentials.create")?;
-    let config = provider(&kind)?;
-    let redirect = callback(&s)?;
+    if options.channel.len() > 64
+        || !options
+            .channel
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(ApiError::bad("授权窗口标识无效。"));
+    }
+    let settings = OAuthSettings::load(&s, &s.db).await?;
+    let config = settings.provider(&kind)?;
+    let redirect = settings.callback(&s)?;
     let state = random_token();
     let verifier = random_token();
     let id = s.next_id()?;
     let now = db::now();
-    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config)});
+    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config),"popup":options.popup,"channel":options.channel});
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     flows::Entity::delete_many()
         .filter(flows::Column::ExpiresAt.lt(now))
@@ -263,6 +445,8 @@ pub async fn start(
         &config.base,
         if kind == "github" {
             "login/oauth/authorize"
+        } else if kind == "gitea" {
+            "login/oauth/authorize"
         } else {
             "oauth/authorize"
         },
@@ -279,6 +463,7 @@ pub async fn start(
                 match kind.as_str() {
                     "github" => "repo read:user",
                     "gitlab" => "read_user read_api read_repository",
+                    "gitea" => "read:user read:repository",
                     _ => "user_info projects",
                 },
             );
@@ -335,18 +520,32 @@ pub async fn complete(
         tx.commit().await?;
         row
     };
-    if !b.error.is_empty() || b.code.is_empty() {
-        return Ok(Redirect::to(&format!(
-            "/{workspace}/build/repository-auth?authorization=cancelled"
-        )));
-    }
-    let config = provider(&flow.provider)?;
     let proof: Value = serde_json::from_str(
         &s.vault
             .open_secret(&flow.proof, &flow_aad(scope.workspace_id, flow.id.into()))?,
     )
     .map_err(|_| ApiError::bad("授权状态损坏，请重新授权。"))?;
-    if proof["client_id"].as_str() != Some(&config.client_id)
+    let return_path = if proof["popup"].as_bool() == Some(true) {
+        format!(
+            "/{workspace}/build/repositories/new?oauth_popup=1&provider={}&oauth_channel={}",
+            flow.provider,
+            proof["channel"].as_str().unwrap_or("")
+        )
+    } else {
+        format!(
+            "/{workspace}/build/repositories/new?provider={}",
+            flow.provider
+        )
+    };
+    if !b.error.is_empty() || b.code.is_empty() {
+        return Ok(Redirect::to(&format!(
+            "{return_path}&authorization=cancelled"
+        )));
+    }
+    let settings = OAuthSettings::load(&s, &s.db).await?;
+    let config = settings.provider(&flow.provider)?;
+    if proof["redirect"].as_str() != Some(settings.callback(&s)?.as_str())
+        || proof["client_id"].as_str() != Some(&config.client_id)
         || proof["base"].as_str() != Some(config.base.as_str())
     {
         return Err(ApiError::bad("授权应用配置已变化，请重新授权。"));
@@ -367,7 +566,7 @@ pub async fn complete(
         client
             .post(endpoint(
                 &config.base,
-                if flow.provider == "github" {
+                if matches!(flow.provider.as_str(), "github" | "gitea") {
                     "login/oauth/access_token"
                 } else {
                     "oauth/token"
@@ -400,6 +599,34 @@ pub async fn complete(
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty() && v.len() < 255)
         .ok_or_else(|| ApiError::bad("授权提供方未返回有效账号。"))?;
+    save_connection(
+        &s,
+        &scope,
+        &flow.provider,
+        &config,
+        account,
+        access,
+        expires,
+        refresh,
+        None,
+    )
+    .await?;
+    Ok(Redirect::to(&format!(
+        "{return_path}&authorization=connected"
+    )))
+}
+
+async fn save_connection(
+    s: &AppState,
+    scope: &Scope,
+    kind: &str,
+    config: &Provider,
+    account: &str,
+    access: &str,
+    expires: i64,
+    refresh: Option<&str>,
+    token_config: Option<String>,
+) -> Result<Id> {
     let fresh = Scope::for_actor(&s, scope.workspace_id, scope.user.id).await?;
     fresh.require("credentials.create")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -407,7 +634,7 @@ pub async fn complete(
     let existing = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(connections::Column::UserId.eq(scope.user.id))
-        .filter(connections::Column::Provider.eq(&flow.provider))
+        .filter(connections::Column::Provider.eq(kind))
         .one(&tx)
         .await?;
     let id = existing
@@ -446,14 +673,11 @@ pub async fn complete(
         credentials::Entity::insert(credentials::ActiveModel {
             id: Set(credential.into()),
             workspace_id: Set(scope.workspace_id.into()),
-            name: Set(format!("{} · {}", flow.provider, account)
-                .chars()
-                .take(60)
-                .collect()),
+            name: Set(format!("{} · {}", kind, account).chars().take(60).collect()),
             kind: Set("token".into()),
             username: Set(account.into()),
             secret: Set(sealed),
-            description: Set("网页授权管理；请通过仓库授权页面重新授权。".into()),
+            description: Set("仓库连接管理；请在仓库表单中重新连接。".into()),
             version: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -465,7 +689,7 @@ pub async fn complete(
         id: Set(id.into()),
         workspace_id: Set(scope.workspace_id.into()),
         user_id: Set(scope.user.id.into()),
-        provider: Set(flow.provider),
+        provider: Set(kind.to_owned()),
         credential_id: Set(credential.into()),
         account: Set(account.into()),
         refresh_secret: Set(match refresh {
@@ -475,8 +699,9 @@ pub async fn complete(
         expires_at: Set(expires),
         state: Set("connected".into()),
         last_error: Set(String::new()),
-        config_fingerprint: Set(config_fingerprint(&config)),
-        client_id: Set(config.client_id),
+        config_fingerprint: Set(config_fingerprint(config)),
+        client_id: Set(config.client_id.clone()),
+        token_config: Set(token_config),
         version: Set(existing.as_ref().map(|r| r.version + 1).unwrap_or(1)),
         created_at: Set(existing.map(|r| r.created_at).unwrap_or(now)),
         updated_at: Set(now),
@@ -494,9 +719,323 @@ pub async fn complete(
     )
     .await?;
     tx.commit().await?;
-    Ok(Redirect::to(&format!(
-        "/{workspace}/build/repository-auth?authorization=connected"
-    )))
+    Ok(credential)
+}
+
+#[derive(Serialize, Deserialize)]
+struct TokenConfig {
+    base_url: String,
+    api_url: String,
+    #[serde(default)]
+    organization: String,
+}
+impl TokenConfig {
+    fn provider(&self) -> Result<Provider> {
+        Ok(Provider {
+            client_id: String::new(),
+            client_secret: String::new(),
+            base: parse_endpoint(&self.base_url)?,
+            api: parse_endpoint(&self.api_url)?,
+        })
+    }
+}
+async fn connection_provider(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    row: &connections::Model,
+) -> Result<Provider> {
+    let config = if let Some(value) = &row.token_config {
+        serde_json::from_str::<TokenConfig>(value)
+            .map_err(|_| ApiError::bad("仓库连接配置损坏。"))?
+            .provider()?
+    } else {
+        OAuthSettings::load(s, conn)
+            .await?
+            .provider(&row.provider)?
+    };
+    require_same_config(&config, &row.config_fingerprint)?;
+    Ok(config)
+}
+#[derive(Deserialize)]
+pub struct TokenConnect {
+    token: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    api_url: String,
+    #[serde(default)]
+    organization: String,
+}
+fn token_config(kind: &str, body: &TokenConnect) -> Result<TokenConfig> {
+    if !PROVIDERS.contains(&kind) && kind != "codeup" {
+        return Err(ApiError::bad("请选择支持的代码平台。"));
+    }
+    if body.token.is_empty()
+        || body.token.len() > 65536
+        || body
+            .token
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err(ApiError::bad("请填写有效个人访问令牌。"));
+    }
+    if kind == "codeup"
+        && (body.username.trim().is_empty()
+            || body.username.len() > 255
+            || body.username.chars().any(char::is_control))
+    {
+        return Err(ApiError::bad("请填写Codeup的Git用户名，用于后续拉取仓库。"));
+    }
+    let base = parse_endpoint(if body.base_url.trim().is_empty() {
+        if kind == "codeup" {
+            "https://codeup.aliyun.com"
+        } else {
+            default_base(kind)
+        }
+    } else {
+        body.base_url.trim()
+    })?;
+    let default_api = match kind {
+        "github" if base.host_str() == Some("github.com") => "https://api.github.com".into(),
+        "github" => endpoint(&base, "api/v3")?.to_string(),
+        "gitlab" => endpoint(&base, "api/v4")?.to_string(),
+        "gitea" => endpoint(&base, "api/v1")?.to_string(),
+        "codeup" => "https://openapi-rdc.aliyuncs.com".into(),
+        _ => endpoint(&base, "api/v5")?.to_string(),
+    };
+    let api = parse_endpoint(if body.api_url.trim().is_empty() {
+        &default_api
+    } else {
+        body.api_url.trim()
+    })?;
+    if body.organization.len() > 255
+        || body
+            .organization
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '?' | '#'))
+    {
+        return Err(ApiError::bad("Codeup组织ID无效。"));
+    }
+    if kind == "codeup"
+        && api.host_str() == Some("openapi-rdc.aliyuncs.com")
+        && body.organization.trim().is_empty()
+    {
+        return Err(ApiError::bad("Codeup中心版需要填写组织ID。"));
+    }
+    Ok(TokenConfig {
+        base_url: base.to_string(),
+        api_url: api.to_string(),
+        organization: body.organization.trim().into(),
+    })
+}
+fn authorize_request(
+    request: reqwest::RequestBuilder,
+    kind: &str,
+    token: &str,
+    personal: bool,
+) -> reqwest::RequestBuilder {
+    match kind {
+        "gitee" => request.query(&[("access_token", token)]),
+        "codeup" => request.header("x-yunxiao-token", token),
+        "gitlab" if personal => request.header("PRIVATE-TOKEN", token),
+        "gitea" if personal => request.header("Authorization", format!("token {token}")),
+        _ => request.bearer_auth(token),
+    }
+}
+async fn remote_repositories(
+    kind: &str,
+    config: &Provider,
+    access: &str,
+    personal: bool,
+    organization: &str,
+    page: u32,
+) -> Result<Value> {
+    let mut url = match kind {
+        "gitlab" => endpoint(&config.api, "projects")?,
+        "codeup" => {
+            let mut url = endpoint(&config.api, "oapi/v1/codeup")?;
+            {
+                let mut path = url
+                    .path_segments_mut()
+                    .map_err(|_| ApiError::bad("API地址无效。"))?;
+                if !organization.is_empty() {
+                    path.push("organizations").push(organization);
+                }
+                path.push("repositories");
+            }
+            url
+        }
+        _ => endpoint(&config.api, "user/repos")?,
+    };
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("page", &page.to_string()).append_pair(
+            if kind == "codeup" {
+                "perPage"
+            } else if kind == "gitea" {
+                "limit"
+            } else {
+                "per_page"
+            },
+            "50",
+        );
+        if kind == "gitlab" {
+            query.append_pair("membership", "true");
+        }
+    }
+    let value = response_json(
+        authorize_request(http()?.get(url), kind, access, personal)
+            .send()
+            .await
+            .map_err(|_| ApiError::bad("读取代码平台仓库失败，请检查接入点和网络。"))?,
+    )
+    .await?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| ApiError::bad("代码平台返回了无效仓库列表。"))?;
+    let mut items = Vec::new();
+    for row in rows {
+        let text = |keys: &[&str]| {
+            keys.iter()
+                .find_map(|k| row.get(k).and_then(Value::as_str))
+                .unwrap_or("")
+        };
+        let clone_url = text(&[
+            "clone_url",
+            "http_url_to_repo",
+            "httpCloneUrl",
+            "httpUrlToRepo",
+        ]);
+        let url = if clone_url.is_empty() && kind == "codeup" {
+            let web = text(&["webUrl"]);
+            if web.is_empty() {
+                return Err(ApiError::bad("Codeup未返回仓库地址。"));
+            }
+            format!("{}.git", web.trim_end_matches('/').trim_end_matches(".git"))
+        } else {
+            clone_url.to_owned()
+        };
+        let address = parse_endpoint(&url)?;
+        if address.host_str() != config.base.host_str()
+            || address.port_or_known_default() != config.base.port_or_known_default()
+            || (config.base.scheme() == "https" && address.scheme() != "https")
+        {
+            return Err(ApiError::bad(
+                "代码平台返回的仓库地址与配置的网站地址不匹配。",
+            ));
+        }
+        items.push(json!({"name":text(&["name"]),"full_name":text(&["full_name","path_with_namespace","pathWithNamespace","name"]),
+            "url":url,"default_branch":text(&["default_branch","defaultBranch"])}));
+    }
+    Ok(json!({"items":items,"page":page,"has_more":rows.len()==50}))
+}
+pub async fn connect_token(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, kind)): Path<(String, String)>,
+    Json(body): Json<TokenConnect>,
+) -> Result<Json<Value>> {
+    scope.require("credentials.create")?;
+    scope.require("repositories.create")?;
+    let settings = token_config(&kind, &body)?;
+    let config = settings.provider()?;
+    let account = if kind == "codeup" {
+        body.username.trim().to_owned()
+    } else {
+        let value = response_json(
+            authorize_request(
+                http()?.get(endpoint(&config.api, "user")?),
+                &kind,
+                &body.token,
+                true,
+            )
+            .send()
+            .await
+            .map_err(|_| ApiError::bad("无法验证代码平台令牌。"))?,
+        )
+        .await?;
+        value
+            .get("login")
+            .or_else(|| value.get("username"))
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty() && v.len() < 255)
+            .ok_or_else(|| ApiError::bad("代码平台未返回有效账号。"))?
+            .to_owned()
+    };
+    // Do not save a credential or mark connected unless repository access also succeeds.
+    let mut result =
+        remote_repositories(&kind, &config, &body.token, true, &settings.organization, 1).await?;
+    let stored =
+        serde_json::to_string(&settings).map_err(|_| ApiError::bad("连接配置编码失败。"))?;
+    let id = save_connection(
+        &s,
+        &scope,
+        &kind,
+        &config,
+        &account,
+        &body.token,
+        0,
+        None,
+        Some(stored),
+    )
+    .await?;
+    result["credential_id"] = json!(id);
+    result["account"] = json!(account);
+    Ok(Json(result))
+}
+#[derive(Deserialize)]
+pub struct RepositoryPage {
+    #[serde(default = "first_page")]
+    page: u32,
+}
+fn first_page() -> u32 {
+    1
+}
+pub async fn browse_repositories(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, kind)): Path<(String, String)>,
+    Query(page): Query<RepositoryPage>,
+) -> Result<Json<Value>> {
+    scope.require("credentials.read")?;
+    scope.require("repositories.create")?;
+    if page.page == 0 || page.page > 10000 {
+        return Err(ApiError::bad("页码无效。"));
+    }
+    let row = connections::Entity::find()
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(connections::Column::Provider.eq(&kind))
+        .one(&s.db)
+        .await?
+        .ok_or_else(|| ApiError::bad("请先连接代码平台。"))?;
+    let config = connection_provider(&s, &s.db, &row).await?;
+    ensure_fresh(&s, scope.workspace_id, row.credential_id.into()).await?;
+    let (_, _, secret) =
+        crate::credentials::unseal(&s, &scope.workspace_id, &row.credential_id.into()).await?;
+    let token = row
+        .token_config
+        .as_deref()
+        .map(serde_json::from_str::<TokenConfig>)
+        .transpose()
+        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+    let mut result = remote_repositories(
+        &kind,
+        &config,
+        &secret,
+        token.is_some(),
+        token
+            .as_ref()
+            .map(|c| c.organization.as_str())
+            .unwrap_or(""),
+        page.page,
+    )
+    .await?;
+    result["credential_id"] = json!(Id::from(row.credential_id));
+    result["account"] = json!(row.account);
+    Ok(Json(result))
 }
 
 /// Called only when an execution needs a credential, not during metadata reads.
@@ -545,7 +1084,9 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
         break (row, version);
     };
     let result: Result<()> = async {
-        let config = provider(&row.provider)?;
+        let config = OAuthSettings::load(s, &s.db)
+            .await?
+            .provider(&row.provider)?;
         require_same_config(&config, &row.config_fingerprint)?;
         let refresh = s.vault.open_secret(
             &row.refresh_secret,
@@ -561,7 +1102,7 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
             http()?
                 .post(endpoint(
                     &config.base,
-                    if row.provider == "github" {
+                    if matches!(row.provider.as_str(), "github" | "gitea") {
                         "login/oauth/access_token"
                     } else {
                         "oauth/token"
@@ -657,6 +1198,7 @@ pub async fn recover(s: &AppState) -> Result<()> {
 
 /// A web-authorized credential is usable only with its configured provider.
 pub async fn validate_target(
+    s: &AppState,
     conn: &impl sea_orm::ConnectionTrait,
     workspace: Id,
     credential: Id,
@@ -671,8 +1213,7 @@ pub async fn validate_target(
     else {
         return Ok(());
     };
-    let config = provider(&row.provider)?;
-    require_same_config(&config, &row.config_fingerprint)?;
+    let config = connection_provider(s, conn, &row).await?;
     let expected = if api { config.api } else { config.base };
     let address =
         if let Some((host, path)) = address.strip_prefix("git@").and_then(|v| v.split_once(':')) {

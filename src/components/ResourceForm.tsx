@@ -12,6 +12,7 @@
  * set (§8 of the design doc).
  */
 import { useCallback, useEffect, useState } from "react";
+import { RepositorySource } from "./RepositorySource";
 import { ManifestEditor } from "./ManifestEditor";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -167,6 +168,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
                 <Field
                   key={field.key}
                   field={field}
+                  workspace={workspace}
                   reportOptions={reportOptions}
                   value={draft[field.key]}
                   stored={!!draft[field.stored ?? `has_${field.key}`]}
@@ -178,7 +180,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
                   onChange={(value) => setDraft((d) => ({
                     ...d,
                     ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-                    [field.key]: value,
+                    ...(field.type === "repository-source" ? value as Record<string, unknown> : { [field.key]: value }),
                   }) as Partial<T>)}
                 />
               ))}
@@ -291,17 +293,20 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
       <Checkbox checked={replacing} disabled={readOnly} onCheckedChange={(checked) => onChange(checked ? "" : undefined)} />
       替换{field.label}（不勾选则保留原值）
     </label>}
+    {!creating && <p className="text-xs text-muted-foreground">{stored ? "已设置密钥" : "尚未设置密钥"}</p>}
+    {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     {replacing && <label className="flex flex-col gap-1.5 text-sm font-medium">
       {field.label}
       <textarea className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} readOnly={readOnly}
-        autoComplete="off" spellCheck={false} placeholder="允许留空；空白和换行会原样保存" />
+        autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? "允许留空；空白和换行会原样保存"} />
     </label>}
   </Wrapper>;
 }
 
 function Field<T>({
   field,
+  workspace = "",
   value,
   readOnly,
   asText,
@@ -313,6 +318,7 @@ function Field<T>({
   reportOptions,
 }: {
   field: FormField<T>;
+  workspace?: string;
   value: unknown;
   readOnly: boolean;
   asText: boolean;
@@ -344,6 +350,8 @@ function Field<T>({
       asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
+
+  if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "manifest") return <Wrapper field={field}><ManifestEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></Wrapper>;
 

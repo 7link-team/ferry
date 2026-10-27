@@ -83,6 +83,7 @@ export interface ListConfig<T> {
 }
 
 export type FieldType =
+  | "repository-source"
   | "text"
   | "textarea"
   | "number"

@@ -20,7 +20,6 @@ beforeEach(() => {
     if (url === "/api/setup") return { required, has_users: true, registration_enabled: !required };
     if (url === "/api/workspaces/ops/preferences") return {default_page_size:20,dictionaries:{}};
     if (url === "/api/me") return { user: { id: "1", name: "Existing owner", email: "owner@example.invalid", is_superadmin: false }, workspaces: [{ id: "2", name: "Existing workspace", slug: "ops", role_name: "拥有者", permissions }] };
-    if (url === "/api/workspaces/ops/repository-auth?page=1&page_size=20") return { items: ["github", "gitlab", "gitee", "codeup"].map(provider => ({id:provider,provider,web_available:false,state:"not-connected",account:"",expires_at:0,credential_id:null,setup:"尚未配置网页授权应用",last_error:""})), total:4, page:1, page_size:20 };
     return { items: [], total: 0, page: 1, page_size: 20 };
   } })));
 });
@@ -41,18 +40,16 @@ it("does not ask existing users to initialize an already initialized platform", 
   expect(host.textContent).not.toContain("稍后初始化，继续工作空间");
 });
 
-it("keeps authorization and token routes inside one repository menu", async () => {
+it("has one repository entry and no separate authorization tabs", async () => {
   required = false;
-  permissions = ["repositories.read", "credentials.read", "credentials.create"];
-  history.replaceState({}, "", "/ops/build/repository-auth");
+  permissions = ["repositories.read", "repositories.create", "credentials.read", "credentials.create"];
+  history.replaceState({}, "", "/ops/build/repositories");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="构建"]')!;
   expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库", "授权认证"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库");
-  expect(host.querySelector('nav[aria-label="仓库页面"]')?.textContent).toContain("平台授权");
-  const web = [...host.querySelectorAll("button")].filter(b => b.textContent === "网页授权");
-  expect(web).toHaveLength(3);
-  expect(web.every(b => b.disabled && b.title.includes("尚未配置"))).toBe(true);
+  expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
+  expect(host.textContent).not.toContain("平台授权");
 });
 it("groups deployment history and configuration files under application deployment", async () => {
   required = false;
@@ -65,25 +62,18 @@ it("groups deployment history and configuration files under application deployme
   expect(host.textContent).toContain("nginx.conf");
   expect(pages.querySelector('[aria-current="page"]')?.textContent).toBe("应用配置文件");
 });
-it("retains a usable explanation and return path for unsupported detail URLs", async () => {
+it("opens legacy repository authorization bookmarks as the unified repository list", async () => {
   required = false;
-  permissions = ["credentials.read"];
+  permissions = ["repositories.read"];
   history.replaceState({}, "", "/ops/build/repository-auth/github");
   await act(async () => root.render(<App />));
-  expect(host.textContent).toContain("此页面不支持当前操作");
-  expect(host.textContent).not.toContain("还未实现");
-  await act(async () => [...host.querySelectorAll("button")].find(b => b.textContent === "返回列表")!.click());
-  expect(location.pathname).toBe("/ops/build/repository-auth");
+  expect(host.querySelector("h1")?.textContent).toBe("仓库");
+  expect(host.textContent).not.toContain("平台授权");
 });
-
-it("keeps nested authorization reachable for a role without repository-read permission", async () => {
+it("does not expose repository creation to a credentials-only role", async () => {
   required = false;
   permissions = ["credentials.read"];
   history.replaceState({}, "", "/ops/build/credentials");
   await act(async () => root.render(<App />));
-  const repository = [...host.querySelectorAll('nav[aria-label="构建"] a')].find(a => a.textContent === "仓库") as HTMLAnchorElement;
-  expect(repository.pathname).toBe("/ops/build/repository-auth");
-  await act(async () => repository.click());
-  expect(host.querySelector("main")?.textContent).not.toContain("没有访问此页面的权限");
-  expect(host.querySelector("h1")?.textContent).toBe("平台授权");
+  expect([...host.querySelectorAll('nav[aria-label="构建"] a')].map(a => a.textContent)).toEqual(["授权认证"]);
 });

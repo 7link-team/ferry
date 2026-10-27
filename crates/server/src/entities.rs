@@ -9,6 +9,7 @@ pub mod platform_state {
         pub id: i64,
         pub initialized: i64,
         pub registration_enabled: i64,
+        pub repository_oauth: Option<String>,
         pub version: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -278,6 +279,7 @@ pub mod repositories {
         pub id: i64,
         pub workspace_id: i64,
         pub name: String,
+        pub provider: String,
         pub url: String,
         pub default_branch: String,
         pub credential_id: i64,
@@ -798,6 +800,7 @@ pub mod repository_connections {
         pub last_error: String,
         pub client_id: String,
         pub config_fingerprint: String,
+        pub token_config: Option<String>,
         pub version: i64,
         pub created_at: i64,
         pub updated_at: i64,

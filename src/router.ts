@@ -33,9 +33,10 @@ export function parse(pathname = location.pathname): Route {
   }
   const fallback = nav[0]!;
   const resolved = nav.find((g) => g.key === group) ?? fallback;
-  const resolvedItem =
+  const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
+  const resolvedItem = legacyRepository ? "repositories" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
-  const mode =
+  const mode = legacyRepository ? "list" :
     third === "new" ? "new" : third ? (fourth === "edit" ? "edit" : "view") : "list";
   return {
     workspace,

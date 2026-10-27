@@ -88,8 +88,8 @@ try {
   await ordinaryPage.goto(`${origin}/_platform/users`);
   await ordinaryPage.getByText('当前账号没有平台管理权限。').waitFor();
   assert.equal(await ordinaryPage.getByRole('cell').count(), 0, 'ordinary account cannot view platform table');
-  await page.getByRole('link', { name: '注册设置', exact: true }).click();
-  const toggle = page.getByRole('checkbox');
+  await page.getByRole('link', { name: '平台设置', exact: true }).click();
+  const toggle = page.getByRole('checkbox', { name: '允许注册新账号', exact: true });
   await toggle.waitFor();
   assert.equal(await toggle.getAttribute('aria-checked'), 'true');
   await toggle.click();

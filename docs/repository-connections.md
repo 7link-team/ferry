@@ -1,40 +1,47 @@
-# 外部仓库授权与应用市场
+# 外部仓库连接与应用市场
 
-平台连接已有 GitHub、GitLab、Gitee、Codeup 仓库，不托管 Git。先配置仓库授权或 API 凭据，再创建外部仓库；应用市场来源关联该仓库并读取指定分支的索引文件。
+只连接已有 GitHub、GitLab、Gitee、Gitea、Codeup 或普通 Git 仓库，不托管 Git。所有连接步骤都在工作空间的“仓库 → 创建”完成，没有独立的“平台授权”或“仓库访问令牌”Tab。
 
-## 网页授权
+## 创建仓库
 
-GitHub、GitLab、Gitee 支持网页授权。管理员先在提供方创建 OAuth 应用，将回调地址登记为：
+1. 选择代码来源：GitHub、GitLab、Gitee、Gitea、Codeup 或普通 Git。
+2. 代码平台选择网页授权或个人访问令牌。网页授权在弹窗完成，返回后保留原表单；个人令牌必须通过平台接口验证并成功读取仓库列表，才会保存为连接。
+3. 从平台返回的列表选择仓库，确认名称、默认分支和备注后创建。访问凭据自动绑定，无需跳到凭据页面。
+
+令牌错误或没有读取仓库的权限时，界面显示错误，不会仅创建一个凭据就显示“已连接”。仓库列表按页读取；可使用已有连接或在表单中重新授权。重新授权保留原凭据引用。授权记录按工作空间和操作者隔离，仓库绑定的凭据可供该工作空间中有相应权限的任务使用。
+
+普通 Git 直接填写 HTTP(S) 或 SSH 地址，选择无需授权、账号密码、SSH 私钥或令牌。授权信息与仓库在同一事务中保存并加密，失败不会留下孤立凭据。已存在的仓库可保持原授权，也可在编辑时替换。
+
+## 平台动态配置
+
+超管在“平台管理 → 平台设置”配置公开访问地址及 GitHub、GitLab、Gitee、Gitea 的 OAuth 应用。**保存后立即生效，无需重启**。各工作空间仅授权自己的账号，不重复配置应用密钥。
+
+先在代码平台创建 OAuth 应用，将平台设置页面显示的回调地址登记到提供方：
 
 ```text
 https://<平台域名>/api/repository-auth/callback
 ```
 
-服务端配置以下环境变量并重启。`PUBLIC_URL` 必须是用户实际访问平台的地址，授权前后使用同一登录会话。
+公开访问地址必须是用户浏览器实际访问平台的地址，授权前后使用同一登录会话。应用配置加密存储，密钥从不回显；不勾选替换或留空均保留原密钥。关闭某提供方的网页授权后，该提供方的网页授权凭据不再用于新执行；配置仍保留。个人访问令牌连接独立于 OAuth 应用开关。
 
-```text
-REPOSITORY_OAUTH_PUBLIC_URL=https://<平台域名>
-REPOSITORY_OAUTH_GITHUB_CLIENT_ID=<应用 ID>
-REPOSITORY_OAUTH_GITHUB_CLIENT_SECRET=<应用密钥>
-```
-
-GitLab、Gitee 分别将变量名中的 `GITHUB` 替换为 `GITLAB`、`GITEE`。密钥仅配置在服务端，不放入前端、仓库索引或版本库。
-
-| 提供方 | 默认网页地址 | 默认 API 地址 | 请求权限 |
+| 提供方 | 默认网站地址 | 默认 API 地址 | 网页授权请求权限 |
 | --- | --- | --- | --- |
 | GitHub | `https://github.com` | `https://api.github.com` | `repo read:user` |
 | GitLab | `https://gitlab.com` | `https://gitlab.com/api/v4` | `read_user read_api read_repository` |
 | Gitee | `https://gitee.com` | `https://gitee.com/api/v5` | `user_info projects` |
+| Gitea | 必须填写实例地址 | 网站地址加 `/api/v1` | `read:user read:repository` |
 
-自托管实例可配置对应前缀的 `_BASE_URL` 与 `_API_URL`。GitHub Enterprise 默认 API 路径为 `/api/v3`，GitLab 为 `/api/v4`。更换应用 ID、网页地址或 API 地址后，已有凭据需要重新授权，避免旧令牌被发送到新的接入点。
+自建 GitLab/GitHub Enterprise/Gitea 可填写网站和 API 地址；GitHub Enterprise 默认 API 路径为 `/api/v3`。更换应用 ID、网站或 API 接入点后，原网页授权凭据需要重新授权，不能将旧令牌发送到新接入点。更换公开地址会拒绝尚未完成的旧授权流程，请重新发起。
 
-用户进入工作空间的“仓库 → 平台授权”，点击网页授权并在提供方确认。GitHub、GitLab、Gitee 的按钮在未配置 OAuth 应用时仍显示，但不可点击，旁边说明缺少的配置；超管可展开“配置网页授权”查看部署步骤。成功后生成加密保管的令牌凭据；创建外部仓库时选择该凭据。授权将要过期且提供方发放了刷新令牌时，在实际使用前自动续期。续期失败或服务在续期中断开时，通过“重新授权”恢复；原凭据 ID 保留，已有仓库引用无需重建。网页管理的令牌不可手工覆盖。
+兼容原有环境变量：尚未在网页保存设置时，读取 `REPOSITORY_OAUTH_PUBLIC_URL` 与 `REPOSITORY_OAUTH_{GITHUB|GITLAB|GITEE|GITEA}_{CLIENT_ID|CLIENT_SECRET|BASE_URL|API_URL}`。网页保存后以数据库平台设置为准，关闭网页授权不会重新启用环境变量里的配置。
 
-## API 凭据
+## 个人访问令牌
 
-Codeup 当前使用官方个人访问令牌。未配置 OAuth 应用的平台也可以使用 API 凭据入口；该入口位于“仓库 → 平台授权 → 使用个人访问令牌”，默认创建“令牌”类型，不是独立的 API 令牌模块。这是代码平台签发的仓库访问凭据，不是调用 Ferry API 的令牌。令牌必须具有目标仓库的读取权限，私有仓库还需满足提供方的组织访问要求。
+令牌由代码平台签发，需具备目标仓库读取权限；不是调用本平台 API 的令牌。GitHub/GitLab/Gitee/Gitea 会验证账号并读取仓库列表，未配置 OAuth 应用也可以使用令牌连接。自建平台在创建表单中填写自定义接入点。
 
-创建外部仓库时填写仓库 URL、分支并选择凭据。市场来源的 API 主机必须与仓库主机一致，官方例外为 GitHub 的 `api.github.com` 和 Codeup 的 `openapi-rdc.aliyuncs.com`。不允许通过重定向转发认证信息。
+Codeup 使用个人访问令牌。中心版填写组织 ID；默认网站为 `https://codeup.aliyun.com`，API 为 `https://openapi-rdc.aliyuncs.com`。Region 版填写对应的网站和 API 地址，组织 ID 可留空。由于 Codeup 令牌接口不返回 Git 登录用户名，还需填写用于实际拉取的 Git 用户名。连接以成功读取组织内可访问仓库为准。
+
+市场来源的 API 主机必须与仓库主机一致，官方例外为 GitHub 的 `api.github.com` 和 Codeup 的 `openapi-rdc.aliyuncs.com`。不会通过重定向转发认证信息。
 
 ## 市场索引
 

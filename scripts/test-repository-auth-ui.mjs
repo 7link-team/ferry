@@ -15,7 +15,7 @@ const provider=createHttpServer(async(request,response)=>{
     const code=randomUUID();codes.set(code,url.searchParams);
     const callback=new URL(url.searchParams.get('redirect_uri'));
     callback.searchParams.set('code',code);callback.searchParams.set('state',url.searchParams.get('state'));
-    response.writeHead(302,{Location:callback.href});response.end();return;
+    response.writeHead(200,{'Content-Type':'text/html','Cross-Origin-Opener-Policy':'same-origin'});response.end(`<script>location.href=${JSON.stringify(callback.href)}</script>`);return;
   }
   if(url.pathname==='/login/oauth/access_token') {
     let body='';for await(const part of request)body+=part;
@@ -25,8 +25,13 @@ const provider=createHttpServer(async(request,response)=>{
     assert.equal(form.get('client_secret'),'fixture-client-secret');
     response.setHeader('Content-Type','application/json');response.end(JSON.stringify({access_token:'fixture-browser-access-token',refresh_token:'fixture-browser-refresh-token',expires_in:3600}));return;
   }
-  assert.equal(url.pathname,'/user');assert.equal(request.headers.authorization,'Bearer fixture-browser-access-token');
-  response.setHeader('Content-Type','application/json');response.end(JSON.stringify({login:'browser-authorized-user'}));
+  const token=url.searchParams.get('access_token') || request.headers['private-token'] || request.headers['x-yunxiao-token'] || (request.headers.authorization ?? '').replace(/^(Bearer|token) /,'');
+  if (!['fixture-browser-access-token','valid-personal-token'].includes(token)) {response.writeHead(401);response.end();return;}
+  response.setHeader('Content-Type','application/json');
+  if (url.pathname.endsWith('/user')) response.end(JSON.stringify({login:'browser-authorized-user'}));
+  else if (url.pathname.endsWith('/repos') || url.pathname.endsWith('/projects') || url.pathname.endsWith('/repositories')) response.end(JSON.stringify([{name:'test-repo',full_name:'team/test-repo',clone_url:providerOrigin+'/team/test-repo.git',default_branch:'develop'}]));
+  else {response.writeHead(404);response.end();}
+
 });
 await new Promise(r=>provider.listen(0,'127.0.0.1',r));
 const providerOrigin=`http://127.0.0.1:${provider.address().port}`;
@@ -39,7 +44,8 @@ const origin = `http://127.0.0.1:${port}`;
 const log = await open(join(work, 'server.log'), 'w');
 const env = { ...process.env, FERRY_DATA_DIR: work, FERRY_BIND: `127.0.0.1:${port}` };
 delete env.FERRY_DATABASE_URL;
-Object.assign(env,{REPOSITORY_OAUTH_PUBLIC_URL:origin,REPOSITORY_OAUTH_GITHUB_CLIENT_ID:'fixture-client-id',REPOSITORY_OAUTH_GITHUB_CLIENT_SECRET:'fixture-client-secret',REPOSITORY_OAUTH_GITHUB_BASE_URL:providerOrigin,REPOSITORY_OAUTH_GITHUB_API_URL:providerOrigin,RUST_LOG:'ferry_server=debug'});
+for (const key of Object.keys(env)) if (key.startsWith('REPOSITORY_OAUTH_')) delete env[key];
+env.RUST_LOG='ferry_server=debug';
 const server = spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'), [], { env, stdio: ['ignore', log.fd, log.fd], windowsHide: true });
 let browser,runner;
 try {
@@ -66,36 +72,97 @@ try {
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root='/workspaces/tenant';
+  const platform=await context.newPage();platform.on('pageerror',e=>errors.push(e.message));
+  await platform.goto(`${origin}/_platform/settings/1/edit`);
+  await platform.getByLabel('平台公开访问地址',{exact:true}).fill(origin);
+  await platform.getByLabel('启用 GitHub 网页授权',{exact:true}).check();
+  await platform.getByLabel('GitHub 应用 ID',{exact:true}).fill('fixture-client-id');
+  await platform.getByLabel('替换GitHub 应用密钥（不勾选则保留原值）',{exact:true}).check();
+  await platform.getByLabel('GitHub 应用密钥',{exact:true}).fill('fixture-client-secret');
+  await platform.getByLabel('GitHub 网站地址',{exact:true}).fill(providerOrigin);
+  await platform.getByLabel('GitHub API 地址',{exact:true}).fill(providerOrigin);
+  await platform.getByRole('button',{name:'保存',exact:true}).click();
+  await platform.getByText('平台设置已保存，立即生效。',{exact:true}).waitFor();
+  await platform.getByLabel('GitHub 应用 ID',{exact:true}).waitFor();
+  assert.equal(await platform.getByLabel('GitHub 应用密钥',{exact:true}).count(),0,'stored app secret is not returned');
+  assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-auth/callback');
+
   await p.goto(`${origin}/tenant/build/repositories`);
-  assert.equal(await p.locator('nav[aria-label="构建"]').getByRole('link',{name:'平台授权',exact:true}).count(),0);
-  assert.equal(await p.locator('nav[aria-label="构建"]').getByRole('link',{name:'API 令牌',exact:true}).count(),0);
-  await p.getByRole('navigation',{name:'仓库页面',exact:true}).getByRole('link',{name:'平台授权',exact:true}).click();
-  for (const name of ['GitLab','Gitee']) {
-    const row=p.getByRole('row').filter({hasText:name});
-    assert(await row.getByRole('button',{name:'网页授权',exact:true}).isDisabled());
-    assert((await row.innerText()).includes('尚未配置'));
-  }
-  if (process.env.UI_SCREENSHOT) await p.screenshot({ path: process.env.UI_SCREENSHOT });
-  await p.getByRole('row').filter({hasText:'GitHub'}).getByRole('button',{name:'网页授权',exact:true}).click();
-  await p.waitForURL('**/build/repository-auth?authorization=connected');
-  await p.getByRole('cell',{name:'browser-authorized-user',exact:true}).waitFor();
-  const first=await (await owner.request.get(`${origin}/api${root}/credentials`)).json();assert.equal(first.total,1);
-  await p.getByRole('row').filter({hasText:'GitHub'}).getByRole('button',{name:'重新授权',exact:true}).click();
-  await p.waitForURL('**/build/repository-auth?authorization=connected');
-  await p.getByRole('cell',{name:'browser-authorized-user',exact:true}).waitFor();
-  const second=await (await owner.request.get(`${origin}/api${root}/credentials`)).json();assert.equal(second.total,1);assert.equal(second.items[0].id,first.items[0].id);
-  await p.getByRole('row').filter({hasText:'GitHub'}).getByRole('link',{name:'查看凭据',exact:true}).click();
-  await p.waitForURL('**/build/credentials/*');
-  assert(!(await p.locator('body').innerText()).includes('fixture-browser-access-token'));
-  await p.goto(`${origin}/tenant/build/repository-auth`);
-  await p.getByRole('row').filter({hasText:'Codeup'}).getByRole('link',{name:'使用个人访问令牌',exact:true}).click();
-  await p.waitForURL('**/build/api-tokens/new');
-  assert((await p.locator('main').innerText()).includes('不是调用本平台 API 的令牌'));
-  assert((await p.getByLabel('类型',{exact:false}).innerText()).includes('令牌'));
+  assert.equal(await p.getByRole('navigation',{name:'仓库页面',exact:true}).count(),0,'no separate repository authorization tabs');
+  assert.equal(await p.getByRole('link',{name:'平台授权',exact:true}).count(),0);
+  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.getByLabel('代码来源',{exact:true}).selectOption('github');
+  await p.getByLabel(/^名称/).fill('Preserved draft');
+  await p.getByLabel(/^备注/).fill('Keep this during OAuth');
+  const popupPromise=p.waitForEvent('popup');
+  await p.getByRole('button',{name:'打开网页授权',exact:true}).click();
+  const popup=await popupPromise;
+  await p.getByText('已连接：browser-authorized-user',{exact:true}).waitFor();
+  assert.equal(await p.getByLabel(/^名称/).inputValue(),'Preserved draft');
+  assert.equal(await p.getByLabel(/^备注/).inputValue(),'Keep this during OAuth');
+  assert(popup.isClosed(),'OAuth callback closes only its popup');
+  await p.getByLabel('选择平台仓库',{exact:true}).selectOption(providerOrigin+'/team/test-repo.git');
+  assert.equal(await p.getByLabel(/^默认分支/).inputValue(),'develop');
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL('**/tenant/build/repositories');
+  let rows=await (await owner.request.get(`${origin}/api${root}/repositories`)).json();
+  assert.equal(rows.items[0].name,'Preserved draft');assert.equal(rows.items[0].provider,'github');assert.notEqual(rows.items[0].credential_id,'0');
+  const firstCredential=rows.items[0].credential_id;
+
+  // Reauthorization uses the same connection and preserves the still-unsaved form.
+  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.getByLabel('代码来源',{exact:true}).selectOption('github');
+  await p.getByRole('button',{name:'打开网页授权',exact:true}).click();
+  await p.getByText('已连接：browser-authorized-user',{exact:true}).waitFor();
+  const connections=await (await owner.request.get(`${origin}/api${root}/repository-auth`)).json();
+  assert.equal(connections.items.find(row=>row.id==='github').credential_id,firstCredential);
+
+  await p.getByLabel('代码来源',{exact:true}).selectOption('gitee');
+  assert.equal(await p.getByLabel('选择平台仓库',{exact:true}).count(),0,'changing platform clears old repository selection');
+  await p.getByLabel('平台授权方式',{exact:true}).selectOption('token');
+  await p.getByLabel('个人访问令牌',{exact:true}).fill('invalid-token');
+  await p.getByText('自定义接入点（自建平台时填写）',{exact:true}).click();
+  await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
+  await p.getByLabel('平台 API 地址',{exact:true}).fill(providerOrigin);
+  await p.getByRole('button',{name:'连接并读取仓库',exact:true}).click();
+  await p.getByRole('alert').filter({hasText:'HTTP 401'}).waitFor();
+  assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
+  assert.equal(await p.getByLabel('选择平台仓库',{exact:true}).count(),0);
+  await p.getByLabel('个人访问令牌',{exact:true}).fill('valid-personal-token');
+  await p.getByRole('button',{name:'连接并读取仓库',exact:true}).click();
+  await p.getByLabel('选择平台仓库',{exact:true}).selectOption(providerOrigin+'/team/test-repo.git');
+  assert.equal(await p.getByLabel('个人访问令牌',{exact:true}).inputValue(),'','token cleared after successful exchange');
+  await p.getByLabel(/^名称/).fill('Gitee connected repository');
+  await p.setViewportSize({width:390,height:844});
+  assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'repository form fits mobile viewport');
+  if(process.env.UI_SCREENSHOT) await p.screenshot({path:process.env.UI_SCREENSHOT,fullPage:true});
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL('**/tenant/build/repositories');
+  rows=await (await owner.request.get(`${origin}/api${root}/repositories`)).json();
+  assert(rows.items.some(row=>row.provider==='gitee'&&row.name==='Gitee connected repository'&&row.credential_id!=='0'));
+
+  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.getByLabel('代码来源',{exact:true}).selectOption('git');
+  await p.getByLabel('Git 仓库地址',{exact:true}).fill(providerOrigin+'/generic.git');
+  await p.getByLabel('Git 授权方式',{exact:true}).selectOption('password');
+  await p.getByLabel('Git 账号',{exact:true}).fill('git-user');
+  await p.getByLabel('Git 密码',{exact:true}).fill('generic-private-password');
+  await p.getByLabel(/^名称/).fill('Generic with password');
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL('**/tenant/build/repositories');
+  rows=await (await owner.request.get(`${origin}/api${root}/repositories`)).json();
+  assert(rows.items.some(row=>row.provider==='git'&&row.name==='Generic with password'&&row.credential_id!=='0'));
+  console.log('PASS: dynamic platform settings, secret nonreturn, popup OAuth preserves draft, Gitee PAT validates and binds selected repository, no auth tabs, generic Git inline credentials, mobile form');
   assert.deepEqual(errors,[]);
   const logs=await readFile(join(work,'server.log'),'utf8');
   for(const secret of ['fixture-client-secret','fixture-browser-access-token','fixture-browser-refresh-token','code=','state='])assert(!logs.includes(secret),`server logs leaked ${secret}`);
-  console.log('PASS: Chromium same-window OAuth redirect, PKCE callback, connected status, reauthorization keeps credential, metadata/log secrecy');
+  console.log('PASS: reauthorization retains references and secrets stay out of metadata/logs');
+} catch (error) {
+  for (const context of browser?.contexts() ?? []) for (const page of context.pages()) {
+    console.error('PAGE',page.url(),await page.locator('body').innerText().catch(()=>''));
+    console.error('SELECTS',await page.locator('select').evaluateAll(nodes=>nodes.map(node=>({html:node.outerHTML,label:node.labels?.[0]?.textContent}))));
+  }
+  throw error;
 } finally {
   if (runner && runner.exitCode===null) {runner.kill();await new Promise(r=>runner.once("exit",r));}
   if (browser) await browser.close();

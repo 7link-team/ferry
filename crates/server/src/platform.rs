@@ -484,14 +484,20 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    Ok(Json(
-        json!({"id": "1", "registration_enabled": row.registration_enabled != 0, "version": row.version}),
-    ))
+    let mut view =
+        crate::repository_auth::OAuthSettings::read(&s, row.repository_oauth.as_deref())?
+            .view(&s, row.repository_oauth.is_some());
+    view["id"] = json!("1");
+    view["registration_enabled"] = json!(row.registration_enabled != 0);
+    view["version"] = json!(row.version);
+    Ok(Json(view))
 }
 #[derive(Deserialize)]
 pub struct SettingsUpdate {
     version: i64,
     registration_enabled: bool,
+    #[serde(flatten)]
+    oauth: serde_json::Map<String, Value>,
 }
 pub async fn update_settings(
     State(s): State<AppState>,
@@ -504,7 +510,24 @@ pub async fn update_settings(
     if row.version != body.version {
         return Err(ApiError::conflict("设置已被修改，请刷新后重试。"));
     }
+    let mut repository_oauth = row.repository_oauth.clone();
+    let oauth_changed = body.oauth.keys().any(|key| {
+        key == "oauth_public_url"
+            || ["github", "gitlab", "gitee", "gitea"]
+                .iter()
+                .any(|provider| key.starts_with(&format!("oauth_{provider}_")))
+    });
+    if oauth_changed {
+        let mut config =
+            crate::repository_auth::OAuthSettings::read(&s, repository_oauth.as_deref())?;
+        config.update(&s, &body.oauth)?;
+        repository_oauth = Some(config.seal(&s)?);
+    }
     platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::RepositoryOauth,
+            Expr::value(repository_oauth),
+        )
         .col_expr(
             platform_state::Column::RegistrationEnabled,
             Expr::value(i64::from(body.registration_enabled)),
@@ -523,7 +546,7 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled}),
+        json!({"registration_enabled": body.registration_enabled, "repository_oauth_updated": oauth_changed}),
     )
     .await?;
     tx.commit().await?;

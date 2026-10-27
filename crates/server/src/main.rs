@@ -179,6 +179,14 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/repository-auth/{provider}/actions/connect",
+            post(repository_auth::connect_token),
+        )
+        .route(
+            "/{workspace}/repository-auth/{provider}/repositories",
+            get(repository_auth::browse_repositories),
+        )
         .route("/{workspace}/repository-auth", get(repository_auth::list))
         .route(
             "/{workspace}/repository-auth/{provider}/actions/authorize",

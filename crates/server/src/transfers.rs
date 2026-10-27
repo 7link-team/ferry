@@ -35,7 +35,7 @@ fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
         "host-groups" => "name description parent_id",
         "tags" => "name color",
         "credentials" => "name kind username description secret:secret",
-        "repositories" => "name url default_branch credential_id description",
+        "repositories" => "name provider url default_branch credential_id description",
         "pipelines" => "name definition repository_id target_kind target_ref description",
         "deployments" => "name manifest mode target_kind target_ref workdir description",
         "variables" => "name scope scope_ref kind description value:secret",

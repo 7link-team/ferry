@@ -122,6 +122,7 @@ const groupOptions = (workspace: string) => namedOptions(workspace, "host-groups
 const tagOptions = (workspace: string) => namedOptions(workspace, "tags");
 
 interface Repository {
+  provider: string;
   id: string; name: string; url: string; default_branch: string;
   credential_id: string; description: string;
 }
@@ -188,8 +189,6 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
   },
 });
 
-interface RepositoryAuthorization {id:string;provider:string;web_available:boolean;state:string;credential_id:string|null;account:string;expires_at:number;last_error:string;setup:string}
-const authorizeRepository=(workspace:string)=>async(row:RepositoryAuthorization)=>{const result=await runItemAction<{url:string}>(workspace,"repository-auth",row.id,"authorize",{});window.location.assign(result.url);};
 interface MarketSource {id:string;name:string;repository_id:string;provider:string;api_base:string;project:string;organization:string;branch:string;index_path:string;state:string;last_error:string;synced_at:number;version:number}
 interface MarketEntry {id:string;source_id:string;entry_key:string;name:string;description:string;content:string;parameters:string;version:number}
 const marketProviders=[{value:"github",label:"GitHub"},{value:"gitlab",label:"GitLab"},{value:"gitee",label:"Gitee"},{value:"codeup",label:"Codeup"}];
@@ -212,7 +211,6 @@ const cronLinks=(workspace:string)=>[
 
 export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void, hostStates: Option[] = STATES): Record<string, ListConfig<AnyRow>> {
   return {
-    "repository-auth": list<RepositoryAuthorization>({resource:"repository-auth",rowKey:r=>r.id,columns:[{key:"provider",label:"平台",render:r=>marketProviders.find(p=>p.value===r.provider)?.label??r.provider},{key:"account",label:"授权账号"},{key:"state",label:"授权状态",render:r=>({connected:"已连接",expired:"已过期",refreshable:"使用时续期",refreshing:"续期中",reauthorize:"需要重新授权","not-connected":"未连接"}[r.state]??r.state)},{key:"expires_at",label:"有效期至",render:r=>cronDate(r.expires_at)},{key:"setup",label:"授权方式"},{key:"last_error",label:"最近异常"}],actions:[{label:"网页授权",permission:"credentials.create",when:r=>r.provider!=="codeup"&&!r.credential_id,disabled:r=>!r.web_available,disabledReason:r=>r.setup,action:authorizeRepository(workspace)},{label:"重新授权",permission:"credentials.create",when:r=>r.provider!=="codeup"&&!!r.credential_id,disabled:r=>!r.web_available,disabledReason:r=>r.setup,action:authorizeRepository(workspace)},{label:"查看凭据",when:r=>!!r.credential_id,to:r=>({group:"build",item:"credentials",id:r.credential_id!,mode:"view"})},{label:"使用个人访问令牌",permission:"credentials.create",to:()=>({group:"build",item:"api-tokens",mode:"new"})}],toolbar:{create:false,import:false,export:false}}),
     "marketplace-sources": list<MarketSource>({resource:"marketplace-sources",rowKey:r=>r.id,filters:[{key:"q",label:"名称",type:"text"}],columns:[{key:"name",label:"名称",sortable:true},{key:"provider",label:"平台"},{key:"state",label:"同步状态",render:r=>({idle:"空闲",syncing:"同步中",failed:"失败"}[r.state]??r.state)},{key:"synced_at",label:"上次成功",render:r=>cronDate(r.synced_at)},{key:"last_error",label:"同步错误"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"marketplace-sources.update",to:r=>({id:r.id,mode:"edit"})},{label:"立即同步",permission:"marketplace-sources.sync",action:async r=>{await runItemAction(workspace,"marketplace-sources",r.id,"sync",{});}},{label:"目录",to:()=>({group:"deploy",item:"marketplace",mode:"list"}),query:r=>({source_id:r.id})},{label:"删除",permission:"marketplace-sources.delete",destructive:true,action:r=>deleteResource(workspace,"marketplace-sources",r.id)}],toolbar:{import:false,export:false}}),
     marketplace: list<MarketEntry>({resource:"marketplace",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"},{key:"source_id",label:"来源 ID",type:"text"}],columns:[{key:"name",label:"应用模板",sortable:true},{key:"description",label:"说明"},{key:"entry_key",label:"目录标识"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},marketInstall(workspace)],toolbar:{create:false,import:false,export:false}}),
     "alert-rules": list<AlertRule>({resource:"alert-rules",permissionResource:"alerts",rowKey:r=>r.id,filters:[{key:"q",label:"名称",type:"text"},{key:"target_kind",label:"目标类型",type:"select",options:alertTargets}],columns:[{key:"name",label:"名称",sortable:true},{key:"metric",label:"指标",render:r=>alertMetrics.find(m=>m.value===r.metric)?.label??r.metric},{key:"threshold",label:"阈值"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"has_webhook",label:"Webhook",render:r=>r.has_webhook?"已配置":"未配置"},{key:"last_error",label:"检查异常"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"alerts.update",to:r=>({id:r.id,mode:"edit"})},{...alertEventLink,query:(r:AlertRule)=>({rule_id:r.id})},{label:"删除",permission:"alerts.delete",destructive:true,action:r=>deleteResource(workspace,"alert-rules",r.id)}],toolbar:{create:true,import:false,export:false}}),
@@ -636,14 +634,11 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     }),
     repositories: form({
       resource: "repositories", heading: (r: Repository) => r.name,
-      blank: { name: "", url: "", default_branch: "main", credential_id: "0", description: "" },
+      blank: { name: "", provider: "", url: "", default_branch: "main", credential_id: "0", description: "" },
       sections: [{ fields: [
+        { key: "source", label: "连接仓库", type: "repository-source", span: 2 },
         { key: "name", label: "名称", type: "text", required: true },
-        { key: "url", label: "URL", type: "text", required: true },
         { key: "default_branch", label: "默认分支", type: "text", required: true },
-        { key: "credential_id", label: "凭据", type: "select", options: async () => [
-          { value: "0", label: "无凭据" }, ...await namedOptions(workspace, "credentials")(),
-        ] },
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),

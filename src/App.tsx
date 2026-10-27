@@ -53,6 +53,19 @@ export function App() {
   };
   useEffect(reload, []);
   useEffect(() => {
+    const query = new URLSearchParams(location.search);
+    if (query.get("oauth_popup") === "1") {
+      const message = { type: "repository-authorized", provider: query.get("provider"), status: query.get("authorization") };
+      if (window.opener) window.opener.postMessage(message, location.origin);
+      const key = query.get("oauth_channel");
+      if (key && /^[a-zA-Z0-9-]{1,64}$/.test(key)) {
+        const channel = new BroadcastChannel(`repository-authorized-${key}`);
+        channel.postMessage(message); channel.close();
+      }
+      window.close();
+    }
+  }, []);
+  useEffect(() => {
     // A session that expires mid-use drops back to the entry screen without
     // changing the URL, so signing in again lands on the same page.
     const onUnauthorized = () => setIdentity(undefined);
@@ -140,7 +153,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   });
 
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
-  const relatedItems = group.items.filter(i => (i.key === parentItem.key || i.parent === parentItem.key) && i.key !== "api-tokens" && (!i.permission || permissions.has(i.permission)));
+  const relatedItems = group.items.filter(i => (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.resource];
 
   return (
@@ -291,7 +304,6 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
           </nav>}
           {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
-          {item.resource === "repository-auth" && identity.user.is_superadmin && <details className="mb-3 text-sm"><summary className="cursor-pointer">配置网页授权</summary><p className="my-2">在 GitHub、GitLab 或 Gitee 创建 OAuth 应用，将回调地址设置为当前服务公开地址加 /api/repository-auth/callback。服务端设置以下变量并重启；将 GITHUB 替换为 GITLAB 或 GITEE 即可配置对应平台。</p><pre className="overflow-auto rounded border p-3">{"REPOSITORY_OAUTH_PUBLIC_URL=https://你的平台地址\nREPOSITORY_OAUTH_GITHUB_CLIENT_ID=应用 ID\nREPOSITORY_OAUTH_GITHUB_CLIENT_SECRET=应用密钥"}</pre><p className="mt-2">应用密钥仅保存在服务端。桌面内置服务也需配置与已登记回调地址一致的 OAuth 应用。Codeup 使用个人访问令牌。</p></details>}
           {preferencesError && <p role="alert">{preferencesError}</p>}
           </div>
           {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (

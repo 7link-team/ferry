@@ -31,6 +31,7 @@ fn to_json(row: &repositories::Model) -> Value {
     json!({
         "id": Id::from(row.id),
         "name": row.name,
+        "provider": row.provider,
         "url": row.url,
         "default_branch": row.default_branch,
         "credential_id": Id::from(row.credential_id),
@@ -44,6 +45,10 @@ fn to_json(row: &repositories::Model) -> Value {
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    inline_credential: Option<InlineCredential>,
     url: String,
     #[serde(default)]
     default_branch: String,
@@ -55,6 +60,42 @@ pub struct Body {
     version: i64,
 }
 
+#[derive(Deserialize)]
+struct InlineCredential {
+    kind: String,
+    #[serde(default)]
+    username: String,
+    secret: String,
+}
+async fn bind_inline(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: &mut Body,
+) -> Result<()> {
+    if let Some(auth) = body.inline_credential.take() {
+        if body.provider != "git" {
+            return Err(ApiError::bad("代码平台请先完成网页授权或令牌连接。"));
+        }
+        let ssh = body.url.starts_with("git@") || body.url.starts_with("ssh://");
+        if (auth.kind == "ssh-key") != ssh {
+            return Err(ApiError::bad(
+                "SSH地址需使用SSH私钥，HTTP(S)地址需使用账号密码或令牌。",
+            ));
+        }
+        if auth.kind == "password" && auth.username.trim().is_empty() {
+            return Err(ApiError::bad("请填写Git账号。"));
+        }
+        let credential: crate::credentials::Body = serde_json::from_value(json!({"name":body.name,"kind":auth.kind,"username":auth.username,"secret":auth.secret}))
+            .map_err(|_|ApiError::bad("仓库授权信息无效。"))?;
+        let (_, Json(saved)) = crate::credentials::create_in(s, tx, scope, credential).await?;
+        body.credential_id = saved["id"]
+            .as_str()
+            .ok_or_else(|| ApiError::bad("保存仓库授权失败。"))?
+            .into();
+    }
+    Ok(())
+}
 impl Body {
     fn branch(&self) -> &str {
         match self.default_branch.trim() {
@@ -82,7 +123,12 @@ fn valid_url(url: &str) -> bool {
         .is_some_and(|(host, path)| !host.is_empty() && !host.contains('/') && !path.is_empty())
 }
 
-async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body) -> Result<String> {
+async fn check(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    body: &Body,
+) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
@@ -92,8 +138,29 @@ async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body)
             "请填写有效的远程仓库地址（255 字以内，仅支持 HTTP、HTTPS、SSH 或 git@host:path）。",
         ));
     }
+    if !["git", "github", "gitlab", "gitee", "gitea", "codeup"].contains(&body.provider.as_str()) {
+        return Err(ApiError::bad("请选择支持的代码平台或普通Git。"));
+    }
+    if body.provider != "git" {
+        let connection = crate::entities::repository_connections::Entity::find()
+            .filter(
+                crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id),
+            )
+            .filter(crate::entities::repository_connections::Column::Provider.eq(&body.provider))
+            .filter(
+                crate::entities::repository_connections::Column::CredentialId
+                    .eq(Id::reference(&body.credential_id)?),
+            )
+            .one(conn)
+            .await?
+            .ok_or_else(|| ApiError::bad("请先连接所选代码平台并选择仓库。"))?;
+        if connection.state != "connected" {
+            return Err(ApiError::bad("代码平台授权已失效，请重新连接。"));
+        }
+    }
     if Id::reference(&body.credential_id)? != Id::from(0) {
         crate::repository_auth::validate_target(
+            s,
             conn,
             scope.workspace_id,
             Id::reference(&body.credential_id)?,
@@ -165,15 +232,20 @@ pub(crate) async fn create_in(
     s: &AppState,
     tx: &sea_orm::DatabaseTransaction,
     scope: &Scope,
-    body: Body,
+    mut body: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("repositories.create")?;
-    let name = check(tx, &scope, &body).await?;
+    if body.provider.is_empty() {
+        body.provider = "git".into();
+    }
+    bind_inline(s, tx, scope, &mut body).await?;
+    let name = check(s, tx, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
     repositories::Entity::insert(repositories::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
         name: Set(name.clone()),
+        provider: Set(body.provider.clone()),
         url: Set(body.url.trim().to_owned()),
         default_branch: Set(body.branch().to_owned()),
         credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
@@ -204,13 +276,31 @@ pub async fn update(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
-    Json(body): Json<Body>,
+    Json(mut body): Json<Body>,
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("repositories.update")?;
-    let name = check(&s.db, &scope, &body).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let current = repositories::Entity::find()
+        .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(repositories::Column::Id.eq(id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if current.version != body.version {
+        return Err(ApiError::conflict("仓库已被修改，请刷新后重试。"));
+    }
+    if body.provider.is_empty() {
+        body.provider = current.provider;
+    }
+    bind_inline(&s, &tx, &scope, &mut body).await?;
+    let name = check(&s, &tx, &scope, &body).await?;
     let affected = repositories::Entity::update_many()
         .col_expr(repositories::Column::Name, Expr::value(name.clone()))
+        .col_expr(
+            repositories::Column::Provider,
+            Expr::value(body.provider.clone()),
+        )
         .col_expr(repositories::Column::Url, Expr::value(body.url.trim()))
         .col_expr(
             repositories::Column::DefaultBranch,
@@ -232,7 +322,7 @@ pub async fn update(
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(repositories::Column::Id.eq(id))
         .filter(repositories::Column::Version.eq(body.version))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if affected == 0 {
@@ -244,8 +334,9 @@ pub async fn update(
         )
         .await?);
     }
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        &tx,
         &scope,
         "update",
         "repositories",
@@ -253,6 +344,7 @@ pub async fn update(
         json!({"name": name}),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok": true})))
 }
 
