@@ -55,6 +55,9 @@ export const nav: NavGroup[] = [
     items: [
       { key: "repositories", label: "仓库", resource: "repositories", permission: "repositories.read" },
       { key: "pipelines", label: "流水线", resource: "pipelines", permission: "pipelines.read" },
+      {key:"pipeline-groups",label:"分组",resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},
+      {key:"pipeline-environments",label:"环境",resource:"pipeline-environments",permission:"pipeline-environments.read",hidden:true,parent:"pipelines"},
+      {key:"environment-variables",label:"环境变量",resource:"variables",permission:"variables.read",params:{scope:"environment"},hidden:true,parent:"pipelines"},
       { key: "artifacts", label: "构建产物", resource: "pipeline-artifacts", permission: "pipelines.read" },
       { key: "runs", label: "执行历史", resource: "pipeline-runs", permission: "pipelines.read" },
       { key: "pipeline-templates", label: "流水线模版", resource: "pipeline-templates", permission: "pipeline-templates.read" },

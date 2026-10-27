@@ -1,3 +1,5 @@
+mod actions;
+mod actions_run;
 mod alerts;
 mod artifacts;
 mod assets;
@@ -16,6 +18,7 @@ mod maintenance;
 mod manifest;
 mod marketplace;
 mod migration;
+mod pipeline_contexts;
 mod pipeline_runs;
 mod pipelines;
 mod platform;
@@ -339,6 +342,27 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/pipeline-artifacts/{id}/download",
             get(artifacts::download),
+        )
+        .route(
+            "/{workspace}/pipeline-groups",
+            get(pipeline_contexts::groups::list).post(pipeline_contexts::groups::create),
+        )
+        .route(
+            "/{workspace}/pipeline-groups/{id}",
+            get(pipeline_contexts::groups::get)
+                .patch(pipeline_contexts::groups::update)
+                .delete(pipeline_contexts::groups::remove),
+        )
+        .route(
+            "/{workspace}/pipeline-environments",
+            get(pipeline_contexts::environments::list)
+                .post(pipeline_contexts::environments::create),
+        )
+        .route(
+            "/{workspace}/pipeline-environments/{id}",
+            get(pipeline_contexts::environments::get)
+                .patch(pipeline_contexts::environments::update)
+                .delete(pipeline_contexts::environments::remove),
         )
         .route("/{workspace}/pipeline-runs", get(pipeline_runs::list))
         .route("/{workspace}/pipeline-runs/{id}", get(pipeline_runs::get))

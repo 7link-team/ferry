@@ -32,9 +32,9 @@ use std::{
 };
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
-struct VariableSnapshot {
-    values: BTreeMap<String, String>,
-    sources: Vec<Value>,
+pub(crate) struct VariableSnapshot {
+    pub(crate) values: BTreeMap<String, String>,
+    pub(crate) sources: Vec<Value>,
 }
 fn snapshot_aad(workspace: i64, run: i64) -> String {
     crate::vault::aad(
@@ -43,7 +43,7 @@ fn snapshot_aad(workspace: i64, run: i64) -> String {
         &run.to_string(),
     )
 }
-fn open_variables(s: &AppState, run: &runs::Model) -> Result<VariableSnapshot> {
+pub(crate) fn open_variables(s: &AppState, run: &runs::Model) -> Result<VariableSnapshot> {
     match &run.variable_snapshot {
         Some(sealed) => serde_json::from_str(
             &s.vault
@@ -56,13 +56,15 @@ fn open_variables(s: &AppState, run: &runs::Model) -> Result<VariableSnapshot> {
 
 const SPEC: Spec = Spec {
     search: &[],
-    filters: &["pipeline_id", "state"],
+    filters: &["pipeline_id", "state", "environment_id"],
     sortable: &["number", "created_at", "state"],
     default_sort: "-number",
 };
 fn run_json(r: &runs::Model) -> Value {
     json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"host_id":Id::from(r.host_id),
+        "environment_id":Id::from(r.environment_id),"environment_name":r.environment_name,
         "number":r.number,"state":r.state,"trigger_kind":r.trigger_kind,
+        "definition_format":if crate::actions::snapshot(&r.definition).is_some(){"github-actions"}else{"legacy"},
         "triggered_by":Id::from(r.triggered_by),"branch":r.branch,"commit":r.commit,
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
@@ -112,6 +114,11 @@ pub async fn get(
             )
             .collect::<Vec<_>>()
     );
+    let jobs = crate::entities::pipeline_run_jobs::Entity::find()
+        .filter(crate::entities::pipeline_run_jobs::Column::RunId.eq(r.id))
+        .all(&s.db)
+        .await?;
+    v["jobs"] = json!(jobs.iter().map(|job| json!({"key":job.job_key,"host_id":Id::from(job.host_id),"state":job.state,"started_at":job.started_at,"finished_at":job.finished_at})).collect::<Vec<_>>());
     v["artifacts"] = crate::artifacts::for_run(s.as_ref(), r.workspace_id, r.id).await?;
     Ok(Json(v))
 }
@@ -151,6 +158,7 @@ pub async fn log_list(
 pub struct TriggerBody {
     branch: Option<String>,
     commit: Option<String>,
+    environment_id: Option<String>,
 }
 
 pub async fn trigger(
@@ -161,11 +169,30 @@ pub async fn trigger(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.run")?;
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
-    let p = pipelines::Entity::find_by_id(i64::from(id))
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let mut p = pipelines::Entity::find_by_id(i64::from(id))
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
+        .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    let body: TriggerBody = if body.is_empty() {
+        TriggerBody::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::bad("执行参数必须是包含 branch/commit/environment_id 的 JSON 对象。")
+        })?
+    };
+    let environment = crate::pipeline_contexts::selected(
+        &tx,
+        scope.workspace_id,
+        id,
+        body.environment_id.as_deref(),
+    )
+    .await?;
+    if let Some(environment) = &environment {
+        p.target_kind = environment.target_kind.clone();
+        p.target_ref = environment.target_ref;
+    }
     let definition = crate::pipelines::validate_definition(&p.definition)?;
     // Scope references again at execution time, not only when a definition is saved.
     let candidates =
@@ -174,13 +201,13 @@ pub async fn trigger(
         "host" => {
             candidates
                 .filter(hosts::Column::Id.eq(p.target_ref))
-                .one(&s.db)
+                .one(&tx)
                 .await?
         }
         "host-group" => {
             host_groups::Entity::find_by_id(p.target_ref)
                 .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
-                .one(&s.db)
+                .one(&tx)
                 .await?
                 .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
             // One run has one concrete host. Resolve direct online members once,
@@ -189,7 +216,7 @@ pub async fn trigger(
                 .filter(hosts::Column::GroupId.eq(p.target_ref))
                 .filter(hosts::Column::State.eq("online"))
                 .order_by_asc(hosts::Column::Id)
-                .one(&s.db)
+                .one(&tx)
                 .await?
         }
         _ => return Err(ApiError::bad("未知的执行目标类型。")),
@@ -199,7 +226,7 @@ pub async fn trigger(
         Some(
             repositories::Entity::find_by_id(p.repository_id)
                 .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
-                .one(&s.db)
+                .one(&tx)
                 .await?
                 .ok_or_else(|| ApiError::bad("仓库不存在于当前工作空间。"))?,
         )
@@ -209,12 +236,6 @@ pub async fn trigger(
     let (repo_url, branch, credential_id) = repo
         .map(|r| (r.url, r.default_branch, r.credential_id))
         .unwrap_or_default();
-    let body: TriggerBody = if body.is_empty() {
-        TriggerBody::default()
-    } else {
-        serde_json::from_slice(&body)
-            .map_err(|_| ApiError::bad("执行参数必须是包含 branch/commit 的 JSON 对象。"))?
-    };
     let branch = body.branch.unwrap_or(branch);
     let commit = body.commit.unwrap_or_default();
     for value in [&branch, &commit] {
@@ -225,7 +246,6 @@ pub async fn trigger(
         }
     }
     let (run_id, now) = (i64::from(s.next_id()?), db::now());
-    let tx = s.db.begin().await?;
     // UPDATE first acquires the workspace row lock, then read our own increment
     // inside that transaction. Concurrent triggers cannot receive the same number.
     workspaces::Entity::update_many()
@@ -241,16 +261,32 @@ pub async fn trigger(
         .await?
         .ok_or_else(ApiError::missing)?
         .pipeline_run_number;
-    let variable_rows = crate::variables::resolve(
+    let actions = match crate::actions::document(&p.definition) {
+        Some(document) => Some(crate::actions::resolve(&tx, &scope, document, host.id).await?),
+        None => None,
+    };
+    let variable_rows = crate::variables::resolve_for_environment(
         &tx,
         scope.workspace_id,
         "build",
         id,
+        Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0)),
         &crate::pipelines::variable_names(&definition),
     )
     .await?;
     let mut snapshot = VariableSnapshot::default();
     for (name, row) in variable_rows {
+        if actions.is_some()
+            && row.kind == "secret"
+            && definition
+                .env
+                .iter()
+                .any(|entry| entry.name == format!("vars:{name}"))
+        {
+            return Err(ApiError::bad(
+                "密钥变量必须通过 secrets 引用，不能通过 vars 公开。",
+            ));
+        }
         let value = s.vault.open_secret(
             &row.value,
             &crate::vault::aad(
@@ -286,11 +322,20 @@ pub async fn trigger(
         workspace_id: i64::from(scope.workspace_id),
         pipeline_id: p.id,
         host_id: host.id,
+        environment_id: environment.as_ref().map(|e| e.id).unwrap_or(0),
+        environment_name: environment
+            .as_ref()
+            .map(|e| e.name.clone())
+            .unwrap_or_default(),
         number: number,
         state: "queued".into(),
         trigger_kind: "manual".into(),
         triggered_by: i64::from(scope.user.id),
-        definition: p.definition,
+        definition: match &actions {
+            Some(snapshot) => serde_json::to_string(snapshot)
+                .map_err(|_| ApiError::bad("无法保存 Actions 执行快照。"))?,
+            None => p.definition,
+        },
         variable_snapshot,
         repo_url: repo_url,
         branch: branch,
@@ -317,6 +362,23 @@ pub async fn trigger(
         .exec(&tx)
         .await?;
     }
+    if let Some(snapshot) = &actions {
+        use crate::entities::pipeline_run_jobs as jobs;
+        for job in &snapshot.jobs {
+            jobs::Entity::insert(jobs::ActiveModel {
+                id: Set(i64::from(s.next_id()?)),
+                run_id: Set(run_id),
+                job_key: Set(job.key.clone()),
+                host_id: Set(job.host_id),
+                state: Set("queued".into()),
+                outputs: Set(None),
+                started_at: Set(0),
+                finished_at: Set(0),
+            })
+            .exec(&tx)
+            .await?;
+        }
+    }
     tx.commit().await?;
     crate::hosts::activity(
         &s,
@@ -339,7 +401,27 @@ pub async fn cancel(
 ) -> Result<Json<Value>> {
     scope.require("pipelines.run")?;
     let r = scoped(&s, &scope, &id).await?;
-    finish(&s, r.id, "cancelled").await?;
+    if crate::actions::snapshot(&r.definition).is_some() {
+        let queued = runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("cancelling"))
+            .filter(runs::Column::Id.eq(r.id))
+            .filter(runs::Column::State.eq("queued"))
+            .exec(&s.db)
+            .await?
+            .rows_affected;
+        if queued > 0 {
+            finish(&s, r.id, "cancelled").await?;
+        } else {
+            runs::Entity::update_many()
+                .col_expr(runs::Column::State, Expr::value("cancelling"))
+                .filter(runs::Column::Id.eq(r.id))
+                .filter(runs::Column::State.eq("running"))
+                .exec(&s.db)
+                .await?;
+        }
+    } else {
+        finish(&s, r.id, "cancelled").await?;
+    }
     crate::hosts::activity(
         &s,
         &scope,
@@ -351,17 +433,42 @@ pub async fn cancel(
     .await?;
     Ok(Json(json!({"ok":true})))
 }
-async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
+pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
     let tx = s.db.begin().await?;
     let changed = runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value(state))
         .col_expr(runs::Column::FinishedAt, Expr::value(db::now()))
         .filter(runs::Column::Id.eq(id))
-        .filter(runs::Column::State.is_in(["queued", "running"]))
+        .filter(runs::Column::State.is_in(["queued", "running", "cancelling"]))
         .exec(&tx)
         .await?
         .rows_affected;
     if changed > 0 {
+        // Recovery and queued cancellation also finish Actions job rows.
+        // Normal orchestration already finalized its jobs; only unfinished
+        // rows are changed here, in the same transaction as the run.
+        use crate::entities::pipeline_run_jobs as jobs;
+        jobs::Entity::update_many()
+            .col_expr(
+                jobs::Column::State,
+                Expr::value(if state == "cancelled" {
+                    "cancelled"
+                } else {
+                    "failed"
+                }),
+            )
+            .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
+            .filter(jobs::Column::RunId.eq(id))
+            .filter(jobs::Column::State.eq("running"))
+            .exec(&tx)
+            .await?;
+        jobs::Entity::update_many()
+            .col_expr(jobs::Column::State, Expr::value("skipped"))
+            .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
+            .filter(jobs::Column::RunId.eq(id))
+            .filter(jobs::Column::State.eq("queued"))
+            .exec(&tx)
+            .await?;
         steps::Entity::update_many()
             .col_expr(
                 steps::Column::State,
@@ -387,7 +494,7 @@ async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
     tx.commit().await?;
     Ok(())
 }
-async fn active(s: &AppState, id: i64) -> Result<bool> {
+pub(crate) async fn active(s: &AppState, id: i64) -> Result<bool> {
     Ok(runs::Entity::find_by_id(id)
         .one(&s.db)
         .await?
@@ -402,7 +509,7 @@ pub async fn scheduler(
     // No leases/multi-instance support yet. Interrupted runs cannot be resumed
     // safely: a remote command might have completed before the server crashed.
     if let Ok(rows) = runs::Entity::find()
-        .filter(runs::Column::State.eq("running"))
+        .filter(runs::Column::State.is_in(["running", "cancelling"]))
         .all(&s.db)
         .await
     {
@@ -469,7 +576,7 @@ async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -
     }
     Ok(())
 }
-fn quote(v: &str) -> String {
+pub(crate) fn quote(v: &str) -> String {
     format!("'{}'", v.replace('\'', "'\\''"))
 }
 fn expand(v: &str, r: &runs::Model) -> String {
@@ -495,7 +602,12 @@ fn expand(v: &str, r: &runs::Model) -> String {
     out.push_str(rest);
     out
 }
-async fn upload(ch: &dyn HostChannel, path: &str, value: String, mode: u32) -> Result<()> {
+pub(crate) async fn upload(
+    ch: &dyn HostChannel,
+    path: &str,
+    value: String,
+    mode: u32,
+) -> Result<()> {
     ch.write_file(
         path,
         mode,
@@ -503,7 +615,7 @@ async fn upload(ch: &dyn HostChannel, path: &str, value: String, mode: u32) -> R
     )
     .await
 }
-async fn append(
+pub(crate) async fn append(
     s: &AppState,
     run: i64,
     index: i64,
@@ -539,6 +651,9 @@ async fn execute(
     r: &runs::Model,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    if let Some(snapshot) = crate::actions::snapshot(&r.definition) {
+        return crate::actions_run::execute(s, r, snapshot, stop).await;
+    }
     let host = hosts::Entity::find_by_id(r.host_id)
         .filter(hosts::Column::WorkspaceId.eq(r.workspace_id))
         .one(&s.db)
@@ -609,7 +724,7 @@ async fn execute(
     let state = result?;
     finish(s, r.id, state).await
 }
-fn checkout_script(r: &runs::Model) -> Result<String> {
+pub(crate) fn checkout_script(r: &runs::Model) -> Result<String> {
     if r.repo_url.is_empty() {
         return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
     }
@@ -633,28 +748,12 @@ fn checkout_script(r: &runs::Model) -> Result<String> {
     ))
 }
 
-async fn execute_private(
-    s: &AppState,
-    r: &runs::Model,
-    def: &Definition,
+pub(crate) async fn credential_environment(
     ch: &dyn HostChannel,
     private: &str,
     credential: Option<&(String, String, String)>,
-    variables: &BTreeMap<String, String>,
-    stop: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<&'static str> {
+) -> Result<String> {
     let mut env = String::new();
-    for e in &def.env {
-        let value = match (&e.value, &e.value_from) {
-            (Some(value), None) => expand(value, r),
-            (None, Some(reference)) => variables
-                .get(reference.strip_prefix("variable/").unwrap_or(""))
-                .cloned()
-                .ok_or_else(|| ApiError::bad("流水线变量快照缺失。"))?,
-            _ => return Err(ApiError::bad("流水线环境变量配置无效。")),
-        };
-        env.push_str(&format!("export {}={}\n", e.name, quote(&value)));
-    }
     env.push_str("export GIT_TERMINAL_PROMPT=0\n");
     if let Some((kind, user, secret)) = credential {
         if kind == "ssh-key" {
@@ -695,6 +794,32 @@ async fn execute_private(
             ));
         }
     }
+    Ok(env)
+}
+
+async fn execute_private(
+    s: &AppState,
+    r: &runs::Model,
+    def: &Definition,
+    ch: &dyn HostChannel,
+    private: &str,
+    credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<&'static str> {
+    let mut env = String::new();
+    for e in &def.env {
+        let value = match (&e.value, &e.value_from) {
+            (Some(value), None) => expand(value, r),
+            (None, Some(reference)) => variables
+                .get(reference.strip_prefix("variable/").unwrap_or(""))
+                .cloned()
+                .ok_or_else(|| ApiError::bad("流水线变量快照缺失。"))?,
+            _ => return Err(ApiError::bad("流水线环境变量配置无效。")),
+        };
+        env.push_str(&format!("export {}={}\n", e.name, quote(&value)));
+    }
+    env.push_str(&credential_environment(ch, private, credential).await?);
     let mut seq = 0;
     for (index, step) in def.steps.iter().enumerate() {
         if !active(s, r.id).await? || *stop.borrow() {
@@ -777,15 +902,16 @@ async fn execute_private(
     crate::artifacts::collect(s, r, ch, &expand(&def.workdir, r), &def.artifacts, stop).await?;
     Ok("succeeded")
 }
-fn redact(
+pub(crate) fn redact(
     mut text: String,
     credential: Option<&(String, String, String)>,
     variables: &BTreeMap<String, String>,
 ) -> String {
-    let mut values: Vec<&String> = variables.values().collect();
+    let mut values: Vec<&str> = variables.values().map(String::as_str).collect();
     if let Some((_, user, secret)) = credential {
-        values.extend([secret, user]);
+        values.extend([secret.as_str(), user.as_str()]);
     }
+    values.extend(values.clone().into_iter().flat_map(str::lines));
     values.sort_by_key(|value| std::cmp::Reverse(value.len()));
     values.dedup();
     for value in values {
@@ -803,6 +929,22 @@ mod tests {
     #[test]
     fn shell_quote_preserves_single_quotes_without_evaluation() {
         assert_eq!(quote("a'b$(id)"), "'a'\\''b$(id)'");
+    }
+
+    #[test]
+    fn redaction_masks_individual_lines_of_multiline_variables() {
+        let variables = BTreeMap::from([(
+            "TOKEN".into(),
+            "first-secret-line\r\nsecond-secret-line".into(),
+        )]);
+        assert_eq!(
+            redact("first-secret-line".into(), None, &variables),
+            "[REDACTED]"
+        );
+        assert_eq!(
+            redact("second-secret-line".into(), None, &variables),
+            "[REDACTED]"
+        );
     }
 
     #[test]
@@ -825,6 +967,8 @@ mod tests {
             id: 1,
             workspace_id: 1,
             pipeline_id: 1,
+            environment_id: 0,
+            environment_name: String::new(),
             host_id: 1,
             number: 12,
             state: "queued".into(),

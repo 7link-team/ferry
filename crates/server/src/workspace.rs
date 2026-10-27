@@ -48,6 +48,14 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     ("repositories.create", "仓库", "新增"),
     ("repositories.update", "仓库", "修改"),
     ("repositories.delete", "仓库", "删除"),
+    ("pipeline-groups.read", "流水线分组", "查看"),
+    ("pipeline-groups.create", "流水线分组", "新增"),
+    ("pipeline-groups.update", "流水线分组", "修改"),
+    ("pipeline-groups.delete", "流水线分组", "删除"),
+    ("pipeline-environments.read", "执行环境", "查看"),
+    ("pipeline-environments.create", "执行环境", "新增"),
+    ("pipeline-environments.update", "执行环境", "修改"),
+    ("pipeline-environments.delete", "执行环境", "删除"),
     ("pipelines.read", "流水线", "查看"),
     ("pipelines.create", "流水线", "新增"),
     ("pipelines.update", "流水线", "修改"),
@@ -258,7 +266,12 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
         };
         let additions = builtin_permissions(key)
             .into_iter()
-            .filter(|p| p.starts_with("marketplace-sources.") || p.starts_with("config-templates."))
+            .filter(|p| {
+                p.starts_with("marketplace-sources.")
+                    || p.starts_with("config-templates.")
+                    || p.starts_with("pipeline-groups.")
+                    || p.starts_with("pipeline-environments.")
+            })
             .collect::<Vec<_>>();
         if additions.is_empty() {
             continue;

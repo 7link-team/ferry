@@ -12,6 +12,8 @@
  * set (§8 of the design doc).
  */
 import { useCallback, useEffect, useState } from "react";
+import { Dialog } from "radix-ui";
+import { ActionsEditor } from "./ActionsEditor";
 import { PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
 import { ManifestEditor } from "./ManifestEditor";
@@ -30,7 +32,7 @@ import { cn } from "cn";
 import { errorText } from "../api";
 import { createResource, getResource, patchResource } from "../resource";
 import { href, navigate, useRoute } from "../router";
-import type { FormConfig, FormField, Option, Options } from "./dsl";
+import type { FormConfig, FormField, Option, Options, RowAction } from "./dsl";
 
 function useOptions(source: Options | undefined) {
   const [error, setError] = useState("");
@@ -72,6 +74,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const readOnly = route.mode === "view" || protectedRow;
   const [loading, setLoading] = useState(!creating || !!copyId);
   const [saving, setSaving] = useState(false);
+  const [pendingAction, setPendingAction] = useState<RowAction<T>>();
   const [unavailableOptions, setUnavailableOptions] = useState<Record<string, boolean>>({});
   const reportOptions = useCallback((key: string, blocked: boolean) => {
     setUnavailableOptions(current => current[key] === blocked ? current : { ...current, [key]: blocked });
@@ -146,9 +149,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
         </p>
       )}
 
+      {pendingAction && <ResourceActionDialog action={pendingAction} row={draft as T} workspace={workspace} permissions={permissions} onClose={() => setPendingAction(undefined)} onDone={() => { setPendingAction(undefined); if(route.id) void getResource<T>(workspace,config.resource,route.id,config.endpoint).then(setDraft).catch(cause=>setError(errorText(cause))); }} />}
       {creating && config.generator && <FormGenerator config={config.generator} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
       {readOnly && config.viewActions && <div className="flex flex-wrap gap-2">{config.viewActions.filter(action=>(!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T))).map(action=>action.to ? <Button key={action.label} variant="outline" asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.label}</a></Button> : <Button key={action.label} type="button" variant="outline" disabled={saving} onClick={async()=>{
+        if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
         if(action.destructive && !confirm(`${action.label}？`))return;
         setSaving(true);setError("");
         try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
@@ -181,7 +186,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
                   onChange={(value) => setDraft((d) => ({
                     ...d,
                     ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-                    ...(["repository-source", "pipeline-repository"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+                    ...(["repository-source", "pipeline-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
                   }) as Partial<T>)}
                 />
               ))}
@@ -352,6 +357,7 @@ function Field<T>({
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
 
+  if (field.type === "actions-editor") return <div className="min-w-0 sm:col-span-2"><ActionsEditor draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
   if (field.type === "pipeline-repository") return <div className="min-w-0 sm:col-span-2"><PipelineRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
@@ -469,3 +475,30 @@ const Wrapper = <T,>({
 }) => (
   <div className={cn("flex flex-col gap-1.5", field.span === 2 && "sm:col-span-2")}>{children}</div>
 );
+
+/** Shared field rendering and modal lifecycle for parameterized row actions. */
+export function ResourceActionDialog<T>({ action, row, workspace, permissions, onClose, onDone }: {
+ action: RowAction<T>; row: T; workspace: string; permissions: Set<string>; onClose: () => void; onDone: () => void;
+}) {
+ const [values,setValues]=useState<Record<string,unknown>>({});
+ const [blocked,setBlocked]=useState<Record<string,boolean>>({});
+ const [busy,setBusy]=useState(false),[error,setError]=useState("");
+ const report=useCallback((key:string,value:boolean)=>setBlocked(current=>current[key]===value?current:{...current,[key]:value}),[]);
+ const fields=action.parameters!(row).filter(field=>!field.when||field.when(values));
+ const incomplete=fields.some(field=>field.required&&(values[field.key]===undefined||values[field.key]===null||values[field.key]===""));
+ return <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)onClose();}}><Dialog.Portal>
+  <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+  <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
+   <Dialog.Title className="text-lg font-semibold">{action.label}</Dialog.Title>
+   <Dialog.Description className="mt-2 text-sm text-muted-foreground">确认以下执行参数后开始操作。</Dialog.Description>
+   <form className="mt-4 space-y-4" onSubmit={async event=>{
+    event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
+    setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
+   }}>
+    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,[field.key]:value}))} />)}
+    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?"处理中…":"确认"+action.label}</Button></div>
+   </form>
+  </Dialog.Content>
+ </Dialog.Portal></Dialog.Root>;
+}

@@ -20,6 +20,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -39,6 +43,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Test Actions worker
+        working-directory: workers/actions
+        run: bash go.sh test -race ./...
       - run: node --test .github/scripts/check-updater-manifest.mjs
       - run: npm run build
       - run: cargo fmt --all -- --check
@@ -213,6 +220,10 @@ jobs:
       FERRY_REQUIRE_ALL: "1"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -244,6 +255,7 @@ jobs:
           fi
       - if: matrix.harness == 'build-ui' || startsWith(matrix.harness, 'deployments') || matrix.harness == 'variables-ui'
         run: npm run build
+      - run: bash scripts/build-actions-workers.sh
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
@@ -278,6 +290,10 @@ jobs:
         run: |
           node scripts/test-marketplace-ui.mjs
           node scripts/test-repository-auth-ui.mjs
+          node scripts/test-actions-ui.mjs
+      - name: Pipeline environments and classification acceptance
+        if: matrix.harness == 'pipelines'
+        run: python3 scripts/test-pipeline-classification.py
       - name: Three consecutive live runs (no retries)
         env:
           HARNESS: ${{ matrix.harness }}
@@ -287,6 +303,7 @@ jobs:
           # Other jobs do not supply sshd coordinates to workspace unit tests.
           if [ "$HARNESS" = ssh ]; then export FERRY_REQUIRE_LIVE=1; fi
           case "$HARNESS" in
+            pipelines) export FERRY_TEST_ACTIONS=1 ;;
             deployments-docker) export FERRY_TEST_DEPLOY_MODE=docker ;;
             deployments-native) export FERRY_TEST_DEPLOY_MODE=native ;;
             deployments-stack) export FERRY_TEST_DEPLOY_MODE=stack ;;
@@ -342,6 +359,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -367,6 +388,9 @@ jobs:
       - run: npm run build
       - name: Build the server and the runner
         run: cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
+      - name: Build bundled Actions workers
+        shell: bash
+        run: bash scripts/build-actions-workers.sh desktop/resources/actions-workers
       - name: Stage the sidecar Tauri bundles
         shell: bash
         run: |

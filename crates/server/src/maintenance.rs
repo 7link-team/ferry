@@ -719,6 +719,10 @@ pub async fn prune_history(s: &AppState, deployments: bool) -> Result<()> {
                     .filter(logs::Column::RunId.eq(row.id))
                     .exec(&tx)
                     .await?;
+                crate::entities::pipeline_run_jobs::Entity::delete_many()
+                    .filter(crate::entities::pipeline_run_jobs::Column::RunId.eq(row.id))
+                    .exec(&tx)
+                    .await?;
                 steps::Entity::delete_many()
                     .filter(steps::Column::RunId.eq(row.id))
                     .exec(&tx)

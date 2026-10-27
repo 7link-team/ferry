@@ -75,6 +75,15 @@ pub trait HostChannel: Send + Sync {
     /// deployment steps, never for anything interactive.
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output>;
 
+    /// Streams raw chunks while running. Cancellation must terminate owned processes.
+    async fn exec_stream(
+        &self,
+        command: &str,
+        timeout: Duration,
+        output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+        cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<i32>;
+
     async fn open_pty(&self, size: PtySize) -> Result<Box<dyn Pty>>;
 
     async fn list_dir(&self, path: &str) -> Result<Vec<DirEntry>>;

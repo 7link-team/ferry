@@ -150,6 +150,7 @@ pub async fn collect(
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|_| ApiError::bad("无法创建产物存储目录。"))?;
+    let mut created_files = Vec::new();
     let result = async {
         let mut rows = Vec::new();
         for path in paths {
@@ -168,6 +169,7 @@ pub async fn collect(
                 .open(dir.join(id.to_string()))
                 .await
                 .map_err(|_| ApiError::bad("无法写入构建产物。"))?;
+            created_files.push(dir.join(id.to_string()));
             let mut hash = Sha256::new();
             let mut size = 0u64;
             while let Some(part) = stream.next().await {
@@ -224,7 +226,9 @@ pub async fn collect(
     };
     let result = result.await;
     if result.is_err() {
-        let _ = tokio::fs::remove_dir_all(&dir).await;
+        for path in created_files {
+            let _ = tokio::fs::remove_file(path).await;
+        }
     }
     result
 }

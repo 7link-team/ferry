@@ -318,6 +318,72 @@ impl HostChannel for SshChannel {
         }
     }
 
+    async fn exec_stream(
+        &self,
+        command: &str,
+        timeout: Duration,
+        output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<i32> {
+        let mut channel = self.session_channel().await?;
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|_| ApiError::bad("下发流水线命令失败。"))?;
+        let deadline = tokio::time::sleep(timeout);
+        tokio::pin!(deadline);
+        let mut stopping = None;
+        let mut code = None;
+        loop {
+            if *cancel.borrow() && stopping.is_none() {
+                let _ = channel.signal(russh::Sig::TERM).await;
+                stopping = Some(-130);
+                deadline
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + Duration::from_secs(70));
+            }
+            tokio::select! {
+                _ = cancel.changed(), if stopping.is_none() => {
+                    let _ = channel.signal(russh::Sig::TERM).await;
+                    stopping = Some(-130);
+                    deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(70));
+                }
+                _ = &mut deadline => {
+                    if let Some(reason) = stopping {
+                        let _ = channel.signal(russh::Sig::KILL).await;
+                        let _ = channel.close().await;
+                        return Ok(reason);
+                    }
+                    let _ = channel.signal(russh::Sig::TERM).await;
+                    stopping = Some(-124);
+                    deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(70));
+                }
+                message = channel.wait() => {
+                    let chunk = match message {
+                        Some(ChannelMsg::Data {data}) => Some(("stdout".into(), data.to_vec())),
+                        Some(ChannelMsg::ExtendedData {data, ..}) => Some(("stderr".into(), data.to_vec())),
+                        Some(ChannelMsg::ExitStatus {exit_status}) => { code = Some(exit_status as i32); None }
+                        Some(ChannelMsg::ExitSignal {..}) => { code = Some(-1); None }
+                        None => return Ok(stopping.or(code).unwrap_or(-1)),
+                        _ => None,
+                    };
+                    if let Some(chunk) = chunk && stopping.is_none() {
+                        let reason = tokio::select! {
+                            sent = output.send(chunk) => if sent.is_err() {Some(-130)} else {None},
+                            _ = cancel.changed() => Some(-130),
+                            _ = &mut deadline => Some(-124),
+                        };
+                        if let Some(reason) = reason {
+                            let _ = channel.signal(russh::Sig::TERM).await;
+                            stopping = Some(reason);
+                            deadline.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(70));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     async fn open_pty(&self, size: PtySize) -> Result<Box<dyn Pty>> {
         let size = size.sane();
         let channel = self.session_channel().await?;
@@ -716,6 +782,82 @@ mod tests {
 
         let slow = ssh.exec("sleep 5", Duration::from_secs(1)).await;
         assert_eq!(slow.unwrap_err().0, StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn live_streaming_logs_cancel_descendants_and_enforce_timeout() {
+        if live_or_fail().is_none() {
+            return;
+        }
+        let ssh = connect().await;
+        let (output, mut chunks) = tokio::sync::mpsc::channel(8);
+        let (stop, cancelled) = tokio::sync::watch::channel(false);
+        let execution = ssh.exec_stream(
+            "sleep 120 & printf '%s\\n' \"$!\"; wait",
+            Duration::from_secs(30),
+            output,
+            cancelled,
+        );
+        tokio::pin!(execution);
+        let (stream, data) = tokio::select! {
+            result = &mut execution => panic!("command finished before live log: {result:?}"),
+            chunk = chunks.recv() => chunk.unwrap(),
+        };
+        assert_eq!(stream, "stdout");
+        let pid = String::from_utf8(data).unwrap().trim().to_owned();
+        stop.send(true).unwrap();
+        assert_ne!(
+            tokio::time::timeout(Duration::from_secs(12), execution)
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        let alive = ssh
+            .exec(
+                &format!("kill -0 {pid} 2>/dev/null"),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_ne!(alive.code, 0, "cancel must stop the descendant");
+        let (output, _chunks) = tokio::sync::mpsc::channel(8);
+        let (_stop, cancelled) = tokio::sync::watch::channel(false);
+        assert_eq!(
+            ssh.exec_stream("sleep 120", Duration::from_secs(1), output, cancelled)
+                .await
+                .unwrap(),
+            -124
+        );
+    }
+
+    #[tokio::test]
+    async fn live_streaming_cancel_with_full_output_buffer() {
+        if live_or_fail().is_none() {
+            return;
+        }
+        let ssh = connect().await;
+        let (output, _unread) = tokio::sync::mpsc::channel(1);
+        let (stop, cancelled) = tokio::sync::watch::channel(false);
+        let execution = ssh.exec_stream(
+            "while :; do echo backpressure; done",
+            Duration::from_secs(30),
+            output,
+            cancelled,
+        );
+        let cancellation = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            stop.send(true).unwrap();
+        };
+        let result = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(execution, cancellation).0
+        })
+        .await;
+        assert!(
+            result.is_ok(),
+            "full log buffer must not prevent cancellation"
+        );
+        assert_ne!(result.unwrap().unwrap(), 0);
     }
 
     #[tokio::test]

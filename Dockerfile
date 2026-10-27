@@ -1,5 +1,6 @@
 ARG NODE_VERSION=24.14.0
 ARG RUST_VERSION=1.99.0
+ARG GO_VERSION=1.27.1
 ARG BASE_REGISTRY=docker.io/library
 
 FROM ${BASE_REGISTRY}/node:${NODE_VERSION}-bookworm-slim AS web
@@ -9,6 +10,14 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
 COPY src ./src
 RUN npm run build
+
+FROM ${BASE_REGISTRY}/golang:${GO_VERSION}-bookworm AS actions
+WORKDIR /build
+COPY workers/actions ./workers/actions
+COPY scripts/build-actions-workers.sh ./scripts/build-actions-workers.sh
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    bash scripts/build-actions-workers.sh /out/actions-workers
 
 FROM ${BASE_REGISTRY}/rust:${RUST_VERSION}-bookworm AS server
 WORKDIR /build
@@ -36,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && useradd --uid 10001 --gid ferry --no-create-home ferry \
     && mkdir /data && chown ferry:ferry /data
 COPY --from=server /out/ferry-server /usr/local/bin/ferry-server
+COPY --from=actions /out/actions-workers /usr/local/bin/actions-workers
 COPY --from=server /out/ferry-runner /usr/local/share/ferry/runner/linux-amd64/ferry-runner
 ENV FERRY_DATA_DIR=/data FERRY_BIND=0.0.0.0:4290 FERRY_SERVER_MODE=true
 USER 10001:10001

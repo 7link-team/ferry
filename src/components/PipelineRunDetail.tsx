@@ -86,8 +86,10 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
     if (follow.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [logs]);
 
+  const actions = run?.definition_format === "github-actions";
+  const cancelNotice = actions ? "取消执行并等待远端任务及临时资源清理完成。" : CANCEL_NOTICE;
   const cancel = async () => {
-    if (!window.confirm(CANCEL_NOTICE)) return;
+    if (!window.confirm(cancelNotice)) return;
     const controller = new AbortController();
     cancelRequest.current = controller;
     setBusy(true);
@@ -111,25 +113,36 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
             <h2 className="font-semibold">执行 #{run.number}</h2>
             <Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
             {isActive(run.state) && permissions.has("pipelines.run") && (
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void cancel()}>
-                {busy ? "提交中…" : "停止等待并标记取消"}
+              <Button variant="outline" size="sm" disabled={busy || run.state === "cancelling"} onClick={() => void cancel()}>
+                {busy ? "提交中…" : run.state === "cancelling" ? "正在取消…" : actions ? "取消执行" : "停止等待并标记取消"}
               </Button>
             )}
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             {[
-              ["流水线 ID", run.pipeline_id], ["目标主机 ID", run.host_id], ["触发人 ID", run.triggered_by],
+              ["流水线 ID", run.pipeline_id], ["执行环境", run.environment_name || "默认执行器"], ["目标主机 ID", run.host_id], ["触发人 ID", run.triggered_by],
               ["耗时", duration(run.started_at, run.finished_at)], ["Commit", run.commit || "—"],
             ].map(([label, value]) => <div key={label} className="min-w-0">
               <dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd>
             </div>)}
           </dl>
           <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>查看构建产物</a>
-          <p className="text-xs text-muted-foreground">{CANCEL_NOTICE}</p>
+          <p className="text-xs text-muted-foreground">{cancelNotice}</p>
         </section>
         {!!run.variables?.length && <section aria-label="执行变量" className="rounded border p-3 text-sm">
           <h2 className="font-medium">执行变量</h2><p className="text-muted-foreground">使用触发时的加密快照，修改当前变量不会改变本次执行。</p>
-          <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope_ref !== "0" ? "流水线专属" : v.scope === "global" ? "全局" : "构建模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</li>)}</ul>
+          <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope === "environment" ? "执行环境" : v.scope_ref !== "0" ? "流水线专属" : v.scope === "global" ? "全局" : "构建模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</li>)}</ul>
+        </section>}
+        {!!run.jobs?.length && <section aria-label="任务执行器" className="shrink-0">
+          <h2 className="mb-2 text-sm font-medium">任务执行器</h2>
+          <ul className="divide-y rounded-lg border bg-card">{run.jobs.map(job => {
+            const badge = stateBadge(job.state);
+            return <li key={job.key} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
+              <span className="min-w-0 flex-1 break-all">{job.key}</span>
+              <span>主机 {job.host_id}</span><Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
+              <span>{duration(job.started_at, job.finished_at)}</span>
+            </li>;
+          })}</ul>
         </section>}
         <section aria-label="步骤" className="shrink-0">
           <h2 className="mb-2 text-sm font-medium">步骤</h2>

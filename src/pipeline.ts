@@ -4,12 +4,16 @@ export interface PipelineRun {
   number: number;
   pipeline_id: string;
   host_id: string;
+  environment_id?: string;
+  environment_name?: string;
   triggered_by: string;
   state: string;
   commit: string;
   started_at: number;
   finished_at: number;
   steps: PipelineStep[];
+  definition_format?: string;
+  jobs?: { key: string; host_id: string; state: string; started_at: number; finished_at: number }[];
   variables?: { environment: string; name: string; scope: string; scope_ref: string; version: number; secret: boolean }[];
 }
 export interface PipelineStep {
@@ -52,6 +56,7 @@ export function stateBadge(state: string): {
 } {
   switch (state) {
     case "queued": return { label: "排队中", variant: "secondary", className: "" };
+    case "cancelling": return { label: "正在取消", variant: "secondary", className: "" };
     case "running": return { label: "运行中", variant: "default", className: "" };
     case "succeeded": return { label: "成功", variant: "outline", className: "text-success border-success" };
     case "failed": return { label: "失败", variant: "destructive", className: "" };
@@ -61,4 +66,4 @@ export function stateBadge(state: string): {
     default: return { label: state, variant: "outline", className: "" };
   }
 }
-export const isActive = (state: string) => state === "queued" || state === "running";
+export const isActive = (state: string) => state === "queued" || state === "running" || state === "cancelling";

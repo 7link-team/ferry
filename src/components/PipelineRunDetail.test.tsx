@@ -106,3 +106,11 @@ it("服务端错误完整显示且可恢复", async () => {
   await mount(); expect(host.querySelector('[role="alert"]')?.textContent).toBe("具体错误句子。");
   await tick(); expect(host.querySelector('[role="alert"]')).toBeNull();
 });
+it("Actions cancellation describes remote cleanup and displays each job's executor", async () => {
+  fetchMock.mockImplementation(async (url: string) => ({ok:true,status:200,json:async()=>url.includes('/logs?')?{items:[],next_seq:0}:{...detail(),definition_format:'github-actions',jobs:[{key:'compile',host_id:'81',state:'running',started_at:1,finished_at:0}]}}));
+  await mount(new Set(['pipelines.run']));
+  expect(host.textContent).toContain('取消执行');
+  expect(host.textContent).toContain('compile');
+  expect(host.textContent).toContain('81');
+  expect(host.textContent).not.toContain('命令可能继续执行');
+});

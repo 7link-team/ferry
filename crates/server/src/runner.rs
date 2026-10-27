@@ -766,6 +766,62 @@ impl HostChannel for RunnerChannel {
         }
     }
 
+    async fn exec_stream(
+        &self,
+        command: &str,
+        timeout: Duration,
+        output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<i32> {
+        let mut socket = self.session(wire::SessionKind::Exec).await?;
+        send_frame(
+            &mut socket,
+            &wire::Session::ExecStreamStart {
+                command: command.into(),
+                timeout_seconds: timeout.as_secs().max(1),
+            },
+        )
+        .await?;
+        let deadline = tokio::time::sleep(timeout + Duration::from_secs(85));
+        tokio::pin!(deadline);
+        let mut stopping = false;
+        loop {
+            if *cancel.borrow() && !stopping {
+                send_frame(&mut socket, &wire::Session::ExecCancel).await?;
+                stopping = true;
+            }
+            tokio::select! {
+                _ = cancel.changed(), if !stopping => {
+                    send_frame(&mut socket, &wire::Session::ExecCancel).await?;
+                    stopping = true;
+                }
+                _ = &mut deadline => {
+                    let _ = socket.send(Message::Close(None)).await;
+                    return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "执行主机未在超时后完成清理。".into()));
+                }
+                frame = next_frame(&mut socket) => match frame? {
+                    wire::Session::ExecOutput {stream, data} => {
+                        if !["stdout", "stderr"].contains(&stream.as_str()) || data.len() > 65536 {return Err(garbled());}
+                        if !stopping {
+                            let should_stop = tokio::select! {
+                                sent = output.send((stream, data)) => sent.is_err(),
+                                _ = cancel.changed() => true,
+                                _ = &mut deadline => return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "执行主机未在超时后完成清理。".into())),
+                            };
+                            if should_stop {
+                                send_frame(&mut socket, &wire::Session::ExecCancel).await?;
+                                stopping = true;
+                            }
+                        }
+                    }
+                    wire::Session::ExecExit {code} => return Ok(code),
+                    wire::Session::Failed {error} => return Err(remote_failed(error)),
+                    _ => return Err(garbled()),
+                }
+            }
+        }
+    }
+
     async fn open_pty(&self, size: PtySize) -> Result<Box<dyn Pty>> {
         let size = size.sane();
         let mut socket = self.session(wire::SessionKind::Terminal).await?;

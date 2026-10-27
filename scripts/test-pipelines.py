@@ -107,11 +107,11 @@ def main():
     def detail(rid, ws='ops'):
         return api(f'/workspaces/{ws}/pipeline-runs/{rid}')
 
-    def done(rid):
+    def done(rid, seconds=30):
         def poll():
             row = detail(rid)
-            return row if row['state'] not in ('running', 'queued') else None
-        return eventually(poll)
+            return row if row['state'] not in ('running', 'queued', 'cancelling') else None
+        return eventually(poll, seconds)
 
     def logs(rid):
         after, items = 0, []
@@ -142,7 +142,7 @@ def main():
 
     try:
         dockerfile = b'''FROM alpine:3.21
-RUN apk add --no-cache openssh-server openssh-sftp-server coreutils git git-daemon python3 procps \
+RUN apk add --no-cache openssh-server openssh-sftp-server coreutils git git-daemon python3 procps nodejs \
  && adduser -D -s /bin/sh ferry \
  && echo 'ferry:ferry-test' | chpasswd \
  && printf '%s\\n' 'HostKey /etc/ssh/ssh_host_ed25519_key' 'PasswordAuthentication yes' 'PermitRootLogin no' 'Subsystem sftp /usr/lib/ssh/sftp-server' > /etc/ssh/sshd_config
@@ -210,6 +210,97 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
         all_runs, successful = [], []
+        if os.environ.get('FERRY_TEST_ACTIONS'):
+            workflow = """name: Real Actions build
+on: workflow_dispatch
+jobs:
+  compile:
+    runs-on: self-hosted
+    outputs:
+      proof: ${{ steps.build.outputs.proof }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        run: |
+          sh build.sh
+          echo proof=compiled >> "$GITHUB_OUTPUT"
+          echo ACTIONS_COMPILE_OK
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compiled
+          path: output/result.txt
+          if-no-files-found: error
+  verify:
+    needs: compile
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          test '${{ needs.compile.outputs.proof }}' = compiled
+          sh build.sh
+          echo ACTIONS_VERIFY_OK
+      - uses: actions/download-artifact@v4
+        with:
+          name: compiled
+          path: received
+      - run: cmp output/result.txt received/result.txt && echo ACTIONS_ARTIFACT_OK
+"""
+            actions_body={'name':'Actions on two hosts','repository_id':repo_id,'target_kind':'host','target_ref':runner,
+                'definition_format':'github-actions','definition':workflow,
+                'executor_bindings':[{'job_id':'compile','target_kind':'host','target_ref':runner,'image':'host'},{'job_id':'verify','target_kind':'host','target_ref':ssh,'image':'host'}],
+                'graph_layout':{'compile':{'x':10,'y':20},'verify':{'x':350,'y':20}}}
+            actions_id=create('pipelines',actions_body)
+            saved=api('/workspaces/ops/pipelines/'+actions_id)
+            check('Actions YAML and executor bindings persist',saved['definition']==workflow and saved['definition_format']=='github-actions' and len(saved['executor_bindings'])==2)
+            actions_run=trigger(actions_id)['id'];all_runs.append(actions_run)
+            actions_result=done(actions_run, 180)
+            check('actual Actions jobs execute on runner and SSH with dependency outputs',actions_result['state']=='succeeded',str(actions_result.get('jobs')))
+            action_logs=''.join(item['chunk'] for item in logs(actions_run))
+            check('Actions step logs persist and are readable remotely','ACTIONS_COMPILE_OK' in action_logs and 'ACTIONS_VERIFY_OK' in action_logs)
+            if actions_result['state']!='succeeded':raise AssertionError(action_logs)
+            check('Actions artifact is archived and downloaded on another host',len(actions_result['artifacts'])==1 and 'ACTIONS_ARTIFACT_OK' in action_logs)
+
+            matrix_workflow="""name: matrix failure
+on: workflow_dispatch
+jobs:
+  matrix:
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        value: [good, bad]
+    steps:
+      - id: check
+        run: |
+          if [ '${{ matrix.value }}' = bad ]; then sleep 1; exit 7; fi
+          echo MATRIX_GOOD
+"""
+            matrix_id=create('pipelines',dict(actions_body,name='Matrix status',definition=matrix_workflow,executor_bindings=[],graph_layout={}))
+            matrix_run=trigger(matrix_id)['id'];all_runs.append(matrix_run)
+            matrix_result=done(matrix_run)
+            check('matrix failure is reflected in job and step status',matrix_result['state']=='failed' and matrix_result['steps'][0]['state']=='failed',str(matrix_result['steps']))
+
+            for target,label in [(runner,'runner'),(ssh,'ssh')]:
+                cancel_workflow="name: cancel\non: workflow_dispatch\njobs:\n  hold:\n    runs-on: self-hosted\n    steps:\n      - run: sleep 120 & child=$!; echo ACTIONS_CHILD_PID=$child; wait\n"
+                cancel_id=create('pipelines',dict(actions_body,name='Cancel Actions '+label,definition=cancel_workflow,executor_bindings=[],target_ref=target,graph_layout={}))
+                cancel_run=trigger(cancel_id)['id'];all_runs.append(cancel_run)
+                def live_pid():
+                    text=''.join(item['chunk'] for item in logs(cancel_run))
+                    import re
+                    match=re.search(r'\[hold\] ACTIONS_CHILD_PID=(\d+)',text)
+                    return int(match.group(1)) if match else None
+                child=eventually(live_pid)
+                check(label+' Actions logs arrive while command is running',detail(cancel_run)['state']=='running')
+                api('/workspaces/ops/pipeline-runs/'+cancel_run+'/actions/cancel',method='POST')
+                cancelled=done(cancel_run)
+                check(label+' Actions cancellation waits for terminal job state',cancelled['state']=='cancelled' and all(j['state'] not in ('queued','running') for j in cancelled['jobs']))
+                if label=='runner':
+                    try:os.kill(child,0);alive=True
+                    except ProcessLookupError:alive=False
+                else:
+                    alive=subprocess.run(['docker','exec',name,'sh','-c',f'kill -0 {child} 2>/dev/null'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+                check(label+' Actions cancellation actually stops descendant',not alive)
+
         # New path: provider connection -> choose visible repo in build -> real private checkout/build.
         for provider in ['github','gitlab','gitee','gitea','codeup']:
             connection=api('/workspaces/ops/repository-auth/'+provider+'/actions/connect',{'token':secret,'username':'connected-git-user','base_url':f'http://127.0.0.1:{git_port}','api_url':f'http://127.0.0.1:{git_port}','organization':'fixture'})
@@ -471,6 +562,28 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
             row = detail(rid)
             check(kind + ' active run persisted as succeeded after restart', row['state'] == 'succeeded'
                   and all(marker in ''.join(i['chunk'] for i in logs(rid)) for marker in ['DRAIN_COMPLETED', 'NEXT_STEP_COMPLETED']))
+        if os.environ.get('FERRY_TEST_ACTIONS') == '1':
+            restart_workflow = "name: interrupted\non: workflow_dispatch\njobs:\n  hold:\n    runs-on: self-hosted\n    steps:\n      - run: echo RESTART_RUNNING; sleep 120\n  later:\n    needs: hold\n    runs-on: self-hosted\n    steps:\n      - run: echo SHOULD_NOT_RUN\n"
+            restart_id = create('pipelines', dict(actions_body, name='Interrupted Actions', definition=restart_workflow, executor_bindings=[], graph_layout={}))
+            def runner_reconnected():
+                try:
+                    return api('/workspaces/ops/hosts/'+runner+'/actions/test-connection', method='POST')['ok']
+                except AssertionError:
+                    return False
+            eventually(runner_reconnected)
+            interrupted = trigger(restart_id)['id']
+            def restart_started():
+                output = ''.join(item['chunk'] for item in logs(interrupted))
+                assert detail(interrupted)['state'] not in ('failed', 'cancelled'), output
+                return 'RESTART_RUNNING' in output
+            eventually(restart_started)
+            server.kill()
+            server.wait(timeout=10)
+            server = launch(['target/debug/ferry-server', '--desktop-control'], 'server-actions-recovery.log', env)
+            eventually(restarted)
+            recovered = done(interrupted)
+            states = [job['state'] for job in recovered['jobs']]
+            check('restart finalizes interrupted Actions jobs and skips queued jobs', recovered['state']=='failed' and sorted(states)==['failed', 'skipped'], str(states))
         # A real read-only membership exercises permission gates, not a mock Scope.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users', {'email': 'viewer@example.invalid', 'password': 'correct-horse-battery', 'name': 'viewer'})

@@ -70,6 +70,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     assert after['user'].get('is_superadmin', False) is False
                     before[path]['user']['is_superadmin'] = False
                     allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
+                    allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -87,15 +88,25 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     assert after.get('tag_ids') == [] and after.get('tags') == []
                     before[path]['tag_ids'] = []
                     before[path]['tags'] = []
-                assert after==before[path], f'Upgrade changed existing resource: {path}'
+                if '/pipelines/' in path:
+                    defaults={'definition_format':'legacy','executor_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
+                    for key,value in defaults.items():
+                        assert after[key]==before[path].get(key,value),(key,after[key])
+                        before[path].setdefault(key,value)
+                if '/pipeline-runs/' in path:
+                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy'}.items():
+                        assert after[key]==before[path].get(key,value),(key,after[key])
+                        before[path].setdefault(key,value)
+                assert after==before[path], f'Upgrade changed existing resource: {path}; fields: {[key for key in set(after)|set(before[path]) if after.get(key)!=before[path].get(key)]}'
             roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
             for role in roles_before:
                 migrated = roles_after[role['id']]
                 added=set(migrated['permissions'])-set(role['permissions'])
                 expected={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} if role['name'] in ['拥有者','管理员'] else {'marketplace-sources.read'} if role['name']=='只读' else set()
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
+                expected |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
                 expected -= set(role['permissions'])
-                assert added==expected and set(role['permissions'])<=set(migrated['permissions'])
+                assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)
                 for field in ('id','name','builtin'):
                     assert migrated[field] == role[field], f'Upgrade changed role {field}'

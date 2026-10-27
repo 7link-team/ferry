@@ -165,6 +165,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         definition={'workdir':'/tmp/import-test','steps':[{'name':'check','run':'true'}]}
         fixtures={
             'host-groups':{'name':'Imported group'},
+            'pipeline-groups':{'name':'Imported pipeline group'},
+            'pipeline-environments':{'name':'Imported environment','target_kind':'host','target_ref':host},
             'repositories':{'name':'External','url':'https://github.com/example/repository.git','credential_id':credential},
             'pipelines':{'name':'Imported pipeline','target_kind':'host','target_ref':host,'definition':json.dumps(definition)},
             'deployments':{'name':'Imported application','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/import-app','manifest':json.dumps(manifest)},
@@ -180,6 +182,28 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             previous=count(resource);p=upload(resource,[body]);assert p['valid'],(resource,p)
             assert count(resource)==previous
             commit(resource,p);check(count(resource)==previous+1,resource+' import preserves normal creation contract')
+        actions_yaml='# retained comment\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo imported\n'
+        actions_body={'name':'Actions export','definition_format':'github-actions','definition':actions_yaml,'target_kind':'host','target_ref':host,'executor_bindings':[{'job_id':'build','target_kind':'host','target_ref':host,'image':'host'}],'graph_layout':{'build':{'x':12,'y':34}}}
+        classification_group=request(owner,root+'/pipeline-groups')['items'][0]['id']
+        classification_environment=request(owner,root+'/pipeline-environments')['items'][0]['id']
+        classification_app=request(owner,root+'/deployments')['items'][0]['id']
+        classification_tag=request(owner,root+'/tags',{'name':'Pipeline classification'},expected=201)['id']
+        actions_body.update(group_id=classification_group,application_id=classification_app,tag_ids=[classification_tag],environment_ids=[classification_environment])
+        request(owner,root+'/pipelines',actions_body,expected=201)
+        exported=list(csv.DictReader(io.StringIO(download('pipelines',query='&q=Actions%20export').decode('utf-8-sig'))))[0]
+        check(exported.get('definition_format')=='github-actions','Actions CSV export retains definition format')
+        check(json.loads(exported['graph_layout'])==actions_body['graph_layout'],'Actions export preserves canvas layout')
+        exported={key:value for key,value in exported.items() if key not in ('id','version','created_at','updated_at','group_name','application_name','tags','environments')}
+        exported['name']='Actions imported'
+        imported=upload('pipelines',[exported]);check(imported['valid'],'Actions export can be imported without converting YAML to legacy JSON');commit('pipelines',imported)
+        copied=request(owner,root+'/pipelines?q=Actions%20imported')['items'][0]
+        check(copied['definition']==actions_yaml and copied['executor_bindings']==actions_body['executor_bindings'],'Actions import preserves original YAML and executor bindings')
+        check(all(copied[key]==actions_body[key] for key in ['group_id','application_id','tag_ids','environment_ids']),'Actions CSV roundtrip preserves group, application, tags and environments')
+        secondary=request(owner,root+'/hosts',{'name':'Actions-only target','connection':'runner'},expected=201)['id']
+        scoped=dict(actions_body,name='Secondary executor',executor_bindings=[{'job_id':'build','target_kind':'host','target_ref':secondary,'image':'host'}])
+        request(owner,root+'/pipelines',scoped,expected=201)
+        request(owner,root+'/hosts/'+secondary,method='DELETE',expected=409)
+        check(True,'host referenced only by an Actions job cannot be deleted')
         repo=request(owner,root+'/repositories')['items'][0]['id']
         p=upload('marketplace-sources',[{'name':'Imported source','repository_id':repo,'provider':'github','api_base':'https://api.github.com','project':'example/repository','branch':'main','index_path':'index.json'}])
         assert p['valid'],p;commit('marketplace-sources',p)

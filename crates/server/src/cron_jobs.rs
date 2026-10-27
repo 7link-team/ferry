@@ -52,6 +52,8 @@ pub struct Body {
     pub target_kind: String,
     pub target_ref: String,
     #[serde(default)]
+    pub environment_id: String,
+    #[serde(default)]
     pub command: String,
     pub timeout_seconds: u64,
     #[serde(default)]
@@ -136,6 +138,13 @@ async fn validate(
         }
         ("build", "pipeline", "pipeline") => {
             scope.require("pipelines.run")?;
+            crate::pipeline_contexts::selected(
+                conn,
+                scope.workspace_id,
+                id,
+                Some(&b.environment_id),
+            )
+            .await?;
             pipelines::Entity::find_by_id(i64::from(id))
                 .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
                 .one(conn)
@@ -861,7 +870,7 @@ async fn once(
             State(s.clone()),
             scope,
             Path((String::new(), b.target_ref.clone())),
-            bytes::Bytes::new(),
+            bytes::Bytes::from(json!({"environment_id":b.environment_id}).to_string()),
         )
         .await?;
         (
@@ -1111,6 +1120,48 @@ async fn prune(s: &AppState) -> Result<()> {
     Ok(())
 }
 
+/// Keep saved and pending schedules valid when pipeline environment bindings change.
+pub async fn check_pipeline_environments(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    pipeline: Id,
+    environments: &std::collections::BTreeSet<Id>,
+) -> Result<()> {
+    let mut configs = jobs::Entity::find()
+        .filter(jobs::Column::WorkspaceId.eq(workspace))
+        .filter(jobs::Column::TargetKind.eq("pipeline"))
+        .filter(jobs::Column::TargetRef.eq(pipeline))
+        .all(conn)
+        .await?
+        .into_iter()
+        .map(|row| row.config)
+        .collect::<Vec<_>>();
+    configs.extend(
+        runs::Entity::find()
+            .filter(runs::Column::WorkspaceId.eq(workspace))
+            .filter(runs::Column::TargetKind.eq("pipeline"))
+            .filter(runs::Column::TargetRef.eq(pipeline))
+            .filter(runs::Column::State.is_in(["queued", "running", "needs-review"]))
+            .all(conn)
+            .await?
+            .into_iter()
+            .map(|row| row.config),
+    );
+    for config in configs {
+        let body: Body =
+            serde_json::from_str(&config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
+        let environment = Id::reference(&body.environment_id)?;
+        if !(environments.contains(&environment)
+            || (environments.is_empty() && i64::from(environment) == 0))
+        {
+            return Err(ApiError::conflict(
+                "执行环境仍被定时任务引用，请先修改或删除任务。",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Resource deletion uses this within its own transaction.
 pub async fn ensure_unreferenced(
     conn: &impl ConnectionTrait,
@@ -1160,6 +1211,7 @@ mod tests {
             action: "command".into(),
             target_kind: "host".into(),
             target_ref: "1".into(),
+            environment_id: String::new(),
             command: "true".into(),
             timeout_seconds: 10,
             max_retries: 0,

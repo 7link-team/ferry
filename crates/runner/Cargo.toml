@@ -21,3 +21,6 @@ futures-util = "0.3"
 portable-pty = "0.9"
 # Load, memory and disk without three per-OS parsers in this crate.
 sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

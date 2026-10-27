@@ -1,3 +1,4 @@
+import { ensureActionCheckout } from "../actions-workflow";
 import { useEffect, useState } from "react";
 import { RepositorySource } from "./RepositorySource";
 import { Button } from "./ui/button";
@@ -19,6 +20,9 @@ export function PipelineRepository({ workspace, draft, options, readOnly, onChan
   const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
   function checkout(): string | undefined {
     try {
+      if (draft.definition_format === "github-actions") {
+        const value = ensureActionCheckout(String(draft.definition)); setError(""); return value;
+      }
       const definition = JSON.parse(String(draft.definition));
       if (!Array.isArray(definition.steps)) throw new Error();
       if (!definition.steps.some((step: { checkout?: boolean }) => step.checkout))

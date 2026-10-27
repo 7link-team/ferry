@@ -1,4 +1,5 @@
 import { importResources, exportResources } from "./components/ResourceTransfer";
+import { DEFAULT_ACTIONS } from "./actions-workflow";
 import { api } from "./api";
 /**
  * Every resource page in one place: a `ListConfig` and a `FormConfig` per
@@ -9,11 +10,10 @@ import { api } from "./api";
  */
 import { duration, stateBadge, type PipelineRun } from "./pipeline";
 import { deploymentState, type Deployment, type Revision } from "./deployment";
-import { nav } from "./nav";
 import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
 import { deleteResource, listResource, runAction, runItemAction } from "./resource";
-import type { FormConfig, ListConfig, Option } from "./components/dsl";
+import type { FormConfig, ListConfig, Option, RowAction } from "./components/dsl";
 
 /* The registries are keyed by resource name, so their values have to share one
    type while each config stays checked against its own row type. These two
@@ -71,7 +71,7 @@ export interface Variable {
   id: string; name: string; scope: string; scope_ref: string; kind: string;
   description: string; has_value: boolean; value?: string; version: number;
 }
-const VARIABLE_SCOPES = [{ value: "global", label: "全局" }, { value: "deploy", label: "部署" }, { value: "build", label: "构建" }];
+const VARIABLE_SCOPES = [{ value: "global", label: "全局" }, { value: "deploy", label: "部署" }, { value: "build", label: "构建" }, { value: "environment", label: "执行环境" }];
 const VARIABLE_KINDS = [{ value: "secret", label: "密钥" }, { value: "plain", label: "普通" }];
 const variableSource = (row: Variable) => row.scope === "global" ? "全局" : `${label(VARIABLE_SCOPES, row.scope)} · ${row.scope_ref === "0" ? "模块默认" : `对象 ${row.scope_ref}`}`;
 export interface Tag {
@@ -128,7 +128,8 @@ interface Repository {
 }
 interface Pipeline {
   id: string; name: string; repository_id: string; target_kind: string;
-  target_ref: string; definition: string; description: string;
+  group_id: string; group_name: string; application_id: string; application_name: string; tag_ids: string[]; environment_ids: string[]; tags: {id:string;name:string}[]; environments: {id:string;name:string}[];
+  target_ref: string; definition: string; description: string; definition_format: string; executor_bindings: unknown[]; graph_layout: Record<string, unknown>;
 }
 const namedOptions = (workspace: string, resource: string) => async (): Promise<Option[]> => {
   const items: Option[] = [];
@@ -138,6 +139,15 @@ const namedOptions = (workspace: string, resource: string) => async (): Promise<
     if (!result.items.length || page * result.page_size >= result.total) return items;
   }
 };
+interface PipelineContext {id:string;name:string;description:string;target_kind:string;target_ref:string;version:number}
+const pipelineRunAction = (workspace:string): RowAction<Pipeline> => ({
+ label:"触发",permission:"pipelines.run",
+ parameters: row=>row.environments?.length ? [{key:"environment_id",label:"执行环境",type:"select",required:true,options:row.environments.map(environment=>({value:environment.id,label:environment.name})),help:"环境默认执行器替代流水线默认值；任务单独指定的执行器优先。环境变量覆盖流水线默认变量。"}] : [],
+ action:async(row,values)=>{
+  const run=await runItemAction<{id:string}>(workspace,"pipelines",row.id,"run",values??{});
+  navigate({workspace,group:"build",item:"runs",id:run.id,mode:"view"},{});
+ }
+});
 const TARGETS = [{ value: "host", label: "主机" }, { value: "host-group", label: "主机组" }];
 
 interface Template { id: string; name: string; description: string; content: string; parameters: string; version: number }
@@ -185,7 +195,7 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
     const parameters = JSON.parse(row.parameters) as TemplateParameter[];
     const typed = Object.fromEntries(Object.entries(values).filter(([key,value]) => !(parameters.find(p => p.name === key)?.type === "integer" && value === "")).map(([key,value]) => [key, parameters.find(p => p.name === key)?.type === "boolean" ? value === "true" : value]));
     const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/actions/render`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
-    return { [field]: result[field] };
+    return { [field]: result[field], ...(resource === "pipeline-templates" ? { definition_format: "legacy", executor_bindings: [], graph_layout: {} } : {}) };
   },
 });
 
@@ -198,7 +208,7 @@ interface AlertEvent {id:string;rule_id:string;rule_name:string;state:string;mes
 const alertTargets=[{value:"host",label:"主机"},{value:"pipeline",label:"流水线"},{value:"deployment",label:"应用"},{value:"cron-job",label:"定时任务"}];
 const alertMetrics=[{value:"offline",label:"离线"},{value:"load1",label:"一分钟负载"},{value:"memory-percent",label:"内存使用率（%）"},{value:"disk-percent",label:"磁盘使用率（%）"},{value:"execution-failed",label:"最近执行失败"}];
 const alertEventLink={label:"告警事件",to:()=>({group:"deploy",item:"alert-events",mode:"list" as const})};
-interface CronJob {id:string;name:string;description:string;scope:string;schedule:string;timezone:string;enabled:boolean;action:string;target_kind:string;target_ref:string;command:string;timeout_seconds:number;max_retries:number;retry_delay_seconds:number;next_run_at:number;run_as_name:string;version:number}
+interface CronJob {id:string;name:string;description:string;scope:string;schedule:string;timezone:string;enabled:boolean;action:string;target_kind:string;target_ref:string;environment_id:string;command:string;timeout_seconds:number;max_retries:number;retry_delay_seconds:number;next_run_at:number;run_as_name:string;version:number}
 interface CronRun {id:string;job_id:string;job_name:string;scope:string;state:string;scheduled_at:number;started_at:number;finished_at:number;attempt:number;output:string;config:string;downstream_id:string;downstream_kind:string;version:number;trigger_kind:string}
 const cronState=(state:string)=>({queued:"排队中",running:"执行中",succeeded:"成功",failed:"失败",skipped:"已跳过","needs-review":"需核实"}[state]??state);
 const cronDate=(value:number)=>value?new Date(value).toLocaleString():"—";
@@ -279,22 +289,29 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
           action: (r) => deleteResource(workspace, "repositories", r.id) },
       ],
     }),
+    ...Object.fromEntries((["pipeline-groups","pipeline-environments"] as const).map(resource=>[resource,list<PipelineContext>({
+      resource,rowKey:row=>row.id,filters:[{key:"q",label:"名称",type:"text"}],
+      columns:[{key:"name",label:"名称"},{key:"description",label:"说明"}],
+      actions:[{label:"查看",permission:resource+".read",to:row=>({id:row.id,mode:"view"})},{label:"编辑",permission:resource+".update",to:row=>({id:row.id,mode:"edit"})},{label:"删除",permission:resource+".delete",destructive:true,action:row=>deleteResource(workspace,resource,row.id)}]
+    })])),
     pipelines: list({
       resource: "pipelines", rowKey: (r: Pipeline) => r.id,
-      filters: [{ key: "q", label: "名称", type: "text" }],
+      filters: [{ key: "q", label: "名称", type: "text" },
+        {key:"group_id",label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
+        {key:"application_id",label:"应用",type:"select",options:namedOptions(workspace,"deployments")},
+        {key:"tag_id",label:"标签",type:"select",options:tagOptions(workspace)},
+        {key:"environment_id",label:"环境",type:"select",options:namedOptions(workspace,"pipeline-environments")}],
       columns: [
-        { key: "name", label: "名称" }, { key: "repository_id", label: "仓库 ID" },
+        { key: "name", label: "名称" },
+        {key:"group_name",label:"分组"},{key:"application_name",label:"应用"},
+        {key:"tags",label:"标签",render:row=><span className="flex flex-wrap gap-1">{row.tags?.map(tag=><Badge key={tag.id} variant="secondary">{tag.name}</Badge>)}</span>},
+        {key:"environments",label:"可选环境",render:row=>row.environments?.map(environment=>environment.name).join("、")||"默认执行器"}, { key: "repository_id", label: "仓库 ID" },
         { key: "target_kind", label: "目标类型", render: (r) => label(TARGETS, r.target_kind) },
         { key: "target_ref", label: "目标 ID" }, { key: "description", label: "备注" },
       ],
       actions: [
         { label: "查看", permission: "pipelines.read", to: (r) => ({ id: r.id, mode: "view" }) },
-        { label: "触发", permission: "pipelines.run", action: async (r) => {
-          const run = await runItemAction<{ id: string }>(workspace, "pipelines", r.id, "run", {});
-          const group = nav.find((g) => g.items.some((i) => i.resource === "pipeline-runs"))!;
-          const item = group.items.find((i) => i.resource === "pipeline-runs")!;
-          navigate({ workspace, group: group.key, item: item.key, id: run.id, mode: "view" }, {});
-        } },
+        pipelineRunAction(workspace),
         { label: "编辑", permission: "pipelines.update", to: (r) => ({ id: r.id, mode: "edit" }) },
         { label: "删除", permission: "pipelines.delete", destructive: true,
           action: (r) => deleteResource(workspace, "pipelines", r.id) },
@@ -314,7 +331,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     "pipeline-runs": list({
       resource: "pipeline-runs", rowKey: (r: PipelineRun) => r.id,
       filters: [{ key: "state", label: "状态", type: "select", options:
-        ["queued", "running", "succeeded", "failed", "cancelled"].map((value) => ({ value, label: stateBadge(value).label })) }],
+        ["queued", "running", "cancelling", "succeeded", "failed", "cancelled"].map((value) => ({ value, label: stateBadge(value).label })) }],
       columns: [
         { key: "number", label: "执行序号", sortable: true, render: (r) => `#${r.number}` },
         { key: "pipeline_id", label: "流水线 ID" },
@@ -580,6 +597,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       {key:"target_kind",label:"目标类型",type:"select",required:true,when:d=>d.action==="sync-marketplace",options:[{value:"marketplace-source",label:"市场来源"}]},
       {key:"target_ref",label:"市场来源",type:"select",required:true,when:d=>d.target_kind==="marketplace-source",options:namedOptions(workspace,"marketplace-sources")},
       ...([['host','hosts','主机'],['host-group','host-groups','主机组'],['pipeline','pipelines','流水线'],['deployment','deployments','应用']] as const).map(([kind,resource,label])=>({key:"target_ref",label:`目标${label}`,type:"select" as const,required:true,when:(d:Partial<CronJob>)=>d.target_kind===kind,options:namedOptions(workspace,resource)})),
+      {key:"environment_id",label:"执行环境",type:"select",options:namedOptions(workspace,"pipeline-environments"),when:d=>d.scope==="build",help:"流水线绑定环境时必须选择其中一个；不绑定环境时留空。"},
       {key:"command",label:"命令",type:"code",span:2,required:true,when:d=>d.scope==="host",help:"通过所选主机通道执行；主机组逐台执行，失败即停。不要把密钥写进脚本。"},
       {key:"timeout_seconds",label:"超时（秒）",type:"number",required:true,help:"1–86400；下游执行等待超时不会强制停止远端，会标记需核实。"},
       {key:"max_retries",label:"失败重试次数",type:"number",required:true,help:"默认0；仅对确定失败重试，最多10次。命令必须允许重复执行。"},
@@ -642,20 +660,35 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),
+    "pipeline-groups":form<PipelineContext>({resource:"pipeline-groups",heading:row=>row.name,blank:{name:"",description:""},sections:[{fields:[{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea"}]}]}),
+    "pipeline-environments":form<PipelineContext>({resource:"pipeline-environments",heading:row=>row.name,blank:{name:"",description:"",target_kind:"host",target_ref:""},
+      viewActions:[{label:"管理环境变量",permission:"variables.read",to:()=>({group:"build",item:"environment-variables",mode:"list",id:""}),query:row=>({scope_ref:row.id})}],
+      sections:[{fields:[{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea"},
+        {key:"target_kind",label:"默认执行器类型",type:"select",options:TARGETS,resetOnChange:["target_ref"]},
+        {key:"target_ref",label:"默认主机",type:"select",required:true,options:namedOptions(workspace,"hosts"),when:row=>row.target_kind==="host"},
+        {key:"target_ref",label:"默认主机组",type:"select",required:true,options:namedOptions(workspace,"host-groups"),when:row=>row.target_kind==="host-group"}
+      ]}]}),
     pipelines: form({
       ...(permissions?.has("pipeline-templates.read") ? { generator: templateGenerator(workspace, "pipeline-templates", "definition") } : {}),
       resource: "pipelines", heading: (r: Pipeline) => r.name,
-      blank: { name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
-        definition: JSON.stringify({ workdir: "/tmp/build-{{run}}", steps: [{ name: "构建", run: "echo hello", timeout_seconds: 1800 }] }, null, 2) },
+      viewActions:[pipelineRunAction(workspace)],
+      blank: { group_id:"",application_id:"",tag_ids:[],environment_ids:[],name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
+        definition_format: "github-actions", executor_bindings: [], graph_layout: {}, definition: DEFAULT_ACTIONS },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
+        {key:"group_id",when:()=>!permissions||permissions.has("pipeline-groups.read"),label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
+        {key:"application_id",when:()=>!permissions||permissions.has("deployments.read"),label:"关联应用",type:"select",options:namedOptions(workspace,"deployments")},
+        {key:"tag_ids",when:()=>!permissions||permissions.has("tags.read"),label:"标签",type:"multiselect",options:tagOptions(workspace),span:2},
+        {key:"environment_ids",when:()=>!permissions||permissions.has("pipeline-environments.read"),label:"执行环境",type:"multiselect",options:namedOptions(workspace,"pipeline-environments"),span:2,help:"可绑定多个环境，触发时必须选择一个；不绑定时使用默认执行器。"},
         { key: "repository_id", label: "仓库", type: "pipeline-repository", options: namedOptions(workspace, "repositories"), span: 2 },
         { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, resetOnChange: ["target_ref"] },
         { key: "target_ref", label: "目标主机", type: "select", required: true,
           options: namedOptions(workspace, "hosts"), when: (d) => d.target_kind === "host" },
         { key: "target_ref", label: "目标主机组", type: "select", required: true,
           options: namedOptions(workspace, "host-groups"), when: (d) => d.target_kind === "host-group" },
-        { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2,
+        { key: "definition", label: "Actions 工作流", type: "actions-editor", required: true, span: 2, when: d => d.definition_format === "github-actions",
+          options: async () => (await Promise.all(["hosts", "host-groups"].filter(resource=>!permissions||permissions.has(`${resource}.read`)).map(async (resource) => (await namedOptions(workspace, resource)()).map(option => ({ value: `${resource === "hosts" ? "host" : "host-group"}:${option.value}`, label: `${resource === "hosts" ? "主机" : "主机组"} · ${option.label}` }))))).flat() },
+        { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2, when: d => d.definition_format !== "github-actions",
           help: "逐步执行；env 支持 value 或 valueFrom: variable/变量名（二选一）。变量按全局→构建→当前流水线覆盖，触发时加密保存快照，日志脱敏。" },
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
@@ -735,7 +768,8 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "name", label: "名称", type: "text", required: true, immutable: true, help: "96个以内字母、数字、下划线或连字符；引用写作 variable/名称。" },
         { key: "kind", label: "类型", type: "select", options: VARIABLE_KINDS, immutable: true },
         { key: "scope", label: "作用域", type: "select", options: VARIABLE_SCOPES, immutable: true, resetOnChange: ["scope_ref"] },
-        { key: "scope_ref", label: "对象 ID", type: "text", immutable: true, when: (row) => row.scope !== "global", help: "0 或留空为模块默认；部署范围填应用 ID，构建范围填流水线 ID。具体对象覆盖模块，模块覆盖全局。" },
+        {key:"scope_ref",label:"执行环境",type:"select",options:namedOptions(workspace,"pipeline-environments"),required:true,immutable:true,when:row=>row.scope==="environment",help:"只用于选中该环境的流水线执行；同名值覆盖全局、构建和流水线变量。"},
+        { key: "scope_ref", label: "对象 ID", type: "text", immutable: true, when: (row) => row.scope !== "global" && row.scope !== "environment", help: "0 或留空为模块默认；部署范围填应用 ID，构建范围填流水线 ID。具体对象覆盖模块，模块覆盖全局。" },
         { key: "value", label: "变量值", type: "textarea", span: 2, when: (row) => row.kind === "plain", help: "空白和换行会原样保存；留空表示空字符串。" },
         { key: "value", label: "密钥值", type: "secret", stored: "has_value", replaceOnEdit: true, span: 2, when: (row) => row.kind === "secret",
           help: "加密保存。编辑时勾选替换后留空，表示设置为空字符串；查看明文会记录审计。",

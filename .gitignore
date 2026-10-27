@@ -16,3 +16,6 @@ tsconfig.tsbuildinfo
 
 # Python acceptance harness cache
 __pycache__/
+
+# Cross-compiled Actions workers bundled as desktop resources
+desktop/resources/actions-workers/actions-worker-*

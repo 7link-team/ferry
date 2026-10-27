@@ -53,6 +53,10 @@ async fn dispatch(socket: &mut Socket, request: wire::Session) -> anyhow::Result
             command,
             timeout_seconds,
         } => exec(socket, &command, timeout_seconds).await,
+        wire::Session::ExecStreamStart {
+            command,
+            timeout_seconds,
+        } => exec_stream(socket, &command, timeout_seconds).await,
         wire::Session::ReadFile { path } => read_file(socket, &path).await,
         wire::Session::WriteFile { path, mode } => write_file(socket, &path, mode).await,
         wire::Session::ListDir { path } => list_dir(socket, &path).await,
@@ -67,7 +71,7 @@ async fn dispatch(socket: &mut Socket, request: wire::Session) -> anyhow::Result
 
 // ------------------------------------------------------------------ 命令
 
-fn shell_command(command: &str) -> tokio::process::Command {
+pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
     #[cfg(windows)]
     let mut process = {
         let mut process = tokio::process::Command::new("cmd");
@@ -114,6 +118,43 @@ async fn exec(socket: &mut Socket, command: &str, timeout_seconds: u64) -> anyho
         },
     )
     .await
+}
+
+async fn exec_stream(socket: &mut Socket, command: &str, seconds: u64) -> anyhow::Result<()> {
+    let (output, mut chunks) = tokio::sync::mpsc::channel(16);
+    let (stop, cancelled) = tokio::sync::watch::channel(false);
+    let execution = crate::exec_stream::run(command, seconds, output, cancelled);
+    tokio::pin!(execution);
+    let mut exit = None;
+    loop {
+        tokio::select! {
+            result = &mut execution, if exit.is_none() => { exit = Some(result?); }
+            chunk = chunks.recv() => match chunk {
+                Some((stream, data)) => {
+                    let sent = tokio::time::timeout(std::time::Duration::from_secs(10), crate::send(socket, &wire::Session::ExecOutput {stream, data})).await;
+                    if !matches!(sent, Ok(Ok(()))) {
+                        let _ = stop.send(true);
+                        if exit.is_none() { let _ = execution.await; }
+                        return match sent { Ok(Err(error))=>Err(error), _=>Err(anyhow::anyhow!("流水线日志传输超时")) };
+                    }
+                }
+                None => {
+                    let code = match exit {Some(code) => code, None => execution.await?};
+                    return crate::send(socket, &wire::Session::ExecExit {code}).await;
+                }
+            },
+            message = socket.next() => match message {
+                Some(Ok(Message::Text(text))) if matches!(serde_json::from_str::<wire::Session>(&text), Ok(wire::Session::ExecCancel)) => { let _ = stop.send(true); }
+                Some(Ok(Message::Ping(data))) => { socket.send(Message::Pong(data)).await?; }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => {
+                    let _ = stop.send(true);
+                    if exit.is_none() { let _ = execution.await; }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 // ------------------------------------------------------------------ 文件
@@ -374,6 +415,48 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn streaming_wire_delivers_live_output_and_acknowledges_cancel() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let frame = crate::next_frame(&mut socket).await.unwrap();
+            dispatch(&mut socket, frame).await.unwrap();
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        crate::send(
+            &mut client,
+            &wire::Session::ExecStreamStart {
+                command: "printf ready; sleep 120".into(),
+                timeout_seconds: 30,
+            },
+        )
+        .await
+        .unwrap();
+        let frame = tokio::time::timeout(Duration::from_secs(2), crate::next_frame(&mut client))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(frame, wire::Session::ExecOutput {stream, data} if stream == "stdout" && data == b"ready")
+        );
+        crate::send(&mut client, &wire::Session::ExecCancel)
+            .await
+            .unwrap();
+        let frame = tokio::time::timeout(Duration::from_secs(12), crate::next_frame(&mut client))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(frame, wire::Session::ExecExit {code} if code != 0));
+        server.await.unwrap();
+    }
 
     #[test]
     fn output_is_bounded_but_short_output_is_untouched() {

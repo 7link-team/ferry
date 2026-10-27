@@ -302,6 +302,8 @@ pub mod pipelines {
         pub id: i64,
         pub workspace_id: i64,
         pub name: String,
+        pub group_id: i64,
+        pub application_id: i64,
         pub repository_id: i64,
         pub definition: String,
         pub target_kind: String,
@@ -356,6 +358,8 @@ pub mod pipeline_runs {
         pub id: i64,
         pub workspace_id: i64,
         pub pipeline_id: i64,
+        pub environment_id: i64,
+        pub environment_name: String,
         pub host_id: i64,
         pub number: i64,
         pub state: String,
@@ -924,6 +928,64 @@ pub mod resource_imports {
         pub result: String,
         pub created_at: i64,
         pub committed_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod pipeline_run_jobs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_run_jobs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub run_id: i64,
+        pub job_key: String,
+        pub host_id: i64,
+        pub state: String,
+        pub outputs: Option<String>,
+        pub started_at: i64,
+        pub finished_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod pipeline_contexts {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_contexts")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub kind: String,
+        pub name: String,
+        pub description: String,
+        pub target_kind: String,
+        pub target_ref: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod pipeline_links {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "pipeline_links")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub pipeline_id: i64,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub kind: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub reference_id: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

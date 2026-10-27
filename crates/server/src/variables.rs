@@ -128,9 +128,10 @@ async fn check_scope(
     layer: &str,
     reference: Id,
 ) -> Result<()> {
-    if !["global", "deploy", "build"].contains(&layer)
+    if !["global", "deploy", "build", "environment"].contains(&layer)
         || i64::from(reference) < 0
         || (layer == "global" && i64::from(reference) != 0)
+        || (layer == "environment" && i64::from(reference) == 0)
     {
         return Err(ApiError::bad("变量作用域或对象引用无效。"));
     }
@@ -138,6 +139,12 @@ async fn check_scope(
         return Ok(());
     }
     let exists = match layer {
+        "environment" => crate::entities::pipeline_contexts::Entity::find_by_id(reference)
+            .filter(crate::entities::pipeline_contexts::Column::WorkspaceId.eq(workspace))
+            .filter(crate::entities::pipeline_contexts::Column::Kind.eq("environment"))
+            .one(db)
+            .await?
+            .is_some(),
         "deploy" => deployments::Entity::find_by_id(reference)
             .filter(deployments::Column::WorkspaceId.eq(workspace))
             .one(db)
@@ -379,6 +386,16 @@ pub async fn resolve(
     reference: Id,
     names: &std::collections::BTreeSet<String>,
 ) -> Result<std::collections::BTreeMap<String, variables::Model>> {
+    resolve_for_environment(db, workspace, layer, reference, Id::from(0), names).await
+}
+pub async fn resolve_for_environment(
+    db: &impl ConnectionTrait,
+    workspace: Id,
+    layer: &str,
+    reference: Id,
+    environment: Id,
+    names: &std::collections::BTreeSet<String>,
+) -> Result<std::collections::BTreeMap<String, variables::Model>> {
     use sea_orm::Condition;
     use variables::Column as C;
     if names.is_empty() {
@@ -398,12 +415,20 @@ pub async fn resolve(
                     Condition::all()
                         .add(C::Scope.eq(layer))
                         .add(C::ScopeRef.is_in([0, i64::from(reference)])),
+                )
+                .add(
+                    Condition::all()
+                        .add(C::Scope.eq("environment"))
+                        .add(C::ScopeRef.eq(environment))
+                        .add(Expr::value(i64::from(environment)).ne(0)),
                 ),
         )
         .all(db)
         .await?;
     let rank = |r: &variables::Model| {
-        if r.scope == "global" {
+        if r.scope == "environment" {
+            3
+        } else if r.scope == "global" {
             0
         } else if r.scope_ref == 0 {
             1
@@ -437,7 +462,7 @@ pub async fn remove(
     let id: Id = id.parse().map_err(|_| ApiError::missing())?;
     let tx = transaction(&s, scope.workspace_id).await?;
     let row = summary(&tx, scope.workspace_id, id).await?;
-    if row.scope != "build" {
+    if row.scope != "build" && row.scope != "environment" {
         let apps = deployments::Entity::find()
             .filter(deployments::Column::WorkspaceId.eq(scope.workspace_id))
             .all(&tx)
@@ -464,21 +489,32 @@ pub async fn remove(
             }
             let definition = crate::pipelines::validate_definition(&build.definition)?;
             if crate::pipelines::variable_names(&definition).contains(&row.name) {
-                let resolved = resolve(
-                    &tx,
-                    scope.workspace_id,
-                    "build",
-                    build.id.into(),
-                    &std::collections::BTreeSet::from([row.name.clone()]),
-                )
-                .await?;
-                if resolved
-                    .get(&row.name)
-                    .is_some_and(|selected| selected.id == row.id)
-                {
-                    return Err(ApiError::conflict(
-                        "流水线仍引用此变量，请先修改引用再删除。",
-                    ));
+                let mut environments =
+                    crate::pipeline_contexts::ids(&tx, build.id.into(), "environment").await?;
+                if environments.is_empty() {
+                    environments.push(Id::from(0));
+                }
+                if row.scope == "environment" {
+                    environments.retain(|id| i64::from(*id) == row.scope_ref);
+                }
+                for environment in environments {
+                    let resolved = resolve_for_environment(
+                        &tx,
+                        scope.workspace_id,
+                        "build",
+                        build.id.into(),
+                        environment,
+                        &std::collections::BTreeSet::from([row.name.clone()]),
+                    )
+                    .await?;
+                    if resolved
+                        .get(&row.name)
+                        .is_some_and(|selected| selected.id == row.id)
+                    {
+                        return Err(ApiError::conflict(
+                            "流水线仍引用此变量，请先修改引用再删除。",
+                        ));
+                    }
                 }
             }
         }

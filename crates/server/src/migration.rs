@@ -86,6 +86,8 @@ impl MigratorTrait for Migrator {
             Box::new(ResourceImports),
             Box::new(PipelineVariableSnapshots),
             Box::new(PlatformRepositoryOAuth),
+            Box::new(ActionsJobs),
+            Box::new(PipelineClassification),
         ]
     }
 }
@@ -951,6 +953,7 @@ mod schema_tests {
             pipeline_execution,
             compose_deployments,
             variables,
+            pipeline_classification,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -988,10 +991,15 @@ mod schema_tests {
             ("credentials", "id workspace_id"),
             ("variables", "id workspace_id scope_ref"),
             ("repositories", "id workspace_id credential_id"),
-            ("pipelines", "id workspace_id repository_id target_ref"),
+            (
+                "pipelines",
+                "id workspace_id repository_id target_ref group_id application_id",
+            ),
+            ("pipeline_contexts", "id workspace_id target_ref"),
+            ("pipeline_links", "pipeline_id reference_id"),
             (
                 "pipeline_runs",
-                "id workspace_id pipeline_id host_id triggered_by credential_id",
+                "id workspace_id pipeline_id host_id triggered_by credential_id environment_id",
             ),
             ("pipeline_run_steps", "id run_id"),
             ("pipeline_run_logs", "id run_id"),
@@ -1055,7 +1063,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 63);
+        assert_eq!(count, 71);
     }
 
     #[test]
@@ -2446,4 +2454,135 @@ impl MigrationTrait for PlatformRepositoryOAuth {
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))
     }
+}
+
+struct ActionsJobs;
+impl MigrationName for ActionsJobs {
+    fn name(&self) -> &str {
+        "actions_jobs_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ActionsJobs {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let mut table = create_table("pipeline_run_jobs", m.get_database_backend());
+        table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+        for name in ["run_id", "host_id", "started_at", "finished_at"] {
+            table.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+        }
+        for name in ["job_key", "state"] {
+            table.col(ColumnDef::new(Alias::new(name)).string_len(255).not_null());
+        }
+        table.col(long_text("outputs", m.get_database_backend()));
+        execute_schema(m, SchemaStatement::Table(table)).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "pipeline_run_jobs",
+                "pipeline_run_jobs_key",
+                Index::create()
+                    .name("pipeline_run_jobs_key")
+                    .table(Alias::new("pipeline_run_jobs"))
+                    .col(Alias::new("run_id"))
+                    .col(Alias::new("job_key"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct PipelineClassification;
+impl MigrationName for PipelineClassification {
+    fn name(&self) -> &str {
+        "pipeline_classification_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineClassification {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in pipeline_classification(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+fn pipeline_classification(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut table = create_table("pipeline_contexts", backend);
+    table.col(ColumnDef::new(Alias::new("id")).big_integer().primary_key());
+    for name in [
+        "workspace_id",
+        "target_ref",
+        "created_at",
+        "updated_at",
+        "version",
+    ] {
+        table.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in ["kind", "name", "target_kind"] {
+        table.col(ColumnDef::new(Alias::new(name)).string_len(255).not_null());
+    }
+    table.col(long_text("description", backend).not_null());
+    let mut statements = vec![SchemaStatement::Table(table)];
+    let mut links = create_table("pipeline_links", backend);
+    links
+        .col(
+            ColumnDef::new(Alias::new("pipeline_id"))
+                .big_integer()
+                .not_null(),
+        )
+        .col(ColumnDef::new(Alias::new("kind")).string_len(32).not_null())
+        .col(
+            ColumnDef::new(Alias::new("reference_id"))
+                .big_integer()
+                .not_null(),
+        )
+        .primary_key(
+            Index::create()
+                .col(Alias::new("pipeline_id"))
+                .col(Alias::new("kind"))
+                .col(Alias::new("reference_id")),
+        );
+    statements.push(SchemaStatement::Table(links));
+    for (table, column) in [
+        ("pipelines", "group_id"),
+        ("pipelines", "application_id"),
+        ("pipeline_runs", "environment_id"),
+    ] {
+        statements.push(SchemaStatement::Column(
+            table,
+            column,
+            Table::alter()
+                .table(Alias::new(table))
+                .add_column(
+                    ColumnDef::new(Alias::new(column))
+                        .big_integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        ));
+    }
+    statements.push(SchemaStatement::Column(
+        "pipeline_runs",
+        "environment_name",
+        Table::alter()
+            .table(Alias::new("pipeline_runs"))
+            .add_column(
+                ColumnDef::new(Alias::new("environment_name"))
+                    .string_len(255)
+                    .not_null()
+                    .default(""),
+            )
+            .to_owned(),
+    ));
+    statements
 }

@@ -226,6 +226,9 @@ pub async fn delete_group(
         return Err(ApiError::conflict("主机组仍被应用部署引用。"));
     }
 
+    crate::pipeline_contexts::ensure_unreferenced(&tx, scope.workspace_id, "host-group", &[id])
+        .await?;
+    crate::actions::ensure_target_unreferenced(&tx, scope.workspace_id, "host-group", id).await?;
     if pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::TargetKind.eq("host-group"))
@@ -589,6 +592,8 @@ async fn host_is_free(
         ));
     }
 
+    crate::pipeline_contexts::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
+    crate::actions::ensure_target_unreferenced(conn, *workspace_id, "host", *id).await?;
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(*workspace_id))
         .filter(pipelines::Column::TargetKind.eq("host"))
@@ -830,6 +835,7 @@ pub async fn delete_tag(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    crate::pipeline_contexts::ensure_unreferenced(&tx, scope.workspace_id, "tag", &[id]).await?;
     if host_tags::Entity::find()
         .filter(host_tags::Column::TagId.eq(id))
         .count(&tx)

@@ -148,6 +148,19 @@ pub enum Session {
         command: String,
         timeout_seconds: u64,
     },
+    /// Additive streaming command protocol; legacy ExecStart remains unchanged.
+    ExecStreamStart {
+        command: String,
+        timeout_seconds: u64,
+    },
+    ExecCancel,
+    ExecOutput {
+        stream: String,
+        data: Vec<u8>,
+    },
+    ExecExit {
+        code: i32,
+    },
     /// Download: the runner answers `FileMeta`, then binary frames, then `Eof`.
     ReadFile {
         path: String,

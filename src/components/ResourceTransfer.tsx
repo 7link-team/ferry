@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 
-export const importResources = new Set(["hosts", "host-groups", "tags", "credentials", "repositories", "pipelines", "deployments", "variables", "cron-jobs", "alert-rules", "dictionaries", "roles", "marketplace-sources", "app-templates", "pipeline-templates", "config-templates"]);
+export const importResources = new Set(["hosts", "host-groups", "tags", "credentials", "repositories", "pipelines", "pipeline-groups", "pipeline-environments", "deployments", "variables", "cron-jobs", "alert-rules", "dictionaries", "roles", "marketplace-sources", "app-templates", "pipeline-templates", "config-templates"]);
 export const exportResources = new Set([...importResources, "activity", "members", "settings", "marketplace", "alert-events", "cron-runs", "pipeline-runs", "pipeline-artifacts", "deployment-revisions"]);
 interface Preview { id: string | null; valid: boolean; count: number; rows: { row: number; values: Record<string, unknown>; error: string | null }[] }
 

@@ -339,6 +339,13 @@ pub async fn remove(
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "deployment", &[Id::from(r.id)])
         .await?;
     crate::variables::check_object_removal(&tx, scope.workspace_id, "deploy", r.id.into()).await?;
+    crate::pipeline_contexts::ensure_unreferenced(
+        &tx,
+        scope.workspace_id,
+        "application",
+        &[Id::from(r.id)],
+    )
+    .await?;
     let n = apps::Entity::delete_many()
         .filter(apps::Column::Id.eq(r.id))
         .filter(apps::Column::WorkspaceId.eq(scope.workspace_id))

@@ -18,6 +18,8 @@
  *     jitters inside iOS Safari's rubber-band scroll.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ResourceActionDialog } from "./ResourceForm";
+import type { RowAction } from "./dsl";
 import {
   ChevronLeft,
   ChevronRight,
@@ -112,6 +114,7 @@ export function ResourceTable<T>({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [refresh, setRefresh] = useState(() => readRefresh(config.resource));
   const [busy, setBusy] = useState(false);
+  const [pendingAction,setPendingAction]=useState<{action:RowAction<T>;row:T}>();
   const reloadToken = useRef(0);
 
   const params = useMemo(
@@ -228,6 +231,7 @@ export function ResourceTable<T>({
   return (
     <div className="grid min-h-0 grid-rows-[auto_1fr_auto] gap-3">
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
+      {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       <div className="flex flex-col gap-3">
         {!!config.filters?.length && (
           <form
@@ -440,6 +444,7 @@ export function ResourceTable<T>({
                                           !window.confirm(`确认${action.label}？此操作无法撤销。`)
                                         )
                                           return;
+                                        if(action.parameters?.(row).length){setPendingAction({action,row});return;}
                                         setBusy(true);
                                         try {
                                           await action.action!(row);

@@ -120,7 +120,12 @@ pub async fn connection_settings(
     result
 }
 
-fn spawn_server(executable: &Path, data: &Path, bind: &str) -> Result<Child, String> {
+fn spawn_server(
+    executable: &Path,
+    data: &Path,
+    bind: &str,
+    workers: Option<&Path>,
+) -> Result<Child, String> {
     // Never mistake a service already listening on this port for our child.
     let probe = std::net::TcpListener::bind(bind)
         .map_err(|e| format!("本地服务端口 {bind} 不可用：{e}"))?;
@@ -139,6 +144,9 @@ fn spawn_server(executable: &Path, data: &Path, bind: &str) -> Result<Child, Str
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(log);
+    if let Some(workers) = workers {
+        command.env("ACTIONS_WORKER_DIR", workers);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -239,7 +247,17 @@ async fn open_workspace_inner(
                 let exe = std::env::current_exe().map_err(|e| e.to_string())?;
                 let sidecar =
                     exe.with_file_name(format!("ferry-server{}", std::env::consts::EXE_SUFFIX));
-                *guard = Some(spawn_server(&sidecar, &data, "127.0.0.1:4290")?);
+                *guard = Some(spawn_server(
+                    &sidecar,
+                    &data,
+                    "127.0.0.1:4290",
+                    Some(
+                        &app.path()
+                            .resource_dir()
+                            .map_err(|e| e.to_string())?
+                            .join("actions-workers"),
+                    ),
+                )?);
             }
         }
         if let Err(error) = wait_ready(&runtime, &data, LOCAL_URL).await {
@@ -351,7 +369,7 @@ mod tests {
         let target = format!("http://{bind}");
         let runtime = Runtime::default();
         *runtime.child.lock().unwrap() =
-            Some(spawn_server(Path::new(&executable), &data, &bind).unwrap());
+            Some(spawn_server(Path::new(&executable), &data, &bind, None).unwrap());
         wait_ready(&runtime, &data, &target).await.unwrap();
         let identity = std::fs::read_to_string(data.join("instance-id")).unwrap();
         assert!(data.join("ferry.sqlite").exists());
@@ -367,14 +385,14 @@ mod tests {
         assert!(!data.join("setup-token").exists());
         // A second process cannot silently attach to the already running service.
         assert!(
-            spawn_server(Path::new(&executable), &data, &bind)
+            spawn_server(Path::new(&executable), &data, &bind, None)
                 .unwrap_err()
                 .contains("不可用")
         );
         runtime.drain().await.unwrap();
         assert!(std::net::TcpStream::connect(&bind).is_err());
         *runtime.child.lock().unwrap() =
-            Some(spawn_server(Path::new(&executable), &data, &bind).unwrap());
+            Some(spawn_server(Path::new(&executable), &data, &bind, None).unwrap());
         wait_ready(&runtime, &data, &target).await.unwrap();
         assert_eq!(
             identity,
@@ -403,7 +421,7 @@ mod tests {
     fn missing_sidecar_is_actionable() {
         let data = std::env::temp_dir().join(format!("desktop-missing-{}", std::process::id()));
         assert!(
-            spawn_server(Path::new("/missing/server"), &data, "127.0.0.1:0")
+            spawn_server(Path::new("/missing/server"), &data, "127.0.0.1:0", None)
                 .unwrap_err()
                 .contains("无法启动本地服务")
         );

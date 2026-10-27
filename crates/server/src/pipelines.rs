@@ -13,7 +13,7 @@ use axum::{
     http::StatusCode,
 };
 use sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, QueryTrait, Set,
     sea_query::{Expr, ExprTrait},
 };
 use serde::Deserialize;
@@ -22,16 +22,18 @@ use std::collections::HashMap;
 
 const SPEC: Spec = Spec {
     search: &["name"],
-    filters: &["repository_id", "target_kind"],
+    filters: &["repository_id", "target_kind", "group_id", "application_id"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
 
 fn to_json(row: &pipelines::Model) -> Value {
-    json!({
+    let mut value = json!({
         "id": Id::from(row.id),
         "name": row.name,
         "repository_id": Id::from(row.repository_id),
+        "group_id": Id::from(row.group_id),
+        "application_id": Id::from(row.application_id),
         "definition": row.definition,
         "target_kind": row.target_kind,
         "target_ref": Id::from(row.target_ref),
@@ -39,13 +41,29 @@ fn to_json(row: &pipelines::Model) -> Value {
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "version": row.version,
-    })
+    });
+    crate::actions::display(&mut value, &row.definition);
+    value
 }
 
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
+    #[serde(default)]
+    group_id: Option<String>,
+    #[serde(default)]
+    application_id: Option<String>,
+    #[serde(default)]
+    tag_ids: Option<Vec<Id>>,
+    #[serde(default)]
+    environment_ids: Option<Vec<Id>>,
     definition: String,
+    #[serde(default)]
+    definition_format: String,
+    #[serde(default)]
+    executor_bindings: Vec<crate::actions::Binding>,
+    #[serde(default)]
+    graph_layout: Value,
     #[serde(default)]
     repository_id: String,
     #[serde(default)]
@@ -58,12 +76,46 @@ pub struct Body {
     version: i64,
 }
 
+impl Body {
+    fn stored_definition(&self) -> Result<String> {
+        match self.definition_format.as_str() {
+            "" | "legacy" => Ok(self.definition.clone()),
+            crate::actions::ENGINE => serde_json::to_string(&crate::actions::Document {
+                engine: crate::actions::ENGINE.into(),
+                workflow: self.definition.clone(),
+                executor_bindings: self.executor_bindings.clone(),
+                graph_layout: self.graph_layout.clone(),
+            })
+            .map_err(|_| ApiError::bad("无法保存 Actions 定义。")),
+            _ => Err(ApiError::bad("未知的流水线定义格式。")),
+        }
+    }
+}
+
 async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
     }
-    let definition = validate_definition(&body.definition)?;
+    crate::pipeline_contexts::check_single(
+        conn,
+        scope.workspace_id,
+        "group",
+        Id::reference(body.group_id.as_deref().unwrap_or(""))?,
+    )
+    .await?;
+    crate::pipeline_contexts::check_single(
+        conn,
+        scope.workspace_id,
+        "application",
+        Id::reference(body.application_id.as_deref().unwrap_or(""))?,
+    )
+    .await?;
+    let stored = body.stored_definition()?;
+    let definition = validate_definition(&stored)?;
+    if let Some(document) = crate::actions::document(&stored) {
+        crate::actions::check_bindings(conn, scope, &document).await?;
+    }
     if definition.steps.iter().any(|step| step.checkout)
         && Id::reference(&body.repository_id)? == Id::from(0)
     {
@@ -116,20 +168,36 @@ async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body)
 pub async fn list(
     State(s): State<AppState>,
     scope: Scope,
-    Query(raw): Query<HashMap<String, String>>,
+    Query(mut raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
+    let mut select = pipelines::Entity::find();
+    for (key, kind) in [("tag_id", "tag"), ("environment_id", "environment")] {
+        if let Some(id) = raw.remove(key).filter(|id| !id.is_empty()) {
+            use crate::entities::pipeline_links as links;
+            let id = Id::reference(&id)?;
+            select = select.filter(
+                pipelines::Column::Id.in_subquery(
+                    links::Entity::find()
+                        .select_only()
+                        .column(links::Column::PipelineId)
+                        .filter(links::Column::Kind.eq(kind))
+                        .filter(links::Column::ReferenceId.eq(id))
+                        .into_query(),
+                ),
+            );
+        }
+    }
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(
+    let (rows, total) = resource::list(&s.db, &SPEC, select, &scope.workspace_id, &query).await?;
+    let items = crate::pipeline_contexts::decorate(
         &s.db,
-        &SPEC,
-        pipelines::Entity::find(),
-        &scope.workspace_id,
-        &query,
+        scope.workspace_id,
+        rows.iter().map(to_json).collect(),
     )
     .await?;
     Ok(Json(json!({
-        "items": rows.iter().map(to_json).collect::<Vec<_>>(),
+        "items": items,
         "total": total, "page": query.page, "page_size": query.page_size,
     })))
 }
@@ -147,7 +215,11 @@ pub async fn get(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    Ok(Json(to_json(&row)))
+    Ok(Json(
+        crate::pipeline_contexts::decorate(&s.db, scope.workspace_id, vec![to_json(&row)])
+            .await?
+            .remove(0),
+    ))
 }
 
 pub async fn create(
@@ -176,8 +248,10 @@ pub(crate) async fn create_in(
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
         name: Set(name.clone()),
+        group_id: Set(Id::reference(body.group_id.as_deref().unwrap_or(""))?.into()),
+        application_id: Set(Id::reference(body.application_id.as_deref().unwrap_or(""))?.into()),
         repository_id: Set(i64::from(Id::reference(&body.repository_id)?)),
-        definition: Set(body.definition.clone()),
+        definition: Set(body.stored_definition()?),
         target_kind: Set(body.target_kind.clone()),
         target_ref: Set(i64::from(Id::reference(&body.target_ref)?)),
         description: Set(body.description.trim().to_owned()),
@@ -187,6 +261,22 @@ pub(crate) async fn create_in(
         ..Default::default()
     })
     .exec(tx)
+    .await?;
+    crate::pipeline_contexts::replace_links(
+        tx,
+        scope.workspace_id,
+        id,
+        "tag",
+        body.tag_ids.as_deref(),
+    )
+    .await?;
+    crate::pipeline_contexts::replace_links(
+        tx,
+        scope.workspace_id,
+        id,
+        "environment",
+        body.environment_ids.as_deref(),
+    )
     .await?;
     // The details of an audit entry are readable by anyone with activity.read,
     // so they carry the name and never the secret.
@@ -221,12 +311,26 @@ pub async fn update(
     if current.version != body.version {
         return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
     }
+    if body.group_id.is_none() {
+        body.group_id = Some(current.group_id.to_string());
+    }
+    if body.application_id.is_none() {
+        body.application_id = Some(current.application_id.to_string());
+    }
     if let Some(selection) = body.repository_selection.take() {
         body.repository_id =
             crate::repositories::bind_selection(&s, &tx, &scope, selection).await?;
     }
     let name = check(&tx, &scope, &body).await?;
     let affected = pipelines::Entity::update_many()
+        .col_expr(
+            pipelines::Column::GroupId,
+            Expr::value(Id::reference(body.group_id.as_deref().unwrap_or(""))?),
+        )
+        .col_expr(
+            pipelines::Column::ApplicationId,
+            Expr::value(Id::reference(body.application_id.as_deref().unwrap_or(""))?),
+        )
         .col_expr(pipelines::Column::Name, Expr::value(name.clone()))
         .col_expr(
             pipelines::Column::RepositoryId,
@@ -234,7 +338,7 @@ pub async fn update(
         )
         .col_expr(
             pipelines::Column::Definition,
-            Expr::value(body.definition.clone()),
+            Expr::value(body.stored_definition()?),
         )
         .col_expr(
             pipelines::Column::TargetKind,
@@ -268,6 +372,22 @@ pub async fn update(
         )
         .await?);
     }
+    crate::pipeline_contexts::replace_links(
+        &tx,
+        scope.workspace_id,
+        id,
+        "tag",
+        body.tag_ids.as_deref(),
+    )
+    .await?;
+    crate::pipeline_contexts::replace_links(
+        &tx,
+        scope.workspace_id,
+        id,
+        "environment",
+        body.environment_ids.as_deref(),
+    )
+    .await?;
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -316,6 +436,10 @@ pub async fn remove(
     if affected == 0 {
         return Err(ApiError::missing());
     }
+    crate::entities::pipeline_links::Entity::delete_many()
+        .filter(crate::entities::pipeline_links::Column::PipelineId.eq(id))
+        .exec(&tx)
+        .await?;
     tx.commit().await?;
     crate::hosts::activity(&s, &scope, "delete", "pipelines", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -376,6 +500,9 @@ fn check_templates(input: &str, context: &str) -> Result<()> {
 }
 
 pub fn validate_definition(input: &str) -> Result<Definition> {
+    if let Some(document) = crate::actions::document(input) {
+        return crate::actions::summary(&document);
+    }
     if input.len() > 64 * 1024 {
         return Err(ApiError::bad("流水线定义不能超过 64KB。"));
     }
@@ -516,6 +643,21 @@ mod tests {
         let error = validate_definition(&value.to_string()).unwrap_err();
         assert!(error.1.contains(message), "{error}");
         assert!(error.1.ends_with('。'), "{error}");
+    }
+
+    #[test]
+    fn actions_envelope_preserves_yaml_and_validates_dependencies() {
+        let workflow = "# keep this comment\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo hello\n";
+        let envelope = json!({"engine":"github-actions", "workflow":workflow});
+        let parsed = validate_definition(&envelope.to_string()).unwrap();
+        assert_eq!(parsed.steps.len(), 1);
+        let invalid = json!({"engine":"github-actions", "workflow":workflow.replace("    runs-on:", "    needs: missing\n    runs-on:")});
+        assert!(
+            validate_definition(&invalid.to_string())
+                .unwrap_err()
+                .1
+                .contains("不存在")
+        );
     }
 
     #[test]

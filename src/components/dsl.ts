@@ -43,7 +43,9 @@ export interface RowAction<T> {
   to?: (row: T) => Partial<Route>;
   query?: (row: T) => Record<string, string>;
   /** Executing action: destructive ones confirm first. */
-  action?: (row: T) => Promise<void>;
+  action?: (row: T, values?: Record<string, unknown>) => Promise<void>;
+  /** Shared action form, for operations needing explicit input before execution. */
+  parameters?: (row: T) => FormField<Record<string, unknown>>[];
   destructive?: boolean;
   when?: (row: T) => boolean;
   /** Keep unavailable actions discoverable and explain why. */
@@ -85,6 +87,7 @@ export interface ListConfig<T> {
 export type FieldType =
   | "repository-source"
   | "pipeline-repository"
+  | "actions-editor"
   | "text"
   | "textarea"
   | "number"

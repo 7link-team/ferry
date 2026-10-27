@@ -28,3 +28,7 @@ it("状态徽标逐一映射且超时不同于失败", () => {
   expect(stateBadge("future").label).toBe("future");
   expect(["queued", "running", "succeeded", "failed", "cancelled"].map(isActive)).toEqual([true, true, false, false, false]);
 });
+it("cancelling keeps polling until remote cleanup completes", () => {
+  expect(isActive("cancelling")).toBe(true);
+  expect(stateBadge("cancelling").label).toBe("正在取消");
+});

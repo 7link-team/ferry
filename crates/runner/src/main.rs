@@ -9,6 +9,7 @@
 // runs a handful of concurrent sessions; move to yamux only if that stops
 // being true.
 
+mod exec_stream;
 mod session;
 
 use anyhow::Context;

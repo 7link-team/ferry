@@ -33,14 +33,18 @@ fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
             "name connection address port:number username group_id credential_id description tag_ids:json"
         }
         "host-groups" => "name description parent_id",
+        "pipeline-groups" => "name description",
+        "pipeline-environments" => "name description target_kind target_ref",
         "tags" => "name color",
         "credentials" => "name kind username description secret:secret",
         "repositories" => "name provider url default_branch credential_id description",
-        "pipelines" => "name definition repository_id target_kind target_ref description",
+        "pipelines" => {
+            "name definition definition_format executor_bindings:json graph_layout:json repository_id target_kind target_ref description group_id application_id tag_ids:json environment_ids:json"
+        }
         "deployments" => "name manifest mode target_kind target_ref workdir description",
         "variables" => "name scope scope_ref kind description value:secret",
         "cron-jobs" => {
-            "name description scope schedule timezone enabled:bool action target_kind target_ref command timeout_seconds:number max_retries:number retry_delay_seconds:number"
+            "name description scope schedule timezone enabled:bool action target_kind target_ref command timeout_seconds:number max_retries:number retry_delay_seconds:number environment_id"
         }
         "alert-rules" => {
             "name description target_kind target_ref metric threshold:number enabled:bool webhook:secret"
@@ -69,6 +73,8 @@ pub fn routes() -> Router<AppState> {
         "credentials",
         "repositories",
         "pipelines",
+        "pipeline-groups",
+        "pipeline-environments",
         "deployments",
         "variables",
         "cron-jobs",
@@ -123,6 +129,12 @@ async fn page(s: AppState, scope: Scope, r: &str, q: HashMap<String, String>) ->
         "credentials" => crate::credentials::list(State(s), scope, Query(q)).await?,
         "repositories" => crate::repositories::list(State(s), scope, Query(q)).await?,
         "pipelines" => crate::pipelines::list(State(s), scope, Query(q)).await?,
+        "pipeline-groups" => {
+            crate::pipeline_contexts::groups::list(State(s), scope, Query(q)).await?
+        }
+        "pipeline-environments" => {
+            crate::pipeline_contexts::environments::list(State(s), scope, Query(q)).await?
+        }
         "deployments" => crate::deployments::list(State(s), scope, Query(q)).await?,
         "variables" => crate::variables::list(State(s), scope, Query(q)).await?,
         "cron-jobs" => crate::cron_jobs::list(State(s), scope, Query(q)).await?,
@@ -183,6 +195,16 @@ async fn create(
         }
         "repositories" => {
             crate::repositories::create_in(s, tx, scope, decode!())
+                .await?
+                .1
+        }
+        "pipeline-groups" => {
+            crate::pipeline_contexts::groups::create_in(s, tx, scope, decode!())
+                .await?
+                .1
+        }
+        "pipeline-environments" => {
+            crate::pipeline_contexts::environments::create_in(s, tx, scope, decode!())
                 .await?
                 .1
         }

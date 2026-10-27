@@ -1,5 +1,6 @@
 /** Real Chromium platform connection -> private Git checkout -> build acceptance. */
 import assert from 'node:assert/strict';
+import { parseDocument } from 'yaml';
 import { createServer as createHttpServer } from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
@@ -185,12 +186,14 @@ try {
   await p.getByRole('button',{name:/使用已有连接/}).click();
   await p.getByLabel('选择平台仓库',{exact:true}).selectOption(providerOrigin+'/team/test-repo.git');
   assert.equal(await p.getByLabel(/^名称/).inputValue(),'Build from connection');
-  const definition=JSON.parse(await p.getByLabel(/^定义（JSON）/).inputValue());
-  assert.equal(definition.steps[0].checkout,true);
-  assert.equal(definition.steps[1].run,'echo hello');
-  definition.workdir=join(work,'build-{{run}}');
-  definition.steps[1].run='sh build.sh';definition.artifacts=['output/result.txt'];
-  await p.getByLabel(/^定义（JSON）/).fill(JSON.stringify(definition));
+  await p.getByRole('tab',{name:'YAML',exact:true}).click();
+  const definition=parseDocument(await p.getByLabel('GitHub Actions YAML',{exact:true}).inputValue());
+  const steps=definition.toJS().jobs.build.steps;
+  assert.equal(steps[0].uses,'actions/checkout@v4');
+  assert.equal(steps[1].run,'echo hello');
+  definition.setIn(['jobs','build','steps',1,'run'],'sh build.sh');
+  definition.addIn(['jobs','build','steps'],{uses:'actions/upload-artifact@v4',with:{name:'result',path:'output/result.txt','if-no-files-found':'error'}});
+  await p.getByLabel('GitHub Actions YAML',{exact:true}).fill(definition.toString());
   await p.getByRole('combobox',{name:/目标主机/}).click();
   await p.getByRole('option',{name:'Connected build host',exact:true}).click();
   await p.getByRole('button',{name:'创建',exact:true}).click();
@@ -205,11 +208,14 @@ try {
   for(let i=0;;i++) {
     result=await (await owner.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();
     if(!['queued','running'].includes(result.state))break;
-    assert(i<200,'build timed out');await new Promise(r=>setTimeout(r,100));
+    assert(i<1200,'build timed out');await new Promise(r=>setTimeout(r,100));
   }
   assert.equal(result.state,'succeeded',JSON.stringify(result.steps));
-  assert.equal(await readFile(join(work,'build-'+result.number,'output/result.txt'),'utf8'),'built-from-private-repository\n'+sourceCommit+'\n');
   assert.equal(result.artifacts.length,1);
+  const archive=await owner.request.get(origin+'/api'+root+'/pipeline-artifacts/'+result.artifacts[0].id+'/download');
+  assert(archive.ok());
+  const content=execFileSync('python3',['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
+  assert.equal(content,'built-from-private-repository\n'+sourceCommit+'\n');
   console.log('PASS: browser-selected connection -> authenticated private Git checkout -> checked-in build script -> exact commit artifact');
   console.log('PASS: build form browses existing connection, binds selected platform repository and preserves commands/name with explicit checkout');
   console.log('PASS: dynamic platform settings, secret nonreturn, popup OAuth preserves draft, Gitee PAT validates and binds selected repository, no auth tabs, generic Git inline credentials, mobile form');
