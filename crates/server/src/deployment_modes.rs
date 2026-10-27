@@ -721,11 +721,11 @@ pub(crate) async fn native_execute(
         .map(|name| quote(name))
         .collect::<Vec<_>>()
         .join(" ");
-    for name in units.keys() {
-        command.push_str(&format!("if [ \"$(systemctl show -p ActiveState --value {})\" = failed ]; then systemctl reset-failed {}; fi; ",quote(name),quote(name)));
-    }
+    // A unit waiting for RestartSec is activating, not failed, but may have
+    // exhausted StartLimitBurst. Quiesce automatic retries before resetting
+    // the counter for this explicit deployment/restart/rollback operation.
     command.push_str(&format!(
-        "systemctl enable {names}; systemctl restart {names}; "
+        "systemctl enable {names}; systemctl stop {names}; systemctl reset-failed {names}; systemctl start {names}; "
     ));
     for name in units.keys() {
         command.push_str(&format!("systemctl is-active --quiet {}; ", quote(name)));
