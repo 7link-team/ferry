@@ -271,6 +271,9 @@ print(json.dumps({"name":"pipeline-build","repository_id":sys.argv[1],"target_ki
   ck "pipeline update" '200$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
   ck "pipeline stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
   ck "pipeline version incremented" '"version":2' "$(c "$B/workspaces/ops/pipelines/$pipeline")"
+  # The successful update above advanced the version; exercise reference
+  # validation with a current version, independently of stale-write rejection.
+  pipeline_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["version"]=2;print(json.dumps(v))')
   ck "pipeline update validates references" '400$' "$(c -w '%{http_code}' -X PATCH -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/ops/pipelines/$pipeline")"
   ck "pipeline referenced repository protected" '409$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$pipeline_repo")"
   ck "pipeline isolated list" '"total":0' "$(c "$B/workspaces/repo-other/pipelines")"

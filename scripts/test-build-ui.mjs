@@ -95,20 +95,23 @@ try {
   await page.route('**/preferences', async route => { await preferencesGate; await route.continue(); });
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('UI repository');
-  await page.getByLabel('URL', { exact: false }).fill(`http://127.0.0.1:${gitPort}/source.git`);
+  await page.getByRole('combobox', {name:'代码来源',exact:true}).selectOption('git');
+  await page.getByLabel('Git 仓库地址', { exact: true }).fill(`http://127.0.0.1:${gitPort}/source.git`);
   await page.getByLabel('默认分支', { exact: false }).fill(branch);
   const preferencesLoaded = page.waitForResponse(response => response.url().endsWith('/preferences'));
   releasePreferences(); await preferencesLoaded;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByLabel('名称', { exact: false }).inputValue(), 'UI repository', 'background preferences refresh discarded the form draft');
-  assert.equal(await page.getByLabel('URL', { exact: false }).inputValue(), `http://127.0.0.1:${gitPort}/source.git`);
+  assert.equal(await page.getByLabel('Git 仓库地址', { exact: true }).inputValue(), `http://127.0.0.1:${gitPort}/source.git`);
   await page.unroute('**/preferences');
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByRole('cell', { name: 'UI repository', exact: true }).waitFor();
-  await page.getByRole('link', { name: '流水线', exact: true }).click();
-  await page.getByRole('button', { name: '创建', exact: true }).click();
+  // New workflows use Actions; retain this acceptance fixture for editing and
+  // executing pipelines saved by earlier releases, with the original assertions.
+  const legacy=await api('/workspaces/ops/pipelines',{name:'Legacy seed',target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:join(work,'build-{{run}}'),steps:[{name:'Seed',run:'true'}]})});
+  await page.goto(`${origin}/ops/build/pipelines/${legacy.id}/edit`);
   await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
-  await page.getByRole('combobox', { name: /^仓库/ }).click(); await page.getByRole('option', { name: 'UI repository', exact: true }).click();
+  await page.getByRole('combobox', { name: '仓库',exact:true }).selectOption({label:'UI repository'});
   await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
   await page.getByRole('combobox', { name: /^目标类型/ }).click(); await page.getByRole('option', { name: '主机组', exact: true }).click();
   assert.equal(await page.getByRole('combobox', { name: /^目标主机组/ }).innerText(), '请选择');
@@ -128,11 +131,11 @@ try {
     ],
   };
   await page.getByLabel('定义（JSON）', { exact: false }).fill(JSON.stringify({ ...definition, steps: [{ ...definition.steps[0], timeout_seconds: 0 }] }));
-  await page.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText(/第 1 步.*超时时间/).waitFor();
   pass('repository/pipeline shared forms, dependent target reset, verbatim server validation');
   await page.getByLabel('定义（JSON）', { exact: false }).fill(JSON.stringify(definition, null, 2));
-  await page.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('cell', { name: 'UI pipeline', exact: true }).waitFor();
   const requests = [];
   page.on('request', (request) => { if (/pipeline-runs\/[^/]+(?:\/logs\?|$)/.test(request.url())) requests.push(request.url()); });
