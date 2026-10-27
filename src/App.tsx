@@ -105,6 +105,14 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const lists = useMemo(() => listConfigs(slug, permissions, onSignedOut, preferences?.dictionaries["host-state"]), [slug, permissions, onSignedOut, preferences]);
   const forms = useMemo(() => formConfigs(slug, permissions), [slug, permissions]);
 
+  // Keep the form configuration stable while background preferences refresh.
+  // ResourceForm reloads its draft when its configuration changes.
+  const formConfig = useMemo(() => {
+    const item = findItem(route.group, route.item);
+    const config = item && forms[item.resource];
+    return config ? { ...config, blank: { ...config.blank, ...item?.params } } : undefined;
+  }, [forms, route.group, route.item]);
+
   // Nothing to show yet: send the user through workspace creation/joining.
   if (joining) return <div className="h-full"><Button className="absolute top-4 left-4" variant="outline" onClick={() => setJoining(false)}>返回工作空间</Button><Entry onReady={() => { setJoining(false); onSignedOut(); }} error="" signedIn /></div>;
   if (!current) return <Entry onReady={onSignedOut} error="" signedIn />;
@@ -134,7 +142,6 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
   const relatedItems = group.items.filter(i => (i.key === parentItem.key || i.parent === parentItem.key) && i.key !== "api-tokens" && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.resource];
-  const formConfig = forms[item.resource];
 
   return (
     <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[48px_1fr]">
@@ -319,7 +326,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               <ResourceForm
                 key={`${current.slug}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
                 {...(item.resource === "roles" || item.resource === "members" ? { onSaved: onSignedOut } : {})}
-                config={{ ...formConfig, blank: { ...formConfig.blank, ...item.params } }}
+                config={formConfig}
                 workspace={current.slug}
                 permissions={permissions}
               />

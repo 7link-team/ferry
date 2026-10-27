@@ -80,6 +80,7 @@ def main():
         if not condition and mode=='native':
             debug=subprocess.run(['docker','exec',name,'journalctl','--no-pager','-n','120'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             (work/'native-journal.log').write_bytes(debug.stdout)
+            print(debug.stdout.decode(errors='replace'), flush=True)
         assert condition, label
         checks += 1
         print('  ok ' + label, flush=True)
@@ -463,7 +464,18 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 source['strategy']={'type':'recreate','healthTimeout':3};source['services'][0]['health']['readiness']['httpGet']['path']='/not-ready'
                 update(id,source);start(id);row=done(id)
                 check(kind+' native failed readiness not accepted',row['state']=='failed')
-                start(id,first);check(kind+' native explicit rollback recovers',done(id)['state']=='succeeded' and eventually(lambda:response(web_port)=='native-v1'))
+                start(id,first);row=done(id);check(kind+' native explicit rollback recovers: '+row['latest_revision']['output'],row['state']=='succeeded' and eventually(lambda:response(web_port)=='native-v1'))
+                # Keep automatic recovery pending after the fifth start fails.
+                # A manual rollback must clear the counter even in ActiveState=activating.
+                unit=project+'-web.service'
+                remote('mkdir -p /etc/systemd/system/'+unit+'.d; printf "[Unit]\\nStartLimitIntervalSec=120\\nStartLimitBurst=5\\n[Service]\\nRestartSec=30\\n" > /etc/systemd/system/'+unit+'.d/start-limit.conf; systemctl daemon-reload; systemctl reset-failed '+unit)
+                for attempt in range(4): remote('systemctl restart '+unit)
+                start(id);row=done(id)
+                check(kind+' native repeated failed readiness not accepted',row['state']=='failed')
+                check(kind+' native automatic recovery is pending',remote('systemctl show '+unit+' -p ActiveState --value').strip()=='activating')
+                start(id,first);row=done(id)
+                check(kind+' native rollback during automatic recovery: '+row['latest_revision']['output'],row['state']=='succeeded' and eventually(lambda:response(web_port)=='native-v1'))
+                remote('rm -f /etc/systemd/system/'+unit+'.d/start-limit.conf; systemctl daemon-reload; systemctl reset-failed '+unit)
                 api('/workspaces/other/deployments/'+id,status=404);check(kind+' native tenant isolation',True)
                 api('/workspaces/ops/pipelines/'+pipeline,method='DELETE',status=409)
                 check(kind+' native pipeline reference prevents deletion',True)

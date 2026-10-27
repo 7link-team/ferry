@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions'])
-                assert migrated['version'] == role['version']+bool(added)
+                assert migrated['version'] == role.get('version', 1)+bool(added)
                 for field in ('id','name','builtin'):
                     assert migrated[field] == role[field], f'Upgrade changed role {field}'
             members = api('/workspaces/upgrade/members')['items']
