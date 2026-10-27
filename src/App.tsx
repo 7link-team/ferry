@@ -137,8 +137,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const formConfig = forms[item.resource];
 
   return (
-    <div className="grid h-full grid-rows-[48px_1fr]">
-      <header className="flex items-center gap-5 border-b border-border bg-card px-4">
+    <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[48px_1fr]">
+      <header className="flex min-w-0 items-center gap-5 overflow-x-auto border-b border-border bg-card px-4">
         <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           Ferry
         </a>
@@ -213,7 +213,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
         </DropdownMenu>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[180px_1fr] max-sm:grid-cols-1">
+      <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
         <nav
           className="flex flex-col gap-0.5 overflow-y-auto border-r border-border bg-card p-3 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b"
           aria-label={group.label}
@@ -237,7 +237,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
 
         {/* auto breadcrumbs / auto title / 1fr content — min-h-0 is what lets
             the content own the scrolling instead of the page. */}
-        <main className="grid min-h-0 grid-rows-[auto_1fr] px-4 pt-3">
+        <main className="grid min-h-0 min-w-0 grid-rows-[auto_1fr] px-4 pt-3">
           <div>
           <nav aria-label="面包屑">
             <ol className="flex gap-1.5 text-sm text-muted-foreground">

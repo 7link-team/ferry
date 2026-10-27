@@ -630,7 +630,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true, when: (d) => d.target_kind === "host" },
         { key: "target_ref", label: "目标主机组", type: "select", options: namedOptions(workspace, "host-groups"), required: true, immutable: true, when: (d) => d.target_kind === "host-group", help: "部署全部直接成员，按主机 ID 排序；失败停止，已成功主机不自动回滚。" },
         { key: "workdir", label: "部署工作目录", type: "text", required: true, immutable: true, help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。容器模式需要 Docker，Compose 另需 Compose v2+；Native 需要 systemd 及管理服务的权限。所有模式需要 flock、sha256sum。" },
-        { key: "manifest", label: "应用 manifest（YAML / JSON）", type: "code", required: true, span: 2, help: "支持镜像、多服务、端口、环境变量、命名卷、依赖、HTTP健康检查和CPU/内存资源限制；环境项可使用 valueFrom: variable/变量名 引用普通或密钥变量，按全局→部署模块→应用专属覆盖。files 可引用配置模板；Native 使用 artifact: {source: pipeline, pipeline: 流水线ID, path: 产物相对路径}，可选 run 固定构建执行；Swarm 支持 strategy.type: rolling 和 maxUnavailable。不要填写密钥明文。" },
+        { key: "manifest", label: "应用配置", type: "manifest", required: true, span: 2 },
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),

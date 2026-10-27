@@ -45,7 +45,7 @@ try {
   await post(owner,root+'/variables',{name:'token',scope:'deploy',kind:'secret',value:'secret-not-in-template'});
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
   for (const [group,resource,target,field,label] of [
-    ['deploy','app-templates','apps','manifest','应用 manifest（YAML / JSON）'],
+    ['deploy','app-templates','apps','manifest','应用配置源码（YAML / JSON）'],
     ['build','pipeline-templates','pipelines','definition','定义（JSON）'],
   ]) {
     const app=field==='manifest';
@@ -85,11 +85,12 @@ try {
     }
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
+    if(app) await p.getByRole('button',{name:'源码编辑',exact:true}).click();
     const generated=JSON.parse(await p.getByLabel(label,{exact:false}).inputValue());
     if(app) assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
     else { assert.equal(generated.steps[0].run,'echo build false'); assert.equal(generated.steps[0].timeout_seconds,30); }
     assert(!JSON.stringify(generated).includes('secret-not-in-template'));
-    await p.getByLabel(app?'镜像':'构建命令',{exact:false}).fill(app?'nginx:latest':'echo revised');
+    await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:false}).fill(app?'nginx:latest':'echo revised');
     assert(await create.isDisabled(),'changed parameters invalidate generation');
     const template=(await get(root+'/'+resource)).items[0];
     const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
@@ -108,7 +109,8 @@ try {
     }
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
-    await p.getByLabel('名称',{exact:false}).fill('Generated '+resource);
+    if(app) await p.getByRole('button',{name:'表单编辑',exact:true}).click();
+    await p.getByRole('textbox',{name:/^名称/}).fill('Generated '+resource);
     await p.getByLabel('目标主机',{exact:false}).click();
     await p.getByRole('option',{name:'Template host',exact:true}).click();
     await create.click();
@@ -126,10 +128,10 @@ try {
   await p.goto(`${origin}/tenant/deploy/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('名称',{exact:false}).fill('Runtime file');
-  await p.getByLabel('配置文件模板',{exact:false}).fill('port={{ .Values.port }}\n');
+  await p.getByLabel('应用配置文件内容',{exact:false}).fill('port={{ .Values.port }}\n');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('link',{name:'编辑',exact:true}).click();
-  await p.getByLabel('配置文件模板',{exact:false}).fill('listen={{ .Values.port }}\n');
+  await p.getByLabel('应用配置文件内容',{exact:false}).fill('listen={{ .Values.port }}\n');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   const configs=await get(root+'/config-templates');
   assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');

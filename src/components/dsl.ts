@@ -91,6 +91,7 @@ export type FieldType =
   | "password"
   | "secret"
   | "code"
+  | "manifest"
   | "multiselect";
 
 export interface FormField<T> {

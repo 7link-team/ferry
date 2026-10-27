@@ -12,6 +12,7 @@
  * set (§8 of the design doc).
  */
 import { useCallback, useEffect, useState } from "react";
+import { ManifestEditor } from "./ManifestEditor";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -327,6 +328,7 @@ function Field<T>({
     reportOptions(field.key, optionsLoading || !!optionsError);
     return () => reportOptions(field.key, false);
   }, [field.key, optionsLoading, optionsError, reportOptions]);
+  const reportManifest = useCallback((blocked: boolean) => reportOptions(`$manifest:${field.key}`, blocked), [field.key, reportOptions]);
   const text = String(value ?? "");
   if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}，请刷新页面重试。</p></Wrapper>;
 
@@ -342,6 +344,8 @@ function Field<T>({
       asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
+
+  if (field.type === "manifest") return <Wrapper field={field}><ManifestEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></Wrapper>;
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value as string[] : []);
