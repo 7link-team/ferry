@@ -1,14 +1,324 @@
 //! Recoverable application-file replacement; callers retain the installation lock.
-use std::path::Path;
+use anyhow::{Context, ensure};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
-pub struct Transaction;
+#[derive(Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Phase {
+    Prepared,
+    Applied,
+    Confirmed,
+    RolledBack,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Entry {
+    path: String,
+    new_hash: String,
+    old_hash: Option<String>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Journal {
+    version: String,
+    phase: Phase,
+    entries: Vec<Entry>,
+}
+
+pub struct Transaction {
+    installation: PathBuf,
+    directory: PathBuf,
+    journal: Journal,
+}
 impl Transaction {
-    pub fn prepare(_installation: &Path, _directory: &Path, _version: &str) -> anyhow::Result<Self> {
-        anyhow::bail!("update transaction is not implemented")
+    /// `directory/new` must contain the verified archive in protected storage.
+    /// The broker supplies both roots from its own registration, never a client.
+    pub fn prepare(installation: &Path, directory: &Path, version: &str) -> anyhow::Result<Self> {
+        ensure!(version.len() <= 128, "更新版本过长");
+        semver::Version::parse(version)?;
+        no_link(installation)?;
+        no_link(directory)?;
+        let installation = installation.canonicalize()?;
+        let directory = directory.canonicalize()?;
+        ensure!(
+            !directory.starts_with(&installation) && !installation.starts_with(&directory),
+            "安装目录与更新状态目录不能嵌套"
+        );
+        ensure!(
+            !directory.join("journal.json").exists() && !directory.join("old").exists(),
+            "更新事务已存在"
+        );
+        no_link(&directory.join("new"))?;
+        let mut paths = Vec::new();
+        collect(&directory.join("new"), "", &mut paths)?;
+        ensure!(!paths.is_empty(), "更新包没有文件");
+        paths.sort();
+        let mut names = std::collections::BTreeSet::new();
+        let mut entries = Vec::new();
+        for path in paths {
+            super::safe_entry_path(&path)?;
+            ensure!(names.insert(path.to_lowercase()), "更新文件名重复");
+            check_target(&installation, &path)?;
+            let target = installation.join(&path);
+            let old_hash = if target.try_exists()? {
+                let digest = hash(&target)?;
+                copy(&target, &directory.join("old").join(&path), &directory)?;
+                Some(digest)
+            } else {
+                None
+            };
+            entries.push(Entry {
+                new_hash: hash(&directory.join("new").join(&path))?,
+                path,
+                old_hash,
+            });
+        }
+        let transaction = Self {
+            installation,
+            directory,
+            journal: Journal {
+                version: version.into(),
+                phase: Phase::Prepared,
+                entries,
+            },
+        };
+        transaction.save()?;
+        Ok(transaction)
     }
-    pub fn apply(&mut self) -> anyhow::Result<()> { anyhow::bail!("update transaction is not implemented") }
-    pub fn confirm(&mut self) -> anyhow::Result<()> { anyhow::bail!("update transaction is not implemented") }
-    pub fn recover(_installation: &Path, _directory: &Path) -> anyhow::Result<()> { anyhow::bail!("update transaction is not implemented") }
+    pub fn apply(&mut self) -> anyhow::Result<()> {
+        ensure!(
+            self.journal.phase == Phase::Prepared,
+            "更新事务不能重复应用"
+        );
+        for entry in &self.journal.entries {
+            check_target(&self.installation, &entry.path)?;
+            ensure!(
+                hash(&self.directory.join("new").join(&entry.path))? == entry.new_hash,
+                "暂存更新文件已改变"
+            );
+        }
+        // Prepared is already durable. Any failure below is recovered from the
+        // saved originals; startup treats unconfirmed Applied the same way.
+        for entry in &self.journal.entries {
+            copy(
+                &self.directory.join("new").join(&entry.path),
+                &self.installation.join(&entry.path),
+                &self.installation,
+            )?;
+        }
+        self.journal.phase = Phase::Applied;
+        self.save()
+    }
+    pub fn confirm(&mut self) -> anyhow::Result<()> {
+        ensure!(
+            self.journal.phase == Phase::Applied,
+            "不能确认尚未应用的更新"
+        );
+        self.journal.phase = Phase::Confirmed;
+        self.save()
+    }
+    pub fn recover(installation: &Path, directory: &Path) -> anyhow::Result<()> {
+        no_link(installation)?;
+        no_link(directory)?;
+        let mut bytes = Vec::new();
+        let path = directory.join("journal.json");
+        no_link(&path)?;
+        fs::File::open(path)?
+            .take(8 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= 8 * 1024 * 1024, "更新日志过大");
+        let journal: Journal = serde_json::from_slice(&bytes)?;
+        let mut transaction = Self {
+            installation: installation.canonicalize()?,
+            directory: directory.canonicalize()?,
+            journal,
+        };
+        ensure!(
+            !transaction.directory.starts_with(&transaction.installation)
+                && !transaction.installation.starts_with(&transaction.directory),
+            "更新恢复目录无效"
+        );
+        if matches!(
+            transaction.journal.phase,
+            Phase::Confirmed | Phase::RolledBack
+        ) {
+            return Ok(());
+        }
+        ensure!(
+            transaction.journal.entries.len() <= 16384,
+            "更新日志文件数量无效"
+        );
+        // Check every backup before changing even one installed file.
+        for entry in &transaction.journal.entries {
+            super::safe_entry_path(&entry.path)?;
+            check_target(&transaction.installation, &entry.path)?;
+            if let Some(expected) = &entry.old_hash {
+                check_target(&transaction.directory, &format!("old/{}", entry.path))?;
+                ensure!(
+                    hash(&transaction.directory.join("old").join(&entry.path))? == *expected,
+                    "旧版备份损坏，停止自动恢复"
+                );
+            }
+        }
+        for entry in &transaction.journal.entries {
+            let target = transaction.installation.join(&entry.path);
+            if entry.old_hash.is_some() {
+                copy(
+                    &transaction.directory.join("old").join(&entry.path),
+                    &target,
+                    &transaction.installation,
+                )?;
+            } else if target.try_exists()? {
+                ensure!(
+                    hash(&target)? == entry.new_hash,
+                    "新增文件被修改，停止自动删除"
+                );
+                fs::remove_file(&target)?;
+                sync_parents(target.parent().unwrap(), &transaction.installation)?;
+            }
+        }
+        transaction.journal.phase = Phase::RolledBack;
+        transaction.save()
+    }
+    fn save(&self) -> anyhow::Result<()> {
+        atomic_write(
+            &self.directory.join("journal.json"),
+            serde_json::to_vec(&self.journal)?.as_slice(),
+        )?;
+        sync_parents(&self.directory, &self.directory)
+    }
+}
+
+fn collect(directory: &Path, prefix: &str, paths: &mut Vec<String>) -> anyhow::Result<()> {
+    for child in fs::read_dir(directory)? {
+        let child = child?;
+        let metadata = no_link(&child.path())?;
+        let component = child
+            .file_name()
+            .into_string()
+            .map_err(|_| anyhow::anyhow!("更新路径编码无效"))?;
+        let path = if prefix.is_empty() {
+            component
+        } else {
+            format!("{prefix}/{component}")
+        };
+        super::safe_entry_path(&path)?;
+        if metadata.is_dir() {
+            collect(&child.path(), &path, paths)?;
+        } else {
+            ensure!(metadata.is_file(), "更新文件类型无效");
+            paths.push(path);
+            ensure!(paths.len() <= 16384, "更新文件数量过多");
+        }
+    }
+    Ok(())
+}
+fn no_link(path: &Path) -> anyhow::Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path)?;
+    ensure!(!metadata.file_type().is_symlink(), "更新路径不能包含链接");
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        ensure!(
+            metadata.file_attributes() & 0x400 == 0,
+            "更新路径不能包含重解析点"
+        );
+    }
+    Ok(metadata)
+}
+fn check_target(root: &Path, relative: &str) -> anyhow::Result<()> {
+    super::safe_entry_path(relative)?;
+    let mut path = root.to_path_buf();
+    no_link(&path)?;
+    for component in relative.split('/') {
+        path.push(component);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                no_link(&path)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+fn hash(path: &Path) -> anyhow::Result<String> {
+    ensure!(no_link(path)?.is_file(), "更新对象不是普通文件");
+    let mut source = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    let mut size = 0u64;
+    loop {
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        size += count as u64;
+        ensure!(size <= super::MAX_PACKAGE_BYTES, "更新文件过大");
+        hash.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+fn copy(source: &Path, target: &Path, boundary: &Path) -> anyhow::Result<()> {
+    let relative = target
+        .strip_prefix(boundary)?
+        .components()
+        .map(|part| part.as_os_str().to_str().context("更新路径编码无效"))
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .join("/");
+    check_target(boundary, &relative)?;
+    fs::create_dir_all(target.parent().context("更新文件没有父目录")?)?;
+    atomic_write(target, fs::File::open(source)?)?;
+    sync_parents(target.parent().unwrap(), boundary)
+}
+fn atomic_write(target: &Path, mut source: impl Read) -> anyhow::Result<()> {
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(target.parent().context("更新文件没有父目录")?)?;
+    std::io::copy(&mut source, &mut temporary)?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    let temporary = temporary.into_temp_path();
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let from: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
+        let to: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        ensure!(
+            unsafe {
+                MoveFileExW(
+                    from.as_ptr(),
+                    to.as_ptr(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            } != 0,
+            "更新文件替换失败：{}",
+            std::io::Error::last_os_error()
+        );
+    }
+    #[cfg(not(windows))]
+    fs::rename(&temporary, target)?;
+    Ok(())
+}
+fn sync_parents(path: &Path, boundary: &Path) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    for parent in path
+        .ancestors()
+        .take_while(|parent| parent.starts_with(boundary))
+    {
+        fs::File::open(parent)?.sync_all()?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, boundary);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -16,49 +326,59 @@ mod tests {
     use super::*;
     use std::fs;
     fn fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
-        let temp=tempfile::tempdir().unwrap();
-        let app=temp.path().join("installed");let transaction=temp.path().join("transaction");
-        fs::create_dir(&app).unwrap();fs::create_dir_all(transaction.join("new/resources")).unwrap();
-        fs::write(app.join("app.exe"),b"old").unwrap();
-        fs::write(app.join("user.config"),b"preserve").unwrap();
-        fs::write(transaction.join("new/app.exe"),b"new").unwrap();
-        fs::write(transaction.join("new/resources/worker.exe"),b"worker").unwrap();
-        (temp,app,transaction)
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("installed");
+        let transaction = temp.path().join("transaction");
+        fs::create_dir(&app).unwrap();
+        fs::create_dir_all(transaction.join("new/resources")).unwrap();
+        fs::write(app.join("app.exe"), b"old").unwrap();
+        fs::write(app.join("user.config"), b"preserve").unwrap();
+        fs::write(transaction.join("new/app.exe"), b"new").unwrap();
+        fs::write(transaction.join("new/resources/worker.exe"), b"worker").unwrap();
+        (temp, app, transaction)
     }
     #[test]
     fn interrupted_apply_and_failed_health_restore_original_files() {
-        for partial in [true,false] {
-            let (_temp,app,directory)=fixture();
-            let mut transaction=Transaction::prepare(&app,&directory,"2.0.0").unwrap();
-            assert_eq!(fs::read(app.join("app.exe")).unwrap(),b"old");
-            if partial { fs::write(app.join("app.exe"),b"new").unwrap(); }
-            else { transaction.apply().unwrap(); assert!(app.join("resources/worker.exe").exists()); }
+        for partial in [true, false] {
+            let (_temp, app, directory) = fixture();
+            let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+            assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
+            if partial {
+                fs::write(app.join("app.exe"), b"new").unwrap();
+            } else {
+                transaction.apply().unwrap();
+                assert!(app.join("resources/worker.exe").exists());
+            }
             drop(transaction);
-            Transaction::recover(&app,&directory).unwrap();
-            assert_eq!(fs::read(app.join("app.exe")).unwrap(),b"old");
-            assert_eq!(fs::read(app.join("user.config")).unwrap(),b"preserve");
+            Transaction::recover(&app, &directory).unwrap();
+            assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
+            assert_eq!(fs::read(app.join("user.config")).unwrap(), b"preserve");
             assert!(!app.join("resources/worker.exe").exists());
-            Transaction::recover(&app,&directory).unwrap();
+            Transaction::recover(&app, &directory).unwrap();
         }
     }
     #[test]
     fn confirmed_update_survives_recovery_and_cannot_confirm_without_apply() {
-        let (_temp,app,directory)=fixture();
-        let mut transaction=Transaction::prepare(&app,&directory,"2.0.0").unwrap();
+        let (_temp, app, directory) = fixture();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
         assert!(transaction.confirm().is_err());
-        transaction.apply().unwrap();transaction.confirm().unwrap();
-        Transaction::recover(&app,&directory).unwrap();
-        assert_eq!(fs::read(app.join("app.exe")).unwrap(),b"new");
-        assert_eq!(fs::read(app.join("resources/worker.exe")).unwrap(),b"worker");
+        transaction.apply().unwrap();
+        transaction.confirm().unwrap();
+        Transaction::recover(&app, &directory).unwrap();
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
+        assert_eq!(
+            fs::read(app.join("resources/worker.exe")).unwrap(),
+            b"worker"
+        );
     }
     #[test]
     fn corrupt_backup_is_rejected_before_restore_changes_any_file() {
-        let (_temp,app,directory)=fixture();
-        let mut transaction=Transaction::prepare(&app,&directory,"2.0.0").unwrap();
+        let (_temp, app, directory) = fixture();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
         transaction.apply().unwrap();
-        fs::write(directory.join("old/app.exe"),b"corrupt").unwrap();
-        assert!(Transaction::recover(&app,&directory).is_err());
-        assert_eq!(fs::read(app.join("app.exe")).unwrap(),b"new");
+        fs::write(directory.join("old/app.exe"), b"corrupt").unwrap();
+        assert!(Transaction::recover(&app, &directory).is_err());
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
         assert!(app.join("resources/worker.exe").exists());
     }
 }
