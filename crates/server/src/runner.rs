@@ -1301,6 +1301,56 @@ mod tests {
         assert!(normal.contains("\"load1\":0.57"), "{normal}");
     }
 
+    #[tokio::test]
+    async fn audit_failure_recovers_after_failed_status_write_becomes_available() {
+        use sea_orm::ConnectionTrait;
+        let scratch = scratch_db().await;
+        let dir = tempfile::tempdir().unwrap();
+        let id = Id::from(9107);
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(id.into()), workspace_id: Set(1), name: Set("update recovery".into()),
+            address: Set(String::new()), port: Set(0), username: Set(String::new()),
+            connection: Set("runner".into()), state: Set("online".into()), group_id: Set(0),
+            description: Set(String::new()), host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()), os: Set(String::new()), arch: Set(String::new()),
+            agent_version: Set("1.0.0".into()), metrics: Set(String::new()),
+            seen_at: Set(0), created_at: Set(0), updated_at: Set(0), version: Set(1),
+            ..Default::default()
+        }).exec(&scratch.db).await.unwrap();
+        // Real database failures at the two distinct writes, without mocking
+        // admission or the persistence code being exercised.
+        scratch.db.execute_unprepared("CREATE TRIGGER fail_audit BEFORE INSERT ON activity BEGIN SELECT RAISE(FAIL, 'audit unavailable'); END").await.unwrap();
+        scratch.db.execute_unprepared("CREATE TRIGGER fail_update_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%failed%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
+        let s = Arc::new(crate::state::State {
+            ids: Arc::new(crate::snowflake::Generator::new(1,std::time::Instant::now()).unwrap()),
+            db: scratch.db.clone(), data_dir: dir.path().into(), instance_id: "update-test".into(),
+            server_mode: true, secure_cookie: false, bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(),true).unwrap(),
+        });
+        let (control, mut receiver) = mpsc::channel(1);
+        live().insert(id.to_string(),Arc::new(Live {
+            control, managed: true, version: "1.0.0".into(),
+            ready: std::sync::atomic::AtomicBool::new(true),
+            failed_version: Mutex::new(None), update_error: Mutex::new(None),
+        }));
+        let scope = Scope { workspace_id: Id::from(1), user: crate::auth::User {
+            id: Id::from(1), email: "test@example.invalid".into(), name: "test".into(), is_superadmin: false,
+        }, permissions: ["hosts.update".into()].into_iter().collect() };
+        let mut request = tokio::spawn(start_update(State(s),scope,Path(("test".into(),id)),Json(UpdateBody {
+            version: "2.0.0".into(),manifest: "{}".into(),signature: "fixture".into(),
+        })));
+        assert!(tokio::time::timeout(Duration::from_millis(300),&mut request).await.is_err(),
+            "admission must keep recovering after audit and status writes both fail");
+        assert!(receiver.try_recv().is_err(),"an unaudited update must never reach the runner");
+        scratch.db.execute_unprepared("DROP TRIGGER fail_update_status").await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_secs(5),request).await.unwrap().unwrap().is_err());
+        let row=hosts::Entity::find_by_id(i64::from(id)).one(&scratch.db).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap()).unwrap().state,"failed");
+        assert!(!UPDATES.lock().unwrap().get(&id.to_string()).is_some_and(|job|job.state=="draining"));
+        live().remove(&id.to_string());
+        UPDATES.lock().unwrap().remove(&id.to_string());
+    }
+
     #[test]
     fn a_reported_hostname_becomes_a_usable_name() {
         assert_eq!(reported_name("  web-01 "), "web-01");

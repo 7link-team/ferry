@@ -57,6 +57,7 @@ jobs:
         run: python scripts/test-runner-update.py
       - name: Whole-task upgrade reservation tests
         run: |
+          cargo test --locked -p ferry-server runner::tests
           cargo test --locked -p ferry-server runner_updates::tests
           cargo test --locked -p ferry-server actions_run::tests
       - name: Native system service lifecycle (Unix)
