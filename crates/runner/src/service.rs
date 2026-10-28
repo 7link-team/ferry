@@ -1,5 +1,7 @@
 //! Native service installation and protected configuration for the runner.
 
+pub(crate) mod supervisor;
+
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -150,6 +152,13 @@ enum Action {
     /// Remove the service registration, preserving host identity and data.
     Uninstall(Identity),
     #[command(hide = true)]
+    Worker {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
+    #[command(hide = true)]
     Run {
         #[arg(long)]
         config: PathBuf,
@@ -196,6 +205,20 @@ pub fn dispatch() -> anyhow::Result<bool> {
         Action::Stop(service) => service.control("stop")?,
         Action::Status(service) => service.control("status")?,
         Action::Uninstall(service) => service.uninstall()?,
+        Action::Worker { config, name } => {
+            let settings = Settings::load(&config)?;
+            anyhow::ensure!(settings.service_name == name, "服务名称与安装配置不一致");
+            let (stop, stopped) = tokio::sync::watch::channel(false);
+            std::thread::spawn(move || {
+                use std::io::Read;
+                let mut byte = [0u8; 1];
+                let _ = std::io::stdin().read(&mut byte);
+                stop.send_replace(true);
+            });
+            tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(
+                crate::run_with_shutdown(crate::Config { server: settings.server, token: settings.token, state_dir: settings.state_dir, managed: true }, stopped)
+            )?;
+        }
         Action::Run { config, name } => {
             validate_name(&name)?;
             #[cfg(windows)]
@@ -204,11 +227,7 @@ pub fn dispatch() -> anyhow::Result<bool> {
             {
                 let settings = Settings::load(&config)?;
                 anyhow::ensure!(settings.service_name == name, "服务名称与安装配置不一致");
-                crate::foreground(crate::Config {
-                    server: settings.server,
-                    token: settings.token,
-                    state_dir: settings.state_dir,
-                })?;
+                supervisor::foreground(config)?;
             }
         }
     }

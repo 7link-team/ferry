@@ -1,7 +1,7 @@
 //! Signed release metadata and payload verification, before any executable switch.
 use anyhow::{Context, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, io::Read, path::Path};
 
@@ -134,6 +134,129 @@ pub(crate) fn verify_files(
         expected,
     )?;
     verified.verify(std::fs::File::open(artifact)?)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Installed {
+    pub(crate) version: String,
+    pub(crate) digest: String,
+}
+
+fn version_dir(root: &Path, installed: &Installed) -> anyhow::Result<std::path::PathBuf> {
+    ensure!(
+        installed.digest.len() == 64
+            && installed
+                .digest
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "版本目录标识无效"
+    );
+    let base = root.join("versions");
+    let dir = base.join(&installed.digest);
+    for path in [&base, &dir] {
+        ensure!(
+            std::fs::symlink_metadata(path)?.file_type().is_dir(),
+            "版本目录不能是符号链接"
+        );
+    }
+    Ok(dir)
+}
+
+pub(crate) fn staged_binary(
+    root: &Path,
+    installed: &Installed,
+) -> anyhow::Result<std::path::PathBuf> {
+    let dir = version_dir(root, installed)?;
+    let bytes = std::fs::read(dir.join("manifest.json"))?;
+    let signature = std::fs::read_to_string(dir.join("manifest.sig"))?;
+    let artifact = verify_catalog(
+        &bytes,
+        &signature,
+        env!("RUNNER_UPDATE_PUBLIC_KEY"),
+        env!("RUNNER_BUILD_TARGET"),
+        "0.0.0-0",
+        &installed.version,
+    )?;
+    ensure!(
+        artifact.sha256 == installed.digest,
+        "版本目录与签名哈希不一致"
+    );
+    let binary = dir.join(if cfg!(windows) {
+        "runner.exe"
+    } else {
+        "runner"
+    });
+    ensure!(
+        std::fs::symlink_metadata(&binary)?.file_type().is_file(),
+        "代理程序必须是普通文件"
+    );
+    artifact.verify(std::fs::File::open(&binary)?)?;
+    Ok(binary)
+}
+
+pub(crate) fn stage(
+    root: &Path,
+    bytes: &[u8],
+    signature: &str,
+    source: &Path,
+    version: &str,
+) -> anyhow::Result<Installed> {
+    use std::io::Write;
+    let artifact = verify_catalog(
+        bytes,
+        signature,
+        env!("RUNNER_UPDATE_PUBLIC_KEY"),
+        env!("RUNNER_BUILD_TARGET"),
+        env!("CARGO_PKG_VERSION"),
+        version,
+    )?;
+    let installed = Installed {
+        version: version.to_owned(),
+        digest: artifact.sha256.clone(),
+    };
+    let base = root.join("versions");
+    std::fs::create_dir_all(&base)?;
+    ensure!(
+        std::fs::symlink_metadata(&base)?.file_type().is_dir(),
+        "版本目录不能是符号链接"
+    );
+    let directory = tempfile::Builder::new()
+        .prefix("staging-")
+        .tempdir_in(&base)?;
+    let binary = directory.path().join(if cfg!(windows) {
+        "runner.exe"
+    } else {
+        "runner"
+    });
+    let mut input = std::fs::File::open(source)?.take(artifact.size + 1);
+    let mut output = std::fs::File::create(&binary)?;
+    std::io::copy(&mut input, &mut output)?;
+    output.sync_all()?;
+    drop(output);
+    artifact.verify(std::fs::File::open(&binary)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700))?;
+    }
+    for (name, data) in [
+        ("manifest.json", bytes),
+        ("manifest.sig", signature.as_bytes()),
+    ] {
+        let mut file = std::fs::File::create(directory.path().join(name))?;
+        file.write_all(data)?;
+        file.sync_all()?;
+    }
+    let target = base.join(&installed.digest);
+    if target.exists() {
+        staged_binary(root, &installed)?;
+    } else {
+        std::fs::rename(directory.path(), &target)?;
+        #[cfg(unix)]
+        std::fs::File::open(&base)?.sync_all()?;
+    }
+    Ok(installed)
 }
 
 #[cfg(test)]

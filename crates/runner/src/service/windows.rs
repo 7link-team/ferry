@@ -204,17 +204,12 @@ fn serve() -> anyhow::Result<()> {
     handle.set_service_status(status(ServiceState::StartPending, 0, 1))?;
     let settings = Settings::load(path)?;
     anyhow::ensure!(settings.service_name == *name, "服务名称与安装配置不一致");
-    let cfg = crate::Config {
-        server: settings.server,
-        token: settings.token,
-        state_dir: settings.state_dir,
-    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     handle.set_service_status(status(ServiceState::Running, 0, 0))?;
     let result = runtime.block_on(async {
-        let execution = crate::run_with_shutdown(cfg, stopped.clone());
+        let execution = supervisor::run(path.clone(), stopped.clone());
         tokio::pin!(execution);
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         let mut checkpoint = 0;

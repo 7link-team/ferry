@@ -68,3 +68,10 @@ Files: `.github/scripts/runner-manifest.mjs`, release/native CI, `crates/runner/
 - CI `40635356494` at `7d03ccf`: Linux, macOS and Windows all passed expanded signed-update verification, actual CLI checks and existing native service/reservation/cancellation regression. Throwaway keys used only in CI; no release key or fixture-key executable is published by these tests.
 - Release pipeline checks package/Cargo/tag agreement, signs the catalog with the existing release key, then verifies with the fixed public key and regenerates metadata to match every artifact. Independent review found no remaining blockers for this stage.
 - This proves update authenticity/integrity/version/platform validation, not automatic service version switching or rollback. Those tasks above remain open.
+
+### Supervisor implementation details
+- Native service entry remains stable and supervises one versioned worker process. The existing runner executable gains a hidden managed-worker entry; normal foreground invocation is unchanged.
+- Parent-to-worker stdin EOF requests graceful stop. Worker-to-parent stdout carries readiness only after authenticated Welcome, and an activation request only after old sessions drain. Logs remain stderr. Unexpected worker exit restarts through the existing native service recovery policy.
+- Signed staged artifacts are immutable under `versions/<sha256>/`; parent re-verifies before launch. Journal atomically records current/previous/pending. Startup discards unconfirmed pending activation and launches last confirmed version. Candidate failure or health timeout rolls back; confirmed version advances only after matching version readiness while child is alive.
+- No direct service-stop/update command will bypass whole-task draining: network activation is requested through the existing authenticated runner control connection after server exclusive reservation (server integration follows the supervisor stage).
+- Tests must exercise real child processes, readiness, failed child, interrupted pending journal, graceful stop, and existing native service recovery on all three CI systems.

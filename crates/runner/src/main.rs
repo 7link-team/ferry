@@ -25,6 +25,8 @@ use tokio_tungstenite::tungstenite::Message;
 #[derive(Parser)]
 #[command(version, about = "Ferry 运维代理")]
 struct Config {
+    #[arg(skip)]
+    managed: bool,
     /// Server base URL, e.g. https://ops.example.com
     #[arg(long, env = "FERRY_SERVER")]
     server: String,
@@ -326,6 +328,9 @@ async fn hold(
     };
     let enrolment = Enrolment::load(&cfg.state_dir).context("注册信息丢失")?;
     tracing::info!(%host_id, "控制连接已建立");
+    if cfg.managed {
+        service::supervisor::emit(&service::supervisor::Event::Ready { version: env!("CARGO_PKG_VERSION").into() })?;
+    }
 
     let session_base = cfg.server.clone();
     let mut report = tokio::time::interval(Duration::from_secs(metrics_seconds.max(5)));
@@ -386,6 +391,7 @@ mod tests {
         let (stop, stopped) = tokio::sync::watch::channel(false);
         let running = tokio::spawn(run_with_shutdown(
             Config {
+                managed: false,
                 server: format!("http://{address}"),
                 token: Some("fixture-token".into()),
                 state_dir: dir.path().to_owned(),
