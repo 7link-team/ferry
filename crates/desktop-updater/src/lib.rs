@@ -1,6 +1,8 @@
 //! Admission policy shared by the unelevated helper and privileged broker.
 use std::io::Read;
 #[cfg(windows)]
+pub mod ipc;
+#[cfg(windows)]
 pub mod maintenance;
 pub mod transaction;
 pub mod transfer;
