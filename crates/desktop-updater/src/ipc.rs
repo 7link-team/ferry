@@ -94,7 +94,7 @@ impl Process {
         let mut exit = FILETIME::default();
         let mut kernel = FILETIME::default();
         let mut user = FILETIME::default();
-        unsafe {
+        let queried = unsafe {
             GetProcessTimes(
                 self.0.as_raw_handle(),
                 &mut creation,
@@ -102,8 +102,8 @@ impl Process {
                 &mut kernel,
                 &mut user,
             ) != 0
-        }
-        &&exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0
+        };
+        queried && exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0
     }
     pub fn matches_image(&self, path: &Path) -> anyhow::Result<bool> {
         let expected = match path.canonicalize() {
