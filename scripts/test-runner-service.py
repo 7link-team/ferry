@@ -8,6 +8,7 @@ import json, os, platform, re, signal, socket, sqlite3, subprocess, sys, tempfil
 sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 from pathlib import Path
+from contextlib import closing
 
 runner = Path(os.environ.get('RUNNER_BINARY', 'target/debug/ferry-runner' + ('.exe' if os.name == 'nt' else ''))).resolve()
 server_binary = Path(os.environ.get('FERRY_BINARY', 'target/debug/ferry-server' + ('.exe' if os.name == 'nt' else ''))).resolve()
@@ -82,9 +83,10 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         # Such an interrupted enrollment must eventually permit regeneration.
         interrupted_token = api('/workspaces/service/runner-tokens', {})
         interrupted_path = '/workspaces/service/runner-tokens/' + interrupted_token['id']
-        with sqlite3.connect(root/'server/ferry.sqlite') as fixture_db:
+        with closing(sqlite3.connect(root/'server/ferry.sqlite')) as fixture_db:
             fixture_db.execute('UPDATE runner_tokens SET used_at=?, expires_at=? WHERE id=?',
                                (int(time.time()*1000), int(time.time()*1000)-1, interrupted_token['id']))
+            fixture_db.commit()
         assert api(interrupted_path)['state']=='expired', 'consumed but unbound token must expire'
         for script in ['install.sh','install.ps1']:
             with urllib.request.urlopen(origin+'/api/runners/'+script) as response:
