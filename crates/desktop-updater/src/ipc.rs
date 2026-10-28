@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::net::windows::named_pipe::{NamedPipeClient, NamedPipeServer, ServerOptions};
 use windows_sys::Win32::{
-    Foundation::{INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT},
+    Foundation::{FILETIME, INVALID_HANDLE_VALUE, LocalFree},
     Globalization::{CSTR_EQUAL, CompareStringOrdinal},
     Security::{
         Authorization::{
@@ -26,8 +26,8 @@ use windows_sys::Win32::{
     System::{
         Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
         Threading::{
-            GetProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
-            PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
+            GetProcessId, GetProcessTimes, OpenProcess, OpenProcessToken,
+            PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
         },
     },
 };
@@ -75,13 +75,7 @@ impl Process {
     }
     pub fn open(pid: u32) -> anyhow::Result<Self> {
         ensure!(pid > 0, "进程标识无效");
-        let handle = unsafe {
-            OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
-                0,
-                pid,
-            )
-        };
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
         ensure!(
             !handle.is_null(),
             "无法查询进程：{}",
@@ -93,7 +87,23 @@ impl Process {
         unsafe { GetProcessId(self.0.as_raw_handle()) }
     }
     pub fn is_running(&self) -> bool {
-        unsafe { WaitForSingleObject(self.0.as_raw_handle(), 0) == WAIT_TIMEOUT }
+        // Ordinary users cannot request SYNCHRONIZE on a SYSTEM process.
+        // Exit time is available with QUERY_LIMITED_INFORMATION and also avoids
+        // treating a process that exited with code STILL_ACTIVE as still alive.
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        unsafe {
+            GetProcessTimes(
+                self.0.as_raw_handle(),
+                &mut creation,
+                &mut exit,
+                &mut kernel,
+                &mut user,
+            ) != 0
+        }
+        &&exit.dwLowDateTime == 0 && exit.dwHighDateTime == 0
     }
     pub fn matches_image(&self, path: &Path) -> anyhow::Result<bool> {
         let expected = match path.canonicalize() {
