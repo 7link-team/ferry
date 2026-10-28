@@ -202,8 +202,8 @@ jobs:
                 output=run_logs(actions_run)
                 assert 'BUILD_FINISHED' in output and 'VERIFY_FINISHED' in output and 'TASK_ARTIFACT' in output
                 assert len(run_status(actions_run)['artifacts'])==1
-                for name in ['build.workdir','verify.workdir']:
-                    assert not Path((root/name).read_text().strip()).exists(), 'job private directory cleanup must finish'
+                for workdir_marker in ['build.workdir','verify.workdir']:
+                    assert not Path((root/workdir_marker).read_text().strip()).exists(), 'job private directory cleanup must finish'
                 print('PASS whole Actions run drains across jobs, artifacts, logs and cleanup; later task stays blocked', flush=True)
 
             wait(lambda: api(update_path)['update']['state']=='succeeded', 'signed version upgrade', seconds=120)
@@ -242,6 +242,7 @@ jobs:
             restored = api(update_path)['update']
             assert restored['version']=='9.9.12' and restored['state'] in ('updating', 'unknown')
             interrupted = pid()
+            assert interrupted > 1, 'must identify actual supervisor before crash injection'
             if system=='Windows': command('taskkill','/PID',str(interrupted),'/F')
             else: os.kill(interrupted, 9)
             wait(lambda: pid() not in (0, interrupted), 'native manager restarts interrupted supervisor')
@@ -295,6 +296,7 @@ jobs:
             print('PASS missing/corrupt/unlaunchable confirmed version recovers bootstrap identity', flush=True)
 
         first = wait(pid, 'service PID')
+        assert first > 1, 'must identify actual service before lifecycle checks'
         # Reinstall must not restart a running agent or change its identity.
         service('install', '--server', origin, '--token', 'unused-token', '--state-dir', state)
         assert pid()==first, 'reinstall interrupted running service'
