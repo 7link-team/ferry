@@ -1351,6 +1351,51 @@ mod tests {
         UPDATES.lock().unwrap().remove(&id.to_string());
     }
 
+    #[tokio::test]
+    async fn recovery_blocks_tasks_until_health_and_durable_terminal_status() {
+        use sea_orm::ConnectionTrait;
+        let scratch = scratch_db().await;
+        let dir = tempfile::tempdir().unwrap();
+        let id = Id::from(9108);
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(id.into()), workspace_id: Set(1), name: Set("update recovery".into()),
+            address: Set(String::new()), port: Set(0), username: Set(String::new()),
+            connection: Set("runner".into()), state: Set("online".into()), group_id: Set(0),
+            description: Set(String::new()), host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()), os: Set(String::new()), arch: Set(String::new()),
+            agent_version: Set("1.0.0".into()), metrics: Set(String::new()),
+            seen_at: Set(0), created_at: Set(0), updated_at: Set(0), version: Set(1),
+            ..Default::default()
+        }).exec(&scratch.db).await.unwrap();
+        let s = Arc::new(crate::state::State {
+            ids: Arc::new(crate::snowflake::Generator::new(1,std::time::Instant::now()).unwrap()),
+            db: scratch.db.clone(), data_dir: dir.path().into(), instance_id: "update-test".into(),
+            server_mode: true, secure_cookie: false, bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(),true).unwrap(),
+        });
+        let job=UpdateJob { request: "recovery".into(),version: "2.0.0".into(),state: "updating".into(),message: String::new() };
+        persist_update(&s,id,&job).await.unwrap();
+        recover_updates(&s).await.unwrap();
+        let mut task=tokio::spawn(async move { crate::runner_updates::lease(&id.to_string()).await });
+        assert!(tokio::time::timeout(Duration::from_millis(100),&mut task).await.is_err(),"offline recovery must exclude new work");
+        let (control, _receiver)=mpsc::channel(1);
+        let peer=Arc::new(Live {
+            control,managed: true,version: "2.0.0".into(),ready: std::sync::atomic::AtomicBool::new(false),
+            failed_version: Mutex::new(None),update_error: Mutex::new(None),
+        });
+        live().insert(id.to_string(),peer.clone());
+        assert!(tokio::time::timeout(Duration::from_millis(100),&mut task).await.is_err(),"unconfirmed connection must not release recovery lock");
+        scratch.db.execute_unprepared("CREATE TRIGGER fail_terminal_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%succeeded%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
+        peer.ready.store(true,std::sync::atomic::Ordering::Release);
+        assert!(tokio::time::timeout(Duration::from_millis(500),&mut task).await.is_err(),"health without durable status must not release recovery lock");
+        scratch.db.execute_unprepared("DROP TRIGGER fail_terminal_status").await.unwrap();
+        drop(tokio::time::timeout(Duration::from_secs(5),task).await.unwrap().unwrap());
+        let row=hosts::Entity::find_by_id(i64::from(id)).one(&scratch.db).await.unwrap().unwrap();
+        assert_eq!(serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap()).unwrap().state,"succeeded");
+        live().remove(&id.to_string());
+        UPDATES.lock().unwrap().remove(&id.to_string());
+    }
+
     #[test]
     fn a_reported_hostname_becomes_a_usable_name() {
         assert_eq!(reported_name("  web-01 "), "web-01");
