@@ -255,7 +255,7 @@ pub async fn token_status(
         "id": Id::from(token.id), "expires_at": token.expires_at, "used_at": token.used_at,
         "host_id": if token.used_by != 0 { token.used_by.to_string() } else { String::new() },
         "host_state": host.map(|h| h.state).unwrap_or_default(),
-        "state": if token.used_by != 0 { "connected" } else if token.used_at == 0 && token.expires_at <= db::now() { "expired" } else { "pending" },
+        "state": if token.used_by != 0 { "connected" } else if token.expires_at <= db::now() { "expired" } else { "pending" },
     })))
 }
 

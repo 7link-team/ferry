@@ -11,6 +11,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 $serverUri = [Uri]$Server
 if (-not $serverUri.IsAbsoluteUri -or $serverUri.Scheme -notin @('http', 'https') -or $serverUri.UserInfo -or $serverUri.Query -or $serverUri.Fragment) { throw 'Server must be an HTTP(S) URL without credentials, query or fragment.' }
+# Server-verified metadata must itself arrive over an authenticated connection.
+if ($serverUri.Scheme -eq 'http' -and $Server -cnotmatch '^http://(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?(?:/|$)') {
+    throw 'Remote servers require HTTPS; HTTP is allowed only on localhost, 127.0.0.1 or [::1].'
+}
 if ($Name -cnotmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$') { throw 'Invalid service name.' }
 if (-not $env:FERRY_TOKEN -or $env:FERRY_TOKEN -cnotmatch '^[a-zA-Z0-9._~-]+$') { throw 'Set FERRY_TOKEN to the enrolment token first.' }
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') { throw 'Only Windows x64 is supported.' }
@@ -98,7 +102,7 @@ try {
     Save-Download $url $binary $size $false
     if ((Get-Item -LiteralPath $binary).Length -ne $size) { throw 'Artifact size mismatch; nothing installed.' }
     if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -cne $lines[2]) { throw 'Artifact SHA256 mismatch; nothing installed.' }
-    Write-Host "Installing Runner $($lines[0]) as $Name…"
+    Write-Host "Installing Runner $($lines[0]) as ${Name}..."
     # The token remains in the inherited environment, never the process argv.
     & $binary service install --server $Server --name $Name
     if ($LASTEXITCODE -ne 0) { throw "Native service installation failed (exit $LASTEXITCODE)." }

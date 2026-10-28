@@ -48,15 +48,24 @@ else:
              ('negative-size', valid.replace(str(len(payload))+'\n', '-1\n'), False),
              ('uppercase-hash', valid.replace(digest, digest.upper()), False),
              ('oversized', valid.replace(str(len(payload))+'\n', '268435457\n'), False)]
+    server_cases = [('remote-http', 'http://example.invalid', False),
+                    ('remote-https', 'https://example.invalid', True),
+                    ('loopback-ipv4', 'http://127.0.0.1:1234', True),
+                    ('loopback-ipv6', 'http://[::1]:1234', True),
+                    ('loopback-prefix-attack', 'http://localhost.evil.invalid', False),
+                    ('loopback-port-attack', 'http://localhost:1234.evil.invalid', False)]
+    cases += [(label, valid, success) for label, _, success in server_cases]
+    servers = {label: url for label, url, _ in server_cases}
     for label, metadata, success in cases:
+        server = servers.get(label, 'http://localhost:1234')
         marker.unlink(missing_ok=True)
         (root / 'metadata').write_text(metadata)
         result = subprocess.run(['/bin/sh', str(repo / 'scripts/runner-install.sh'), '--server',
-                                 'http://localhost:1234', '--name', 'installer-test'],
+                                 server, '--name', 'installer-test'],
                                 env=env, capture_output=True, text=True)
         assert (result.returncode == 0) == success, (label, result.stdout, result.stderr)
         assert marker.exists() == success, (label, 'unverified artifact executed')
         if success:
-            assert marker.read_text().splitlines() == ['service', 'install', '--server', 'http://localhost:1234', '--name', 'installer-test']
+            assert marker.read_text().splitlines() == ['service', 'install', '--server', server, '--name', 'installer-test']
             assert Path(str(marker)+'.token').read_text() == env['FERRY_TOKEN']
         print('PASS', label)

@@ -1,4 +1,5 @@
 import { importResources, exportResources } from "./components/ResourceTransfer";
+import { RunnerConnection } from "./components/RunnerConnection";
 import { DEFAULT_ACTIONS } from "./actions-workflow";
 import { api } from "./api";
 /**
@@ -369,6 +370,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
     hosts: list({
       resource: "hosts",
+      toolbar: { content: { permission: "hosts.enroll", render: reload => <RunnerConnection workspace={workspace} onConnected={reload} /> } },
       rowKey: (row: Host) => row.id,
       filters: [
         { key: "tag_id", label: "标签", type: "select", options: tagOptions(workspace) },
@@ -409,6 +411,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       ],
       actions: [
         { label: "查看", permission: "hosts.read", to: (row: Host) => ({ id: row.id, mode: "view" }) },
+        { label: "接入 Agent", permission: "hosts.enroll", when: (row: Host) => row.connection === "runner", to: (row: Host) => ({ id: row.id, mode: "view" }), query: () => ({ tab: "connect" }) },
         {
           label: "测试连接",
           permission: "hosts.read",

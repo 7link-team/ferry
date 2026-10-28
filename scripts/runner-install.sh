@@ -13,6 +13,23 @@ while [ "$#" -gt 0 ]; do
 done
 case "$server" in http://?*|https://?*) ;; *) fail '--server must be an HTTP(S) URL' ;; esac
 case "$server" in *'?'*|*'#'*|*'@'*|*[[:space:]]*) fail 'Invalid server URL' ;; esac
+# Metadata authenticity relies on the authenticated server connection. Plain
+# HTTP is allowed only for explicit loopback development/native CI endpoints.
+case "$server" in
+    http://*)
+        authority=${server#http://}
+        authority=${authority%%/*}
+        case "$authority" in
+            localhost|127.0.0.1|'[::1]') ;;
+            localhost:*|127.0.0.1:*|'[::1]:'*)
+                port=${authority##*:}
+                case "$port" in ''|*[!0-9]*) fail 'Invalid loopback port' ;; esac
+                [ "${#port}" -le 5 ] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || fail 'Invalid loopback port'
+                ;;
+            *) fail 'Remote servers require HTTPS; HTTP is allowed only on localhost, 127.0.0.1 or [::1]' ;;
+        esac
+        ;;
+esac
 case "$name" in ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9._-]*) fail 'Invalid service name' ;; esac
 [ "${#name}" -le 80 ] || fail 'Service name exceeds 80 characters'
 [ -n "${FERRY_TOKEN:-}" ] || fail 'Set FERRY_TOKEN to the enrolment token first'

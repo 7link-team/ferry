@@ -478,7 +478,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
         .route("/{workspace}/runner-tokens/{id}", get(runner::token_status))
-        .route("/{workspace}/hosts/{id}/runner-update", get(runner::update_status).post(runner::start_update))
+        .route(
+            "/{workspace}/hosts/{id}/runner-update",
+            get(runner::update_status).post(runner::start_update),
+        )
         .route(
             "/{workspace}/pipelines",
             get(pipelines::list).post(pipelines::create),

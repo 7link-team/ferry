@@ -76,10 +76,10 @@ export function Platform({ identity, reload }: { identity: Identity; reload: () 
       <span className="flex-1" /><span className="text-sm text-muted-foreground">{identity.user.name}</span>
       <Button variant="ghost" onClick={() => { void api("/sessions", { method: "DELETE" }).then(reload); }}>退出登录</Button>
     </header>
-    <main className="min-h-0 flex-1 overflow-auto p-5">
-      <h2 className="mb-4 text-lg font-semibold">{labels[item]}</h2>
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
+      <h2 className="mb-4 shrink-0 text-lg font-semibold">{labels[item]}</h2>
       {route.mode === "list" && item !== "settings" ? <ResourceTable key={item} config={lists[item]!} workspace="_platform" permissions={permissions} />
-        : <ResourceForm key={`${item}/${route.id}/${route.mode}`} config={form} workspace="_platform" permissions={permissions} onSaved={() => { if (item === "settings") toast.success("平台设置已保存，立即生效。"); reload(); }} />}
+        : <div className="min-h-0 overflow-auto"><ResourceForm key={`${item}/${route.id}/${route.mode}`} config={form} workspace="_platform" permissions={permissions} onSaved={() => { if (item === "settings") toast.success("平台设置已保存，立即生效。"); reload(); }} /></div>}
     </main>
   </div>;
 }

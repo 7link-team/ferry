@@ -7,7 +7,8 @@
  *   the sticky frame (header, first column, last column, footer)
  *
  * Sticky frame rules, because they are easy to break:
- *   - The page is a 3-row grid (toolbar / scroll / footer) and `min-h-0` is
+ *   - The page fills its parent's remaining height (`flex-1`) and is a
+ *     3-row grid (toolbar / scroll / footer). `min-h-0` and `min-w-0` are
  *     mandatory on the grid and the scroll row. Grid items default to
  *     `min-height: auto`, so without it nothing shrinks, the whole page
  *     scrolls, and all four edges come unstuck.
@@ -229,7 +230,7 @@ export function ResourceTable<T>({
   const columnCount = config.columns.length + 1 + (visibleActions.length ? 1 : 0);
 
   return (
-    <div className="grid min-h-0 grid-rows-[auto_1fr_auto] gap-3">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       <div className="flex flex-col gap-3">
@@ -310,6 +311,7 @@ export function ResourceTable<T>({
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
             canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
             canExport={config.toolbar?.export === true} onChanged={() => { void load(); }} />
+          {config.toolbar?.content && (!config.toolbar.content.permission || permissions.has(config.toolbar.content.permission)) && config.toolbar.content.render(reload)}
           {canCreate && (
             <Button
               size="sm"
@@ -326,7 +328,7 @@ export function ResourceTable<T>({
       {/* ------------------------------------------------------------ 列表 */}
       <div
         ref={scrollRef}
-        className="min-h-0 overflow-auto rounded-lg border border-border bg-card"
+        className="min-h-0 min-w-0 overflow-auto rounded-lg border border-border bg-card"
       >
         <table className="w-full min-w-max border-separate border-spacing-0 text-sm">
           <thead>

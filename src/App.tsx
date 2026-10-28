@@ -11,6 +11,7 @@ import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
 import { DeploymentDetail } from "./components/DeploymentDetail";
 import { PipelineRunDetail } from "./components/PipelineRunDetail";
+import { RunnerConnection } from "./components/RunnerConnection";
 import { HostFiles } from "./components/HostFiles";
 import { ResourceForm } from "./components/ResourceForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -308,7 +309,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           </div>
           {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
-              <div className="flex min-h-0 flex-col">
+              <div className="flex min-h-0 min-w-0 flex-col">
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.slug} workspace={current.slug} />}
               {(preferences || preferencesError) ? <ResourceTable
                 key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
@@ -366,8 +367,23 @@ function HostDetail({
   // `?tab=` rather than component state: a shared link should reopen on the
   // terminal if that is what the sender was looking at.
   const [tab, setTab] = useQueryValue("tab", "info");
+  const canEnroll = permissions.has("hosts.enroll");
+  const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string }>();
+  const [connectionError, setConnectionError] = useState("");
+  useEffect(() => {
+    setConnection(undefined); setConnectionError("");
+    if (!canEnroll) return;
+    const controller = new AbortController();
+    void api<{ connection: string }>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}`, { signal: controller.signal })
+      .then(host => { if (!controller.signal.aborted) setConnection({ workspace, hostId, kind: host.connection }); })
+      .catch(cause => { if (!controller.signal.aborted) setConnectionError(errorText(cause)); });
+    return () => controller.abort();
+  }, [workspace, hostId, canEnroll]);
+  const canConnect = canEnroll && connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner";
+
   const panes = [
     { value: "info", label: "信息", enabled: true },
+    { value: "connect", label: "接入 Agent", enabled: canConnect },
     { value: "terminal", label: "终端", enabled: permissions.has("hosts.terminal") },
     { value: "files", label: "文件", enabled: permissions.has("hosts.files") },
   ].filter((pane) => pane.enabled);
@@ -383,9 +399,13 @@ function HostDetail({
         ))}
       </TabsList>
       <TabsContent value="info" className="min-h-0 overflow-auto">
+        {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">无法确认 Agent 接入方式：{connectionError}</p>}
         {form && (
           <ResourceForm config={form} workspace={workspace} permissions={permissions} />
         )}
+      </TabsContent>
+      <TabsContent value="connect" className="min-h-0 overflow-auto">
+        {active === "connect" && canConnect && <div className="max-w-2xl p-1"><RunnerConnection workspace={workspace} hostId={hostId} inline /></div>}
       </TabsContent>
       {/* Mounted only while selected: an unseen tab must not hold a pty open. */}
       <TabsContent value="terminal" className="min-h-0">

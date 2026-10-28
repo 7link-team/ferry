@@ -25,6 +25,34 @@ import time
 import urllib.request
 import uuid
 
+def token_allows_metadata(authorization, enrollment, status_fetch):
+    """Keep the fixture's metadata eligibility identical to production tokens."""
+    if authorization != ('Bearer ' + enrollment['token']).encode(): return False
+    status = status_fetch(enrollment['id'])
+    return status['state'] == 'pending' and status['used_at'] == 0 and status['expires_at'] > int(time.time() * 1000)
+
+
+# Lightweight executable regression for this fixture's authentication boundary.
+# Native runs below additionally query the real backend token status endpoint.
+if sys.argv[1:] == ['--check-token-gate']:
+    enrollment = {'id': 'fixture-token-id', 'token': 'fixture-secret'}
+    pending = {'state': 'pending', 'used_at': 0, 'expires_at': int(time.time() * 1000) + 60000}
+    for label, status, expected in [
+        ('pending', pending, True),
+        ('used', dict(pending, state='connected', used_at=1), False),
+        ('expired', dict(pending, state='expired', expires_at=1), False),
+        ('used-without-host', dict(pending, used_at=1), False),
+    ]:
+        def status_fetch(token_id):
+            assert token_id == enrollment['id']
+            return status
+        assert token_allows_metadata(b'Bearer fixture-secret', enrollment, status_fetch) == expected, label
+        print('PASS token metadata gate', label)
+    assert not token_allows_metadata(b'Bearer wrong-token', enrollment, lambda _: pending)
+    print('PASS token metadata gate invalid token')
+    sys.exit(0)
+
+
 sys.stdout.reconfigure(encoding='utf-8', errors='backslashreplace')
 sys.stderr.reconfigure(encoding='utf-8', errors='backslashreplace')
 repo = Path(__file__).resolve().parent.parent
@@ -150,7 +178,10 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
                       'password':'temporary-bootstrap-password','token':(root/'server/setup-token').read_text().strip()})
         api('/workspaces', {'name':'Bootstrap','slug':'bootstrap'})
         host = api('/workspaces/bootstrap/hosts', {'name':'Bootstrap runner','connection':'runner'})['id']
-        token = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})['token']
+        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        token = enrollment['token']
+        def token_status(token_id):
+            return api('/workspaces/bootstrap/runner-tokens/' + token_id)
         expected_target = {
             ('Linux','x86_64'):'x86_64-unknown-linux-gnu', ('Linux','aarch64'):'aarch64-unknown-linux-gnu',
             ('Darwin','x86_64'):'x86_64-apple-darwin', ('Darwin','arm64'):'aarch64-apple-darwin',
@@ -172,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
                 if path.startswith('/api/runners/install/'):
                     fields = bytes(header).split(b'\r\n\r\n', 1)[0].split(b'\r\n')[1:]
                     headers = {k.lower():v.strip() for field in fields for k, v in [field.split(b':', 1)]}
-                    accepted = path == '/api/runners/install/' + expected_target and headers.get(b'authorization') == ('Bearer ' + token).encode()
+                    accepted = path == '/api/runners/install/' + expected_target and token_allows_metadata(headers.get(b'authorization'), enrollment, token_status)
                     metadata_requests.append(accepted)
                     body = f'{version}\n{binary_url}\n{digest}\n{len(payload)}\n'.encode() if accepted else b'unauthorized'
                     status = b'200 OK' if accepted else b'401 Unauthorized'
@@ -212,7 +243,9 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
             install_args = ['/bin/sh', repo/'scripts/runner-install.sh', '--server', origin, '--name', name]
         host_path = '/workspaces/bootstrap/hosts/' + host
         update_path = host_path + '/runner-update'
-        command(*install_args, env=installer_env, timeout=150)
+        installed = command(*install_args, env=installer_env, timeout=150)
+        if windows:
+            assert f'Installing Runner {version} as {name}...' in installed.stdout, installed.stdout
         wait(lambda: api(host_path)['state'] == 'online', 'bootstrap service enrols automatically')
         wait(lambda: api(update_path)['ready'], 'managed service authenticates worker readiness')
         assert api(update_path)['supported'] is True
@@ -221,12 +254,27 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         assert first_pid > 0
         assert metadata_requests == [True]
         print('PASS bootstrap verifies HTTPS artifact, installs native service and enrols intended host', flush=True)
+        assert token_status(enrollment['id'])['state'] == 'connected'
+        used_command = command(*install_args, env=installer_env, timeout=150, check=False)
+        assert used_command.returncode != 0, 'consumed token must reject the old installation command'
+        assert '401' in used_command.stdout + used_command.stderr, (used_command.stdout, used_command.stderr)
+        assert metadata_requests == [True, False]
+        assert service_pid() == first_pid
+        assert (state/'runner.json').read_bytes() == identity
+        assert api(host_path)['state'] == 'online' and api(update_path)['ready']
+        print('PASS consumed installation command returns 401 and preserves the healthy native service', flush=True)
+        # A fresh command authorizes the download, but existing native identity
+        # means reinstall must not consume its newly generated enrolment token.
+        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        installer_env['FERRY_TOKEN'] = enrollment['token']
         command(*install_args, env=installer_env, timeout=150)
         assert service_pid() == first_pid, 'reinstall restarted the service'
         assert (state/'runner.json').read_bytes() == identity, 'reinstall replaced identity'
         assert api(host_path)['state'] == 'online'
-        assert metadata_requests == [True, True]
-        print('PASS repeated bootstrap preserves native service PID and enrolled host identity', flush=True)
+        assert token_status(enrollment['id'])['state'] == 'pending'
+        assert token_status(enrollment['id'])['used_at'] == 0
+        assert metadata_requests == [True, False, True]
+        print('PASS fresh installation command preserves native PID/host identity without consuming its token', flush=True)
         artifact['bytes'] = corrupt
         rejected = command(*install_args, env=installer_env, timeout=150, check=False)
         assert rejected.returncode != 0, 'tampered executable was accepted'
@@ -234,7 +282,8 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         assert service_pid() == first_pid
         assert (state/'runner.json').read_bytes() == identity
         assert api(host_path)['state'] == 'online' and api(update_path)['ready']
-        assert metadata_requests == [True, True, True]
+        assert metadata_requests == [True, False, True, True]
+        assert token_status(enrollment['id'])['state'] == 'pending'
         print('PASS tampered download rejected before execution; original native service remains healthy', flush=True)
     except Exception:
         log.flush()

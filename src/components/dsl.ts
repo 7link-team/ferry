@@ -73,6 +73,7 @@ export interface ListConfig<T> {
   actions?: RowAction<T>[];
   bulk?: BulkAction[];
   toolbar?: {
+    content?: { permission?: string; render: (reload: () => void) => ReactNode };
     create?: boolean | { label: string };
     import?: boolean;
     export?: boolean;

@@ -279,7 +279,10 @@ async fn run_with_shutdown(
     );
     while sessions.join_next().await.is_some() {}
     if let Some(candidate) = activation {
-        service::supervisor::emit(&service::supervisor::Event::Activate { version: candidate.version, digest: candidate.digest })?;
+        service::supervisor::emit(&service::supervisor::Event::Activate {
+            version: candidate.version,
+            digest: candidate.digest,
+        })?;
     }
     Ok(())
 }
@@ -342,10 +345,22 @@ async fn hold(
     let enrolment = Enrolment::load(&cfg.state_dir).context("注册信息丢失")?;
     tracing::info!(%host_id, "控制连接已建立");
     if cfg.managed {
-        service::supervisor::emit(&service::supervisor::Event::Ready { version: env!("CARGO_PKG_VERSION").into() })?;
+        service::supervisor::emit(&service::supervisor::Event::Ready {
+            version: env!("CARGO_PKG_VERSION").into(),
+        })?;
         let mut confirmation = cfg.confirmation.clone().context("缺少服务确认通道")?;
-        confirmation.wait_for(|confirmed| *confirmed).await.context("服务启动器未确认版本")?;
-        send(&mut socket, &wire::Report::UpdateHealth { version: env!("CARGO_PKG_VERSION").into(), failed_version: cfg.failed_version.clone() }).await?;
+        confirmation
+            .wait_for(|confirmed| *confirmed)
+            .await
+            .context("服务启动器未确认版本")?;
+        send(
+            &mut socket,
+            &wire::Report::UpdateHealth {
+                version: env!("CARGO_PKG_VERSION").into(),
+                failed_version: cfg.failed_version.clone(),
+            },
+        )
+        .await?;
     }
 
     let session_base = cfg.server.clone();

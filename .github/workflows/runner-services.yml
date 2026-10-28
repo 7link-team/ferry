@@ -48,6 +48,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - name: Generated install commands (including native Windows PowerShell)
+        run: npx vitest run src/components/RunnerConnection.test.tsx
       - run: node --test .github/scripts/check-runner-manifest.mjs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

@@ -3,7 +3,7 @@
 macOS uses a per-user LaunchAgent. Linux and Windows require service-install privileges.
 Run after cargo build -p ferry-server -p ferry-runner.
 """
-import json, os, platform, re, signal, socket, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
+import json, os, platform, re, signal, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
 
 sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -78,6 +78,14 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         token = enrollment['token']
         token_path = '/workspaces/service/runner-tokens/'+enrollment['id']
         assert api(token_path)['state']=='pending'
+        # Registration can consume a token before the host transaction fails.
+        # Such an interrupted enrollment must eventually permit regeneration.
+        interrupted_token = api('/workspaces/service/runner-tokens', {})
+        interrupted_path = '/workspaces/service/runner-tokens/' + interrupted_token['id']
+        with sqlite3.connect(root/'server/ferry.sqlite') as fixture_db:
+            fixture_db.execute('UPDATE runner_tokens SET used_at=?, expires_at=? WHERE id=?',
+                               (int(time.time()*1000), int(time.time()*1000)-1, interrupted_token['id']))
+        assert api(interrupted_path)['state']=='expired', 'consumed but unbound token must expire'
         for script in ['install.sh','install.ps1']:
             with urllib.request.urlopen(origin+'/api/runners/'+script) as response:
                 assert response.headers['Content-Type'].startswith('text/') and len(response.read())>100
