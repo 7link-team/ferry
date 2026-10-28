@@ -74,6 +74,9 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         sign('sign', '--', '--private-key-path', root/'key', '--password', '', path)
     try:
         trust(True)
+        if system == 'Darwin':
+            privileged('security', 'dump-trust-settings', '-d')
+            privileged('security', 'verify-cert', '-c', root/'tls.crt', '-p', 'ssl', '-s', 'localhost')
         args = [str(Path(shutil.which('python') or shutil.which('python3'))), 'scripts/test-runner-service.py']
         if os.name != 'nt':
             run('sudo', '-n', 'env', 'RUNNER_TEST_SYSTEM_SERVICE=1', f'RUNNER_BINARY={baseline}', f'RUNNER_UPGRADE_FIXTURES={root}', *args)

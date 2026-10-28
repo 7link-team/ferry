@@ -3,7 +3,10 @@
 macOS uses a per-user LaunchAgent. Linux and Windows require service-install privileges.
 Run after cargo build -p ferry-server -p ferry-runner.
 """
-import json, os, platform, re, socket, subprocess, tempfile, time, urllib.request, http.cookiejar
+import json, os, platform, re, socket, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
+
+sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
 from pathlib import Path
 
 runner = Path(os.environ.get('RUNNER_BINARY', 'target/debug/ferry-runner' + ('.exe' if os.name == 'nt' else ''))).resolve()
@@ -100,12 +103,26 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             import runpy
             ws_module = runpy.run_path(str(Path(__file__).with_name('ws-probe.py')))
             terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
-            list(terminal.frames(1))
+            def terminal_output(seconds):
+                output = bytearray()
+                for opcode, data in terminal.frames(seconds):
+                    if opcode == ws_module['BINARY']:
+                        output.extend(data)
+                        # ConPTY asks its terminal emulator for the cursor position.
+                        # Unlike xterm.js, this raw WebSocket client must reply itself.
+                        if b'\x1b[6n' in output:
+                            terminal.send(ws_module['BINARY'], b'\x1b[1;1R')
+                    elif opcode == ws_module['TEXT']:
+                        print('Terminal control:', repr(data), flush=True)
+                return bytes(output)
+            initial_output = terminal_output(2)
+            print('Terminal initial output:', repr(initial_output), flush=True)
             upgrade('9.9.9')
             time.sleep(.5)
             assert api(update_path)['update']['state']=='draining', 'upgrade must wait for existing terminal'
             terminal.send(ws_module['BINARY'], b'echo DRAIN-CONTINUES\r\n')
-            output = b''.join(data for opcode,data in terminal.frames(2) if opcode==ws_module['BINARY'])
+            output = terminal_output(3)
+            print('Terminal drain output:', repr(output), flush=True)
             assert b'DRAIN-CONTINUES' in output, 'active terminal must remain usable during drain'
             assert api(update_path)['update']['state']=='draining'
             terminal.close()
@@ -174,7 +191,9 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         except Exception as diagnostic: print('Diagnostic error:', type(diagnostic).__name__, flush=True)
         raise
     finally:
+        if 'terminal' in locals(): terminal.close()
         service('uninstall', check=False)
+        wait(lambda: pid()==0, 'test service cleanup stops supervisor')
         server.terminate()
         server.wait(timeout=30)
         log.close()
