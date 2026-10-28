@@ -69,6 +69,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: pipeline-editing
+          cache-on-failure: true
       - name: Install live pipeline harness dependencies
         run: |
           sudo apt-get update

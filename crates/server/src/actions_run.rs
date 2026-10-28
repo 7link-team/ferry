@@ -960,19 +960,25 @@ mod tests {
         options.max_connections(1);
         let db = sea_orm::Database::connect(options).await.unwrap();
         let jobs = vec![test_job("database-user", &[])];
+        let owns_connection = std::sync::atomic::AtomicBool::new(false);
+        let status_started = tokio::sync::Notify::new();
         let (_stop, mut stop) = tokio::sync::watch::channel(false);
         let execution = schedule_jobs(
             &jobs,
             &mut stop,
             || async {
+                if owns_connection.load(std::sync::atomic::Ordering::SeqCst) {
+                    status_started.notify_one();
+                }
                 db.execute_unprepared("SELECT 1").await?;
                 Ok(true)
             },
             |_, _, _| async {
                 let tx = db.begin().await?;
-                // The scheduler's 100ms status poll must wait for this same
-                // pool slot, while continuing to poll this job to release it.
-                tokio::time::sleep(Duration::from_millis(250)).await;
+                owns_connection.store(true, std::sync::atomic::Ordering::SeqCst);
+                // Release only after the scheduler starts a competing status
+                // read. It must still poll this job while that read is pending.
+                status_started.notified().await;
                 tx.rollback().await?;
                 Ok(success())
             },

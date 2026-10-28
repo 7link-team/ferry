@@ -117,7 +117,7 @@ jobs:
 
  await page.getByRole('button',{name:'创建',exact:true}).click();
  await page.waitForURL('**/actions/build/pipelines');
- const list=await(await context.request.get(origin+'/api'+root+'/pipelines')).json();const pipeline=list.items.find(row=>row.name==='Canvas pipeline');assert(pipeline);assert(pipeline.graph_layout.build && pipeline.graph_layout.build.x!==24, "dragged layout was not saved");assert.equal(pipeline.graph_layout.build.x,keyboardX,"keyboard layout was not saved");
+ const list=await(await context.request.get(origin+'/api'+root+'/pipelines')).json();const pipeline=list.items.find(row=>row.name==='Canvas pipeline');assert(pipeline);assert(pipeline.graph_layout.build && pipeline.graph_layout.build.x!==24, "dragged layout was not saved");assert(Math.abs(pipeline.graph_layout.build.x-keyboardX)<0.001,"keyboard layout was not saved (CSS serializes coordinates to three decimals)");
  await page.goto(origin+'/actions/build/pipelines/'+pipeline.id+'/edit');
  await page.getByRole('button',{name:'Compile edited',exact:true}).waitFor();
  await page.getByRole('button',{name:/Compile source/}).click();
