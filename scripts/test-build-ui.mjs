@@ -89,11 +89,11 @@ try {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const assets = []; page.on('request', (request) => assets.push(request.url()));
   await page.goto(`${origin}/ops/build/repositories`);
-  await page.getByRole('button', { name: '创建', exact: true }).waitFor();
+  await page.getByRole('button', { name: '创建连接', exact: true }).waitFor();
   let releasePreferences;
   const preferencesGate = new Promise(resolve => { releasePreferences = resolve; });
   await page.route('**/preferences', async route => { await preferencesGate; await route.continue(); });
-  await page.getByRole('button', { name: '创建', exact: true }).click();
+  await page.getByRole('button', { name: '创建连接', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('UI repository');
   await page.getByRole('combobox', {name:'代码平台',exact:true}).selectOption('git');
   await page.getByLabel('Git 仓库地址（可选）', { exact: true }).fill(`http://127.0.0.1:${gitPort}/source.git`);

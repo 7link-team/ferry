@@ -89,7 +89,7 @@ jobs:
         if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         run: |
           result=0
-          for suite in actions-canvas named-connection-ui repository-auth-ui actions-ui marketplace-ui; do
+          for suite in actions-canvas named-connection-ui repository-auth-ui actions-ui marketplace-ui templates-ui build-ui; do
             node "scripts/test-$suite.mjs" || result=1
           done
           exit "$result"

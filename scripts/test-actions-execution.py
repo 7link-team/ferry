@@ -68,6 +68,9 @@ def accept(context):
 
     mixed_workflow = json.loads(json.dumps(workflow))
     mixed_workflow['jobs']['right']['steps'].insert(0, {'run': 'test "$(cat payload.txt)" = local-private-repository; echo LEGACY_SOURCE_PRESERVED'})
+    # Existing Actions jobs still request checkout explicitly. Server-side
+    # cloning supplies act's repository source, not its isolated job workspace.
+    mixed_workflow['jobs']['right']['steps'].insert(0, {'uses': 'actions/checkout@v4'})
     mixed_body = dict(body, name='Mixed legacy and node sources', repository_id=context['repo_id'], definition=json.dumps(mixed_workflow))
     mixed_pipeline = create('pipelines', mixed_body)
     mixed_run = trigger(mixed_pipeline)['id']
