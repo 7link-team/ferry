@@ -1,6 +1,16 @@
 //! Bounded package transfer for the local helper/broker connection.
+use anyhow::ensure;
 use std::path::Path;
 use tokio::io::AsyncRead;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Header {
+    version: String,
+    signature: String,
+    size: u64,
+}
 
 pub struct VerifiedDownload {
     version: String,
@@ -18,11 +28,61 @@ impl VerifiedDownload {
 /// The caller owns and protects the staging directory and supplies the
 /// installed version from trusted registration. Neither comes from the peer.
 pub async fn receive(
-    _source: impl AsyncRead + Unpin,
-    _directory: &Path,
-    _current: &str,
+    mut source: impl AsyncRead + Unpin,
+    directory: &Path,
+    current: &str,
 ) -> anyhow::Result<VerifiedDownload> {
-    anyhow::bail!("package transfer not implemented")
+    tokio::time::timeout(std::time::Duration::from_secs(300), async {
+        let length = source.read_u32_le().await? as usize;
+        ensure!(length > 0 && length <= 16384, "更新请求头大小无效");
+        let mut bytes = vec![0; length];
+        source.read_exact(&mut bytes).await?;
+        let header: Header = serde_json::from_slice(&bytes)?;
+        ensure!(
+            header.size > 0 && header.size <= super::MAX_PACKAGE_BYTES,
+            "更新包大小无效"
+        );
+        ensure!(
+            header.version.len() <= 128 && header.signature.len() <= 8192,
+            "更新元数据过大"
+        );
+        ensure!(
+            semver::Version::parse(&header.version)?
+                .cmp_precedence(&semver::Version::parse(current)?)
+                .is_gt(),
+            "更新版本必须高于当前版本"
+        );
+        let temporary = tempfile::NamedTempFile::new_in(directory)?;
+        let mut output = tokio::fs::File::from_std(temporary.reopen()?);
+        let mut remaining = header.size;
+        let mut buffer = [0u8; 65536];
+        while remaining > 0 {
+            let count = remaining.min(buffer.len() as u64) as usize;
+            source.read_exact(&mut buffer[..count]).await?;
+            output.write_all(&buffer[..count]).await?;
+            remaining -= count as u64;
+        }
+        output.flush().await?;
+        output.sync_all().await?;
+        drop(output);
+        let current = current.to_owned();
+        // Hash/signature verification can be expensive; never block the pipe
+        // runtime. The task only owns staging bytes, not an install transaction.
+        tokio::task::spawn_blocking(move || {
+            super::verify_package(
+                temporary.reopen()?,
+                &header.signature,
+                &header.version,
+                &current,
+            )?;
+            Ok(VerifiedDownload {
+                version: header.version,
+                file: temporary,
+            })
+        })
+        .await?
+    })
+    .await?
 }
 
 #[cfg(test)]
