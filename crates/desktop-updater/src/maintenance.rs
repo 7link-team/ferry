@@ -1,16 +1,39 @@
 //! Windows installation-wide exclusion shared by desktop and updater.
-use std::{fs::File, path::Path};
+use std::{
+    fs::File,
+    os::windows::fs::{MetadataExt, OpenOptionsExt},
+    path::Path,
+};
+use windows_sys::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ};
 
 /// The installer provisions this file outside the replaceable application files.
 /// Desktop users receive read permission; only the updater may open it for write.
-pub struct InstallationLock(File);
+pub struct InstallationLock {
+    _handle: File,
+}
 
 impl InstallationLock {
-    pub fn running(_path: &Path) -> anyhow::Result<Self> {
-        anyhow::bail!("installation lock not implemented")
+    pub fn running(path: &Path) -> anyhow::Result<Self> {
+        Self::open(path, false)
     }
-    pub fn updating(_path: &Path) -> anyhow::Result<Self> {
-        anyhow::bail!("installation lock not implemented")
+    pub fn updating(path: &Path) -> anyhow::Result<Self> {
+        Self::open(path, true)
+    }
+    fn open(path: &Path, updating: bool) -> anyhow::Result<Self> {
+        // Sharing is enforced atomically by the kernel across user sessions.
+        // Do not create/truncate: an absent registration must fail closed.
+        let handle = File::options()
+            .read(true)
+            .write(updating)
+            .share_mode(if updating { 0 } else { FILE_SHARE_READ })
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)?;
+        let metadata = handle.metadata()?;
+        anyhow::ensure!(
+            metadata.is_file() && metadata.file_attributes() & 0x400 == 0,
+            "安装锁不能是目录或重解析点"
+        );
+        Ok(Self { _handle: handle })
     }
 }
 
