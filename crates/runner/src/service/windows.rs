@@ -23,7 +23,7 @@ impl Identity {
         }
         Ok(ServiceManager::local_computer(None::<&str>, access)?)
     }
-    fn register(&self, binary: &Path, config: &Path) -> anyhow::Result<()> {
+    pub(super) fn register(&self, binary: &Path, config: &Path) -> anyhow::Result<()> {
         let manager = self.manager(true)?;
         let access = ServiceAccess::QUERY_CONFIG
             | ServiceAccess::QUERY_STATUS
@@ -94,7 +94,7 @@ impl Identity {
         service.set_failure_actions_on_non_crash_failures(true)?;
         Ok(())
     }
-    fn control(&self, action: &str) -> anyhow::Result<()> {
+    pub(super) fn control(&self, action: &str) -> anyhow::Result<()> {
         let manager = self.manager(false)?;
         let service = manager.open_service(
             &self.name,
@@ -126,7 +126,7 @@ impl Identity {
         }
         Ok(())
     }
-    fn uninstall(&self) -> anyhow::Result<()> {
+    pub(super) fn uninstall(&self) -> anyhow::Result<()> {
         let manager = self.manager(false)?;
         let service = match manager.open_service(
             &self.name,
