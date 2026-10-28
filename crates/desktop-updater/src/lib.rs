@@ -1,5 +1,6 @@
 //! Admission policy shared by the unelevated helper and privileged broker.
 use std::io::Read;
+pub mod transaction;
 
 pub const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
