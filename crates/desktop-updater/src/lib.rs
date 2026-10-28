@@ -99,7 +99,8 @@ pub fn extract_package(
     let mut expanded = 0u64;
     for index in 0..archive.len() {
         let entry = archive.by_index(index)?;
-        let name = entry.name().strip_suffix('/').unwrap_or(entry.name());
+        let entry_name = entry.name()?;
+        let name = entry_name.strip_suffix('/').unwrap_or(&entry_name);
         let path = safe_entry_path(name)?;
         ensure!(names.insert(name.to_lowercase()), "更新包存在重复文件名");
         let kind = entry.unix_mode().unwrap_or(0) & 0o170000;
