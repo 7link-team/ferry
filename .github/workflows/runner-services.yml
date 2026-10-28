@@ -66,5 +66,15 @@ jobs:
       - name: Native system service lifecycle (Windows)
         if: runner.os == 'Windows'
         run: python scripts/test-runner-service.py
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - name: Build Actions worker for whole-task upgrade acceptance
+        if: runner.os == 'Linux'
+        run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh
       - name: Signed service upgrade and rollback
+        env:
+          RUNNER_TEST_ACTIONS: ${{ runner.os == 'Linux' && '1' || '' }}
         run: python scripts/test-runner-upgrade.py

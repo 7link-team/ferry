@@ -101,6 +101,56 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
                 result = api(update_path, body)
                 assert result['state']=='draining'
                 return result
+            actions_run = None
+            if os.environ.get('RUNNER_TEST_ACTIONS') == '1':
+                import shlex
+                def marker(name): return shlex.quote(str(root/name))
+                workflow = f"""name: upgrade drain acceptance
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - run: |
+          pwd > {marker('build.workdir')}
+          touch {marker('build.started')}
+          while [ ! -f {marker('build.release')} ]; do sleep 0.1; done
+          echo TASK_ARTIFACT > proof.txt
+          echo BUILD_FINISHED
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proof
+          path: proof.txt
+          if-no-files-found: error
+  verify:
+    needs: build
+    runs-on: self-hosted
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: proof
+          path: received
+      - run: |
+          grep TASK_ARTIFACT received/proof.txt
+          pwd > {marker('verify.workdir')}
+          touch {marker('verify.started')}
+          while [ ! -f {marker('verify.release')} ]; do sleep 0.1; done
+          echo VERIFY_FINISHED
+"""
+                def pipeline(document, jobs):
+                    return api('/workspaces/service/pipelines', {'name':'upgrade acceptance',
+                        'target_kind':'host','target_ref':host,'definition_format':'github-actions','definition':document,
+                        'executor_bindings':[{'job_id':job,'target_kind':'host','target_ref':host,'image':'host'} for job in jobs]})['id']
+                def trigger(pipeline_id):
+                    return api('/workspaces/service/pipelines/'+pipeline_id+'/actions/run', {})['id']
+                def run_status(run): return api('/workspaces/service/pipeline-runs/'+run)
+                def run_logs(run): return ''.join(item['chunk'] for item in api('/workspaces/service/pipeline-runs/'+run+'/logs?after=0')['items'])
+                actions_run = trigger(pipeline(workflow, ['build','verify']))
+                def build_started():
+                    status = run_status(actions_run)
+                    assert status['state'] not in ('failed','cancelled'), run_logs(actions_run)
+                    return (root/'build.started').exists()
+                wait(build_started, 'first Actions job starts before upgrade', seconds=120)
             import runpy
             ws_module = runpy.run_path(str(Path(__file__).with_name('ws-probe.py')))
             terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
@@ -128,8 +178,30 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert api(update_path)['update']['state']=='draining'
             terminal.close()
             print('PASS upgrade waits for active terminal without interrupting output', flush=True)
+            if actions_run:
+                assert api(update_path)['update']['state']=='draining'
+                later_workflow = f"name: later task\non: workflow_dispatch\njobs:\n  later:\n    runs-on: self-hosted\n    steps:\n      - run: touch {marker('later.started')}\n"
+                later_run = trigger(pipeline(later_workflow, ['later']))
+                assert not (root/'later.started').exists()
+                (root/'build.release').touch()
+                wait(lambda: (root/'verify.started').exists(), 'later job in reserved task can execute while upgrade is waiting', seconds=120)
+                assert api(update_path)['update']['state']=='draining', 'upgrade must wait through dependent job and artifact transfer'
+                assert not (root/'later.started').exists(), 'new task must not overtake pending upgrade'
+                (root/'verify.release').touch()
+                wait(lambda: run_status(actions_run)['state']=='succeeded', 'complete Actions run before upgrade', seconds=120)
+                output=run_logs(actions_run)
+                assert 'BUILD_FINISHED' in output and 'VERIFY_FINISHED' in output and 'TASK_ARTIFACT' in output
+                assert len(run_status(actions_run)['artifacts'])==1
+                for name in ['build.workdir','verify.workdir']:
+                    assert not Path((root/name).read_text().strip()).exists(), 'job private directory cleanup must finish'
+                print('PASS whole Actions run drains across jobs, artifacts, logs and cleanup; later task stays blocked', flush=True)
+
             wait(lambda: api(update_path)['update']['state']=='succeeded', 'signed version upgrade', seconds=120)
             assert api(update_path)['agent_version']=='9.9.9'
+            if actions_run:
+                wait(lambda: run_status(later_run)['state']=='succeeded', 'queued task runs after confirmed upgrade', seconds=120)
+                assert (root/'later.started').exists()
+
             journal = json.loads((state/'versions.json').read_text())
             assert journal['current']['version']=='9.9.9' and journal['pending'] is None
             assert (state/'runner.json').read_bytes()==original
