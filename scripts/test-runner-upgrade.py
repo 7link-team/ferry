@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     (source/'desktop').mkdir(parents=True)
     shutil.copy2(repo/'desktop/tauri.conf.json', source/'desktop/tauri.conf.json')
     shutil.copy2(repo/'Cargo.lock', source/'Cargo.lock')
-    manifest = (repo/'Cargo.toml').read_text(encoding='utf-8').replace('"crates/server", ', '')
+    manifest = (repo/'Cargo.toml').read_text(encoding='utf-8').replace('"crates/server", ', '').replace(', "crates/desktop-updater"', '')
     original_main = (source/'crates/runner/src/main.rs').read_text(encoding='utf-8')
     for version, filename, stall in [('9.9.9', 'candidate', False), ('9.9.12', 'stalled', True)]:
         (source/'Cargo.toml').write_text(re.sub(r'^version = "[^"]+"$', f'version = "{version}"', manifest, count=1, flags=re.M))

@@ -1,0 +1,30 @@
+name: Desktop updater service
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feat/**"]
+    paths:
+      - "crates/desktop-updater/**"
+      - "scripts/test-desktop-update-policy.py"
+      - ".github/workflows/desktop-updater.yml"
+permissions:
+  contents: read
+jobs:
+  policy:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-update-service
+      - run: python scripts/test-desktop-update-policy.py
