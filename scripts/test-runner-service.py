@@ -93,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         assert api(host_path)['state']=='online', 'invalid update must preserve current runner'
         print('PASS authenticated readiness and rejected update preserve live service', flush=True)
         original = (state/'runner.json').read_bytes()
+        original_version = api(update_path)['agent_version']
         if os.environ.get('RUNNER_UPGRADE_FIXTURES'):
             fixtures = Path(os.environ['RUNNER_UPGRADE_FIXTURES'])
             def upgrade(version):
@@ -153,6 +154,36 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert journal['failed_version']=='9.9.12'
             assert (state/'runner.json').read_bytes()==original
             print('PASS supervisor crash during unconfirmed activation rolls back after native restart', flush=True)
+            # Fault injection after stopping the actual service: a confirmed
+            # installation can be damaged between boots, not only while pending.
+            saved_journal = (state/'versions.json').read_bytes()
+            installed = state/'versions'/journal['current']['digest']/('runner.exe' if system=='Windows' else 'runner')
+            service('stop')
+            wait(lambda: pid()==0, 'stop before damaging confirmed version')
+            saved_binary = installed.read_bytes()
+            saved_mode = installed.stat().st_mode
+            for fault in ['missing', 'corrupt'] + (['nonexecutable'] if system!='Windows' else []):
+                (state/'versions.json').write_bytes(saved_journal)
+                installed.write_bytes(saved_binary)
+                installed.chmod(saved_mode)
+                if fault=='missing': installed.unlink()
+                elif fault=='corrupt': installed.write_bytes(b'corrupt confirmed payload')
+                else: installed.chmod(0o600)
+                service('start')
+                wait(lambda: api(update_path)['ready'] and api(update_path)['agent_version']==original_version,
+                     'damaged confirmed version must recover bootstrap: '+fault, seconds=60)
+                recovered = json.loads((state/'versions.json').read_text())
+                assert recovered['current'] is None and recovered['pending'] is None
+                assert recovered['failed_version']=='9.9.9'
+                assert (state/'runner.json').read_bytes()==original
+                service('stop')
+                wait(lambda: pid()==0, 'stop recovered bootstrap')
+            installed.write_bytes(saved_binary)
+            installed.chmod(saved_mode)
+            service('start')
+            wait(lambda: api(update_path)['ready'], 'bootstrap restarts after fault tests')
+            print('PASS missing/corrupt/unlaunchable confirmed version recovers bootstrap identity', flush=True)
+
         first = wait(pid, 'service PID')
         # Reinstall must not restart a running agent or change its identity.
         service('install', '--server', origin, '--token', 'unused-token', '--state-dir', state)
