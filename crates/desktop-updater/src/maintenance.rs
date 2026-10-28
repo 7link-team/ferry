@@ -72,4 +72,53 @@ mod tests {
         assert!(InstallationLock::running(temp.path()).is_err());
         assert!(InstallationLock::updating(temp.path()).is_err());
     }
+
+    #[test]
+    fn lock_child_process() {
+        let Some(directory) = std::env::var_os("DESKTOP_LOCK_TEST_CHILD") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        let _lock = InstallationLock::updating(&directory.join("installation.lock")).unwrap();
+        std::fs::write(directory.join("ready"), b"ready").unwrap();
+        // Parent deliberately kills this process while it holds the lock.
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).unwrap();
+    }
+
+    #[test]
+    fn updater_crash_releases_kernel_lock_for_recovery() {
+        use std::os::windows::process::CommandExt;
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("installation.lock");
+        std::fs::write(&path, b"registered").unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "maintenance::tests::lock_child_process"])
+            .env("DESKTOP_LOCK_TEST_CHILD", temp.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !temp.path().join("ready").exists() && Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let ready = temp.path().join("ready").exists();
+        let running_blocked = InstallationLock::running(&path).is_err();
+        let updating_blocked = InstallationLock::updating(&path).is_err();
+        let killed = child.kill();
+        let waited = child.wait();
+        assert!(ready, "child did not acquire maintenance lock");
+        assert!(running_blocked && updating_blocked);
+        killed.unwrap();
+        waited.unwrap();
+        let _recovery = InstallationLock::updating(&path).unwrap();
+    }
 }
