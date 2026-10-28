@@ -481,10 +481,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_failing_command_reports_its_real_exit_code() {
-        let output = shell_command("echo out; echo err 1>&2; exit 3")
-            .output()
-            .await
-            .unwrap();
+        let command = if cfg!(windows) {
+            "echo out & echo err 1>&2 & exit /b 3"
+        } else {
+            "echo out; echo err 1>&2; exit 3"
+        };
+        let output = shell_command(command).output().await.unwrap();
         assert_eq!(output.status.code(), Some(3));
         assert_eq!(capped(&output.stdout).trim(), "out");
         assert_eq!(capped(&output.stderr).trim(), "err");

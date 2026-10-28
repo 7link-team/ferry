@@ -235,6 +235,7 @@ fn secure_directory(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn write_registration(path: &Path, content: &str) -> anyhow::Result<()> {
     if regular_file(path)? {
         anyhow::ensure!(
