@@ -111,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             terminal.close()
             print('PASS upgrade waits for active terminal without interrupting output', flush=True)
             wait(lambda: api(update_path)['update']['state']=='succeeded', 'signed version upgrade', seconds=120)
-            assert api(host_path)['agent_version']=='9.9.9'
+            assert api(update_path)['agent_version']=='9.9.9'
             journal = json.loads((state/'versions.json').read_text())
             assert journal['current']['version']=='9.9.9' and journal['pending'] is None
             assert (state/'runner.json').read_bytes()==original
@@ -119,7 +119,7 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             for version in ['9.9.10', '9.9.11']:
                 upgrade(version)
                 wait(lambda: api(update_path)['update']['state']=='rolled_back', 'failed candidate must roll back', seconds=120)
-                assert api(host_path)['agent_version']=='9.9.9'
+                assert api(update_path)['agent_version']=='9.9.9'
                 journal = json.loads((state/'versions.json').read_text())
                 assert journal['current']['version']=='9.9.9' and journal['failed_version']==version
                 assert (state/'runner.json').read_bytes()==original
