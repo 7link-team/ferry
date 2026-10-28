@@ -43,7 +43,10 @@ def pid():
         found = re.search(r'PID\s*:\s*(\d+)', text)
     return int(found[1]) if found else 0
 
-with tempfile.TemporaryDirectory(prefix='runner-service-') as tmp:
+# Hosted Windows runners grant other accounts write access to their Temp tree.
+# A privileged service must live under an administrator-controlled parent.
+with tempfile.TemporaryDirectory(prefix='runner-service-',
+                                 dir=os.environ['ProgramFiles'] if system == 'Windows' else None) as tmp:
     root = Path(tmp)
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
@@ -66,6 +69,14 @@ with tempfile.TemporaryDirectory(prefix='runner-service-') as tmp:
         host = api('/workspaces/service/hosts', {'name':'Managed runner','connection':'runner'})['id']
         token = api('/workspaces/service/runner-tokens', {'host_id':host})['token']
         state = root/'state with spaces'
+        if system == 'Windows':
+            unsafe = root/'unsafe-state'
+            unsafe.mkdir()
+            command('icacls.exe', unsafe, '/grant', '*S-1-5-32-545:(OI)(CI)M')
+            rejected = service('install', '--server', origin, '--token', token,
+                               '--state-dir', unsafe, check=False)
+            assert rejected.returncode != 0, 'must reject user-writable service state'
+            assert not (unsafe/'service.json').exists(), 'unsafe install must not persist credentials'
         service('install', '--server', origin, '--token', token, '--state-dir', state)
         host_path = '/workspaces/service/hosts/'+host
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
