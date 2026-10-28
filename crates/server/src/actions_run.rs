@@ -960,14 +960,18 @@ mod tests {
         options.max_connections(1);
         let db = sea_orm::Database::connect(options).await.unwrap();
         let jobs = vec![test_job("database-user", &[])];
-        let owns_connection = std::sync::atomic::AtomicBool::new(false);
+        let initial_status = std::sync::atomic::AtomicBool::new(true);
+        let connection_owned = tokio::sync::Notify::new();
         let status_started = tokio::sync::Notify::new();
         let (_stop, mut stop) = tokio::sync::watch::channel(false);
         let execution = schedule_jobs(
             &jobs,
             &mut stop,
             || async {
-                if owns_connection.load(std::sync::atomic::Ordering::SeqCst) {
+                if !initial_status.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    // The status future can start before begin() completes.
+                    // Wait for ownership instead of inspecting a racy flag.
+                    connection_owned.notified().await;
                     status_started.notify_one();
                 }
                 db.execute_unprepared("SELECT 1").await?;
@@ -975,7 +979,7 @@ mod tests {
             },
             |_, _, _| async {
                 let tx = db.begin().await?;
-                owns_connection.store(true, std::sync::atomic::Ordering::SeqCst);
+                connection_owned.notify_one();
                 // Release only after the scheduler starts a competing status
                 // read. It must still poll this job while that read is pending.
                 status_started.notified().await;

@@ -95,19 +95,22 @@ try {
   await page.route('**/preferences', async route => { await preferencesGate; await route.continue(); });
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('UI repository');
-  await page.getByRole('combobox', {name:'代码来源',exact:true}).selectOption('git');
-  await page.getByLabel('Git 仓库地址', { exact: true }).fill(`http://127.0.0.1:${gitPort}/source.git`);
-  await page.getByLabel('默认分支', { exact: false }).fill(branch);
+  await page.getByRole('combobox', {name:'代码平台',exact:true}).selectOption('git');
+  await page.getByLabel('Git 仓库地址（可选）', { exact: true }).fill(`http://127.0.0.1:${gitPort}/source.git`);
+  assert.equal(await page.getByLabel('默认分支', { exact: false }).count(),0);
   const preferencesLoaded = page.waitForResponse(response => response.url().endsWith('/preferences'));
   releasePreferences(); await preferencesLoaded;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByLabel('名称', { exact: false }).inputValue(), 'UI repository', 'background preferences refresh discarded the form draft');
-  assert.equal(await page.getByLabel('Git 仓库地址', { exact: true }).inputValue(), `http://127.0.0.1:${gitPort}/source.git`);
+  assert.equal(await page.getByLabel('Git 仓库地址（可选）', { exact: true }).inputValue(), `http://127.0.0.1:${gitPort}/source.git`);
   await page.unroute('**/preferences');
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByRole('cell', { name: 'UI repository', exact: true }).waitFor();
   // New workflows use Actions; retain this acceptance fixture for editing and
   // executing pipelines saved by earlier releases, with the original assertions.
+  // Seed a concrete repository as an older release would have persisted it;
+  // new connection/source-node checkout is covered by repository-auth-ui.
+  await api('/workspaces/ops/repositories',{name:'UI repository',provider:'git',url:`http://127.0.0.1:${gitPort}/source.git`,default_branch:branch});
   const legacy=await api('/workspaces/ops/pipelines',{name:'Legacy seed',target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:join(work,'build-{{run}}'),steps:[{name:'Seed',run:'true'}]})});
   await page.goto(`${origin}/ops/build/pipelines/${legacy.id}/edit`);
   await page.getByLabel('名称', { exact: false }).fill('UI pipeline');

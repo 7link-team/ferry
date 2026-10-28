@@ -192,7 +192,7 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
     const parameters = JSON.parse(row.parameters) as TemplateParameter[];
     const typed = Object.fromEntries(Object.entries(values).filter(([key,value]) => !(parameters.find(p => p.name === key)?.type === "integer" && value === "")).map(([key,value]) => [key, parameters.find(p => p.name === key)?.type === "boolean" ? value === "true" : value]));
     const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/actions/render`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
-    return { [field]: result[field], ...(resource === "pipeline-templates" ? { definition_format: "legacy", executor_bindings: [], graph_layout: {} } : {}) };
+    return { [field]: result[field], ...(resource === "pipeline-templates" ? { definition_format: "legacy", executor_bindings: [], checkout_bindings: [], graph_layout: {} } : {}) };
   },
 });
 
@@ -659,7 +659,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       ...(permissions?.has("pipeline-templates.read") ? { generator: templateGenerator(workspace, "pipeline-templates", "definition") } : {}),
       resource: "pipelines", width: "full", heading: (r: Pipeline) => r.name,
       viewActions:[pipelineRunAction(workspace)],
-      blank: { group_id:"",application_id:"",tag_ids:[],environment_ids:[],name: "", repository_id: "", target_kind: "", target_ref: "", description: "",
+      blank: { group_id:"",application_id:"",tag_ids:[],environment_ids:[],name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
         definition_format: "github-actions", executor_bindings: [], checkout_bindings: [], graph_layout: {}, definition: DEFAULT_ACTIONS },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
