@@ -355,13 +355,15 @@ impl Identity {
         validate_name(&self.name)?;
         settings.validate()?;
         let root = &settings.state_dir;
-        std::fs::create_dir_all(root)?;
-        anyhow::ensure!(
-            !std::fs::symlink_metadata(root)?.file_type().is_symlink(),
-            "服务状态目录不能是符号链接"
-        );
         #[cfg(unix)]
-        secure_directory(root)?;
+        {
+            std::fs::create_dir_all(root)?;
+            anyhow::ensure!(
+                !std::fs::symlink_metadata(root)?.file_type().is_symlink(),
+                "服务状态目录不能是符号链接"
+            );
+            secure_directory(root)?;
+        }
         #[cfg(windows)]
         {
             anyhow::ensure!(!self.user, "Windows 服务需要管理员权限，不支持 --user");

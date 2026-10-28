@@ -243,6 +243,27 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
             install_args = ['/bin/sh', repo/'scripts/runner-install.sh', '--server', origin, '--name', name]
         host_path = '/workspaces/bootstrap/hosts/' + host
         update_path = host_path + '/runner-update'
+        if windows:
+            # Existing unsafe state must never be promoted to trusted service
+            # state. Keep its content and ACL intact when installation rejects it.
+            state.mkdir()
+            sentinel = state/'untrusted-marker'
+            sentinel.write_bytes(b'preexisting untrusted content')
+            command('icacls.exe', state, '/grant', '*S-1-5-32-545:(OI)(CI)M')
+            acl_args = [powershell, '-NoProfile', '-NonInteractive', '-Command',
+                        '(Get-Acl -LiteralPath ' + quote(state) + ').Sddl']
+            unsafe_acl = command(*acl_args, env=installer_env).stdout
+            unsafe = command(runner, 'service', 'install', '--server', origin, '--name', name,
+                             env=installer_env, check=False)
+            assert unsafe.returncode != 0, 'preexisting unsafe default state was accepted'
+            assert 'Untrusted write access' in unsafe.stdout + unsafe.stderr, (unsafe.stdout, unsafe.stderr)
+            assert sentinel.read_bytes() == b'preexisting untrusted content'
+            assert command(*acl_args, env=installer_env).stdout == unsafe_acl, 'rejection changed unsafe ACL'
+            assert not (state/'service.json').exists()
+            assert not (state/'runner-service.exe').exists()
+            shutil.rmtree(state)
+            print('PASS unsafe existing default state rejected without changing ACL or files', flush=True)
+        assert not state.exists(), 'bootstrap must create fresh default native state'
         installed = command(*install_args, env=installer_env, timeout=150)
         if windows:
             assert f'Installing Runner {version} as {name}...' in installed.stdout, installed.stdout

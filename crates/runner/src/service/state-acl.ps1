@@ -1,5 +1,4 @@
 $ErrorActionPreference = 'Stop'
-$root = Get-Item -LiteralPath $env:RUNNER_SERVICE_STATE_DIRECTORY -Force
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Service installation requires administrator privileges' }
@@ -21,6 +20,35 @@ function Assert-Secure($item, $mask) {
         if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference.Value -notin $trusted -and ($rule.FileSystemRights -band $mask)) { throw "Untrusted write access to service path: $($item.FullName); principal=$($rule.IdentityReference.Value); rights=$($rule.FileSystemRights)" }
     }
 }
+# Validate existing ancestors before creating anything. ProgramData permits
+# users to create children, so every missing component needs a protected ACL
+# at creation, not a later Set-Acl on a directory with inherited user writes.
+$missing = [Collections.Generic.List[string]]::new()
+$cursor = [IO.DirectoryInfo]::new([IO.Path]::GetFullPath($env:RUNNER_SERVICE_STATE_DIRECTORY))
+while (-not (Test-Path -LiteralPath $cursor.FullName)) {
+    $missing.Insert(0, $cursor.FullName)
+    $cursor = $cursor.Parent
+    if (-not $cursor) { throw 'Service state has no existing ancestor' }
+}
+$ancestor = Get-Item -LiteralPath $cursor.FullName -Force
+if (-not $ancestor.PSIsContainer) { throw 'Service state ancestor is not a directory' }
+while ($ancestor) { Assert-Secure $ancestor $replaceRights; $ancestor = $ancestor.Parent }
+$creationAcl = [Security.AccessControl.DirectorySecurity]::new()
+$creationAcl.SetAccessRuleProtection($true, $false)
+$creationAcl.SetOwner($admins)
+foreach ($sid in @($system, $admins)) {
+    $creationAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit', [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
+}
+foreach ($path in $missing) {
+    # .NET Framework's overload supplies the security descriptor to creation.
+    # If another process created the path first, it does not repair its ACL;
+    # the following validation rejects an unsafe object before any writes.
+    $null = [IO.Directory]::CreateDirectory($path, $creationAcl)
+    $created = Get-Item -LiteralPath $path -Force
+    Assert-Secure $created $writeRights
+}
+$root = Get-Item -LiteralPath $env:RUNNER_SERVICE_STATE_DIRECTORY -Force
+if (-not $root.PSIsContainer) { throw 'Service state is not a directory' }
 Assert-Secure $root $writeRights
 $parent = $root.Parent
 while ($parent) { Assert-Secure $parent $replaceRights; $parent = $parent.Parent }
