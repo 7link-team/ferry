@@ -657,6 +657,7 @@ async fn hand_over(s: AppState, session: String, mut socket: WebSocket) {
 // ----------------------------------------------------------- HostChannel
 
 pub struct RunnerChannel {
+    _lease: crate::runner_updates::Lease,
     host_id: String,
     /// Only for error messages: an operator reads names, not ids.
     name: String,
@@ -666,10 +667,12 @@ pub struct RunnerChannel {
 /// not connected, so the operator gets a readable HTTP error instead of a
 /// socket that opens and immediately closes.
 pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
+    let lease = crate::runner_updates::lease(&host.id.to_string()).await;
     if !live().contains_key(&host.id.to_string()) {
         return Err(offline(&host.name));
     }
     Ok(Box::new(RunnerChannel {
+        _lease: lease,
         host_id: host.id.to_string(),
         name: host.name.clone(),
     }))
@@ -838,7 +841,11 @@ impl HostChannel for RunnerChannel {
         // mpsc receiver is cancel-safe where a half-read frame would not be.
         let (output, from_host) = mpsc::channel(32);
         let (to_host, input) = mpsc::channel(32);
-        tokio::spawn(pump_pty(socket, output, input));
+        let lease = self._lease.clone();
+        tokio::spawn(async move {
+            let _lease = lease;
+            pump_pty(socket, output, input).await;
+        });
         Ok(Box::new(RunnerPty {
             output: from_host,
             input: to_host,
@@ -890,11 +897,11 @@ impl HostChannel for RunnerChannel {
         };
         // One frame at a time: the server's memory stays at one chunk no
         // matter how large the file is.
-        let stream = futures::stream::unfold(Some(socket), |state| async move {
-            let mut socket = state?;
+        let stream = futures::stream::unfold(Some((socket, self._lease.clone())), |state| async move {
+            let (mut socket, lease) = state?;
             loop {
                 match socket.recv().await {
-                    Some(Ok(Message::Binary(bytes))) => return Some((Ok(bytes), Some(socket))),
+                    Some(Ok(Message::Binary(bytes))) => return Some((Ok(bytes), Some((socket, lease)))),
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<wire::Session>(&text) {
                             Ok(wire::Session::Eof) => return None,

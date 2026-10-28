@@ -27,6 +27,7 @@ mod repositories;
 mod repository_auth;
 mod resource;
 mod runner;
+mod runner_updates;
 mod snowflake;
 mod ssh;
 mod state;

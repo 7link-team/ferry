@@ -7,6 +7,9 @@ on:
     paths:
       - "crates/runner/**"
       - "crates/protocol/**"
+      - "crates/server/src/runner.rs"
+      - "crates/server/src/runner_updates.rs"
+      - "crates/server/src/actions_run.rs"
       - "Cargo.lock"
       - "scripts/test-runner-service.py"
       - ".github/workflows/runner-services.yml"
@@ -32,6 +35,8 @@ jobs:
         run: cargo build --locked -p ferry-runner -p ferry-server
       - name: Runner tests
         run: cargo test --locked -p ferry-runner
+      - name: Whole-task upgrade reservation tests
+        run: cargo test --locked -p ferry-server runner_updates::tests
       - name: Native system service lifecycle (Unix)
         if: runner.os != 'Windows'
         run: sudo env RUNNER_TEST_SYSTEM_SERVICE=1 python3 scripts/test-runner-service.py

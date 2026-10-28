@@ -33,6 +33,16 @@ pub async fn execute(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    let hosts=snapshot.jobs.iter().map(|job|job.host_id.to_string()).collect();
+    crate::runner_updates::with_hosts(hosts, execute_reserved(s,run,snapshot,stop)).await
+}
+
+async fn execute_reserved(
+    s: &AppState,
+    run: &runs::Model,
+    snapshot: Snapshot,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
     let variables = history::open_variables(s, run)?.values;
     let credential = if run.credential_id == 0 {
         None
