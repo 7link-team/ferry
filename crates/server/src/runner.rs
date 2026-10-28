@@ -1417,8 +1417,7 @@ pub async fn start_update(State(s): State<AppState>, scope: Scope, Path((_worksp
     }
     if let Err(error)=crate::hosts::activity(&s,&scope,"runner-update","hosts",&id,json!({"version":body.version,"request":job.request})).await {
         let mut failed=job.clone();
-        failed.state="failed".into(); failed.message="升级审计写入失败，未发送更新".into();
-        persist_update(&s,id,&failed).await?;
+        transition_update(&s,id,&mut failed,"failed","升级审计写入失败，未发送更新").await;
         UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
         return Err(error);
     }
