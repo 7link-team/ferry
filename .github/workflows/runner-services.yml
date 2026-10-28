@@ -13,6 +13,7 @@ on:
       - "Cargo.lock"
       - "scripts/test-runner-service.py"
       - "scripts/test-runner-update.py"
+      - "scripts/test-runner-upgrade.py"
       - ".github/scripts/*runner-manifest.mjs"
       - ".github/workflows/runner-services.yml"
 
@@ -64,3 +65,5 @@ jobs:
       - name: Native system service lifecycle (Windows)
         if: runner.os == 'Windows'
         run: python scripts/test-runner-service.py
+      - name: Signed service upgrade and rollback
+        run: python scripts/test-runner-upgrade.py

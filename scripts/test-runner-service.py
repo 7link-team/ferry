@@ -89,6 +89,40 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         assert api(host_path)['state']=='online', 'invalid update must preserve current runner'
         print('PASS authenticated readiness and rejected update preserve live service', flush=True)
         original = (state/'runner.json').read_bytes()
+        if os.environ.get('RUNNER_UPGRADE_FIXTURES'):
+            fixtures = Path(os.environ['RUNNER_UPGRADE_FIXTURES'])
+            def upgrade(version):
+                body = {'version':version, 'manifest':(fixtures/(version+'.json')).read_text(), 'signature':(fixtures/(version+'.json.sig')).read_text().strip()}
+                result = api(update_path, body)
+                assert result['state']=='draining'
+                return result
+            upgrade('9.9.9')
+            wait(lambda: api(update_path)['update']['state']=='succeeded', 'signed version upgrade', seconds=120)
+            assert api(host_path)['agent_version']=='9.9.9'
+            journal = json.loads((state/'versions.json').read_text())
+            assert journal['current']['version']=='9.9.9' and journal['pending'] is None
+            assert (state/'runner.json').read_bytes()==original
+            print('PASS signed update downloads over TLS and confirms real new-version handshake', flush=True)
+            for version in ['9.9.10', '9.9.11']:
+                upgrade(version)
+                wait(lambda: api(update_path)['update']['state']=='rolled_back', 'failed candidate must roll back', seconds=120)
+                assert api(host_path)['agent_version']=='9.9.9'
+                journal = json.loads((state/'versions.json').read_text())
+                assert journal['current']['version']=='9.9.9' and journal['failed_version']==version
+                assert (state/'runner.json').read_bytes()==original
+            print('PASS invalid executable and wrong-version health check restore confirmed version', flush=True)
+            upgrade('9.9.12')
+            wait(lambda: json.loads((state/'versions.json').read_text()).get('pending') is not None, 'pending activation journal', seconds=120)
+            interrupted = pid()
+            if system=='Windows': command('taskkill','/PID',str(interrupted),'/F')
+            else: os.kill(interrupted, 9)
+            wait(lambda: pid() not in (0, interrupted), 'native manager restarts interrupted supervisor')
+            wait(lambda: api(update_path)['update']['state']=='rolled_back', 'interrupted switch must recover old version', seconds=120)
+            journal = json.loads((state/'versions.json').read_text())
+            assert journal['current']['version']=='9.9.9' and journal['pending'] is None
+            assert journal['failed_version']=='9.9.12'
+            assert (state/'runner.json').read_bytes()==original
+            print('PASS supervisor crash during unconfirmed activation rolls back after native restart', flush=True)
         first = wait(pid, 'service PID')
         # Reinstall must not restart a running agent or change its identity.
         service('install', '--server', origin, '--token', 'unused-token', '--state-dir', state)
