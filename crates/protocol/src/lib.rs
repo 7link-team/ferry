@@ -17,6 +17,8 @@
 // ids, no flow control, no head-of-line blocking — an ops host runs a handful
 // of concurrent sessions. Revisit only if that stops being true.
 
+pub mod release;
+
 use serde::{Deserialize, Serialize};
 
 /// Protocol revision. Either side refuses a peer that does not match.

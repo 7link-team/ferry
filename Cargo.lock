@@ -1436,8 +1436,14 @@ dependencies = [
 name = "ferry-protocol"
 version = "0.1.0-alpha.11"
 dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "minisign-verify",
+ "semver",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "url",
 ]
 
 [[package]]

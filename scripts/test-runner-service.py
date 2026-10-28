@@ -74,7 +74,10 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         api('/setup', {'name':'Service Test','email':'service@example.invalid','password':'temporary-service-password','token':(root/'server/setup-token').read_text().strip()})
         api('/workspaces', {'name':'Service','slug':'service'})
         host = api('/workspaces/service/hosts', {'name':'Managed runner','connection':'runner'})['id']
-        token = api('/workspaces/service/runner-tokens', {'host_id':host})['token']
+        enrollment = api('/workspaces/service/runner-tokens', {'host_id':host})
+        token = enrollment['token']
+        token_path = '/workspaces/service/runner-tokens/'+enrollment['id']
+        assert api(token_path)['state']=='pending'
         state = root/'state with spaces'
         if system == 'Windows':
             unsafe = root/'unsafe-state'
@@ -87,6 +90,8 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         service('install', '--server', origin, '--token', token, '--state-dir', state)
         host_path = '/workspaces/service/hosts/'+host
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
+        status = api(token_path)
+        assert status['state']=='connected' and status['host_id']==host and status['host_state']=='online'
         update_path = host_path+'/runner-update'
         wait(lambda: api(update_path)['ready'], 'supervisor must confirm authenticated worker readiness')
         assert api(update_path)['supported'] is True

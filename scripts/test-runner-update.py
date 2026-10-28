@@ -50,3 +50,4 @@ with tempfile.TemporaryDirectory(prefix='runner-update-') as directory:
         "try {verifySignature(Buffer.from('tampered'),readFileSync(p+'/valid.json.sig','utf8'),readFileSync(p+'/test.key.pub','utf8')); process.exit(1)} catch {}", str(root)], check=True)
     subprocess.run(['cargo', 'test' , '--locked', '-p', 'ferry-runner', 'signed_runner_update', '--', '--ignored'],
                    env=env, check=True)
+    subprocess.run(['cargo', 'test', '--locked', '-p', 'ferry-server', 'runner_install::tests', '--', '--ignored'], env=env, check=True)
