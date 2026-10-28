@@ -242,6 +242,10 @@ pub(super) fn secure_directory(root: &Path) -> anyhow::Result<()> {
     // Paths are data in the child environment, never interpolated PowerShell.
     command(
         Command::new("powershell.exe")
+            // A caller running PowerShell 7 exports its own module search path.
+            // Windows PowerShell 5 must resolve its matching Security module
+            // (Get-Acl/Set-Acl), not attempt to load PowerShell 7 assemblies.
+            .env_remove("PSModulePath")
             .args([
                 "-NoProfile",
                 "-NonInteractive",
