@@ -6,6 +6,7 @@ on:
     paths:
       - "crates/desktop-updater/**"
       - "scripts/test-desktop-update-policy.py"
+      - "scripts/test-desktop-update-ipc.ps1"
       - ".github/workflows/desktop-updater.yml"
 permissions:
   contents: read

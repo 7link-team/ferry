@@ -30,7 +30,15 @@ use windows_sys::Win32::{
 
 /// Retain the kernel process object through authentication and handoff.
 pub struct Process(OwnedHandle);
+pub struct Identity {
+    pub sid: String,
+    pub session: u32,
+    pub elevated: bool,
+}
 impl Process {
+    pub fn identity(&self) -> anyhow::Result<Identity> {
+        anyhow::bail!("process token identity not implemented")
+    }
     pub fn open(pid: u32) -> anyhow::Result<Self> {
         ensure!(pid > 0, "进程标识无效");
         let handle = unsafe {
@@ -185,6 +193,7 @@ mod tests {
     async fn exclusive_local_pipe_authenticates_both_peer_processes() {
         let name = format!("{}-test-{}", pipe_name(), std::process::id());
         let process = Process::open(std::process::id()).unwrap();
+        assert!(process.identity().unwrap().sid.starts_with("S-1-"));
         assert!(
             process
                 .matches_image(&std::env::current_exe().unwrap())
@@ -211,5 +220,92 @@ mod tests {
         let mut bytes = [0; 8];
         client.read_exact(&mut bytes).await.unwrap();
         assert_eq!(&bytes, b"response");
+    }
+
+    // Invoked only by the Windows harness under actual SYSTEM/standard tokens.
+    #[tokio::test]
+    async fn system_server_fixture() {
+        let Some(root) = std::env::var_os("DESKTOP_IPC_TEST_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let identity = Process::open(std::process::id())
+            .unwrap()
+            .identity()
+            .unwrap();
+        assert_eq!(identity.sid, "S-1-5-18");
+        let name = format!("{}-native-{}", pipe_name(), std::process::id());
+        let mut server = create(&name).unwrap();
+        std::fs::write(
+            root.join("ready.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "pid": std::process::id(), "pipe": name, "image": std::env::current_exe().unwrap()
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(45), async {
+            server.connect().await.unwrap();
+            let peer = client_process(&server).unwrap().identity().unwrap();
+            assert_ne!(peer.sid, identity.sid);
+            assert!(!peer.elevated);
+            let mut bytes = [0; 7];
+            server.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(&bytes, b"request");
+            server.write_all(b"response").await.unwrap();
+            // Keep server identity alive until the client tests a spoofed pipe.
+            let mut done = [0; 4];
+            server.read_exact(&mut done).await.unwrap();
+            assert_eq!(&done, b"done");
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn standard_client_fixture() {
+        let Some(root) = std::env::var_os("DESKTOP_IPC_TEST_ROOT") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let identity = Process::open(std::process::id())
+            .unwrap()
+            .identity()
+            .unwrap();
+        assert_ne!(identity.sid, "S-1-5-18");
+        assert!(
+            !identity.elevated,
+            "must exercise a genuinely unelevated token"
+        );
+        let config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("ready.json")).unwrap()).unwrap();
+        let server = Process::open(config["pid"].as_u64().unwrap() as u32).unwrap();
+        assert_eq!(server.identity().unwrap().sid, "S-1-5-18");
+        assert!(
+            server
+                .matches_image(Path::new(config["image"].as_str().unwrap()))
+                .unwrap()
+        );
+        let name = config["pipe"].as_str().unwrap();
+        let mut client = connect_peer(name, &server).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            client.write_all(b"request").await.unwrap();
+            let mut response = [0; 8];
+            client.read_exact(&mut response).await.unwrap();
+            assert_eq!(&response, b"response");
+            assert!(ServerOptions::new().create(name).is_err());
+            let spoof_name = format!("{name}-spoof");
+            let _spoof = ServerOptions::new()
+                .first_pipe_instance(true)
+                .create(&spoof_name)
+                .unwrap();
+            assert!(
+                connect_peer(&spoof_name, &server).is_err(),
+                "spoofed pipe must fail server authentication"
+            );
+            client.write_all(b"done").await.unwrap();
+        })
+        .await
+        .unwrap();
     }
 }

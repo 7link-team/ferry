@@ -36,3 +36,8 @@ with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
     (root/'oversize.zip').write_bytes(oversized)
     env=dict(os.environ,DESKTOP_UPDATE_TEST_DIR=directory,DESKTOP_UPDATE_PUBLIC_KEY=(root/'key.pub').read_text().strip())
     subprocess.run(['cargo','test','--locked','-p','ferry-desktop-updater','--','--include-ignored'],env=env,check=True)
+    if os.name == 'nt':
+        compiled=subprocess.check_output(['cargo','test','--locked','-p','ferry-desktop-updater','--no-run','--message-format=json'],env=env,text=True)
+        binaries=[item['executable'] for line in compiled.splitlines() if (item:=json.loads(line)).get('reason')=='compiler-artifact' and item.get('profile',{}).get('test') and item.get('executable')]
+        assert len(binaries)==1, binaries
+        subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','scripts/test-desktop-update-ipc.ps1','-TestExecutable',binaries[0]],check=True)
