@@ -210,6 +210,55 @@ async fn reject(socket: &mut WebSocket, reason: &str) {
 
 // ------------------------------------------------------------ 注册令牌
 
+pub(crate) async fn bootstrap_token(s: &AppState, token: &str) -> Result<()> {
+    if token.len() != 64 {
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "接入令牌无效，请重新生成安装命令。".into(),
+        ));
+    }
+    let valid = runner_tokens::Entity::find()
+        .filter(runner_tokens::Column::TokenHash.eq(fingerprint(token)))
+        .filter(runner_tokens::Column::UsedAt.eq(0_i64))
+        .filter(runner_tokens::Column::ExpiresAt.gt(db::now()))
+        .one(&s.db)
+        .await?;
+    if valid.is_none() {
+        return Err(ApiError(
+            StatusCode::UNAUTHORIZED,
+            "接入令牌已过期或已使用，请重新生成安装命令。".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub async fn token_status(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_workspace, id)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    scope.require("hosts.enroll")?;
+    let token = runner_tokens::Entity::find_by_id(i64::from(Id::reference(&id)?))
+        .filter(runner_tokens::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let host = if token.used_by != 0 {
+        hosts::Entity::find_by_id(token.used_by)
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&s.db)
+            .await?
+    } else {
+        None
+    };
+    Ok(Json(json!({
+        "id": Id::from(token.id), "expires_at": token.expires_at, "used_at": token.used_at,
+        "host_id": if token.used_by != 0 { token.used_by.to_string() } else { String::new() },
+        "host_state": host.map(|h| h.state).unwrap_or_default(),
+        "state": if token.used_by != 0 { "connected" } else if token.used_at == 0 && token.expires_at <= db::now() { "expired" } else { "pending" },
+    })))
+}
+
 #[derive(Deserialize)]
 pub struct TokenBody {
     /// Bind the token to a host the operator already created. Empty means the

@@ -12,6 +12,7 @@ on:
       - "crates/server/src/runner_install.rs"
       - "scripts/runner-install.*"
       - "scripts/test-runner-install.py"
+      - "scripts/test-runner-bootstrap.py"
       - "crates/server/src/actions_run.rs"
       - "Cargo.lock"
       - "scripts/test-runner-service.py"
@@ -69,6 +70,15 @@ jobs:
       - name: Native system service lifecycle (Windows)
         if: runner.os == 'Windows'
         run: python scripts/test-runner-service.py
+      - name: Bootstrap script rejection tests
+        if: runner.os != 'Windows'
+        run: python3 scripts/test-runner-install.py
+      - name: One-command native service bootstrap (Unix)
+        if: runner.os != 'Windows'
+        run: sudo python3 scripts/test-runner-bootstrap.py
+      - name: One-command native service bootstrap (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/test-runner-bootstrap.py
       - uses: actions/setup-go@v5
         if: runner.os == 'Linux'
         with:

@@ -477,6 +477,7 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
+        .route("/{workspace}/runner-tokens/{id}", get(runner::token_status))
         .route("/{workspace}/hosts/{id}/runner-update", get(runner::update_status).post(runner::start_update))
         .route(
             "/{workspace}/pipelines",
@@ -527,6 +528,9 @@ async fn main() -> anyhow::Result<()> {
         // A runner is not a browser: it proves itself with the protocol's Hello
         // frame, so these two sit outside the session cookie.
         .route("/api/runners/connect", get(runner::connect))
+        .route("/api/runners/install.sh", get(runner_install::shell))
+        .route("/api/runners/install.ps1", get(runner_install::powershell))
+        .route("/api/runners/install/{target}", get(runner_install::artifact))
         .route("/api/runners/sessions/{session}", get(runner::session))
         .route("/api/permissions", get(workspace::permission_catalogue))
         .route(
