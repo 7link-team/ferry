@@ -75,6 +75,10 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     try:
         trust(True)
         if system == 'Darwin':
+            run(openssl, 'version', '-a')
+            run(openssl, 'x509', '-in', root/'ca.crt', '-noout', '-text')
+            run(openssl, 'x509', '-in', root/'tls.crt', '-noout', '-text')
+            run(openssl, 'verify', '-CAfile', root/'ca.crt', root/'tls.crt')
             privileged('security', 'dump-trust-settings', '-d')
             privileged('security', 'verify-cert', '-c', root/'tls.crt', '-p', 'ssl', '-s', 'localhost')
         args = [str(Path(shutil.which('python') or shutil.which('python3'))), 'scripts/test-runner-service.py']
