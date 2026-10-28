@@ -2,6 +2,7 @@ node_modules
 dist
 target
 data
-desktop
+desktop/*
+!desktop/tauri.conf.json
 build-artifacts
 .git

@@ -24,6 +24,8 @@ WORKDIR /build
 ARG BUILD_JOBS=2
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY desktop/tauri.conf.json ./desktop/tauri.conf.json
+COPY scripts/runner-install.sh scripts/runner-install.ps1 ./scripts/
 COPY --from=web /build/dist ./dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
