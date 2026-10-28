@@ -40,7 +40,10 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     shutil.copy2(baseline, built)
     (root/'broken').write_bytes(b'not an executable\n')
     shutil.copy2(baseline, root/'wrong-version')
-    run(openssl, 'req', '-x509', '-newkey', 'rsa:2048', '-keyout', root/'ca.key', '-out', root/'ca.crt', '-days', '1', '-nodes', '-subj', '/CN=Runner CI root', '-addext', 'basicConstraints=critical,CA:TRUE', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    # OpenSSL 1.1 appends -addext to configured v3_ca extensions, producing
+    # duplicate basicConstraints. Use a fixture-owned config on every OS.
+    (root/'ca.cnf').write_text('[req]\ndistinguished_name=dn\nx509_extensions=ca\n[dn]\n[ca]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n', encoding='utf-8')
+    run(openssl, 'req', '-x509', '-newkey', 'rsa:2048', '-keyout', root/'ca.key', '-out', root/'ca.crt', '-days', '1', '-nodes', '-subj', '/CN=Runner CI root', '-config', root/'ca.cnf', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     run(openssl, 'req', '-new', '-newkey', 'rsa:2048', '-keyout', root/'tls.key', '-out', root/'tls.csr', '-nodes', '-subj', '/CN=localhost', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     (root/'tls.ext').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n', encoding='utf-8')
     run(openssl, 'x509', '-req', '-in', root/'tls.csr', '-CA', root/'ca.crt', '-CAkey', root/'ca.key', '-CAcreateserial', '-out', root/'tls.crt', '-days', '1', '-extfile', root/'tls.ext', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -72,14 +75,10 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         path = root/(version+'.json')
         path.write_text(json.dumps(catalog))
         sign('sign', '--', '--private-key-path', root/'key', '--password', '', path)
+    run(openssl, 'verify', '-CAfile', root/'ca.crt', root/'tls.crt')
     try:
         trust(True)
         if system == 'Darwin':
-            run(openssl, 'version', '-a')
-            run(openssl, 'x509', '-in', root/'ca.crt', '-noout', '-text')
-            run(openssl, 'x509', '-in', root/'tls.crt', '-noout', '-text')
-            run(openssl, 'verify', '-CAfile', root/'ca.crt', root/'tls.crt')
-            privileged('security', 'dump-trust-settings', '-d')
             privileged('security', 'verify-cert', '-c', root/'tls.crt', '-p', 'ssl', '-s', 'localhost')
         args = [str(Path(shutil.which('python') or shutil.which('python3'))), 'scripts/test-runner-service.py']
         if os.name != 'nt':
