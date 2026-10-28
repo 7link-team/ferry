@@ -133,6 +133,17 @@ enum Action {
         #[arg(long)]
         state_dir: Option<PathBuf>,
     },
+    /// Verify a signed update for this runner without modifying the service.
+    VerifyUpdate {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        signature: PathBuf,
+        #[arg(long)]
+        artifact: PathBuf,
+        #[arg(long)]
+        version: String,
+    },
     Start(Identity),
     Stop(Identity),
     Status(Identity),
@@ -176,6 +187,10 @@ pub fn dispatch() -> anyhow::Result<bool> {
                 user_service: service.user,
             };
             service.install(&settings)?;
+        }
+        Action::VerifyUpdate { manifest, signature, artifact, version } => {
+            crate::update::verify_files(&manifest, &signature, &artifact, &version)?;
+            println!("更新签名、版本、平台及文件完整性验证通过");
         }
         Action::Start(service) => service.control("start")?,
         Action::Stop(service) => service.control("stop")?,

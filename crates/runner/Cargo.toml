@@ -14,6 +14,11 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
 tempfile = "3"
+base64 = "0.22"
+minisign-verify = "0.3"
+sha2 = "0.10"
+semver = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
@@ -28,3 +33,6 @@ libc = "0.2"
 
 [target."cfg(windows)".dependencies]
 windows-service = "0.8"
+
+[build-dependencies]
+serde_json.workspace = true

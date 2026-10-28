@@ -46,7 +46,7 @@ jobs:
       - name: Test Actions worker
         working-directory: workers/actions
         run: bash go.sh test -race ./...
-      - run: node --test .github/scripts/check-updater-manifest.mjs
+      - run: node --test .github/scripts/check-updater-manifest.mjs .github/scripts/check-runner-manifest.mjs
       - run: npm run build
       - run: cargo fmt --all -- --check
       - run: cargo check --workspace --all-targets
@@ -544,6 +544,15 @@ jobs:
         env:
           REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/updater-manifest.mjs release-assets "$(node -p 'require("./package.json").version')" "$REPOSITORY"
+      - run: npm ci
+      - name: Generate and sign runner update catalog
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          node .github/scripts/runner-manifest.mjs release-assets "$(node -p 'require("./package.json").version')" "$REPOSITORY"
+          npm exec tauri signer sign -- release-assets/runner-update.json
       - name: Checksum every asset
         working-directory: release-assets
         run: |

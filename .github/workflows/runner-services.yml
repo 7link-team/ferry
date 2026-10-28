@@ -12,6 +12,8 @@ on:
       - "crates/server/src/actions_run.rs"
       - "Cargo.lock"
       - "scripts/test-runner-service.py"
+      - "scripts/test-runner-update.py"
+      - ".github/scripts/*runner-manifest.mjs"
       - ".github/workflows/runner-services.yml"
 
 permissions:
@@ -36,6 +38,12 @@ jobs:
               env = dict(os.environ, RUNNER_SERVICE_STATE_DIRECTORY=root)
               env.pop('PSModulePath', None)
               subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', pathlib.Path('crates/runner/src/service/state-acl.ps1').read_text()], env=env, check=True)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node --test .github/scripts/check-runner-manifest.mjs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -44,6 +52,8 @@ jobs:
         run: cargo build --locked -p ferry-runner -p ferry-server
       - name: Runner tests
         run: cargo test --locked -p ferry-runner
+      - name: Signed runner update verification
+        run: python scripts/test-runner-update.py
       - name: Whole-task upgrade reservation tests
         run: |
           cargo test --locked -p ferry-server runner_updates::tests

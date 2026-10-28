@@ -12,6 +12,7 @@
 mod exec_stream;
 mod service;
 mod session;
+mod update;
 
 use anyhow::Context;
 use clap::Parser;
