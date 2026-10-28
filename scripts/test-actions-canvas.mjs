@@ -34,5 +34,12 @@ try {
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:900});await page.waitForTimeout(350);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);const canvas=await page.getByLabel('流水线画布',{exact:true}).boundingBox();assert(canvas.width>200);for(const node of await page.locator('.react-flow__node').all()){const box=await node.boundingBox();assert(box.x>=canvas.x-1 && box.x+box.width<=canvas.x+canvas.width+1,`node clipped at ${width}: ${JSON.stringify({box,canvas})}`);}}
  await page.evaluate(()=>window.setCanvasDraft({...window.canvasDraft,target_kind:'host',target_ref:'local'}));
  assert.match(await page.getByLabel('任务执行器',{exact:true}).locator('option:checked').textContent(),/Local host/);
+ await page.evaluate(()=>window.setCanvasDraft({...window.canvasDraft,definition:'jobs:\n  first:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n  second:\n    runs-on: self-hosted\n    steps:\n      - run: echo kept\n',checkout_bindings:[{job_id:'first',step_id:'source',connection_id:'42'}],executor_bindings:[{job_id:'first',target_ref:'local'}]}));
+ await page.getByRole('tab',{name:'YAML',exact:true}).click();
+ await page.getByLabel('GitHub Actions YAML',{exact:true}).fill('jobs: [');
+ assert.equal((await page.evaluate(()=>window.canvasDraft.checkout_bindings)).length,1);
+ await page.getByLabel('GitHub Actions YAML',{exact:true}).fill('jobs:\n  second:\n    runs-on: self-hosted\n    steps:\n      - run: echo kept\n');
+ assert.deepEqual(await page.evaluate(()=>window.canvasDraft.checkout_bindings),[]);
+ assert.deepEqual(await page.evaluate(()=>window.canvasDraft.executor_bindings),[]);
  console.log('PASS: serial/parallel edges, dependency removal, cycle rejection, save/reload, checkout cleanup and 1280/900/390 layout');
 } finally {await browser?.close();await server.close();}

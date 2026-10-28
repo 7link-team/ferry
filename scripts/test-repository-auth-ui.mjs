@@ -182,7 +182,7 @@ try {
   await p.waitForURL('**/tenant/build/repositories');
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const giteeConnection=rows.items.find(row=>row.provider==='gitee'&&row.name==='Gitee connection');assert(giteeConnection);assert.equal(giteeConnection.credential_id,personalCredential.id);assert(!('default_branch' in giteeConnection));
-  await p.goto(`${origin}/tenant/build/repositories/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
+  await p.goto(`${origin}/tenant/build/repositories/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
   const passwordCredential=await post(owner,root+'/credentials',{name:'Reusable Git password',kind:'password',username:'git-user',secret:'generic-private-password',description:''});
   await p.goto(`${origin}/tenant/build/repositories/new`);

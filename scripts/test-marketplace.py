@@ -93,6 +93,29 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         def entries(id):return request(owner,root+'/marketplace?source_id='+id)['items']
         sources=[]
         body={'name':'Source','repository_id':repo,'provider':'github','api_base':api_base,'project':'group/repository','organization':'org','branch':'main','index_path':'marketplace.json'}
+        connection=request(owner,root+'/code-connections',{'name':'Market connection','provider':'git','credential_id':credential,'url':api_base+'/group/selected.git'},expected=201)['id']
+        selection={'connection_id':connection,'name':'Selected market repository','url':api_base+'/group/selected.git','default_branch':'release/non-default'}
+        selected_body=dict(body,name='Selected source',repository_selection=selection,project='group/selected',branch='release/non-default')
+        selected_body.pop('repository_id')
+        selected_id=request(owner,root+'/marketplace-sources',selected_body,expected=201)['id']
+        selected=source(selected_id);selected_repo=request(owner,root+'/repositories/'+selected['repository_id'])
+        check(selected_repo['credential_id']==credential and selected_repo['url']==selection['url'] and selected_repo['default_branch']=='release/non-default','market source atomically materializes selected connection repository and branch')
+        request(owner,root+'/marketplace-sources/'+selected_id+'/actions/sync',{})
+        check(requests[-1][1].get('authorization')=='Bearer fixture-provider-token','selected market source uses existing encrypted connection credential')
+        before=request(owner,root+'/repositories')['total']
+        request(owner,root+'/marketplace-sources',dict(selected_body,name='Invalid source',api_base='https://wrong.example.invalid',repository_selection=dict(selection,default_branch='rollback-ref')),expected=400)
+        check(request(owner,root+'/repositories')['total']==before,'invalid market source rolls back repository materialization')
+        request(outsider,'/workspaces/other/marketplace-sources',selected_body,expected=404)
+        changed=dict(selected_body,version=source(selected_id)['version'],repository_selection=dict(selection,default_branch='release/updated'),branch='release/updated')
+        request(owner,root+'/marketplace-sources/'+selected_id,changed,method='PATCH')
+        changed_repo=source(selected_id)['repository_id']
+        check(request(owner,root+'/repositories/'+changed_repo)['default_branch']=='release/updated','market source update binds selected ref in the same transaction')
+        before=request(owner,root+'/repositories')['total']
+        request(owner,root+'/marketplace-sources/'+selected_id,dict(changed,repository_selection=dict(selection,default_branch='stale-ref')),method='PATCH',expected=409)
+        check(request(owner,root+'/repositories')['total']==before,'stale market source update rolls back new repository')
+        request(owner,root+'/marketplace-sources/'+selected_id,method='DELETE',expected=204)
+        for repository_id in {selected['repository_id'],changed_repo}:request(owner,root+'/repositories/'+repository_id,method='DELETE',expected=204)
+        request(owner,root+'/code-connections/'+connection,method='DELETE',expected=204)
         for provider in ['github','gitlab','gitee','codeup']:
             sid=request(owner,root+'/marketplace-sources',dict(body,name=provider,provider=provider),expected=201)['id'];sources.append(sid)
             result=request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{})

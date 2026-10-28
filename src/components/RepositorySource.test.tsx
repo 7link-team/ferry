@@ -87,3 +87,8 @@ it("reauthorizing a saved OAuth connection sends its ID without clearing the exi
  await act(async()=>[...host.querySelectorAll("button")].find(button=>button.textContent==="取消授权")!.click());
  expect(validity).toHaveBeenLastCalledWith(false);expect(opened.close).toHaveBeenCalled();
 });
+it("can reuse a credential beyond the first page",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);const second=url.includes('page=2');return {ok:true,status:200,json:async()=>url.includes('/credentials')?{items:second?[{id:'late',name:'Second page PAT',kind:'token'}]:credentials,total:4,page_size:3}:{items:[]}};}));
+ await mount();await select('授权认证','late');expect(patch).toHaveBeenLastCalledWith({credential_id:'late'});
+ expect(requests.some(url=>url.includes('page=2'))).toBe(true);
+});

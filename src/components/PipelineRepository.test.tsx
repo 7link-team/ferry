@@ -22,3 +22,26 @@ it('binds a visible repository and non-default branch to the checkout step, not 
  expect(saved.definition).toContain('id: checkout_');
  expect(host.querySelector('datalist')?.textContent).toContain('feature/node-source');
 });
+
+it('marketplace sources choose a named connection repository without changing source API/project settings',async()=>{
+ const {MarketplaceRepository}=await import('./PipelineRepository');
+ function MarketHarness(){const [draft,setDraft]=useState<Record<string,unknown>>({repository_id:'',provider:'gitlab',api_base:'https://git.example/api/v4',project:'existing/project',branch:'release'});saved=draft;return <MarketplaceRepository workspace="ops" draft={draft} options={[]} readOnly={false} onChange={patch=>setDraft(value=>({...value,...patch}))} onValidityChange={()=>{}}/>;}
+ await act(async()=>root.render(<MarketHarness/>));
+ await select('仓库连接','c1');await select('连接仓库','https://git.example/team/repo.git');
+ expect(saved.repository_id).toBe('');
+ expect(saved.repository_selection).toEqual({connection_id:'c1',name:'repo',url:'https://git.example/team/repo.git',default_branch:'main'});
+ expect(saved).toMatchObject({provider:'gitlab',api_base:'https://git.example/api/v4',project:'existing/project',branch:'release'});
+});
+it('marketplace legacy bindings remain selected until an explicit source change',async()=>{
+ const {MarketplaceRepository}=await import('./PipelineRepository');const onChange=vi.fn();const validity=vi.fn();
+ await act(async()=>root.render(<MarketplaceRepository workspace="ops" draft={{repository_id:'legacy1'}} options={[{value:'legacy1',label:'Existing private repository'}]} readOnly={false} onChange={onChange} onValidityChange={validity}/>));
+ expect(host.querySelector<HTMLSelectElement>('[aria-label="外部仓库"]')?.value).toBe('legacy1');expect(onChange).not.toHaveBeenCalled();expect(validity).toHaveBeenLastCalledWith(false);
+});
+it('converting native checkout to a bound connection clears conflicting source parameters but preserves other options',async()=>{
+ const nativeDefinition='jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: old/team\n          ref: old-branch\n          path: old-dir\n          fetch-depth: 7\n';
+ function NativeHarness(){const [draft,setDraft]=useState<Record<string,unknown>>({definition:nativeDefinition,checkout_bindings:[]});saved=draft;return <PipelineRepository workspace="ops" draft={draft} jobId="build" stepIndex={0} readOnly={false} onChange={patch=>setDraft(value=>({...value,...patch}))} onValidityChange={()=>{}}/>;}
+ await act(async()=>root.render(<NativeHarness/>));await select('仓库连接','c1');await select('节点仓库','https://git.example/team/repo.git');
+ const {parseActions}=await import('../actions-workflow');
+ expect(parseActions(String(saved.definition)).jobs[0]?.steps[0]?.with).toEqual({'fetch-depth':7});
+ expect(saved.checkout_bindings).toEqual([expect.objectContaining({connection_id:'c1',repository_url:'https://git.example/team/repo.git',ref:'main',path:''})]);
+});

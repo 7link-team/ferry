@@ -43,9 +43,15 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
     if (readOnly) return;
     let active = true;
     setLoadingCredentials(true); setCredentialError("");
-    void api<{ items: Credential[] }>(`${root}/credentials?page_size=200`).then(data => {
-      if (active) setCredentials(data.items);
-    }).catch(cause => { if (active) setCredentialError(errorText(cause)); })
+    void (async () => {
+      const all: Credential[] = [];
+      for (let page = 1; active; page++) {
+        const data = await api<{items: Credential[];total?: number;page_size?: number}>(`${root}/credentials?page=${page}&page_size=200`);
+        all.push(...data.items);
+        if (!data.items.length || all.length >= (data.total ?? all.length)) break;
+      }
+      if (active) setCredentials(all);
+    })().catch(cause => { if (active) setCredentialError(errorText(cause)); })
       .finally(() => { if (active) setLoadingCredentials(false); });
     return () => { active = false; };
   }, [root, readOnly, refresh]);

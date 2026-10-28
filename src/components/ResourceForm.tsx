@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Dialog } from "radix-ui";
 import { ActionsEditor } from "./ActionsEditor";
-import { PipelineRepository } from "./PipelineRepository";
+import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
 import { ManifestEditor } from "./ManifestEditor";
 import { Loader2 } from "lucide-react";
@@ -188,7 +188,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
                   onChange={(value) => setDraft((d) => ({
                     ...d,
                     ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-                    ...(["repository-source", "pipeline-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+                    ...(["repository-source", "pipeline-repository", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
                   }) as Partial<T>)}
                 />
               ))}
@@ -363,6 +363,7 @@ function Field<T>({
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
 
   if (field.type === "actions-editor") return <div className="min-w-0 sm:col-span-2"><ActionsEditor draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
+  if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
   if (field.type === "pipeline-repository") return <div className="min-w-0 sm:col-span-2"><PipelineRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;

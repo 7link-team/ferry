@@ -80,15 +80,20 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: bash scripts/build-actions-workers.sh
-      - run: cargo build --locked -p ferry-server -p ferry-runner
-      - run: cargo test --locked -p ferry-server
+      - id: backend
+        run: cargo build --locked -p ferry-server -p ferry-runner
+      - if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        run: cargo test --locked -p ferry-server
       - name: Pipeline and connection browser acceptance
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         run: |
-          node scripts/test-actions-canvas.mjs
-          node scripts/test-named-connection-ui.mjs
-          node scripts/test-repository-auth-ui.mjs
-          node scripts/test-actions-ui.mjs
+          result=0
+          for suite in actions-canvas named-connection-ui repository-auth-ui actions-ui marketplace-ui; do
+            node "scripts/test-$suite.mjs" || result=1
+          done
+          exit "$result"
       - name: Code connections and repository authorization on all three databases
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         env:
           MYSQL_PWD: integration-only-password
           PGPASSWORD: integration-only-password
@@ -99,13 +104,22 @@ jobs:
           FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/oauth_test python3 -I scripts/test-repository-auth.py
           FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/oauth_test python3 -I scripts/test-repository-auth.py
       - name: Pipeline classification and environment snapshots
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         run: python3 -I scripts/test-pipeline-classification.py
       - name: Live Actions pipeline execution
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
         env:
           FERRY_TEST_ACTIONS: "1"
         run: |
           mkdir -p harness-logs
           python3 -I scripts/test-pipelines.py 2>&1 | tee harness-logs/pipelines.log
+      - name: Transfer and marketplace compatibility
+        if: ${{ !cancelled() && steps.backend.outcome == 'success' }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/transfer-venv"
+          "$RUNNER_TEMP/transfer-venv/bin/pip" install openpyxl==3.1.5
+          "$RUNNER_TEMP/transfer-venv/bin/python" -I scripts/test-transfers.py
+          python3 -I scripts/test-marketplace.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -100,7 +100,11 @@ export function ActionsEditor({ draft, options, readOnly, onChange, onValidityCh
     }}><Plus className="size-4" />{mode === "serial" ? "添加串行任务" : "添加并行任务"}</Button>)}</div>}</div>
     {!readOnly && <p className="text-xs text-muted-foreground">{job ? `以「${job.name}」为基准：串行任务在其完成后执行；并行任务与其共享前置任务。` : "先选择一个任务，再添加串行后继或并行同级任务。"}</p>}
     {selectedEdge && !readOnly && <Button type="button" variant="outline" onClick={() => { change(() => editActionJob(source, selectedEdge.target, { needs: parsed.jobs.find(row => row.id === selectedEdge.target)!.needs.filter(id => id !== selectedEdge.source) })); setSelectedEdge(undefined); }}>删除依赖连接</Button>}
-    {tab === "yaml" ? <label className="block space-y-2"><span className="text-sm font-medium">GitHub Actions YAML</span><textarea aria-label="GitHub Actions YAML" className={`${inputClass} min-h-[440px] font-mono`} spellCheck={false} value={source} readOnly={readOnly} onChange={event => onChange({ definition: event.target.value })} /></label> : <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border lg:h-[620px] lg:flex-row">
+    {tab === "yaml" ? <label className="block space-y-2"><span className="text-sm font-medium">GitHub Actions YAML</span><textarea aria-label="GitHub Actions YAML" className={`${inputClass} min-h-[440px] font-mono`} spellCheck={false} value={source} readOnly={readOnly} onChange={event => {
+      const definition = event.target.value;
+      try { parseActions(definition); } catch { onChange({ definition }); return; }
+      change(() => definition);
+    }} /></label> : <div className="flex min-h-[520px] flex-col overflow-hidden rounded-lg border lg:h-[620px] lg:flex-row">
       <div className="h-[520px] min-w-0 flex-1 lg:h-full" aria-label="流水线画布">
         {!parsed.error && <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesFocusable={!readOnly} deleteKeyCode={null} onConnect={onConnect} onEdgeClick={(_, edge) => setSelectedEdge({ source: edge.source, target: edge.target })} onPaneClick={() => setSelectedEdge(undefined)} onNodesChange={changes => {
           const dimensions = changes.flatMap(change => change.type === "dimensions" && change.dimensions ? [[change.id, change.dimensions] as const] : []);

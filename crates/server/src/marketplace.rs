@@ -360,12 +360,49 @@ const ENTRIES: Spec = Spec {
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
+    #[serde(default)]
     repository_id: String,
+    #[serde(default)]
+    repository_selection: Option<RepositorySelection>,
     #[serde(flatten)]
     source: Source,
     #[serde(default)]
     version: i64,
 }
+#[derive(Deserialize)]
+struct RepositorySelection {
+    connection_id: Id,
+    name: String,
+    url: String,
+    #[serde(default)]
+    default_branch: String,
+}
+
+async fn bind_source_repository(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: &mut Body,
+) -> Result<()> {
+    if let Some(selection) = body.repository_selection.take() {
+        let (provider, credential) = crate::repository_auth::resolve_connection(
+            s,
+            tx,
+            scope,
+            selection.connection_id,
+            &selection.url,
+        )
+        .await?;
+        let repository = serde_json::from_value::<crate::repositories::Body>(json!({
+            "name":selection.name,"provider":provider,"url":selection.url,
+            "default_branch":selection.default_branch,"credential_id":credential
+        }))
+        .map_err(|_| ApiError::bad("仓库选择无效。"))?;
+        body.repository_id = crate::repositories::bind_selection(s, tx, scope, repository).await?;
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Index {
@@ -484,9 +521,10 @@ pub(crate) async fn create_source_in(
     s: &AppState,
     tx: &sea_orm::DatabaseTransaction,
     scope: &Scope,
-    b: Body,
+    mut b: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("marketplace-sources.create")?;
+    bind_source_repository(s, tx, scope, &mut b).await?;
     validate(tx, &scope, &b).await?;
     let id = s.next_id()?;
     let now = db::now();
@@ -522,12 +560,13 @@ pub async fn update_source(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, id)): Path<(String, Id)>,
-    Json(b): Json<Body>,
+    Json(mut b): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("marketplace-sources.update")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    validate(&tx, &scope, &b).await?;
     scoped(&tx, &scope, id).await?;
+    bind_source_repository(&s, &tx, &scope, &mut b).await?;
+    validate(&tx, &scope, &b).await?;
     let n = sources::Entity::update_many()
         .col_expr(sources::Column::Name, Expr::value(b.name.trim()))
         .col_expr(
