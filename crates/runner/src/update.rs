@@ -252,6 +252,9 @@ pub(crate) fn stage(
     }
     // Persist directory entries before publishing a version that the journal
     // may make current. File data fsync alone does not persist their names.
+    // Unix chmod above also needs persistence. Windows already flushed the
+    // writable output handle; FlushFileBuffers rejects a read-only handle.
+    #[cfg(unix)]
     std::fs::File::open(&binary)?.sync_all()?;
     #[cfg(unix)]
     std::fs::File::open(directory.path())?.sync_all()?;
