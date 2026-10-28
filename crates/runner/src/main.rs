@@ -409,7 +409,7 @@ async fn hold(
                 match result {
                     Ok(candidate) => return Err(update::Prepared(candidate).into()),
                     Err(error) => {
-                        tracing::warn!(%error, "更新验证或下载失败");
+                        tracing::warn!(error=?error, "更新验证或下载失败");
                         send(&mut socket, &wire::Report::UpdateFailed { request, error: "更新下载或校验失败，保留原版本".into() }).await?;
                     }
                 }

@@ -40,18 +40,21 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     shutil.copy2(baseline, built)
     (root/'broken').write_bytes(b'not an executable\n')
     shutil.copy2(baseline, root/'wrong-version')
-    run(openssl, 'req', '-x509', '-newkey', 'rsa:2048', '-keyout', root/'tls.key', '-out', root/'tls.crt', '-days', '1', '-nodes', '-subj', '/CN=Runner CI fixture', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    fingerprint = subprocess.check_output([openssl, 'x509', '-in', str(root/'tls.crt'), '-noout', '-fingerprint', '-sha1'], text=True).strip().split('=')[1].replace(':', '')
+    run(openssl, 'req', '-x509', '-newkey', 'rsa:2048', '-keyout', root/'ca.key', '-out', root/'ca.crt', '-days', '1', '-nodes', '-subj', '/CN=Runner CI root', '-addext', 'basicConstraints=critical,CA:TRUE', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    run(openssl, 'req', '-new', '-newkey', 'rsa:2048', '-keyout', root/'tls.key', '-out', root/'tls.csr', '-nodes', '-subj', '/CN=localhost', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    (root/'tls.ext').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost,IP:127.0.0.1\n', encoding='utf-8')
+    run(openssl, 'x509', '-req', '-in', root/'tls.csr', '-CA', root/'ca.crt', '-CAkey', root/'ca.key', '-CAcreateserial', '-out', root/'tls.crt', '-days', '1', '-extfile', root/'tls.ext', stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    fingerprint = subprocess.check_output([openssl, 'x509', '-in', str(root/'ca.crt'), '-noout', '-fingerprint', '-sha1'], text=True).strip().split('=')[1].replace(':', '')
     ca_path = Path('/usr/local/share/ca-certificates')/(root.name+'.crt')
     def trust(add):
         if system == 'Linux':
-            if add: privileged('cp', root/'tls.crt', ca_path)
+            if add: privileged('cp', root/'ca.crt', ca_path)
             else: privileged('rm', '-f', ca_path)
             privileged('update-ca-certificates')
         elif system == 'Darwin':
-            if add: privileged('security', 'add-trusted-cert', '-d', '-r', 'trustRoot', '-k', '/Library/Keychains/System.keychain', root/'tls.crt')
+            if add: privileged('security', 'add-trusted-cert', '-d', '-r', 'trustRoot', '-k', '/Library/Keychains/System.keychain', root/'ca.crt')
             else: privileged('security', 'delete-certificate', '-Z', fingerprint, '/Library/Keychains/System.keychain')
-        elif add: run('certutil', '-addstore', 'Root', root/'tls.crt')
+        elif add: run('certutil', '-addstore', 'Root', root/'ca.crt')
         else: run('certutil', '-delstore', 'Root', fingerprint)
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *args): pass
