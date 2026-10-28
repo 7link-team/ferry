@@ -90,6 +90,7 @@ pub fn extract_package(
         "更新暂存目录必须为空"
     );
     let mut archive = zip::ZipArchive::new(source)?;
+    ensure!(!archive.has_duplicate_names(), "更新包存在重复文件名");
     ensure!(
         !archive.is_empty() && archive.len() <= 16384,
         "更新包文件数量无效"
