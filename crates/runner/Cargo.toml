@@ -13,6 +13,7 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
+tempfile = "3"
 
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
@@ -24,3 +25,6 @@ sysinfo = { version = "0.39", default-features = false, features = ["system", "d
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-service = "0.8"

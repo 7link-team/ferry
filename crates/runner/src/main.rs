@@ -10,6 +10,7 @@
 // being true.
 
 mod exec_stream;
+mod service;
 mod session;
 
 use anyhow::Context;
@@ -181,8 +182,7 @@ fn metrics() -> wire::Report {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -190,7 +190,42 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "ferry_runner=info".into()),
         )
         .init();
-    let cfg = Config::parse();
+    if service::dispatch()? {
+        return Ok(());
+    }
+    foreground(Config::parse())
+}
+
+fn foreground(cfg: Config) -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run(cfg))
+}
+
+async fn run(cfg: Config) -> anyhow::Result<()> {
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            let mut term =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("SIGTERM handler");
+            tokio::select! { _ = term.recv() => {}, _ = tokio::signal::ctrl_c() => {} }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        let _ = stop.send(true);
+    });
+    run_with_shutdown(cfg, stopped).await
+}
+
+async fn run_with_shutdown(
+    cfg: Config,
+    mut stopped: tokio::sync::watch::Receiver<bool>,
+) -> anyhow::Result<()> {
     anyhow::ensure!(
         cfg.token.is_some() || Enrolment::load(&cfg.state_dir).is_some(),
         "首次运行需要 --token，或已有 {} 中的注册信息。",
@@ -202,8 +237,14 @@ async fn main() -> anyhow::Result<()> {
     // Reconnect with backoff, forever: a server restart or a flapping link is
     // normal operation for an agent, not a reason to stop.
     let mut backoff = Duration::from_secs(1);
+    let mut sessions = tokio::task::JoinSet::new();
     loop {
-        match hold(&cfg, &control_url).await {
+        let result = tokio::select! {
+            biased;
+            _ = stopped.wait_for(|value| *value) => break,
+            result = hold(&cfg, &control_url, &mut sessions) => result,
+        };
+        match result {
             Ok(()) => {
                 tracing::warn!("控制连接已关闭，准备重连");
                 backoff = Duration::from_secs(1);
@@ -214,13 +255,26 @@ async fn main() -> anyhow::Result<()> {
             }
             Err(error) => tracing::warn!(%error, "控制连接失败，{}s 后重试", backoff.as_secs()),
         }
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            _ = stopped.wait_for(|value| *value) => break,
+            _ = tokio::time::sleep(backoff) => {},
+        }
         backoff = (backoff * 2).min(Duration::from_secs(30));
     }
+    tracing::info!(
+        active_sessions = sessions.len(),
+        "停止接收会话，等待在途会话结束"
+    );
+    while sessions.join_next().await.is_some() {}
+    Ok(())
 }
 
 /// One life of the control connection: handshake, then forward until it ends.
-async fn hold(cfg: &Config, control_url: &str) -> anyhow::Result<()> {
+async fn hold(
+    cfg: &Config,
+    control_url: &str,
+    sessions: &mut tokio::task::JoinSet<()>,
+) -> anyhow::Result<()> {
     let mut socket = dial(control_url).await?;
     let (hostname, os, arch) = facts();
     let stored = Enrolment::load(&cfg.state_dir);
@@ -300,7 +354,7 @@ async fn hold(cfg: &Config, control_url: &str) -> anyhow::Result<()> {
                             };
                             // Dialled on its own task: a slow transfer must not
                             // stall heartbeats or the next session request.
-                            tokio::spawn(async move {
+                            sessions.spawn(async move {
                                 if let Err(error) = session::run(&url, hello, kind).await {
                                     tracing::warn!(%id, ?kind, %error, "会话结束于错误");
                                 }
@@ -314,6 +368,7 @@ async fn hold(cfg: &Config, control_url: &str) -> anyhow::Result<()> {
                 }
             }
             _ = report.tick() => send(&mut socket, &metrics()).await?,
+            _ = sessions.join_next(), if !sessions.is_empty() => {},
         }
     }
 }
@@ -321,6 +376,101 @@ async fn hold(cfg: &Config, control_url: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn graceful_stop_waits_for_a_running_session() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let running = tokio::spawn(run_with_shutdown(
+            Config {
+                server: format!("http://{address}"),
+                token: Some("fixture-token".into()),
+                state_dir: dir.path().to_owned(),
+            },
+            stopped,
+        ));
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut control = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let hello = control.next().await.unwrap().unwrap().into_text().unwrap();
+        assert!(hello.contains("fixture-token"));
+        control
+            .send(Message::Text(
+                serde_json::to_string(&wire::Control::Welcome {
+                    host_id: "1".into(),
+                    key: Some("fixture-key".into()),
+                    heartbeat_seconds: 20,
+                    metrics_seconds: 30,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        control
+            .send(Message::Text(
+                serde_json::to_string(&wire::Control::OpenSession {
+                    session: "job".into(),
+                    kind: wire::SessionKind::Exec,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut session = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        session.next().await.unwrap().unwrap();
+        let command = if cfg!(windows) {
+            "echo BEFORE & ping -n 3 127.0.0.1 >NUL & echo AFTER"
+        } else {
+            "printf BEFORE; sleep 1; printf AFTER"
+        };
+        session
+            .send(Message::Text(
+                serde_json::to_string(&wire::Session::ExecStreamStart {
+                    command: command.into(),
+                    timeout_seconds: 15,
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let first = session.next().await.unwrap().unwrap().into_text().unwrap();
+        let first: wire::Session = serde_json::from_str(&first).unwrap();
+        assert!(
+            matches!(first, wire::Session::ExecOutput { data, .. } if String::from_utf8_lossy(&data).contains("BEFORE"))
+        );
+        stop.send(true).unwrap();
+        tokio::task::yield_now().await;
+        assert!(
+            !running.is_finished(),
+            "stop must wait for executing session"
+        );
+        let mut output = Vec::new();
+        let mut exit = None;
+        while let Some(Ok(message)) = session.next().await {
+            if let Message::Text(text) = message {
+                match serde_json::from_str::<wire::Session>(&text).unwrap() {
+                    wire::Session::ExecOutput { data, .. } => output.extend(data),
+                    wire::Session::ExecExit { code } => exit = Some(code),
+                    other => panic!("unexpected session frame: {other:?}"),
+                }
+            }
+        }
+        assert!(
+            String::from_utf8_lossy(&output).contains("AFTER"),
+            "in-flight command was interrupted"
+        );
+        assert_eq!(exit, Some(0));
+        tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
 
     #[test]
     fn a_base_url_becomes_the_matching_websocket_url() {

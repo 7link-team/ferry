@@ -1,0 +1,40 @@
+name: Runner native services
+
+on:
+  workflow_call:
+  push:
+    branches: ["feat/**"]
+    paths:
+      - "crates/runner/**"
+      - "crates/protocol/**"
+      - "Cargo.lock"
+      - "scripts/test-runner-service.py"
+      - ".github/workflows/runner-services.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  runner-services:
+    name: Native runner service (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: runner-native-service
+      - name: Build service and isolated API fixture
+        run: cargo build --locked -p ferry-runner -p ferry-server
+      - name: Runner tests
+        run: cargo test --locked -p ferry-runner
+      - name: Native system service lifecycle (Unix)
+        if: runner.os != 'Windows'
+        run: sudo env RUNNER_TEST_SYSTEM_SERVICE=1 python3 scripts/test-runner-service.py
+      - name: Native system service lifecycle (Windows)
+        if: runner.os == 'Windows'
+        run: python scripts/test-runner-service.py

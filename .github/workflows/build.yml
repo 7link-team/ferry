@@ -520,10 +520,13 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
+  runner-services:
+    uses: ./.github/workflows/runner-services.yml
+
   release:
     # Dispatch exercises the exact collection/checksum path without publishing.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: [checks, backends, e2e, desktop, runner-linux-arm64]
+    needs: [checks, backends, e2e, desktop, runner-linux-arm64, runner-services]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
