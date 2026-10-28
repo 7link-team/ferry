@@ -13,7 +13,10 @@ name = 'runner-test-' + str(os.getpid())
 user = ['--user'] if system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
 
 def command(*args, check=True):
-    result = subprocess.run([str(a) for a in args], capture_output=True, text=True)
+    # Rust emits UTF-8; native service tools can emit a legacy code page.
+    # Preserve undecodable bytes in diagnostics instead of losing stderr.
+    result = subprocess.run([str(a) for a in args], capture_output=True,
+                            text=True, encoding='utf-8', errors='backslashreplace')
     if check: assert result.returncode == 0, (args, result.stdout, result.stderr)
     return result
 
