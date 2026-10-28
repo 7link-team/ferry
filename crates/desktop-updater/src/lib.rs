@@ -3,6 +3,7 @@ use std::io::Read;
 #[cfg(windows)]
 pub mod maintenance;
 pub mod transaction;
+pub mod transfer;
 
 pub const MAX_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
