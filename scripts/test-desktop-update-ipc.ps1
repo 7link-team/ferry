@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $tag = [guid]::NewGuid().ToString('N').Substring(0,12)
 $user = "upd$tag"
 $serverTask = "DesktopUpdateServer-$tag"
-$clientTask = "DesktopUpdateClient-$tag"
+$clientProcess = $null
 $root = Join-Path $env:ProgramData "desktop-update-test-$tag"
 $password = "Test!$([guid]::NewGuid().ToString('N'))a1"
 try {
@@ -36,9 +36,10 @@ echo %ERRORLEVEL% > "$output\exit.txt"
         Start-Sleep -Milliseconds 100
     }
     if (-not (Test-Path (Join-Path $root 'ready.json'))) { throw 'SYSTEM pipe server failed to become ready' }
-    $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\cmd.exe" -Argument "/d /c `"$root\client.cmd`""
-    Register-ScheduledTask -TaskName $clientTask -Action $action -Settings $settings -User "$env:COMPUTERNAME\$user" -Password $password -RunLevel Limited | Out-Null
-    Start-ScheduledTask -TaskName $clientTask
+    # Task Scheduler left a freshly-created user's task unstarted (0x41303).
+    # Direct logon provides an actual process handle and immediate launch errors.
+    $credential = [pscredential]::new("$env:COMPUTERNAME\$user", (ConvertTo-SecureString $password -AsPlainText -Force))
+    $clientProcess = Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList "/d /c `"$root\client.cmd`"" -WorkingDirectory $root -Credential $credential -WindowStyle Hidden -PassThru
     $deadline = (Get-Date).AddSeconds(55)
     while ((-not (Test-Path (Join-Path $result.FullName 'exit.txt')) -or -not (Test-Path (Join-Path $root 'exit.txt'))) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 100 }
     foreach ($output in @($root, $result.FullName)) {
@@ -51,7 +52,8 @@ echo %ERRORLEVEL% > "$output\exit.txt"
     foreach ($log in @((Join-Path $root 'test.log'), (Join-Path $root 'client-result/test.log'))) {
         if (Test-Path $log) { Get-Content $log }
     }
-    foreach ($task in @($serverTask, $clientTask)) {
+    if ($clientProcess -and -not $clientProcess.HasExited) { Stop-Process -Id $clientProcess.Id -Force }
+    foreach ($task in @($serverTask)) {
         if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
             Get-ScheduledTaskInfo -TaskName $task | Select-Object TaskName,LastRunTime,LastTaskResult | Format-List | Out-String | Write-Host
             Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
