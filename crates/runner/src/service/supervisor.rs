@@ -35,8 +35,8 @@ impl Journal {
         let mut tmp = tempfile::NamedTempFile::new_in(root)?;
         tmp.write_all(&serde_json::to_vec(self)?)?;
         tmp.as_file().sync_all()?;
-        tmp.persist(root.join("versions.json"))
-            .map_err(|e| e.error)?;
+        let temp = tmp.into_temp_path();
+        crate::update::durable_rename(&temp, &root.join("versions.json"), true)?;
         #[cfg(unix)]
         std::fs::File::open(root)?.sync_all()?;
         Ok(())
@@ -109,11 +109,22 @@ fn spawn(binary: &Path, config: &Path, name: &str, failed: Option<&str>) -> anyh
         command.arg("--failed-version").arg(version);
     }
     #[cfg(windows)]
-    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    {
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        let log = config.with_file_name("service.log");
+        super::regular_file(&log)?;
+        command.stderr(Stdio::from(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log)?,
+        ));
+    }
     Ok(command.spawn()?)
 }
 
 enum Outcome {
+    Retry,
     Stopped,
     Activate(Installed),
     Failed,
@@ -211,16 +222,39 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
             .unwrap_or(env!("CARGO_PKG_VERSION"))
             .to_owned();
         let binary = match selected {
-            Some(installed) => crate::update::staged_binary(root, installed)?,
+            Some(installed) => match crate::update::staged_binary(root, installed) {
+                Ok(binary) => binary,
+                Err(error) => {
+                    tracing::warn!(%error, "版本文件不可用，恢复上一个已确认版本");
+                    if journal.pending.is_some() {
+                        journal.rollback();
+                    } else {
+                        journal.failed_version = journal.current.take().map(|v| v.version);
+                        journal.current = journal.previous.take();
+                    }
+                    journal.store(root)?;
+                    continue;
+                }
+            },
             None => std::env::current_exe()?,
         };
         let execution = async {
-            let mut child = spawn(
+            let mut child = match spawn(
                 &binary,
                 &config,
                 &settings.service_name,
                 journal.failed_version.as_deref(),
-            )?;
+            ) {
+                Ok(child) => child,
+                Err(error) if journal.pending.is_none() && journal.current.is_some() => {
+                    tracing::warn!(%error, "已确认版本无法启动，恢复上一版本");
+                    journal.failed_version = journal.current.take().map(|v| v.version);
+                    journal.current = journal.previous.take();
+                    journal.store(root)?;
+                    return Ok(Outcome::Retry);
+                }
+                Err(error) => return Err(error),
+            };
             #[cfg(windows)]
             let _job = WorkerJob::attach(&child)?;
             let result = monitor(
@@ -243,6 +277,7 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
         }
         .await;
         match execution {
+            Ok(Outcome::Retry) => continue,
             Ok(Outcome::Stopped) => return Ok(()),
             Ok(Outcome::Activate(candidate)) => {
                 let current = journal

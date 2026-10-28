@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     def sign(*args):
         run(npm, 'exec', 'tauri', 'signer', *args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     sign('generate', '--', '--ci', '--password', '', '--write-keys', root/'key')
-    env = dict(os.environ, RUNNER_UPDATE_PUBLIC_KEY=(root/'key.pub').read_text().strip())
+    env = dict(os.environ, RUNNER_UPDATE_PUBLIC_KEY=(root/'key.pub').read_text(encoding='utf-8').strip())
     run('cargo', 'build', '--locked', '-p', 'ferry-runner', env=env)
     baseline = root/('baseline'+exe)
     built = repo/'target/debug'/('ferry-runner'+exe)
@@ -30,11 +30,11 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     (source/'desktop').mkdir(parents=True)
     shutil.copy2(repo/'desktop/tauri.conf.json', source/'desktop/tauri.conf.json')
     shutil.copy2(repo/'Cargo.lock', source/'Cargo.lock')
-    manifest = (repo/'Cargo.toml').read_text().replace('"crates/server", ', '')
-    original_main = (source/'crates/runner/src/main.rs').read_text()
+    manifest = (repo/'Cargo.toml').read_text(encoding='utf-8').replace('"crates/server", ', '')
+    original_main = (source/'crates/runner/src/main.rs').read_text(encoding='utf-8')
     for version, filename, stall in [('9.9.9', 'candidate', False), ('9.9.12', 'stalled', True)]:
         (source/'Cargo.toml').write_text(re.sub(r'^version = "[^"]+"$', f'version = "{version}"', manifest, count=1, flags=re.M))
-        (source/'crates/runner/src/main.rs').write_text(original_main.replace('fn main() -> anyhow::Result<()> {', 'fn main() -> anyhow::Result<()> { std::thread::sleep(std::time::Duration::from_secs(120));') if stall else original_main)
+        (source/'crates/runner/src/main.rs').write_text(original_main.replace('fn main() -> anyhow::Result<()> {', 'fn main() -> anyhow::Result<()> { std::thread::sleep(std::time::Duration::from_secs(120));') if stall else original_main, encoding='utf-8')
         run('cargo', 'build', '--offline', '--manifest-path', source/'Cargo.toml', '--target-dir', repo/'target', '-p', 'ferry-runner', env=env)
         shutil.copy2(built, root/filename)
     shutil.copy2(baseline, built)
@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     thread = threading.Thread(target=http.serve_forever, daemon=True)
     thread.start()
     target = next(line.split(': ', 1)[1] for line in subprocess.check_output(['rustc', '-vV'], text=True).splitlines() if line.startswith('host: '))
-    protocol = int(re.search(r'pub const VERSION: u32 = (\d+);', (repo/'crates/protocol/src/lib.rs').read_text())[1])
+    protocol = int(re.search(r'pub const VERSION: u32 = (\d+);', (repo/'crates/protocol/src/lib.rs').read_text(encoding='utf-8'))[1])
     for version, filename in [('9.9.9','candidate'), ('9.9.10','broken'), ('9.9.11','wrong-version'), ('9.9.12','stalled')]:
         payload = (root/filename).read_bytes()
         catalog = {'schema':1, 'protocol':protocol, 'version':version, 'targets':{target:{'url':f'https://localhost:{http.server_port}/{filename}', 'size':len(payload), 'sha256':hashlib.sha256(payload).hexdigest()}}}

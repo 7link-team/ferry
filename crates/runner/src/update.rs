@@ -217,6 +217,8 @@ pub(crate) fn stage(
     };
     let base = root.join("versions");
     std::fs::create_dir_all(&base)?;
+    #[cfg(unix)]
+    std::fs::File::open(root)?.sync_all()?;
     ensure!(
         std::fs::symlink_metadata(&base)?.file_type().is_dir(),
         "版本目录不能是符号链接"
@@ -248,11 +250,16 @@ pub(crate) fn stage(
         file.write_all(data)?;
         file.sync_all()?;
     }
+    // Persist directory entries before publishing a version that the journal
+    // may make current. File data fsync alone does not persist their names.
+    std::fs::File::open(&binary)?.sync_all()?;
+    #[cfg(unix)]
+    std::fs::File::open(directory.path())?.sync_all()?;
     let target = base.join(&installed.digest);
     if target.exists() {
         staged_binary(root, &installed)?;
     } else {
-        std::fs::rename(directory.path(), &target)?;
+        durable_rename(directory.path(), &target, false)?;
         #[cfg(unix)]
         std::fs::File::open(&base)?.sync_all()?;
     }
@@ -301,6 +308,35 @@ pub(crate) async fn download(
     }
     file.as_file().sync_all()?;
     stage(root, manifest.as_bytes(), signature, file.path(), version)
+}
+
+pub(crate) fn durable_rename(source: &Path, target: &Path, replace: bool) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+        };
+        let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+        let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+        let flags = MOVEFILE_WRITE_THROUGH
+            | if replace {
+                MOVEFILE_REPLACE_EXISTING
+            } else {
+                0
+            };
+        ensure!(
+            unsafe { MoveFileExW(source.as_ptr(), target.as_ptr(), flags) } != 0,
+            "版本状态持久化失败：{}",
+            std::io::Error::last_os_error()
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = replace;
+        std::fs::rename(source, target)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -55,7 +55,8 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
     env.pop('FERRY_DATABASE_URL', None)
     log = (root/'server.log').open('w')
     server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log)
-    client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    jar = http.cookiejar.CookieJar()
+    client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(jar))
     def api(path, body=None):
         request = urllib.request.Request(origin+'/api'+path, data=json.dumps(body).encode() if body is not None else None, headers={'Content-Type':'application/json','X-Ferry-Request':'1'})
         with client.open(request, timeout=10) as response: return json.load(response)
@@ -96,7 +97,19 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
                 result = api(update_path, body)
                 assert result['state']=='draining'
                 return result
+            import runpy
+            ws_module = runpy.run_path(str(Path(__file__).with_name('ws-probe.py')))
+            terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
+            list(terminal.frames(1))
             upgrade('9.9.9')
+            time.sleep(.5)
+            assert api(update_path)['update']['state']=='draining', 'upgrade must wait for existing terminal'
+            terminal.send(ws_module['BINARY'], b'echo DRAIN-CONTINUES\r\n')
+            output = b''.join(data for opcode,data in terminal.frames(2) if opcode==ws_module['BINARY'])
+            assert b'DRAIN-CONTINUES' in output, 'active terminal must remain usable during drain'
+            assert api(update_path)['update']['state']=='draining'
+            terminal.close()
+            print('PASS upgrade waits for active terminal without interrupting output', flush=True)
             wait(lambda: api(update_path)['update']['state']=='succeeded', 'signed version upgrade', seconds=120)
             assert api(host_path)['agent_version']=='9.9.9'
             journal = json.loads((state/'versions.json').read_text())
@@ -151,6 +164,15 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         wait(lambda: pid()==0, 'uninstalled service should finish stopping')
         assert (state/'runner.json').read_bytes()==original, 'uninstall must preserve identity data'
         print('PASS uninstall removes only service registration', flush=True)
+    except Exception:
+        try:
+            if 'update_path' in locals(): print('Upgrade status:', json.dumps(api(update_path)), flush=True)
+            for filename in ['versions.json', 'service.log']:
+                path = state/filename
+                if path.exists(): print(filename, path.read_text(encoding='utf-8', errors='replace')[-12000:], flush=True)
+            if system == 'Linux': print(command('journalctl', '-u', name, '--no-pager', '-n', '60', check=False).stdout, flush=True)
+        except Exception as diagnostic: print('Diagnostic error:', type(diagnostic).__name__, flush=True)
+        raise
     finally:
         service('uninstall', check=False)
         server.terminate()
