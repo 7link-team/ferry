@@ -490,9 +490,12 @@ async fn control(s: AppState, mut socket: WebSocket) {
 
     let (control, inbox) = mpsc::channel(16);
     let registration = Arc::new(Live {
-        control, managed: hello.managed_updates, version: hello.agent_version.clone(),
+        control,
+        managed: hello.managed_updates,
+        version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
-        failed_version: Mutex::new(None), update_error: Mutex::new(None),
+        failed_version: Mutex::new(None),
+        update_error: Mutex::new(None),
     });
     // A replaced connection's own loop ends when its sender is dropped here,
     // so a half-dead socket cannot keep a host looking online.
@@ -687,7 +690,10 @@ pub struct RunnerChannel {
 /// socket that opens and immediately closes.
 pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
     let lease = crate::runner_updates::lease(&host.id.to_string()).await;
-    if !live().get(&host.id.to_string()).is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)) {
+    if !live()
+        .get(&host.id.to_string())
+        .is_some_and(|r| r.ready.load(std::sync::atomic::Ordering::Acquire))
+    {
         return Err(offline(&host.name));
     }
     Ok(Box::new(RunnerChannel {
@@ -916,36 +922,39 @@ impl HostChannel for RunnerChannel {
         };
         // One frame at a time: the server's memory stays at one chunk no
         // matter how large the file is.
-        let stream = futures::stream::unfold(Some((socket, self._lease.clone())), |state| async move {
-            let (mut socket, lease) = state?;
-            loop {
-                match socket.recv().await {
-                    Some(Ok(Message::Binary(bytes))) => return Some((Ok(bytes), Some((socket, lease)))),
-                    Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<wire::Session>(&text) {
-                            Ok(wire::Session::Eof) => return None,
-                            Ok(wire::Session::Failed { error }) => {
-                                return Some((Err(remote_failed(error)), None));
+        let stream =
+            futures::stream::unfold(Some((socket, self._lease.clone())), |state| async move {
+                let (mut socket, lease) = state?;
+                loop {
+                    match socket.recv().await {
+                        Some(Ok(Message::Binary(bytes))) => {
+                            return Some((Ok(bytes), Some((socket, lease))));
+                        }
+                        Some(Ok(Message::Text(text))) => {
+                            match serde_json::from_str::<wire::Session>(&text) {
+                                Ok(wire::Session::Eof) => return None,
+                                Ok(wire::Session::Failed { error }) => {
+                                    return Some((Err(remote_failed(error)), None));
+                                }
+                                _ => continue,
                             }
-                            _ => continue,
+                        }
+                        Some(Ok(_)) => continue,
+                        // Closing without `Eof` means a truncated file. Reporting
+                        // it as an error is the difference between a failed
+                        // download and a silently short one.
+                        Some(Err(_)) | None => {
+                            return Some((
+                                Err(ApiError(
+                                    StatusCode::BAD_GATEWAY,
+                                    "下载中断：主机代理连接提前关闭。".into(),
+                                )),
+                                None,
+                            ));
                         }
                     }
-                    Some(Ok(_)) => continue,
-                    // Closing without `Eof` means a truncated file. Reporting
-                    // it as an error is the difference between a failed
-                    // download and a silently short one.
-                    Some(Err(_)) | None => {
-                        return Some((
-                            Err(ApiError(
-                                StatusCode::BAD_GATEWAY,
-                                "下载中断：主机代理连接提前关闭。".into(),
-                            )),
-                            None,
-                        ));
-                    }
                 }
-            }
-        });
+            });
         Ok((
             FileMeta {
                 size,
@@ -1308,45 +1317,117 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Id::from(9107);
         hosts::Entity::insert(hosts::ActiveModel {
-            id: Set(id.into()), workspace_id: Set(1), name: Set("update recovery".into()),
-            address: Set(String::new()), port: Set(0), username: Set(String::new()),
-            connection: Set("runner".into()), state: Set("online".into()), group_id: Set(0),
-            description: Set(String::new()), host_key: Set(String::new()),
-            runner_key_hash: Set(String::new()), os: Set(String::new()), arch: Set(String::new()),
-            agent_version: Set("1.0.0".into()), metrics: Set(String::new()),
-            seen_at: Set(0), created_at: Set(0), updated_at: Set(0), version: Set(1),
+            id: Set(id.into()),
+            workspace_id: Set(1),
+            name: Set("update recovery".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("online".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set("1.0.0".into()),
+            metrics: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
             ..Default::default()
-        }).exec(&scratch.db).await.unwrap();
+        })
+        .exec(&scratch.db)
+        .await
+        .unwrap();
         // Real database failures at the two distinct writes, without mocking
         // admission or the persistence code being exercised.
         scratch.db.execute_unprepared("CREATE TRIGGER fail_audit BEFORE INSERT ON activity BEGIN SELECT RAISE(FAIL, 'audit unavailable'); END").await.unwrap();
         scratch.db.execute_unprepared("CREATE TRIGGER fail_update_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%failed%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
         let s = Arc::new(crate::state::State {
-            ids: Arc::new(crate::snowflake::Generator::new(1,std::time::Instant::now()).unwrap()),
-            db: scratch.db.clone(), data_dir: dir.path().into(), instance_id: "update-test".into(),
-            server_mode: true, secure_cookie: false, bind: "127.0.0.1:0".parse().unwrap(),
-            vault: crate::vault::Vault::open(dir.path(),true).unwrap(),
+            ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
+            db: scratch.db.clone(),
+            data_dir: dir.path().into(),
+            instance_id: "update-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
         });
         let (control, mut receiver) = mpsc::channel(1);
-        live().insert(id.to_string(),Arc::new(Live {
-            control, managed: true, version: "1.0.0".into(),
-            ready: std::sync::atomic::AtomicBool::new(true),
-            failed_version: Mutex::new(None), update_error: Mutex::new(None),
-        }));
-        let scope = Scope { workspace_id: Id::from(1), user: crate::auth::User {
-            id: Id::from(1), email: "test@example.invalid".into(), name: "test".into(), is_superadmin: false,
-        }, permissions: ["hosts.update".into()].into_iter().collect() };
-        let mut request = tokio::spawn(start_update(State(s),scope,Path(("test".into(),id)),Json(UpdateBody {
-            version: "2.0.0".into(),manifest: "{}".into(),signature: "fixture".into(),
-        })));
-        assert!(tokio::time::timeout(Duration::from_millis(300),&mut request).await.is_err(),
-            "admission must keep recovering after audit and status writes both fail");
-        assert!(receiver.try_recv().is_err(),"an unaudited update must never reach the runner");
-        scratch.db.execute_unprepared("DROP TRIGGER fail_update_status").await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_secs(5),request).await.unwrap().unwrap().is_err());
-        let row=hosts::Entity::find_by_id(i64::from(id)).one(&scratch.db).await.unwrap().unwrap();
-        assert_eq!(serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap()).unwrap().state,"failed");
-        assert!(!UPDATES.lock().unwrap().get(&id.to_string()).is_some_and(|job|job.state=="draining"));
+        live().insert(
+            id.to_string(),
+            Arc::new(Live {
+                control,
+                managed: true,
+                version: "1.0.0".into(),
+                ready: std::sync::atomic::AtomicBool::new(true),
+                failed_version: Mutex::new(None),
+                update_error: Mutex::new(None),
+            }),
+        );
+        let scope = Scope {
+            workspace_id: Id::from(1),
+            user: crate::auth::User {
+                id: Id::from(1),
+                email: "test@example.invalid".into(),
+                name: "test".into(),
+                is_superadmin: false,
+            },
+            permissions: ["hosts.update".into()].into_iter().collect(),
+        };
+        let mut request = tokio::spawn(start_update(
+            State(s),
+            scope,
+            Path(("test".into(), id)),
+            Json(UpdateBody {
+                version: "2.0.0".into(),
+                manifest: "{}".into(),
+                signature: "fixture".into(),
+            }),
+        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), &mut request)
+                .await
+                .is_err(),
+            "admission must keep recovering after audit and status writes both fail"
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "an unaudited update must never reach the runner"
+        );
+        scratch
+            .db
+            .execute_unprepared("DROP TRIGGER fail_update_status")
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), request)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_err()
+        );
+        let row = hosts::Entity::find_by_id(i64::from(id))
+            .one(&scratch.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap())
+                .unwrap()
+                .state,
+            "failed"
+        );
+        assert!(
+            !UPDATES
+                .lock()
+                .unwrap()
+                .get(&id.to_string())
+                .is_some_and(|job| job.state == "draining")
+        );
         live().remove(&id.to_string());
         UPDATES.lock().unwrap().remove(&id.to_string());
     }
@@ -1358,40 +1439,103 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let id = Id::from(9108);
         hosts::Entity::insert(hosts::ActiveModel {
-            id: Set(id.into()), workspace_id: Set(1), name: Set("update recovery".into()),
-            address: Set(String::new()), port: Set(0), username: Set(String::new()),
-            connection: Set("runner".into()), state: Set("online".into()), group_id: Set(0),
-            description: Set(String::new()), host_key: Set(String::new()),
-            runner_key_hash: Set(String::new()), os: Set(String::new()), arch: Set(String::new()),
-            agent_version: Set("1.0.0".into()), metrics: Set(String::new()),
-            seen_at: Set(0), created_at: Set(0), updated_at: Set(0), version: Set(1),
+            id: Set(id.into()),
+            workspace_id: Set(1),
+            name: Set("update recovery".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("online".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set("1.0.0".into()),
+            metrics: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
             ..Default::default()
-        }).exec(&scratch.db).await.unwrap();
+        })
+        .exec(&scratch.db)
+        .await
+        .unwrap();
         let s = Arc::new(crate::state::State {
-            ids: Arc::new(crate::snowflake::Generator::new(1,std::time::Instant::now()).unwrap()),
-            db: scratch.db.clone(), data_dir: dir.path().into(), instance_id: "update-test".into(),
-            server_mode: true, secure_cookie: false, bind: "127.0.0.1:0".parse().unwrap(),
-            vault: crate::vault::Vault::open(dir.path(),true).unwrap(),
+            ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
+            db: scratch.db.clone(),
+            data_dir: dir.path().into(),
+            instance_id: "update-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
         });
-        let job=UpdateJob { request: "recovery".into(),version: "2.0.0".into(),state: "updating".into(),message: String::new() };
-        persist_update(&s,id,&job).await.unwrap();
+        let job = UpdateJob {
+            request: "recovery".into(),
+            version: "2.0.0".into(),
+            state: "updating".into(),
+            message: String::new(),
+        };
+        persist_update(&s, id, &job).await.unwrap();
         recover_updates(&s).await.unwrap();
-        let mut task=tokio::spawn(async move { crate::runner_updates::lease(&id.to_string()).await });
-        assert!(tokio::time::timeout(Duration::from_millis(100),&mut task).await.is_err(),"offline recovery must exclude new work");
-        let (control, _receiver)=mpsc::channel(1);
-        let peer=Arc::new(Live {
-            control,managed: true,version: "2.0.0".into(),ready: std::sync::atomic::AtomicBool::new(false),
-            failed_version: Mutex::new(None),update_error: Mutex::new(None),
+        let mut task =
+            tokio::spawn(async move { crate::runner_updates::lease(&id.to_string()).await });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut task)
+                .await
+                .is_err(),
+            "offline recovery must exclude new work"
+        );
+        let (control, _receiver) = mpsc::channel(1);
+        let peer = Arc::new(Live {
+            control,
+            managed: true,
+            version: "2.0.0".into(),
+            ready: std::sync::atomic::AtomicBool::new(false),
+            failed_version: Mutex::new(None),
+            update_error: Mutex::new(None),
         });
-        live().insert(id.to_string(),peer.clone());
-        assert!(tokio::time::timeout(Duration::from_millis(100),&mut task).await.is_err(),"unconfirmed connection must not release recovery lock");
+        live().insert(id.to_string(), peer.clone());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut task)
+                .await
+                .is_err(),
+            "unconfirmed connection must not release recovery lock"
+        );
         scratch.db.execute_unprepared("CREATE TRIGGER fail_terminal_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%succeeded%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
-        peer.ready.store(true,std::sync::atomic::Ordering::Release);
-        assert!(tokio::time::timeout(Duration::from_millis(500),&mut task).await.is_err(),"health without durable status must not release recovery lock");
-        scratch.db.execute_unprepared("DROP TRIGGER fail_terminal_status").await.unwrap();
-        drop(tokio::time::timeout(Duration::from_secs(5),task).await.unwrap().unwrap());
-        let row=hosts::Entity::find_by_id(i64::from(id)).one(&scratch.db).await.unwrap().unwrap();
-        assert_eq!(serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap()).unwrap().state,"succeeded");
+        peer.ready.store(true, std::sync::atomic::Ordering::Release);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), &mut task)
+                .await
+                .is_err(),
+            "health without durable status must not release recovery lock"
+        );
+        scratch
+            .db
+            .execute_unprepared("DROP TRIGGER fail_terminal_status")
+            .await
+            .unwrap();
+        drop(
+            tokio::time::timeout(Duration::from_secs(5), task)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+        let row = hosts::Entity::find_by_id(i64::from(id))
+            .one(&scratch.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<UpdateJob>(row.agent_update.as_deref().unwrap())
+                .unwrap()
+                .state,
+            "succeeded"
+        );
         live().remove(&id.to_string());
         UPDATES.lock().unwrap().remove(&id.to_string());
     }
@@ -1423,139 +1567,278 @@ pub struct UpdateBody {
 }
 
 async fn update_host(s: &AppState, scope: &Scope, id: Id) -> Result<hosts::Model> {
-    hosts::Entity::find_by_id(i64::from(id)).filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(hosts::Column::Connection.eq("runner")).one(&s.db).await?
+    hosts::Entity::find_by_id(i64::from(id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(&s.db)
+        .await?
         .ok_or_else(ApiError::missing)
 }
 
-pub async fn update_status(State(s): State<AppState>, scope: Scope, Path((_workspace, id)): Path<(String, Id)>) -> Result<Json<Value>> {
+pub async fn update_status(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_workspace, id)): Path<(String, Id)>,
+) -> Result<Json<Value>> {
     scope.require("hosts.read")?;
     let host = update_host(&s, &scope, id).await?;
     let registration = live().get(&id.to_string()).cloned();
-    let status = host.agent_update.as_deref().map(serde_json::from_str::<UpdateJob>).transpose()
-        .map_err(|_|ApiError::bad("代理升级状态无法读取"))?;
-    Ok(Json(json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)),"update":status})))
+    let status = host
+        .agent_update
+        .as_deref()
+        .map(serde_json::from_str::<UpdateJob>)
+        .transpose()
+        .map_err(|_| ApiError::bad("代理升级状态无法读取"))?;
+    Ok(Json(
+        json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)),"update":status}),
+    ))
 }
 
-pub async fn start_update(State(s): State<AppState>, scope: Scope, Path((_workspace, id)): Path<(String, Id)>, Json(body): Json<UpdateBody>) -> Result<(StatusCode, Json<Value>)> {
+pub async fn start_update(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_workspace, id)): Path<(String, Id)>,
+    Json(body): Json<UpdateBody>,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("hosts.update")?;
     update_host(&s, &scope, id).await?;
-    if body.version.len()>128 || body.manifest.len()>65536 || body.signature.len()>8192 || body.version.is_empty() {
+    if body.version.len() > 128
+        || body.manifest.len() > 65536
+        || body.signature.len() > 8192
+        || body.version.is_empty()
+    {
         return Err(ApiError::bad("升级清单或版本无效。"));
     }
-    let registration = live().get(&id.to_string()).cloned().ok_or_else(||ApiError::bad("代理离线，不能升级。"))?;
-    if !registration.managed { return Err(ApiError::bad("当前代理不支持服务升级，请先安装为新版托管服务。")); }
-    if registration.version == body.version { return Err(ApiError::bad("代理已是该版本。")); }
-    let job = UpdateJob { request:secret(),version:body.version.clone(),state:"draining".into(),message:"等待进行中的完整任务结束".into() };
+    let registration = live()
+        .get(&id.to_string())
+        .cloned()
+        .ok_or_else(|| ApiError::bad("代理离线，不能升级。"))?;
+    if !registration.managed {
+        return Err(ApiError::bad(
+            "当前代理不支持服务升级，请先安装为新版托管服务。",
+        ));
+    }
+    if registration.version == body.version {
+        return Err(ApiError::bad("代理已是该版本。"));
+    }
+    let job = UpdateJob {
+        request: secret(),
+        version: body.version.clone(),
+        state: "draining".into(),
+        message: "等待进行中的完整任务结束".into(),
+    };
     {
-        let mut jobs=UPDATES.lock().unwrap_or_else(|e|e.into_inner());
-        if jobs.get(&id.to_string()).is_some_and(|j|matches!(j.state.as_str(),"draining"|"updating"|"unknown")) {
-            return Err(ApiError(StatusCode::CONFLICT,"已有代理升级进行中。".into()));
+        let mut jobs = UPDATES.lock().unwrap_or_else(|e| e.into_inner());
+        if jobs
+            .get(&id.to_string())
+            .is_some_and(|j| matches!(j.state.as_str(), "draining" | "updating" | "unknown"))
+        {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "已有代理升级进行中。".into(),
+            ));
         }
-        jobs.insert(id.to_string(),job.clone());
+        jobs.insert(id.to_string(), job.clone());
     }
     // Persist/audit admission also outlives a disconnected HTTP caller.
-    let admission=tokio::spawn(async move {
-    if let Err(error)=persist_update(&s,id,&job).await {
-        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
-        return Err(error);
-    }
-    if let Err(error)=crate::hosts::activity(&s,&scope,"runner-update","hosts",&id,json!({"version":body.version,"request":job.request})).await {
-        let mut failed=job.clone();
-        transition_update(&s,id,&mut failed,"failed","升级审计写入失败，未发送更新").await;
-        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
-        return Err(error);
-    }
-    let response = serde_json::to_value(&job).map_err(|_|ApiError::bad("升级状态编码失败"))?;
-    tokio::spawn(async move {
-        let host=id.to_string();
-        let _exclusive=crate::runner_updates::exclusive(&host).await;
-        let mut job=job;
-        let peer=live().get(&host).cloned();
-        let Some(peer)=peer else {transition_update(&s,id,&mut job,"failed","等待任务结束期间代理离线").await;return;};
-        if !peer.managed {transition_update(&s,id,&mut job,"failed","重连后的代理不支持托管升级").await;return;}
-        transition_update(&s,id,&mut job,"updating","正在验证更新并切换版本").await;
-        if peer.control.send(wire::Control::Update {request:job.request.clone(),version:body.version.clone(),manifest:body.manifest,signature:body.signature}).await.is_err() {
-            transition_update(&s,id,&mut job,"failed","无法发送升级请求").await;return;
+    let admission = tokio::spawn(async move {
+        if let Err(error) = persist_update(&s, id, &job).await {
+            UPDATES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id.to_string());
+            return Err(error);
         }
-        let started=std::time::Instant::now();
-        loop {
-            let failure=peer.update_error.lock().unwrap_or_else(|e|e.into_inner()).clone();
-            if let Some((request,message))=failure {
-                if request==job.request {transition_update(&s,id,&mut job,"failed",&message).await;return;}
+        if let Err(error) = crate::hosts::activity(
+            &s,
+            &scope,
+            "runner-update",
+            "hosts",
+            &id,
+            json!({"version":body.version,"request":job.request}),
+        )
+        .await
+        {
+            let mut failed = job.clone();
+            transition_update(
+                &s,
+                id,
+                &mut failed,
+                "failed",
+                "升级审计写入失败，未发送更新",
+            )
+            .await;
+            UPDATES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&id.to_string());
+            return Err(error);
+        }
+        let response = serde_json::to_value(&job).map_err(|_| ApiError::bad("升级状态编码失败"))?;
+        tokio::spawn(async move {
+            let host = id.to_string();
+            let _exclusive = crate::runner_updates::exclusive(&host).await;
+            let mut job = job;
+            let peer = live().get(&host).cloned();
+            let Some(peer) = peer else {
+                transition_update(&s, id, &mut job, "failed", "等待任务结束期间代理离线").await;
+                return;
+            };
+            if !peer.managed {
+                transition_update(&s, id, &mut job, "failed", "重连后的代理不支持托管升级").await;
+                return;
             }
-            let current=live().get(&host).cloned();
-            if let Some(current)=current {
-                if !Arc::ptr_eq(&peer,&current) && current.ready.load(std::sync::atomic::Ordering::Acquire) {
-                    if current.version==body.version {transition_update(&s,id,&mut job,"succeeded","代理升级完成，已通过连接健康检查").await;}
-                    else {transition_update(&s,id,&mut job,"rolled_back","新版本未完成激活，已恢复原版本").await;}
-                    return;
+            transition_update(&s, id, &mut job, "updating", "正在验证更新并切换版本").await;
+            if peer
+                .control
+                .send(wire::Control::Update {
+                    request: job.request.clone(),
+                    version: body.version.clone(),
+                    manifest: body.manifest,
+                    signature: body.signature,
+                })
+                .await
+                .is_err()
+            {
+                transition_update(&s, id, &mut job, "failed", "无法发送升级请求").await;
+                return;
+            }
+            let started = std::time::Instant::now();
+            loop {
+                let failure = peer
+                    .update_error
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                if let Some((request, message)) = failure {
+                    if request == job.request {
+                        transition_update(&s, id, &mut job, "failed", &message).await;
+                        return;
+                    }
                 }
+                let current = live().get(&host).cloned();
+                if let Some(current) = current {
+                    if !Arc::ptr_eq(&peer, &current)
+                        && current.ready.load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        if current.version == body.version {
+                            transition_update(
+                                &s,
+                                id,
+                                &mut job,
+                                "succeeded",
+                                "代理升级完成，已通过连接健康检查",
+                            )
+                            .await;
+                        } else {
+                            transition_update(
+                                &s,
+                                id,
+                                &mut job,
+                                "rolled_back",
+                                "新版本未完成激活，已恢复原版本",
+                            )
+                            .await;
+                        }
+                        return;
+                    }
+                }
+                if started.elapsed() > Duration::from_secs(420) {
+                    // Never admit new work merely because a response timed out.
+                    if job.state != "unknown" {
+                        transition_update(
+                            &s,
+                            id,
+                            &mut job,
+                            "unknown",
+                            "等待代理重新连接确认，继续暂停向该主机派发新任务",
+                        )
+                        .await;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
             }
-            if started.elapsed()>Duration::from_secs(420) {
-                // Never admit new work merely because a response timed out.
-                if job.state != "unknown" { transition_update(&s,id,&mut job,"unknown","等待代理重新连接确认，继续暂停向该主机派发新任务").await; }
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
+        });
+        Ok((StatusCode::ACCEPTED, Json(response)))
     });
-    Ok((StatusCode::ACCEPTED,Json(response)))
-    });
-    admission.await.map_err(|_|ApiError::bad("升级任务初始化失败"))?
+    admission
+        .await
+        .map_err(|_| ApiError::bad("升级任务初始化失败"))?
 }
 
-
 async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
-    let value=serde_json::to_string(job).map_err(|_|ApiError::bad("升级状态编码失败"))?;
-    hosts::Entity::update_many().col_expr(hosts::Column::AgentUpdate,Expr::value(value))
-        .filter(hosts::Column::Id.eq(id)).exec(&s.db).await?;
+    let value = serde_json::to_string(job).map_err(|_| ApiError::bad("升级状态编码失败"))?;
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
+        .filter(hosts::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?;
     Ok(())
 }
 
 // The caller retains its exclusive reservation throughout persistence retries.
 // A failed state write must never release a host with an uncertain update.
 async fn transition_update(s: &AppState, id: Id, job: &mut UpdateJob, state: &str, message: &str) {
-    job.state=state.into(); job.message=message.into();
+    job.state = state.into();
+    job.message = message.into();
     loop {
-        match persist_update(s,id,job).await {
+        match persist_update(s, id, job).await {
             Ok(()) => break,
-            Err(error) => tracing::error!(host=%id,error=%error.1,"无法保存代理升级状态，继续保留主机升级锁"),
+            Err(error) => {
+                tracing::error!(host=%id,error=%error.1,"无法保存代理升级状态，继续保留主机升级锁")
+            }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    UPDATES.lock().unwrap_or_else(|e|e.into_inner()).insert(id.to_string(),job.clone());
+    UPDATES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id.to_string(), job.clone());
 }
 
 /// Restore exclusion before the schedulers or HTTP listener can admit new work.
 pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
-    let rows=hosts::Entity::find().filter(hosts::Column::AgentUpdate.is_not_null()).all(&s.db).await?;
+    let rows = hosts::Entity::find()
+        .filter(hosts::Column::AgentUpdate.is_not_null())
+        .all(&s.db)
+        .await?;
     for row in rows {
-        let mut job: UpdateJob=serde_json::from_str(row.agent_update.as_deref().unwrap())
-            .map_err(|_|ApiError::bad("持久化的代理升级状态无法读取"))?;
-        let id=Id::from(row.id);
-        if job.state=="draining" {
-            job.state="failed".into(); job.message="服务重启中断了等待，尚未发送升级请求".into();
-            persist_update(s,id,&job).await?;
+        let mut job: UpdateJob = serde_json::from_str(row.agent_update.as_deref().unwrap())
+            .map_err(|_| ApiError::bad("持久化的代理升级状态无法读取"))?;
+        let id = Id::from(row.id);
+        if job.state == "draining" {
+            job.state = "failed".into();
+            job.message = "服务重启中断了等待，尚未发送升级请求".into();
+            persist_update(s, id, &job).await?;
         }
-        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).insert(id.to_string(),job.clone());
-        if !matches!(job.state.as_str(),"updating"|"unknown") { continue; }
-        let exclusion=crate::runner_updates::exclusive(&id.to_string()).await;
-        let s=s.clone();
+        UPDATES
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string(), job.clone());
+        if !matches!(job.state.as_str(), "updating" | "unknown") {
+            continue;
+        }
+        let exclusion = crate::runner_updates::exclusive(&id.to_string()).await;
+        let s = s.clone();
         tokio::spawn(async move {
-            let _exclusion=exclusion;
+            let _exclusion = exclusion;
             loop {
-                let peer=live().get(&id.to_string()).cloned();
-                if let Some(peer)=peer {
+                let peer = live().get(&id.to_string()).cloned();
+                if let Some(peer) = peer {
                     if peer.managed && peer.ready.load(std::sync::atomic::Ordering::Acquire) {
-                        let failed=peer.failed_version.lock().unwrap_or_else(|e|e.into_inner()).clone();
-                        let (state,message)=if peer.version==job.version {
-                            ("succeeded","代理升级完成，重启后已确认连接健康")
-                        } else if failed.as_deref()==Some(job.version.as_str()) {
-                            ("rolled_back","新版本未完成激活，重启后已确认回退")
+                        let failed = peer
+                            .failed_version
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone();
+                        let (state, message) = if peer.version == job.version {
+                            ("succeeded", "代理升级完成，重启后已确认连接健康")
+                        } else if failed.as_deref() == Some(job.version.as_str()) {
+                            ("rolled_back", "新版本未完成激活，重启后已确认回退")
                         } else {
-                            ("failed","升级准备被服务中断，代理已恢复健康连接")
+                            ("failed", "升级准备被服务中断，代理已恢复健康连接")
                         };
-                        transition_update(&s,id,&mut job,state,message).await;
+                        transition_update(&s, id, &mut job, state, message).await;
                         break;
                     }
                 }

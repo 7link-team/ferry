@@ -19,7 +19,7 @@ def command(*args, check=True):
     # Rust emits UTF-8; native service tools can emit a legacy code page.
     # Preserve undecodable bytes in diagnostics instead of losing stderr.
     result = subprocess.run([str(a) for a in args], capture_output=True,
-                            text=True, encoding='utf-8', errors='backslashreplace')
+                            text=True, encoding='utf-8', errors='backslashreplace', timeout=90)
     if check: assert result.returncode == 0, (args, result.stdout, result.stderr)
     return result
 
@@ -327,6 +327,10 @@ jobs:
         except Exception as diagnostic: print('Diagnostic error:', type(diagnostic).__name__, flush=True)
         raise
     finally:
+        # A failed assertion must not leave the fixture's own file barriers
+        # holding an Actions job while systemd correctly waits for graceful stop.
+        for filename in ['build.release','verify.release']:
+            (root/filename).touch()
         if 'terminal' in locals(): terminal.close()
         service('uninstall', check=False)
         wait(lambda: pid()==0, 'test service cleanup stops supervisor')
