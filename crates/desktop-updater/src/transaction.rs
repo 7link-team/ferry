@@ -381,4 +381,62 @@ mod tests {
         assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
         assert!(app.join("resources/worker.exe").exists());
     }
+
+    #[test]
+    fn failed_journal_write_allows_retry_without_false_confirmation() {
+        for during_confirm in [false, true] {
+            let (_temp, app, directory) = fixture();
+            let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+            if during_confirm {
+                transaction.apply().unwrap();
+            }
+            let journal = directory.join("journal.json");
+            fs::rename(&journal, directory.join("saved-journal.json")).unwrap();
+            fs::create_dir(&journal).unwrap();
+            if during_confirm {
+                assert!(transaction.confirm().is_err());
+            } else {
+                assert!(transaction.apply().is_err());
+            }
+            fs::remove_dir(&journal).unwrap();
+            fs::rename(directory.join("saved-journal.json"), &journal).unwrap();
+            if !during_confirm {
+                assert!(transaction.confirm().is_err(), "failed apply must not become confirmable");
+                transaction.apply().unwrap();
+            }
+            transaction.confirm().unwrap();
+            Transaction::recover(&app, &directory).unwrap();
+            assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
+        }
+    }
+
+    #[test]
+    fn changed_new_file_blocks_recovery_before_any_replacement() {
+        let (_temp, app, directory) = fixture();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+        transaction.apply().unwrap();
+        fs::write(app.join("resources/worker.exe"), b"external change").unwrap();
+        assert!(Transaction::recover(&app, &directory).is_err());
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
+        assert_eq!(fs::read(app.join("resources/worker.exe")).unwrap(), b"external change");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_file_partial_apply_is_recoverable_after_handle_closes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (_temp, app, directory) = fixture();
+        fs::create_dir_all(app.join("resources")).unwrap();
+        fs::write(app.join("resources/worker.exe"), b"old worker").unwrap();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+        let handle = fs::OpenOptions::new().read(true).share_mode(1)
+            .open(app.join("resources/worker.exe")).unwrap();
+        assert!(transaction.apply().is_err());
+        assert!(transaction.confirm().is_err());
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
+        drop(handle);
+        Transaction::recover(&app, &directory).unwrap();
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
+        assert_eq!(fs::read(app.join("resources/worker.exe")).unwrap(), b"old worker");
+    }
 }
