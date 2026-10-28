@@ -66,3 +66,36 @@ it("unmounting a revealed detail does not carry plaintext into another detail", 
   expect(host.textContent).not.toContain("secret-value");
   expect(requests.filter(r => r.url.endsWith("/reveal"))).toHaveLength(1);
 });
+it("pipeline creation uses a wide form and keeps repository/host settings out of basic fields", async () => {
+  history.replaceState({}, "", "/ops/build/pipelines/new");
+  vi.stubGlobal("fetch", vi.fn(async () => ({ok:true,status:200,json:async()=>({items:[],total:0,page:1,page_size:200})})));
+  const permissions = new Set(["pipelines.create","hosts.read","tags.read","tags.create","pipeline-environments.read","pipeline-environments.create"]);
+  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions).pipelines!} workspace="ops" permissions={permissions}/>));
+  expect(host.querySelector("form")?.className).not.toContain("max-w-3xl");
+  expect(host.textContent).not.toContain("构建代码来源");
+  expect(host.textContent).not.toContain("目标类型");
+  expect(host.textContent).toContain("新建标签");
+  expect(host.textContent).toContain("新建执行环境");
+});
+it("creates a classification tag in place and selects it without losing the pipeline draft", async () => {
+ history.replaceState({}, "", "/ops/build/pipelines/new");
+ const tags:{id:string;name:string}[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(url:string,init:RequestInit={})=>{
+   requests.push({url,method:init.method,body:init.body as string});
+   if(url.endsWith('/tags')&&init.method==='POST'){const body=JSON.parse(String(init.body));tags.push({id:'tag-created',name:body.name});return {ok:true,status:201,json:async()=>({id:'tag-created'})};}
+   return {ok:true,status:200,json:async()=>({items:url.includes('/tags?')?tags:[],total:url.includes('/tags?')?tags.length:0,page:1,page_size:200})};
+ }));
+ const permissions=new Set(['pipelines.create','tags.read','tags.create']);
+ await act(async()=>root.render(<ResourceForm config={formConfigs('ops',permissions).pipelines!} workspace="ops" permissions={permissions}/>));
+ const name=host.querySelector('input')!;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(name,'Draft kept');name.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('新建标签');
+ const dialog=document.querySelector('[role="dialog"]')!;
+ const input=dialog.querySelector('input')!;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Release');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>dialog.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ expect(requests.filter(row=>row.method==='POST')).toHaveLength(1);
+ expect(host.textContent).toContain('Release');
+ expect(host.querySelector('[role="checkbox"][data-state="checked"]')).not.toBeNull();
+ expect(name.value).toBe('Draft kept');
+});

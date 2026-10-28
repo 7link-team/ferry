@@ -68,17 +68,20 @@ export function removeActionJob(source: string, id: string): string {
   for (const job of jobs.filter(job => job.id !== id && job.needs.includes(id))) patch(document, ["jobs", job.id], { needs: job.needs.filter(need => need !== id) });
   return serialize(document);
 }
-export function addActionJob(source: string, checkout = false): { source: string; id: string } {
+export function addActionJob(source: string, checkout = false, placement?: { job: string; mode: "serial" | "parallel" }): { source: string; id: string } {
   const { document, jobs } = parseActions(source);
   let suffix = 1; while (jobs.some(job => job.id === `job_${suffix}`)) suffix++;
   const id = `job_${suffix}`;
-  document.setIn(["jobs", id], { name: "新任务", "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "拉取代码", uses: "actions/checkout@v4" }] : []), { name: "执行命令", run: "echo hello" }] });
+  const anchor = placement && jobs.find(job => job.id === placement.job);
+  if (placement && !anchor) throw new Error("任务不存在。");
+  const needs = anchor ? placement?.mode === "serial" ? [anchor.id] : anchor.needs : [];
+  document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "拉取代码", uses: "actions/checkout@v4" }] : []), { name: "执行命令", run: "echo hello" }] });
   return { source: serialize(document), id };
 }
-export function addActionStep(source: string, job: string): string {
+export function addActionStep(source: string, job: string, kind: "run" | "checkout" = "run"): string {
   const { document, jobs } = parseActions(source);
   const row = jobs.find(row => row.id === job); if (!row) throw new Error("任务不存在。");
-  document.addIn(["jobs", job, "steps"], { name: "执行命令", run: "echo hello" });
+  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name: "拉取代码", uses: "actions/checkout@v4" } : { name: "执行命令", run: "echo hello" });
   return serialize(document);
 }
 export function removeActionStep(source: string, job: string, index: number): string {

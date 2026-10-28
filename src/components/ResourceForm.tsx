@@ -35,6 +35,8 @@ import { href, navigate, useRoute } from "../router";
 import type { FormConfig, FormField, Option, Options, RowAction } from "./dsl";
 
 function useOptions(source: Options | undefined) {
+  const [revision, setRevision] = useState(0);
+  const reload = useCallback(() => setRevision(value => value + 1), []);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(typeof source === "function");
   const [options, setOptions] = useState<Option[]>(Array.isArray(source) ? source : []);
@@ -50,8 +52,8 @@ function useOptions(source: Options | undefined) {
     return () => {
       live = false;
     };
-  }, [source]);
-  return { options, error, loading };
+  }, [source, revision]);
+  return { options, error, loading, reload };
 }
 
 export function ResourceForm<T extends Record<string, unknown>>({
@@ -142,7 +144,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     );
 
   return (
-    <form className="max-w-3xl space-y-6 pb-8" onSubmit={submit}>
+    <form className={cn("min-w-0 w-full space-y-6 pb-8", config.width !== "full" && "max-w-3xl")} onSubmit={submit}>
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -335,12 +337,15 @@ function Field<T>({
   onChange: (value: unknown) => void;
   reportOptions: (key: string, blocked: boolean) => void;
 }) {
-  const { options, error: optionsError, loading: optionsLoading } = useOptions(field.options);
+  const { options, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
+  const [creatingOption, setCreatingOption] = useState(false);
+  const [optionSearch, setOptionSearch] = useState("");
   useEffect(() => {
     reportOptions(field.key, optionsLoading || !!optionsError);
     return () => reportOptions(field.key, false);
   }, [field.key, optionsLoading, optionsError, reportOptions]);
   const reportManifest = useCallback((blocked: boolean) => reportOptions(`$manifest:${field.key}`, blocked), [field.key, reportOptions]);
+  const reportCheckout = useCallback((blocked: boolean) => reportOptions(`$checkout:${field.key}`, blocked), [field.key, reportOptions]);
   const text = String(value ?? "");
   if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}，请刷新页面重试。</p></Wrapper>;
 
@@ -357,7 +362,7 @@ function Field<T>({
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
 
-  if (field.type === "actions-editor") return <div className="min-w-0 sm:col-span-2"><ActionsEditor draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
+  if (field.type === "actions-editor") return <div className="min-w-0 sm:col-span-2"><ActionsEditor draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
   if (field.type === "pipeline-repository") return <div className="min-w-0 sm:col-span-2"><PipelineRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
@@ -379,8 +384,11 @@ function Field<T>({
       onChange([...next]);
     };
     return <Wrapper field={field}><fieldset className="space-y-3"><legend>{label}</legend>
-      {[...new Set(options.map(o => o.group ?? "选项"))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
-        {options.filter(o => (o.group ?? "选项") === group).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.label}</label>)}
+      {field.createOption && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={`搜索${field.label}`} placeholder={`搜索${field.label}`} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
+      {!options.length && <p className="text-sm text-muted-foreground">暂无可选{field.label}{field.createOption && permissions.has(field.createOption.permission) ? "，可在此新建。" : "，请联系有权限的成员创建。"}</p>}
+      {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
+      {[...new Set(options.filter(o => o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? "选项"))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
+        {options.filter(o => (o.group ?? "选项") === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.label}</label>)}
       </div></div>)}
       {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     </fieldset></Wrapper>;

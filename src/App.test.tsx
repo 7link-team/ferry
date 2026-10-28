@@ -46,8 +46,8 @@ it("has one repository entry and no separate authorization tabs", async () => {
   history.replaceState({}, "", "/ops/build/repositories");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="构建"]')!;
-  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库", "授权认证"]);
-  expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库");
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "授权认证"]);
+  expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库连接");
   expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
   expect(host.textContent).not.toContain("平台授权");
 });
@@ -67,7 +67,7 @@ it("opens legacy repository authorization bookmarks as the unified repository li
   permissions = ["repositories.read"];
   history.replaceState({}, "", "/ops/build/repository-auth/github");
   await act(async () => root.render(<App />));
-  expect(host.querySelector("h1")?.textContent).toBe("仓库");
+  expect(host.querySelector("h1")?.textContent).toBe("仓库连接");
   expect(host.textContent).not.toContain("平台授权");
 });
 it("does not expose repository creation to a credentials-only role", async () => {

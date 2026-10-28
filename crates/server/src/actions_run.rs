@@ -438,7 +438,12 @@ async fn execute_private(
     .await?;
     let environment = history::credential_environment(ch, private, credential).await?;
     let workdir = format!("{private}/source");
-    let checkout = if run.repo_url.is_empty() || !snapshot.document.checkout_bindings.is_empty() {
+    let checkout = if run.repo_url.is_empty()
+        || snapshot
+            .checkouts
+            .iter()
+            .any(|checkout| checkout.binding.job_id == job.key)
+    {
         "git init -q\n".into()
     } else {
         history::checkout_script(run)?

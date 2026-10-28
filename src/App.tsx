@@ -56,7 +56,7 @@ export function App() {
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     if (query.get("oauth_popup") === "1") {
-      const message = { type: "repository-authorized", provider: query.get("provider"), status: query.get("authorization") };
+      const message = { type: "repository-authorized", provider: query.get("provider"), status: query.get("authorization"), connection_id: query.get("connection_id") };
       if (window.opener) window.opener.postMessage(message, location.origin);
       const key = query.get("oauth_channel");
       if (key && /^[a-zA-Z0-9-]{1,64}$/.test(key)) {

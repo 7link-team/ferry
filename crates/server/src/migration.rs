@@ -2688,6 +2688,7 @@ impl MigrationTrait for NamedCodeConnections {
                     .await?;
                 }
             }
+            _ => return Err(DbErr::Custom("Unsupported database backend".into())),
         }
         Ok(())
     }

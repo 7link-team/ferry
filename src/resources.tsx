@@ -13,7 +13,7 @@ import { duration, stateBadge, type PipelineRun } from "./pipeline";
 import { deploymentState, type Deployment, type Revision } from "./deployment";
 import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
-import { deleteResource, listResource, runAction, runItemAction } from "./resource";
+import { createResource, deleteResource, listResource, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option, RowAction } from "./components/dsl";
 
 /* The registries are keyed by resource name, so their values have to share one
@@ -122,15 +122,11 @@ const sshCredentialOptions = (workspace: string) => async (): Promise<Option[]> 
 const groupOptions = (workspace: string) => namedOptions(workspace, "host-groups");
 const tagOptions = (workspace: string) => namedOptions(workspace, "tags");
 
-interface Repository {
-  provider: string;
-  id: string; name: string; url: string; default_branch: string;
-  credential_id: string; description: string;
-}
+interface CodeConnection { id:string; name:string; provider:string; credential_id:string; account:string; state:string; authorization:string; description:string; base_url:string; api_url:string; organization:string; url?:string; version:number }
 interface Pipeline {
   id: string; name: string; repository_id: string; target_kind: string;
   group_id: string; group_name: string; application_id: string; application_name: string; tag_ids: string[]; environment_ids: string[]; tags: {id:string;name:string}[]; environments: {id:string;name:string}[];
-  target_ref: string; definition: string; description: string; definition_format: string; executor_bindings: unknown[]; graph_layout: Record<string, unknown>;
+  target_ref: string; definition: string; description: string; definition_format: string; executor_bindings: unknown[]; checkout_bindings: unknown[]; graph_layout: Record<string, unknown>;
 }
 const namedOptions = (workspace: string, resource: string) => async (): Promise<Option[]> => {
   const items: Option[] = [];
@@ -276,19 +272,12 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       actions: [{ label: "查看", permission: "deployments.read", to: (r) => ({ id: r.id, mode: "view" }) }],
       toolbar: { create: false, import: false, export: false },
     }),
-    repositories: list({
-      resource: "repositories", rowKey: (r: Repository) => r.id,
-      filters: [{ key: "q", label: "名称 / URL", type: "text" }],
-      columns: [
-        { key: "name", label: "名称" }, { key: "url", label: "URL" },
-        { key: "default_branch", label: "默认分支" }, { key: "description", label: "备注" },
-      ],
-      actions: [
-        { label: "查看", permission: "repositories.read", to: (r) => ({ id: r.id, mode: "view" }) },
-        { label: "编辑", permission: "repositories.update", to: (r) => ({ id: r.id, mode: "edit" }) },
-        { label: "删除", permission: "repositories.delete", destructive: true,
-          action: (r) => deleteResource(workspace, "repositories", r.id) },
-      ],
+    "code-connections": list<CodeConnection>({
+      resource: "code-connections", permissionResource:"repositories", rowKey: row => row.id,
+      filters: [{ key: "q", label: "名称", type: "text" }],
+      columns: [{key:"name",label:"连接名称"},{key:"provider",label:"平台"},{key:"account",label:"账号"},{key:"state",label:"连接状态",render:row=>({connected:"已连接",expired:"授权过期",refreshable:"可刷新授权",failed:"连接失败"}[row.state]??row.state)},{key:"description",label:"备注"}],
+      actions: [{label:"查看",permission:"repositories.read",to:row=>({id:row.id,mode:"view"})},{label:"编辑",permission:"repositories.update",to:row=>({id:row.id,mode:"edit"})},{label:"删除",permission:"repositories.delete",destructive:true,action:row=>deleteResource(workspace,"code-connections",row.id)}],
+      toolbar:{create:{label:"创建连接"}},empty:"尚无仓库连接。创建连接后，在流水线的拉取代码节点选择仓库和分支。",
     }),
     ...Object.fromEntries((["pipeline-groups","pipeline-environments"] as const).map(resource=>[resource,list<PipelineContext>({
       resource,rowKey:row=>row.id,filters:[{key:"q",label:"名称",type:"text"}],
@@ -653,15 +642,10 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),
-    repositories: form({
-      resource: "repositories", heading: (r: Repository) => r.name,
-      blank: { name: "", provider: "", url: "", default_branch: "main", credential_id: "0", description: "" },
-      sections: [{ fields: [
-        { key: "source", label: "连接仓库", type: "repository-source", span: 2 },
-        { key: "name", label: "名称", type: "text", required: true },
-        { key: "default_branch", label: "默认分支", type: "text", required: true },
-        { key: "description", label: "备注", type: "textarea", span: 2 },
-      ] }],
+    "code-connections": form<CodeConnection>({
+      resource:"code-connections",permissionResource:"repositories",heading:row=>row.name,
+      blank:{name:"",provider:"",credential_id:"0",base_url:"",api_url:"",organization:"",description:""},
+      sections:[{fields:[{key:"name",label:"连接名称",type:"text",required:true},{key:"source",label:"连接平台",type:"repository-source",span:2},{key:"description",label:"备注",type:"textarea",span:2}]}],
     }),
     "pipeline-groups":form<PipelineContext>({resource:"pipeline-groups",heading:row=>row.name,blank:{name:"",description:""},sections:[{fields:[{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea"}]}]}),
     "pipeline-environments":form<PipelineContext>({resource:"pipeline-environments",heading:row=>row.name,blank:{name:"",description:"",target_kind:"host",target_ref:""},
@@ -673,22 +657,22 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       ]}]}),
     pipelines: form({
       ...(permissions?.has("pipeline-templates.read") ? { generator: templateGenerator(workspace, "pipeline-templates", "definition") } : {}),
-      resource: "pipelines", heading: (r: Pipeline) => r.name,
+      resource: "pipelines", width: "full", heading: (r: Pipeline) => r.name,
       viewActions:[pipelineRunAction(workspace)],
-      blank: { group_id:"",application_id:"",tag_ids:[],environment_ids:[],name: "", repository_id: "", target_kind: "host", target_ref: "", description: "",
-        definition_format: "github-actions", executor_bindings: [], graph_layout: {}, definition: DEFAULT_ACTIONS },
+      blank: { group_id:"",application_id:"",tag_ids:[],environment_ids:[],name: "", repository_id: "", target_kind: "", target_ref: "", description: "",
+        definition_format: "github-actions", executor_bindings: [], checkout_bindings: [], graph_layout: {}, definition: DEFAULT_ACTIONS },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
         {key:"group_id",when:()=>!permissions||permissions.has("pipeline-groups.read"),label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
         {key:"application_id",when:()=>!permissions||permissions.has("deployments.read"),label:"关联应用",type:"select",options:namedOptions(workspace,"deployments")},
-        {key:"tag_ids",when:()=>!permissions||permissions.has("tags.read"),label:"标签",type:"multiselect",options:tagOptions(workspace),span:2},
-        {key:"environment_ids",when:()=>!permissions||permissions.has("pipeline-environments.read"),label:"执行环境",type:"multiselect",options:namedOptions(workspace,"pipeline-environments"),span:2,help:"可绑定多个环境，触发时必须选择一个；不绑定时使用默认执行器。"},
-        { key: "repository_id", label: "仓库", type: "pipeline-repository", options: namedOptions(workspace, "repositories"), span: 2 },
-        { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, resetOnChange: ["target_ref"] },
+        {key:"tag_ids",when:()=>!permissions||permissions.has("tags.read"),label:"标签",type:"multiselect",options:tagOptions(workspace),span:2,createOption:{label:"新建标签",permission:"tags.create",fields:[{key:"name",label:"名称",type:"text",required:true}],create:async values=>{const row=await createResource<{id:string}>(workspace,"tags",values);return {value:row.id,label:String(values.name)};}}},
+        {key:"environment_ids",when:()=>!permissions||permissions.has("pipeline-environments.read"),label:"执行环境",type:"multiselect",options:namedOptions(workspace,"pipeline-environments"),span:2,help:"运行时选择一个环境，提供该环境的变量和默认执行器；任务指定的执行器优先。",createOption:{label:"新建执行环境",permission:"pipeline-environments.create",fields:[{key:"name",label:"名称",type:"text",required:true},{key:"target_kind",label:"默认执行器类型",type:"select",options:TARGETS,required:true},{key:"target_ref",label:"默认主机",type:"select",options:namedOptions(workspace,"hosts"),required:true,when:d=>d.target_kind==="host"},{key:"target_ref",label:"默认主机组",type:"select",options:namedOptions(workspace,"host-groups"),required:true,when:d=>d.target_kind==="host-group"}],create:async values=>{const row=await createResource<{id:string}>(workspace,"pipeline-environments",values);return {value:row.id,label:String(values.name)};}}},
+        { key: "repository_id", label: "仓库", type: "pipeline-repository", when:d=>d.definition_format!=="github-actions", options: namedOptions(workspace, "repositories"), span: 2 },
+        { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, when:d=>d.definition_format!=="github-actions", resetOnChange: ["target_ref"] },
         { key: "target_ref", label: "目标主机", type: "select", required: true,
-          options: namedOptions(workspace, "hosts"), when: (d) => d.target_kind === "host" },
+          options: namedOptions(workspace, "hosts"), when: (d) => d.definition_format!=="github-actions" && d.target_kind === "host" },
         { key: "target_ref", label: "目标主机组", type: "select", required: true,
-          options: namedOptions(workspace, "host-groups"), when: (d) => d.target_kind === "host-group" },
+          options: namedOptions(workspace, "host-groups"), when: (d) => d.definition_format!=="github-actions" && d.target_kind === "host-group" },
         { key: "definition", label: "Actions 工作流", type: "actions-editor", required: true, span: 2, when: d => d.definition_format === "github-actions",
           options: async () => (await Promise.all(["hosts", "host-groups"].filter(resource=>!permissions||permissions.has(`${resource}.read`)).map(async (resource) => (await namedOptions(workspace, resource)()).map(option => ({ value: `${resource === "hosts" ? "host" : "host-group"}:${option.value}`, label: `${resource === "hosts" ? "主机" : "主机组"} · ${option.label}` }))))).flat() },
         { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2, when: d => d.definition_format !== "github-actions",

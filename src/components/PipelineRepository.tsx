@@ -1,61 +1,85 @@
-import { ensureActionCheckout } from "../actions-workflow";
-import { useEffect, useState } from "react";
-import { RepositorySource } from "./RepositorySource";
+import { useEffect, useId, useState } from "react";
+import { editActionStep, ensureActionCheckout, parseActions } from "../actions-workflow";
+import { api, errorText } from "../api";
+import { href } from "../router";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import type { Option } from "./dsl";
 
-/** Adapt the shared repository connection input to a pipeline's atomic source binding. */
-export function PipelineRepository({ workspace, draft, options, readOnly, onChange, onValidityChange }: {
-  workspace: string; draft: Record<string, unknown>; options: Option[]; readOnly: boolean;
-  onChange: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void;
-}) {
-  const [mode, setMode] = useState(draft.repository_selection ? "connection" : "saved");
-  const [source, setSource] = useState<Record<string, unknown>>(
-    (draft.repository_selection as Record<string, unknown>) ?? { provider: "", name: "", url: "", credential_id: "0" },
-  );
-  const [error, setError] = useState("");
-  useEffect(() => {
-    if (mode !== "connection") onValidityChange(false);
-  }, [mode, onValidityChange]);
-  const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
-  function checkout(): string | undefined {
-    try {
-      if (draft.definition_format === "github-actions") {
-        const value = ensureActionCheckout(String(draft.definition)); setError(""); return value;
-      }
-      const definition = JSON.parse(String(draft.definition));
-      if (!Array.isArray(definition.steps)) throw new Error();
-      if (!definition.steps.some((step: { checkout?: boolean }) => step.checkout))
-        definition.steps.unshift({ name: "拉取代码", checkout: true, timeout_seconds: 1800 });
-      setError("");
-      return JSON.stringify(definition, null, 2);
-    } catch { setError("请先修正流水线定义，再添加拉取代码步骤。"); return undefined; }
+type Connection = {id:string;name:string;provider:string;state:string;url?:string};
+type Remote = {name:string;full_name:string;url:string;default_branch:string};
+type Binding = {job_id:string;step_id:string;connection_id:string;repository_url:string;ref:string;path:string};
+type Props = { workspace:string;draft:Record<string,unknown>;options?:Option[];jobId?:string;stepIndex?:number;readOnly:boolean;onChange:(patch:Record<string,unknown>)=>void;onValidityChange:(blocked:boolean)=>void };
+const selectClass="w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm";
+
+export function PipelineRepository(props:Props) {
+  if(props.jobId===undefined || props.stepIndex===undefined) return <LegacyRepository {...props}/>;
+  return <CheckoutRepository {...props} jobId={props.jobId} stepIndex={props.stepIndex}/>;
+}
+function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,onValidityChange}:Props & {jobId:string;stepIndex:number}) {
+  const [connections,setConnections]=useState<Connection[]>([]),[repositories,setRepositories]=useState<Remote[]>([]),[branches,setBranches]=useState<string[]>([]);
+  const [error,setError]=useState(""),[loading,setLoading]=useState(false),[page,setPage]=useState(1),[hasMore,setHasMore]=useState(false),[revision,setRevision]=useState(0);
+  const branchList=useId();
+  const jobs=parseActions(String(draft.definition)).jobs;
+  const job=jobs.find(row=>row.id===jobId)!;
+  const step=job.steps[stepIndex]!;
+  const bindings=(draft.checkout_bindings??[]) as Binding[];
+  const current=bindings.find(row=>row.job_id===jobId && row.step_id===step.id);
+  const connection=connections.find(row=>row.id===current?.connection_id);
+  const root=`/workspaces/${encodeURIComponent(workspace)}/code-connections`;
+  const nativeSource=!!(step.with as Record<string,unknown>|undefined)?.repository;
+  const legacy=!!draft.repository_id && draft.repository_id!=="0";
+  const missing=!current ? !legacy&&!nativeSource : !current.connection_id||!current.repository_url;
+  useEffect(()=>{onValidityChange(!readOnly && missing);return()=>onValidityChange(false);},[missing,readOnly,onValidityChange]);
+  useEffect(()=>{
+    const controller=new AbortController();setError("");
+    void (async()=>{const all:Connection[]=[];for(let page=1;;page++){const data=await api<{items:Connection[];total:number;page_size:number}>(`${root}?page=${page}&page_size=200`,{signal:controller.signal});all.push(...data.items);if(!data.items.length||page*data.page_size>=data.total)break;}if(!controller.signal.aborted)setConnections(all);})().catch(cause=>{if(!controller.signal.aborted)setError(errorText(cause));});
+    return()=>controller.abort();
+  },[root,revision]);
+  useEffect(()=>{
+    setRepositories([]);setPage(1);setHasMore(false);
+  },[current?.connection_id]);
+  useEffect(()=>{
+    if(!connection || connection.provider==='git')return;
+    const controller=new AbortController();setLoading(true);setError("");
+    void api<{items:Remote[];has_more:boolean}>(`${root}/${encodeURIComponent(connection.id)}/repositories?page=${page}`,{signal:controller.signal})
+      .then(value=>{if(!controller.signal.aborted){setRepositories(previous=>page===1?value.items:[...previous,...value.items.filter(row=>!previous.some(existing=>existing.url===row.url))]);setHasMore(value.has_more);}})
+      .catch(cause=>{if(!controller.signal.aborted)setError(errorText(cause));}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
+    return()=>controller.abort();
+  },[root,connection?.id,connection?.provider,page,revision]);
+  useEffect(()=>{
+    setBranches([]);
+    if(!connection || connection.provider==='git' || !current?.repository_url)return;
+    const controller=new AbortController();
+    void api<{items:{name:string}[]}>(`${root}/${encodeURIComponent(connection.id)}/branches?url=${encodeURIComponent(current.repository_url)}`,{signal:controller.signal})
+      .then(value=>{if(!controller.signal.aborted)setBranches(value.items.map(row=>row.name));})
+      .catch(cause=>{if(!controller.signal.aborted)setError(errorText(cause));});
+    return()=>controller.abort();
+  },[root,connection?.id,connection?.provider,current?.repository_url]);
+  function change(patch:Partial<Binding>) {
+    let stepId=typeof step.id==='string'?step.id:'';
+    if(!stepId){let n=1;while(job.steps.some(row=>row.id===`checkout_${n}`))n++;stepId=`checkout_${n}`;}
+    const next={job_id:jobId,step_id:stepId,connection_id:'',repository_url:'',ref:'',path:'',...current,...patch};
+    onChange({definition:step.id?draft.definition:editActionStep(String(draft.definition),jobId,stepIndex,{id:stepId}),checkout_bindings:[...bindings.filter(row=>!(row.job_id===jobId&&row.step_id===stepId)),next]});
   }
-  if (readOnly) return <p className="text-sm">仓库：{options.find(row => row.value === draft.repository_id)?.label || "未选择"}</p>;
-  return <div className="space-y-4">
-    <label className="block space-y-2"><span className="text-sm font-medium">构建代码来源</span>
-      <select aria-label="构建代码来源" className={selectClass} value={mode} onChange={event => {
-        const next = event.target.value; setMode(next); setError("");
-        onChange({ repository_selection: null, repository_id: "" });
-        setSource({ provider: "", name: "", url: "", credential_id: "0" });
-      }}><option value="saved">已保存仓库 / 无代码来源</option><option value="connection">通过平台连接选择仓库</option></select>
-    </label>
-    {mode === "saved" ? <label className="block space-y-2"><span className="text-sm font-medium">仓库</span>
-      <select aria-label="仓库" className={selectClass} value={String(draft.repository_id ?? "")} onChange={event => onChange({ repository_id: event.target.value, repository_selection: null })}>
-        <option value="">不选择（仅执行命令）</option>{options.map(row => <option key={row.value} value={row.value}>{row.label}</option>)}
-      </select>
-    </label> : <RepositorySource platformOnly workspace={workspace} draft={source} readOnly={false} onValidityChange={onValidityChange} onChange={patch => {
-      const selected = { ...source, ...patch };
-      // This is the local display name; keep the full remote identity in its URL.
-      selected.name = [...String(selected.name ?? "")].slice(0, 60).join("");
-      setSource(selected);
-      const definition = selected.url ? checkout() : undefined;
-      onChange({ repository_id: "", repository_selection: selected, ...(definition ? { definition } : {}) });
-    }} />}
-    {(draft.repository_id || source.url) ? <Button type="button" variant="outline" onClick={() => {
-      const definition = checkout(); if (definition) onChange({ definition });
-    }}>添加拉取代码步骤</Button> : null}
-    <p className="text-xs text-muted-foreground">平台连接选择仓库后会添加“拉取代码”步骤，再执行你配置的构建命令。已保存流水线可手动添加；已有手写 Git 命令不受影响。</p>
-    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-  </div>;
+  if(readOnly)return <dl className="space-y-2 text-sm"><dt>仓库连接</dt><dd>{connection?.name||current?.connection_id||'沿用原有 YAML / 旧版仓库配置'}</dd>{current&&<><dt>仓库</dt><dd className="break-all">{current.repository_url}</dd><dt>分支 / 标签 / Commit</dt><dd>{current.ref||'仓库默认 HEAD'}</dd><dt>检出目录</dt><dd>{current.path||'工作目录'}</dd></>}</dl>;
+  return <section aria-label="拉取代码配置" className="min-w-0 space-y-3">
+    <label className="block space-y-2"><span className="text-sm">仓库连接</span><select aria-label="仓库连接" className={selectClass} value={current?.connection_id??''} onChange={event=>{const selected=connections.find(row=>row.id===event.target.value);change({connection_id:event.target.value,repository_url:selected?.provider==='git'?selected.url??'':'',ref:''});}}><option value="">请选择连接</option>{connections.map(row=><option key={row.id} value={row.id}>{row.name} · {row.provider}{row.state!=='connected'?'（需要重新授权）':''}</option>)}</select></label>
+    <div className="flex flex-wrap gap-3 text-xs"><a className="underline" href={href({workspace,group:'build',item:'repositories',mode:'new',id:''},{})} target="_blank" rel="noopener noreferrer">新建仓库连接</a><Button type="button" size="sm" variant="ghost" onClick={()=>setRevision(value=>value+1)}>刷新连接</Button></div>
+    {!connections.length&&<p className="text-xs text-muted-foreground">尚无可用仓库连接。先创建连接，再返回选择。</p>}
+    {connection?.provider==='git'?<label className="block space-y-2"><span className="text-sm">Git 仓库地址</span><Input aria-label="Git 仓库地址" value={current?.repository_url??''} onChange={event=>change({repository_url:event.target.value,ref:''})}/></label>:current?.connection_id&&<label className="block space-y-2"><span className="text-sm">仓库</span><select aria-label="节点仓库" className={selectClass} value={current.repository_url} disabled={loading&&page===1} onChange={event=>change({repository_url:event.target.value,ref:repositories.find(row=>row.url===event.target.value)?.default_branch??''})}><option value="">{loading?'正在读取可见仓库…':'请选择可见仓库'}</option>{current.repository_url&&!repositories.some(row=>row.url===current.repository_url)&&<option value={current.repository_url}>{current.repository_url}</option>}{repositories.map(row=><option key={row.url} value={row.url}>{row.full_name||row.name}</option>)}</select></label>}
+    {hasMore&&<Button type="button" variant="outline" disabled={loading} onClick={()=>setPage(value=>value+1)}>加载更多仓库</Button>}
+    {current?.repository_url&&<>
+      <label className="block space-y-2"><span className="text-sm">分支 / 标签 / Commit</span><Input aria-label="分支 / 标签 / Commit" list={branchList} value={current.ref} placeholder="选择或输入；留空使用仓库默认 HEAD" onChange={event=>change({ref:event.target.value})}/><datalist id={branchList}>{branches.map(name=><option key={name} value={name}>{name}</option>)}</datalist></label>
+      <label className="block space-y-2"><span className="text-sm">检出目录</span><Input aria-label="检出目录" value={current.path} placeholder="默认工作目录；多仓库可填写不同子目录" onChange={event=>change({path:event.target.value})}/></label>
+    </>}
+    {!current&&legacy&&<p className="text-xs text-muted-foreground">该历史流水线沿用已保存的仓库。选择连接后，此步骤使用独立来源。</p>}
+    {!current&&nativeSource&&<p className="text-xs text-muted-foreground">当前使用 YAML 中的 checkout 参数；选择连接后按此节点配置拉取。</p>}
+    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+  </section>;
+}
+function LegacyRepository({draft,options=[],readOnly,onChange}:Props){
+ const [error,setError]=useState('');
+ return <div className="space-y-3"><label className="block space-y-2"><span>仓库</span><select aria-label="仓库" className={selectClass} disabled={readOnly} value={String(draft.repository_id??'')} onChange={event=>onChange({repository_id:event.target.value,repository_selection:null})}><option value="">不选择（仅执行命令）</option>{options.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</select></label>
+ {!readOnly&&!!draft.repository_id&&<Button type="button" variant="outline" onClick={()=>{try{if(draft.definition_format==='github-actions')onChange({definition:ensureActionCheckout(String(draft.definition))});else{const definition=JSON.parse(String(draft.definition));if(!definition.steps.some((step:{checkout?:boolean})=>step.checkout))definition.steps.unshift({name:'拉取代码',checkout:true,timeout_seconds:1800});onChange({definition:JSON.stringify(definition,null,2)});}setError('');}catch{setError('请先修正流水线定义。');}}}>添加拉取代码步骤</Button>}{error&&<p role="alert">{error}</p>}</div>;
 }

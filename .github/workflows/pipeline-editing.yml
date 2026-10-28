@@ -11,6 +11,8 @@ on:
       - "crates/**"
       - "workers/actions/**"
       - "scripts/build-actions-workers.sh"
+      - "scripts/test-*.mjs"
+      - "scripts/test-actions-execution.py"
       - "scripts/test-repository-auth.py"
       - "scripts/test-pipeline-classification.py"
       - "scripts/test-pipelines.py"
@@ -73,10 +75,19 @@ jobs:
           sudo apt-get install -y bc lsof openssh-client python3 git curl libdigest-sha-perl
           docker info
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
       - run: bash scripts/build-actions-workers.sh
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - run: cargo test --locked -p ferry-server
+      - name: Pipeline and connection browser acceptance
+        run: |
+          node scripts/test-actions-canvas.mjs
+          node scripts/test-named-connection-ui.mjs
+          node scripts/test-repository-auth-ui.mjs
+          node scripts/test-actions-ui.mjs
       - name: Code connections and repository authorization on all three databases
         env:
           MYSQL_PWD: integration-only-password

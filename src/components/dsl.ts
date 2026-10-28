@@ -105,6 +105,7 @@ export interface FormField<T> {
   label: string;
   type: FieldType;
   required?: boolean;
+  createOption?: { label: string; permission: string; fields: FormField<Record<string, unknown>>[]; create: (values: Record<string, unknown>) => Promise<Option> };
   help?: string;
   placeholder?: string;
   options?: Options;
@@ -125,6 +126,7 @@ export interface FormField<T> {
 }
 
 export interface FormConfig<T> {
+  width?: "full";
   permissionResource?: string;
   resource: string;
   /** Explicit API path for global resources (without /api). */

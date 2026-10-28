@@ -19,7 +19,6 @@ use axum::{
 use futures::StreamExt;
 use sea_orm::{
     ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
-    TransactionTrait,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -206,7 +205,22 @@ pub async fn collect(
                 created_at: db::now(),
             });
         }
-        let tx = s.db.begin().await?;
+        // Bytes are staged under globally unique artifact IDs, never the
+        // shared logical path. Serialize publication across all server tasks;
+        // a losing upload removes only its own staged files below.
+        let tx = crate::variables::transaction(s, run.workspace_id.into()).await?;
+        if artifacts::Entity::find()
+            .filter(artifacts::Column::WorkspaceId.eq(run.workspace_id))
+            .filter(artifacts::Column::RunId.eq(run.id))
+            .filter(artifacts::Column::Path.is_in(paths.iter().cloned()))
+            .one(&tx)
+            .await?
+            .is_some()
+        {
+            return Err(ApiError::conflict(
+                "同一执行中的产物名称已被其他任务使用，请为并行任务选择不同的产物名称。",
+            ));
+        }
         // Cancellation must not publish a completed-looking archive.
         if pipeline_runs::Entity::find_by_id(run.id)
             .filter(pipeline_runs::Column::State.eq("running"))

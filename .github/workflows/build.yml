@@ -291,6 +291,8 @@ jobs:
           node scripts/test-marketplace-ui.mjs
           node scripts/test-repository-auth-ui.mjs
           node scripts/test-actions-ui.mjs
+          node scripts/test-actions-canvas.mjs
+          node scripts/test-named-connection-ui.mjs
           node scripts/test-runner-connection-ui.mjs
           node scripts/test-table-layout-ui.mjs
       - name: Pipeline environments and classification acceptance

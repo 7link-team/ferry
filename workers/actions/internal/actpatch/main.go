@@ -88,6 +88,22 @@ func generate() error {
 	if err := os.WriteFile(runnerSource, []byte(strings.Replace(string(runnerData), original, replacement, 1)), 0600); err != nil {
 		return err
 	}
+	// Display names are not execution identities. Every server job invocation
+	// has a private action-cache directory, so use it to namespace Docker
+	// containers, volumes and service networks without changing user contexts.
+	contextSource := filepath.Join(moduleDir, "pkg", "runner", "run_context.go")
+	contextData, err := os.ReadFile(contextSource)
+	if err != nil {
+		return err
+	}
+	original = `return createContainerName("act", rc.String())`
+	replacement = `return createContainerName("act", rc.Config.ActionCacheDir, rc.Run.JobID, rc.String())`
+	if strings.Count(string(contextData), original) != 1 {
+		return fmt.Errorf("act invocation namespace patch no longer applies")
+	}
+	if err := os.WriteFile(contextSource, []byte(strings.Replace(string(contextData), original, replacement, 1)), 0600); err != nil {
+		return err
+	}
 	mod, err := os.ReadFile("go.mod")
 	if err != nil {
 		return err

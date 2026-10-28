@@ -1,5 +1,6 @@
 /** Real browser canvas -> saved Actions YAML -> remote worker -> persisted logs. */
 import assert from 'node:assert/strict';
+import { parseDocument } from 'yaml';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ try {
  await page.getByLabel(/^名称/).fill('Browser group');
  await page.getByRole('button',{name:'创建',exact:true}).click();
  await page.waitForURL('**/actions/build/pipeline-groups');
- for(const name of ['Browser staging','Browser production']) {
+ for(const name of ['Browser staging']) {
   await page.goto(origin+'/actions/build/pipeline-environments/new');
   await page.getByLabel(/^名称/).fill(name);
   await page.getByRole('combobox',{name:/默认主机/}).click();
@@ -45,10 +46,23 @@ try {
  await page.getByRole('combobox',{name:'分组',exact:true}).click();
  await page.getByRole('option',{name:'Browser group',exact:true}).click();
  await page.getByRole('checkbox',{name:'Browser staging',exact:true}).check();
- await page.getByRole('checkbox',{name:'Browser production',exact:true}).check();
-
- await page.getByRole('combobox',{name:/目标主机/}).click();
- await page.getByRole('option',{name:'Local runner',exact:true}).click();
+ await page.getByRole('button',{name:'新建标签',exact:true}).click();
+ const tagDialog=page.getByRole('dialog');await tagDialog.getByLabel(/^名称/).fill('Browser tag');await tagDialog.getByRole('button',{name:'确认新建标签',exact:true}).click();
+ await tagDialog.waitFor({state:'hidden'});assert(await page.getByRole('checkbox',{name:'Browser tag',exact:true}).isChecked());
+ await page.getByRole('button',{name:'新建执行环境',exact:true}).click();
+ const environmentDialog=page.getByRole('dialog');await environmentDialog.getByLabel(/^名称/).fill('Browser production');
+ await environmentDialog.getByRole('combobox',{name:/默认执行器类型/}).click();await page.getByRole('option',{name:'主机',exact:true}).click();
+ await environmentDialog.getByRole('combobox',{name:/默认主机/}).click();await page.getByRole('option',{name:'Local runner',exact:true}).click();
+ await environmentDialog.getByRole('button',{name:'确认新建执行环境',exact:true}).click();await environmentDialog.waitFor({state:'hidden'});
+ assert(await page.getByRole('checkbox',{name:'Browser production',exact:true}).isChecked());
+ assert.equal(await page.getByRole('combobox',{name:/目标主机/}).count(),0,'host selection belongs to task panel');
+ assert.equal(await page.getByLabel('构建代码来源',{exact:true}).count(),0,'repository selection belongs to checkout node');
+ for(const width of [1280,900,390]) {
+  await page.setViewportSize({width,height:1000});
+  await eventually(async()=>page.locator('form').first().evaluate(form=>{const parent=form.parentElement;const style=getComputedStyle(parent);const available=parent.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight);return form.getBoundingClientRect().width>=available-2;}));
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`pipeline form overflows at ${width}`);
+ }
+ await page.setViewportSize({width:1440,height:1000});
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
  await page.getByLabel('GitHub Actions YAML',{exact:true}).fill(`# keep workflow comment
 name: Browser workflow
@@ -68,6 +82,7 @@ jobs:
  await page.getByRole('button',{name:'关闭配置面板',exact:true}).click();
  await page.getByRole('button',{name:'Compile',exact:true}).click();
  await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
+ await page.getByLabel('任务执行器',{exact:true}).selectOption(`host:${host.id}`);
  const grip=page.locator('.react-flow__node[data-id="build"] .job-drag svg');
  await grip.scrollIntoViewIfNeeded();
  const box=await grip.boundingBox();assert(box);
@@ -82,8 +97,17 @@ jobs:
  await canvasNode.press('ArrowRight');
  await eventually(async()=>(await nodeX())>beforeKeyboard);
  const keyboardX=await canvasNode.evaluate(node=>Number(node.style.transform.match(/translate\(([-\d.]+)px/)[1]));
+ await page.getByRole('button',{name:'添加串行任务',exact:true}).click();await page.getByLabel('任务名称',{exact:true}).fill('Serial successor');
+ await page.getByRole('button',{name:'添加并行任务',exact:true}).click();await page.getByLabel('任务名称',{exact:true}).fill('Parallel sibling');
+ await eventually(async()=>await page.locator('.react-flow__edge').count()===2);
+ await page.getByRole('checkbox',{name:'Compile edited',exact:true}).uncheck();await eventually(async()=>await page.locator('.react-flow__edge').count()===1);
+ await page.getByRole('checkbox',{name:'Compile edited',exact:true}).check();await eventually(async()=>await page.locator('.react-flow__edge').count()===2);
+ await page.getByRole('button',{name:'Compile edited',exact:true}).click();await page.getByRole('checkbox',{name:'Serial successor',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'循环'}).waitFor();assert(!(await page.getByRole('checkbox',{name:'Serial successor',exact:true}).isChecked()));
+ await page.getByLabel('任务名称',{exact:true}).fill('Compile intermediate');await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
  const yaml=await page.getByLabel('GitHub Actions YAML',{exact:true}).inputValue();
+ const jobs=parseDocument(yaml).toJS().jobs;assert.deepEqual(jobs.job_1.needs,['build']);assert.deepEqual(jobs.job_2.needs,['build']);
  assert(yaml.includes('# keep workflow comment')&&yaml.includes('ACTIONS_BROWSER_OK')&&yaml.includes('timeout-minutes: 2'));
  await page.getByLabel('GitHub Actions YAML',{exact:true}).fill('jobs:\n  a:\n    needs: b\n  b:\n    needs: a\n');
  assert((await page.getByRole('alert').allTextContents()).some(text=>text.includes('循环')));
@@ -99,7 +123,12 @@ jobs:
  await page.getByRole('button',{name:/Compile source/}).click();
  assert.equal(await page.getByLabel('执行命令',{exact:true}).inputValue(),'echo ACTIONS_BROWSER_OK');
  assert.equal(pipeline.environments.length,2);
- assert.equal(pipeline.group_name,'Browser group');
+ assert.equal(pipeline.group_name,'Browser group');assert.equal(pipeline.tag_ids.length,1);
+ assert.deepEqual(pipeline.executor_bindings.find(binding=>binding.job_id==='build'),{job_id:'build',target_kind:'host',target_ref:host.id,image:'host'});
+ assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_1.needs,['build']);assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_2.needs,['build']);
+ await page.getByRole('button',{name:'Compile edited',exact:true}).click();assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),`host:${host.id}`);
+ for(const width of [1280,900,390]) {await page.setViewportSize({width,height:1000});await eventually(async()=>page.getByLabel('流水线画布',{exact:true}).evaluate(canvas=>{const bounds=canvas.getBoundingClientRect();return [...canvas.querySelectorAll('.react-flow__node')].every(node=>{const box=node.getBoundingClientRect();return box.left>=bounds.left-1&&box.right<=bounds.right+1;});}));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`canvas overflow at ${width}`);}
+ await page.setViewportSize({width:1440,height:1000});
  await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
  await page.getByRole('button',{name:'触发',exact:true}).click();
  const dialog=page.getByRole('dialog');
@@ -120,7 +149,7 @@ jobs:
  await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();
  assert(await page.getByLabel('任务名称',{exact:true}).isDisabled());
- assert.equal(await page.getByRole('button',{name:'添加任务',exact:true}).count(),0);
+ assert.equal(await page.getByRole('button',{name:/添加串行任务|添加并行任务/}).count(),0);
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
  assert(await page.getByLabel('GitHub Actions YAML',{exact:true}).evaluate(node=>node.readOnly));
  await page.getByRole('tab',{name:'可视化',exact:true}).click();
@@ -145,13 +174,13 @@ jobs:
  await editor.getByRole('button',{name:'保存',exact:true}).click();
  await editor.waitForURL('**/actions/build/pipelines');
  const edited=await(await context.request.get(origin+'/api'+root+'/pipelines/'+pipeline.id)).json();
- assert.equal(edited.name,'Restricted edit saved');assert.deepEqual(edited.environment_ids,pipeline.environment_ids);assert.equal(edited.group_id,pipeline.group_id);
+ assert.equal(edited.name,'Restricted edit saved');assert.deepEqual(edited.environment_ids,pipeline.environment_ids);assert.equal(edited.group_id,pipeline.group_id);assert.deepEqual(edited.tag_ids,pipeline.tag_ids);
  await restricted.close();
  await page.setViewportSize({width:390,height:844});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'mobile layout overflows');
  assert.deepEqual(errors,[]);
  passed=true;
- console.log('PASS canvas step/job panel -> comment-preserving YAML -> save/reopen -> actual runner -> remote logs; mobile and browser errors');
+ console.log('PASS full-width canvas; inline tag/environment creation; serial/parallel dependencies and cycle rejection; task executor -> saved YAML -> actual runner logs; restricted edits and responsive node visibility');
 } catch(error) { console.error('diagnostics:',work); for(const context of browser?.contexts()??[]) for(const page of context.pages()){console.error(await page.locator('body').innerText());await page.screenshot({path:join(work,'failure.png'),fullPage:true});} throw error; }
 finally {
  if(runner&&runner.exitCode===null){runner.kill();await new Promise(r=>runner.once('exit',r))}

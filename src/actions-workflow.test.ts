@@ -78,3 +78,21 @@ it("new jobs with a selected repository include checkout before commands", () =>
  expect(job.steps[0]?.uses).toBe("actions/checkout@v4");
  expect(job.steps[1]?.run).toBe("echo hello");
 });
+
+it("serial successors and parallel siblings persist their different dependencies", () => {
+ const serial = addActionJob(source, false, { job: "test", mode: "serial" });
+ expect(parseActions(serial.source).jobs.find(job => job.id === serial.id)?.needs).toEqual(["test"]);
+ const parallel = addActionJob(serial.source, false, { job: serial.id, mode: "parallel" });
+ expect(parseActions(parallel.source).jobs.find(job => job.id === parallel.id)?.needs).toEqual(["test"]);
+ expect(parallel.source).toContain("# preserved workflow comment");
+ expect(() => connectActionJobs(parallel.source, parallel.id, "test")).toThrow(/循环/);
+ const disconnected = editActionJob(parallel.source, parallel.id, { needs: [] });
+ expect(parseActions(disconnected).jobs.find(job => job.id === parallel.id)?.needs).toEqual([]);
+});
+
+it("checkout steps can be added explicitly without changing command steps", async () => {
+ const { addActionStep } = await import("./actions-workflow");
+ const changed = addActionStep(DEFAULT_ACTIONS, "build", "checkout");
+ expect(parseActions(changed).jobs[0]?.steps[1]?.uses).toBe("actions/checkout@v4");
+ expect(parseActions(changed).jobs[0]?.steps[0]?.run).toBe("echo hello");
+});
