@@ -1,6 +1,9 @@
 name: Publish verified release assets
 
 on:
+  push:
+    branches: ["feat/**"]
+    paths: [".github/workflows/publish-verified.yml"]
   workflow_dispatch:
     inputs:
       run_id:
@@ -26,6 +29,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}
