@@ -159,5 +159,24 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+
+        // A peer that stalls mid-stream must not leave an update ready to apply
+        // when its connection task is cancelled (shutdown or outer deadline).
+        let (mut peer, connection) = tokio::io::duplex(16384);
+        peer.write_all(&frame(header, &bytes[..1])).await.unwrap();
+        let staging = directory.path().to_owned();
+        let receiving = tokio::spawn(async move { receive(connection, &staging, "1.0.0").await });
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::fs::read_dir(directory.path()).unwrap().count() == 0
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let staged = std::fs::read_dir(directory.path()).unwrap().count();
+        receiving.abort();
+        assert!(receiving.await.unwrap_err().is_cancelled());
+        drop(peer);
+        assert_eq!(staged, 1, "test must cancel after staging has begun");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 }
