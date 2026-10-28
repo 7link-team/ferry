@@ -7,9 +7,9 @@
 复用 repository_connections、repository_auth provider adapters、credentials vault、ResourceForm/ResourceTable、pipeline repository_selection 原子绑定、现有 runner。repositories 保留为旧流水线和应用市场的具体源码绑定，保持历史兼容。
 
 ## Design / Task Decomposition
-- [ ] 后端连接资源：命名连接，平台授权及普通 Git；已有凭证只引用，不复制/改写。连接不绑定分支/仓库。兼容旧连接和 OAuth；新连接不能覆盖其他连接。
-- [ ] 用真实连接 ID 浏览可见仓库；流水线源码选择独立于认证表单，选择或输入分支。
-- [ ] 共享表单/列表单一代码连接入口；已有凭证按类型选择，网页授权保留 popup/COOP/state 保护。
+- [x] 后端连接资源：命名连接，平台授权及普通 Git；已有凭证只引用，不复制/改写。连接不绑定分支/仓库。兼容旧连接和 OAuth；新连接不能覆盖其他连接。
+- [x] 用真实连接 ID 浏览可见仓库；流水线源码选择独立于认证表单，选择或输入分支。
+- [x] 共享表单/列表单一代码连接入口；已有凭证按类型选择，网页授权保留 popup/COOP/state 保护。
 - [ ] 回归和实际端到端验收，独立审查。
 
 ## Execution Mode
@@ -36,3 +36,8 @@ repository_auth.rs / entities.rs / migration.rs / app router；RepositorySource.
 Hybrid：连接后端、Actions 执行后端、画布交互为独立单元；主代理负责共享表单、连接/checkout UI、流水线 API 全局字段兼容、集成及验收。
 Document.checkout_bindings: [{job_id,step_id,connection_id,repository_url,ref,path}]；不含密钥。新建 Actions 仅用节点绑定，旧全局字段保持历史/API 兼容。
 验证：布局及表单浏览器、命名连接复用凭据且不创建副本、真实 Git 非默认分支按节点顺序拉取、并行 barrier 与串行依赖、跨空间拒绝、取消及日志清理。Rust/Go 构建测试只在 Actions，不在本地执行。
+
+## 验收进度（2026-10-29）
+- 本地前端 typecheck、build、98 项单测通过（1 项 Windows 专属跳过）。画布真实浏览器验证串并行依赖、删除/循环保护、保存重载、1280/900/390 布局；凭证选择与 OAuth 弹窗桥接通过。
+- 云端已通过服务器/Runner 编译及服务器单测；完整页面、三数据库连接、真实 SSH/Agent 并行、取消与产物验收仍在进行，不据此宣称整体通过。
+- 审查补回归：并发产物名称原子归属、每次任务独立容器身份、混合旧全局/新节点来源、CSV/XLSX 保留节点绑定、应用市场沿用新连接、YAML 删除清理绑定及凭证分页。

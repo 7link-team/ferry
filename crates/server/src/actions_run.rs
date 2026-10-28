@@ -240,16 +240,14 @@ where
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
     let mut failure = None;
     let mut poll = tokio::time::interval(Duration::from_millis(100));
+    // No jobs exist yet, so this initial check cannot wait for a resource
+    // held by an unpolled job future.
+    if !active().await? || *stop.borrow() {
+        return Ok(completed);
+    }
     loop {
-        match active().await {
-            Ok(true) if !*stop.borrow() => {}
-            Ok(_) => {
-                cancel.send_replace(true);
-            }
-            Err(error) => {
-                failure.get_or_insert(error);
-                cancel.send_replace(true);
-            }
+        if *stop.borrow() {
+            cancel.send_replace(true);
         }
         if !*cancelled.borrow() {
             for job in jobs {
@@ -277,7 +275,16 @@ where
                 }
             }
             _ = stop.changed(), if !*cancelled.borrow() => { cancel.send_replace(true); }
-            _ = poll.tick() => {}
+            // SQLite has one pooled connection by default. A pending job can
+            // own that connection, so keep polling jobs while this read waits;
+            // awaiting it outside select would deadlock the entire server.
+            status = async { poll.tick().await; active().await }, if !*cancelled.borrow() => {
+                match status {
+                    Ok(true) => {},
+                    Ok(false) => { cancel.send_replace(true); },
+                    Err(error) => { failure.get_or_insert(error); cancel.send_replace(true); },
+                }
+            }
         }
     }
     if let Some(error) = failure {
@@ -944,6 +951,38 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn scheduler_status_checks_do_not_starve_jobs_holding_the_only_db_connection() {
+        use sea_orm::TransactionTrait;
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:");
+        options.max_connections(1);
+        let db = sea_orm::Database::connect(options).await.unwrap();
+        let jobs = vec![test_job("database-user", &[])];
+        let (_stop, mut stop) = tokio::sync::watch::channel(false);
+        let execution = schedule_jobs(
+            &jobs,
+            &mut stop,
+            || async {
+                db.execute_unprepared("SELECT 1").await?;
+                Ok(true)
+            },
+            |_, _, _| async {
+                let tx = db.begin().await?;
+                // The scheduler's 100ms status poll must wait for this same
+                // pool slot, while continuing to poll this job to release it.
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                tx.rollback().await?;
+                Ok(success())
+            },
+        );
+        let completed = tokio::time::timeout(Duration::from_secs(2), execution)
+            .await
+            .expect("scheduler stopped polling the job holding its database connection")
+            .unwrap();
+        assert_eq!(completed.len(), 1);
+        db.execute_unprepared("SELECT 1").await.unwrap();
     }
 
     #[tokio::test]

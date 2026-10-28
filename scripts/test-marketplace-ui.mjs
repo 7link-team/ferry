@@ -71,7 +71,7 @@ try {
     const originalSources=await(await owner.request.get(`${origin}/api${root}/marketplace-sources`)).json();const legacySource=originalSources.items.find(row=>row.name==='Legacy browser source');assert(legacySource);assert.equal(legacySource.repository_id,legacy.id);
     await p.goto(`${origin}/tenant/deploy/marketplace-sources/${legacySource.id}/edit`);assert.equal(await p.getByLabel('外部仓库',{exact:true}).inputValue(),legacy.id);
     await p.getByRole('button',{name:'保存',exact:true}).click();await p.waitForURL('**/tenant/deploy/marketplace-sources');
-    const retained=await(await owner.request.get(`${origin}/api${root}/marketplace-sources/${legacySource.id}`)).json();assert.equal(retained.repository_id,legacy.id);assert.equal(retained.api_base,fixtureOrigin);assert.equal(retained.project,'owner/repository');
+    const retained=await(await owner.request.get(`${origin}/api${root}/marketplace-sources/${legacySource.id}`)).json();assert.equal(retained.repository_id,legacy.id);assert.equal(new URL(retained.api_base).href,new URL(fixtureOrigin).href);assert.equal(retained.project,'owner/repository');
     await p.getByRole('button',{name:'创建',exact:true}).click();await p.getByRole('textbox',{name:/^名称/}).fill('Browser source');
     await p.getByLabel('仓库连接',{exact:true}).selectOption(connection.id);await p.getByLabel('连接仓库',{exact:true}).selectOption(fixtureOrigin+'/owner/repository.git');
     await p.getByRole('textbox',{name:/^API 接入点/}).fill(fixtureOrigin);await p.getByRole('textbox',{name:/^项目路径/}).fill('owner/repository');
