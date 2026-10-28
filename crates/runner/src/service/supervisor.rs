@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
     sync::watch,
 };
@@ -94,7 +94,7 @@ pub(super) fn foreground(config: PathBuf) -> anyhow::Result<()> {
         })
 }
 
-fn spawn(binary: &Path, config: &Path, name: &str) -> anyhow::Result<Child> {
+fn spawn(binary: &Path, config: &Path, name: &str, failed: Option<&str>) -> anyhow::Result<Child> {
     let mut command = Command::new(binary);
     command
         .args(["service", "worker", "--config"])
@@ -105,6 +105,9 @@ fn spawn(binary: &Path, config: &Path, name: &str) -> anyhow::Result<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true);
+    if let Some(version) = failed {
+        command.arg("--failed-version").arg(version);
+    }
     #[cfg(windows)]
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     Ok(command.spawn()?)
@@ -136,7 +139,7 @@ async fn monitor(
             biased;
             _ = stopped.wait_for(|value| *value) => {
                 // EOF requests graceful session drain, including after parent death.
-                drop(child.stdin.take());
+                drop(input.take());
                 child.wait().await?;
                 return Ok(Outcome::Stopped);
             }
@@ -164,6 +167,7 @@ async fn monitor(
                                 ready()?;
                                 confirmed = true;
                             }
+                            input.as_mut().context("worker stdin unavailable")?.write_all(b"confirm\n").await?;
                         }
                         Event::Activate { version, digest } => activation = Some(Installed { version, digest }),
                     },
@@ -209,7 +213,12 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
             None => std::env::current_exe()?,
         };
         let execution = async {
-            let mut child = spawn(&binary, &config, &settings.service_name)?;
+            let mut child = spawn(
+                &binary,
+                &config,
+                &settings.service_name,
+                journal.failed_version.as_deref(),
+            )?;
             let result = monitor(
                 &mut child,
                 &expected,
@@ -374,5 +383,27 @@ mod tests {
         .unwrap();
         assert!(matches!(result, Outcome::Failed));
         assert!(child.try_wait().unwrap().is_some());
+    }
+    #[tokio::test]
+    async fn waiting_for_process_exit_does_not_close_its_control_pipe() {
+        let mut child = fixture("import sys; sys.stdin.read(); sys.exit(0)");
+        let (stop, mut stopped) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            stop.send_replace(true);
+        });
+        let start = std::time::Instant::now();
+        let result = monitor(
+            &mut child,
+            "1.0.0",
+            false,
+            Duration::from_secs(5),
+            &mut stopped,
+            || Ok(()),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, Outcome::Stopped));
+        assert!(start.elapsed() >= Duration::from_millis(200));
     }
 }

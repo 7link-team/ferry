@@ -77,6 +77,11 @@ const CHUNK: usize = 256 * 1024;
 /// which is how an evicted connection's own loop learns it was replaced.
 struct Live {
     control: mpsc::Sender<wire::Control>,
+    managed: bool,
+    version: String,
+    ready: std::sync::atomic::AtomicBool,
+    failed_version: Mutex<Option<String>>,
+    update_error: Mutex<Option<(String, String)>>,
 }
 
 /// A session the server has asked a runner to dial. `host_id` is what stops a
@@ -484,7 +489,11 @@ async fn control(s: AppState, mut socket: WebSocket) {
     }
 
     let (control, inbox) = mpsc::channel(16);
-    let registration = Arc::new(Live { control });
+    let registration = Arc::new(Live {
+        control, managed: hello.managed_updates, version: hello.agent_version.clone(),
+        ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
+        failed_version: Mutex::new(None), update_error: Mutex::new(None),
+    });
     // A replaced connection's own loop ends when its sender is dropped here,
     // so a half-dead socket cannot keep a host looking online.
     live().insert(host_id.clone(), registration.clone());
@@ -505,7 +514,7 @@ async fn control(s: AppState, mut socket: WebSocket) {
     }
     tracing::info!(%host_id, hostname = %hello.hostname, "runner 控制连接已建立");
 
-    pump_control(&s, &host_id, socket, inbox).await;
+    pump_control(&s, &host_id, socket, inbox, registration.clone()).await;
 
     // Only tear down the registration if it is still ours: a reconnect that
     // replaced us must not be marked offline by our own exit.
@@ -553,6 +562,7 @@ async fn pump_control(
     host_id: &str,
     mut socket: WebSocket,
     mut inbox: mpsc::Receiver<wire::Control>,
+    registration: Arc<Live>,
 ) {
     let Ok(row_id) = host_id.parse::<Id>() else {
         return;
@@ -580,6 +590,15 @@ async fn pump_control(
                 match message {
                     Message::Text(text) => match serde_json::from_str::<wire::Report>(&text) {
                         Ok(wire::Report::Pong) => {}
+                        Ok(wire::Report::UpdateHealth { version, failed_version }) => {
+                            if registration.managed && version == registration.version {
+                                *registration.failed_version.lock().unwrap_or_else(|e|e.into_inner()) = failed_version;
+                                registration.ready.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                        }
+                        Ok(wire::Report::UpdateFailed { request, error }) => {
+                            *registration.update_error.lock().unwrap_or_else(|e|e.into_inner()) = Some((request, error.chars().take(512).collect()));
+                        }
                         Ok(wire::Report::Metrics { load1, memory_used, memory_total, disk_used, disk_total }) => {
                             // No version bump: a heartbeat is not an edit, and
                             // bumping it would invalidate an operator's open form
@@ -668,7 +687,7 @@ pub struct RunnerChannel {
 /// socket that opens and immediately closes.
 pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
     let lease = crate::runner_updates::lease(&host.id.to_string()).await;
-    if !live().contains_key(&host.id.to_string()) {
+    if !live().get(&host.id.to_string()).is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)) {
         return Err(offline(&host.name));
     }
     Ok(Box::new(RunnerChannel {
@@ -1288,4 +1307,96 @@ mod tests {
         assert_eq!(reported_name(""), "未命名主机");
         assert_eq!(reported_name(&"x".repeat(200)).chars().count(), 60);
     }
+}
+
+// Upgrade tasks outlive their HTTP request so closing the page cannot release
+// the exclusive host reservation while a remote version switch is in flight.
+#[derive(Clone, Serialize)]
+struct UpdateJob {
+    request: String,
+    version: String,
+    state: String,
+    message: String,
+}
+static UPDATES: LazyLock<Mutex<HashMap<String, UpdateJob>>> = LazyLock::new(Default::default);
+
+#[derive(Deserialize)]
+pub struct UpdateBody {
+    version: String,
+    manifest: String,
+    signature: String,
+}
+
+async fn update_host(s: &AppState, scope: &Scope, id: Id) -> Result<hosts::Model> {
+    hosts::Entity::find_by_id(i64::from(id)).filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Connection.eq("runner")).one(&s.db).await?
+        .ok_or_else(ApiError::missing)
+}
+
+pub async fn update_status(State(s): State<AppState>, scope: Scope, Path((_workspace, id)): Path<(String, Id)>) -> Result<Json<Value>> {
+    scope.require("hosts.read")?;
+    let host = update_host(&s, &scope, id).await?;
+    let registration = live().get(&id.to_string()).cloned();
+    let status = UPDATES.lock().unwrap_or_else(|e|e.into_inner()).get(&id.to_string()).cloned();
+    Ok(Json(json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)),"update":status})))
+}
+
+pub async fn start_update(State(s): State<AppState>, scope: Scope, Path((_workspace, id)): Path<(String, Id)>, Json(body): Json<UpdateBody>) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("hosts.update")?;
+    update_host(&s, &scope, id).await?;
+    if body.version.len()>128 || body.manifest.len()>65536 || body.signature.len()>8192 || body.version.is_empty() {
+        return Err(ApiError::bad("升级清单或版本无效。"));
+    }
+    let registration = live().get(&id.to_string()).cloned().ok_or_else(||ApiError::bad("代理离线，不能升级。"))?;
+    if !registration.managed { return Err(ApiError::bad("当前代理不支持服务升级，请先安装为新版托管服务。")); }
+    if registration.version == body.version { return Err(ApiError::bad("代理已是该版本。")); }
+    let job = UpdateJob { request:secret(),version:body.version.clone(),state:"draining".into(),message:"等待进行中的完整任务结束".into() };
+    {
+        let mut jobs=UPDATES.lock().unwrap_or_else(|e|e.into_inner());
+        if jobs.get(&id.to_string()).is_some_and(|j|matches!(j.state.as_str(),"draining"|"updating"|"unknown")) {
+            return Err(ApiError(StatusCode::CONFLICT,"已有代理升级进行中。".into()));
+        }
+        jobs.insert(id.to_string(),job.clone());
+    }
+    if let Err(error)=crate::hosts::activity(&s,&scope,"runner-update","hosts",&id,json!({"version":body.version,"request":job.request})).await {
+        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
+        return Err(error);
+    }
+    let response = serde_json::to_value(&job).map_err(|_|ApiError::bad("升级状态编码失败"))?;
+    tokio::spawn(async move {
+        let host=id.to_string();
+        let _exclusive=crate::runner_updates::exclusive(&host).await;
+        let set=|state:&str,message:&str| {
+            if let Some(job)=UPDATES.lock().unwrap_or_else(|e|e.into_inner()).get_mut(&host) {
+                job.state=state.into(); job.message=message.into();
+            }
+        };
+        let Some(peer)=live().get(&host).cloned() else {set("failed","等待任务结束期间代理离线");return;};
+        if !peer.managed {set("failed","重连后的代理不支持托管升级");return;}
+        set("updating","正在验证更新并切换版本");
+        if peer.control.send(wire::Control::Update {request:job.request.clone(),version:body.version.clone(),manifest:body.manifest,signature:body.signature}).await.is_err() {
+            set("failed","无法发送升级请求");return;
+        }
+        let started=std::time::Instant::now();
+        loop {
+            let failure=peer.update_error.lock().unwrap_or_else(|e|e.into_inner()).clone();
+            if let Some((request,message))=failure {
+                if request==job.request {set("failed",&message);return;}
+            }
+            let current=live().get(&host).cloned();
+            if let Some(current)=current {
+                if !Arc::ptr_eq(&peer,&current) && current.ready.load(std::sync::atomic::Ordering::Acquire) {
+                    if current.version==body.version {set("succeeded","代理升级完成，已通过连接健康检查");}
+                    else {set("rolled_back","新版本未完成激活，已恢复原版本");}
+                    return;
+                }
+            }
+            if started.elapsed()>Duration::from_secs(420) {
+                // Never admit new work merely because a response timed out.
+                set("unknown","等待代理重新连接确认，继续暂停向该主机派发新任务");
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    });
+    Ok((StatusCode::ACCEPTED,Json(response)))
 }

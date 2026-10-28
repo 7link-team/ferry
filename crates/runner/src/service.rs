@@ -157,6 +157,8 @@ enum Action {
         config: PathBuf,
         #[arg(long)]
         name: String,
+        #[arg(long)]
+        failed_version: Option<String>,
     },
     #[command(hide = true)]
     Run {
@@ -205,18 +207,21 @@ pub fn dispatch() -> anyhow::Result<bool> {
         Action::Stop(service) => service.control("stop")?,
         Action::Status(service) => service.control("status")?,
         Action::Uninstall(service) => service.uninstall()?,
-        Action::Worker { config, name } => {
+        Action::Worker { config, name, failed_version } => {
             let settings = Settings::load(&config)?;
             anyhow::ensure!(settings.service_name == name, "服务名称与安装配置不一致");
             let (stop, stopped) = tokio::sync::watch::channel(false);
+            let (confirm, confirmation) = tokio::sync::watch::channel(false);
             std::thread::spawn(move || {
-                use std::io::Read;
-                let mut byte = [0u8; 1];
-                let _ = std::io::stdin().read(&mut byte);
+                use std::io::BufRead;
+                for line in std::io::stdin().lock().lines() {
+                    if matches!(line.as_deref(), Ok("confirm")) { confirm.send_replace(true); }
+                    else { break; }
+                }
                 stop.send_replace(true);
             });
             tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(
-                crate::run_with_shutdown(crate::Config { server: settings.server, token: settings.token, state_dir: settings.state_dir, managed: true }, stopped)
+                crate::run_with_shutdown(crate::Config { server: settings.server, token: settings.token, state_dir: settings.state_dir, managed: true, confirmation: Some(confirmation), failed_version }, stopped)
             )?;
         }
         Action::Run { config, name } => {

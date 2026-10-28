@@ -27,6 +27,10 @@ use tokio_tungstenite::tungstenite::Message;
 struct Config {
     #[arg(skip)]
     managed: bool,
+    #[arg(skip)]
+    confirmation: Option<tokio::sync::watch::Receiver<bool>>,
+    #[arg(skip)]
+    failed_version: Option<String>,
     /// Server base URL, e.g. https://ops.example.com
     #[arg(long, env = "FERRY_SERVER")]
     server: String,
@@ -241,6 +245,7 @@ async fn run_with_shutdown(
     // normal operation for an agent, not a reason to stop.
     let mut backoff = Duration::from_secs(1);
     let mut sessions = tokio::task::JoinSet::new();
+    let mut activation = None;
     loop {
         let result = tokio::select! {
             biased;
@@ -251,6 +256,10 @@ async fn run_with_shutdown(
             Ok(()) => {
                 tracing::warn!("控制连接已关闭，准备重连");
                 backoff = Duration::from_secs(1);
+            }
+            Err(error) if error.is::<update::Prepared>() => {
+                activation = Some(error.downcast::<update::Prepared>()?.0);
+                break;
             }
             Err(error) if error.is::<Rejected>() => {
                 tracing::error!(%error, "接入被拒绝，不再重试");
@@ -269,6 +278,9 @@ async fn run_with_shutdown(
         "停止接收会话，等待在途会话结束"
     );
     while sessions.join_next().await.is_some() {}
+    if let Some(candidate) = activation {
+        service::supervisor::emit(&service::supervisor::Event::Activate { version: candidate.version, digest: candidate.digest })?;
+    }
     Ok(())
 }
 
@@ -302,6 +314,7 @@ async fn hold(
             os,
             arch,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+            managed_updates: cfg.managed,
         },
     )
     .await?;
@@ -330,9 +343,13 @@ async fn hold(
     tracing::info!(%host_id, "控制连接已建立");
     if cfg.managed {
         service::supervisor::emit(&service::supervisor::Event::Ready { version: env!("CARGO_PKG_VERSION").into() })?;
+        let mut confirmation = cfg.confirmation.clone().context("缺少服务确认通道")?;
+        confirmation.wait_for(|confirmed| *confirmed).await.context("服务启动器未确认版本")?;
+        send(&mut socket, &wire::Report::UpdateHealth { version: env!("CARGO_PKG_VERSION").into(), failed_version: cfg.failed_version.clone() }).await?;
     }
 
     let session_base = cfg.server.clone();
+    let mut preparing = tokio::task::JoinSet::new();
     let mut report = tokio::time::interval(Duration::from_secs(metrics_seconds.max(5)));
     // Report once immediately so the dashboard is populated before the first
     // interval elapses.
@@ -351,7 +368,21 @@ async fn hold(
                 match message? {
                     Message::Text(text) => match serde_json::from_str::<wire::Control>(&text)? {
                         wire::Control::Ping => send(&mut socket, &wire::Report::Pong).await?,
+                        wire::Control::Update { request, version, manifest, signature } => {
+                            if !cfg.managed || !preparing.is_empty() {
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务或已有升级进行中".into() }).await?;
+                            } else if cfg.failed_version.as_deref() == Some(&version) {
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "该版本启动失败，已回退，不能自动重复尝试".into() }).await?;
+                            } else {
+                                let root = cfg.state_dir.clone();
+                                preparing.spawn(async move { (request, update::download(&root, &manifest, &signature, &version).await) });
+                            }
+                        }
                         wire::Control::OpenSession { session: id, kind } => {
+                            if !preparing.is_empty() {
+                                send(&mut socket, &wire::Report::SessionFailed { session: id, error: "代理正在准备升级".into() }).await?;
+                                continue;
+                            }
                             let url = ws_url(&session_base, &format!("/api/runners/sessions/{id}"))?;
                             let hello = wire::SessionHello {
                                 version: wire::VERSION,
@@ -373,6 +404,16 @@ async fn hold(
                     _ => {}
                 }
             }
+            completed = preparing.join_next(), if !preparing.is_empty() => {
+                let (request, result) = completed.context("更新任务丢失")??;
+                match result {
+                    Ok(candidate) => return Err(update::Prepared(candidate).into()),
+                    Err(error) => {
+                        tracing::warn!(%error, "更新验证或下载失败");
+                        send(&mut socket, &wire::Report::UpdateFailed { request, error: "更新下载或校验失败，保留原版本".into() }).await?;
+                    }
+                }
+            }
             _ = report.tick() => send(&mut socket, &metrics()).await?,
             _ = sessions.join_next(), if !sessions.is_empty() => {},
         }
@@ -392,6 +433,8 @@ mod tests {
         let running = tokio::spawn(run_with_shutdown(
             Config {
                 managed: false,
+                confirmation: None,
+                failed_version: None,
                 server: format!("http://{address}"),
                 token: Some("fixture-token".into()),
                 state_dir: dir.path().to_owned(),

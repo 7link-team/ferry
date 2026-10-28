@@ -80,6 +80,14 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         service('install', '--server', origin, '--token', token, '--state-dir', state)
         host_path = '/workspaces/service/hosts/'+host
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
+        update_path = host_path+'/runner-update'
+        wait(lambda: api(update_path)['ready'], 'supervisor must confirm authenticated worker readiness')
+        assert api(update_path)['supported'] is True
+        invalid_update = api(update_path, {'version':'9.9.9','manifest':'{}','signature':'invalid'})
+        assert invalid_update['state'] == 'draining'
+        wait(lambda: api(update_path)['update']['state']=='failed', 'invalid signature must reject update')
+        assert api(host_path)['state']=='online', 'invalid update must preserve current runner'
+        print('PASS authenticated readiness and rejected update preserve live service', flush=True)
         original = (state/'runner.json').read_bytes()
         first = wait(pid, 'service PID')
         # Reinstall must not restart a running agent or change its identity.

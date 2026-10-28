@@ -44,6 +44,8 @@ pub struct Hello {
     pub os: String,
     pub arch: String,
     pub agent_version: String,
+    #[serde(default)]
+    pub managed_updates: bool,
 }
 
 /// Runner -> server, first frame on a session connection. The session id is in
@@ -70,6 +72,13 @@ pub enum Control {
     },
     /// Open a dedicated session connection back to the server.
     OpenSession { session: String, kind: SessionKind },
+    /// Signed catalog; only sent after complete host tasks have drained.
+    Update {
+        request: String,
+        version: String,
+        manifest: String,
+        signature: String,
+    },
     /// Server-side liveness probe; the runner answers `Report::Pong`.
     Ping,
     /// Refused for good: wrong protocol version, bad token, unknown key. The
@@ -82,6 +91,14 @@ pub enum Control {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Report {
     Pong,
+    UpdateHealth {
+        version: String,
+        failed_version: Option<String>,
+    },
+    UpdateFailed {
+        request: String,
+        error: String,
+    },
     /// Periodic host facts for the dashboard. Doubles as the runner's own
     /// heartbeat: silence in this direction is what makes the server hang up.
     Metrics {
@@ -221,6 +238,7 @@ mod tests {
             os: "linux".into(),
             arch: "x86_64".into(),
             agent_version: "0.1.0".into(),
+            managed_updates: false,
         };
         let text = serde_json::to_string(&hello).unwrap();
         assert!(text.contains(r#""type":"enroll""#), "{text}");

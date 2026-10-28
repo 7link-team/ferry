@@ -473,6 +473,7 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
+        .route("/{workspace}/hosts/{id}/runner-update", get(runner::update_status).post(runner::start_update))
         .route(
             "/{workspace}/pipelines",
             get(pipelines::list).post(pipelines::create),

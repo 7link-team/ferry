@@ -259,6 +259,50 @@ pub(crate) fn stage(
     Ok(installed)
 }
 
+#[derive(Debug)]
+pub(crate) struct Prepared(pub(crate) Installed);
+impl std::fmt::Display for Prepared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "更新已验证并暂存")
+    }
+}
+impl std::error::Error for Prepared {}
+
+pub(crate) async fn download(
+    root: &Path,
+    manifest: &str,
+    signature: &str,
+    version: &str,
+) -> anyhow::Result<Installed> {
+    use std::io::Write;
+    let artifact = verify_catalog(
+        manifest.as_bytes(),
+        signature,
+        env!("RUNNER_UPDATE_PUBLIC_KEY"),
+        env!("RUNNER_BUILD_TARGET"),
+        env!("CARGO_PKG_VERSION"),
+        version,
+    )?;
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .timeout(std::time::Duration::from_secs(300))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()?;
+    let mut response = client.get(&artifact.url).send().await?.error_for_status()?;
+    if let Some(size) = response.content_length() {
+        ensure!(size == artifact.size, "更新下载长度与签名不一致");
+    }
+    let mut file = tempfile::NamedTempFile::new_in(root)?;
+    let mut received = 0u64;
+    while let Some(chunk) = response.chunk().await? {
+        received += chunk.len() as u64;
+        ensure!(received <= artifact.size, "更新文件超过签名大小");
+        file.write_all(&chunk)?;
+    }
+    file.as_file().sync_all()?;
+    stage(root, manifest.as_bytes(), signature, file.path(), version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
