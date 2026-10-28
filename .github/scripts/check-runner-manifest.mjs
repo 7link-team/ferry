@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { generate, targets } from './runner-manifest.mjs';
+import { generate, targets, checkVersions } from './runner-manifest.mjs';
 
 test('catalog binds each target to its exact bytes and version', () => {
   const dir = mkdtempSync(join(tmpdir(), 'runner-manifest-'));
@@ -34,4 +34,11 @@ test('catalog rejects invalid metadata', () => {
     assert.throws(() => generate('.', '1.2.3', repo, 1));
   for (const protocol of [0, -1, 1.5, NaN])
     assert.throws(() => generate('.', '1.2.3', 'owner/project', protocol));
+});
+
+test('release versions must agree before signing', () => {
+  checkVersions('1.2.3', '1.2.3', 'v1.2.3');
+  checkVersions('1.2.3-alpha.1', '1.2.3-alpha.1');
+  assert.throws(() => checkVersions('1.2.3', '1.2.2', 'v1.2.3'));
+  assert.throws(() => checkVersions('1.2.3', '1.2.3', 'v1.2.2'));
 });

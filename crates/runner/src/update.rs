@@ -55,7 +55,9 @@ fn verify_catalog(
     );
     ensure!(catalog.version == expected, "更新版本与请求不一致");
     ensure!(
-        semver::Version::parse(&catalog.version)? > semver::Version::parse(current)?,
+        semver::Version::parse(&catalog.version)?
+            .cmp_precedence(&semver::Version::parse(current)?)
+            .is_gt(),
         "更新版本必须高于当前版本"
     );
     let artifact = catalog
@@ -174,6 +176,54 @@ mod tests {
         assert!(check(&bytes, &sig, &key, "wrong-target", "0.1.0", "9.9.9").is_err());
         assert!(check(&bytes, &sig, &key, "fixture-target", "0.1.0", "9.9.10").is_err());
         assert!(check(&bytes, &sig, &key, "fixture-target", "9.9.9", "9.9.9").is_err());
+        for invalid in [
+            "bad-url",
+            "credential-url",
+            "bad-size",
+            "oversize",
+            "bad-hash",
+        ] {
+            let data = std::fs::read(root.join(format!("{invalid}.json"))).unwrap();
+            let signature =
+                std::fs::read_to_string(root.join(format!("{invalid}.json.sig"))).unwrap();
+            assert!(
+                check(&data, &signature, &key, "fixture-target", "0.1.0", "9.9.9").is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(
+            check(
+                &vec![0; MAX_CATALOG + 1],
+                &sig,
+                &key,
+                "fixture-target",
+                "0.1.0",
+                "9.9.9"
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &bytes,
+                &"X".repeat(8193),
+                &key,
+                "fixture-target",
+                "0.1.0",
+                "9.9.9"
+            )
+            .is_err()
+        );
+        assert!(
+            check(
+                &bytes,
+                "invalid-signature",
+                &key,
+                "fixture-target",
+                "0.1.0",
+                "9.9.9"
+            )
+            .is_err()
+        );
         for (name, version) in [
             ("wrong-protocol", "9.9.9"),
             ("wrong-schema", "9.9.9"),

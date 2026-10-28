@@ -553,6 +553,7 @@ jobs:
         run: |
           node .github/scripts/runner-manifest.mjs release-assets "$(node -p 'require("./package.json").version')" "$REPOSITORY"
           npm exec tauri signer sign -- release-assets/runner-update.json
+          node .github/scripts/runner-manifest.mjs release-assets "$(node -p 'require("./package.json").version')" "$REPOSITORY" --verify
       - name: Checksum every asset
         working-directory: release-assets
         run: |
