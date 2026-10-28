@@ -78,6 +78,22 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         token = enrollment['token']
         token_path = '/workspaces/service/runner-tokens/'+enrollment['id']
         assert api(token_path)['state']=='pending'
+        for script in ['install.sh','install.ps1']:
+            with urllib.request.urlopen(origin+'/api/runners/'+script) as response:
+                assert response.headers['Content-Type'].startswith('text/') and len(response.read())>100
+        def refused(url, code, bearer=None, authenticated=False):
+            headers={'Authorization':'Bearer '+bearer} if bearer else {}
+            request=urllib.request.Request(origin+'/api'+url,headers=headers)
+            try:
+                (client if authenticated else urllib.request.build_opener(urllib.request.ProxyHandler({}))).open(request)
+            except urllib.error.HTTPError as error:
+                assert error.code==code,(url,error.code,code)
+            else: raise AssertionError('expected rejection: '+url)
+        refused(token_path,401)
+        refused('/runners/install/invalid',401,'bad')
+        refused('/runners/install/invalid',400,token)
+        api('/workspaces', {'name':'Other bootstrap tenant','slug':'other-bootstrap'})
+        refused('/workspaces/other-bootstrap/runner-tokens/'+enrollment['id'],404,authenticated=True)
         state = root/'state with spaces'
         if system == 'Windows':
             unsafe = root/'unsafe-state'
@@ -92,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
         status = api(token_path)
         assert status['state']=='connected' and status['host_id']==host and status['host_state']=='online'
+        refused('/runners/install/x86_64-unknown-linux-gnu',401,token)
         update_path = host_path+'/runner-update'
         wait(lambda: api(update_path)['ready'], 'supervisor must confirm authenticated worker readiness')
         assert api(update_path)['supported'] is True

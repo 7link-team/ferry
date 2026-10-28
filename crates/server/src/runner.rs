@@ -210,7 +210,7 @@ async fn reject(socket: &mut WebSocket, reason: &str) {
 
 // ------------------------------------------------------------ 注册令牌
 
-pub(crate) async fn bootstrap_token(s: &AppState, token: &str) -> Result<()> {
+pub(crate) async fn bootstrap_token(db: &sea_orm::DatabaseConnection, token: &str) -> Result<()> {
     if token.len() != 64 {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
@@ -221,7 +221,7 @@ pub(crate) async fn bootstrap_token(s: &AppState, token: &str) -> Result<()> {
         .filter(runner_tokens::Column::TokenHash.eq(fingerprint(token)))
         .filter(runner_tokens::Column::UsedAt.eq(0_i64))
         .filter(runner_tokens::Column::ExpiresAt.gt(db::now()))
-        .one(&s.db)
+        .one(db)
         .await?;
     if valid.is_none() {
         return Err(ApiError(
@@ -1252,6 +1252,39 @@ mod tests {
         .exec(db)
         .await
         .expect("insert token");
+    }
+
+    #[tokio::test]
+    async fn bootstrap_probe_does_not_consume_and_rejects_expired_or_used_tokens() {
+        let scratch = scratch_db().await;
+        let db = &*scratch;
+        let token = secret();
+        mint(db, &token, db::now() + 60_000).await;
+        bootstrap_token(db, &token).await.unwrap();
+        bootstrap_token(db, &token).await.unwrap();
+        consume_token(db, &token).await.unwrap();
+        assert_eq!(
+            bootstrap_token(db, &token).await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+        runner_tokens::Entity::update_many()
+            .col_expr(runner_tokens::Column::UsedAt, Expr::value(0_i64))
+            .col_expr(runner_tokens::Column::ExpiresAt, Expr::value(db::now() - 1))
+            .exec(db)
+            .await
+            .unwrap();
+        assert_eq!(
+            bootstrap_token(db, &token).await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            bootstrap_token(db, &secret()).await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            bootstrap_token(db, "bad").await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[tokio::test]

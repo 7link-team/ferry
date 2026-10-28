@@ -78,7 +78,7 @@ pub async fn artifact(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .unwrap_or("");
-    runner::bootstrap_token(&s, token).await?;
+    runner::bootstrap_token(&s.db, token).await?;
     if ![
         "x86_64-unknown-linux-gnu",
         "aarch64-unknown-linux-gnu",
