@@ -443,6 +443,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn journal_too_large_to_recover_is_rejected_before_persistence() {
+        let (_temp, app, directory) = fixture();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+        let original = fs::read(directory.join("journal.json")).unwrap();
+        transaction.journal.entries = (0..16384)
+            .map(|i| Entry {
+                path: format!("{}/{i}.exe", "文".repeat(220)),
+                new_hash: "a".repeat(64),
+                old_hash: None,
+            })
+            .collect();
+        assert!(serde_json::to_vec(&transaction.journal).unwrap().len() > 8 * 1024 * 1024);
+        assert!(transaction.save().is_err());
+        assert_eq!(fs::read(directory.join("journal.json")).unwrap(), original);
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn completed_rollback_reconciles_reappearing_new_file() {
+        let (_temp, app, directory) = fixture();
+        let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
+        transaction.apply().unwrap();
+        Transaction::recover(&app, &directory).unwrap();
+        // Model a persisted terminal journal but a lost deletion directory update.
+        fs::write(app.join("resources/worker.exe"), b"worker").unwrap();
+        fs::write(app.join("app.exe"), b"old app subsequently touched").unwrap();
+        Transaction::recover(&app, &directory).unwrap();
+        assert!(!app.join("resources/worker.exe").exists());
+        assert_eq!(
+            fs::read(app.join("app.exe")).unwrap(),
+            b"old app subsequently touched"
+        );
+    }
+
+    #[test]
+    fn interrupted_preparation_reports_unprepared_without_changing_installation() {
+        let (_temp, app, directory) = fixture();
+        fs::create_dir(directory.join("old")).unwrap();
+        fs::write(directory.join("old/app.exe"), b"partial backup").unwrap();
+        let outcome = Transaction::recover(&app, &directory).unwrap();
+        assert_eq!(format!("{outcome:?}"), "Unprepared");
+        assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
+        assert_eq!(
+            fs::read(directory.join("old/app.exe")).unwrap(),
+            b"partial backup"
+        );
+    }
+
     #[cfg(windows)]
     #[test]
     fn locked_file_partial_apply_is_recoverable_after_handle_closes() {
