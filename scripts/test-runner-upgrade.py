@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
             privileged('security', 'verify-cert', '-c', root/'tls.crt', '-p', 'ssl', '-s', 'localhost')
         args = [str(Path(shutil.which('python') or shutil.which('python3'))), 'scripts/test-runner-service.py']
         if os.name != 'nt':
-            run('sudo', '-n', 'env', 'RUNNER_TEST_SYSTEM_SERVICE=1', f'RUNNER_TEST_ACTIONS={os.environ.get("RUNNER_TEST_ACTIONS", "")}', f'RUNNER_BINARY={baseline}', f'RUNNER_UPGRADE_FIXTURES={root}', *args)
+            run('sudo', '-n', *(['timeout', '-k', '15s', '300s'] if system=='Linux' else []), 'env', 'RUNNER_TEST_SYSTEM_SERVICE=1', f'RUNNER_TEST_ACTIONS={os.environ.get("RUNNER_TEST_ACTIONS", "")}', f'RUNNER_BINARY={baseline}', f'RUNNER_UPGRADE_FIXTURES={root}', *args)
         else:
             run(*args, env=dict(os.environ, RUNNER_BINARY=str(baseline), RUNNER_UPGRADE_FIXTURES=str(root)))
     finally:

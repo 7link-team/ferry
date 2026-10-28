@@ -3,7 +3,7 @@
 macOS uses a per-user LaunchAgent. Linux and Windows require service-install privileges.
 Run after cargo build -p ferry-server -p ferry-runner.
 """
-import json, os, platform, re, socket, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
+import json, os, platform, re, signal, socket, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
 
 sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
 sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -11,6 +11,9 @@ from pathlib import Path
 
 runner = Path(os.environ.get('RUNNER_BINARY', 'target/debug/ferry-runner' + ('.exe' if os.name == 'nt' else ''))).resolve()
 server_binary = Path(os.environ.get('FERRY_BINARY', 'target/debug/ferry-server' + ('.exe' if os.name == 'nt' else ''))).resolve()
+def interrupted(signum, frame):
+    raise TimeoutError('native acceptance exceeded its deadline')
+if os.name != 'nt': signal.signal(signal.SIGTERM, interrupted)
 system = platform.system()
 name = 'runner-test-' + str(os.getpid())
 user = ['--user'] if system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
@@ -145,6 +148,7 @@ jobs:
                     return api('/workspaces/service/pipelines/'+pipeline_id+'/actions/run', {})['id']
                 def run_status(run): return api('/workspaces/service/pipeline-runs/'+run)
                 def run_logs(run): return ''.join(item['chunk'] for item in api('/workspaces/service/pipeline-runs/'+run+'/logs?after=0')['items'])
+                print('Starting Actions task before upgrade', flush=True)
                 actions_run = trigger(pipeline(workflow, ['build','verify']))
                 def build_started():
                     status = run_status(actions_run)
@@ -181,12 +185,14 @@ jobs:
             if actions_run:
                 assert api(update_path)['update']['state']=='draining'
                 later_workflow = f"name: later task\non: workflow_dispatch\njobs:\n  later:\n    runs-on: self-hosted\n    steps:\n      - run: touch {marker('later.started')}\n"
+                print('Creating competing Actions task while upgrade drains', flush=True)
                 later_pipeline = pipeline(later_workflow, ['later'])
                 cancelled_run = trigger(later_pipeline)
                 api('/workspaces/service/pipeline-runs/'+cancelled_run+'/actions/cancel', {})
                 wait(lambda: run_status(cancelled_run)['state']=='cancelled', 'waiting task cancels without entering upgrading host')
                 later_run = trigger(later_pipeline)
                 assert not (root/'later.started').exists()
+                print('Releasing first Actions job', flush=True)
                 (root/'build.release').touch()
                 wait(lambda: (root/'verify.started').exists(), 'later job in reserved task can execute while upgrade is waiting', seconds=120)
                 assert api(update_path)['update']['state']=='draining', 'upgrade must wait through dependent job and artifact transfer'
