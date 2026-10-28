@@ -36,7 +36,9 @@ jobs:
       - name: Runner tests
         run: cargo test --locked -p ferry-runner
       - name: Whole-task upgrade reservation tests
-        run: cargo test --locked -p ferry-server runner_updates::tests
+        run: |
+          cargo test --locked -p ferry-server runner_updates::tests
+          cargo test --locked -p ferry-server actions_run::tests
       - name: Native system service lifecycle (Unix)
         if: runner.os != 'Windows'
         run: sudo env RUNNER_TEST_SYSTEM_SERVICE=1 python3 scripts/test-runner-service.py

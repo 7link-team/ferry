@@ -33,8 +33,34 @@ pub async fn execute(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let hosts=snapshot.jobs.iter().map(|job|job.host_id.to_string()).collect();
-    crate::runner_updates::with_hosts(hosts, execute_reserved(s,run,snapshot,stop)).await
+    let hosts = snapshot
+        .jobs
+        .iter()
+        .map(|job| job.host_id.to_string())
+        .collect();
+    // Only acquisition is cancellable here. Once execution starts, its existing
+    // cancellation path owns remote process termination and credential cleanup.
+    let reservations = {
+        let pending = crate::runner_updates::reserve(hosts);
+        tokio::pin!(pending);
+        let mut poll = tokio::time::interval(Duration::from_millis(200));
+        loop {
+            if *stop.borrow() || !history::active(s, run.id).await? {
+                return history::finish(s, run.id, "cancelled").await;
+            }
+            tokio::select! {
+                biased;
+                _ = stop.changed() => {
+                    return history::finish(s, run.id, "cancelled").await;
+                }
+                guards = &mut pending => break guards,
+                _ = poll.tick() => {}
+            }
+        }
+    };
+    reservations
+        .run(execute_reserved(s, run, snapshot, stop))
+        .await
 }
 
 async fn execute_reserved(
@@ -644,4 +670,144 @@ async fn event(
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel, Schema};
+
+    async fn cancel_while_waiting(stop_service: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let backend = db.get_database_backend();
+        let schema = Schema::new(backend);
+        for statement in [
+            schema.create_table_from_entity(runs::Entity),
+            schema.create_table_from_entity(jobs::Entity),
+            schema.create_table_from_entity(steps::Entity),
+        ] {
+            db.execute(backend.build(&statement)).await.unwrap();
+        }
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "cancel-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
+        });
+        let run = runs::Model {
+            id: 1,
+            workspace_id: 1,
+            pipeline_id: 1,
+            environment_id: 0,
+            environment_name: String::new(),
+            host_id: 0,
+            number: 1,
+            state: "running".into(),
+            trigger_kind: "manual".into(),
+            triggered_by: 1,
+            definition: String::new(),
+            variable_snapshot: None,
+            repo_url: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            credential_id: 0,
+            created_at: 0,
+            started_at: 0,
+            finished_at: 0,
+        };
+        run.clone().into_active_model().insert(&s.db).await.unwrap();
+        let base = if stop_service { 8100 } else { 8200 };
+        let first = (base + 1).to_string();
+        let second = (base + 2).to_string();
+        let update = crate::runner_updates::exclusive(&second).await;
+        let snapshot = Snapshot {
+            engine: crate::actions::ENGINE.into(),
+            document: crate::actions::Document {
+                engine: crate::actions::ENGINE.into(),
+                workflow: String::new(),
+                executor_bindings: vec![],
+                graph_layout: Value::Null,
+            },
+            jobs: [base + 1, base + 2]
+                .into_iter()
+                .map(|host_id| Job {
+                    key: host_id.to_string(),
+                    name: "must not execute".into(),
+                    needs: vec![],
+                    labels: vec![],
+                    steps: vec![],
+                    host_id,
+                    image: "host".into(),
+                })
+                .collect(),
+        };
+        let (stop, mut stopped) = tokio::sync::watch::channel(false);
+        let state = s.clone();
+        let task = tokio::spawn(async move { execute(&state, &run, snapshot, &mut stopped).await });
+        // Prove the task already holds A while waiting for the upgrade on B.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if tokio::time::timeout(
+                    Duration::from_millis(30),
+                    crate::runner_updates::exclusive(&first),
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        if stop_service {
+            stop.send_replace(true);
+        } else {
+            runs::Entity::update_many()
+                .col_expr(runs::Column::State, Expr::value("cancelling"))
+                .filter(runs::Column::Id.eq(1))
+                .exec(&s.db)
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            runs::Entity::find_by_id(1)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "cancelled"
+        );
+        let _released = tokio::time::timeout(
+            Duration::from_secs(1),
+            crate::runner_updates::exclusive(&first),
+        )
+        .await
+        .unwrap();
+        drop(update);
+    }
+
+    #[tokio::test]
+    async fn database_cancel_releases_partial_reservations() {
+        cancel_while_waiting(false).await;
+    }
+
+    #[tokio::test]
+    async fn service_stop_releases_partial_reservations() {
+        cancel_while_waiting(true).await;
+    }
 }

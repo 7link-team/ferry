@@ -34,7 +34,15 @@ pub(crate) async fn exclusive(host: &str) -> OwnedRwLockWriteGuard<()> {
     host_lock(host).write_owned().await
 }
 
-pub(crate) async fn with_hosts<T>(mut hosts: Vec<String>, task: impl Future<Output = T>) -> T {
+pub(crate) struct Reservations(HashMap<String, Lease>);
+
+impl Reservations {
+    pub(crate) async fn run<T>(self, task: impl Future<Output = T>) -> T {
+        RESERVED.scope(self.0, task).await
+    }
+}
+
+pub(crate) async fn reserve(mut hosts: Vec<String>) -> Reservations {
     hosts.sort();
     hosts.dedup();
     let mut guards = RESERVED.try_with(Clone::clone).unwrap_or_default();
@@ -42,7 +50,12 @@ pub(crate) async fn with_hosts<T>(mut hosts: Vec<String>, task: impl Future<Outp
     for host in &hosts {
         guards.insert(host.clone(), lease(host).await);
     }
-    RESERVED.scope(guards, task).await
+    Reservations(guards)
+}
+
+#[cfg(test)]
+async fn with_hosts<T>(hosts: Vec<String>, task: impl Future<Output = T>) -> T {
+    reserve(hosts).await.run(task).await
 }
 
 #[cfg(test)]
