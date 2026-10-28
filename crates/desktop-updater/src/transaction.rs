@@ -112,16 +112,14 @@ impl Transaction {
                 &self.installation,
             )?;
         }
-        self.journal.phase = Phase::Applied;
-        self.save()
+        self.transition(Phase::Applied)
     }
     pub fn confirm(&mut self) -> anyhow::Result<()> {
         ensure!(
             self.journal.phase == Phase::Applied,
             "不能确认尚未应用的更新"
         );
-        self.journal.phase = Phase::Confirmed;
-        self.save()
+        self.transition(Phase::Confirmed)
     }
     pub fn recover(installation: &Path, directory: &Path) -> anyhow::Result<()> {
         no_link(installation)?;
@@ -164,6 +162,14 @@ impl Transaction {
                     hash(&transaction.directory.join("old").join(&entry.path))? == *expected,
                     "旧版备份损坏，停止自动恢复"
                 );
+            } else {
+                let target = transaction.installation.join(&entry.path);
+                if target.try_exists()? {
+                    ensure!(
+                        hash(&target)? == entry.new_hash,
+                        "新增文件被修改，停止自动删除"
+                    );
+                }
             }
         }
         for entry in &transaction.journal.entries {
@@ -183,8 +189,18 @@ impl Transaction {
                 sync_parents(target.parent().unwrap(), &transaction.installation)?;
             }
         }
-        transaction.journal.phase = Phase::RolledBack;
-        transaction.save()
+        transaction.transition(Phase::RolledBack)
+    }
+    fn transition(&mut self, phase: Phase) -> anyhow::Result<()> {
+        let previous = std::mem::replace(&mut self.journal.phase, phase);
+        if let Err(error) = self.save() {
+            // Failed persistence must never unlock the next lifecycle step.
+            // Retrying writes the same intended state, including when the
+            // replacement succeeded but its subsequent directory sync failed.
+            self.journal.phase = previous;
+            return Err(error);
+        }
+        Ok(())
     }
     fn save(&self) -> anyhow::Result<()> {
         atomic_write(
@@ -401,7 +417,10 @@ mod tests {
             fs::remove_dir(&journal).unwrap();
             fs::rename(directory.join("saved-journal.json"), &journal).unwrap();
             if !during_confirm {
-                assert!(transaction.confirm().is_err(), "failed apply must not become confirmable");
+                assert!(
+                    transaction.confirm().is_err(),
+                    "failed apply must not become confirmable"
+                );
                 transaction.apply().unwrap();
             }
             transaction.confirm().unwrap();
@@ -418,7 +437,10 @@ mod tests {
         fs::write(app.join("resources/worker.exe"), b"external change").unwrap();
         assert!(Transaction::recover(&app, &directory).is_err());
         assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
-        assert_eq!(fs::read(app.join("resources/worker.exe")).unwrap(), b"external change");
+        assert_eq!(
+            fs::read(app.join("resources/worker.exe")).unwrap(),
+            b"external change"
+        );
     }
 
     #[cfg(windows)]
@@ -429,14 +451,20 @@ mod tests {
         fs::create_dir_all(app.join("resources")).unwrap();
         fs::write(app.join("resources/worker.exe"), b"old worker").unwrap();
         let mut transaction = Transaction::prepare(&app, &directory, "2.0.0").unwrap();
-        let handle = fs::OpenOptions::new().read(true).share_mode(1)
-            .open(app.join("resources/worker.exe")).unwrap();
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(app.join("resources/worker.exe"))
+            .unwrap();
         assert!(transaction.apply().is_err());
         assert!(transaction.confirm().is_err());
         assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"new");
         drop(handle);
         Transaction::recover(&app, &directory).unwrap();
         assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
-        assert_eq!(fs::read(app.join("resources/worker.exe")).unwrap(), b"old worker");
+        assert_eq!(
+            fs::read(app.join("resources/worker.exe")).unwrap(),
+            b"old worker"
+        );
     }
 }
