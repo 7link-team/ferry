@@ -1,0 +1,95 @@
+name: Publish verified release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Build and release run containing release-dry-run assets
+        required: true
+        type: string
+      title:
+        description: Release title
+        required: true
+        type: string
+      notes:
+        description: Release notes
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-verified-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - name: Require a successful release build from this repository
+        id: source
+        shell: bash
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID" > run.json
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const run = JSON.parse(readFileSync('run.json', 'utf8'));
+          assert.equal(run.status, 'completed');
+          assert.equal(run.conclusion, 'success');
+          assert.equal(run.path, '.github/workflows/build.yml');
+          assert.equal(run.head_repository.full_name, process.env.GITHUB_REPOSITORY);
+          assert.match(run.head_sha, /^[a-f0-9]{40}$/);
+          appendFileSync(process.env.GITHUB_OUTPUT, `sha=${run.head_sha}\n`);
+          JS
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dry-run
+          path: release-assets
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify checksums, signatures and artifact manifests
+        shell: bash
+        run: |
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          version=$(node -p 'require("./package.json").version')
+          node .github/scripts/runner-manifest.mjs release-assets "$version" "$GITHUB_REPOSITORY" --verify
+          cp release-assets/latest.json /tmp/verified-latest.json
+          node .github/scripts/updater-manifest.mjs release-assets "$version" "$GITHUB_REPOSITORY"
+          cmp /tmp/verified-latest.json release-assets/latest.json
+          node --input-type=module <<'JS'
+          import { readFileSync, readdirSync } from 'node:fs';
+          import { verifySignature } from './.github/scripts/runner-manifest.mjs';
+          const config = JSON.parse(readFileSync('desktop/tauri.conf.json', 'utf8'));
+          for (const name of readdirSync('release-assets').filter(name => name.endsWith('.sig'))) {
+            verifySignature(readFileSync(`release-assets/${name.slice(0, -4)}`), readFileSync(`release-assets/${name}`, 'utf8'), config.plugins.updater.pubkey);
+          }
+          console.log('PASS every release signature');
+          JS
+      - name: Publish the verified files without rebuilding
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+          RELEASE_TITLE: ${{ inputs.title }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        shell: bash
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          printf '%s\n' "$RELEASE_NOTES" > /tmp/release-notes.md
+          flags=()
+          if [[ "$version" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "v$version" release-assets/* --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SHA" --title "$RELEASE_TITLE" \
+            --notes-file /tmp/release-notes.md "${flags[@]}"
