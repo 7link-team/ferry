@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CI-only real signed service upgrade, rollback, and interrupted activation."""
-import functools, hashlib, http.server, json, os, platform, re, shutil, ssl, subprocess, tempfile, threading
+import functools, hashlib, http.server, json, os, platform, re, shutil, ssl, subprocess, tempfile, threading, time
 from pathlib import Path
 
 repo = Path.cwd()
@@ -61,6 +61,15 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         else: run('certutil', '-delstore', 'Root', fingerprint)
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *args): pass
+        def do_GET(self):
+            if self.path == '/slow':
+                (root/'slow.started').touch()
+                deadline = time.monotonic() + 90
+                while not (root/'slow.release').exists() and time.monotonic() < deadline:
+                    time.sleep(.1)
+                self.path = '/candidate'
+            try: super().do_GET()
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError): pass
     http = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Handler, directory=str(root)))
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(root/'tls.crt', root/'tls.key')
@@ -69,9 +78,9 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     thread.start()
     target = next(line.split(': ', 1)[1] for line in subprocess.check_output(['rustc', '-vV'], text=True).splitlines() if line.startswith('host: '))
     protocol = int(re.search(r'pub const VERSION: u32 = (\d+);', (repo/'crates/protocol/src/lib.rs').read_text(encoding='utf-8'))[1])
-    for version, filename in [('9.9.9','candidate'), ('9.9.10','broken'), ('9.9.11','wrong-version'), ('9.9.12','stalled')]:
+    for version, filename in [('9.9.9','candidate'), ('9.9.10','broken'), ('9.9.11','wrong-version'), ('9.9.12','stalled'), ('9.9.13','candidate')]:
         payload = (root/filename).read_bytes()
-        catalog = {'schema':1, 'protocol':protocol, 'version':version, 'targets':{target:{'url':f'https://localhost:{http.server_port}/{filename}', 'size':len(payload), 'sha256':hashlib.sha256(payload).hexdigest()}}}
+        catalog = {'schema':1, 'protocol':protocol, 'version':version, 'targets':{target:{'url':f'https://localhost:{http.server_port}/{"slow" if version=="9.9.13" else filename}', 'size':len(payload), 'sha256':hashlib.sha256(payload).hexdigest()}}}
         path = root/(version+'.json')
         path.write_text(json.dumps(catalog))
         sign('sign', '--', '--private-key-path', root/'key', '--password', '', path)

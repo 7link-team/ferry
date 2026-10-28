@@ -181,7 +181,11 @@ jobs:
             if actions_run:
                 assert api(update_path)['update']['state']=='draining'
                 later_workflow = f"name: later task\non: workflow_dispatch\njobs:\n  later:\n    runs-on: self-hosted\n    steps:\n      - run: touch {marker('later.started')}\n"
-                later_run = trigger(pipeline(later_workflow, ['later']))
+                later_pipeline = pipeline(later_workflow, ['later'])
+                cancelled_run = trigger(later_pipeline)
+                api('/workspaces/service/pipeline-runs/'+cancelled_run+'/actions/cancel', {})
+                wait(lambda: run_status(cancelled_run)['state']=='cancelled', 'waiting task cancels without entering upgrading host')
+                later_run = trigger(later_pipeline)
                 assert not (root/'later.started').exists()
                 (root/'build.release').touch()
                 wait(lambda: (root/'verify.started').exists(), 'later job in reserved task can execute while upgrade is waiting', seconds=120)
@@ -241,6 +245,19 @@ jobs:
             assert journal['failed_version']=='9.9.12'
             assert (state/'runner.json').read_bytes()==original
             print('PASS supervisor crash during unconfirmed activation rolls back after native restart', flush=True)
+            upgrade('9.9.13')
+            wait(lambda: (fixtures/'slow.started').exists(), 'signed download begins before server restart')
+            server.terminate()
+            server.wait(timeout=30)
+            server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log)
+            wait(ready, 'server restart during download', seconds=90)
+            wait(lambda: api(update_path)['update']['state']=='failed', 'interrupted download reconciles healthy old worker', seconds=60)
+            assert api(update_path)['agent_version']=='9.9.9' and api(update_path)['ready']
+            (fixtures/'slow.release').touch()
+            assert json.loads((state/'versions.json').read_text())['pending'] is None
+            assert (state/'runner.json').read_bytes()==original
+            print('PASS restart during download cancels preparation and confirms original worker', flush=True)
+
             # Fault injection after stopping the actual service: a confirmed
             # installation can be damaged between boots, not only while pending.
             saved_journal = (state/'versions.json').read_bytes()
@@ -302,6 +319,7 @@ jobs:
     except Exception:
         try:
             if 'update_path' in locals(): print('Upgrade status:', json.dumps(api(update_path)), flush=True)
+            if locals().get('actions_run'): print('Actions diagnostics:', json.dumps(run_status(actions_run)), run_logs(actions_run), flush=True)
             for filename in ['versions.json', 'service.log']:
                 path = state/filename
                 if path.exists(): print(filename, path.read_text(encoding='utf-8', errors='replace')[-12000:], flush=True)
