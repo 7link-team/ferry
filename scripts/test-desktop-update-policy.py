@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """CI-only real signatures for privileged desktop update admission."""
-import json, os, shutil, struct, subprocess, tempfile, warnings, zipfile
+import json, os, shutil, struct, subprocess, sys, tempfile, warnings, zipfile
 from pathlib import Path
+
+if os.name == 'nt':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
     root=Path(directory)
@@ -42,6 +45,6 @@ with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
         assert len(binaries)==1, binaries
         # Windows PowerShell 5 must not inherit PowerShell 7's module search path.
         native_env={key:value for key,value in os.environ.items() if key.lower()!='psmodulepath'}
-        native=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','scripts/test-desktop-update-ipc.ps1','-TestExecutable',binaries[0]],env=native_env,creationflags=subprocess.CREATE_NO_WINDOW,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',timeout=180)
+        native=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','scripts/test-desktop-update-ipc.ps1','-TestExecutable',binaries[0]],env=native_env,creationflags=subprocess.CREATE_NO_WINDOW,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',timeout=180)
         print(native.stdout,flush=True)
         native.check_returncode()

@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$TestExecutable)
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $tag = [guid]::NewGuid().ToString('N').Substring(0,12)
 $user = "upd$tag"
 $serverTask = "DesktopUpdateServer-$tag"
@@ -50,7 +51,7 @@ echo %ERRORLEVEL% > "$output\exit.txt"
     Write-Host 'PASS: SYSTEM server / standard-user pipe transfer, peer identities and spoof rejection'
 } finally {
     foreach ($log in @((Join-Path $root 'test.log'), (Join-Path $root 'client-result/test.log'))) {
-        if (Test-Path $log) { Get-Content $log }
+        if (Test-Path $log) { Get-Content $log -Encoding UTF8 }
     }
     if ($clientProcess -and -not $clientProcess.HasExited) { Stop-Process -Id $clientProcess.Id -Force }
     foreach ($task in @($serverTask)) {
