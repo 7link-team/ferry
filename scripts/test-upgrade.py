@@ -89,7 +89,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     before[path]['tag_ids'] = []
                     before[path]['tags'] = []
                 if '/pipelines/' in path:
-                    defaults={'definition_format':'legacy','executor_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
+                    defaults={'definition_format':'legacy','executor_bindings':[],'checkout_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
                     for key,value in defaults.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
