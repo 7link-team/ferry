@@ -7,6 +7,17 @@ use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+const MAX_JOURNAL_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Recovery {
+    /// Preparation never became durable; installation files were not changed.
+    /// Under the installation lock, the caller may discard this protected stage
+    /// and prepare a fresh one. Do not reuse its potentially partial backups.
+    Unprepared,
+    Confirmed,
+    RolledBack,
+}
 
 #[derive(Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -121,39 +132,48 @@ impl Transaction {
         );
         self.transition(Phase::Confirmed)
     }
-    pub fn recover(installation: &Path, directory: &Path) -> anyhow::Result<()> {
+    pub fn recover(installation: &Path, directory: &Path) -> anyhow::Result<Recovery> {
         no_link(installation)?;
         no_link(directory)?;
-        let mut bytes = Vec::new();
-        let path = directory.join("journal.json");
-        no_link(&path)?;
-        fs::File::open(path)?
-            .take(8 * 1024 * 1024 + 1)
-            .read_to_end(&mut bytes)?;
-        ensure!(bytes.len() <= 8 * 1024 * 1024, "更新日志过大");
-        let journal: Journal = serde_json::from_slice(&bytes)?;
-        let mut transaction = Self {
-            installation: installation.canonicalize()?,
-            directory: directory.canonicalize()?,
-            journal,
-        };
+        let installation = installation.canonicalize()?;
+        let directory = directory.canonicalize()?;
         ensure!(
-            !transaction.directory.starts_with(&transaction.installation)
-                && !transaction.installation.starts_with(&transaction.directory),
+            !directory.starts_with(&installation) && !installation.starts_with(&directory),
             "更新恢复目录无效"
         );
-        if matches!(
-            transaction.journal.phase,
-            Phase::Confirmed | Phase::RolledBack
-        ) {
-            return Ok(());
+        let mut bytes = Vec::new();
+        let path = directory.join("journal.json");
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Recovery::Unprepared);
+            }
+            Err(error) => return Err(error.into()),
+            Ok(_) => {}
         }
+        no_link(&path)?;
+        fs::File::open(path)?
+            .take(MAX_JOURNAL_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        ensure!(bytes.len() <= MAX_JOURNAL_BYTES, "更新日志过大");
+        let journal: Journal = serde_json::from_slice(&bytes)?;
+        let mut transaction = Self {
+            installation,
+            directory,
+            journal,
+        };
+        if transaction.journal.phase == Phase::Confirmed {
+            return Ok(Recovery::Confirmed);
+        }
+        let restore_originals = transaction.journal.phase != Phase::RolledBack;
         ensure!(
             transaction.journal.entries.len() <= 16384,
             "更新日志文件数量无效"
         );
         // Check every backup before changing even one installed file.
         for entry in &transaction.journal.entries {
+            if !restore_originals && entry.old_hash.is_some() {
+                continue;
+            }
             super::safe_entry_path(&entry.path)?;
             check_target(&transaction.installation, &entry.path)?;
             if let Some(expected) = &entry.old_hash {
@@ -175,11 +195,13 @@ impl Transaction {
         for entry in &transaction.journal.entries {
             let target = transaction.installation.join(&entry.path);
             if entry.old_hash.is_some() {
-                copy(
-                    &transaction.directory.join("old").join(&entry.path),
-                    &target,
-                    &transaction.installation,
-                )?;
+                if restore_originals {
+                    copy(
+                        &transaction.directory.join("old").join(&entry.path),
+                        &target,
+                        &transaction.installation,
+                    )?;
+                }
             } else if target.try_exists()? {
                 ensure!(
                     hash(&target)? == entry.new_hash,
@@ -189,7 +211,11 @@ impl Transaction {
                 sync_parents(target.parent().unwrap(), &transaction.installation)?;
             }
         }
-        transaction.transition(Phase::RolledBack)
+        // Reconcile deletions even for RolledBack: Windows does not provide
+        // our Unix directory-fsync barrier for remove_file. A surviving stale
+        // file is removed on recovery before the caller resumes the desktop.
+        transaction.transition(Phase::RolledBack)?;
+        Ok(Recovery::RolledBack)
     }
     fn transition(&mut self, phase: Phase) -> anyhow::Result<()> {
         let previous = std::mem::replace(&mut self.journal.phase, phase);
@@ -203,10 +229,13 @@ impl Transaction {
         Ok(())
     }
     fn save(&self) -> anyhow::Result<()> {
-        atomic_write(
-            &self.directory.join("journal.json"),
-            serde_json::to_vec(&self.journal)?.as_slice(),
-        )?;
+        let bytes = serde_json::to_vec(&self.journal)?;
+        // Reserve the longest phase spelling so a prepared journal cannot
+        // exceed the recovery limit on a later state transition.
+        let largest = bytes.len() - serde_json::to_vec(&self.journal.phase)?.len()
+            + serde_json::to_vec(&Phase::RolledBack)?.len();
+        ensure!(largest <= MAX_JOURNAL_BYTES, "更新日志过大");
+        atomic_write(&self.directory.join("journal.json"), bytes.as_slice())?;
         sync_parents(&self.directory, &self.directory)
     }
 }
@@ -484,7 +513,7 @@ mod tests {
         fs::create_dir(directory.join("old")).unwrap();
         fs::write(directory.join("old/app.exe"), b"partial backup").unwrap();
         let outcome = Transaction::recover(&app, &directory).unwrap();
-        assert_eq!(format!("{outcome:?}"), "Unprepared");
+        assert_eq!(outcome, Recovery::Unprepared);
         assert_eq!(fs::read(app.join("app.exe")).unwrap(), b"old");
         assert_eq!(
             fs::read(directory.join("old/app.exe")).unwrap(),
