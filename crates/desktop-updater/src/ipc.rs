@@ -13,7 +13,11 @@ use windows_sys::Win32::{
     Foundation::{INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT},
     Globalization::{CSTR_EQUAL, CompareStringOrdinal},
     Security::{
-        Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES,
+        Authorization::{
+            ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        },
+        GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER,
+        TokenElevation, TokenSessionId, TokenUser,
     },
     Storage::FileSystem::{
         CreateFileW, FILE_FLAG_OVERLAPPED, FILE_READ_DATA, FILE_WRITE_DATA, OPEN_EXISTING,
@@ -22,8 +26,8 @@ use windows_sys::Win32::{
     System::{
         Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
         Threading::{
-            GetProcessId, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-            QueryFullProcessImageNameW, WaitForSingleObject,
+            GetProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+            PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW, WaitForSingleObject,
         },
     },
 };
@@ -37,7 +41,37 @@ pub struct Identity {
 }
 impl Process {
     pub fn identity(&self) -> anyhow::Result<Identity> {
-        anyhow::bail!("process token identity not implemented")
+        let mut token = std::ptr::null_mut();
+        ensure!(
+            unsafe { OpenProcessToken(self.0.as_raw_handle(), TOKEN_QUERY, &mut token) } != 0,
+            "无法查询进程令牌：{}",
+            std::io::Error::last_os_error()
+        );
+        let token = unsafe { OwnedHandle::from_raw_handle(token) };
+        let user = token_information(&token, TokenUser, std::mem::size_of::<TOKEN_USER>())?;
+        let user = unsafe { &*user.as_ptr().cast::<TOKEN_USER>() };
+        let mut sid = std::ptr::null_mut();
+        ensure!(
+            unsafe { ConvertSidToStringSidW(user.User.Sid, &mut sid) } != 0,
+            "无法读取进程用户标识：{}",
+            std::io::Error::last_os_error()
+        );
+        let value = unsafe {
+            let mut len = 0;
+            while *sid.add(len) != 0 {
+                len += 1;
+            }
+            let value = String::from_utf16(std::slice::from_raw_parts(sid, len));
+            LocalFree(sid.cast());
+            value
+        }?;
+        let session = token_information(&token, TokenSessionId, 4)?;
+        let elevation = token_information(&token, TokenElevation, 4)?;
+        Ok(Identity {
+            sid: value,
+            session: unsafe { *session.as_ptr().cast::<u32>() },
+            elevated: unsafe { *elevation.as_ptr().cast::<u32>() } != 0,
+        })
     }
     pub fn open(pid: u32) -> anyhow::Result<Self> {
         ensure!(pid > 0, "进程标识无效");
@@ -91,6 +125,44 @@ impl Process {
                 ) == CSTR_EQUAL
             })
     }
+}
+
+fn token_information(
+    token: &OwnedHandle,
+    class: TOKEN_INFORMATION_CLASS,
+    minimum: usize,
+) -> anyhow::Result<Vec<usize>> {
+    let mut bytes = 0;
+    unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            class,
+            std::ptr::null_mut(),
+            0,
+            &mut bytes,
+        );
+    }
+    ensure!(
+        bytes as usize >= minimum && bytes <= 65536,
+        "进程令牌信息大小无效"
+    );
+    // TOKEN_USER contains a native pointer, so the buffer must be pointer-aligned.
+    let mut buffer = vec![0usize; (bytes as usize).div_ceil(std::mem::size_of::<usize>())];
+    ensure!(
+        unsafe {
+            GetTokenInformation(
+                token.as_raw_handle(),
+                class,
+                buffer.as_mut_ptr().cast(),
+                bytes,
+                &mut bytes,
+            )
+        } != 0,
+        "无法读取进程令牌信息：{}",
+        std::io::Error::last_os_error()
+    );
+    ensure!(bytes as usize >= minimum, "进程令牌信息不完整");
+    Ok(buffer)
 }
 
 pub fn listen() -> anyhow::Result<NamedPipeServer> {
