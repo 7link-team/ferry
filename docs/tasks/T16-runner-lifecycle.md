@@ -45,3 +45,9 @@ Direct implementation initially: lifecycle/protocol boundary needs one owner; fi
 - Runner SIGTERM/SCM stop stops receiving sessions and waits for active sessions. This does not yet provide whole-pipeline upgrade draining.
 - Local real macOS LaunchAgent acceptance: registration, startup, repeated install without restart, kill/recovery, explicit stop/start, uninstall retaining identity. Native CI for systemd/launchd/SCM added as a release dependency. Full reboot and update rollback not yet tested.
 - Workspace tests:141 passed,1existing live-SSH test ignored; macOS service lifecycle passed after independent-review fixes. Linux/Windows native results pending; not release-ready.
+
+## Native service and reservation acceptance — 2026-10-28
+- GitHub Actions run `40630691384` at `2ddbeb0`: Ubuntu 24.04, macOS 15 and Windows 2022 jobs all passed. Native acceptance covers install/enrolment, reinstall without restart or identity replacement, crash recovery, explicit stop/start, uninstall preserving identity, and rejection of conflicting service paths. Windows also rejects user-writable state directories.
+- Each platform runs runner unit/CLI tests, four reservation tests, and two real database/stop cancellation tests. Whole Actions tasks reserve their hosts; download streams and terminal pumps retain shared leases. Waiting tasks respond to cancellation without aborting active-task cleanup.
+- Windows installation isolates Windows PowerShell module lookup from PowerShell 7 and recognizes OWNER RIGHTS only after verifying the actual owner. Independent review found no remaining blocking issues in this stage.
+- Build/test execution moved to GitHub Actions after local disk cleanup. This stage does not implement signed agent updates, update health checks/rollback, installation download UI, or a complete machine reboot test. Those release gates remain open.
