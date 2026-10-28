@@ -134,6 +134,15 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert journal['current']['version']=='9.9.9' and journal['pending'] is None
             assert (state/'runner.json').read_bytes()==original
             print('PASS signed update downloads over TLS and confirms real new-version handshake', flush=True)
+            completed_update = api(update_path)['update']
+            server.terminate()
+            server.wait(timeout=30)
+            server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log)
+            wait(ready, 'server restart with existing data', seconds=90)
+            wait(lambda: api(update_path)['ready'], 'managed agent reconnects after server restart', seconds=60)
+            assert api(update_path)['update']==completed_update, 'server restart must preserve completed upgrade status'
+            print('PASS server restart preserves upgrade result and reconnects managed agent', flush=True)
+
             for version in ['9.9.10', '9.9.11']:
                 upgrade(version)
                 wait(lambda: api(update_path)['update']['state']=='rolled_back', 'failed candidate must roll back', seconds=120)
