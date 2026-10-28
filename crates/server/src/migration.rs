@@ -88,6 +88,7 @@ impl MigratorTrait for Migrator {
             Box::new(PlatformRepositoryOAuth),
             Box::new(ActionsJobs),
             Box::new(PipelineClassification),
+            Box::new(RunnerUpdateState),
         ]
     }
 }
@@ -2585,4 +2586,22 @@ fn pipeline_classification(backend: DbBackend) -> Vec<SchemaStatement> {
             .to_owned(),
     ));
     statements
+}
+
+
+struct RunnerUpdateState;
+impl MigrationName for RunnerUpdateState {
+    fn name(&self) -> &str { "runner_update_state_v1" }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RunnerUpdateState {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(m, SchemaStatement::Column(
+            "hosts", "agent_update", Table::alter().table(Alias::new("hosts"))
+                .add_column(long_text("agent_update", m.get_database_backend()).null()).to_owned(),
+        )).await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
 }

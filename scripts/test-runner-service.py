@@ -153,6 +153,12 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             print('PASS invalid executable and wrong-version health check restore confirmed version', flush=True)
             upgrade('9.9.12')
             wait(lambda: json.loads((state/'versions.json').read_text()).get('pending') is not None, 'pending activation journal', seconds=120)
+            server.terminate()
+            server.wait(timeout=30)
+            server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log)
+            wait(ready, 'server restart during pending activation', seconds=90)
+            restored = api(update_path)['update']
+            assert restored['version']=='9.9.12' and restored['state'] in ('updating', 'unknown')
             interrupted = pid()
             if system=='Windows': command('taskkill','/PID',str(interrupted),'/F')
             else: os.kill(interrupted, 9)

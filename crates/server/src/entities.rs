@@ -183,6 +183,7 @@ pub mod hosts {
         pub os: String,
         pub arch: String,
         pub agent_version: String,
+        pub agent_update: Option<String>,
         pub metrics: String,
         pub credential_id: i64,
     }

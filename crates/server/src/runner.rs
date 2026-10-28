@@ -1311,7 +1311,7 @@ mod tests {
 
 // Upgrade tasks outlive their HTTP request so closing the page cannot release
 // the exclusive host reservation while a remote version switch is in flight.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct UpdateJob {
     request: String,
     version: String,
@@ -1337,7 +1337,8 @@ pub async fn update_status(State(s): State<AppState>, scope: Scope, Path((_works
     scope.require("hosts.read")?;
     let host = update_host(&s, &scope, id).await?;
     let registration = live().get(&id.to_string()).cloned();
-    let status = UPDATES.lock().unwrap_or_else(|e|e.into_inner()).get(&id.to_string()).cloned();
+    let status = host.agent_update.as_deref().map(serde_json::from_str::<UpdateJob>).transpose()
+        .map_err(|_|ApiError::bad("代理升级状态无法读取"))?;
     Ok(Json(json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)),"update":status})))
 }
 
@@ -1358,7 +1359,16 @@ pub async fn start_update(State(s): State<AppState>, scope: Scope, Path((_worksp
         }
         jobs.insert(id.to_string(),job.clone());
     }
+    // Persist/audit admission also outlives a disconnected HTTP caller.
+    let admission=tokio::spawn(async move {
+    if let Err(error)=persist_update(&s,id,&job).await {
+        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
+        return Err(error);
+    }
     if let Err(error)=crate::hosts::activity(&s,&scope,"runner-update","hosts",&id,json!({"version":body.version,"request":job.request})).await {
+        let mut failed=job.clone();
+        failed.state="failed".into(); failed.message="升级审计写入失败，未发送更新".into();
+        persist_update(&s,id,&failed).await?;
         UPDATES.lock().unwrap_or_else(|e|e.into_inner()).remove(&id.to_string());
         return Err(error);
     }
@@ -1366,37 +1376,98 @@ pub async fn start_update(State(s): State<AppState>, scope: Scope, Path((_worksp
     tokio::spawn(async move {
         let host=id.to_string();
         let _exclusive=crate::runner_updates::exclusive(&host).await;
-        let set=|state:&str,message:&str| {
-            if let Some(job)=UPDATES.lock().unwrap_or_else(|e|e.into_inner()).get_mut(&host) {
-                job.state=state.into(); job.message=message.into();
-            }
-        };
-        let Some(peer)=live().get(&host).cloned() else {set("failed","等待任务结束期间代理离线");return;};
-        if !peer.managed {set("failed","重连后的代理不支持托管升级");return;}
-        set("updating","正在验证更新并切换版本");
+        let mut job=job;
+        let peer=live().get(&host).cloned();
+        let Some(peer)=peer else {transition_update(&s,id,&mut job,"failed","等待任务结束期间代理离线").await;return;};
+        if !peer.managed {transition_update(&s,id,&mut job,"failed","重连后的代理不支持托管升级").await;return;}
+        transition_update(&s,id,&mut job,"updating","正在验证更新并切换版本").await;
         if peer.control.send(wire::Control::Update {request:job.request.clone(),version:body.version.clone(),manifest:body.manifest,signature:body.signature}).await.is_err() {
-            set("failed","无法发送升级请求");return;
+            transition_update(&s,id,&mut job,"failed","无法发送升级请求").await;return;
         }
         let started=std::time::Instant::now();
         loop {
             let failure=peer.update_error.lock().unwrap_or_else(|e|e.into_inner()).clone();
             if let Some((request,message))=failure {
-                if request==job.request {set("failed",&message);return;}
+                if request==job.request {transition_update(&s,id,&mut job,"failed",&message).await;return;}
             }
             let current=live().get(&host).cloned();
             if let Some(current)=current {
                 if !Arc::ptr_eq(&peer,&current) && current.ready.load(std::sync::atomic::Ordering::Acquire) {
-                    if current.version==body.version {set("succeeded","代理升级完成，已通过连接健康检查");}
-                    else {set("rolled_back","新版本未完成激活，已恢复原版本");}
+                    if current.version==body.version {transition_update(&s,id,&mut job,"succeeded","代理升级完成，已通过连接健康检查").await;}
+                    else {transition_update(&s,id,&mut job,"rolled_back","新版本未完成激活，已恢复原版本").await;}
                     return;
                 }
             }
             if started.elapsed()>Duration::from_secs(420) {
                 // Never admit new work merely because a response timed out.
-                set("unknown","等待代理重新连接确认，继续暂停向该主机派发新任务");
+                if job.state != "unknown" { transition_update(&s,id,&mut job,"unknown","等待代理重新连接确认，继续暂停向该主机派发新任务").await; }
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     });
     Ok((StatusCode::ACCEPTED,Json(response)))
+    });
+    admission.await.map_err(|_|ApiError::bad("升级任务初始化失败"))?
+}
+
+
+async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
+    let value=serde_json::to_string(job).map_err(|_|ApiError::bad("升级状态编码失败"))?;
+    hosts::Entity::update_many().col_expr(hosts::Column::AgentUpdate,Expr::value(value))
+        .filter(hosts::Column::Id.eq(id)).exec(&s.db).await?;
+    Ok(())
+}
+
+// The caller retains its exclusive reservation throughout persistence retries.
+// A failed state write must never release a host with an uncertain update.
+async fn transition_update(s: &AppState, id: Id, job: &mut UpdateJob, state: &str, message: &str) {
+    job.state=state.into(); job.message=message.into();
+    loop {
+        match persist_update(s,id,job).await {
+            Ok(()) => break,
+            Err(error) => tracing::error!(host=%id,error=%error.1,"无法保存代理升级状态，继续保留主机升级锁"),
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    UPDATES.lock().unwrap_or_else(|e|e.into_inner()).insert(id.to_string(),job.clone());
+}
+
+/// Restore exclusion before the schedulers or HTTP listener can admit new work.
+pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
+    let rows=hosts::Entity::find().filter(hosts::Column::AgentUpdate.is_not_null()).all(&s.db).await?;
+    for row in rows {
+        let mut job: UpdateJob=serde_json::from_str(row.agent_update.as_deref().unwrap())
+            .map_err(|_|ApiError::bad("持久化的代理升级状态无法读取"))?;
+        let id=Id::from(row.id);
+        if job.state=="draining" {
+            job.state="failed".into(); job.message="服务重启中断了等待，尚未发送升级请求".into();
+            persist_update(s,id,&job).await?;
+        }
+        UPDATES.lock().unwrap_or_else(|e|e.into_inner()).insert(id.to_string(),job.clone());
+        if !matches!(job.state.as_str(),"updating"|"unknown") { continue; }
+        let exclusion=crate::runner_updates::exclusive(&id.to_string()).await;
+        let s=s.clone();
+        tokio::spawn(async move {
+            let _exclusion=exclusion;
+            loop {
+                let peer=live().get(&id.to_string()).cloned();
+                if let Some(peer)=peer {
+                    if peer.managed && peer.ready.load(std::sync::atomic::Ordering::Acquire) {
+                        let failed=peer.failed_version.lock().unwrap_or_else(|e|e.into_inner()).clone();
+                        let (state,message)=if peer.version==job.version {
+                            ("succeeded","代理升级完成，重启后已确认连接健康")
+                        } else if failed.as_deref()==Some(job.version.as_str()) {
+                            ("rolled_back","新版本未完成激活，重启后已确认回退")
+                        } else {
+                            ("failed","升级准备被服务中断，代理已恢复健康连接")
+                        };
+                        transition_update(&s,id,&mut job,state,message).await;
+                        break;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        });
+    }
+    Ok(())
 }

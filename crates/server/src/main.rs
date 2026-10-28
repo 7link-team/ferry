@@ -146,6 +146,9 @@ async fn main() -> anyhow::Result<()> {
         ids: worker.generator.clone(),
     });
 
+    runner::recover_updates(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
     platform::prepare(&s).await?;
     maintenance::prepare(&s).await?;
     workspace::prepare_permissions(&s)
