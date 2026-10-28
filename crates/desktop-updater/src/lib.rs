@@ -64,10 +64,30 @@ pub fn verify_package(
     Ok(())
 }
 
+/// Expand a verified archive into a fresh protected staging directory.
+pub fn extract_package(_source: impl Read + std::io::Seek, _destination: &std::path::Path) -> anyhow::Result<()> {
+    anyhow::bail!("desktop package extraction is not implemented")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    #[ignore = "scripts/test-desktop-update-policy.py supplies archive fixtures"]
+    fn archive_staging_rejects_windows_path_aliases_and_special_files() {
+        let root=PathBuf::from(std::env::var("DESKTOP_UPDATE_TEST_DIR").unwrap());
+        let stage=tempfile::tempdir().unwrap();
+        extract_package(std::fs::File::open(root.join("valid.zip")).unwrap(),stage.path()).unwrap();
+        assert_eq!(std::fs::read(stage.path().join("application.exe")).unwrap(),b"application");
+        assert_eq!(std::fs::read(stage.path().join("resources/worker.exe")).unwrap(),b"worker");
+        assert!(extract_package(std::fs::File::open(root.join("valid.zip")).unwrap(),stage.path()).is_err(),"existing staged files must not be overwritten");
+        for name in ["traversal","absolute","drive","backslash","reserved","trailing","alternate-stream","case-alias","symlink","oversize","duplicate"] {
+            let stage=tempfile::tempdir().unwrap();
+            assert!(extract_package(std::fs::File::open(root.join(format!("{name}.zip"))).unwrap(),stage.path()).is_err(),"must reject {name}");
+        }
+    }
 
     #[test]
     #[ignore = "scripts/test-desktop-update-policy.py supplies genuine throwaway signatures"]

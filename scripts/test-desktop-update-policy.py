@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CI-only real signatures for privileged desktop update admission."""
-import json, os, shutil, subprocess, tempfile
+import json, os, shutil, struct, subprocess, tempfile, warnings, zipfile
 from pathlib import Path
 
 with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
@@ -17,5 +17,22 @@ with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
         signer('sign','--','--private-key-path',str(root/key),'--password','',*(['--app-version',version] if version else []),str(root/name))
     (root/'tampered.exe').write_bytes(b'PKmodified archive fixture\n')
     shutil.copy2(root/(valid+'.sig'),root/'tampered.exe.sig')
+    with zipfile.ZipFile(root/'valid.zip','w') as archive:
+        archive.writestr('application.exe',b'application')
+        archive.writestr('resources/worker.exe',b'worker')
+    for label,name in [('traversal','../outside'),('absolute','/outside'),('drive','C:/outside'),('backslash','..\\outside'),('reserved','CON.txt'),('trailing','folder./app.exe'),('alternate-stream','app.exe:stream')]:
+        with zipfile.ZipFile(root/(label+'.zip'),'w') as archive: archive.writestr(name,b'bad')
+    for label,names in [('case-alias',['app.exe','APP.EXE']),('duplicate',['app.exe','app.exe'])]:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore',UserWarning)
+            with zipfile.ZipFile(root/(label+'.zip'),'w') as archive:
+                for name in names: archive.writestr(name,b'bad')
+    with zipfile.ZipFile(root/'symlink.zip','w') as archive:
+        entry=zipfile.ZipInfo('link');entry.create_system=3;entry.external_attr=0o120777<<16
+        archive.writestr(entry,b'../outside')
+    oversized=bytearray((root/'valid.zip').read_bytes())
+    central=oversized.index(b'PK\x01\x02')
+    struct.pack_into('<I',oversized,central+24,2*1024*1024*1024+1)
+    (root/'oversize.zip').write_bytes(oversized)
     env=dict(os.environ,DESKTOP_UPDATE_TEST_DIR=directory,DESKTOP_UPDATE_PUBLIC_KEY=(root/'key.pub').read_text().strip())
     subprocess.run(['cargo','test','--locked','-p','ferry-desktop-updater','--','--include-ignored'],env=env,check=True)
