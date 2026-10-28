@@ -197,31 +197,40 @@ pub async fn trigger(
     // Scope references again at execution time, not only when a definition is saved.
     let candidates =
         hosts::Entity::find().filter(hosts::Column::WorkspaceId.eq(scope.workspace_id));
-    let host = match p.target_kind.as_str() {
-        "host" => {
-            candidates
-                .filter(hosts::Column::Id.eq(p.target_ref))
-                .one(&tx)
-                .await?
-        }
-        "host-group" => {
-            host_groups::Entity::find_by_id(p.target_ref)
-                .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
-                .one(&tx)
-                .await?
-                .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
-            // One run has one concrete host. Resolve direct online members once,
-            // deterministically, and retain that host even if group membership changes.
-            candidates
-                .filter(hosts::Column::GroupId.eq(p.target_ref))
-                .filter(hosts::Column::State.eq("online"))
-                .order_by_asc(hosts::Column::Id)
-                .one(&tx)
-                .await?
-        }
-        _ => return Err(ApiError::bad("未知的执行目标类型。")),
-    }
-    .ok_or_else(|| ApiError::bad("当前工作空间中没有可用的执行主机（主机组需要在线成员）。"))?;
+    let node_only = crate::actions::document(&p.definition).is_some() && p.target_ref == 0;
+    let host = if node_only {
+        None
+    } else {
+        Some(
+            match p.target_kind.as_str() {
+                "host" => {
+                    candidates
+                        .filter(hosts::Column::Id.eq(p.target_ref))
+                        .one(&tx)
+                        .await?
+                }
+                "host-group" => {
+                    host_groups::Entity::find_by_id(p.target_ref)
+                        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+                        .one(&tx)
+                        .await?
+                        .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
+                    // One run has one concrete host. Resolve direct online members once,
+                    // deterministically, and retain that host even if group membership changes.
+                    candidates
+                        .filter(hosts::Column::GroupId.eq(p.target_ref))
+                        .filter(hosts::Column::State.eq("online"))
+                        .order_by_asc(hosts::Column::Id)
+                        .one(&tx)
+                        .await?
+                }
+                _ => return Err(ApiError::bad("未知的执行目标类型。")),
+            }
+            .ok_or_else(|| {
+                ApiError::bad("当前工作空间中没有可用的执行主机（主机组需要在线成员）。")
+            })?,
+        )
+    };
     let repo = if p.repository_id != 0 {
         Some(
             repositories::Entity::find_by_id(p.repository_id)
@@ -262,7 +271,16 @@ pub async fn trigger(
         .ok_or_else(ApiError::missing)?
         .pipeline_run_number;
     let actions = match crate::actions::document(&p.definition) {
-        Some(document) => Some(crate::actions::resolve(&tx, &scope, document, host.id).await?),
+        Some(document) => Some(
+            crate::actions::resolve(
+                &s,
+                &tx,
+                &scope,
+                document,
+                host.as_ref().map(|row| row.id).unwrap_or(0),
+            )
+            .await?,
+        ),
         None => None,
     };
     let variable_rows = crate::variables::resolve_for_environment(
@@ -321,7 +339,12 @@ pub async fn trigger(
         id: run_id,
         workspace_id: i64::from(scope.workspace_id),
         pipeline_id: p.id,
-        host_id: host.id,
+        host_id: actions
+            .as_ref()
+            .and_then(|snapshot| snapshot.jobs.first())
+            .map(|job| job.host_id)
+            .or_else(|| host.as_ref().map(|row| row.id))
+            .ok_or_else(|| ApiError::bad("流水线缺少执行主机。"))?,
         environment_id: environment.as_ref().map(|e| e.id).unwrap_or(0),
         environment_name: environment
             .as_ref()

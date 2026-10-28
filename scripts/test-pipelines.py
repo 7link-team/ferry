@@ -211,6 +211,8 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         sampler.start()
         all_runs, successful = [], []
         if os.environ.get('FERRY_TEST_ACTIONS'):
+            import runpy
+            runpy.run_path(str(Path(__file__).with_name('test-actions-execution.py')))['accept'](dict(globals(), **locals()))
             workflow = """name: Real Actions build
 on: workflow_dispatch
 jobs:

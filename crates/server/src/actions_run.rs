@@ -11,10 +11,14 @@ use crate::{
     snowflake::Id,
     state::AppState,
 };
+use futures::{StreamExt, stream::FuturesUnordered};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Outcome {
@@ -69,7 +73,31 @@ async fn execute_reserved(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let variables = history::open_variables(s, run)?.values;
+    let mut variables = history::open_variables(s, run)?.values;
+    // Include every source credential in server-side redaction, even if a later
+    // job fails before its worker can install its own log masks.
+    for (index, checkout) in snapshot.checkouts.iter().enumerate() {
+        if checkout.credential_id != 0 {
+            crate::repository_auth::validate_target(
+                s,
+                &s.db,
+                run.workspace_id.into(),
+                checkout.credential_id.into(),
+                &checkout.binding.repository_url,
+                false,
+            )
+            .await?;
+            let (kind, user, secret) = crate::credentials::unseal(
+                s,
+                &Id::from(run.workspace_id),
+                &Id::from(checkout.credential_id),
+            )
+            .await?;
+            variables.insert(format!("__SOURCE_{index}_KIND"), kind);
+            variables.insert(format!("__SOURCE_{index}_USER"), user);
+            variables.insert(format!("__SOURCE_{index}_SECRET"), secret);
+        }
+    }
     let credential = if run.credential_id == 0 {
         None
     } else {
@@ -91,96 +119,88 @@ async fn execute_reserved(
             .await?,
         )
     };
-    let mut completed: BTreeMap<String, Outcome> = BTreeMap::new();
-    let mut seq = 0;
-    while completed.len() < snapshot.jobs.len() {
-        if *stop.borrow() || !history::active(s, run.id).await? {
-            break;
-        }
-        let job = snapshot
-            .jobs
-            .iter()
-            .find(|job| {
-                !completed.contains_key(&job.key)
-                    && job.needs.iter().all(|key| completed.contains_key(key))
-            })
-            .ok_or_else(|| ApiError::bad("Actions 依赖无法调度。"))?;
-        job_state(s, run.id, &job.key, "running", None).await?;
-        let result = execute_job(
-            s,
-            run,
-            &snapshot,
-            job,
-            &completed,
-            &variables,
-            credential.as_ref(),
-            stop,
-            &mut seq,
-        )
-        .await;
-        let outcome = match result {
-            Ok(result) => result,
-            Err(error) => {
-                append(
-                    s,
-                    run.id,
-                    -1,
-                    &mut seq,
-                    "stderr",
-                    &history::redact(
-                        format!("任务 {} 执行或清理失败：{}\n", job.key, error.1),
-                        credential.as_ref(),
-                        &variables,
-                    ),
+    let seq = tokio::sync::Mutex::new(0i64);
+    let completed = schedule_jobs(
+        &snapshot.jobs,
+        stop,
+        || history::active(s, run.id),
+        |job, completed, mut stop| {
+            let snapshot = &snapshot;
+            let variables = &variables;
+            let credential = credential.as_ref();
+            let seq = &seq;
+            async move {
+                job_state(s, run.id, &job.key, "running", None).await?;
+                let result = execute_job(
+                    s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
                 )
-                .await?;
-                Outcome {
-                    state: "failure".into(),
-                    outputs: BTreeMap::new(),
-                    artifacts: Vec::new(),
-                    steps: BTreeMap::new(),
-                }
-            }
-        };
-        let sealed = s.vault.seal(
-            &serde_json::to_string(&outcome.outputs)
-                .map_err(|_| ApiError::bad("无法保存任务输出。"))?,
-            &crate::vault::aad(
-                &run.workspace_id.to_string(),
-                "actions-job-outputs",
-                &format!("{}:{}", run.id, job.key),
-            ),
-        )?;
-        job_state(s, run.id, &job.key, state(&outcome.state), Some(sealed)).await?;
-        // Matrix instances share a UI step row. Final worker summaries fold
-        // all instances; a fast success must not hide a later failure.
-        for step in &job.steps {
-            let terminal = outcome.steps.get(&step.key).map(|value| state(value));
-            let row = steps::Entity::find()
-                .filter(steps::Column::RunId.eq(run.id))
-                .filter(steps::Column::StepIndex.eq(step.index))
-                .one(&s.db)
-                .await?;
-            if let Some(row) = row
-                && ["queued", "running"].contains(&row.state.as_str())
-            {
-                let terminal = terminal.unwrap_or_else(|| {
-                    if row.state == "queued" {
-                        "skipped"
-                    } else {
-                        state(&outcome.state)
+                .await;
+                let outcome = match result {
+                    Ok(result) => result,
+                    Err(error) => {
+                        append(
+                            s,
+                            run.id,
+                            -1,
+                            &mut *seq.lock().await,
+                            "stderr",
+                            &history::redact(
+                                format!("任务 {} 执行或清理失败：{}\n", job.key, error.1),
+                                credential,
+                                &variables,
+                            ),
+                        )
+                        .await?;
+                        Outcome {
+                            state: "failure".into(),
+                            outputs: BTreeMap::new(),
+                            artifacts: Vec::new(),
+                            steps: BTreeMap::new(),
+                        }
                     }
-                });
-                steps::Entity::update_many()
-                    .col_expr(steps::Column::State, Expr::value(terminal))
-                    .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
-                    .filter(steps::Column::Id.eq(row.id))
-                    .exec(&s.db)
-                    .await?;
+                };
+                let sealed = s.vault.seal(
+                    &serde_json::to_string(&outcome.outputs)
+                        .map_err(|_| ApiError::bad("无法保存任务输出。"))?,
+                    &crate::vault::aad(
+                        &run.workspace_id.to_string(),
+                        "actions-job-outputs",
+                        &format!("{}:{}", run.id, job.key),
+                    ),
+                )?;
+                job_state(s, run.id, &job.key, state(&outcome.state), Some(sealed)).await?;
+                // Matrix instances share a UI step row. Final worker summaries fold
+                // all instances; a fast success must not hide a later failure.
+                for step in &job.steps {
+                    let terminal = outcome.steps.get(&step.key).map(|value| state(value));
+                    let row = steps::Entity::find()
+                        .filter(steps::Column::RunId.eq(run.id))
+                        .filter(steps::Column::StepIndex.eq(step.index))
+                        .one(&s.db)
+                        .await?;
+                    if let Some(row) = row
+                        && ["queued", "running"].contains(&row.state.as_str())
+                    {
+                        let terminal = terminal.unwrap_or_else(|| {
+                            if row.state == "queued" {
+                                "skipped"
+                            } else {
+                                state(&outcome.state)
+                            }
+                        });
+                        steps::Entity::update_many()
+                            .col_expr(steps::Column::State, Expr::value(terminal))
+                            .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
+                            .filter(steps::Column::Id.eq(row.id))
+                            .exec(&s.db)
+                            .await?;
+                    }
+                }
+                Ok(outcome)
             }
-        }
-        completed.insert(job.key.clone(), outcome);
-    }
+        },
+    )
+    .await?;
     let final_state = if *stop.borrow() || !history::active(s, run.id).await? {
         "cancelled"
     } else if completed
@@ -200,6 +220,75 @@ async fn execute_reserved(
         .await?;
     history::finish(s, run.id, final_state).await
 }
+/// Run all ready jobs concurrently; retain every future until termination and
+/// cleanup finish, including when scheduling or persistence encounters errors.
+async fn schedule_jobs<F, Fut, A, Active>(
+    jobs: &[Job],
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+    mut active: A,
+    mut execute: F,
+) -> Result<BTreeMap<String, Outcome>>
+where
+    F: FnMut(Job, BTreeMap<String, Outcome>, tokio::sync::watch::Receiver<bool>) -> Fut,
+    Fut: std::future::Future<Output = Result<Outcome>>,
+    A: FnMut() -> Active,
+    Active: std::future::Future<Output = Result<bool>>,
+{
+    let mut completed = BTreeMap::new();
+    let mut started = BTreeSet::new();
+    let mut running = FuturesUnordered::new();
+    let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let mut failure = None;
+    let mut poll = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        match active().await {
+            Ok(true) if !*stop.borrow() => {}
+            Ok(_) => {
+                cancel.send_replace(true);
+            }
+            Err(error) => {
+                failure.get_or_insert(error);
+                cancel.send_replace(true);
+            }
+        }
+        if !*cancelled.borrow() {
+            for job in jobs {
+                if started.contains(&job.key)
+                    || !job.needs.iter().all(|key| completed.contains_key(key))
+                {
+                    continue;
+                }
+                started.insert(job.key.clone());
+                let future = execute(job.clone(), completed.clone(), cancelled.clone());
+                let key = job.key.clone();
+                running.push(async move { (key, future.await) });
+            }
+        }
+        if running.is_empty() {
+            break;
+        }
+        tokio::select! {
+            result = running.next() => {
+                if let Some((key, result)) = result {
+                    match result {
+                        Ok(outcome) => { completed.insert(key, outcome); },
+                        Err(error) => { failure.get_or_insert(error); cancel.send_replace(true); },
+                    }
+                }
+            }
+            _ = stop.changed(), if !*cancelled.borrow() => { cancel.send_replace(true); }
+            _ = poll.tick() => {}
+        }
+    }
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    if !*cancelled.borrow() && completed.len() != jobs.len() {
+        return Err(ApiError::bad("Actions 依赖无法调度。"));
+    }
+    Ok(completed)
+}
+
 fn state(value: &str) -> &str {
     match value {
         "success" => "succeeded",
@@ -242,7 +331,7 @@ async fn execute_job(
     variables: &BTreeMap<String, String>,
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
-    seq: &mut i64,
+    seq: &tokio::sync::Mutex<i64>,
 ) -> Result<Outcome> {
     let host = hosts::Entity::find_by_id(job.host_id)
         .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
@@ -305,7 +394,7 @@ async fn execute_private(
     variables: &BTreeMap<String, String>,
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
-    seq: &mut i64,
+    seq: &tokio::sync::Mutex<i64>,
     ch: &dyn HostChannel,
     private: &str,
 ) -> Result<Outcome> {
@@ -349,7 +438,7 @@ async fn execute_private(
     .await?;
     let environment = history::credential_environment(ch, private, credential).await?;
     let workdir = format!("{private}/source");
-    let checkout = if run.repo_url.is_empty() {
+    let checkout = if run.repo_url.is_empty() || !snapshot.document.checkout_bindings.is_empty() {
         "git init -q\n".into()
     } else {
         history::checkout_script(run)?
@@ -467,7 +556,8 @@ async fn execute_private(
         });
         ch.write_file(&path, 0o600, Box::pin(stream)).await?;
     }
-    let request = json!({"workflow":snapshot.document.workflow,"job":job.key,"workdir":workdir,"event_name":"workflow_dispatch","needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,"timeout_seconds":86400,"run_id":run.id.to_string(),"artifact_dir":artifact_dir});
+    let workflow = checkout_workflow(snapshot, job, variables, &mut secrets)?;
+    let request = json!({"workflow":workflow,"job":job.key,"workdir":workdir,"event_name":"workflow_dispatch","needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,"timeout_seconds":86400,"run_id":run.id.to_string(),"artifact_dir":artifact_dir});
     upload(
         ch,
         &format!("{private}/request"),
@@ -516,11 +606,125 @@ async fn execute_private(
     Ok(result)
 }
 
+/// Replace bound checkout nodes only; act still evaluates their conditions,
+/// reports their original step IDs, and runs them in the selected container.
+fn checkout_workflow(
+    snapshot: &Snapshot,
+    job: &Job,
+    variables: &BTreeMap<String, String>,
+    secrets: &mut BTreeMap<String, String>,
+) -> Result<String> {
+    if snapshot.checkouts.is_empty() {
+        return Ok(snapshot.document.workflow.clone());
+    }
+    let mut workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow)
+        .map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    for (index, checkout) in snapshot.checkouts.iter().enumerate() {
+        let binding = &checkout.binding;
+        if binding.job_id != job.key {
+            continue;
+        }
+        let step = workflow["jobs"][&job.key]["steps"]
+            .as_array_mut()
+            .and_then(|steps| {
+                steps
+                    .iter_mut()
+                    .find(|step| step["id"].as_str() == Some(binding.step_id.as_str()))
+            })
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| ApiError::bad("代码源步骤不存在。"))?;
+        let mut env = step
+            .get("env")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        for field in ["KIND", "USER", "SECRET"] {
+            let key = format!("__SOURCE_{index}_{field}");
+            let value = variables.get(&key).cloned().unwrap_or_default();
+            secrets.insert(key.clone(), value);
+            env.insert(
+                format!("SOURCE_{field}"),
+                json!(format!("${{{{ secrets.{key} }}}}")),
+            );
+        }
+        step.remove("uses");
+        step.remove("with");
+        step.insert("shell".into(), json!("sh"));
+        step.insert("working-directory".into(), json!("${{ github.workspace }}"));
+        step.insert("env".into(), json!(env));
+        step.insert("run".into(), json!(checkout_node_script(binding)));
+    }
+    serde_json::to_string(&workflow).map_err(|_| ApiError::bad("无法准备代码源步骤。"))
+}
+
+fn checkout_node_script(binding: &crate::actions::CheckoutBinding) -> String {
+    let path = if binding.path.is_empty() {
+        "."
+    } else {
+        &binding.path
+    };
+    let reference = if binding.git_ref.is_empty() {
+        "HEAD"
+    } else {
+        &binding.git_ref
+    };
+    format!(
+        r#"set -eu
+workspace=$(pwd -P)
+relative={path}
+original_ifs=$IFS
+IFS=/
+set -f
+for component in $relative; do
+    [ -n "$component" ] || continue
+    mkdir -p -- "$component"
+    cd -- "$component"
+    target=$(pwd -P)
+    case "$target/" in "$workspace/"*) ;; *) echo 'Checkout path escapes workspace' >&2; exit 1;; esac
+done
+set +f
+IFS=$original_ifs
+umask 077
+credential_dir=$(mktemp -d "$workspace/.checkout-credentials.XXXXXX")
+trap 'rm -rf -- "$credential_dir"' EXIT HUP INT TERM
+chmod 700 "$credential_dir"
+export GIT_TERMINAL_PROMPT=0
+if [ "$SOURCE_KIND" = ssh-key ]; then
+    printf '%s' "$SOURCE_SECRET" > "$credential_dir/key"
+    chmod 600 "$credential_dir/key"
+    export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o IdentitiesOnly=yes -i '$credential_dir/key'"
+elif [ -n "$SOURCE_SECRET" ]; then
+    cat > "$credential_dir/helper" <<'HELPER'
+#!/bin/sh
+cat >/dev/null
+[ "$1" = get ] || exit 0
+printf 'username=%s\npassword=%s\n\n' "${{SOURCE_USER:-git}}" "$SOURCE_SECRET"
+HELPER
+    chmod 700 "$credential_dir/helper"
+    export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=''
+    export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1="$credential_dir/helper"
+fi
+git init -q
+git remote remove origin 2>/dev/null || true
+git remote add origin {url}
+git fetch --no-tags -- origin {reference}
+revision=$(git rev-parse --verify --end-of-options 'FETCH_HEAD^{{commit}}')
+git checkout --detach "$revision" --
+if [ -n "${{GITHUB_OUTPUT:-}}" ]; then
+    printf 'commit=%s\nref=%s\n' "$revision" {reference} >> "$GITHUB_OUTPUT"
+fi
+"#,
+        path = quote(path),
+        url = quote(&binding.repository_url),
+        reference = quote(reference)
+    )
+}
+
 async fn stream_events(
     s: &AppState,
     run: &runs::Model,
     job: &Job,
-    seq: &mut i64,
+    seq: &tokio::sync::Mutex<i64>,
     credential: Option<&(String, String, String)>,
     variables: &BTreeMap<String, String>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
@@ -602,7 +806,7 @@ async fn event(
     s: &AppState,
     run: &runs::Model,
     job: &Job,
-    seq: &mut i64,
+    seq: &tokio::sync::Mutex<i64>,
     stream: &str,
     line: &[u8],
     credential: Option<&(String, String, String)>,
@@ -634,7 +838,7 @@ async fn event(
         s,
         run.id,
         step.map(|step| step.index).unwrap_or(-1),
-        seq,
+        &mut *seq.lock().await,
         stream,
         &text,
     )
@@ -676,6 +880,223 @@ async fn event(
 mod tests {
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel, Schema};
+
+    fn test_job(key: &str, needs: &[&str]) -> Job {
+        Job {
+            key: key.into(),
+            name: key.into(),
+            needs: needs.iter().map(|key| (*key).into()).collect(),
+            labels: vec![],
+            steps: vec![],
+            host_id: 1,
+            image: "host".into(),
+        }
+    }
+    fn success() -> Outcome {
+        Outcome {
+            state: "success".into(),
+            outputs: BTreeMap::new(),
+            artifacts: vec![],
+            steps: BTreeMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn dag_starts_parallel_branches_and_waits_for_both_before_join() {
+        let jobs = vec![
+            test_job("left", &[]),
+            test_job("right", &[]),
+            test_job("join", &["left", "right"]),
+        ];
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let finished = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (_stop, mut stop) = tokio::sync::watch::channel(false);
+        let execution = schedule_jobs(
+            &jobs,
+            &mut stop,
+            || async { Ok(true) },
+            |job, completed, _| {
+                let barrier = barrier.clone();
+                let finished = finished.clone();
+                async move {
+                    if job.key == "join" {
+                        assert_eq!(finished.load(std::sync::atomic::Ordering::SeqCst), 2);
+                        assert_eq!(completed.len(), 2);
+                    } else {
+                        // A serial implementation deadlocks here and fails the timeout.
+                        barrier.wait().await;
+                        if job.key == "right" {
+                            tokio::time::sleep(Duration::from_millis(30)).await;
+                        }
+                        finished.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    Ok(success())
+                }
+            },
+        );
+        let result = tokio::time::timeout(Duration::from_secs(2), execution)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn scheduler_failure_cancels_and_drains_other_running_jobs() {
+        let jobs = vec![
+            test_job("broken", &[]),
+            test_job("running", &[]),
+            test_job("dependent", &["broken"]),
+        ];
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+        let cleaned = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (_stop, mut stop) = tokio::sync::watch::channel(false);
+        let execution = schedule_jobs(
+            &jobs,
+            &mut stop,
+            || async { Ok(true) },
+            |job, _, mut cancelled| {
+                let barrier = barrier.clone();
+                let cleaned = cleaned.clone();
+                async move {
+                    assert_ne!(job.key, "dependent");
+                    barrier.wait().await;
+                    if job.key == "broken" {
+                        return Err(ApiError::bad("persistence failure"));
+                    }
+                    while !*cancelled.borrow() {
+                        cancelled.changed().await.unwrap();
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    cleaned.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(success())
+                }
+            },
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), execution)
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert!(cleaned.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn checkout_nodes_preserve_order_conditions_and_keep_credentials_out_of_scripts() {
+        let binding = crate::actions::CheckoutBinding {
+            job_id: "build".into(),
+            step_id: "source".into(),
+            connection_id: "1".into(),
+            repository_url: "https://example.invalid/project.git".into(),
+            git_ref: "release".into(),
+            path: "source".into(),
+        };
+        let snapshot = Snapshot {
+            engine: crate::actions::ENGINE.into(),
+            document: crate::actions::Document {
+                engine: crate::actions::ENGINE.into(),
+                workflow: "jobs: {build: {runs-on: self-hosted, steps: [{id: before, run: echo before}, {id: source, if: 'success()', uses: 'actions/checkout@v4'}, {id: after, run: echo after}]}}".into(),
+                executor_bindings: vec![], checkout_bindings: vec![binding.clone()], graph_layout: Value::Null,
+            },
+            jobs: vec![], checkouts: vec![crate::actions::ResolvedCheckout { binding, credential_id: 7 }],
+        };
+        let variables = BTreeMap::from([("__SOURCE_0_SECRET".into(), "private-token".into())]);
+        let mut secrets = BTreeMap::new();
+        let workflow =
+            checkout_workflow(&snapshot, &test_job("build", &[]), &variables, &mut secrets)
+                .unwrap();
+        assert!(!workflow.contains("private-token"));
+        let workflow: Value = serde_json::from_str(&workflow).unwrap();
+        let steps = workflow["jobs"]["build"]["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["id"], "before");
+        assert_eq!(steps[1]["id"], "source");
+        assert_eq!(steps[1]["if"], "success()");
+        assert!(steps[1].get("uses").is_none());
+        assert_eq!(steps[2]["id"], "after");
+        assert_eq!(secrets["__SOURCE_0_SECRET"], "private-token");
+    }
+
+    #[test]
+    fn checkout_scripts_fetch_independent_sources_and_reject_symlink_escape() {
+        use std::process::Command;
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::write(workspace.join("before-checkout"), "preserved").unwrap();
+        for name in ["first", "second"] {
+            let repo = root.path().join(name);
+            std::fs::create_dir(&repo).unwrap();
+            std::fs::write(repo.join("identity"), name).unwrap();
+            for args in [
+                vec!["init", "-q"],
+                vec!["add", "identity"],
+                vec![
+                    "-c",
+                    "user.name=fixture",
+                    "-c",
+                    "user.email=fixture@example.invalid",
+                    "commit",
+                    "-qm",
+                    "fixture",
+                ],
+            ] {
+                assert!(
+                    Command::new("git")
+                        .current_dir(&repo)
+                        .args(args)
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+            }
+            let binding = crate::actions::CheckoutBinding {
+                repository_url: repo.to_string_lossy().into(),
+                path: name.into(),
+                ..Default::default()
+            };
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg(checkout_node_script(&binding))
+                .current_dir(&workspace)
+                .env("SOURCE_KIND", "")
+                .env("SOURCE_SECRET", "")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                std::fs::read_to_string(workspace.join(name).join("identity")).unwrap(),
+                name
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(workspace.join("before-checkout")).unwrap(),
+            "preserved"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.path(), workspace.join("outside")).unwrap();
+            let binding = crate::actions::CheckoutBinding {
+                repository_url: root.path().join("first").to_string_lossy().into(),
+                path: "outside".into(),
+                ..Default::default()
+            };
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg(checkout_node_script(&binding))
+                .current_dir(&workspace)
+                .env("SOURCE_KIND", "")
+                .env("SOURCE_SECRET", "")
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("escapes workspace"));
+        }
+    }
 
     async fn cancel_while_waiting(stop_service: bool) {
         let dir = tempfile::tempdir().unwrap();
@@ -731,11 +1152,13 @@ mod tests {
         let second = (base + 2).to_string();
         let update = crate::runner_updates::exclusive(&second).await;
         let snapshot = Snapshot {
+            checkouts: vec![],
             engine: crate::actions::ENGINE.into(),
             document: crate::actions::Document {
                 engine: crate::actions::ENGINE.into(),
                 workflow: String::new(),
                 executor_bindings: vec![],
+                checkout_bindings: vec![],
                 graph_layout: Value::Null,
             },
             jobs: [base + 1, base + 2]

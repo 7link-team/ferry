@@ -1,0 +1,103 @@
+name: Pipeline editing validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["feat/**"]
+    paths:
+      - ".github/workflows/pipeline-editing.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "workers/actions/**"
+      - "scripts/build-actions-workers.sh"
+      - "scripts/test-repository-auth.py"
+      - "scripts/test-pipeline-classification.py"
+      - "scripts/test-pipelines.py"
+      - "scripts/test-pipelines.sh"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.*"
+      - "tsconfig*.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-editing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connections-and-pipelines:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: integration-only-password
+          MYSQL_DATABASE: ferry
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pintegration-only-password"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: integration-only-password
+          POSTGRES_DB: ferry
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd=pg_isready --health-interval=10s
+          --health-timeout=5s --health-retries=12
+    env:
+      FERRY_REQUIRE_ALL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pipeline-editing
+      - name: Install live pipeline harness dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc lsof openssh-client python3 git curl libdigest-sha-perl
+          docker info
+      - run: npm ci
+      - run: npm run build
+      - run: bash scripts/build-actions-workers.sh
+      - run: cargo build --locked -p ferry-server -p ferry-runner
+      - run: cargo test --locked -p ferry-server
+      - name: Code connections and repository authorization on all three databases
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE oauth_test;'
+          createdb -h 127.0.0.1 -U postgres oauth_test
+          python3 -I scripts/test-repository-auth.py
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/oauth_test python3 -I scripts/test-repository-auth.py
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/oauth_test python3 -I scripts/test-repository-auth.py
+      - name: Pipeline classification and environment snapshots
+        run: python3 -I scripts/test-pipeline-classification.py
+      - name: Live Actions pipeline execution
+        env:
+          FERRY_TEST_ACTIONS: "1"
+        run: |
+          mkdir -p harness-logs
+          python3 -I scripts/test-pipelines.py 2>&1 | tee harness-logs/pipelines.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pipeline-editing-${{ github.run_attempt }}
+          path: harness-logs/*
+          if-no-files-found: ignore

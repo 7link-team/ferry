@@ -14,6 +14,7 @@ use crate::{
 use axum::{
     Json,
     extract::{Path, Query, State},
+    http::StatusCode,
     response::Redirect,
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -364,6 +365,7 @@ pub async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>
             .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(connections::Column::UserId.eq(scope.user.id))
             .filter(connections::Column::Provider.eq(kind))
+            .filter(connections::Column::Name.eq(""))
             .one(&s.db)
             .await?;
         let configured = settings.provider(kind).is_ok() && settings.callback(&s).is_ok();
@@ -395,6 +397,12 @@ pub struct StartOptions {
     popup: bool,
     #[serde(default)]
     channel: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    connection_id: String,
 }
 pub async fn start(
     State(s): State<AppState>,
@@ -411,6 +419,22 @@ pub async fn start(
     {
         return Err(ApiError::bad("授权窗口标识无效。"));
     }
+    if !options.name.is_empty() {
+        validate_connection_name(&options.name, &options.description)?;
+        scope.require("repositories.create")?;
+    }
+    let target = Id::reference(&options.connection_id)?;
+    if target != Id::from(0) {
+        scope.require("repositories.update")?;
+        let row = owned_connection(&s.db, &scope, target).await?;
+        if row.provider != kind
+            || row.name.is_empty()
+            || options.name.is_empty()
+            || row.token_config.is_some()
+        {
+            return Err(ApiError::bad("请选择同平台的网页授权连接重新授权。"));
+        }
+    }
     let settings = OAuthSettings::load(&s, &s.db).await?;
     let config = settings.provider(&kind)?;
     let redirect = settings.callback(&s)?;
@@ -418,7 +442,7 @@ pub async fn start(
     let verifier = random_token();
     let id = s.next_id()?;
     let now = db::now();
-    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config),"popup":options.popup,"channel":options.channel});
+    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config),"popup":options.popup,"channel":options.channel,"name":options.name,"description":options.description,"connection_id":options.connection_id});
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     flows::Entity::delete_many()
         .filter(flows::Column::ExpiresAt.lt(now))
@@ -599,7 +623,9 @@ pub async fn complete(
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty() && v.len() < 255)
         .ok_or_else(|| ApiError::bad("授权提供方未返回有效账号。"))?;
-    save_connection(
+    let connection_name = proof["name"].as_str().unwrap_or("");
+    let target = Id::reference(proof["connection_id"].as_str().unwrap_or(""))?;
+    let (connection_id, _) = save_connection(
         &s,
         &scope,
         &flow.provider,
@@ -609,10 +635,23 @@ pub async fn complete(
         expires,
         refresh,
         None,
+        if connection_name.is_empty() {
+            None
+        } else {
+            Some((
+                connection_name,
+                proof["description"].as_str().unwrap_or(""),
+                if target == Id::from(0) {
+                    None
+                } else {
+                    Some(target)
+                },
+            ))
+        },
     )
     .await?;
     Ok(Redirect::to(&format!(
-        "{return_path}&authorization=connected"
+        "{return_path}&authorization=connected&connection_id={connection_id}"
     )))
 }
 
@@ -626,17 +665,35 @@ async fn save_connection(
     expires: i64,
     refresh: Option<&str>,
     token_config: Option<String>,
-) -> Result<Id> {
+    named: Option<(&str, &str, Option<Id>)>,
+) -> Result<(Id, Id)> {
     let fresh = Scope::for_actor(&s, scope.workspace_id, scope.user.id).await?;
     fresh.require("credentials.create")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let now = db::now();
-    let existing = connections::Entity::find()
-        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
-        .filter(connections::Column::Provider.eq(kind))
-        .one(&tx)
-        .await?;
+    let existing = match named {
+        Some((_, _, Some(id))) => {
+            fresh.require("repositories.update")?;
+            let row = owned_connection(&tx, &fresh, id).await?;
+            if row.provider != kind || row.token_config.is_some() {
+                return Err(ApiError::bad("连接授权类型已变化，请重新发起授权。"));
+            }
+            Some(row)
+        }
+        Some(_) => {
+            fresh.require("repositories.create")?;
+            None
+        }
+        None => {
+            connections::Entity::find()
+                .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(connections::Column::UserId.eq(scope.user.id))
+                .filter(connections::Column::Provider.eq(kind))
+                .filter(connections::Column::Name.eq(""))
+                .one(&tx)
+                .await?
+        }
+    };
     let id = existing
         .as_ref()
         .map(|r| Id::from(r.id))
@@ -690,6 +747,8 @@ async fn save_connection(
         workspace_id: Set(scope.workspace_id.into()),
         user_id: Set(scope.user.id.into()),
         provider: Set(kind.to_owned()),
+        name: Set(named.map(|v| v.0.trim().to_owned()).unwrap_or_default()),
+        description: Set(named.map(|v| v.1.trim().to_owned()).unwrap_or_default()),
         credential_id: Set(credential.into()),
         account: Set(account.into()),
         refresh_secret: Set(match refresh {
@@ -719,7 +778,7 @@ async fn save_connection(
     )
     .await?;
     tx.commit().await?;
-    Ok(credential)
+    Ok((id, credential))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -969,7 +1028,7 @@ pub async fn connect_token(
         remote_repositories(&kind, &config, &body.token, true, &settings.organization, 1).await?;
     let stored =
         serde_json::to_string(&settings).map_err(|_| ApiError::bad("连接配置编码失败。"))?;
-    let id = save_connection(
+    let (_, id) = save_connection(
         &s,
         &scope,
         &kind,
@@ -979,6 +1038,7 @@ pub async fn connect_token(
         0,
         None,
         Some(stored),
+        None,
     )
     .await?;
     result["credential_id"] = json!(id);
@@ -1008,6 +1068,7 @@ pub async fn browse_repositories(
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(connections::Column::UserId.eq(scope.user.id))
         .filter(connections::Column::Provider.eq(&kind))
+        .filter(connections::Column::Name.eq(""))
         .one(&s.db)
         .await?
         .ok_or_else(|| ApiError::bad("请先连接代码平台。"))?;
@@ -1046,6 +1107,7 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
         let Some(row) = connections::Entity::find()
             .filter(connections::Column::WorkspaceId.eq(workspace))
             .filter(connections::Column::CredentialId.eq(credential))
+            .filter(connections::Column::TokenConfig.is_null())
             .one(&tx)
             .await?
         else {
@@ -1208,6 +1270,12 @@ pub async fn validate_target(
     let Some(row) = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(workspace))
         .filter(connections::Column::CredentialId.eq(credential))
+        .filter(connections::Column::Provider.ne("git"))
+        .filter(
+            sea_orm::Condition::any()
+                .add(connections::Column::Name.eq(""))
+                .add(connections::Column::TokenConfig.is_null()),
+        )
         .one(conn)
         .await?
     else {
@@ -1261,4 +1329,663 @@ mod tests {
             assert!(token_data(&value).is_err());
         }
     }
+}
+
+const CONNECTION_SPEC: crate::resource::Spec = crate::resource::Spec {
+    search: &["name", "account"],
+    filters: &["provider", "state"],
+    sortable: &["name", "created_at", "updated_at"],
+    default_sort: "name",
+};
+
+fn connection_json(row: &connections::Model) -> Value {
+    let config: Value = row
+        .token_config
+        .as_deref()
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or(json!({}));
+    let mut value = json!({"id":Id::from(row.id),"name":row.name,"provider":row.provider,
+        "description":row.description,"credential_id":Id::from(row.credential_id),
+        "account":row.account,"state":row.state,"expires_at":row.expires_at,
+        "last_error":row.last_error,"authorization":if row.token_config.is_none(){"oauth"}else{"credential"},
+        "base_url":config["base_url"].as_str().unwrap_or(""),
+        "api_url":config["api_url"].as_str().unwrap_or(""),
+        "organization":config["organization"].as_str().unwrap_or(""),
+        "version":row.version,"created_at":row.created_at,"updated_at":row.updated_at});
+    if row.provider == "git" {
+        value["url"] = json!(config["url"].as_str().unwrap_or(""));
+    }
+    value
+}
+
+async fn owned_connection(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    id: Id,
+) -> Result<connections::Model> {
+    connections::Entity::find_by_id(i64::from(id))
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(connections::Column::UserId.eq(scope.user.id))
+        .one(conn)
+        .await?
+        .ok_or_else(ApiError::missing)
+}
+
+fn validate_connection_name(name: &str, description: &str) -> Result<()> {
+    if name.trim().is_empty()
+        || name.chars().count() > 60
+        || name.chars().any(char::is_control)
+        || description.chars().count() > 255
+    {
+        return Err(ApiError::bad(
+            "连接名称必填且不超过60个字符，描述不超过255个字符。",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct ConnectionBody {
+    name: String,
+    provider: String,
+    #[serde(default)]
+    credential_id: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    api_url: String,
+    #[serde(default)]
+    organization: String,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    version: i64,
+}
+
+pub async fn list_connections(
+    State(s): State<AppState>,
+    scope: Scope,
+    Query(raw): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    let query = crate::resource::ListQuery::parse(&CONNECTION_SPEC, &raw)?;
+    let (rows, total) = crate::resource::list(
+        &s.db,
+        &CONNECTION_SPEC,
+        connections::Entity::find()
+            .filter(connections::Column::UserId.eq(scope.user.id))
+            .filter(connections::Column::Name.ne("")),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
+    Ok(Json(
+        json!({"items":rows.iter().map(connection_json).collect::<Vec<_>>(),"total":total,"page":query.page,"page_size":query.page_size}),
+    ))
+}
+
+pub async fn get_connection(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    Ok(Json(connection_json(
+        &owned_connection(&s.db, &scope, id.parse().map_err(|_| ApiError::missing())?).await?,
+    )))
+}
+
+// Validate before opening a write transaction: provider requests never hold the workspace lock.
+async fn check_connection(
+    s: &AppState,
+    scope: &Scope,
+    body: &ConnectionBody,
+) -> Result<(Id, String, String, String)> {
+    validate_connection_name(&body.name, &body.description)?;
+    scope.require("credentials.read")?;
+    let credential = Id::reference(&body.credential_id)?;
+    if body.provider == "git" && credential == Id::from(0) {
+        if !body.url.is_empty() {
+            parse_endpoint(&body.url)?;
+        }
+        return Ok((
+            credential,
+            String::new(),
+            json!({"url":body.url}).to_string(),
+            String::new(),
+        ));
+    }
+    let (kind, username, secret) =
+        crate::credentials::unseal(s, &scope.workspace_id, &credential).await?;
+    // An OAuth credential belongs to its authorizing user and must retain its refresh owner.
+    let managed = connections::Entity::find()
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(connections::Column::CredentialId.eq(credential))
+        .filter(connections::Column::TokenConfig.is_null())
+        .one(&s.db)
+        .await?;
+    if managed.is_some() {
+        return Err(ApiError::bad(
+            "网页授权凭据请通过网页授权创建或重新授权连接。",
+        ));
+    }
+    if body.provider == "git" {
+        if !crate::credentials::KINDS.contains(&kind.as_str()) {
+            return Err(ApiError::bad("请选择Git授权凭据。"));
+        }
+        if !body.url.is_empty() {
+            validate_git_credential(&body.url, &kind)?;
+        }
+        return Ok((
+            credential,
+            username,
+            json!({"url":body.url}).to_string(),
+            String::new(),
+        ));
+    }
+    if kind != "token" {
+        return Err(ApiError::bad("代码平台API连接需要个人访问令牌凭据。"));
+    }
+    let settings = token_config(
+        &body.provider,
+        &TokenConnect {
+            token: secret.clone(),
+            username: username.clone(),
+            base_url: body.base_url.clone(),
+            api_url: body.api_url.clone(),
+            organization: body.organization.clone(),
+        },
+    )?;
+    let provider = settings.provider()?;
+    let account = if body.provider == "codeup" {
+        username
+    } else {
+        let value = response_json(
+            authorize_request(
+                http()?.get(endpoint(&provider.api, "user")?),
+                &body.provider,
+                &secret,
+                true,
+            )
+            .send()
+            .await
+            .map_err(|_| ApiError::bad("无法验证代码平台令牌。"))?,
+        )
+        .await?;
+        value
+            .get("login")
+            .or_else(|| value.get("username"))
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty() && v.len() < 255)
+            .ok_or_else(|| ApiError::bad("代码平台未返回有效账号。"))?
+            .to_owned()
+    };
+    remote_repositories(
+        &body.provider,
+        &provider,
+        &secret,
+        true,
+        &settings.organization,
+        1,
+    )
+    .await?;
+    Ok((
+        credential,
+        account,
+        serde_json::to_string(&settings).map_err(|_| ApiError::bad("连接配置编码失败。"))?,
+        config_fingerprint(&provider),
+    ))
+}
+
+pub async fn create_connection(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<ConnectionBody>,
+) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("repositories.create")?;
+    let (credential, account, config, fingerprint) = check_connection(&s, &scope, &body).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    // The credential could have been deleted while the remote API was responding.
+    require_credential_in(&tx, &scope, credential).await?;
+    let id = s.next_id()?;
+    let now = db::now();
+    connections::Entity::insert(connections::ActiveModel {
+        id: Set(id.into()),
+        workspace_id: Set(scope.workspace_id.into()),
+        user_id: Set(scope.user.id.into()),
+        name: Set(body.name.trim().into()),
+        description: Set(body.description.trim().into()),
+        provider: Set(body.provider),
+        credential_id: Set(credential.into()),
+        account: Set(account),
+        refresh_secret: Set(String::new()),
+        expires_at: Set(0),
+        state: Set("connected".into()),
+        last_error: Set(String::new()),
+        client_id: Set(String::new()),
+        config_fingerprint: Set(fingerprint),
+        token_config: Set(Some(config)),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(&tx)
+    .await?;
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "create",
+        "repositories",
+        &id,
+        json!({"connection":true,"name":body.name}),
+    )
+    .await?;
+    let row = owned_connection(&tx, &scope, id).await?;
+    tx.commit().await?;
+    Ok((StatusCode::CREATED, Json(connection_json(&row))))
+}
+
+async fn require_credential_in(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    credential: Id,
+) -> Result<()> {
+    if credential == Id::from(0) {
+        return Ok(());
+    }
+    credentials::Entity::find_by_id(i64::from(credential))
+        .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(conn)
+        .await?
+        .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+    Ok(())
+}
+
+pub async fn update_connection(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    Json(body): Json<ConnectionBody>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.update")?;
+    let id: Id = id.parse().map_err(|_| ApiError::missing())?;
+    let existing = owned_connection(&s.db, &scope, id).await?;
+    validate_connection_name(&body.name, &body.description)?;
+    let replacement = if existing.token_config.is_none() {
+        if body.provider != existing.provider
+            || Id::reference(&body.credential_id)? != Id::from(existing.credential_id)
+        {
+            return Err(ApiError::bad("网页授权连接请通过重新授权更换账号。"));
+        }
+        None
+    } else {
+        Some(check_connection(&s, &scope, &body).await?)
+    };
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let mut update = connections::Entity::update_many()
+        .col_expr(connections::Column::Name, Expr::value(body.name.trim()))
+        .col_expr(
+            connections::Column::Description,
+            Expr::value(body.description.trim()),
+        )
+        .col_expr(connections::Column::UpdatedAt, Expr::value(db::now()))
+        .col_expr(
+            connections::Column::Version,
+            Expr::col(connections::Column::Version).add(1),
+        )
+        .filter(connections::Column::Id.eq(id))
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(connections::Column::Version.eq(body.version));
+    if let Some((credential, account, config, fingerprint)) = replacement {
+        require_credential_in(&tx, &scope, credential).await?;
+        update = update
+            .col_expr(connections::Column::Provider, Expr::value(body.provider))
+            .col_expr(
+                connections::Column::CredentialId,
+                Expr::value(i64::from(credential)),
+            )
+            .col_expr(connections::Column::Account, Expr::value(account))
+            .col_expr(connections::Column::TokenConfig, Expr::value(config))
+            .col_expr(
+                connections::Column::ConfigFingerprint,
+                Expr::value(fingerprint),
+            );
+    }
+    if update.exec(&tx).await?.rows_affected == 0 {
+        return Err(ApiError::conflict("连接已变化，请刷新后重试。"));
+    }
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "update",
+        "repositories",
+        &id,
+        json!({"connection":true}),
+    )
+    .await?;
+    let row = owned_connection(&tx, &scope, id).await?;
+    tx.commit().await?;
+    Ok(Json(connection_json(&row)))
+}
+
+pub async fn delete_connection(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+) -> Result<StatusCode> {
+    scope.require("repositories.delete")?;
+    let id: Id = id.parse().map_err(|_| ApiError::missing())?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let row = owned_connection(&tx, &scope, id).await?;
+    let pipelines = crate::entities::pipelines::Entity::find()
+        .filter(crate::entities::pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .all(&tx)
+        .await?;
+    for pipeline in pipelines {
+        if crate::actions::document(&pipeline.definition).is_some_and(|document| {
+            document
+                .checkout_bindings
+                .iter()
+                .any(|binding| Id::reference(&binding.connection_id).is_ok_and(|value| value == id))
+        }) {
+            return Err(ApiError::conflict(
+                "流水线源码节点仍在使用该连接，请先解除引用。",
+            ));
+        }
+    }
+    for run in crate::entities::pipeline_runs::Entity::find()
+        .filter(crate::entities::pipeline_runs::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::pipeline_runs::Column::State.is_in([
+            "queued",
+            "running",
+            "cancelling",
+        ]))
+        .all(&tx)
+        .await?
+    {
+        if crate::actions::snapshot(&run.definition).is_some_and(|snapshot| {
+            snapshot.checkouts.iter().any(|checkout| {
+                Id::reference(&checkout.binding.connection_id).is_ok_and(|value| value == id)
+            })
+        }) {
+            return Err(ApiError::conflict("代码连接仍有流水线任务尚未结束。"));
+        }
+    }
+    // OAuth refresh ownership is retained while an existing source binding uses it.
+    if row.token_config.is_none() {
+        use sea_orm::PaginatorTrait;
+        let used = crate::entities::repositories::Entity::find()
+            .filter(crate::entities::repositories::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(crate::entities::repositories::Column::CredentialId.eq(row.credential_id))
+            .count(&tx)
+            .await?;
+        if used > 0 {
+            return Err(ApiError::conflict("已有仓库使用该网页授权，请先解除引用。"));
+        }
+    }
+    connections::Entity::delete_by_id(row.id).exec(&tx).await?;
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "delete",
+        "repositories",
+        &id,
+        json!({"connection":true}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn connection_repositories(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    Query(page): Query<RepositoryPage>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    scope.require("credentials.read")?;
+    if page.page == 0 || page.page > 10000 {
+        return Err(ApiError::bad("页码无效。"));
+    }
+    let row = owned_connection(&s.db, &scope, id.parse().map_err(|_| ApiError::missing())?).await?;
+    if row.provider == "git" {
+        return Ok(Json(json!({"items":[],"page":page.page,"has_more":false})));
+    }
+    let config = connection_provider(&s, &s.db, &row).await?;
+    ensure_fresh(&s, scope.workspace_id, row.credential_id.into()).await?;
+    let (_, _, secret) =
+        crate::credentials::unseal(&s, &scope.workspace_id, &row.credential_id.into()).await?;
+    let token = row
+        .token_config
+        .as_deref()
+        .map(serde_json::from_str::<TokenConfig>)
+        .transpose()
+        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+    let mut result = remote_repositories(
+        &row.provider,
+        &config,
+        &secret,
+        token.is_some(),
+        token
+            .as_ref()
+            .map(|v| v.organization.as_str())
+            .unwrap_or(""),
+        page.page,
+    )
+    .await?;
+    result["connection_id"] = json!(Id::from(row.id));
+    Ok(Json(result))
+}
+
+fn validate_git_credential(address: &str, kind: &str) -> Result<()> {
+    let ssh = address.starts_with("git@") || address.starts_with("ssh://");
+    if (kind == "ssh-key") != ssh {
+        return Err(ApiError::bad(
+            "SSH地址需使用SSH私钥，HTTP(S)地址需使用账号密码或令牌。",
+        ));
+    }
+    if ssh {
+        let normalized = address
+            .strip_prefix("git@")
+            .and_then(|v| v.split_once(':'))
+            .map(|(host, path)| format!("ssh://git@{host}/{path}"))
+            .unwrap_or_else(|| address.to_owned());
+        let parsed =
+            reqwest::Url::parse(&normalized).map_err(|_| ApiError::bad("Git地址无效。"))?;
+        if parsed.host_str().is_none()
+            || parsed.password().is_some()
+            || address.chars().any(char::is_control)
+        {
+            return Err(ApiError::bad("Git地址无效。"));
+        }
+    } else {
+        parse_endpoint(address)?;
+    }
+    Ok(())
+}
+
+/// Resolve a selected connection without trusting client-supplied credential IDs.
+pub async fn resolve_connection(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    connection_id: Id,
+    address: &str,
+) -> Result<(String, Id)> {
+    let row = owned_connection(conn, scope, connection_id).await?;
+    resolve_connection_row(s, conn, scope, row, address).await
+}
+
+/// Execution of a saved binding follows workspace permissions; editing still requires ownership.
+pub async fn resolve_saved_connection(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    connection_id: Id,
+    address: &str,
+) -> Result<(String, Id)> {
+    let row = connections::Entity::find_by_id(i64::from(connection_id))
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(conn)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    resolve_connection_row(s, conn, scope, row, address).await
+}
+
+async fn resolve_connection_row(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    row: connections::Model,
+    address: &str,
+) -> Result<(String, Id)> {
+    if row.state != "connected" {
+        return Err(ApiError::bad("代码连接授权已失效，请重新授权。"));
+    }
+    let credential = Id::from(row.credential_id);
+    if credential != Id::from(0) {
+        let auth = credentials::Entity::find_by_id(row.credential_id)
+            .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(conn)
+            .await?
+            .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+        validate_git_credential(address, &auth.kind)?;
+    } else {
+        parse_endpoint(address)?;
+    }
+    if row.provider != "git" {
+        let config = connection_provider(s, conn, &row).await?;
+        validate_origin(&config.base, address)?;
+    }
+    Ok((row.provider, credential))
+}
+
+fn validate_origin(expected: &reqwest::Url, address: &str) -> Result<()> {
+    let actual = parse_endpoint(address)?;
+    if actual.host_str() != expected.host_str()
+        || actual.port_or_known_default() != expected.port_or_known_default()
+        || (expected.scheme() == "https" && actual.scheme() != "https")
+    {
+        return Err(ApiError::bad("仓库地址与所选代码平台不匹配。"));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct BranchQuery {
+    url: String,
+    #[serde(default = "first_page")]
+    page: u32,
+}
+
+pub async fn connection_branches(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    Query(query): Query<BranchQuery>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    scope.require("credentials.read")?;
+    if query.page == 0 || query.page > 10000 {
+        return Err(ApiError::bad("页码无效。"));
+    }
+    let id: Id = id.parse().map_err(|_| ApiError::missing())?;
+    resolve_connection(&s, &s.db, &scope, id, &query.url).await?;
+    let row = owned_connection(&s.db, &scope, id).await?;
+    if row.provider == "git" {
+        return Err(ApiError::bad("普通Git请填写分支或引用。"));
+    }
+    let config = connection_provider(&s, &s.db, &row).await?;
+    let source = parse_endpoint(&query.url)?;
+    let path = source
+        .path()
+        .strip_prefix(config.base.path().trim_end_matches('/'))
+        .unwrap_or(source.path())
+        .trim_start_matches('/')
+        .trim_end_matches(".git");
+    if path.is_empty() {
+        return Err(ApiError::bad("请选择有效仓库。"));
+    }
+    let token = row
+        .token_config
+        .as_deref()
+        .map(serde_json::from_str::<TokenConfig>)
+        .transpose()
+        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+    let mut url = config.api.clone();
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| ApiError::bad("API地址无效。"))?;
+        segments.pop_if_empty();
+        match row.provider.as_str() {
+            "gitlab" => {
+                segments
+                    .push("projects")
+                    .push(path)
+                    .push("repository")
+                    .push("branches");
+            }
+            "codeup" => {
+                segments.extend(["oapi", "v1", "codeup"]);
+                let organization = token
+                    .as_ref()
+                    .map(|v| v.organization.as_str())
+                    .unwrap_or("");
+                if !organization.is_empty() {
+                    segments.push("organizations").push(organization);
+                }
+                segments.push("repositories").push(path).push("branches");
+            }
+            _ => {
+                segments
+                    .push("repos")
+                    .extend(path.split('/'))
+                    .push("branches");
+            }
+        }
+    }
+    url.query_pairs_mut()
+        .append_pair("page", &query.page.to_string())
+        .append_pair(
+            if row.provider == "codeup" {
+                "perPage"
+            } else if row.provider == "gitea" {
+                "limit"
+            } else {
+                "per_page"
+            },
+            "50",
+        );
+    let (_, _, secret) =
+        crate::credentials::unseal(&s, &scope.workspace_id, &row.credential_id.into()).await?;
+    let value = response_json(
+        authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
+            .send()
+            .await
+            .map_err(|_| ApiError::bad("读取仓库分支失败。"))?,
+    )
+    .await?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| ApiError::bad("代码平台返回了无效分支列表。"))?;
+    let items = rows
+        .iter()
+        .filter_map(|row| {
+            row.get("name")
+                .or_else(|| row.get("branchName"))
+                .and_then(Value::as_str)
+        })
+        .map(|name| json!({"name":name}))
+        .collect::<Vec<_>>();
+    Ok(Json(
+        json!({"items":items,"page":query.page,"has_more":rows.len()==50}),
+    ))
 }

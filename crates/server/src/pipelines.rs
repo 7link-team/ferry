@@ -63,12 +63,16 @@ pub struct Body {
     #[serde(default)]
     executor_bindings: Vec<crate::actions::Binding>,
     #[serde(default)]
+    checkout_bindings: Vec<crate::actions::CheckoutBinding>,
+    #[serde(default)]
     graph_layout: Value,
     #[serde(default)]
     repository_id: String,
     #[serde(default)]
     repository_selection: Option<crate::repositories::Body>,
+    #[serde(default)]
     target_kind: String,
+    #[serde(default)]
     target_ref: String,
     #[serde(default)]
     description: String,
@@ -84,6 +88,7 @@ impl Body {
                 engine: crate::actions::ENGINE.into(),
                 workflow: self.definition.clone(),
                 executor_bindings: self.executor_bindings.clone(),
+                checkout_bindings: self.checkout_bindings.clone(),
                 graph_layout: self.graph_layout.clone(),
             })
             .map_err(|_| ApiError::bad("无法保存 Actions 定义。")),
@@ -92,7 +97,12 @@ impl Body {
     }
 }
 
-async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body) -> Result<String> {
+async fn check(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    body: &Body,
+) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
@@ -114,23 +124,44 @@ async fn check(conn: &impl sea_orm::ConnectionTrait, scope: &Scope, body: &Body)
     let stored = body.stored_definition()?;
     let definition = validate_definition(&stored)?;
     if let Some(document) = crate::actions::document(&stored) {
-        crate::actions::check_bindings(conn, scope, &document).await?;
+        crate::actions::check_bindings(s, conn, scope, &document).await?;
     }
     if definition.steps.iter().any(|step| step.checkout)
         && Id::reference(&body.repository_id)? == Id::from(0)
     {
         return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
     }
+    let node_only = crate::actions::document(&stored).is_some()
+        && Id::reference(&body.target_ref)? == Id::from(0);
+    if node_only {
+        let document = crate::actions::document(&stored).expect("validated Actions document");
+        let (jobs, _) = crate::actions::parse(&document)?;
+        if body.environment_ids.as_ref().is_none_or(Vec::is_empty) {
+            for job in jobs {
+                if !document.executor_bindings.iter().any(|binding| {
+                    binding.job_id == job.key
+                        && !binding.target_ref.is_empty()
+                        && binding.target_ref != "0"
+                }) {
+                    return Err(ApiError::bad(format!(
+                        "请为任务 {} 选择执行器，或绑定运行环境。",
+                        job.name
+                    )));
+                }
+            }
+        }
+    }
     let target_table = match body.target_kind.as_str() {
         "host" => "hosts",
         "host-group" => "host_groups",
+        "" if node_only => "hosts",
         _ => return Err(ApiError::bad("流水线目标类型必须是 host 或 host-group。")),
     };
     for (table, id, noun) in [
         ("repositories", body.repository_id.trim(), "仓库"),
         (target_table, body.target_ref.trim(), "执行目标"),
     ] {
-        if table == "repositories" && Id::reference(id)? == Id::from(0) {
+        if (table == "repositories" || node_only) && Id::reference(id)? == Id::from(0) {
             continue;
         }
         let id = Id::reference(id)?;
@@ -242,7 +273,7 @@ pub(crate) async fn create_in(
     if let Some(selection) = body.repository_selection.take() {
         body.repository_id = crate::repositories::bind_selection(s, tx, scope, selection).await?;
     }
-    let name = check(tx, &scope, &body).await?;
+    let name = check(s, tx, &scope, &body).await?;
     let (id, now) = (s.next_id()?, db::now());
     pipelines::Entity::insert(pipelines::ActiveModel {
         id: Set(i64::from(id)),
@@ -311,6 +342,19 @@ pub async fn update(
     if current.version != body.version {
         return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
     }
+    if body.environment_ids.is_none() {
+        use crate::entities::pipeline_links as links;
+        body.environment_ids = Some(
+            links::Entity::find()
+                .filter(links::Column::PipelineId.eq(current.id))
+                .filter(links::Column::Kind.eq("environment"))
+                .all(&tx)
+                .await?
+                .into_iter()
+                .map(|link| Id::from(link.reference_id))
+                .collect(),
+        );
+    }
     if body.group_id.is_none() {
         body.group_id = Some(current.group_id.to_string());
     }
@@ -321,7 +365,7 @@ pub async fn update(
         body.repository_id =
             crate::repositories::bind_selection(&s, &tx, &scope, selection).await?;
     }
-    let name = check(&tx, &scope, &body).await?;
+    let name = check(&s, &tx, &scope, &body).await?;
     let affected = pipelines::Entity::update_many()
         .col_expr(
             pipelines::Column::GroupId,

@@ -195,6 +195,24 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/repository-auth/{provider}/repositories",
             get(repository_auth::browse_repositories),
         )
+        .route(
+            "/{workspace}/code-connections",
+            get(repository_auth::list_connections).post(repository_auth::create_connection),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}",
+            get(repository_auth::get_connection)
+                .patch(repository_auth::update_connection)
+                .delete(repository_auth::delete_connection),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}/repositories",
+            get(repository_auth::connection_repositories),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}/branches",
+            get(repository_auth::connection_branches),
+        )
         .route("/{workspace}/repository-auth", get(repository_auth::list))
         .route(
             "/{workspace}/repository-auth/{provider}/actions/authorize",

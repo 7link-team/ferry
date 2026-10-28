@@ -27,6 +27,23 @@ pub struct Binding {
 fn host_image() -> String {
     "host".into()
 }
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CheckoutBinding {
+    pub job_id: String,
+    pub step_id: String,
+    pub connection_id: String,
+    pub repository_url: String,
+    #[serde(default, rename = "ref")]
+    pub git_ref: String,
+    #[serde(default)]
+    pub path: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResolvedCheckout {
+    pub binding: CheckoutBinding,
+    pub credential_id: i64,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Document {
@@ -34,6 +51,8 @@ pub struct Document {
     pub workflow: String,
     #[serde(default)]
     pub executor_bindings: Vec<Binding>,
+    #[serde(default)]
+    pub checkout_bindings: Vec<CheckoutBinding>,
     #[serde(default)]
     pub graph_layout: Value,
 }
@@ -58,6 +77,8 @@ pub struct Snapshot {
     pub engine: String,
     pub document: Document,
     pub jobs: Vec<Job>,
+    #[serde(default)]
+    pub checkouts: Vec<ResolvedCheckout>,
 }
 
 pub fn document(input: &str) -> Option<Document> {
@@ -281,6 +302,61 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             return Err(ApiError::bad("请填写有效的执行镜像。"));
         }
     }
+    let mut checkout_ids = BTreeSet::new();
+    for binding in &document.checkout_bindings {
+        let step = jobs
+            .get(&binding.job_id)
+            .and_then(|job| job.get("steps"))
+            .and_then(Value::as_array)
+            .and_then(|steps| {
+                steps.iter().find(|step| {
+                    step.get("id").and_then(Value::as_str) == Some(binding.step_id.as_str())
+                })
+            });
+        if !step
+            .and_then(|step| step.get("uses"))
+            .and_then(Value::as_str)
+            .is_some_and(|action| action.starts_with("actions/checkout@"))
+            || !checkout_ids.insert((&binding.job_id, &binding.step_id))
+        {
+            return Err(ApiError::bad("代码源绑定必须引用唯一的 checkout 步骤 id。"));
+        }
+        if let Some(options) = step.and_then(|step| step.get("with")) {
+            let options = options
+                .as_object()
+                .ok_or_else(|| ApiError::bad("绑定代码源步骤的 with 必须是对象。"))?;
+            for (key, value) in options {
+                let expected = match key.as_str() {
+                    "repository" => &binding.repository_url,
+                    "ref" => &binding.git_ref,
+                    "path" => &binding.path,
+                    _ => {
+                        return Err(ApiError::bad(format!(
+                            "绑定代码源步骤暂不支持 checkout 参数 {key}，请移除该参数或使用未绑定的原生 Action。"
+                        )));
+                    }
+                };
+                if value.as_str() != Some(expected.as_str()) {
+                    return Err(ApiError::bad(format!(
+                        "checkout 参数 {key} 与代码源节点配置不一致。"
+                    )));
+                }
+            }
+        }
+        if Id::reference(&binding.connection_id)? == Id::from(0)
+            || binding.repository_url.trim().is_empty()
+            || [&binding.repository_url, &binding.git_ref, &binding.path]
+                .iter()
+                .any(|value| value.contains("${{"))
+            || binding.git_ref.len() > 255
+            || binding.git_ref.contains(['\0', '\n', '\r'])
+            || binding.path.contains(['\0', '\n', '\r', '\\'])
+            || binding.path.starts_with('/')
+            || binding.path.split('/').any(|part| part == "..")
+        {
+            return Err(ApiError::bad("代码源连接、引用或工作区路径无效。"));
+        }
+    }
     let mut variables = BTreeMap::new();
     fn references(value: &Value, variables: &mut BTreeMap<String, Environment>) -> Result<()> {
         match value {
@@ -433,11 +509,22 @@ pub async fn host(
     Ok(row.id)
 }
 pub async fn check_bindings(
+    s: &crate::state::AppState,
     conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
     document: &Document,
 ) -> Result<()> {
     parse(document)?;
+    for binding in &document.checkout_bindings {
+        crate::repository_auth::resolve_connection(
+            s,
+            conn,
+            scope,
+            Id::reference(&binding.connection_id)?,
+            &binding.repository_url,
+        )
+        .await?;
+    }
     for binding in &document.executor_bindings {
         if !binding.target_ref.is_empty() {
             let reference = Id::reference(&binding.target_ref)?;
@@ -458,6 +545,7 @@ pub async fn check_bindings(
     Ok(())
 }
 pub async fn resolve(
+    s: &crate::state::AppState,
     conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
     document: Document,
@@ -483,7 +571,28 @@ pub async fn resolve(
             }
         }
     }
+    if jobs.iter().any(|job| job.host_id == 0) {
+        return Err(ApiError::bad(
+            "每个任务需要执行器绑定或所选环境的执行主机。",
+        ));
+    }
+    let mut checkouts = Vec::new();
+    for binding in &document.checkout_bindings {
+        let (_, credential_id) = crate::repository_auth::resolve_saved_connection(
+            s,
+            conn,
+            scope,
+            Id::reference(&binding.connection_id)?,
+            &binding.repository_url,
+        )
+        .await?;
+        checkouts.push(ResolvedCheckout {
+            binding: binding.clone(),
+            credential_id: credential_id.into(),
+        });
+    }
     Ok(Snapshot {
+        checkouts,
         engine: ENGINE.into(),
         document,
         jobs,
@@ -494,10 +603,12 @@ pub fn display(row: &mut Value, definition: &str) {
         row["definition_format"] = json!(ENGINE);
         row["definition"] = json!(document.workflow);
         row["executor_bindings"] = json!(document.executor_bindings);
+        row["checkout_bindings"] = json!(document.checkout_bindings);
         row["graph_layout"] = document.graph_layout;
     } else {
         row["definition_format"] = json!("legacy");
         row["executor_bindings"] = json!([]);
+        row["checkout_bindings"] = json!([]);
         row["graph_layout"] = json!({});
     }
 }
@@ -510,6 +621,7 @@ mod tests {
             engine: ENGINE.into(),
             workflow: workflow.into(),
             executor_bindings: vec![],
+            checkout_bindings: vec![],
             graph_layout: json!({}),
         }
     }
@@ -525,6 +637,61 @@ mod tests {
         ] {
             assert!(parse(&doc(workflow)).is_err(), "accepted {workflow}");
         }
+    }
+
+    #[test]
+    fn checkout_bindings_require_stable_ids_and_workspace_relative_paths() {
+        let mut document = doc(
+            "jobs: {build: {runs-on: self-hosted, steps: [{id: source, uses: 'actions/checkout@v4'}]}}",
+        );
+        let binding = CheckoutBinding {
+            job_id: "build".into(),
+            step_id: "source".into(),
+            connection_id: "1".into(),
+            repository_url: "https://example.invalid/project.git".into(),
+            git_ref: "main".into(),
+            path: "src".into(),
+        };
+        document.checkout_bindings = vec![binding.clone()];
+        assert!(parse(&document).is_ok());
+        for path in [
+            "../outside",
+            "/outside",
+            "src/../../outside",
+            "${{ github.workspace }}",
+        ] {
+            document.checkout_bindings[0].path = path.into();
+            assert!(parse(&document).is_err(), "accepted {path}");
+        }
+        document.checkout_bindings = vec![binding.clone(), binding.clone()];
+        assert!(parse(&document).is_err());
+        document.checkout_bindings = vec![binding];
+        document.checkout_bindings[0].step_id = "missing".into();
+        assert!(parse(&document).is_err());
+    }
+
+    #[test]
+    fn bound_checkout_rejects_unsupported_or_conflicting_action_inputs() {
+        let mut document = doc(
+            "jobs: {build: {runs-on: self-hosted, steps: [{id: source, uses: 'actions/checkout@v4', with: {ref: main}}]}}",
+        );
+        document.checkout_bindings = vec![CheckoutBinding {
+            job_id: "build".into(),
+            step_id: "source".into(),
+            connection_id: "1".into(),
+            repository_url: "https://example.invalid/project.git".into(),
+            git_ref: "main".into(),
+            path: "".into(),
+        }];
+        assert!(parse(&document).is_ok());
+        document.workflow = document.workflow.replace("ref: main", "ref: other");
+        assert!(parse(&document).is_err());
+        document.workflow = document
+            .workflow
+            .replace("ref: other", "submodules: recursive");
+        assert!(parse(&document).is_err());
+        document.checkout_bindings.clear();
+        assert!(parse(&document).is_ok());
     }
 
     #[test]

@@ -224,6 +224,11 @@ pub async fn update(
     let managed = crate::entities::repository_connections::Entity::find()
         .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(crate::entities::repository_connections::Column::CredentialId.eq(id))
+        .filter(
+            sea_orm::Condition::any()
+                .add(crate::entities::repository_connections::Column::TokenConfig.is_null())
+                .add(crate::entities::repository_connections::Column::Name.eq("")),
+        )
         .one(&s.db)
         .await?
         .is_some();
@@ -326,6 +331,36 @@ pub async fn remove(
         return Err(ApiError::conflict(format!(
             "还有 {used} 个仓库在用这条凭据，请先改掉再删除。"
         )));
+    }
+    let used = crate::entities::repository_connections::Entity::find()
+        .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::repository_connections::Column::CredentialId.eq(id))
+        .filter(crate::entities::repository_connections::Column::Name.ne(""))
+        .count(&tx)
+        .await?;
+    if used > 0 {
+        return Err(ApiError::conflict("代码连接仍在使用该凭据，请先解除引用。"));
+    }
+    for run in crate::entities::pipeline_runs::Entity::find()
+        .filter(crate::entities::pipeline_runs::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::pipeline_runs::Column::State.is_in([
+            "queued",
+            "running",
+            "cancelling",
+        ]))
+        .all(&tx)
+        .await?
+    {
+        if run.credential_id == i64::from(id)
+            || crate::actions::snapshot(&run.definition).is_some_and(|snapshot| {
+                snapshot
+                    .checkouts
+                    .iter()
+                    .any(|checkout| checkout.credential_id == i64::from(id))
+            })
+        {
+            return Err(ApiError::conflict("凭据仍有流水线任务尚未结束。"));
+        }
     }
     let affected = credentials::Entity::delete_many()
         .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))

@@ -89,6 +89,7 @@ impl MigratorTrait for Migrator {
             Box::new(ActionsJobs),
             Box::new(PipelineClassification),
             Box::new(RunnerUpdateState),
+            Box::new(NamedCodeConnections),
         ]
     }
 }
@@ -2609,6 +2610,86 @@ impl MigrationTrait for RunnerUpdateState {
             ),
         )
         .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct NamedCodeConnections;
+impl MigrationName for NamedCodeConnections {
+    fn name(&self) -> &str {
+        "named_code_connections_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for NamedCodeConnections {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for column in ["name", "description"] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    "repository_connections",
+                    column,
+                    Table::alter()
+                        .table(Alias::new("repository_connections"))
+                        .add_column(
+                            ColumnDef::new(Alias::new(column))
+                                .string_len(255)
+                                .not_null()
+                                .default(""),
+                        )
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        match m.get_database_backend() {
+            DbBackend::Sqlite => {
+                // SQLite's table UNIQUE constraint is an implicit autoindex, which cannot
+                // be dropped. Rebuild atomically, preserving every identity and secret.
+                use sea_orm::{ConnectionTrait, TransactionTrait};
+                let tx = m.get_connection().begin().await?;
+                tx.execute_unprepared("CREATE TABLE repository_connections_named (
+                    id INTEGER PRIMARY KEY, workspace_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+                    version INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL, provider VARCHAR(20) NOT NULL, credential_id INTEGER NOT NULL,
+                    account TEXT NOT NULL, refresh_secret TEXT NOT NULL, state TEXT NOT NULL,
+                    last_error TEXT NOT NULL, client_id TEXT NOT NULL, config_fingerprint VARCHAR(64) NOT NULL DEFAULT '',
+                    token_config TEXT, name VARCHAR(255) NOT NULL DEFAULT '', description VARCHAR(255) NOT NULL DEFAULT '')").await?;
+                tx.execute_unprepared("INSERT INTO repository_connections_named
+                    (id,workspace_id,user_id,version,expires_at,created_at,updated_at,provider,credential_id,
+                     account,refresh_secret,state,last_error,client_id,config_fingerprint,token_config,name,description)
+                    SELECT id,workspace_id,user_id,version,expires_at,created_at,updated_at,provider,credential_id,
+                     account,refresh_secret,state,last_error,client_id,config_fingerprint,token_config,name,description
+                    FROM repository_connections").await?;
+                tx.execute_unprepared("DROP TABLE repository_connections")
+                    .await?;
+                tx.execute_unprepared(
+                    "ALTER TABLE repository_connections_named RENAME TO repository_connections",
+                )
+                .await?;
+                tx.commit().await?;
+            }
+            DbBackend::Postgres => {
+                use sea_orm::ConnectionTrait;
+                m.get_connection().execute_unprepared("ALTER TABLE repository_connections DROP CONSTRAINT IF EXISTS repository_connection_identity").await?;
+            }
+            DbBackend::MySql => {
+                if m.has_index("repository_connections", "repository_connection_identity")
+                    .await?
+                {
+                    m.drop_index(
+                        Index::drop()
+                            .table(Alias::new("repository_connections"))
+                            .name("repository_connection_identity")
+                            .to_owned(),
+                    )
+                    .await?;
+                }
+            }
+        }
+        Ok(())
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))

@@ -33,6 +33,8 @@ class Receiver(BaseHTTPRequestHandler):
             if '/codeup/' in parsed.path:
                 for row in value:row.pop('clone_url',None)
             payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
+        if parsed.path.endswith('/branches'):
+            payload=json.dumps([{'name':'develop'},{'name':'release/test'}]).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
         if not parsed.path.endswith('/user'):assert 'renewed-access' in access, 'market fetch must use refreshed OAuth token'
         if parsed.path.endswith('/user'):value={'login':'authorized-user','username':'authorized-user'}
         else:
@@ -118,9 +120,46 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         root = '/workspaces/tenant'
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspaces/actions/join',{'code':invitation})
+        # Connection creation has no concrete repository or branch. Reuse vault references.
+        shared=request(owner,root+'/credentials',{'name':'Reusable PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token'},expected=201)['id']
+        count=request(owner,root+'/credentials')['total']
+        credential_before=request(owner,root+'/credentials/'+shared)
+        connection_body={'name':'Team GitHub','provider':'github','credential_id':shared,'base_url':api_base,'api_url':api_base}
+        linked=request(owner,root+'/code-connections',connection_body,expected=201)
+        check(linked['credential_id']==shared and 'default_branch' not in linked and 'url' not in linked,'connection creation uses existing credential without repository/branch')
+        check(request(owner,root+'/credentials')['total']==count,'connection does not duplicate the existing PAT')
+        check(request(owner,root+'/credentials/'+shared)==credential_before,'connection creation does not rewrite shared credential metadata or version')
+        linked2=request(owner,root+'/code-connections',dict(connection_body,name='Second GitHub'),expected=201)
+        check(linked2['id']!=linked['id'],'same platform supports separate named connections')
+        browse=request(owner,root+'/code-connections/'+linked['id']+'/repositories')
+        check(browse['items'][0]['default_branch']=='develop','named connection browses visible repositories')
+        branches=request(owner,root+'/code-connections/'+linked['id']+'/branches?'+urlencode({'url':browse['items'][0]['url']}))
+        check([v['name'] for v in branches['items']]==['develop','release/test'],'selected repository exposes actual branches')
+        request(owner,root+'/code-connections/'+linked['id']+'/branches?'+urlencode({'url':'https://attacker.example.invalid/repo.git'}),expected=400)
+        request(owner,root+'/credentials/'+shared,method='DELETE',expected=409)
+        request(owner,root+'/credentials/'+shared,{'name':'Rotated shared PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token-rotated','version':credential_before['version']},method='PATCH')
+        check(request(owner,root+'/code-connections/'+linked['id']+'/repositories')['items'],'referenced PAT can rotate through existing credential resource')
+        check(request(guest,root+'/code-connections')['items']==[],'named connections remain private to authorizing user')
+        request(guest,root+'/code-connections/'+linked['id'],expected=404)
+        renamed=request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,name='Renamed team',version=linked['version']),method='PATCH')
+        check(renamed['name']=='Renamed team' and request(owner,root+'/code-connections/'+linked2['id'])['name']=='Second GitHub','update targets only selected named connection')
+        request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,version=linked['version']),method='PATCH',expected=409)
+        request(outsider,'/workspaces/other/code-connections',connection_body,expected=400)
+        wrong=request(owner,root+'/credentials',{'name':'Password not PAT','kind':'password','username':'user','secret':'valid-personal-token'},expected=201)['id']
+        request(owner,root+'/code-connections',dict(connection_body,credential_id=wrong),expected=400)
+        invalid=request(owner,root+'/credentials',{'name':'Invalid PAT','kind':'token','secret':'rejected-secret'},expected=201)['id']
+        request(owner,root+'/code-connections',dict(connection_body,credential_id=invalid),expected=400)
+        check(request(owner,root+'/code-connections')['total']==2,'invalid authorization does not leave a connected resource')
+        request(owner,root+'/credentials/'+invalid,method='DELETE',expected=204)
+        plain=request(owner,root+'/code-connections',{'name':'Plain Git','provider':'git','credential_id':wrong,'url':api_base+'/owner/repository.git'},expected=201)
+        check(plain['url']==api_base+'/owner/repository.git' and 'default_branch' not in plain,'plain Git connection stores URL without branch')
+        request(owner,root+'/code-connections/'+plain['id'],method='DELETE',expected=204)
+        for row in [linked,linked2]:request(owner,root+'/code-connections/'+row['id'],method='DELETE',expected=204)
+        request(owner,root+'/credentials/'+shared,method='DELETE',expected=204)
+        request(owner,root+'/credentials/'+wrong,method='DELETE',expected=204)
         def status(provider):return next(r for r in request(owner,root+'/repository-auth')['items'] if r['id']==provider)
-        def authorize(provider):
-            url=request(owner,root+'/repository-auth/'+provider+'/actions/authorize',{})['url']
+        def authorize(provider,options=None):
+            url=request(owner,root+'/repository-auth/'+provider+'/actions/authorize'+('?'+urlencode(options) if options else ''),{})['url']
             try:owner.open(url)
             except urllib.error.HTTPError as response:
                 assert response.code==302;return response.headers['Location'][len(base):]
@@ -151,6 +190,19 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             request(owner,authorize(provider),expected=303)
             check(status(provider)['credential_id']==before,provider+' reauthorization preserves credential references')
         check(len(request(owner,root+'/credentials')['items'])==3,'reauthorization never duplicates credentials')
+        legacy_credential=status('github')['credential_id']
+        for name in ['Named OAuth one','Named OAuth two']:
+            request(owner,authorize('github',{'name':name}),expected=303)
+        named=request(owner,root+'/code-connections')['items']
+        check(len(named)==2 and len({r['credential_id'] for r in named})==2,'named OAuth creates independent connections and refresh owners')
+        check(status('github')['credential_id']==legacy_credential,'named OAuth does not overwrite legacy authorization')
+        first=named[0]
+        request(owner,authorize('github',{'name':first['name'],'connection_id':first['id']}),expected=303)
+        check(request(owner,root+'/code-connections/'+first['id'])['credential_id']==first['credential_id'],'explicit OAuth reauthorization preserves only selected identity')
+        for row in named:
+            request(owner,root+'/code-connections/'+row['id'],method='DELETE',expected=204)
+            request(owner,root+'/credentials/'+row['credential_id'],method='DELETE',expected=204)
+
         callback=authorize('github');cancel=callback.split('?')[0]+'?'+urlencode({'state':parse_qs(urlparse(callback).query)['state'][0],'error':'access_denied'})
         request(owner,cancel,expected=303);request(owner,callback,expected=400)
         check(True,'cancelled authorization consumes single-use state')

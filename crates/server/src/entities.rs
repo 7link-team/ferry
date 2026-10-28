@@ -797,6 +797,8 @@ pub mod repository_connections {
         pub workspace_id: i64,
         pub user_id: i64,
         pub provider: String,
+        pub name: String,
+        pub description: String,
         pub credential_id: i64,
         pub account: String,
         pub refresh_secret: String,
