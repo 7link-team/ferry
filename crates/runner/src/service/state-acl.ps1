@@ -15,6 +15,9 @@ function Assert-Secure($item, $mask) {
     if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) { throw "Untrusted service path owner: $($item.FullName)" }
     foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+        # OWNER RIGHTS names this object's owner, already verified above. It is
+        # not a separate untrusted account (Python-created directories use it).
+        if ($rule.IdentityReference.Value -eq 'S-1-3-4') { continue }
         if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $rule.IdentityReference.Value -notin $trusted -and ($rule.FileSystemRights -band $mask)) { throw "Untrusted write access to service path: $($item.FullName); principal=$($rule.IdentityReference.Value); rights=$($rule.FileSystemRights)" }
     }
 }

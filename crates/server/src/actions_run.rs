@@ -679,7 +679,10 @@ mod tests {
 
     async fn cancel_while_waiting(stop_service: bool) {
         let dir = tempfile::tempdir().unwrap();
-        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let mut options = sea_orm::ConnectOptions::new("sqlite://ferry");
+        let filename = dir.path().join("runs.sqlite");
+        options.map_sqlx_sqlite_opts(move |opts| opts.filename(&filename).create_if_missing(true));
+        let db = sea_orm::Database::connect(options).await.unwrap();
         let backend = db.get_database_backend();
         let schema = Schema::new(backend);
         for statement in [
@@ -687,7 +690,7 @@ mod tests {
             schema.create_table_from_entity(jobs::Entity),
             schema.create_table_from_entity(steps::Entity),
         ] {
-            db.execute(backend.build(&statement)).await.unwrap();
+            db.execute(&statement).await.unwrap();
         }
         let s = std::sync::Arc::new(crate::state::State {
             ids: std::sync::Arc::new(
