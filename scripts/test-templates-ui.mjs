@@ -91,6 +91,9 @@ try {
     else { assert.equal(generated.steps[0].run,'echo build false'); assert.equal(generated.steps[0].timeout_seconds,30); }
     assert(!JSON.stringify(generated).includes('secret-not-in-template'));
     await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:false}).fill(app?'nginx:latest':'echo revised');
+    // The field invalidates local generation first; its effect reports the
+    // invalid state to the parent form on the next React render.
+    await p.waitForFunction(() => [...document.querySelectorAll('button')].find(button => button.textContent === '创建')?.disabled, null, {timeout:5000});
     assert(await create.isDisabled(),'changed parameters invalidate generation');
     const template=(await get(root+'/'+resource)).items[0];
     const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
