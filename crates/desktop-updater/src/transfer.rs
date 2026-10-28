@@ -174,7 +174,7 @@ mod tests {
         }
         let staged = std::fs::read_dir(directory.path()).unwrap().count();
         receiving.abort();
-        assert!(receiving.await.unwrap_err().is_cancelled());
+        assert!(matches!(receiving.await, Err(error) if error.is_cancelled()));
         drop(peer);
         assert_eq!(staged, 1, "test must cancel after staging has begun");
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
