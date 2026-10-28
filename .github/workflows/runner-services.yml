@@ -27,6 +27,15 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2022]
     steps:
       - uses: actions/checkout@v4
+      - name: Windows service directory security preflight
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os, pathlib, subprocess, tempfile
+          with tempfile.TemporaryDirectory(prefix='runner-acl-', dir=os.environ['ProgramFiles']) as root:
+              env = dict(os.environ, RUNNER_SERVICE_STATE_DIRECTORY=root)
+              env.pop('PSModulePath', None)
+              subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', pathlib.Path('crates/runner/src/service/state-acl.ps1').read_text()], env=env, check=True)
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
