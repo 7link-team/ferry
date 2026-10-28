@@ -53,6 +53,7 @@ echo %ERRORLEVEL% > "$output\exit.txt"
     }
     foreach ($task in @($serverTask, $clientTask)) {
         if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
+            Get-ScheduledTaskInfo -TaskName $task | Select-Object TaskName,LastRunTime,LastTaskResult | Format-List | Out-String | Write-Host
             Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
             Unregister-ScheduledTask -TaskName $task -Confirm:$false
         }

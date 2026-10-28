@@ -42,4 +42,6 @@ with tempfile.TemporaryDirectory(prefix='desktop-update-policy-') as directory:
         assert len(binaries)==1, binaries
         # Windows PowerShell 5 must not inherit PowerShell 7's module search path.
         native_env={key:value for key,value in os.environ.items() if key.lower()!='psmodulepath'}
-        subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','scripts/test-desktop-update-ipc.ps1','-TestExecutable',binaries[0]],env=native_env,creationflags=subprocess.CREATE_NO_WINDOW,check=True)
+        native=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','scripts/test-desktop-update-ipc.ps1','-TestExecutable',binaries[0]],env=native_env,creationflags=subprocess.CREATE_NO_WINDOW,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors='replace',timeout=180)
+        print(native.stdout,flush=True)
+        native.check_returncode()
