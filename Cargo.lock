@@ -1447,6 +1447,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows-service",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1951,6 +1952,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -3229,6 +3231,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
