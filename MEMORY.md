@@ -220,3 +220,12 @@ User continued after nextalpha proposal, explicitlyauthorizes packaging/publicat
 - Publicverification /tmp/ferry-alpha13-public-verify.mjs 75796c08600c916064d88acf09dc1c670cf89287 PASS: exacttag/prerelease/draftfalse,21assetdigests,cryptographicRunnercatalogsignature,5runner+5desktopupdatebindings andsignatures. No localheavybuild/download.
 - Selfreview + originalrequirementacceptance complete forT15andrelease. Userrequestedfullwidth/nodesources+executors/actualserialparallel/tag-envselection/connectionwithoutbranch/existingcredentials allcoveredbybrowser+unit+realexecutionchecks. T17 desktopunattendedUAC-freeupdater remainsunfinished; thirdpartyprivateaccountsnotavailable; K8s/Helmdeferred. Do notclaimthesecomplete.
 - Release task COMPLETE. Workingtree onlylocal.claude files (excludedfromcommits). Usernext: testpublishedalpha13. FutureWindowsflakyexitinvestigation/T17remain distinct; no pending releaseactions.
+
+
+## T10 旧工作区验收记录归档 — 2026-10-29
+来源：`ferry-platform` 工作区未提交的历史交接记录；以下是当时的验收结果，不代表本次重新执行了测试。
+- 提交 `bf8843d` 实现工作空间成员、角色、邀请及权限过滤的真实仪表盘；包含 owner/内置角色保护、越权和使用中角色限制、版本冲突保护，邀请轮换与加入串行化。
+- 当时最终验收：SQLite/MySQL 8.4/PostgreSQL 17 各 17 组 API 检查（含真实失败流水线指标）、各 99 项原有回归；三库 alpha.6 升级检查保留角色/成员版本及原业务数据；Chromium 工作空间和平台回归通过；前端 39 项、Rust workspace 92 项通过/1 项跳过。
+- 当时主工作区集成验收：类型检查、构建、44 项前端测试、99 项 Rust 测试/1 项跳过、17 组 API、工作空间与变量页面浏览器测试通过。
+- 临时数据库容器及卷已在当时删除。旧记录中“等待 T8 保留语义”的待办已被后续用户决策及发布状态取代，不再作为当前待办。
+- 两个旧分支的全部提交现均已包含在 main；没有需额外合并的源代码。旧工作区新增的 T9 超管决策已由 ADR.md 的 T9 条目完整覆盖。
