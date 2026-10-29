@@ -124,6 +124,17 @@ impl Identity {
             ),
             _ => {}
         }
+        // SCM stop requests are asynchronous. A rebind replaces the executable
+        // immediately afterwards, so wait for the old supervisor to release it.
+        if action == "stop" {
+            if let Some(pid) = status.process_id {
+                wait_for_process_exit(pid, 30_000)?;
+            }
+            anyhow::ensure!(
+                service.query_status()?.current_state == ServiceState::Stopped,
+                "Runner 服务尚未停止，未替换程序"
+            );
+        }
         Ok(())
     }
     pub(super) fn uninstall(&self) -> anyhow::Result<()> {
@@ -147,6 +158,47 @@ impl Identity {
         // SCM deletes the registration after the running instance has stopped.
         service.delete()?;
         Ok(())
+    }
+}
+
+fn wait_for_process_exit(pid: u32, timeout_ms: u32) -> anyhow::Result<()> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::{
+        Foundation::{ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+    };
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+            return Ok(()); // The process has already exited.
+        }
+        return Err(error.into());
+    }
+    let process = unsafe { OwnedHandle::from_raw_handle(handle) };
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), timeout_ms) } {
+        WAIT_OBJECT_0 => Ok(()),
+        WAIT_TIMEOUT => anyhow::bail!("等待 Runner 服务进程退出超时，未替换程序"),
+        _ => Err(std::io::Error::last_os_error().into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wait_for_process_exit;
+
+    #[test]
+    fn stop_waits_for_process_exit_and_rejects_timeout() {
+        use std::os::windows::process::CommandExt;
+        let mut process = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Milliseconds 300"])
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        assert!(wait_for_process_exit(process.id(), 1).is_err());
+        wait_for_process_exit(process.id(), 10_000).unwrap();
+        assert!(process.try_wait().unwrap().is_some());
+        wait_for_process_exit(process.id(), 100).unwrap();
     }
 }
 
