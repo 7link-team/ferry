@@ -212,7 +212,7 @@ try {
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);
   await p.getByRole('button',{name:'构建',exact:true}).first().click();
-  await p.getByLabel('任务执行器',{exact:true}).selectOption(`host:${buildHost.id}`);
+  await p.getByLabel('任务执行器',{exact:true}).selectOption(buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
   await p.getByLabel('步骤类型').selectOption('checkout');
   await p.getByLabel('仓库连接',{exact:true}).selectOption(giteeConnection.id);

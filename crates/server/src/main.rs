@@ -178,6 +178,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
+    let ssh_heartbeat_task = tokio::spawn(hosts::ssh_heartbeat(s.clone(), drain_rx.clone()));
     let alerts_task = tokio::spawn(alerts::scheduler(s.clone(), drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
@@ -371,6 +372,10 @@ async fn main() -> anyhow::Result<()> {
             get(pipeline_contexts::groups::list).post(pipeline_contexts::groups::create),
         )
         .route(
+            "/{workspace}/pipeline-groups/actions/reorder",
+            post(pipeline_contexts::reorder_groups),
+        )
+        .route(
             "/{workspace}/pipeline-groups/{id}",
             get(pipeline_contexts::groups::get)
                 .patch(pipeline_contexts::groups::update)
@@ -396,6 +401,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/pipeline-runs/{id}/actions/cancel",
             post(pipeline_runs::cancel),
+        )
+        .route(
+            "/{workspace}/pipeline-runs/{id}/jobs/{key}/approve",
+            post(pipeline_runs::approve),
         )
         .route(
             "/{workspace}/app-templates",
@@ -484,10 +493,13 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/hosts/{id}/actions/test-connection",
             post(remote::test_connection),
         )
+        .route("/{workspace}/hosts/{id}/monitor", get(hosts::monitor_host))
         .route("/{workspace}/hosts/{id}/terminal", get(remote::terminal))
         .route(
             "/{workspace}/hosts/{id}/files",
-            get(remote::list_dir).delete(remote::delete_file),
+            get(remote::list_dir)
+                .post(remote::create_entry)
+                .delete(remote::delete_file),
         )
         .route(
             "/{workspace}/hosts/{id}/files/content",
@@ -500,6 +512,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/{workspace}/runner-tokens", post(runner::create_token))
         .route("/{workspace}/runner-tokens/{id}", get(runner::token_status))
+        .route(
+            "/{workspace}/hosts/{id}/connection-command",
+            get(runner::connection_command).post(runner::reset_connection_command),
+        )
         .route(
             "/{workspace}/hosts/{id}/runner-update",
             get(runner::update_status).post(runner::start_update),
@@ -633,6 +649,7 @@ async fn main() -> anyhow::Result<()> {
     };
     let _ = drain.send(true);
     alerts_task.await?;
+    ssh_heartbeat_task.await?;
     cron_task.await?;
     deployment_task.await?;
     pipeline_task.await?;

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseDocument, visit } from "yaml";
 import { Button } from "./ui/button";
+import { Trash2 } from "lucide-react";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
 
@@ -92,6 +94,7 @@ export function ManifestEditor({
 }) {
   const [sourceMode, setSourceMode] = useState(false);
   const [notice, setNotice] = useState("");
+  const [pendingRemoval, setPendingRemoval] = useState<{ path: Path; index: number; action: string; target: string }>();
   const [invalidFields, setInvalidFields] = useState<Record<string, boolean>>(
     {},
   );
@@ -292,11 +295,13 @@ export function ManifestEditor({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="icon"
+                aria-label={`删除${title} ${index + 1}`}
+                title={`删除${title} ${index + 1}`}
                 disabled={invalidJson}
-                onClick={() => remove(path, index)}
+                onClick={() => setPendingRemoval({ path, index, action: `删除${title}`, target: String(row.name ?? row.key ?? index + 1) })}
               >
-                删除{title} {index + 1}
+                <Trash2 className="size-4" />
               </Button>
             )}
           </fieldset>
@@ -306,6 +311,7 @@ export function ManifestEditor({
   };
   return (
     <section aria-label="应用配置编辑器" className="min-w-0 space-y-4">
+      {pendingRemoval && <DeleteConfirmDialog action={pendingRemoval.action} target={pendingRemoval.target} description="将从当前配置草稿移除，保存配置后生效。" onClose={() => setPendingRemoval(undefined)} onConfirm={() => remove(pendingRemoval.path, pendingRemoval.index)} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-medium">应用配置</h2>
         <div className="flex gap-2" role="group" aria-label="编辑方式">
@@ -386,7 +392,9 @@ export function ManifestEditor({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="sm"
+                        size="icon"
+                        aria-label={`删除服务 ${String(service.name || index + 1)}`}
+                        title={`删除服务 ${String(service.name || index + 1)}`}
                         disabled={invalidJson || services.length <= 1}
                         onClick={() => {
                           if (
@@ -403,15 +411,10 @@ export function ManifestEditor({
                             );
                             return;
                           }
-                          if (
-                            confirm(
-                              `删除服务“${String(service.name || index + 1)}”及其配置？保存前不会影响已部署服务。`,
-                            )
-                          )
-                            remove(["services"], index);
+                          setPendingRemoval({ path: ["services"], index, action: "删除服务", target: String(service.name || index + 1) });
                         }}
                       >
-                        删除服务
+                        <Trash2 className="size-4" />
                       </Button>
                     </div>
                   )}
@@ -645,9 +648,12 @@ export function ManifestEditor({
                           <Button
                             type="button"
                             variant="ghost"
-                            onClick={() => remove(p("command"), i)}
+                            size="icon"
+                            aria-label={`删除参数 ${i + 1}`}
+                            title={`删除参数 ${i + 1}`}
+                            onClick={() => setPendingRemoval({ path: p("command"), index: i, action: "删除参数", target: `${String(service.name || "未命名服务")} / 参数 ${i + 1}` })}
                           >
-                            删除参数 {i + 1}
+                            <Trash2 className="size-4" />
                           </Button>
                         )}
                       </div>

@@ -97,6 +97,36 @@ impl Settings {
             Err(error) => Err(error.error.into()),
         }
     }
+
+    fn rebind(&self, path: &Path) -> anyhow::Result<bool> {
+        self.validate()?;
+        if !regular_file(path)? {
+            return Ok(false);
+        }
+        let old = Self::load(path)?;
+        anyhow::ensure!(
+            old.server.trim_end_matches('/') == self.server.trim_end_matches('/')
+                && old.state_dir == self.state_dir
+                && old.service_name == self.service_name
+                && old.user_service == self.user_service,
+            "已有服务连接到其他地址或状态目录；为保护主机身份，不能重新绑定"
+        );
+        anyhow::ensure!(self.token.is_some(), "重新绑定需要新令牌");
+        if old.token == self.token {
+            return Ok(false);
+        }
+        match std::fs::remove_file(crate::Enrolment::path(&self.state_dir)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let mut pending =
+            tempfile::NamedTempFile::new_in(path.parent().context("服务配置目录无效")?)?;
+        pending.write_all(&serde_json::to_vec(self)?)?;
+        pending.as_file().sync_all()?;
+        pending.persist(path)?;
+        Ok(true)
+    }
 }
 
 fn validate_name(name: &str) -> anyhow::Result<()> {
@@ -132,6 +162,8 @@ enum Action {
         server: String,
         #[arg(long, env = "FERRY_TOKEN", hide_env_values = true)]
         token: Option<String>,
+        #[arg(long)]
+        rebind: bool,
         #[arg(long)]
         state_dir: Option<PathBuf>,
     },
@@ -186,6 +218,7 @@ pub fn dispatch() -> anyhow::Result<bool> {
             service,
             server,
             token,
+            rebind,
             state_dir,
         } => {
             validate_name(&service.name)?;
@@ -197,7 +230,7 @@ pub fn dispatch() -> anyhow::Result<bool> {
                 service_name: service.name.clone(),
                 user_service: service.user,
             };
-            service.install(&settings)?;
+            service.install(&settings, rebind)?;
         }
         Action::VerifyUpdate {
             manifest,
@@ -351,7 +384,7 @@ impl Identity {
         Ok(PathBuf::from("/var/lib").join(&self.name))
     }
 
-    fn install(&self, settings: &Settings) -> anyhow::Result<()> {
+    fn install(&self, settings: &Settings, rebind: bool) -> anyhow::Result<()> {
         validate_name(&self.name)?;
         settings.validate()?;
         let root = &settings.state_dir;
@@ -370,13 +403,21 @@ impl Identity {
             windows::secure_directory(root)?;
         }
         let config = root.join("service.json");
+        let mut rebound = false;
+        if rebind && regular_file(&config)? {
+            let old = Settings::load(&config)?;
+            if old.token != settings.token {
+                self.control("stop")?;
+                rebound = settings.rebind(&config)?;
+            }
+        }
         settings.store(&config)?;
         let binary = root.join(if cfg!(windows) {
             "runner-service.exe"
         } else {
             "runner-service"
         });
-        if !regular_file(&binary)? {
+        if rebound || !regular_file(&binary)? {
             let mut temporary = tempfile::NamedTempFile::new_in(root)?;
             std::io::copy(
                 &mut std::fs::File::open(std::env::current_exe()?)?,
@@ -390,7 +431,11 @@ impl Identity {
                     .set_permissions(std::fs::Permissions::from_mode(0o700))?;
             }
             temporary.as_file().sync_all()?;
-            temporary.persist_noclobber(&binary).map_err(|e| e.error)?;
+            if rebound {
+                temporary.persist(&binary).map_err(|e| e.error)?;
+            } else {
+                temporary.persist_noclobber(&binary).map_err(|e| e.error)?;
+            }
         }
         self.register(&binary, &config)?;
         self.control("start")
@@ -616,6 +661,34 @@ mod tests {
             std::fs::read_to_string(dir.join("runner.json")).unwrap(),
             r#"{"host_id":"123","key":"existing-key"}"#
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explicit_rebind_replaces_token_and_removes_stale_key() {
+        let dir = scratch();
+        let settings = Settings {
+            server: "https://ops.example.invalid".into(),
+            token: Some("old".into()),
+            state_dir: dir.clone(),
+            service_name: "fixture-agent".into(),
+            user_service: true,
+        };
+        let path = dir.join("service.json");
+        settings.store(&path).unwrap();
+        std::fs::write(
+            dir.join("runner.json"),
+            br#"{"host_id":"123","key":"old-key"}"#,
+        )
+        .unwrap();
+        let replacement = Settings {
+            token: Some("new".into()),
+            ..settings
+        };
+        assert!(replacement.rebind(&path).unwrap());
+        assert_eq!(Settings::load(&path).unwrap().token.as_deref(), Some("new"));
+        assert!(!dir.join("runner.json").exists());
+        assert!(!replacement.rebind(&path).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

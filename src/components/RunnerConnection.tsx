@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
-import { CheckCircle2, Copy, Loader2, Terminal, X } from "lucide-react";
+import { CheckCircle2, Copy, HelpCircle, Loader2, RotateCcw, Terminal, X } from "lucide-react";
 import { api, errorText } from "../api";
 import { href } from "../router";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 type Platform = "linux" | "macos" | "windows";
 type Token = { id: string; token: string; expires_at: number; server: string };
@@ -209,4 +210,53 @@ export function RunnerConnection(props: Props) {
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>;
+}
+
+export function HostConnectionCommand({ workspace, hostId, compact = false }: { workspace: string; hostId: string; compact?: boolean }) {
+  const [platform, setPlatform] = useState<Platform>("linux");
+  const [server, setServer] = useState(window.location.origin);
+  const [token, setToken] = useState("");
+  const [state, setState] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const path = `/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}/connection-command`;
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ token: string; server: string; state: string }>(path, { signal: controller.signal })
+      .then(value => { if (!controller.signal.aborted) { setToken(value.token); setServer(value.server); setState(value.state); } })
+      .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); });
+    return () => controller.abort();
+  }, [path]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void api<{ state: string }>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}`)
+        .then(value => setState(value.state)).catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [workspace, hostId]);
+  let command = "";
+  let serverError = "";
+  if (token) try { command = runnerInstallCommand(platform, server, token); }
+    catch (cause) { serverError = errorText(cause); }
+  const reset = async () => {
+    setBusy(true); setError("");
+    try {
+      const value = await api<{ token: string; server: string; state: string }>(path, { method: "POST" });
+      setToken(value.token); setState(value.state); setCopied(false);
+    } catch (cause) { setError(errorText(cause)); throw cause; }
+    finally { setBusy(false); }
+  };
+  return <section className={compact ? "min-w-0 space-y-3 border-t pt-4 text-sm xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0" : "mt-5 space-y-3 border-t pt-5 text-sm"} aria-label="当前连接命令">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">当前连接命令</h2><span className={state === "online" ? "text-primary" : "text-muted-foreground"}>{state === "online" ? "已连接" : state === "offline" ? "已断开连接" : "等待连接"}</span></div>
+    <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}><TabsList aria-label="主机操作系统"><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList></Tabs>
+    <label className="block space-y-1"><span>主机可访问的服务地址</span><Input value={server} onChange={event => { setServer(event.target.value); setCopied(false); }} aria-label="主机可访问的服务地址" /></label>
+    {serverError && <p role="alert" className="text-destructive">{serverError}</p>}
+    {error && <p role="alert" className="text-destructive">{error}</p>}
+    <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">命令包含连接令牌，请妥善保管。</span><Button type="button" size="sm" variant="outline" disabled={!command} onClick={async () => { try { await navigator.clipboard.writeText(command); setCopied(true); } catch { setError("复制失败，请手动选中命令。"); } }}><Copy className="size-4" />{copied ? "已复制" : "复制命令"}</Button></div>
+    <textarea aria-label="当前连接命令" readOnly spellCheck={false} value={command} className="min-h-36 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed" onFocus={event => event.currentTarget.select()} />
+    <div className="flex items-center justify-end gap-1"><span title="重置后会生成新命令和令牌，当前连接立即断开，旧命令及令牌失效。" aria-label="重置说明"><HelpCircle className="size-4 text-muted-foreground" /></span><Button type="button" variant="outline" size="sm" disabled={busy || !token} onClick={() => setConfirmReset(true)}><RotateCcw className="size-4" />重置连接</Button></div>
+    {confirmReset && <DeleteConfirmDialog action="重置" target="当前 Agent 连接" description="将生成新的连接命令和令牌，当前连接会立即断开。旧命令和令牌将失效，需在目标主机运行新命令才能重新连接。" onClose={() => setConfirmReset(false)} onConfirm={reset} />}
+  </section>;
 }

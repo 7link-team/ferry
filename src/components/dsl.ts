@@ -69,6 +69,7 @@ export interface ListConfig<T> {
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
   defaultPageSize?: number;
+  defaultRefresh?: number;
   rowKey: (row: T) => string;
   filters?: Filter[];
   columns: Column<T>[];
@@ -92,6 +93,7 @@ export type FieldType =
   | "pipeline-repository"
   | "marketplace-repository"
   | "actions-editor"
+  | "cron"
   | "text"
   | "textarea"
   | "number"

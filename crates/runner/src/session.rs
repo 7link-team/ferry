@@ -60,9 +60,69 @@ async fn dispatch(socket: &mut Socket, request: wire::Session) -> anyhow::Result
         wire::Session::ReadFile { path } => read_file(socket, &path).await,
         wire::Session::WriteFile { path, mode } => write_file(socket, &path, mode).await,
         wire::Session::ListDir { path } => list_dir(socket, &path).await,
+        wire::Session::CreateFile { path } => create_file(socket, &path).await,
+        wire::Session::CreateDir { path } => create_dir(socket, &path).await,
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
+        wire::Session::Monitor => monitor(socket).await,
         other => anyhow::bail!("服务下发了不是请求的帧：{other:?}"),
     }
+}
+
+async fn monitor(socket: &mut Socket) -> anyhow::Result<()> {
+    let metrics = tokio::task::spawn_blocking(|| {
+        let mut system = sysinfo::System::new();
+        system.refresh_cpu_all();
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+        system.refresh_cpu_all();
+        system.refresh_memory();
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        let networks = sysinfo::Networks::new_with_refreshed_list();
+        wire::HostMonitor {
+            cpu_percent: f64::from(system.global_cpu_usage()),
+            load1: sysinfo::System::load_average().one,
+            memory_used: system.used_memory(),
+            memory_total: system.total_memory(),
+            disks: disks
+                .list()
+                .iter()
+                .map(|disk| wire::DiskUsage {
+                    name: disk.name().to_string_lossy().into_owned(),
+                    mount: disk.mount_point().to_string_lossy().into_owned(),
+                    total: disk.total_space(),
+                    used: disk.total_space().saturating_sub(disk.available_space()),
+                })
+                .collect(),
+            networks: networks
+                .list()
+                .iter()
+                .filter(|(name, _)| !name.starts_with("lo") && !name.starts_with("Loopback"))
+                .map(|(name, data)| wire::NetworkUsage {
+                    name: name.clone(),
+                    received: data.total_received(),
+                    transmitted: data.total_transmitted(),
+                })
+                .collect(),
+        }
+    })
+    .await?;
+    crate::send(socket, &wire::Session::MonitorResult { metrics }).await
+}
+
+async fn create_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .await
+        .with_context(|| format!("无法创建文件 {path}，请检查名称是否重复及目录权限。"))?;
+    crate::send(socket, &wire::Session::Done).await
+}
+
+async fn create_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
+    tokio::fs::create_dir(path)
+        .await
+        .with_context(|| format!("无法创建文件夹 {path}，请检查名称是否重复及目录权限。"))?;
+    crate::send(socket, &wire::Session::Done).await
 }
 
 // ponytail: no path validation here. The server already rejects relative and

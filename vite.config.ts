@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: { proxy: { "/api": {
-    target: "http://127.0.0.1:4290",
+    target: process.env.FERRY_DEV_API_TARGET || "http://127.0.0.1:4290",
     ws: true,
     configure(proxy) {
       proxy.on("proxyReq", (proxyReq, request) => {

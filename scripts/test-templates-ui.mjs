@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -70,10 +70,50 @@ try {
     await p.getByLabel('名称',{exact:false}).fill(name+' edited');
     await p.getByRole('button',{name:'保存',exact:true}).click();
     await p.getByRole('row').filter({hasText:name+' edited'}).getByRole('button',{name:'删除模板',exact:true}).click();
+    await p.getByRole('dialog').getByRole('button',{name:'确认删除模板',exact:true}).click();
     await p.waitForFunction(text=>!document.body.innerText.includes(text),name+' edited');
     row=p.getByRole('row').filter({hasText:name});
     await row.getByRole('link',{name:'使用模板',exact:true}).click();
     await p.getByText(/版本 1/).waitFor();
+    if (!app) {
+      const dialog=p.getByRole('dialog');
+      await dialog.getByRole('listbox',{name:'模板列表'}).waitFor();
+      assert.equal(await dialog.getByRole('combobox').count(),1,'only the boolean parameter uses a select');
+      await dialog.getByLabel('超时',{exact:false}).fill('');
+      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
+      await dialog.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
+      await dialog.getByLabel('超时',{exact:false}).fill('30');
+      const template=(await get(root+'/'+resource)).items.find(item=>item.name===name);
+      const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
+      assert(edited.ok());
+      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
+      await dialog.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
+      await dialog.getByRole('button',{name:'重新载入模板',exact:true}).click();
+      await dialog.getByText(/版本 2/).waitFor();
+      await dialog.getByLabel('超时',{exact:false}).fill('30');
+      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
+      await dialog.waitFor({state:'hidden'});
+      const generated=JSON.parse(await p.getByLabel(label,{exact:false}).inputValue());
+      assert.equal(generated.steps[0].run,'echo build false');
+      assert.equal(generated.steps[0].timeout_seconds,30);
+      assert(!JSON.stringify(generated).includes('secret-not-in-template'));
+      await p.getByRole('textbox',{name:'流水线名称',exact:true}).fill('Generated '+resource);
+      await p.getByRole('button',{name:'流水线设置',exact:true}).click();
+      await p.getByLabel('目标主机',{exact:false}).click();
+      await p.getByRole('option',{name:'Template host',exact:true}).click();
+      await p.getByRole('button',{name:'保存',exact:true}).click();
+      await p.getByRole('cell',{name:'Generated '+resource,exact:true}).waitFor();
+      const objects=await get(root+'/pipelines');
+      assert.equal(objects.total,1);
+      assert.equal(objects.items[0].target_ref,host.id);
+      await p.goto(`${origin}/tenant/build/pipelines/new`);
+      await p.getByRole('button',{name:'从模板导入',exact:true}).click();
+      await p.getByRole('dialog').getByRole('option',{name,exact:true}).click();
+      await p.getByRole('dialog').getByText(/版本 2/).waitFor();
+      assert(await p.getByRole('button',{name:'保存',exact:true,includeHidden:true}).isDisabled(),'pending template generation blocks saving');
+      console.log('PASS pipeline-templates: CRUD confirmation, modal template list, typed parameters, stale conflict/reload, generated values and real pipeline creation');
+      continue;
+    }
     const create=p.getByRole('button',{name:'创建',exact:true});
     assert(await create.isDisabled(),'must generate first');
     if(app) await p.getByLabel('令牌（密钥变量名）',{exact:false}).fill('token');
@@ -139,6 +179,7 @@ try {
   const configs=await get(root+'/config-templates');
   assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');
   await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('button',{name:'删除模板',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除模板',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('Runtime file'));
   console.log('PASS configuration template UI create/edit/delete with plain text content');
   assert.deepEqual(errors,[]);

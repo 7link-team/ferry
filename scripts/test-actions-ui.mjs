@@ -27,7 +27,7 @@ try {
  const token=await post(root+'/runner-tokens',{host_id:host.id});
  runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',token.token,'--state-dir',join(work,'runner')],{stdio:'ignore',windowsHide:true});
  await eventually(async()=>((await(await context.request.get(origin+'/api'+root+'/hosts/'+host.id)).json()).state==='online'));
- const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
+ const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.stack??error.message));
  const yamlEditor=page.locator('.monaco-editor .view-lines');
  const readYaml=async()=>{await yamlEditor.click();await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('ControlOrMeta+C');return page.evaluate(()=>navigator.clipboard.readText());};
  const setYaml=async value=>{await yamlEditor.click();await page.keyboard.press('ControlOrMeta+A');await page.evaluate(text=>navigator.clipboard.writeText(text),value);await page.keyboard.press('ControlOrMeta+V');};
@@ -73,7 +73,7 @@ jobs:
  await page.getByRole('button',{name:'关闭配置面板',exact:true}).click();
  await page.getByRole('button',{name:'Compile',exact:true}).click();
  await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
- await page.getByLabel('任务执行器',{exact:true}).selectOption(`host:${host.id}`);
+ await page.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
  const grip=page.locator('.react-flow__node[data-id="build"] .job-drag svg');
  await grip.scrollIntoViewIfNeeded();
  const box=await grip.boundingBox();assert(box);
@@ -88,8 +88,8 @@ jobs:
  await canvasNode.press('ArrowRight');
  await eventually(async()=>(await nodeX())>beforeKeyboard);
  const keyboardX=await canvasNode.evaluate(node=>Number(node.style.transform.match(/translate\(([-\d.]+)px/)[1]));
- await page.locator('button[title="在此任务后添加串行任务"]').first().click();await page.getByLabel('任务名称',{exact:true}).fill('Serial successor');
- await page.locator('button[title="添加并行任务"]').last().click();await page.getByLabel('任务名称',{exact:true}).fill('Parallel sibling');
+ await page.locator('button[title="在此任务后添加串行任务"]').first().click();await page.getByLabel('任务名称',{exact:true}).fill('Serial successor');await page.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
+ await page.locator('button[title="添加并行任务"]').last().click();await page.getByLabel('任务名称',{exact:true}).fill('Parallel sibling');await page.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
  await eventually(async()=>await page.locator('.react-flow__edge').count()===2);
  await page.getByRole('checkbox',{name:'Compile edited',exact:true}).uncheck();await eventually(async()=>await page.locator('.react-flow__edge').count()===1);
  await page.getByRole('checkbox',{name:'Compile edited',exact:true}).check();await eventually(async()=>await page.locator('.react-flow__edge').count()===2);
@@ -99,9 +99,9 @@ jobs:
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
  const yaml=await readYaml();
  const jobs=parseDocument(yaml).toJS().jobs;assert.deepEqual(jobs.job_1.needs,['build']);assert.deepEqual(jobs.job_2.needs,['build']);
- assert(yaml.includes('# keep workflow comment')&&yaml.includes('ACTIONS_BROWSER_OK')&&yaml.includes('timeout-minutes: 2'));
+ for (const preserved of ['# keep workflow comment', 'ACTIONS_BROWSER_OK', 'timeout-minutes: 2']) assert(yaml.includes(preserved), `YAML lost ${preserved}: ${yaml}`);
  await setYaml('jobs:\n  a:\n    needs: b\n  b:\n    needs: a\n');
- assert((await page.getByRole('alert').allTextContents()).some(text=>text.includes('循环')));
+ await page.getByRole('alert').filter({hasText:'循环'}).waitFor();
  assert(await page.getByRole('button',{name:'保存',exact:true}).isDisabled());
  await setYaml(yaml);
  await eventually(async()=>await page.getByRole('button',{name:'保存',exact:true}).isEnabled());
@@ -117,25 +117,29 @@ jobs:
  assert.equal(pipeline.group_name,'Browser group');assert.equal(pipeline.tag_ids.length,1);
  assert.deepEqual(pipeline.executor_bindings.find(binding=>binding.job_id==='build'),{job_id:'build',target_kind:'host',target_ref:host.id,image:'host'});
  assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_1.needs,['build']);assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_2.needs,['build']);
- await page.getByRole('button',{name:'Compile edited',exact:true}).click();assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),`host:${host.id}`);
+ await page.getByRole('button',{name:'Compile edited',exact:true}).click();assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),host.id);
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:1000});await eventually(async()=>page.getByLabel('流水线画布',{exact:true}).evaluate(canvas=>{const bounds=canvas.getBoundingClientRect();return [...canvas.querySelectorAll('.react-flow__node')].every(node=>{const box=node.getBoundingClientRect();return box.left>=bounds.left-1&&box.right<=bounds.right+1;});}));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`canvas overflow at ${width}`);}
  await page.setViewportSize({width:1440,height:1000});
  await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
- await page.getByRole('button',{name:'触发',exact:true}).click();
- assert.equal((await(await context.request.get(origin+'/api'+root+'/pipeline-runs')).json()).total,0);
  await page.getByRole('button',{name:'触发',exact:true}).click();
  await page.waitForURL('**/actions/build/runs/*');
  const run={id:page.url().split('/').at(-1)};
 
  const result=await eventually(async()=>{const row=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();return ['queued','running','cancelling'].includes(row.state)?null:row});
- assert.equal(result.state,'succeeded',JSON.stringify(result));
- const logs=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id+'/logs')).json();assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
+ const logs=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id+'/logs')).json();
+ if(process.platform==='win32') {
+  assert.equal(result.state,'failed',JSON.stringify(result));
+  assert(logs.items.some(row=>row.chunk.includes('需要 Linux 或 macOS 执行器')));
+ } else {
+  assert.equal(result.state,'succeeded',JSON.stringify(result));
+  assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
+ }
  await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();
  assert(await page.getByLabel('任务名称',{exact:true}).isDisabled());
  assert.equal(await page.locator('button[title="在此任务后添加串行任务"],button[title="添加并行任务"]').count(),0);
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
- assert(await page.locator('.monaco-editor textarea.inputarea').evaluate(node=>node.readOnly));
+ const readonlyYaml=await readYaml();await setYaml('jobs: {}');assert.equal(await readYaml(),readonlyYaml);
  await page.getByRole('tab',{name:'可视化',exact:true}).click();
  const readonlyNode=page.locator('.react-flow__node[data-id="build"]');
  await readonlyNode.focus();
@@ -152,7 +156,7 @@ jobs:
  const members=await(await context.request.get(origin+'/api'+root+'/members')).json();
  const member=members.items.find(row=>row.email==='editor@example.invalid');assert(member);
  const assigned=await context.request.patch(origin+'/api'+root+'/members/'+member.id,{headers:{'X-Ferry-Request':'1'},data:{role_id:role.id,version:member.version}});assert(assigned.ok(),await assigned.text());
- const editor=await restricted.newPage();editor.on('pageerror',error=>errors.push(error.message));
+ const editor=await restricted.newPage();editor.on('pageerror',error=>errors.push(error.stack??error.message));
  await editor.goto(origin+'/actions/build/pipelines/'+pipeline.id+'/edit');
  await editor.getByLabel('流水线名称').fill('Restricted edit saved');
  await editor.getByRole('button',{name:'保存',exact:true}).click();

@@ -23,7 +23,7 @@ use sea_orm::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 const SPEC: Spec = Spec {
     search: &["name", "description"],
     filters: &[],
@@ -43,7 +43,7 @@ pub struct Body {
     version: i64,
 }
 fn to_json(row: &rows::Model) -> Value {
-    let mut value = json!({"id":Id::from(row.id),"name":row.name,"description":row.description,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at});
+    let mut value = json!({"id":Id::from(row.id),"name":row.name,"description":row.description,"position":row.position,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at});
     if row.kind == "environment" {
         value["target_kind"] = json!(row.target_kind);
         value["target_ref"] = json!(Id::from(row.target_ref));
@@ -120,12 +120,27 @@ async fn create_in(
     check(tx, scope, kind, &body).await?;
     let id = s.next_id()?;
     let now = db::now();
+    let position = if kind == "group" {
+        rows::Entity::find()
+            .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(rows::Column::Kind.eq("group"))
+            .all(tx)
+            .await?
+            .iter()
+            .map(|row| row.position)
+            .max()
+            .unwrap_or(-1)
+            + 1
+    } else {
+        0
+    };
     rows::Entity::insert(rows::ActiveModel {
         id: Set(id.into()),
         workspace_id: Set(scope.workspace_id.into()),
         kind: Set(kind.into()),
         name: Set(body.name.trim().into()),
         description: Set(body.description),
+        position: Set(position),
         target_kind: Set(if kind == "environment" {
             body.target_kind
         } else {
@@ -291,6 +306,60 @@ macro_rules! context_api {
 }
 context_api!(groups, "group", "pipeline-groups");
 context_api!(environments, "environment", "pipeline-environments");
+
+#[derive(Deserialize)]
+pub struct ReorderGroupsBody {
+    ids: Vec<String>,
+}
+
+pub async fn reorder_groups(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<ReorderGroupsBody>,
+) -> Result<Json<Value>> {
+    scope.require("pipeline-groups.update")?;
+    let ids = body
+        .ids
+        .iter()
+        .map(|id| Id::reference(id))
+        .collect::<Result<Vec<_>>>()?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let current = rows::Entity::find()
+        .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(rows::Column::Kind.eq("group"))
+        .all(&tx)
+        .await?;
+    let expected: HashSet<i64> = current.iter().map(|row| row.id).collect();
+    let actual: HashSet<i64> = ids.iter().map(|id| i64::from(*id)).collect();
+    if actual != expected || ids.len() != current.len() {
+        return Err(ApiError::bad("分组顺序已变化，请刷新后重试。"));
+    }
+    for (position, id) in ids.iter().enumerate() {
+        rows::Entity::update_many()
+            .col_expr(rows::Column::Position, Expr::value(position as i64))
+            .col_expr(
+                rows::Column::Version,
+                Expr::col(rows::Column::Version).add(1_i64),
+            )
+            .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(rows::Column::Kind.eq("group"))
+            .filter(rows::Column::Id.eq(*id))
+            .exec(&tx)
+            .await?;
+    }
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "reorder",
+        "pipeline-groups",
+        &Id::from(0),
+        json!({"ids": body.ids}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({"ok": true})))
+}
 
 pub async fn check_single(
     conn: &impl ConnectionTrait,

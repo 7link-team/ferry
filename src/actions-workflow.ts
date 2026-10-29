@@ -2,15 +2,15 @@ import { parseDocument, type Document } from "yaml";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
 export interface ActionJob { id: string; name: string; needs: string[]; runsOn: string[]; steps: ActionStep[]; raw: Record<string, unknown> }
-export const DEFAULT_ACTIONS = `name: Build
+export const DEFAULT_ACTIONS = `name: 新流水线
 on: workflow_dispatch
 jobs:
   build:
-    name: 构建
+    name: 任务 1
     runs-on: self-hosted
     timeout-minutes: 30
     steps:
-      - name: 构建
+      - name: 步骤1
         run: echo hello
 `;
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -75,13 +75,14 @@ export function addActionJob(source: string, checkout = false, placement?: { job
   const anchor = placement && jobs.find(job => job.id === placement.job);
   if (placement && !anchor) throw new Error("任务不存在。");
   const needs = anchor ? placement?.mode === "serial" ? [anchor.id] : anchor.needs : [];
-  document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "拉取代码", uses: "actions/checkout@v4" }] : []), { name: "执行命令", run: "echo hello" }] });
+  document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "步骤1", uses: "actions/checkout@v4" }] : []), { name: checkout ? "步骤2" : "步骤1", run: "echo hello" }] });
   return { source: serialize(document), id };
 }
 export function addActionStep(source: string, job: string, kind: "run" | "checkout" = "run"): string {
   const { document, jobs } = parseActions(source);
   const row = jobs.find(row => row.id === job); if (!row) throw new Error("任务不存在。");
-  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name: "拉取代码", uses: "actions/checkout@v4" } : { name: "执行命令", run: "echo hello" });
+  const name = `步骤${row.steps.length + 1}`;
+  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name, uses: "actions/checkout@v4" } : { name, run: "echo hello" });
   return serialize(document);
 }
 export function removeActionStep(source: string, job: string, index: number): string {

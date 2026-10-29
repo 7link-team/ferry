@@ -1,10 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ReactFlow, Background, Controls, Handle, Position, type NodeProps, type Node, type Connection, useReactFlow, useNodesInitialized } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ArrowRight, GitFork, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { ArrowRight, GitFork, GripVertical, Plus, Trash2, Unlink2, X } from "lucide-react";
 import { cn } from "cn";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { Option } from "./dsl";
 import { addActionJob, addActionStep, connectActionJobs, editActionJob, editActionStep, parseActions, removeActionJob, removeActionStep, type ActionJob } from "../actions-workflow";
 
@@ -18,8 +19,8 @@ function JobCard({ data }: NodeProps<JobNode>) {
     <div className="flex items-center gap-2 border-b p-3"><span className="job-drag flex size-5 shrink-0 cursor-grab items-center justify-center text-muted-foreground active:cursor-grabbing" title="拖动任务"><GripVertical className="size-4" /></span><button type="button" className="nodrag min-w-0 flex-1 text-left font-medium focus-visible:ring-2 focus-visible:ring-ring" onClick={() => data.select({ job: data.job.id })}>{data.job.name}</button>
       {!data.readOnly && <Button type="button" variant="ghost" size="icon" className="nodrag nopan size-7" aria-label={`删除任务 ${data.job.name}`} title="删除任务" disabled={!data.canDelete} onClick={event => { event.stopPropagation(); data.removeJob(data.job.id); }}><Trash2 className="size-4" /></Button>}
     </div>
-    <div className="space-y-1 p-2">{data.missingHost && <button type="button" className="nodrag w-full rounded px-2 py-1 text-left text-xs text-destructive" onClick={() => data.select({ job: data.job.id })}>请选择执行主机</button>}{data.job.steps.map((step, index) => <button key={index} type="button" className={`nodrag flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${data.selected?.job === data.job.id && data.selected?.step === index ? "bg-accent" : ""}`} onClick={() => data.select({ job: data.job.id, step: index })}><span className="text-xs text-muted-foreground">{index + 1}</span><span className="truncate">{step.name || step.uses || "执行命令"}</span></button>)}{!data.job.steps.length && <p className="p-2 text-xs text-muted-foreground">可复用工作流：在 YAML 中配置</p>}
-      {!data.readOnly && !data.job.raw.uses && <Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start" onClick={event => { event.stopPropagation(); data.addStep(data.job.id); }}><Plus className="size-4" />添加步骤</Button>}
+    <div className="space-y-1 p-2">{data.missingHost && <button type="button" className="nodrag w-full rounded px-2 py-1 text-left text-xs text-destructive" onClick={() => data.select({ job: data.job.id })}>请选择执行主机</button>}{data.job.steps.map((step, index) => <button key={index} type="button" className={`nodrag flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${data.selected?.job === data.job.id && data.selected?.step === index ? "bg-accent" : ""}`} onClick={() => data.select({ job: data.job.id, step: index })}><span className="text-xs text-muted-foreground">{index + 1}</span><span className="truncate">{step.name || step.uses || "执行命令"}</span></button>)}{data.job.raw["ferry-approval"] === true && <p className="p-2 text-xs text-muted-foreground">等待人工确认后继续</p>}{!data.job.steps.length && data.job.raw["ferry-approval"] !== true && <p className="p-2 text-xs text-muted-foreground">可复用工作流：在 YAML 中配置</p>}
+      {!data.readOnly && !data.job.raw.uses && data.job.raw["ferry-approval"] !== true && <Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start" onClick={event => { event.stopPropagation(); data.addStep(data.job.id); }}><Plus className="size-4" />添加步骤</Button>}
     </div>
     {!data.readOnly && <div className="flex gap-1 border-t p-1.5">
       <Button type="button" variant="ghost" size="sm" className="nodrag nopan flex-1" title="添加并行任务" onClick={event => { event.stopPropagation(); data.addJob(data.job.id, "parallel"); }}><GitFork className="size-4" />并行</Button>
@@ -64,10 +65,11 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [selectedEdge, setSelectedEdge] = useState<{ source: string; target: string }>();
   const [error, setError] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<{ action: string; target: string; run: () => void }>();
   const panel = useRef<HTMLElement>(null);
   const parsed = useMemo(() => { try { return { ...parseActions(source), error: "" }; } catch (cause) { return { jobs: [] as ActionJob[], error: cause instanceof Error ? cause.message : String(cause) }; } }, [source]);
   const bindings = (draft.executor_bindings ?? []) as Binding[];
-  const missingHosts = parsed.jobs.filter(job => !bindings.some(binding => binding.job_id === job.id && binding.target_ref && binding.target_ref !== "0"));
+  const missingHosts = parsed.jobs.filter(job => job.raw["ferry-approval"] !== true && !bindings.some(binding => binding.job_id === job.id && binding.target_ref && binding.target_ref !== "0"));
   useEffect(() => { onValidityChange(!!parsed.error || missingHosts.length > 0); return () => onValidityChange(false); }, [parsed.error, missingHosts.length, onValidityChange]);
   useEffect(() => { panel.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [selection?.job, selection?.step]);
   const layout = (draft.graph_layout ?? {}) as Record<string, { x: number; y: number }>;
@@ -107,14 +109,17 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
   const edges = parsed.jobs.flatMap(job => job.needs.map(id => ({ id: `${id}->${job.id}`, source: id, target: job.id })));
   const job = parsed.jobs.find(row => row.id === selection?.job);
   const step = selection?.step === undefined ? undefined : job?.steps[selection.step];
+  const parameters = step?.with && typeof step.with === "object" && !Array.isArray(step.with) ? step.with as Record<string, unknown> : {};
   const binding = bindings.find(row => row.job_id === job?.id);
+  const targetKind = binding?.target_kind === "host-group" ? "host-group" : "host";
+  const targetOptions = options.filter(option => option.value.startsWith(`${targetKind}:`));
   function change(transform: () => string) {
     try {
       if (readOnly) return;
       const definition = transform();
       const nextJobs = parseActions(definition).jobs;
       const ids = new Set(nextJobs.map(job => job.id));
-      onChange({ definition, checkout_bindings: checkoutBindings.filter(binding => nextJobs.some(job => job.id === binding.job_id && job.steps.some(step => step.id === binding.step_id && /^actions\/checkout@/.test(String(step.uses ?? ""))))), executor_bindings: bindings.filter(binding => ids.has(binding.job_id)), graph_layout: Object.fromEntries(Object.entries(layout).filter(([id]) => ids.has(id))) }); setError("");
+      onChange({ definition, checkout_bindings: checkoutBindings.filter(binding => nextJobs.some(job => job.id === binding.job_id && job.steps.some(step => step.id === binding.step_id && /^actions\/checkout@/.test(String(step.uses ?? ""))))), executor_bindings: bindings.filter(binding => ids.has(binding.job_id) && nextJobs.find(job => job.id === binding.job_id)?.raw["ferry-approval"] !== true), graph_layout: Object.fromEntries(Object.entries(layout).filter(([id]) => ids.has(id))) }); setError("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }
   function update(values: Record<string, unknown>) {
@@ -135,8 +140,11 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
     } catch (cause) { setError(String(cause)); }
   }
   function removeJob(id: string) {
-    change(() => removeActionJob(source, id));
-    setSelection(undefined);
+    const target = parsed.jobs.find(row => row.id === id)?.name ?? id;
+    setPendingDelete({ action: "删除任务", target, run: () => {
+      change(() => removeActionJob(source, id));
+      setSelection(undefined);
+    } });
   }
   function addStep(id: string) {
     if (readOnly) return;
@@ -150,9 +158,16 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
   }
   const onConnect = (edge: Connection) => { if (edge.source && edge.target) change(() => connectActionJobs(source, edge.source!, edge.target!)); };
   return <div className={cn("min-w-0 space-y-3", fillHeight && "flex min-h-0 flex-1 flex-col")}>
+    {pendingDelete && <DeleteConfirmDialog action={pendingDelete.action} target={pendingDelete.target} description="将从当前流水线草稿移除，保存流水线后生效。" onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
     {mode === undefined && <div className="flex gap-1" role="tablist" aria-label="流水线编辑模式">{([["visual", "可视化"], ["yaml", "YAML"]] as const).map(([key, title]) => <Button key={key} type="button" role="tab" aria-selected={tab === key} variant={tab === key ? "secondary" : "ghost"} onClick={() => setTab(key)}>{title}</Button>)}</div>}
     {tab === "yaml" && missingHosts.length > 0 && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">未选择执行主机：{missingHosts.map(row => <Button key={row.id} type="button" variant="outline" size="sm" onClick={() => { setSelection({ job: row.id }); setTab("visual"); }}>{row.name}</Button>)}</div>}
-    {selectedEdge && !readOnly && <Button type="button" variant="outline" onClick={() => { change(() => editActionJob(source, selectedEdge.target, { needs: parsed.jobs.find(row => row.id === selectedEdge.target)!.needs.filter(id => id !== selectedEdge.source) })); setSelectedEdge(undefined); }}>删除依赖连接</Button>}
+    {selectedEdge && !readOnly && <Button type="button" variant="outline" size="icon" aria-label="删除依赖连接" title="删除依赖连接" onClick={() => {
+      const edge = selectedEdge;
+      setPendingDelete({ action: "删除依赖连接", target: `${parsed.jobs.find(row => row.id === edge.source)?.name ?? edge.source} → ${parsed.jobs.find(row => row.id === edge.target)?.name ?? edge.target}`, run: () => {
+        change(() => editActionJob(source, edge.target, { needs: parsed.jobs.find(row => row.id === edge.target)!.needs.filter(id => id !== edge.source) }));
+        setSelectedEdge(undefined);
+      } });
+    }}><Unlink2 className="size-4" /></Button>}
     {tab === "yaml" ? <Suspense fallback={<div role="status" className="grid h-[520px] place-items-center text-sm text-muted-foreground">正在加载 YAML 编辑器…</div>}><YamlEditor value={source} readOnly={readOnly} fillHeight={fillHeight} onChange={definition => {
       try { parseActions(definition); } catch { onChange({ definition }); return; }
       change(() => definition);
@@ -176,23 +191,38 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
         <div className="flex items-center justify-between"><h3 className="font-semibold">{step ? "步骤配置" : "任务配置"}</h3><Button type="button" variant="ghost" size="icon" aria-label="关闭配置面板" onClick={() => setSelection(undefined)}><X className="size-4" /></Button></div>
         <label className="block space-y-2"><span className="text-sm">名称</span><Input aria-label={step ? "步骤名称" : "任务名称"} value={String(step?.name ?? (!step ? job.raw.name : "") ?? "")} disabled={readOnly} onChange={e => update({ name: e.target.value })} /></label>
         {!step ? <>
-          <p className="text-xs text-muted-foreground">任务标识：{job.id}。同一任务内的步骤共享执行器和工作目录。</p>
-          <label className="block space-y-2"><span className="text-sm">执行主机</span><select aria-label="任务执行器" aria-invalid={!binding?.target_ref} className={cn(inputClass, !binding?.target_ref && "border-destructive")} disabled={readOnly} value={binding?.target_ref ? `${binding.target_kind}:${binding.target_ref}` : ""} onChange={e => { const [kind, ref] = e.target.value.split(":"); updateBinding({ target_kind: kind || "", target_ref: ref || "" }); }}><option value="" disabled>请选择执行主机</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>{!binding?.target_ref && <span className="text-xs text-destructive">保存前必须为此任务选择执行主机</span>}</label>
+          <label className="block space-y-2"><span className="text-sm">任务类型</span><select aria-label="任务类型" className={inputClass} disabled={readOnly} value={job.raw["ferry-approval"] === true ? "approval" : "actions"} onChange={e => {
+            const manual = e.target.value === "approval";
+            change(() => editActionJob(source, job.id, manual ? { "ferry-approval": true, "runs-on": null, steps: null, "timeout-minutes": null } : { "ferry-approval": null, "runs-on": "self-hosted", steps: [{ name: "步骤1", run: "echo hello" }] }));
+          }}><option value="actions">执行任务</option><option value="approval">人工卡点</option></select></label>
+          {job.raw["ferry-approval"] !== true && <><p className="text-xs text-muted-foreground">任务标识：{job.id}。同一任务内的步骤共享执行器和工作目录。</p>
+          <label className="block space-y-2"><span className="text-sm">执行目标类型</span><select aria-label="执行目标类型" className={inputClass} disabled={readOnly} value={targetKind} onChange={e => updateBinding({ target_kind: e.target.value, target_ref: "" })}><option value="host">主机</option><option value="host-group">主机组</option></select></label>
+          <label className="block space-y-2"><span className="text-sm">{targetKind === "host" ? "执行主机" : "执行主机组"}</span><select aria-label="任务执行器" aria-invalid={!binding?.target_ref} className={cn(inputClass, !binding?.target_ref && "border-destructive")} disabled={readOnly} value={binding?.target_kind === targetKind ? binding.target_ref : ""} onChange={e => updateBinding({ target_kind: targetKind, target_ref: e.target.value })}><option value="" disabled>请选择{targetKind === "host" ? "主机" : "主机组"}</option>{targetOptions.map(option => <option key={option.value} value={option.value.slice(targetKind.length + 1)}>{option.label.replace(/^(主机|主机组)\s*[·路]\s*/, "")}</option>)}</select>{!binding?.target_ref && <span className="text-xs text-destructive">保存前必须为此任务选择执行目标</span>}</label>
           <label className="block space-y-2"><span className="text-sm">运行方式</span><select aria-label="任务运行方式" className={inputClass} disabled={readOnly} value={binding?.image && binding.image !== "host" ? "container" : "host"} onChange={e => updateBinding({ image: e.target.value === "host" ? "host" : "node:20-bookworm" })}><option value="host">直接在执行主机运行</option><option value="container">在 Docker 容器运行</option></select></label>
           {binding?.image && binding.image !== "host" && <label className="block space-y-2"><span className="text-sm">执行镜像</span><Input aria-label="执行镜像" value={binding.image} disabled={readOnly} onChange={e => updateBinding({ image: e.target.value })} /></label>}
           <label className="block space-y-2"><span className="text-sm">执行器标签（runs-on）</span><Input value={job.runsOn.join(", ")} disabled={readOnly} onChange={e => update({ "runs-on": e.target.value.split(",").map(value => value.trim()).filter(Boolean) })} /></label>
+          </>}
           <fieldset className="space-y-2"><legend className="text-sm">前置任务</legend>{parsed.jobs.filter(row => row.id !== job.id).map(row => <label key={row.id} className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={job.needs.includes(row.id)} disabled={readOnly} onChange={e => update({ needs: e.target.checked ? [...job.needs, row.id] : job.needs.filter(id => id !== row.id) })} />{row.name}</label>)}<p className="text-xs text-muted-foreground">全部前置任务完成后执行；取消勾选可删除连接。</p></fieldset>
         </> : <>
           <label className="block space-y-2"><span className="text-sm">步骤类型</span><select aria-label="步骤类型" className={inputClass} value={/^actions\/checkout@/.test(String(step.uses ?? "")) ? "checkout" : step.uses ? "uses" : "run"} disabled={readOnly} onChange={e => update(e.target.value !== "run" ? { uses: e.target.value === "checkout" ? "actions/checkout@v4" : "actions/setup-node@v4", run: null, shell: null } : { run: "echo hello", uses: null, with: null })}><option value="run">执行命令</option><option value="checkout">拉取代码</option><option value="uses">使用 Action</option></select></label>
           {/^actions\/checkout@/.test(String(step.uses ?? "")) && selection?.step !== undefined && renderCheckout?.(job.id, selection.step)}
-          {step.uses ? <label className="block space-y-2"><span className="text-sm">Action</span><Input aria-label="Action 引用" value={step.uses} disabled={readOnly} onChange={e => update({ uses: e.target.value })} /><span className="text-xs text-muted-foreground">例如 actions/checkout@v4；高级 with 参数在 YAML 中编辑。</span></label> : <>
+          {step.uses ? <><label className="block space-y-2"><span className="text-sm">Action</span><Input aria-label="Action 引用" value={step.uses} disabled={readOnly} onChange={e => update({ uses: e.target.value })} /><span className="text-xs text-muted-foreground">例如 actions/setup-node@v4</span></label>
+            <div className="space-y-2"><div className="flex items-center justify-between"><span className="text-sm">参数 (with)</span>{!readOnly && <Button type="button" variant="ghost" size="sm" onClick={() => { let index = 1; while (`input_${index}` in parameters) index++; update({ with: { ...parameters, [`input_${index}`]: "" } }); }}><Plus className="size-4" />添加参数</Button>}</div>
+              {Object.entries(parameters).map(([key, value], index) => <div key={index} className="flex items-center gap-2"><Input aria-label="参数名" className="min-w-0 flex-1" value={key} disabled={readOnly} onChange={e => { const next = e.target.value.trim(); if (!next || (next !== key && next in parameters)) return; update({ with: Object.fromEntries(Object.entries(parameters).map(([name, item]) => [name === key ? next : name, item])) }); }} /><Input aria-label={`${key} 参数值`} className="min-w-0 flex-1" value={String(value ?? "")} disabled={readOnly} onChange={e => update({ with: { ...parameters, [key]: e.target.value } })} />{!readOnly && <Button type="button" variant="ghost" size="icon" aria-label={`删除参数 ${key}`} title="删除参数" onClick={() => setPendingDelete({ action: "删除参数", target: key, run: () => { const next = { ...parameters }; delete next[key]; update({ with: Object.keys(next).length ? next : null }); } })}><Trash2 className="size-4" /></Button>}</div>)}
+            </div></> : <>
             <label className="block space-y-2"><span className="text-sm">执行命令</span><textarea aria-label="执行命令" className={`${inputClass} min-h-36 font-mono`} value={step.run ?? ""} readOnly={readOnly} onChange={e => update({ run: e.target.value })} /></label>
             <label className="block space-y-2"><span className="text-sm">Shell</span><Input aria-label="Shell" placeholder="使用默认 Shell" value={String(step.shell ?? "")} disabled={readOnly} onChange={e => update({ shell: e.target.value || null })} /></label>
             <label className="block space-y-2"><span className="text-sm">工作目录</span><Input value={String(step["working-directory"] ?? "")} disabled={readOnly} placeholder="默认仓库根目录" onChange={e => update({ "working-directory": e.target.value || null })} /></label>
           </>}
         </>}
-        <label className="block space-y-2"><span className="text-sm">超时（分钟）</span><Input aria-label="超时（分钟）" type="text" inputMode="numeric" placeholder={step ? "继承任务剩余时间" : "默认 30 分钟"} value={String((step ?? job.raw)["timeout-minutes"] ?? "")} disabled={readOnly} onChange={e => update({ "timeout-minutes": e.target.value ? (/^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value) : null })} /></label>
-        {!readOnly && step && selection?.step !== undefined && <Button type="button" variant="destructive" onClick={() => { change(() => removeActionStep(source, job.id, selection.step!)); setSelection(undefined); }}>删除步骤</Button>}
+        {(step || job.raw["ferry-approval"] !== true) && <label className="block space-y-2"><span className="text-sm">超时（分钟）</span><Input aria-label="超时（分钟）" type="text" inputMode="numeric" placeholder={step ? "继承任务剩余时间" : "默认 30 分钟"} value={String((step ?? job.raw)["timeout-minutes"] ?? "")} disabled={readOnly} onChange={e => update({ "timeout-minutes": e.target.value ? (/^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value) : null })} /></label>}
+        {!readOnly && step && selection?.step !== undefined && <Button type="button" variant="destructive" size="icon" aria-label={`删除步骤 ${step.name || step.uses || selection.step + 1}`} title="删除步骤" onClick={() => {
+          const jobId = job.id, index = selection.step!;
+          setPendingDelete({ action: "删除步骤", target: `${job.name} / ${step.name || step.uses || index + 1}`, run: () => {
+            change(() => removeActionStep(source, jobId, index));
+            setSelection(undefined);
+          } });
+        }}><Trash2 className="size-4" /></Button>}
       </aside>}
     </div>}
     {(parsed.error || error) && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{parsed.error || error}</p>}

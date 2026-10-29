@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { href, parse } from "./router";
 
 it("round trips the standalone host workspace route", () => {
-  const path = "/ops/host/hosts/123/workspace";
+  const path = "/ops/host/nodes/123/workspace";
   expect(parse(path)).toMatchObject({ workspace: "ops", group: "host", item: "hosts", id: "123", mode: "workspace" });
   expect(href(parse(path), {})).toBe(path);
+  expect(parse("/ops/host/hosts/123/workspace")).toMatchObject(parse(path));
+  expect(parse("/ops/infrastructure/hosts/123/workspace")).toMatchObject(parse(path));
 });
 
 describe("platform route boundary", () => {

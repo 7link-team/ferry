@@ -32,15 +32,16 @@ export function parse(pathname = location.pathname): Route {
       mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
   }
   const fallback = nav[0]!;
-  const resolved = nav.find((g) => g.key === group) ?? fallback;
+  const resolved = nav.find((g) => g.key === (group === "infrastructure" ? "host" : group)) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
   const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
+    resolved.key === "host" && item === "nodes" ? "hosts" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
   const detail = pipelineGroups ? fourth : third;
   const action = pipelineGroups ? fifth : fourth;
   const mode = legacyRepository ? "list" :
-    detail === "new" ? "new" : detail ? (group === "host" && item === "hosts" && action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
+    detail === "new" ? "new" : detail ? (resolved.key === "host" && resolvedItem === "hosts" && action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
   return {
     workspace,
     group: resolved.key,
@@ -59,7 +60,8 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const search = params.toString();
   const base = r.workspace === "_platform" ? `/_platform/${r.item}` :
-    r.group === "build" && r.item === "pipeline-groups" ? `/${r.workspace}/build/pipelines/groups` : `/${r.workspace}/${r.group}/${r.item}`;
+    r.group === "build" && r.item === "pipeline-groups" ? `/${r.workspace}/build/pipelines/groups` :
+    r.group === "host" && r.item === "hosts" ? `/${r.workspace}/host/nodes` : `/${r.workspace}/${r.group}/${r.item}`;
   return `${base}${tail}${search ? `?${search}` : ""}`;
 }
 

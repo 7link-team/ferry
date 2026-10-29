@@ -202,6 +202,42 @@ pub async fn list_dir(
     Ok(Json(json!({ "path": path, "items": entries })))
 }
 
+#[derive(Deserialize)]
+pub struct CreateEntryBody {
+    path: String,
+    kind: String,
+}
+
+pub async fn create_entry(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    Json(body): Json<CreateEntryBody>,
+) -> Result<StatusCode> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
+    scope.require("hosts.files")?;
+    let path = channel::check_path(&body.path)?;
+    if path == "/" || path.ends_with("/.") {
+        return Err(ApiError::bad("请填写文件或文件夹名称。"));
+    }
+    let channel = open(&s, &scope.workspace_id, &id).await?;
+    match body.kind.as_str() {
+        "file" => channel.create_file(path).await?,
+        "directory" => channel.create_dir(path).await?,
+        _ => return Err(ApiError::bad("类型必须是文件或文件夹。")),
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "file-create",
+        "hosts",
+        &id,
+        json!({ "path": path, "kind": body.kind }),
+    )
+    .await?;
+    Ok(StatusCode::CREATED)
+}
+
 pub async fn download(
     State(s): State<AppState>,
     scope: Scope,

@@ -46,7 +46,7 @@ function Harness({ source = fixture, readOnly = false, mode = "compose" }) {
   );
 }
 const button = (name: string, region: ParentNode = host) =>
-  [...region.querySelectorAll("button")].find((b) => b.textContent === name)!;
+  [...region.querySelectorAll("button")].find((b) => b.textContent === name || b.getAttribute("aria-label")?.startsWith(name))!;
 const input = (name: string, region: ParentNode = host) =>
   [...region.querySelectorAll("label")]
     .find((l) => l.firstChild?.textContent === name)!

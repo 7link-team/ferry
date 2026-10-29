@@ -28,7 +28,7 @@ try {
   vite = await viteServer({ server: { host: '127.0.0.1', port: 0, proxy: { '/api': backend } } });
   await vite.listen();
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const errors = [];
@@ -70,6 +70,17 @@ try {
   await seed(0);
   await openList('/layout/build/credentials');
   fills(await geometry(), 'single row');
+  await page.locator('tbody tr').first().locator('td').nth(1).click();
+  assert.match(page.url(), /\/layout\/build\/credentials\/\d+$/);
+  await page.getByText('Credential 000', { exact: true }).waitFor();
+  await openList('/layout/build/credentials');
+  await page.locator('tbody tr').first().focus();
+  await page.keyboard.press('Enter');
+  assert.match(page.url(), /\/layout\/build\/credentials\/\d+$/);
+  await openList('/layout/build/credentials');
+  await page.locator('tbody tr').first().getByRole('link', { name: '编辑' }).click();
+  assert.match(page.url(), /\/layout\/build\/credentials\/\d+\/edit$/);
+  await openList('/layout/build/credentials');
   console.log('PASS single row keeps footer at bottom');
   for (let i = 1; i < 65; i++) await seed(i);
   for (const viewport of [{ width: 1280, height: 800 }, { width: 900, height: 600 }, { width: 390, height: 844 }]) {

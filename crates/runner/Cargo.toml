@@ -26,7 +26,7 @@ futures-util = "0.3"
 # that speaks ConPTY on Windows as well as a unix pty.
 portable-pty = "0.9"
 # Load, memory and disk without three per-OS parsers in this crate.
-sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk", "network"] }
 local-ip-address = "0.6.13"
 
 [target.'cfg(unix)'.dependencies]

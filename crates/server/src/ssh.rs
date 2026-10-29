@@ -19,6 +19,7 @@ use crate::{
 };
 use axum::http::StatusCode;
 use bytes::Bytes;
+use ferry_protocol::{DiskUsage, HostMonitor, NetworkUsage};
 use futures::StreamExt;
 use russh::{
     Channel, ChannelMsg,
@@ -147,7 +148,58 @@ impl client::Handler for Tofu {
 /// 「永远接受」，所以这一步和建立连接绑在一起，写不成功就不给连接。
 pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
     let credential = Credential::load(s, &host.workspace_id, &host.credential_id).await?;
-    let channel = SshChannel::open(host, credential).await?;
+    let target = hosts::Entity::find_by_id(i64::from(host.id))
+        .filter(hosts::Column::WorkspaceId.eq(host.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let channel = if target.jump_host_id == 0 {
+        SshChannel::open(host, credential).await?
+    } else {
+        let jump = hosts::Entity::find_by_id(target.jump_host_id)
+            .filter(hosts::Column::WorkspaceId.eq(host.workspace_id))
+            .filter(hosts::Column::Connection.eq("ssh"))
+            .filter(hosts::Column::JumpHostId.eq(0))
+            .one(&s.db)
+            .await?
+            .ok_or_else(|| ApiError::bad("跳板主机不存在或不再可直连。"))?;
+        let jump_host = Host {
+            id: Id::from(jump.id),
+            workspace_id: host.workspace_id,
+            credential_id: Id::from(jump.credential_id),
+            name: jump.name,
+            address: jump.address,
+            port: jump.port as u16,
+            username: jump.username,
+            connection: jump.connection,
+            host_key: jump.host_key,
+        };
+        let jump_credential =
+            Credential::load(s, &host.workspace_id, &jump_host.credential_id).await?;
+        let jump_channel = SshChannel::open(&jump_host, jump_credential).await?;
+        record_fingerprint(s, &jump_host, &jump_channel).await?;
+        let stream = jump_channel
+            .session
+            .channel_open_direct_tcpip(host.address.clone(), u32::from(host.port), "127.0.0.1", 0)
+            .await
+            .map_err(|error| {
+                ApiError(
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "跳板主机无法连接目标 {}:{}：{error}",
+                        host.address, host.port
+                    ),
+                )
+            })?
+            .into_stream();
+        SshChannel::connect_stream(host, credential, stream, Some(jump_channel.session.clone()))
+            .await?
+    };
+    record_fingerprint(s, host, &channel).await?;
+    Ok(Box::new(channel))
+}
+
+async fn record_fingerprint(s: &AppState, host: &Host, channel: &SshChannel) -> Result<()> {
     if let Some(fingerprint) = &channel.learned_host_key {
         // 只在仍然为空时写：两个并发的首次连接不会互相覆盖。也不动 version，
         // 这不是操作员的编辑，不该让别人正在填的表单失效。
@@ -158,12 +210,13 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
             .exec(&s.db)
             .await?;
     }
-    Ok(Box::new(channel))
+    Ok(())
 }
 
 pub struct SshChannel {
     /// `Arc` 是为了让 `read_file` 返回的流能把连接一起带走。
     session: Arc<Handle<Tofu>>,
+    jump: Option<Arc<Handle<Tofu>>>,
     /// 只有首次连接（`hosts.host_key` 为空）才有值：调用方要把它写回
     /// `hosts.host_key`，之后的连接就靠它防中间人。这里不碰数据库。
     pub learned_host_key: Option<String>,
@@ -180,6 +233,19 @@ impl SshChannel {
                 .map_err(|_| unreachable(&address, "连接超时"))?
                 .map_err(|error| unreachable(&address, &error.to_string()))?;
 
+        Self::connect_stream(host, credential, stream, None).await
+    }
+
+    async fn connect_stream<S>(
+        host: &Host,
+        credential: Credential,
+        stream: S,
+        jump: Option<Arc<Handle<Tofu>>>,
+    ) -> Result<Self>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let address = format!("{}:{}", host.address, host.port);
         let config = Arc::new(client::Config {
             keepalive_interval: Some(KEEPALIVE),
             ..Default::default()
@@ -261,6 +327,7 @@ impl SshChannel {
         let fingerprint = seen.lock().expect("fingerprint lock").clone();
         Ok(Self {
             session: Arc::new(session),
+            jump,
             learned_host_key: host.host_key.is_empty().then_some(fingerprint).flatten(),
         })
     }
@@ -298,8 +365,91 @@ impl SshChannel {
     }
 }
 
+fn parse_linux_monitor(output: &str) -> Result<HostMonitor> {
+    let mut cpu = Vec::new();
+    let mut memory = None;
+    let mut load1 = 0.0;
+    let mut disks = Vec::new();
+    let mut networks = Vec::new();
+    for line in output.lines() {
+        let parts: Vec<_> = line.split_whitespace().collect();
+        match parts.as_slice() {
+            ["cpu", values @ ..] if cpu.len() < 2 && values.len() >= 5 => {
+                let values: Vec<u64> = values
+                    .iter()
+                    .map(|v| v.parse())
+                    .collect::<std::result::Result<_, _>>()
+                    .map_err(|_| ApiError::bad("无法读取主机 CPU 数据。"))?;
+                cpu.push((
+                    values.iter().sum::<u64>(),
+                    values[3] + values.get(4).copied().unwrap_or(0),
+                ));
+            }
+            ["mem", used, total] => memory = Some((used.parse::<u64>(), total.parse::<u64>())),
+            ["load", value] => load1 = value.parse().unwrap_or(0.0),
+            ["disk", name, mount, total, used] => {
+                if let (Ok(total), Ok(used)) = (total.parse(), used.parse()) {
+                    disks.push(DiskUsage {
+                        name: (*name).into(),
+                        mount: (*mount).into(),
+                        total,
+                        used,
+                    });
+                }
+            }
+            ["net", name, received, transmitted] => {
+                if let (Ok(received), Ok(transmitted)) = (received.parse(), transmitted.parse()) {
+                    networks.push(NetworkUsage {
+                        name: (*name).into(),
+                        received,
+                        transmitted,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let (Some((Ok(memory_used), Ok(memory_total))), [first, second]) = (memory, cpu.as_slice())
+    else {
+        return Err(ApiError::bad("无法读取主机 CPU 或内存数据。"));
+    };
+    let elapsed = second.0.saturating_sub(first.0);
+    let idle = second.1.saturating_sub(first.1);
+    Ok(HostMonitor {
+        cpu_percent: if elapsed == 0 {
+            0.0
+        } else {
+            100.0 * (elapsed.saturating_sub(idle)) as f64 / elapsed as f64
+        },
+        load1,
+        memory_used,
+        memory_total,
+        disks,
+        networks,
+    })
+}
+
 #[async_trait::async_trait]
 impl HostChannel for SshChannel {
+    async fn monitor(&self) -> Result<HostMonitor> {
+        const COMMAND: &str = "head -n 1 /proc/stat; sleep 1; head -n 1 /proc/stat; awk '{print \"load\", $1}' /proc/loadavg; awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2} END {printf \"mem %.0f %.0f\\n\", (total-available)*1024, total*1024}' /proc/meminfo; df -P -B1 | awk 'NR>1 && $1 ~ /^\\/dev\\// {printf \"disk %s %s %s %s\\n\", $1, $6, $2, $3}'; for item in /sys/class/net/*; do test -e \"$item/device\" || continue; name=${item##*/}; printf 'net %s %s %s\\n' \"$name\" \"$(cat \"$item/statistics/rx_bytes\")\" \"$(cat \"$item/statistics/tx_bytes\")\"; done";
+        let output = self.exec(COMMAND, Duration::from_secs(10)).await?;
+        if output.code == 0 {
+            if let Ok(metrics) = parse_linux_monitor(&output.stdout) {
+                return Ok(metrics);
+            }
+        }
+        const WINDOWS: &str = "powershell.exe -NoProfile -Command \"$cpu=(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average; $os=Get-CimInstance Win32_OperatingSystem; $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{name=$_.DeviceID;mount=$_.DeviceID;total=[uint64]$_.Size;used=[uint64]($_.Size-$_.FreeSpace)} }); $networks=@(Get-NetAdapter -Physical | Get-NetAdapterStatistics | ForEach-Object { @{name=$_.Name;received=[uint64]$_.ReceivedBytes;transmitted=[uint64]$_.SentBytes} }); @{cpu_percent=[double]$cpu;load1=0.0;memory_used=[uint64](($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)*1024);memory_total=[uint64]($os.TotalVisibleMemorySize*1024);disks=$disks;networks=$networks} | ConvertTo-Json -Compress -Depth 4\"";
+        let output = self.exec(WINDOWS, Duration::from_secs(10)).await?;
+        if output.code != 0 {
+            return Err(ApiError::bad(
+                "主机监控采集失败，请检查 Linux /proc 或 Windows PowerShell 是否可用。",
+            ));
+        }
+        serde_json::from_str(&output.stdout)
+            .map_err(|_| ApiError::bad("无法解析 Windows 主机监控数据。"))
+    }
+
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output> {
         let mut channel = self.session_channel().await?;
         channel.exec(true, command).await.map_err(|error| {
@@ -410,6 +560,7 @@ impl HostChannel for SshChannel {
         Ok(Box::new(SshPty {
             channel,
             _session: self.session.clone(),
+            _jump: self.jump.clone(),
         }))
     }
 
@@ -440,6 +591,30 @@ impl HostChannel for SshChannel {
         Ok(entries)
     }
 
+    async fn create_file(&self, path: &str) -> Result<()> {
+        let sftp = self.sftp().await?;
+        let file = sftp
+            .open_with_flags_and_attributes(
+                path,
+                OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+                FileAttributes {
+                    permissions: Some(0o644),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(|error| sftp_failed(path, error))?;
+        file.close().await.map_err(ApiError::from)
+    }
+
+    async fn create_dir(&self, path: &str) -> Result<()> {
+        self.sftp()
+            .await?
+            .create_dir(path)
+            .await
+            .map_err(|error| sftp_failed(path, error))
+    }
+
     async fn read_file(&self, path: &str) -> Result<(FileMeta, ByteStream)> {
         let sftp = self.sftp().await?;
         let meta = sftp
@@ -458,15 +633,15 @@ impl HostChannel for SshChannel {
         // 一 drop 整条 SSH 连接就断，所以 session 和 sftp 会话都搬进状态里。
         // 每次只持有一块，所以 2 GB 的文件也只占一块的内存。
         let stream = futures::stream::try_unfold(
-            (file, sftp, self.session.clone()),
-            |(mut file, sftp, session)| async move {
+            (file, sftp, self.session.clone(), self.jump.clone()),
+            |(mut file, sftp, session, jump)| async move {
                 let mut buffer = vec![0u8; CHUNK];
                 let filled = file.read(&mut buffer).await?;
                 if filled == 0 {
                     return Ok(None);
                 }
                 buffer.truncate(filled);
-                Ok(Some((Bytes::from(buffer), (file, sftp, session))))
+                Ok(Some((Bytes::from(buffer), (file, sftp, session, jump))))
             },
         );
         Ok((
@@ -521,6 +696,7 @@ struct SshPty {
     channel: Channel<client::Msg>,
     /// 终端活着的时候连接不能断。
     _session: Arc<Handle<Tofu>>,
+    _jump: Option<Arc<Handle<Tofu>>>,
 }
 
 #[async_trait::async_trait]
@@ -651,6 +827,17 @@ fn sftp_failed(path: &str, error: SftpError) -> ApiError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn linux_monitor_reads_cpu_memory_disks_and_nics() {
+        let output = "cpu 100 0 40 860 0\ncpu 130 0 50 920 0\nmem 1073741824 2147483648\ndisk /dev/sda1 / 100000 25000\nnet eth0 1234 5678\n";
+        let sample = parse_linux_monitor(output).unwrap();
+        assert!((sample.cpu_percent - 40.0).abs() < 0.01);
+        assert_eq!(sample.memory_used, 1_073_741_824);
+        assert_eq!(sample.disks[0].mount, "/");
+        assert_eq!(sample.networks[0].received, 1234);
+        assert!(parse_linux_monitor("cpu 1 2 3 4\n").is_err());
+    }
+
     const FINGERPRINT: &str = "SHA256:7xEJ/p1S2KLvQHGC3kqKtJHQ1t6Dh6Y9DVKxwKk0mXo";
 
     #[test]
@@ -750,6 +937,55 @@ mod tests {
         SshChannel::open(&host, Credential::Password(password))
             .await
             .expect("连接真机")
+    }
+
+    #[tokio::test]
+    async fn live_jump_host_tunnels_ssh_and_keeps_download_alive() {
+        let Some((jump_host, password)) = live_or_fail() else {
+            return;
+        };
+        let jump = SshChannel::open(&jump_host, Credential::Password(password.clone()))
+            .await
+            .unwrap();
+        let target = Host {
+            address: "127.0.0.1".into(),
+            port: 22,
+            ..jump_host
+        };
+        let stream = jump
+            .session
+            .channel_open_direct_tcpip("127.0.0.1", 22, "127.0.0.1", 0)
+            .await
+            .unwrap()
+            .into_stream();
+        let target = SshChannel::connect_stream(
+            &target,
+            Credential::Password(password),
+            stream,
+            Some(jump.session.clone()),
+        )
+        .await
+        .unwrap();
+        let output = target
+            .exec("printf jump-ok", Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert_eq!(output.stdout, "jump-ok");
+        target
+            .exec(
+                "printf jump-file > /tmp/ferry-jump-test.txt",
+                Duration::from_secs(10),
+            )
+            .await
+            .unwrap();
+        let (_, mut download) = target.read_file("/tmp/ferry-jump-test.txt").await.unwrap();
+        drop(target);
+        drop(jump);
+        let mut bytes = Vec::new();
+        while let Some(chunk) = download.next().await {
+            bytes.extend_from_slice(&chunk.unwrap());
+        }
+        assert_eq!(bytes, b"jump-file");
     }
 
     #[tokio::test]
@@ -929,6 +1165,24 @@ mod tests {
         assert_eq!(plain.size, 5);
         assert_eq!(plain.mode, 0o600);
         assert!(plain.modified_at > 1_700_000_000_000);
+
+        ssh.create_dir("/tmp/ferry-list/created").await.unwrap();
+        ssh.create_file("/tmp/ferry-list/created/empty.txt")
+            .await
+            .unwrap();
+        assert!(
+            ssh.create_file("/tmp/ferry-list/created/empty.txt")
+                .await
+                .is_err()
+        );
+        let created = ssh.list_dir("/tmp/ferry-list/created").await.unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].name, "empty.txt");
+        assert_eq!(created[0].size, 0);
+        ssh.delete_file("/tmp/ferry-list/created/empty.txt")
+            .await
+            .unwrap();
+        ssh.delete_file("/tmp/ferry-list/created").await.unwrap();
 
         assert_eq!(
             ssh.list_dir("/tmp/ferry-nope").await.unwrap_err().0,

@@ -1,5 +1,4 @@
 import { importResources, exportResources } from "./components/ResourceTransfer";
-import { RunnerConnection } from "./components/RunnerConnection";
 import { DEFAULT_ACTIONS, parseActions } from "./actions-workflow";
 import { api } from "./api";
 /**
@@ -44,6 +43,7 @@ export interface Host {
   tag_ids: string[];
   tags: { id: string; name: string; color: string }[];
   credential_id: string;
+  jump_host_id: string;
   description: string;
   seen_at: number;
   version: number;
@@ -118,6 +118,15 @@ const sshCredentialOptions = (workspace: string) => async (): Promise<Option[]> 
   return page.items
     .filter((c) => c.kind === "password" || c.kind === "ssh-key")
     .map((c) => ({ value: c.id, label: `${c.name}（${label(CREDENTIAL_KINDS, c.kind)}）` }));
+};
+const sshJumpOptions = (workspace: string) => async (): Promise<Option[]> => {
+  const choices: Option[] = [];
+  for (let page = 1; ; page++) {
+    const result = await listResource<Host>(workspace, "hosts", { page, page_size: 200, connection: "ssh" });
+    choices.push(...result.items.filter(host => !host.jump_host_id || host.jump_host_id === "0").map(host => ({ value: host.id, label: host.name })));
+    if (page * result.page_size >= result.total) break;
+  }
+  return choices;
 };
 
 const groupOptions = (workspace: string) => namedOptions(workspace, "host-groups");
@@ -212,7 +221,7 @@ const marketInstall=(workspace:string)=>({label:"导入应用模板",permission:
 interface AlertRule {id:string;name:string;description:string;target_kind:string;target_ref:string;metric:string;threshold:number;enabled:boolean;has_webhook:boolean;webhook?:string;clear_webhook?:boolean;last_error:string;version:number}
 interface AlertEvent {id:string;rule_id:string;rule_name:string;state:string;message:string;triggered_at:number;recovered_at:number;trigger_delivery:string;recovery_delivery:string;version:number}
 const alertTargets=[{value:"host",label:"主机"},{value:"pipeline",label:"流水线"},{value:"deployment",label:"应用"},{value:"cron-job",label:"定时任务"}];
-const alertMetrics=[{value:"offline",label:"离线"},{value:"load1",label:"一分钟负载"},{value:"memory-percent",label:"内存使用率（%）"},{value:"disk-percent",label:"磁盘使用率（%）"},{value:"execution-failed",label:"最近执行失败"}];
+const alertMetrics=[{value:"offline",label:"离线"},{value:"load1",label:"一分钟负载"},{value:"cpu-percent",label:"CPU 使用率（%）"},{value:"memory-percent",label:"内存使用率（%）"},{value:"disk-percent",label:"磁盘使用率（%）"},{value:"execution-failed",label:"最近执行失败"}];
 const alertEventLink={label:"告警事件",to:()=>({group:"deploy",item:"alert-events",mode:"list" as const})};
 interface CronJob {id:string;name:string;description:string;scope:string;schedule:string;timezone:string;enabled:boolean;action:string;target_kind:string;target_ref:string;environment_id:string;command:string;timeout_seconds:number;max_retries:number;retry_delay_seconds:number;next_run_at:number;run_as_name:string;version:number}
 interface CronRun {id:string;job_id:string;job_name:string;scope:string;state:string;scheduled_at:number;started_at:number;finished_at:number;attempt:number;output:string;config:string;downstream_id:string;downstream_kind:string;version:number;trigger_kind:string}
@@ -368,7 +377,8 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
     hosts: list({
       resource: "hosts",
-      toolbar: { create: { label: "添加主机" }, content: { permission: "hosts.enroll", render: reload => <RunnerConnection workspace={workspace} onConnected={reload} /> } },
+      defaultRefresh: 10,
+      toolbar: { create: { label: "添加主机" } },
       rowKey: (row: Host) => row.id,
       filters: [
         { key: "tag_id", label: "标签", type: "select", options: tagOptions(workspace) },
@@ -401,17 +411,16 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
                     : "secondary"
               }
             >
-              {label(hostStates, row.state)}
+              {row.connection === "runner" && row.state === "offline" ? "已断开连接" : label(hostStates, row.state)}
             </Badge>
           ),
         },
-        { key: "seen_at", label: "最近心跳", width: 130, sortable: true, render: (row: Host) => ago(row.seen_at) },
+        { key: "seen_at", label: "最近在线", width: 150, sortable: true, render: (row: Host) => row.seen_at ? `${row.state === "online" ? "更新于" : "最后在线"} ${ago(row.seen_at)}` : "尚未连接" },
       ],
       actions: [
         { label: "查看", permission: "hosts.read", to: (row: Host) => ({ id: row.id, mode: "view" }) },
         { label: "打开终端", icon: <SquareTerminal className="size-4" />, newTab: true, permission: "hosts.terminal", to: (row: Host) => ({ id: row.id, mode: "workspace" }), query: () => ({ tool: "terminal" }) },
         { label: "打开文件", icon: <FolderOpen className="size-4" />, newTab: true, permission: "hosts.files", to: (row: Host) => ({ id: row.id, mode: "workspace" }), query: () => ({ tool: "files" }) },
-        { label: "接入 Agent", permission: "hosts.enroll", when: (row: Host) => row.connection === "runner", to: (row: Host) => ({ id: row.id, mode: "view" }), query: () => ({ tab: "connect" }) },
         {
           label: "测试连接",
           permission: "hosts.read",
@@ -589,7 +598,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     "alert-events": form<AlertEvent>({resource:"alert-events",heading:r=>r.rule_name,blank:{},readOnly:()=>true,pollMs:r=>r.state==="firing"||r.trigger_delivery==="投递中"||r.recovery_delivery==="投递中"?2000:0,viewActions:[{label:"返回规则",to:()=>({group:"deploy",item:"alerts",mode:"list"})}],sections:[{fields:[{key:"rule_name",label:"规则",type:"text"},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]},{key:"message",label:"触发信息",type:"textarea",span:2},{key:"trigger_delivery",label:"触发通知",type:"text"},{key:"recovery_delivery",label:"恢复通知",type:"text"}]}]}),
     "cron-jobs": form<CronJob>({resource:"cron-jobs",heading:r=>r.name,blank:{name:"",description:"",scope:"host",schedule:"0 * * * *",timezone:"",enabled:false,action:"",target_kind:"",target_ref:"",command:"",timeout_seconds:1800,max_retries:0,retry_delay_seconds:30},viewActions:[{label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})}],sections:[{fields:[
       {key:"name",label:"名称",type:"text",required:true},{key:"scope",label:"所属模块",type:"select",resetOnChange:["action","target_kind","target_ref","command"],options:[{value:"host",label:"主机"},{value:"build",label:"构建"},{value:"deploy",label:"部署"}],immutable:true},
-      {key:"enabled",label:"启用定时执行",type:"switch"},{key:"schedule",label:"Cron 表达式",type:"text",required:true,help:"5字段：分 时 日 月 周；6字段在最前面增加秒。停机错过的触发不补跑，同任务重叠时跳过并记录。"},
+      {key:"enabled",label:"启用定时执行",type:"switch"},{key:"schedule",label:"执行周期",type:"cron",required:true,span:2,help:"停机错过的触发不补跑，同任务重叠时跳过并记录。"},
       {key:"timezone",label:"时区",type:"text",required:true,placeholder:"Asia/Shanghai",help:"必须明确填写 IANA 时区，例如 Asia/Shanghai、Asia/Singapore、UTC。"},
       {key:"action",label:"动作",type:"select",required:true,when:d=>d.scope==="host",options:[{value:"command",label:"执行命令"}]},
       {key:"action",label:"动作",type:"select",required:true,when:d=>d.scope==="build",options:[{value:"pipeline",label:"触发流水线"}]},
@@ -706,7 +715,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     hosts: form({
       resource: "hosts",
       heading: (row: Host) => row.name,
-      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", tag_ids: [], credential_id: "", description: "" },
+      blank: { name: "", connection: "runner", address: "", port: 22, username: "", group_id: "", tag_ids: [], credential_id: "", jump_host_id: "", description: "" },
       sections: [
         {
           title: "基本信息",
@@ -738,6 +747,9 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
             },
             { key: "port", label: "端口", type: "number", required: true, when: (draft: Partial<Host>) => draft.connection === "ssh" },
             { key: "username", label: "登录账号", type: "text", required: true, placeholder: "root", when: (draft: Partial<Host>) => draft.connection === "ssh" },
+            { key: "jump_host_id", label: "跳板主机", type: "select", options: sshJumpOptions(workspace),
+              help: "可选。先添加一台可直连的 SSH 主机，多个目标主机可共用它。目标主机仍使用自己的登录凭据。",
+              when: (draft: Partial<Host>) => draft.connection === "ssh" },
             {
               key: "credential_id",
               label: "登录凭据",

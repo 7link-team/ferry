@@ -87,4 +87,4 @@ actual_hash=${actual_hash%% *}
 [ "$actual_hash" = "$expected_hash" ] || fail 'Artifact SHA256 mismatch; nothing installed'
 chmod 700 "$stage/runner"
 printf 'Installing Runner %s as %s…\n' "$version" "$name"
-"$stage/runner" service install --server "$server" --name "$name"
+"$stage/runner" service install --server "$server" --name "$name" --rebind

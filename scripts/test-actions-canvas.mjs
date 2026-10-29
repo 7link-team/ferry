@@ -2,17 +2,18 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
-const server = await createServer({ server: { port: 0 }, plugins: [{ name: 'canvas-test', configureServer(server) {
+const server = await createServer({ server: { host: '127.0.0.1', port: 5174 }, plugins: [{ name: 'canvas-test', configureServer(server) {
  server.middlewares.use('/__canvas', (_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"/><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script></head><body><div id="root"></div><script type="module" src="/__canvas-entry.tsx"></script></body></html>`); });
- }, resolveId(id) { if(id==='/__canvas-entry.tsx') return id; }, load(id) { if(id==='/__canvas-entry.tsx') return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/components/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={()=>{}} renderCheckout={(job,index)=> <button onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></main>};createRoot(document.getElementById('root')).render(<App/>);`; } }] });
+ }, resolveId(id) { if(id==='/__canvas-entry.tsx') return id; }, load(id) { if(id==='/__canvas-entry.tsx') return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/components/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'},{value:'host-group:group',label:'Local group'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={()=>{}} renderCheckout={(job,index)=> <button onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></main>};createRoot(document.getElementById('root')).render(<App/>);`; } }] });
 let browser;
 try {
  await server.listen();browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROME_PATH?{executablePath:process.env.PLAYWRIGHT_CHROME_PATH}:{})});
  const context=await browser.newContext({viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write']});
  const page=await context.newPage(),errors=[],workers=[],failed=[];page.on('pageerror',error=>errors.push(error.message));page.on('response',response=>{if(response.status()>=400)failed.push(`${response.status()} ${response.url()}`)});page.on('worker',worker=>workers.push(worker.url()));await page.goto(server.resolvedUrls.local[0]+'__canvas');
+ await page.locator('[aria-label="流水线画布"]').waitFor();
  const bottomGap=await page.evaluate(()=>{const main=document.querySelector('main').getBoundingClientRect(),canvas=document.querySelector('[aria-label="流水线画布"]').getBoundingClientRect();return main.bottom-canvas.bottom});
  assert(bottomGap<32,`canvas leaves excessive blank space: ${bottomGap}px`);
- await page.getByRole('button',{name:'构建',exact:true}).first().click();
+ await page.getByRole('button',{name:'任务 1',exact:true}).first().click();
  await page.locator('button[title="在此任务后添加串行任务"]').click();
  assert.match(await page.evaluate(()=>window.canvasDraft.definition),/needs:\n\s+- build/);
  await page.locator('button[title="添加并行任务"]').last().click();
@@ -24,26 +25,41 @@ try {
  await page.getByLabel('步骤类型').selectOption('checkout');
  await page.getByText('Repository selector').click();
  assert.equal((await page.evaluate(()=>window.canvasDraft.checkout_bindings)).length,1);
- await page.getByRole('button',{name:'删除步骤',exact:true}).click();
+ await page.getByRole('button',{name:/^删除步骤/}).click();
+ await page.getByRole('button',{name:'确认删除步骤',exact:true}).click();
  assert.equal((await page.evaluate(()=>window.canvasDraft.checkout_bindings)).length,0);
  await page.getByRole('button',{name:'新任务',exact:true}).last().click();
- await page.getByRole('checkbox',{name:'构建',exact:true}).uncheck();
+ await page.getByRole('checkbox',{name:'任务 1',exact:true}).uncheck();
  await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===1,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),1);
- await page.getByRole('button',{name:'构建',exact:true}).first().click();
+ await page.getByRole('button',{name:'任务 1',exact:true}).first().click();
  const beforeCycle=await page.evaluate(()=>window.canvasDraft.definition);
  await page.getByRole('checkbox',{name:'新任务',exact:true}).first().click();
  await page.getByRole('alert').filter({hasText:'循环'}).waitFor();
  assert.equal(await page.evaluate(()=>window.canvasDraft.definition),beforeCycle);
  await page.reload();
- await page.getByRole('button',{name:'构建',exact:true}).first().click();
+ await page.getByRole('button',{name:'任务 1',exact:true}).first().click();
  await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===1,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),1);
  assert.equal(await page.evaluate(()=>window.canvasDraft.definition),beforeCycle);
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:900});await page.waitForTimeout(350);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);const canvas=await page.getByLabel('流水线画布',{exact:true}).boundingBox();assert(canvas.width>200);for(const node of await page.locator('.react-flow__node').all()){const box=await node.boundingBox();assert(box.x>=canvas.x-1 && box.x+box.width<=canvas.x+canvas.width+1,`node clipped at ${width}: ${JSON.stringify({box,canvas})}`);}}
- await page.getByLabel('任务执行器',{exact:true}).selectOption('host:local');
+ await page.getByLabel('任务执行器',{exact:true}).selectOption('local');
  assert.match(await page.getByLabel('任务执行器',{exact:true}).locator('option:checked').textContent(),/Local host/);
  assert.equal((await page.evaluate(()=>window.canvasDraft.executor_bindings))[0].target_ref,'local');
+ await page.getByLabel('执行目标类型').selectOption('host-group');
+ assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),'');
+ await page.getByLabel('任务执行器',{exact:true}).selectOption('group');
+ assert.deepEqual((await page.evaluate(()=>window.canvasDraft.executor_bindings))[0],{job_id:'build',target_kind:'host-group',target_ref:'group',image:'host'});
+ await page.getByLabel('任务类型').selectOption('approval');
+ assert.match(await page.evaluate(()=>window.canvasDraft.definition),/ferry-approval: true/);
+ assert.deepEqual(await page.evaluate(()=>window.canvasDraft.executor_bindings),[]);
+ await page.getByLabel('任务类型').selectOption('actions');
+ await page.getByRole('button',{name:/步骤1/}).first().click();
+ await page.getByLabel('步骤类型').selectOption('uses');
+ await page.getByRole('button',{name:'添加参数',exact:true}).click();
+ await page.getByLabel('参数名').fill('node-version');
+ await page.getByLabel('node-version 参数值').fill('20');
+ assert.match(await page.evaluate(()=>window.canvasDraft.definition),/node-version: ['"]?20/);
  await page.evaluate(()=>window.setCanvasDraft({...window.canvasDraft,definition:'jobs:\n  first:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n  second:\n    runs-on: self-hosted\n    steps:\n      - run: echo kept\n',checkout_bindings:[{job_id:'first',step_id:'source',connection_id:'42'}],executor_bindings:[{job_id:'first',target_ref:'local'}]}));
  await page.getByRole('tab',{name:'YAML',exact:true}).click();
  await page.locator('.monaco-editor').waitFor();
@@ -58,6 +74,9 @@ try {
  await page.waitForFunction(()=>window.canvasDraft.definition==='jobs:\n  second:\n    runs-on: self-hosted\n    steps:\n      - run: echo kept\n');
  assert.deepEqual(await page.evaluate(()=>window.canvasDraft.checkout_bindings),[]);
  assert.deepEqual(await page.evaluate(()=>window.canvasDraft.executor_bindings),[]);
+ const imported='name: Imported\non: workflow_dispatch\njobs:\n  imported:\n    runs-on: self-hosted\n    steps:\n      - run: echo imported\n';
+ await page.getByLabel('选择 Actions YAML 文件').setInputFiles({name:'workflow.yml',mimeType:'text/yaml',buffer:Buffer.from(imported)});
+ await page.waitForFunction(source=>window.canvasDraft.definition===source,imported);
  await page.setViewportSize({width:1280,height:900});
  await page.getByRole('tab',{name:'可视化',exact:true}).click();
  await page.evaluate(()=>window.setCanvasDraft({definition:'jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo build\n  occupied:\n    needs: build\n    runs-on: self-hosted\n    steps:\n      - run: echo occupied\n',graph_layout:{build:{x:24,y:32},occupied:{x:384,y:32}}}));
@@ -70,6 +89,7 @@ try {
  assert(addedBox.x>=buildBox.x+buildBox.width-1,'serial task should be placed to the right of its parent');
  assert(addedBox.y>=occupiedBox.y+occupiedBox.height-1 || addedBox.x>=occupiedBox.x+occupiedBox.width-1,'new task overlaps an existing task');
  await added.locator('button[title="删除任务"]').click();
+ await page.getByRole('button',{name:'确认删除任务',exact:true}).click();
  await added.waitFor({state:'detached'});
  assert(!String(await page.evaluate(()=>window.canvasDraft.definition)).includes('job_1'),'card delete did not remove the task');
  assert.deepEqual(errors,[]);

@@ -25,13 +25,13 @@ use std::{collections::HashMap, time::Duration};
 use tokio::sync::watch;
 const RULES: Spec = Spec {
     search: &["name"],
-    filters: &["target_kind", "metric"],
+    filters: &["target_kind", "target_ref", "metric"],
     sortable: &["name", "created_at"],
     default_sort: "name",
 };
 const EVENTS: Spec = Spec {
     search: &["rule_name"],
-    filters: &["rule_id", "state", "target_kind"],
+    filters: &["rule_id", "state", "target_kind", "target_ref"],
     sortable: &["created_at", "triggered_at", "recovered_at"],
     default_sort: "-created_at",
 };
@@ -104,7 +104,7 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
         match b.metric.as_str() {
             "offline" => true,
             "load1" => b.threshold >= 0,
-            "memory-percent" | "disk-percent" => (0..=100).contains(&b.threshold),
+            "cpu-percent" | "memory-percent" | "disk-percent" => (0..=100).contains(&b.threshold),
             _ => false,
         }
     } else {
@@ -355,6 +355,7 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, String
         let metrics: Value = serde_json::from_str(&host.metrics).unwrap_or(Value::Null);
         let value = match r.metric.as_str() {
             "load1" => metrics["load1"].as_f64(),
+            "cpu-percent" => metrics["cpu_percent"].as_f64(),
             "memory-percent" | "disk-percent" => {
                 let prefix = if r.metric == "memory-percent" {
                     "mem"

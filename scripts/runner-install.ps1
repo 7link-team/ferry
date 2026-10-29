@@ -104,7 +104,7 @@ try {
     if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -cne $lines[2]) { throw 'Artifact SHA256 mismatch; nothing installed.' }
     Write-Host "Installing Runner $($lines[0]) as ${Name}..."
     # The token remains in the inherited environment, never the process argv.
-    & $binary service install --server $Server --name $Name
+    & $binary service install --server $Server --name $Name --rebind
     if ($LASTEXITCODE -ne 0) { throw "Native service installation failed (exit $LASTEXITCODE)." }
 } finally {
     if ($client) { $client.Dispose() }

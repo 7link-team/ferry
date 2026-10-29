@@ -1,5 +1,45 @@
 # Project Memory
 
+## Active alpha.14 release — 2026-10-30
+- User explicitly requests publication now, followed by upgrading the running local Ferry and ASPEED Runner. This supersedes earlier no-release/no-change-to-4290 limits for the post-release upgrade; preserve both local data directories and host identities.
+- Phase: REVIEW / TESTING. Release target 0.1.0-alpha.14 includes current host workspace/files, Runner connection/reset/IP/monitor compatibility, SSH jump/heartbeat/monitor, alerts, Cron forms, pipeline canvas/manual approval/run history/logs, and shared list/layout corrections.
+- Fresh local frontend: 127 tests PASS. Previous Rust workspace run had Windows updater named-pipe access denied and one Actions shell fixture failure; complete release CI must resolve or explain these, never publish a failed build.
+- Development backend 4291 restored as PID 77548; 5173 proxies same instance. ASPEED alpha.13 reconnected and remained online across monitor polling. Installed old Runner needs signed alpha.14 upgrade for detailed monitoring.
+- Fresh acceptance: frontend 127 PASS/build PASS; protocol 3 PASS, Runner 22 PASS (signed fixture test separately covered by CI), server 141 PASS/2 ignored and the single missing-sh failure PASS after adding installed Git/bin to this test process PATH. cargo check/fmt and manifest tests PASS. Chrome host workspace/canvas/Runner connection/templates and no-host manual gate acceptance PASS. File creation now leaves preview closed as requested.
+- GitHub API credentials are unavailable locally; SSH authentication works through ssh.github.com:443 as robotism. Use existing tag-triggered build.yml release job (all required gates before publication), not authenticated dispatch. Public API can inspect runs. Prior main e2e failed on outdated template browser fixture; updated modal/confirmation fixture now passes locally.
+- Next: commit/push version-synchronized source via SSH, require successful main build.yml, push annotated v0.1.0-alpha.14 tag, require successful tag build/publication, verify public signed artifacts and container image, then upgrade local installed Ferry and Runner and verify actual monitor data.
+
+## ASPEED 监控断线 — 2026-10-30
+- 根因：本机已安装 `alpha.13` 旧 Agent（Windows 服务 `runner-agent`）不识别新增的 `Monitor` 会话类型；主机监控每 30 秒请求一次，旧 Agent 解析未知控制帧后断开重连。`4291` 日志证实每分钟接入 30 秒后发生 WebSocket 无关闭握手重置。
+- 修复：Agent 握手新增兼容的 `supports_monitor` 能力字段（旧 Agent 缺省 false），服务端对旧 Agent 拒绝详细监控会话并提示升级，避免发出未知帧。新 Agent 宣告支持；增加旧 Agent 不收帧的回归测试与协议兼容测试。
+- 验证：协议 3 项、Runner 22 项、服务端定向回归、`cargo check --workspace --locked`、`cargo fmt --all -- --check`、`git diff --check` 通过。`4291` 已重建并启动为 PID 83708，ASPEED 连续在线超过两分钟，旧断线循环消失。旧 Agent 的详细图表仍须新版本安装后才可用。
+- 另项：本机 `cargo test --workspace --locked` 因桌面升级器 Windows 命名管道权限测试 `exclusive_local_pipe_authenticates_both_peer_processes` 报 OS error 5 而失败；单独重跑仍失败。`cargo test -p ferry-server` 的 144 项中 141 通过、2 忽略、1 项 Actions checkout 脚本因本机缺少外部程序失败。两项未涉及本轮改动，发布前仍须复核 CI。自动执行审查拒绝了停止并重启 `5173` Vite 的诊断命令；未重试或绕过，当前 `5173` 保持运行。
+
+## 主机报警监控 — 2026-10-29
+- 主机详情「报警监控」已接入按主机过滤的报警规则和告警事件，支持直接新建并预选当前主机；修复表单初始化清掉预选主机、目标过滤可覆盖主机限定的问题。
+- 后端告警事件允许 `target_ref` 过滤，资源筛选将其按雪花 ID 数值绑定；新增大整数绑定测试。
+- 验证：完整前端 127 项通过、`npm run typecheck`、`npm run build`、`cargo check --workspace --locked`、服务端资源单测 5 项、`cargo fmt --all -- --check`、`git diff --check` 通过。`PLAYWRIGHT_CHROME` 指向本机 Chrome 的 `scripts/test-alerts-ui.mjs` 真实浏览器验收通过，覆盖主机页签、预选主机、离线事件与规则全流程。
+- 本机 `4291` 独立开发后端已启动（PID 68044），`5173/api/status` 正常；不碰 `4290`。本次改动未提交，仍需按当前总任务完成整体复核与发布。
+
+## 当前开发任务 — 2026-10-29 夜（继续）
+- 用户要求：完成此前未交付的主机/流水线改动、Cron 默认周期表单与表达式双向同步、宽屏留白排查；测试通过后提交并发布新版本。发布已明确授权；不可动本机 4290 服务。
+- 本轮新增：CronEditor 默认周期表单（分钟/小时/日/周/月）与 Cron 输入常驻、即时校验并阻止非法表单保存；共享表单改为宽屏居中。Runner/SSH 统一 `HostChannel::monitor`，详情显示 CPU/内存/逐盘/逐网卡；SSH 每 30 秒探测并更新在线状态/最近在线时间，支持 Linux 和 Windows PowerShell 采集；CPU 告警指标、Runner 心跳 CPU 指标。
+- 验证：前端曾 121 项通过、构建通过；Rust check 与 SSH 解析单测通过。本轮完整前端及 Rust 测试正在运行，最新 UI 改动仍需重新构建及浏览器脚本。`cargo fmt --all -- --check` 和 `git diff --check` 已通过。Linux/Windows 真实 SSH 监控以及 Runner 实机联动尚待验收。
+- 下一步：等待本轮测试结果，修复失败；重建前端、运行浏览器脚本；构建 4291 后端并仅重启 4291、验收 5173；复核差异与发布流程，更新版本号并提交推送，等待 CI 门禁后通过 publish-verified 发版。
+
+## 当前开发任务 — 2026-10-29 晚
+- 阶段：实现中，尚未提交推送或更新本机 4291 后端。用户新增：SSH 跳板主机可复用、Runner 详情常驻连接命令与重置、Runner IP、SSH 定时心跳、两种接入的 CPU/内存/每盘/每物理网卡监控与告警、流水线分组排序、全局 hover、树目录固定项名称一致。
+- 已编码：文件删除确认/新建文件与文件夹；列表图标和删除确认；Runner 详情常驻命令与重置（专属令牌存密文、旧令牌/密钥失效、断开当前连接），列表移除接入入口；SSH 单级跳板和引用约束；Runner 安装器 `--rebind` 更新凭据；流水线分组排序和 hover；固定项统一为「全部/未分组+对象名」。Runner IP 代码此前已有，需确保重新绑定后的服务二进制更新。
+- 已验证：此前文件与连接前端 118 项、构建、Chrome 脚本通过；Rust server/runner `cargo check` 通过；Runner 令牌单测通过。新增跳板实时 SSH 测试本机无 Docker/sshd，仅完成编译并跳过实际连接，待 CI。最近新增分组排序与 rebind 后尚需重跑测试。
+- 下一步：完成双接入监控与 SSH 周期检查、告警，测试 rebind/跳板/分组；构建并重启独立 4291 服务（不动 4290），更新 5173 前端；复核全量 diff 和 LF、提交推送 main、查看 CI 的 SSH/Runner/前端门禁。不要自动发布版本。
+
+## 本机后端与操作列 — 2026-10-29
+- 当前阶段：本机开发服务已切到新版后端，功能验收进行中；待提交推送并查看 CI。不要自动发布版本。
+- `127.0.0.1:5173` 的 Vite 通过 `FERRY_DEV_API_TARGET=http://127.0.0.1:4291` 代理新服务；4291 使用 `data/dev-backend` 中从桌面版 SQLite 一致性备份得到的独立数据。已安装的 4290 服务未改动。重启 Vite 时须带同一环境变量；`data/` 不提交。
+- 共享列表操作使用图标与 tooltip，其他动作在左，“查看、编辑、删除”相邻排在右侧；删除走明确对象的二次确认弹窗。文件管理增加新建文件夹与空文件，服务端通过 Runner/SSH 独占创建防覆盖；Runner 需更新后才支持新增会话帧。列表中的“接入 Agent”改名“重新接入 Agent”。
+- 已验证：`npm test -- --run` 116 项通过、`npm run build` 通过、Chrome 工作台脚本通过；`cargo build --locked -p ferry-server -p ferry-runner` 通过。`cargo test` 本机服务端 132 项通过、1 项旧 Actions checkout 测试因 Windows 缺少外部程序失败，协议/Runner 单测通过。4291/5173 的实例 ID 一致，新创建文件 API 在 5173 返回 401（未登录），旧 4290 返回 405。
+- 下一步：复核 diff/格式，提交推送，查看 CI 的 checks、e2e-runner 和 SSH 测试；本地 5173 和 4291 会话在本次运行中保持开启。
+
 ## 主机工作台与分组排序 — 2026-10-29
 - 当前阶段：前端与浏览器验收通过，待提交推送并由 CI 编译验证 Rust；不自动发布版本。
 - 主机组树支持同级上下调整并持久化；主机列表和详情可新标签打开全屏工作台。工作台支持终端/文件标签、递归左右或上下分屏、目录快速终端、文件预览和文本编辑保存。

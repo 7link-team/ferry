@@ -20,14 +20,30 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ResourceActionDialog } from "./ResourceForm";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { RowAction } from "./dsl";
 import {
   ChevronLeft,
   ChevronRight,
+  Cable,
+  Copy,
+  Download,
+  Ellipsis,
+  Eye,
+  FolderOpen,
+  History,
+  LayoutTemplate,
   Loader2,
+  Pencil,
+  Play,
+  PlugZap,
   Plus,
   RefreshCw,
+  RotateCw,
   Search,
+  ShieldCheck,
+  Trash2,
+  Users,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -62,12 +78,38 @@ import { ResourceTransfer } from "./ResourceTransfer";
 
 const REFRESH_KEY = (resource: string) => `ferry.refresh.${resource}`;
 
-function readRefresh(resource: string) {
+function actionIcon(label: string): ReactNode {
+  const Icon = label.startsWith("查看") ? Eye : label.startsWith("编辑") ? Pencil :
+    /删除|移除|清除/.test(label) ? Trash2 : label.includes("复制") ? Copy :
+    label.includes("测试") ? PlugZap : /同步|刷新|重启/.test(label) ? RotateCw :
+    /执行|运行|触发|部署/.test(label) ? Play : label.includes("目录") ? FolderOpen :
+    label.includes("下载") ? Download : label.includes("接入") ? Cable :
+    label.includes("模板") ? LayoutTemplate : label.includes("历史") ? History :
+    label.includes("角色") ? Users : label.includes("核实") ? ShieldCheck :
+    label.includes("恢复") ? RefreshCw : Ellipsis;
+  return <Icon className="size-4" />;
+}
+
+function actionOrder(label: string) {
+  if (label === "查看") return 1;
+  if (label === "编辑") return 2;
+  if (/^(删除|移除)/.test(label)) return 3;
+  return 0;
+}
+
+function rowName(row: unknown, fallback: string) {
+  const value = row as Record<string, unknown>;
+  return String(value.name ?? value.title ?? value.email ?? value.path ?? value.key ?? fallback);
+}
+
+function readRefresh(resource: string, fallback = 0) {
   try {
-    const saved = Number(localStorage.getItem(REFRESH_KEY(resource)));
+    const stored = localStorage.getItem(REFRESH_KEY(resource));
+    if (stored === null) return fallback;
+    const saved = Number(stored);
     return (REFRESH_INTERVALS as readonly number[]).includes(saved) ? saved : 0;
   } catch {
-    return 0;
+    return fallback;
   }
 }
 
@@ -113,9 +155,10 @@ export function ResourceTable<T>({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [refresh, setRefresh] = useState(() => readRefresh(config.resource));
+  const [refresh, setRefresh] = useState(() => readRefresh(config.resource, config.defaultRefresh));
   const [busy, setBusy] = useState(false);
   const [pendingAction,setPendingAction]=useState<{action:RowAction<T>;row:T}>();
+  const [pendingDelete, setPendingDelete] = useState<{ action: string; target: string; run: () => Promise<void> }>();
   const reloadToken = useRef(0);
 
   const params = useMemo(
@@ -196,7 +239,7 @@ export function ResourceTable<T>({
 
   const visibleActions = (config.actions ?? []).filter(
     (action) => !action.permission || permissions.has(action.permission),
-  );
+  ).sort((a, b) => actionOrder(a.label) - actionOrder(b.label));
   const visibleBulk = (config.bulk ?? []).filter(
     (action) => !action.permission || permissions.has(action.permission),
   );
@@ -213,11 +256,10 @@ export function ResourceTable<T>({
     setSelected(next);
   };
 
-  const runBulk = async (run: (ids: string[]) => Promise<void>, confirmText?: string) => {
-    if (confirmText && !window.confirm(confirmText)) return;
+  const runBulk = async (run: (ids: string[]) => Promise<void>, ids = [...selected]) => {
     setBusy(true);
     try {
-      await run([...selected]);
+      await run(ids);
       setSelected(new Set());
       reload();
     } catch (cause) {
@@ -233,6 +275,7 @@ export function ResourceTable<T>({
     <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
+      {pendingDelete && <DeleteConfirmDialog action={pendingDelete.action} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
       <div className="flex flex-col gap-3">
         {!!config.filters?.length && (
           <form
@@ -387,8 +430,13 @@ export function ResourceTable<T>({
                 ))
               : rows.map((row, index) => {
                   const key = config.rowKey(row);
+                  const view = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row)));
+                  const canOpen = !!view || visibleActions.some(action => action.label === "编辑" && action.to && (!action.when || action.when(row)));
+                  const open = () => { if (view?.to) navigate({ ...route, ...view.to(row) }, view.query?.(row) ?? {}); else if (canOpen) navigate({ ...route, id: key, mode: "view" }, {}); };
                   return (
-                    <tr key={key} className="group">
+                    <tr key={key} className={cn("group", canOpen && "cursor-pointer focus-visible:outline-2 focus-visible:outline-primary")} tabIndex={canOpen ? 0 : undefined}
+                      onClick={event => { if (!(event.target as Element).closest("a,button,input,select,textarea,[role=button],[role=checkbox]")) open(); }}
+                      onKeyDown={event => { if (canOpen && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } }}>
                       <td className="sticky left-0 z-20 bg-card px-3 py-2 text-muted-foreground shadow-[inset_-1px_0_0_var(--border)] group-hover:bg-accent">
                         <span className="inline-flex items-center gap-2">
                           {!!visibleBulk.length && (
@@ -429,7 +477,7 @@ export function ResourceTable<T>({
                               <RowActionButton
                                 key={action.label}
                                 label={action.label}
-                                icon={action.icon}
+                                icon={action.icon ?? actionIcon(action.label)}
                                 newTab={action.newTab}
                                 disabled={busy || action.disabled?.(row)}
                                 disabledReason={action.disabledReason?.(row)}
@@ -443,11 +491,14 @@ export function ResourceTable<T>({
                                 {...(action.action
                                   ? {
                                       onRun: async () => {
-                                        if (
-                                          action.destructive &&
-                                          !window.confirm(`确认${action.label}？此操作无法撤销。`)
-                                        )
+                                        if (action.destructive) {
+                                          setPendingDelete({ action: action.label, target: rowName(row, config.rowKey(row)), run: async () => {
+                                            if (action.parameters?.(row).length) { setPendingAction({ action, row }); return; }
+                                            await action.action!(row);
+                                            reload();
+                                          } });
                                           return;
+                                        }
                                         if(action.parameters?.(row).length){setPendingAction({action,row});return;}
                                         setBusy(true);
                                         try {
@@ -500,14 +551,20 @@ export function ResourceTable<T>({
                 size="sm"
                 variant={action.destructive ? "destructive" : "outline"}
                 disabled={busy}
-                onClick={() =>
-                  void runBulk(
-                    action.action,
-                    action.destructive
-                      ? `确认${action.label} ${selected.size} 项？此操作无法撤销。`
-                      : undefined,
-                  )
-                }
+                onClick={() => {
+                  const ids = [...selected];
+                  if (action.destructive) {
+                    const names = ids.map(id => {
+                      const row = rows.find(row => config.rowKey(row) === id);
+                      return row ? rowName(row, id) : id;
+                    });
+                    setPendingDelete({ action: action.label, target: names.length <= 5 ? names.join("、") : `${names.slice(0, 5).join("、")}等 ${ids.length} 项`, run: async () => {
+                      await action.action(ids);
+                      setSelected(new Set());
+                      reload();
+                    } });
+                  } else void runBulk(action.action, ids);
+                }}
               >
                 {busy && <Loader2 className="animate-spin" />}
                 {action.label}
@@ -609,7 +666,7 @@ function RowActionButton({
         href={to}
         {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
         aria-label={icon ? label : undefined}
-        title={icon ? label : undefined}
+        title={label}
         className={cn(
           "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
           icon && "inline-flex size-7 items-center justify-center align-middle",
@@ -634,7 +691,8 @@ function RowActionButton({
         destructive ? "text-destructive" : "text-primary",
       )}
       disabled={disabled}
-      title={disabled ? disabledReason : undefined}
+      aria-label={label}
+      title={disabled && disabledReason ? `${label}：${disabledReason}` : label}
       onClick={() => void onRun?.()}
     >
       {icon ?? label}

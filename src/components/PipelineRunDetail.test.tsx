@@ -56,7 +56,7 @@ it.each(["succeeded", "failed", "cancelled"])("终态 %s 排空220片后停止�
   const count = requests.length;
   await tick(5000); await visibility(true); await visibility(false); await tick(2000);
   expect(requests).toHaveLength(count);
-  expect(host.textContent).toContain("轮询已停止");
+  expect(host.textContent).toContain("日志已加载");
   if (terminal === "failed") expect(host.textContent).toContain("超时");
 });
 it("隐藏暂停、恢复立即拉取，不重复追加", async () => {
@@ -85,10 +85,10 @@ it("卸载后忽略不遵守 abort 的晚到响应", async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1); root = createRoot(host);
 });
 it("只读无取消按钮；授权按钮与确认文案如实", async () => {
-  await mount(); expect(host.querySelector("button")).toBeNull();
+  await mount(); expect([...host.querySelectorAll("button")].some(button => button.textContent?.includes("停止等待"))).toBe(false);
   await mount(new Set(["pipelines.run"]));
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-  await act(async () => host.querySelector("button")!.click());
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent?.includes("停止等待"))!.click());
   expect(confirm).toHaveBeenCalledWith(expect.stringContaining("目标主机上的命令可能继续执行完毕"));
   expect(requests.some((s) => s.endsWith("/actions/cancel"))).toBe(true);
 });
@@ -113,4 +113,16 @@ it("Actions cancellation describes remote cleanup and displays each job's execut
   expect(host.textContent).toContain('compile');
   expect(host.textContent).toContain('81');
   expect(host.textContent).not.toContain('命令可能继续执行');
+});
+it("keeps executable steps out of a manual gate's job view", async () => {
+  fetchMock.mockImplementation(async (url: string) => ({ok:true,status:200,json:async()=>url.includes('/logs?')?{items:[],next_seq:0}:{...detail(),definition_format:'github-actions',jobs:[
+    {key:'gate',name:'Approval',step_indices:[],host_id:'0',state:'waiting',started_at:1,finished_at:0},
+    {key:'build',name:'Build',step_indices:[0],host_id:'81',state:'queued',started_at:0,finished_at:0},
+  ]}}));
+  await mount(new Set(['pipelines.run']));
+  const content = host.querySelector('[aria-label="任务步骤和日志"]')!;
+  expect(content.querySelectorAll('[aria-expanded]')).toHaveLength(0);
+  expect(content.textContent).toContain('等待人工确认');
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('aside button')].find(button => button.textContent?.includes('Build'))!.click());
+  expect(content.querySelectorAll('[aria-expanded]')).toHaveLength(1);
 });

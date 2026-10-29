@@ -137,6 +137,9 @@ async fn check(
         let document = crate::actions::document(&stored).expect("validated Actions document");
         let (jobs, _) = crate::actions::parse(&document)?;
         for job in jobs {
+            if job.manual {
+                continue;
+            }
             if !document.executor_bindings.iter().any(|binding| {
                 binding.job_id == job.key
                     && !binding.target_ref.is_empty()

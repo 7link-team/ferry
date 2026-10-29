@@ -156,6 +156,9 @@ fn hostname() -> String {
 /// Load, memory and the filesystem the host actually runs from.
 fn metrics() -> wire::Report {
     let mut system = sysinfo::System::new();
+    system.refresh_cpu_all();
+    std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
+    system.refresh_cpu_all();
     system.refresh_memory();
     let load = sysinfo::System::load_average();
     let disks = sysinfo::Disks::new_with_refreshed_list();
@@ -182,6 +185,7 @@ fn metrics() -> wire::Report {
         .unwrap_or((0, 0));
     wire::Report::Metrics {
         load1: load.one,
+        cpu_percent: f64::from(system.global_cpu_usage()),
         memory_used: system.used_memory(),
         memory_total: system.total_memory(),
         disk_used,
@@ -323,6 +327,7 @@ async fn hold(
             arch,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             managed_updates: cfg.managed,
+            supports_monitor: true,
         },
     )
     .await?;

@@ -50,7 +50,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex, MutexGuard},
     time::Duration,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 /// How often the server probes a quiet control connection.
 const HEARTBEAT_SECONDS: u64 = 20;
@@ -77,7 +77,9 @@ const CHUNK: usize = 256 * 1024;
 /// which is how an evicted connection's own loop learns it was replaced.
 struct Live {
     control: mpsc::Sender<wire::Control>,
+    disconnect: watch::Sender<bool>,
     managed: bool,
+    supports_monitor: bool,
     version: String,
     ready: std::sync::atomic::AtomicBool,
     failed_version: Mutex<Option<String>>,
@@ -223,13 +225,121 @@ pub(crate) async fn bootstrap_token(db: &sea_orm::DatabaseConnection, token: &st
         .filter(runner_tokens::Column::ExpiresAt.gt(db::now()))
         .one(db)
         .await?;
-    if valid.is_none() {
+    let persistent = hosts::Entity::find()
+        .filter(hosts::Column::EnrollTokenHash.eq(fingerprint(token)))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(db)
+        .await?;
+    if valid.is_none() && persistent.is_none() {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
             "接入令牌已过期或已使用，请重新生成安装命令。".into(),
         ));
     }
     Ok(())
+}
+
+fn command_aad(workspace: Id, host: Id) -> String {
+    crate::vault::aad(&workspace.to_string(), "host-connection", &host.to_string())
+}
+
+async fn command_host(s: &AppState, scope: &Scope, id: Id) -> Result<hosts::Model> {
+    scope.require("hosts.enroll")?;
+    hosts::Entity::find_by_id(i64::from(id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)
+}
+
+pub async fn connection_command(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
+    let mut host = command_host(&s, &scope, id).await?;
+    let token = if host.enroll_token.is_empty() {
+        let token = secret();
+        let sealed = s.vault.seal(&token, &command_aad(scope.workspace_id, id))?;
+        hosts::Entity::update_many()
+            .col_expr(hosts::Column::EnrollToken, Expr::value(sealed))
+            .col_expr(
+                hosts::Column::EnrollTokenHash,
+                Expr::value(fingerprint(&token)),
+            )
+            .filter(hosts::Column::Id.eq(id))
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(hosts::Column::EnrollToken.eq(""))
+            .exec(&s.db)
+            .await?;
+        host = command_host(&s, &scope, id).await?;
+        s.vault
+            .open_secret(&host.enroll_token, &command_aad(scope.workspace_id, id))?
+    } else {
+        s.vault
+            .open_secret(&host.enroll_token, &command_aad(scope.workspace_id, id))?
+    };
+    let authority = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    let scheme = if s.secure_cookie { "https" } else { "http" };
+    Ok(Json(
+        json!({ "token": token, "server": format!("{scheme}://{authority}"), "state": host.state }),
+    ))
+}
+
+pub async fn reset_connection_command(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>> {
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
+    let host = command_host(&s, &scope, id).await?;
+    let token = secret();
+    let sealed = s.vault.seal(&token, &command_aad(scope.workspace_id, id))?;
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::EnrollToken, Expr::value(sealed))
+        .col_expr(
+            hosts::Column::EnrollTokenHash,
+            Expr::value(fingerprint(&token)),
+        )
+        .col_expr(hosts::Column::RunnerKeyHash, Expr::value(""))
+        .col_expr(hosts::Column::State, Expr::value("offline"))
+        .filter(hosts::Column::Id.eq(id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .exec(&s.db)
+        .await?;
+    runner_tokens::Entity::update_many()
+        .col_expr(runner_tokens::Column::ExpiresAt, Expr::value(db::now() - 1))
+        .filter(runner_tokens::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(runner_tokens::Column::HostId.eq(id))
+        .filter(runner_tokens::Column::UsedAt.eq(0_i64))
+        .exec(&s.db)
+        .await?;
+    if let Some(registration) = live().remove(&id.to_string()) {
+        let _ = registration.disconnect.send(true);
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "reset-connection",
+        "hosts",
+        &id,
+        json!({ "name": host.name }),
+    )
+    .await?;
+    connection_command(
+        State(s),
+        scope,
+        Path((String::new(), id.to_string())),
+        headers,
+    )
+    .await
 }
 
 pub async fn token_status(
@@ -398,7 +508,17 @@ fn reported_address(address: &str) -> Option<String> {
 
 /// Exchanges a token for the host row it owns and the long-lived key it keeps.
 async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String, String)> {
-    let (token_id, workspace_id, bound_host) = consume_token(&s.db, token).await?;
+    let persistent = hosts::Entity::find()
+        .filter(hosts::Column::EnrollTokenHash.eq(fingerprint(token)))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(&s.db)
+        .await?;
+    let (token_id, workspace_id, bound_host) = if let Some(host) = persistent {
+        (None, Id::from(host.workspace_id), Id::from(host.id))
+    } else {
+        let (token_id, workspace_id, bound_host) = consume_token(&s.db, token).await?;
+        (Some(token_id), workspace_id, bound_host)
+    };
     let (key, now) = (secret(), db::now());
     // The key rotates the host's credential, so the row's version moves with
     // it: an operator's open edit form is genuinely stale afterwards.
@@ -453,6 +573,11 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
             .filter(hosts::Column::WorkspaceId.eq(workspace_id))
             .filter(hosts::Column::Id.eq(bound_host))
             .filter(hosts::Column::Connection.eq("runner"))
+            .filter(if token_id.is_none() {
+                hosts::Column::EnrollTokenHash.eq(fingerprint(token))
+            } else {
+                hosts::Column::Id.eq(bound_host)
+            })
             .exec(&s.db)
             .await?
             .rows_affected;
@@ -465,11 +590,13 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
         }
         bound_host
     };
-    runner_tokens::Entity::update_many()
-        .col_expr(runner_tokens::Column::UsedBy, Expr::value(host_id))
-        .filter(runner_tokens::Column::Id.eq(token_id))
-        .exec(&s.db)
-        .await?;
+    if let Some(token_id) = token_id {
+        runner_tokens::Entity::update_many()
+            .col_expr(runner_tokens::Column::UsedBy, Expr::value(host_id))
+            .filter(runner_tokens::Column::Id.eq(token_id))
+            .exec(&s.db)
+            .await?;
+    }
     tracing::info!(%host_id, %workspace_id, hostname = %hello.hostname, "runner 注册成功");
     Ok((host_id.to_string(), key))
 }
@@ -529,6 +656,11 @@ async fn control(s: AppState, mut socket: WebSocket) {
         Ok(value) => value,
         Err(error) => return reject(&mut socket, &error.1).await,
     };
+    if let Some(key) = key.as_deref() {
+        if let Err(error) = verify_key(&s, &host_id, key).await {
+            return reject(&mut socket, &error.1).await;
+        }
+    }
 
     let row_id = match host_id.parse::<Id>() {
         Ok(id) => id,
@@ -550,9 +682,12 @@ async fn control(s: AppState, mut socket: WebSocket) {
     }
 
     let (control, inbox) = mpsc::channel(16);
+    let (disconnect, disconnect_rx) = watch::channel(false);
     let registration = Arc::new(Live {
         control,
+        disconnect,
         managed: hello.managed_updates,
+        supports_monitor: hello.supports_monitor,
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
         failed_version: Mutex::new(None),
@@ -582,7 +717,15 @@ async fn control(s: AppState, mut socket: WebSocket) {
     }
     tracing::info!(%host_id, hostname = %hello.hostname, "runner 控制连接已建立");
 
-    pump_control(&s, &host_id, socket, inbox, registration.clone()).await;
+    pump_control(
+        &s,
+        &host_id,
+        socket,
+        inbox,
+        disconnect_rx,
+        registration.clone(),
+    )
+    .await;
 
     // Only tear down the registration if it is still ours: a reconnect that
     // replaced us must not be marked offline by our own exit.
@@ -610,6 +753,7 @@ async fn control(s: AppState, mut socket: WebSocket) {
 /// Short keys on purpose: MySQL stores that column as `VARCHAR(255)`.
 fn metrics_json(
     load1: f64,
+    cpu_percent: f64,
     mem_used: u64,
     mem_total: u64,
     disk_used: u64,
@@ -617,6 +761,7 @@ fn metrics_json(
 ) -> String {
     json!({
         "load1": (load1 * 100.0).round() / 100.0,
+        "cpu_percent": (cpu_percent * 10.0).round() / 10.0,
         "mem_used": mem_used,
         "mem_total": mem_total,
         "disk_used": disk_used,
@@ -630,6 +775,7 @@ async fn pump_control(
     host_id: &str,
     mut socket: WebSocket,
     mut inbox: mpsc::Receiver<wire::Control>,
+    mut disconnect: watch::Receiver<bool>,
     registration: Arc<Live>,
 ) {
     let Ok(row_id) = host_id.parse::<Id>() else {
@@ -646,14 +792,30 @@ async fn pump_control(
     let mut unanswered = 0;
     loop {
         tokio::select! {
+            _ = disconnect.changed() => {
+                tracing::info!(%host_id, "runner 控制连接收到重置通知");
+                break;
+            },
             outgoing = inbox.recv() => match outgoing {
-                Some(frame) => if send_frame(&mut socket, &frame).await.is_err() { break },
+                Some(frame) => if let Err(error) = send_frame(&mut socket, &frame).await {
+                    tracing::info!(%host_id, %error, "runner 控制帧发送失败");
+                    break;
+                },
                 // Dropped sender: this connection was replaced.
-                None => break,
+                None => {
+                    tracing::info!(%host_id, "runner 控制连接被新连接替换");
+                    break;
+                },
             },
             incoming = socket.recv() => {
-                let Some(message) = incoming else { break };
-                let Ok(message) = message else { break };
+                let Some(message) = incoming else {
+                    tracing::info!(%host_id, "runner 控制连接已到达流末尾");
+                    break;
+                };
+                let Ok(message) = message else {
+                    tracing::info!(%host_id, error = %message.unwrap_err(), "runner 控制连接读取失败");
+                    break;
+                };
                 unanswered = 0;
                 match message {
                     Message::Text(text) => match serde_json::from_str::<wire::Report>(&text) {
@@ -667,14 +829,14 @@ async fn pump_control(
                         Ok(wire::Report::UpdateFailed { request, error }) => {
                             *registration.update_error.lock().unwrap_or_else(|e|e.into_inner()) = Some((request, error.chars().take(512).collect()));
                         }
-                        Ok(wire::Report::Metrics { load1, memory_used, memory_total, disk_used, disk_total }) => {
+                        Ok(wire::Report::Metrics { load1, cpu_percent, memory_used, memory_total, disk_used, disk_total }) => {
                             // No version bump: a heartbeat is not an edit, and
                             // bumping it would invalidate an operator's open form
                             // every thirty seconds.
                             let _ = hosts::Entity::update_many()
                                 .col_expr(hosts::Column::State, Expr::value("online"))
                                 .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
-                                .col_expr(hosts::Column::Metrics, Expr::value(metrics_json(load1, memory_used, memory_total, disk_used, disk_total)))
+                                .col_expr(hosts::Column::Metrics, Expr::value(metrics_json(load1, cpu_percent, memory_used, memory_total, disk_used, disk_total)))
                                 .filter(hosts::Column::Id.eq(row_id))
                                 .exec(&s.db).await;
                         }
@@ -687,7 +849,10 @@ async fn pump_control(
                     },
                     // The control connection carries no bulk data, by design.
                     Message::Binary(_) => tracing::warn!(%host_id, "控制连接收到二进制帧，已忽略"),
-                    Message::Close(_) => break,
+                    Message::Close(frame) => {
+                        tracing::info!(%host_id, ?frame, "runner 主动关闭控制连接");
+                        break;
+                    },
                     _ => {}
                 }
             }
@@ -700,7 +865,10 @@ async fn pump_control(
                     break;
                 }
                 unanswered += 1;
-                if send_frame(&mut socket, &wire::Control::Ping).await.is_err() { break }
+                if let Err(error) = send_frame(&mut socket, &wire::Control::Ping).await {
+                    tracing::info!(%host_id, %error, "runner 心跳发送失败");
+                    break;
+                }
             }
         }
     }
@@ -775,6 +943,12 @@ impl RunnerChannel {
             .get(&self.host_id)
             .cloned()
             .ok_or_else(|| offline(&self.name))?;
+        if kind == wire::SessionKind::Monitor && !registration.supports_monitor {
+            return Err(ApiError(
+                StatusCode::CONFLICT,
+                "当前 Agent 尚不支持详细监控，请升级 ferry-runner 后重试。".into(),
+            ));
+        }
         let id = secret();
         let (socket, dialled) = oneshot::channel();
         pending().insert(
@@ -831,6 +1005,19 @@ impl RunnerChannel {
 
 #[async_trait::async_trait]
 impl HostChannel for RunnerChannel {
+    async fn monitor(&self) -> Result<wire::HostMonitor> {
+        let (answer, _socket) = self
+            .ask(
+                wire::SessionKind::Monitor,
+                wire::Session::Monitor,
+                Duration::from_secs(15),
+            )
+            .await?;
+        match answer {
+            wire::Session::MonitorResult { metrics } => Ok(metrics),
+            _ => Err(garbled()),
+        }
+    }
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output> {
         let seconds = timeout.as_secs().max(1);
         let (answer, _socket) = self
@@ -963,6 +1150,38 @@ impl HostChannel for RunnerChannel {
                     modified_at: entry.modified_at,
                 })
                 .collect()),
+            _ => Err(garbled()),
+        }
+    }
+
+    async fn create_file(&self, path: &str) -> Result<()> {
+        let (answer, _socket) = self
+            .ask(
+                wire::SessionKind::Files,
+                wire::Session::CreateFile {
+                    path: path.to_owned(),
+                },
+                REQUEST_TIMEOUT,
+            )
+            .await?;
+        match answer {
+            wire::Session::Done => Ok(()),
+            _ => Err(garbled()),
+        }
+    }
+
+    async fn create_dir(&self, path: &str) -> Result<()> {
+        let (answer, _socket) = self
+            .ask(
+                wire::SessionKind::Files,
+                wire::Session::CreateDir {
+                    path: path.to_owned(),
+                },
+                REQUEST_TIMEOUT,
+            )
+            .await?;
+        match answer {
+            wire::Session::Done => Ok(()),
             _ => Err(garbled()),
         }
     }
@@ -1205,6 +1424,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn legacy_runner_monitor_does_not_send_an_unknown_session_kind() {
+        let host_id = "legacy-monitor-fixture";
+        let (control, mut receiver) = mpsc::channel(1);
+        let (disconnect, _) = watch::channel(false);
+        live().insert(
+            host_id.into(),
+            Arc::new(Live {
+                control,
+                disconnect,
+                managed: false,
+                supports_monitor: false,
+                version: "0.1.0-alpha.13".into(),
+                ready: std::sync::atomic::AtomicBool::new(true),
+                failed_version: Mutex::new(None),
+                update_error: Mutex::new(None),
+            }),
+        );
+        let channel = RunnerChannel {
+            _lease: crate::runner_updates::lease(host_id).await,
+            host_id: host_id.into(),
+            name: "旧版主机".into(),
+        };
+        let error = channel.monitor().await.unwrap_err();
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert!(error.1.contains("升级 ferry-runner"));
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+        live().remove(host_id);
+    }
+
     /// A private database per test, on disk, deleted when the test ends.
     ///
     /// Not `sqlite::memory:`: sqlx gives in-memory databases a shared cache, so
@@ -1320,6 +1572,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_connection_token_survives_use_until_rotated() {
+        let scratch = scratch_db().await;
+        let db = &*scratch;
+        let old = secret();
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(7),
+            workspace_id: Set(1),
+            name: Set("host".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            enroll_token: Set("sealed".into()),
+            enroll_token_hash: Set(fingerprint(&old)),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(db)
+        .await
+        .unwrap();
+        bootstrap_token(db, &old).await.unwrap();
+        bootstrap_token(db, &old).await.unwrap();
+        hosts::Entity::update_many()
+            .col_expr(
+                hosts::Column::EnrollTokenHash,
+                Expr::value(fingerprint(&secret())),
+            )
+            .filter(hosts::Column::Id.eq(7))
+            .exec(db)
+            .await
+            .unwrap();
+        assert_eq!(
+            bootstrap_token(db, &old).await.unwrap_err().0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
     async fn an_expired_or_unknown_token_is_refused() {
         let scratch = scratch_db().await;
         let db = &*scratch;
@@ -1398,13 +1701,20 @@ mod tests {
 
     #[test]
     fn metrics_stay_inside_the_column_they_are_stored_in() {
-        let worst = metrics_json(u64::MAX as f64, u64::MAX, u64::MAX, u64::MAX, u64::MAX);
+        let worst = metrics_json(
+            u64::MAX as f64,
+            100.0,
+            u64::MAX,
+            u64::MAX,
+            u64::MAX,
+            u64::MAX,
+        );
         assert!(
             worst.len() <= 255,
             "MySQL stores hosts.metrics as VARCHAR(255), got {} chars: {worst}",
             worst.len()
         );
-        let normal = metrics_json(0.567, 1 << 30, 1 << 34, 1 << 36, 1 << 38);
+        let normal = metrics_json(0.567, 42.0, 1 << 30, 1 << 34, 1 << 36, 1 << 38);
         assert!(normal.contains("\"load1\":0.57"), "{normal}");
     }
 
@@ -1455,11 +1765,14 @@ mod tests {
             vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
         });
         let (control, mut receiver) = mpsc::channel(1);
+        let (disconnect, _) = watch::channel(false);
         live().insert(
             id.to_string(),
             Arc::new(Live {
                 control,
+                disconnect,
                 managed: true,
+                supports_monitor: true,
                 version: "1.0.0".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
@@ -1589,9 +1902,12 @@ mod tests {
             "offline recovery must exclude new work"
         );
         let (control, _receiver) = mpsc::channel(1);
+        let (disconnect, _) = watch::channel(false);
         let peer = Arc::new(Live {
             control,
+            disconnect,
             managed: true,
+            supports_monitor: true,
             version: "2.0.0".into(),
             ready: std::sync::atomic::AtomicBool::new(false),
             failed_version: Mutex::new(None),

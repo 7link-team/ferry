@@ -37,6 +37,9 @@ pub async fn execute(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    if snapshot.jobs.iter().any(|job| job.manual) {
+        return execute_reserved(s, run, snapshot, stop).await;
+    }
     let hosts = snapshot
         .jobs
         .iter()
@@ -120,6 +123,7 @@ async fn execute_reserved(
         )
     };
     let seq = tokio::sync::Mutex::new(0i64);
+    let has_approval = snapshot.jobs.iter().any(|job| job.manual);
     let completed = schedule_jobs(
         &snapshot.jobs,
         stop,
@@ -130,11 +134,28 @@ async fn execute_reserved(
             let credential = credential.as_ref();
             let seq = &seq;
             async move {
+                if job.manual {
+                    return wait_for_approval(s, run.id, &job.key, &mut stop).await;
+                }
                 job_state(s, run.id, &job.key, "running", None).await?;
-                let result = execute_job(
-                    s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
-                )
-                .await;
+                let result = if has_approval {
+                    let reserve = crate::runner_updates::reserve(vec![job.host_id.to_string()]);
+                    tokio::pin!(reserve);
+                    tokio::select! {
+                        guards = &mut reserve => guards.run(execute_job(
+                            s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
+                        )).await,
+                        _ = stop.changed() => Ok(Outcome {
+                            state: "cancelled".into(), steps: BTreeMap::new(),
+                            artifacts: vec![], outputs: BTreeMap::new(),
+                        }),
+                    }
+                } else {
+                    execute_job(
+                        s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
+                    )
+                    .await
+                };
                 let outcome = match result {
                     Ok(result) => result,
                     Err(error) => {
@@ -306,6 +327,44 @@ fn state(value: &str) -> &str {
         _ => "failed",
     }
 }
+async fn wait_for_approval(
+    s: &AppState,
+    run: i64,
+    key: &str,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<Outcome> {
+    job_state(s, run, key, "waiting", None).await?;
+    loop {
+        if *stop.borrow() || !history::active(s, run).await? {
+            job_state(s, run, key, "cancelled", None).await?;
+            return Ok(Outcome {
+                state: "cancelled".into(),
+                steps: BTreeMap::new(),
+                artifacts: vec![],
+                outputs: BTreeMap::new(),
+            });
+        }
+        let row = jobs::Entity::find()
+            .filter(jobs::Column::RunId.eq(run))
+            .filter(jobs::Column::JobKey.eq(key))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if row.state == "approved" {
+            job_state(s, run, key, "succeeded", None).await?;
+            return Ok(Outcome {
+                state: "success".into(),
+                steps: BTreeMap::new(),
+                artifacts: vec![],
+                outputs: BTreeMap::new(),
+            });
+        }
+        tokio::select! {
+            _ = stop.changed() => {},
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+        }
+    }
+}
 async fn job_state(
     s: &AppState,
     run: i64,
@@ -314,7 +373,7 @@ async fn job_state(
     outputs: Option<String>,
 ) -> Result<()> {
     let mut update = jobs::Entity::update_many().col_expr(jobs::Column::State, Expr::value(state));
-    update = if state == "running" {
+    update = if state == "running" || state == "waiting" {
         update.col_expr(jobs::Column::StartedAt, Expr::value(db::now()))
     } else {
         update
@@ -345,6 +404,11 @@ async fn execute_job(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
+    if host.os == "windows" {
+        return Err(ApiError::bad(
+            "当前 Actions worker 需要 Linux 或 macOS 执行器。",
+        ));
+    }
     let host = crate::remote::Host {
         id: host.id.into(),
         workspace_id: host.workspace_id.into(),
@@ -626,11 +690,19 @@ fn checkout_workflow(
     variables: &BTreeMap<String, String>,
     secrets: &mut BTreeMap<String, String>,
 ) -> Result<String> {
-    if snapshot.checkouts.is_empty() {
+    if snapshot.checkouts.is_empty() && !snapshot.jobs.iter().any(|item| item.manual) {
         return Ok(snapshot.document.workflow.clone());
     }
     let mut workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow)
         .map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    for gate in snapshot.jobs.iter().filter(|item| item.manual) {
+        workflow["jobs"][&gate.key] = json!({
+            "name": gate.name,
+            "needs": gate.needs,
+            "runs-on": "self-hosted",
+            "steps": [{"run": "echo approved"}],
+        });
+    }
     for (index, checkout) in snapshot.checkouts.iter().enumerate() {
         let binding = &checkout.binding;
         if binding.job_id != job.key {
@@ -902,6 +974,7 @@ mod tests {
             steps: vec![],
             host_id: 1,
             image: "host".into(),
+            manual: false,
         }
     }
     fn success() -> Outcome {
@@ -911,6 +984,35 @@ mod tests {
             artifacts: vec![],
             steps: BTreeMap::new(),
         }
+    }
+
+    #[test]
+    fn worker_receives_standard_dependency_for_manual_gate() {
+        let workflow = "jobs:\n  gate:\n    ferry-approval: true\n  deploy:\n    needs: gate\n    runs-on: self-hosted\n    steps:\n      - run: echo deploy\n";
+        let mut gate = test_job("gate", &[]);
+        gate.manual = true;
+        gate.host_id = 0;
+        let deploy = test_job("deploy", &["gate"]);
+        let snapshot = Snapshot {
+            engine: crate::actions::ENGINE.into(),
+            document: crate::actions::Document {
+                engine: crate::actions::ENGINE.into(),
+                workflow: workflow.into(),
+                executor_bindings: vec![],
+                checkout_bindings: vec![],
+                graph_layout: Value::Null,
+            },
+            jobs: vec![gate, deploy.clone()],
+            checkouts: vec![],
+        };
+        let transformed =
+            checkout_workflow(&snapshot, &deploy, &BTreeMap::new(), &mut BTreeMap::new()).unwrap();
+        let value: Value = serde_json::from_str(&transformed).unwrap();
+        assert_eq!(value["jobs"]["gate"]["runs-on"], "self-hosted");
+        assert_eq!(value["jobs"]["gate"]["steps"][0]["run"], "echo approved");
+        assert!(value["jobs"]["gate"].get("ferry-approval").is_none());
+        assert_eq!(value["jobs"]["deploy"]["needs"], "gate");
+        assert_eq!(snapshot.document.workflow, workflow);
     }
 
     #[tokio::test]
@@ -1225,6 +1327,7 @@ mod tests {
                     steps: vec![],
                     host_id,
                     image: "host".into(),
+                    manual: false,
                 })
                 .collect(),
         };
@@ -1289,5 +1392,109 @@ mod tests {
     #[tokio::test]
     async fn service_stop_releases_partial_reservations() {
         cancel_while_waiting(true).await;
+    }
+
+    #[tokio::test]
+    async fn manual_gate_waits_for_approval_without_a_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let schema = Schema::new(db.get_database_backend());
+        for statement in [
+            schema.create_table_from_entity(runs::Entity),
+            schema.create_table_from_entity(jobs::Entity),
+        ] {
+            db.execute(&statement).await.unwrap();
+        }
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "approval-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
+        });
+        runs::Model {
+            id: 1,
+            workspace_id: 1,
+            pipeline_id: 1,
+            environment_id: 0,
+            environment_name: String::new(),
+            host_id: 0,
+            number: 1,
+            state: "running".into(),
+            trigger_kind: "manual".into(),
+            triggered_by: 1,
+            definition: String::new(),
+            variable_snapshot: None,
+            repo_url: String::new(),
+            branch: String::new(),
+            commit: String::new(),
+            credential_id: 0,
+            created_at: 0,
+            started_at: 0,
+            finished_at: 0,
+        }
+        .into_active_model()
+        .insert(&s.db)
+        .await
+        .unwrap();
+        jobs::Entity::insert(jobs::ActiveModel {
+            id: sea_orm::Set(2),
+            run_id: sea_orm::Set(1),
+            job_key: sea_orm::Set("gate".into()),
+            host_id: sea_orm::Set(0),
+            state: sea_orm::Set("queued".into()),
+            outputs: sea_orm::Set(None),
+            started_at: sea_orm::Set(0),
+            finished_at: sea_orm::Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let (_sender, mut stop) = tokio::sync::watch::channel(false);
+        let state = s.clone();
+        let waiting =
+            tokio::spawn(async move { wait_for_approval(&state, 1, "gate", &mut stop).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let row = jobs::Entity::find_by_id(2)
+                    .one(&s.db)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if row.state == "waiting" {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!waiting.is_finished());
+        jobs::Entity::update_many()
+            .col_expr(jobs::Column::State, Expr::value("approved"))
+            .filter(jobs::Column::Id.eq(2))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(2), waiting)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.state, "success");
+        assert_eq!(
+            jobs::Entity::find_by_id(2)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "succeeded"
+        );
     }
 }

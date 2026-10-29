@@ -44,6 +44,21 @@ it("read permission never offers reveal", async () => {
   expect(host.textContent).not.toContain("查看明文");
   expect(requests).toHaveLength(1);
 });
+it("keeps the selected host when creating an alert rule from its detail page", async () => {
+  history.replaceState({}, "", "/ops/deploy/alerts/new?target_kind=host&target_ref=42");
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
+    requests.push({ url, method: init.method, body: init.body as string });
+    return { ok: true, status: 200, json: async () => url.includes("/hosts")
+      ? { items: [{ id: "42", name: "Node 42" }], total: 1, page: 1, page_size: 200 }
+      : { id: "99" } };
+  }));
+  const permissions = new Set(["alerts.create", "hosts.read"]);
+  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)["alert-rules"]!} workspace="ops" permissions={permissions} />));
+  expect(host.textContent).toContain("Node 42");
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const request = requests.find(row => row.method === "POST" && row.url.endsWith("/alert-rules"));
+  expect(JSON.parse(request!.body!)).toMatchObject({ target_kind: "host", target_ref: "42" });
+});
 it("editing a secret omits its value unless replacement is explicitly enabled", async () => {
   history.replaceState({}, "", "/ops/deploy/variables/10/edit");
   await mount();
@@ -182,6 +197,8 @@ it("shows an install command immediately in the runner host mode", async () => {
   expect(host.querySelector('[role="tablist"][aria-label="接入方式"]')?.className).toContain("sticky");
   expect(host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="true"]')?.textContent).toBe("SSH");
   expect(host.textContent).toContain("主机地址");
+  expect(host.textContent).toContain("跳板主机");
+  expect(host.textContent).toContain("多个目标主机可共用它");
   expect(host.textContent).toContain("添加登录凭据");
   expect(host.textContent).not.toContain("接入方式*");
   await act(async () => host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="false"]')!.click());

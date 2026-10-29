@@ -118,7 +118,13 @@ pub async fn get(
         .filter(crate::entities::pipeline_run_jobs::Column::RunId.eq(r.id))
         .all(&s.db)
         .await?;
-    v["jobs"] = json!(jobs.iter().map(|job| json!({"key":job.job_key,"host_id":Id::from(job.host_id),"state":job.state,"started_at":job.started_at,"finished_at":job.finished_at})).collect::<Vec<_>>());
+    let snapshot = crate::actions::snapshot(&r.definition);
+    v["jobs"] = json!(jobs.iter().map(|job| {
+        let definition = snapshot.as_ref().and_then(|s| s.jobs.iter().find(|item| item.key == job.job_key));
+        json!({"key":job.job_key,"name":definition.map(|item| item.name.as_str()).unwrap_or(&job.job_key),
+            "step_indices":definition.map(|item| item.steps.iter().map(|step| step.index).collect::<Vec<_>>()).unwrap_or_default(),
+            "host_id":Id::from(job.host_id),"state":job.state,"started_at":job.started_at,"finished_at":job.finished_at})
+    }).collect::<Vec<_>>());
     v["artifacts"] = crate::artifacts::for_run(s.as_ref(), r.workspace_id, r.id).await?;
     Ok(Json(v))
 }
@@ -456,6 +462,40 @@ pub async fn cancel(
     .await?;
     Ok(Json(json!({"ok":true})))
 }
+pub async fn approve(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id, key)): Path<(String, String, String)>,
+) -> Result<Json<Value>> {
+    scope.require("pipelines.run")?;
+    let run = scoped(&s, &scope, &id).await?;
+    let snapshot = crate::actions::snapshot(&run.definition).ok_or_else(ApiError::missing)?;
+    if run.state != "running" || !snapshot.jobs.iter().any(|job| job.key == key && job.manual) {
+        return Err(ApiError::bad("当前任务不是等待确认的人工卡点。"));
+    }
+    use crate::entities::pipeline_run_jobs as jobs;
+    let changed = jobs::Entity::update_many()
+        .col_expr(jobs::Column::State, Expr::value("approved"))
+        .filter(jobs::Column::RunId.eq(run.id))
+        .filter(jobs::Column::JobKey.eq(&key))
+        .filter(jobs::Column::State.eq("waiting"))
+        .exec(&s.db)
+        .await?
+        .rows_affected;
+    if changed == 0 {
+        return Err(ApiError::bad("人工卡点已处理或尚未进入等待状态。"));
+    }
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "approve",
+        "pipeline-runs",
+        &Id::from(run.id),
+        json!({"job":key}),
+    )
+    .await?;
+    Ok(Json(json!({"ok":true})))
+}
 pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
     let tx = s.db.begin().await?;
     let changed = runs::Entity::update_many()
@@ -482,7 +522,7 @@ pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
             )
             .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
             .filter(jobs::Column::RunId.eq(id))
-            .filter(jobs::Column::State.eq("running"))
+            .filter(jobs::Column::State.is_in(["running", "waiting", "approved"]))
             .exec(&tx)
             .await?;
         jobs::Entity::update_many()

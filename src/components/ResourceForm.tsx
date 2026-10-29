@@ -17,7 +17,9 @@ import { ActionsEditor } from "./ActionsEditor";
 import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
 import { RunnerConnection } from "./RunnerConnection";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { ManifestEditor } from "./ManifestEditor";
+import { CronEditor } from "./CronEditor";
 import { ArrowLeft, Download, Loader2, Play, Save, SlidersHorizontal, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -64,23 +66,28 @@ export function ResourceForm<T extends Record<string, unknown>>({
   permissions,
   onSaved,
   pipelineWorkspace = false,
+  showViewNavigation = true,
 }: {
   config: FormConfig<T>;
   workspace: string;
   permissions: Set<string>;
   onSaved?: () => void;
   pipelineWorkspace?: boolean;
+  showViewNavigation?: boolean;
 }) {
   const route = useRoute();
   const creating = route.mode === "new";
   const copyId = creating ? new URLSearchParams(location.search).get("copy") : null;
-
-  const [draft, setDraft] = useState<Partial<T>>(config.blank);
+  const blankDraft = creating && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
+    ? { ...config.blank, target_kind: "host", target_ref: new URLSearchParams(location.search).get("target_ref") ?? "" } as Partial<T>
+    : config.blank;
+  const [draft, setDraft] = useState<Partial<T>>(blankDraft);
   const protectedRow = !creating && !!config.readOnly?.(draft);
   const readOnly = route.mode === "view" || protectedRow;
   const [loading, setLoading] = useState(!creating || !!copyId);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<RowAction<T>>();
+  const [pendingDelete, setPendingDelete] = useState<RowAction<T>>();
   const [pendingActionRow, setPendingActionRow] = useState<T>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [templateDialog, setTemplateDialog] = useState<"import" | "export" | null>(() => new URLSearchParams(location.search).has("template") && pipelineWorkspace ? "import" : null);
@@ -98,7 +105,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
 
   useEffect(() => {
     const id = creating ? (config.copy ? copyId : null) : route.id;
-    if (!id) { setDraft(config.blank); setLoading(false); return; }
+    if (!id) { setDraft(blankDraft); setLoading(false); return; }
     let live = true;
     setLoading(true);
     getResource<T>(workspace, config.resource, id, config.endpoint)
@@ -203,7 +210,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     {([ ["runner", "代理 Runner"], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
   </div>;
 
-  if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="max-w-3xl space-y-4 pb-8">
+  if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="mx-auto w-full max-w-6xl space-y-4 pb-8">
     {hostConnectionTabs}
     {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">当前角色没有代理接入权限。</p>}
   </div>;
@@ -268,7 +275,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <form className={cn("min-w-0 w-full space-y-6 pb-8", config.width !== "full" && "max-w-3xl")} onSubmit={submit}>
+    <form className={cn("min-w-0 w-full space-y-6 pb-8", config.width !== "full" && "mx-auto max-w-6xl")} onSubmit={submit}>
       {hostConnectionTabs}
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -276,12 +283,22 @@ export function ResourceForm<T extends Record<string, unknown>>({
         </p>
       )}
 
+      {readOnly && showViewNavigation && <div className="flex flex-wrap items-center gap-2 border-b pb-4">
+        {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <Button asChild size="sm"><a href={href({ ...route, mode: "edit" }, {})}>编辑</a></Button>}
+      </div>}
+
       {pendingAction && <ResourceActionDialog action={pendingAction} row={draft as T} workspace={workspace} permissions={permissions} onClose={() => setPendingAction(undefined)} onDone={() => { setPendingAction(undefined); if(route.id) void getResource<T>(workspace,config.resource,route.id,config.endpoint).then(setDraft).catch(cause=>setError(errorText(cause))); }} />}
+      {pendingDelete && <DeleteConfirmDialog action={pendingDelete.label} target={String(draft.name ?? draft.title ?? draft.email ?? route.id ?? "当前记录")} onClose={() => setPendingDelete(undefined)} onConfirm={async () => {
+        if (pendingDelete.parameters?.(draft as T).length) { setPendingAction(pendingDelete); return; }
+        setSaving(true); setError("");
+        try { await pendingDelete.action?.(draft as T); if (route.id) setDraft(await getResource<T>(workspace, config.resource, route.id, config.endpoint)); }
+        finally { setSaving(false); }
+      }} />}
       {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
       {readOnly && config.viewActions && <div className="flex flex-wrap gap-2">{config.viewActions.filter(action=>(!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T))).map(action=>action.to ? <Button key={action.label} variant="outline" asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.label}</a></Button> : <Button key={action.label} type="button" variant="outline" disabled={saving} onClick={async()=>{
+        if(action.destructive){setPendingDelete(action);return;}
         if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
-        if(action.destructive && !confirm(`${action.label}？`))return;
         setSaving(true);setError("");
         try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
         catch(cause){setError(errorText(cause));}finally{setSaving(false);}
@@ -303,20 +320,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         );
       })}
 
-      <div className="flex gap-2">
-        {readOnly ? (
-          <>
-            <Button asChild variant="outline">
-              <a href={backToList}>返回列表</a>
-            </Button>
-            {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && (
-              <Button asChild>
-                <a href={href({ ...route, mode: "edit" }, {})}>编辑</a>
-              </Button>
-            )}
-          </>
-        ) : (
-          <>
+      {!readOnly && <div className="flex gap-2">
             <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
               {creating ? config.resource === "hosts" ? "添加主机" : "创建" : "保存"}
@@ -324,9 +328,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <Button type="button" variant="outline" asChild>
               <a href={backToList}>取消</a>
             </Button>
-          </>
-        )}
-      </div>
+      </div>}
     </form>
   );
 }
@@ -488,6 +490,7 @@ function Field<T>({
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "manifest") return <Wrapper field={field}><ManifestEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></Wrapper>;
+  if (field.type === "cron") return <Wrapper field={field}><CronEditor value={text} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />{field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}</Wrapper>;
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value as string[] : []);

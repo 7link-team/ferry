@@ -65,6 +65,8 @@ pub struct Job {
     pub steps: Vec<JobStep>,
     pub host_id: i64,
     pub image: String,
+    #[serde(default)]
+    pub manual: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobStep {
@@ -128,6 +130,35 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
     let mut index = 0i64;
     let mut result = Vec::new();
     for (key, raw) in jobs {
+        let manual = match raw.get("ferry-approval") {
+            None => false,
+            Some(Value::Bool(true)) => true,
+            _ => {
+                return Err(ApiError::bad(format!(
+                    "任务 {key} 的 ferry-approval 必须为 true。"
+                )));
+            }
+        };
+        if manual
+            && (raw.get("steps").is_some()
+                || raw.get("uses").is_some()
+                || raw.get("runs-on").is_some())
+        {
+            return Err(ApiError::bad(format!(
+                "人工卡点 {key} 不能配置执行步骤或主机。"
+            )));
+        }
+        if manual
+            && raw.as_object().is_some_and(|fields| {
+                fields
+                    .keys()
+                    .any(|field| !matches!(field.as_str(), "name" | "needs" | "ferry-approval"))
+            })
+        {
+            return Err(ApiError::bad(format!(
+                "人工卡点 {key} 仅支持名称和前置任务。"
+            )));
+        }
         if !key
             .bytes()
             .next()
@@ -156,7 +187,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .any(|binding| binding.job_id == *key && binding.image != "host");
         let mut step_ids = BTreeSet::new();
         let labels = string_list(raw.get("runs-on"), "runs-on")?;
-        if labels.is_empty() && raw.get("uses").is_none() {
+        if labels.is_empty() && !manual && raw.get("uses").is_none() {
             return Err(ApiError::bad(format!("任务 {key} 缺少 runs-on。")));
         }
         if labels.iter().any(|label| label.contains("${{")) {
@@ -242,7 +273,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                     Ok(item)
                 })
                 .collect::<Result<Vec<_>>>()?,
-            None if raw.get("uses").is_some() => vec![],
+            None if manual || raw.get("uses").is_some() => vec![],
             _ => {
                 return Err(ApiError::bad(format!(
                     "任务 {key} 需要 1 到 50 个执行步骤。"
@@ -261,6 +292,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             steps,
             host_id: 0,
             image: "host".into(),
+            manual,
         });
     }
     fn visit(
@@ -553,6 +585,9 @@ pub async fn resolve(
 ) -> Result<Snapshot> {
     let (mut jobs, _) = parse(&document)?;
     for job in &mut jobs {
+        if job.manual {
+            continue;
+        }
         job.host_id = default_host;
         if let Some(binding) = document
             .executor_bindings
@@ -571,7 +606,7 @@ pub async fn resolve(
             }
         }
     }
-    if jobs.iter().any(|job| job.host_id == 0) {
+    if jobs.iter().any(|job| !job.manual && job.host_id == 0) {
         return Err(ApiError::bad(
             "每个任务需要执行器绑定或所选环境的执行主机。",
         ));
@@ -623,6 +658,30 @@ mod tests {
             executor_bindings: vec![],
             checkout_bindings: vec![],
             graph_layout: json!({}),
+        }
+    }
+    #[test]
+    fn manual_approval_has_no_executor_or_steps() {
+        let workflow = "jobs:\n  gate:\n    name: 发布确认\n    ferry-approval: true\n  deploy:\n    needs: gate\n    runs-on: self-hosted\n    steps:\n      - run: echo deploy\n";
+        let (jobs, _) = parse(&doc(workflow)).unwrap();
+        let gate = jobs.iter().find(|job| job.key == "gate").unwrap();
+        let deploy = jobs.iter().find(|job| job.key == "deploy").unwrap();
+        assert!(gate.manual);
+        assert!(gate.steps.is_empty());
+        assert_eq!(gate.host_id, 0);
+        assert_eq!(deploy.needs, vec!["gate"]);
+        for invalid in [
+            workflow.replace("ferry-approval: true", "ferry-approval: false"),
+            workflow.replace(
+                "ferry-approval: true",
+                "ferry-approval: true\n    runs-on: self-hosted",
+            ),
+            workflow.replace(
+                "ferry-approval: true",
+                "ferry-approval: true\n    steps: [{run: echo bad}]",
+            ),
+        ] {
+            assert!(parse(&doc(&invalid)).is_err());
         }
     }
     #[test]

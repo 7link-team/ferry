@@ -91,7 +91,132 @@ impl MigratorTrait for Migrator {
             Box::new(RunnerUpdateState),
             Box::new(NamedCodeConnections),
             Box::new(HostGroupOrder),
+            Box::new(HostConnectionCommand),
+            Box::new(HostJump),
+            Box::new(PipelineGroupOrder),
         ]
+    }
+}
+
+struct PipelineGroupOrder;
+impl MigrationName for PipelineGroupOrder {
+    fn name(&self) -> &str {
+        "pipeline_group_order_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineGroupOrder {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_contexts",
+                "position",
+                Table::alter()
+                    .table(Alias::new("pipeline_contexts"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("position"))
+                            .big_integer()
+                            .not_null()
+                            .default(0_i64),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct HostJump;
+fn host_jump() -> SchemaStatement {
+    SchemaStatement::Column(
+        "hosts",
+        "jump_host_id",
+        Table::alter()
+            .table(Alias::new("hosts"))
+            .add_column(
+                ColumnDef::new(Alias::new("jump_host_id"))
+                    .big_integer()
+                    .not_null()
+                    .default(0_i64),
+            )
+            .to_owned(),
+    )
+}
+impl MigrationName for HostJump {
+    fn name(&self) -> &str {
+        "host_jump_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for HostJump {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(m, host_jump()).await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct HostConnectionCommand;
+impl MigrationName for HostConnectionCommand {
+    fn name(&self) -> &str {
+        "host_connection_command_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for HostConnectionCommand {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for (name, column) in [
+            (
+                "enroll_token",
+                ColumnDef::new(Alias::new("enroll_token"))
+                    .text()
+                    .not_null()
+                    .default("")
+                    .to_owned(),
+            ),
+            (
+                "enroll_token_hash",
+                ColumnDef::new(Alias::new("enroll_token_hash"))
+                    .string_len(64)
+                    .not_null()
+                    .default("")
+                    .to_owned(),
+            ),
+        ] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    "hosts",
+                    name,
+                    Table::alter()
+                        .table(Alias::new("hosts"))
+                        .add_column(&mut column.clone())
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "hosts",
+                "hosts_enroll_token_hash",
+                Index::create()
+                    .name("hosts_enroll_token_hash")
+                    .table(Alias::new("hosts"))
+                    .col(Alias::new("enroll_token_hash"))
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
     }
 }
 
@@ -992,6 +1117,7 @@ mod schema_tests {
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
+        .chain(std::iter::once(host_jump()))
         .collect()
     }
 
@@ -1016,7 +1142,10 @@ mod schema_tests {
             ("workspace_members", "id workspace_id user_id role_id"),
             ("activity", "id workspace_id actor_id resource_id"),
             ("host_groups", "id workspace_id parent_id"),
-            ("hosts", "id workspace_id group_id credential_id"),
+            (
+                "hosts",
+                "id workspace_id group_id credential_id jump_host_id",
+            ),
             ("tags", "id workspace_id"),
             ("host_tags", "host_id tag_id"),
             (
@@ -1098,7 +1227,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 71);
+        assert_eq!(count, 72);
     }
 
     #[test]

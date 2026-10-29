@@ -98,8 +98,8 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
     <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
       <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label="返回主机详情" title="返回主机详情"><ArrowLeft className="size-4" /></a>
       <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={hostName}>{hostName}</h1>
-      {canTerminal && <Button variant="outline" size="sm" onClick={() => addTab("terminal")}><SquareTerminal className="size-4" />新建终端</Button>}
-      {canFiles && <Button variant="outline" size="sm" onClick={() => addTab("files")}><FolderOpen className="size-4" />新建文件</Button>}
+      {canTerminal && <Button variant="outline" size="icon" aria-label="新建终端" title="新建终端" onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}
+      {canFiles && <Button variant="outline" size="icon" aria-label="新建文件标签" title="新建文件标签" onClick={() => addTab("files")}><FolderOpen className="size-4" /></Button>}
     </header>
     {error && <p role="alert" className="border-b px-3 py-1 text-sm text-destructive">{error}</p>}
     <div role="tablist" aria-label="主机工作标签" className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">

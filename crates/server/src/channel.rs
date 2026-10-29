@@ -13,6 +13,7 @@
 
 use crate::error::{ApiError, Result};
 use bytes::Bytes;
+use ferry_protocol::HostMonitor;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::{pin::Pin, time::Duration};
@@ -71,6 +72,7 @@ pub trait Pty: Send {
 
 #[async_trait::async_trait]
 pub trait HostChannel: Send + Sync {
+    async fn monitor(&self) -> Result<HostMonitor>;
     /// One-shot command with captured output. Used by scheduled jobs and
     /// deployment steps, never for anything interactive.
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output>;
@@ -87,6 +89,10 @@ pub trait HostChannel: Send + Sync {
     async fn open_pty(&self, size: PtySize) -> Result<Box<dyn Pty>>;
 
     async fn list_dir(&self, path: &str) -> Result<Vec<DirEntry>>;
+
+    async fn create_file(&self, path: &str) -> Result<()>;
+
+    async fn create_dir(&self, path: &str) -> Result<()>;
 
     /// Streamed download. The server never buffers the whole file.
     async fn read_file(&self, path: &str) -> Result<(FileMeta, ByteStream)>;

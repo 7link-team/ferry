@@ -266,6 +266,12 @@ LIST=$(c "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER")
 ck "list_dir finds the file"    '"name":"alpha.txt"'  "$LIST"
 ck "list_dir types a directory" '"kind":"directory"'  "$LIST"
 ck "list_dir reports a size"    '"size":6'            "$LIST"
+ck "create directory" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created\",\"kind\":\"directory\"}" "$B/workspaces/ops/hosts/$HOST_A/files" -o /dev/null -w '%{http_code}')"
+ck "create file" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/ops/hosts/$HOST_A/files" -o /dev/null -w '%{http_code}')"
+ck "created file is empty" "^0$" "$(wc -c <"$XFER/created/empty.txt" | tr -d ' ')"
+ck "duplicate create is refused" "名称是否重复" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/ops/hosts/$HOST_A/files")"
+ck "delete created file" "^204$" "$(c -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER/created/empty.txt" -o /dev/null -w '%{http_code}')"
+ck "delete created directory" "^204$" "$(c -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER/created" -o /dev/null -w '%{http_code}')"
 
 COOKIE="ferry_session=$(grep ferry_session "$JAR" | awk '{print $7}' | tail -1)"
 PTY=$(python3 -I scripts/ws-probe.py terminal \

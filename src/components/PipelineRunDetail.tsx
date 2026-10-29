@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { api, errorText } from "../api";
@@ -16,6 +17,8 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [complete, setComplete] = useState(false);
+  const [selectedJob, setSelectedJob] = useState("");
+  const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({});
   const scroll = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const cancelRequest = useRef<AbortController | null>(null);
@@ -102,8 +105,22 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
       if (!controller.signal.aborted) setBusy(false);
     }
   };
+  const approve = async (key: string) => {
+    setBusy(true);
+    try {
+      await api(`${endpoint}/jobs/${encodeURIComponent(key)}/approve`, { method: "POST", body: "{}" });
+      reload.current();
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const badge = stateBadge(run?.state ?? "queued");
+  const currentJob = run?.jobs?.find(job => job.key === selectedJob) ?? run?.jobs?.find(job => job.state === "failed" || job.state === "running" || job.state === "waiting") ?? run?.jobs?.[0];
+  const visibleSteps = currentJob?.step_indices ? run?.steps.filter(step => currentJob.step_indices!.includes(step.index)) ?? [] : run?.steps ?? [];
+  const otherLogs = logs.filter(log => log.step_index < 0);
   return (
     <div className="flex min-h-0 flex-col gap-3 overflow-auto pb-3">
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -120,57 +137,39 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             {[
-              ["流水线 ID", run.pipeline_id], ["执行环境", run.environment_name || "默认执行器"], ["目标主机 ID", run.host_id], ["触发人 ID", run.triggered_by],
+              ["流水线 ID", run.pipeline_id], ["执行环境", run.environment_name || "未指定"], ...(run.host_id !== "0" ? [["目标主机 ID", run.host_id]] : []), ["触发人 ID", run.triggered_by],
               ["耗时", duration(run.started_at, run.finished_at)], ["Commit", run.commit || "—"],
             ].map(([label, value]) => <div key={label} className="min-w-0">
               <dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd>
             </div>)}
           </dl>
           <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>查看构建产物</a>
-          <p className="text-xs text-muted-foreground">{cancelNotice}</p>
+          {isActive(run.state) && <p className="text-xs text-muted-foreground">{cancelNotice}</p>}
         </section>
         {!!run.variables?.length && <section aria-label="执行变量" className="rounded border p-3 text-sm">
           <h2 className="font-medium">执行变量</h2><p className="text-muted-foreground">使用触发时的加密快照，修改当前变量不会改变本次执行。</p>
           <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope === "environment" ? "执行环境" : v.scope_ref !== "0" ? "流水线专属" : v.scope === "global" ? "全局" : "构建模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</li>)}</ul>
         </section>}
-        {!!run.jobs?.length && <section aria-label="任务执行器" className="shrink-0">
-          <h2 className="mb-2 text-sm font-medium">任务执行器</h2>
-          <ul className="divide-y rounded-lg border bg-card">{run.jobs.map(job => {
-            const badge = stateBadge(job.state);
-            return <li key={job.key} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-              <span className="min-w-0 flex-1 break-all">{job.key}</span>
-              <span>主机 {job.host_id}</span><Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
-              <span>{duration(job.started_at, job.finished_at)}</span>
-            </li>;
-          })}</ul>
-        </section>}
-        <section aria-label="步骤" className="shrink-0">
-          <h2 className="mb-2 text-sm font-medium">步骤</h2>
-          <ol className="divide-y divide-border rounded-lg border border-border bg-card">
-            {run.steps.map((step) => {
-              const badge = stateBadge(step.state);
-              return <li key={step.index} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-                <span className="text-muted-foreground">{step.index + 1}.</span>
-                <span className="min-w-0 flex-1 break-words">{step.name}</span>
-                <Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
-                <span>退出码：{step.exit_code ?? "—"}</span>
-                <span>{duration(step.started_at, step.finished_at)}</span>
-              </li>;
-            })}
-          </ol>
-        </section>
-        <div className="flex items-center justify-between text-sm">
-          <h2 className="font-medium">日志 · {logs.length} 个分片</h2>
-          <span className="text-muted-foreground">{complete ? "日志已读取完毕，轮询已停止" : "按步骤读取日志"}</span>
-        </div>
-        <div ref={scroll} role="region" aria-label="执行日志" tabIndex={0}
-          className="min-h-48 flex-1 overflow-auto rounded-lg border border-border bg-card p-3 font-mono text-xs leading-5"
-          onScroll={() => {
-            const el = scroll.current;
-            if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32;
-          }}>
-          {logs.map((log) => <LogChunk key={log.seq} log={log} />)}
-          {!logs.length && <p className="text-muted-foreground">暂无日志。</p>}
+        <div className="grid min-h-0 flex-1 border-y lg:grid-cols-[15rem_minmax(0,1fr)]">
+          <aside aria-label="任务列表" className="border-b bg-muted/30 p-3 lg:border-b-0 lg:border-r">
+            <h2 className="mb-2 px-2 text-sm font-semibold">任务</h2>
+            <div className="space-y-1">{run.jobs?.map(job => {
+              const status = stateBadge(job.state);
+              return <button key={job.key} type="button" className={`flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent ${currentJob?.key === job.key ? "bg-accent font-medium" : ""}`} aria-current={currentJob?.key === job.key ? "true" : undefined} onClick={() => setSelectedJob(job.key)}><span className="min-w-0 truncate">{job.name || job.key}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge></button>;
+            })}</div>
+          </aside>
+          <section aria-label="任务步骤和日志" className="min-w-0 p-3 sm:p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="font-semibold">{currentJob?.name || currentJob?.key || "执行步骤"}</h2>{currentJob && <span className="text-xs text-muted-foreground">{duration(currentJob.started_at, currentJob.finished_at)}</span>}{complete && <span className="text-xs text-muted-foreground">日志已加载</span>}{currentJob?.state === "waiting" && permissions.has("pipelines.run") && <Button type="button" size="sm" disabled={busy} onClick={() => void approve(currentJob.key)}>确认继续</Button>}</div>
+            <div className="divide-y border-y">{visibleSteps.map(step => {
+              const status = stateBadge(step.state);
+              const stepName = currentJob && step.name.startsWith(`${currentJob.name || currentJob.key} / `) ? step.name.slice((currentJob.name || currentJob.key).length + 3) : step.name;
+              const chunks = logs.filter(log => log.step_index === step.index);
+              const expanded = expandedSteps[step.index] ?? (step.state === "failed" || step.state === "running" || chunks.length > 0);
+              return <div key={step.index}><button type="button" className="flex w-full items-center gap-2 px-2 py-3 text-left text-sm hover:bg-accent" aria-expanded={expanded} onClick={() => setExpandedSteps(current => ({ ...current, [step.index]: !expanded }))}>{expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}<span className="min-w-0 flex-1 truncate">{stepName}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge><span className="text-xs text-muted-foreground">{duration(step.started_at, step.finished_at)}</span></button>{expanded && <div ref={step.index === visibleSteps[0]?.index ? scroll : undefined} role="region" aria-label={step.index === visibleSteps[0]?.index ? "执行日志" : `${stepName} 日志`} className="max-h-[32rem] min-h-16 overflow-auto border-t bg-background px-3 py-2 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{chunks.length ? chunks.map(log => <LogChunk key={log.seq} log={log} />) : <span className="text-muted-foreground">暂无日志</span>}{step.exit_code !== null && <p className="mt-2 text-muted-foreground">退出码 {step.exit_code}</p>}</div>}</div>;
+            })}</div>
+            {otherLogs.length > 0 && <div className="mt-4"><h3 className="mb-2 text-sm font-medium">运行日志</h3><div ref={!visibleSteps.length ? scroll : undefined} role="region" aria-label="运行日志" tabIndex={0} className="max-h-64 min-h-20 overflow-auto border bg-background p-3 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{otherLogs.map(log => <LogChunk key={log.seq} log={log} />)}</div></div>}
+            {!visibleSteps.length && otherLogs.length === 0 && <p className="py-6 text-sm text-muted-foreground">{currentJob?.state === "waiting" ? "等待人工确认" : complete ? "暂无步骤日志" : "等待任务开始"}</p>}
+          </section>
         </div>
       </>}
     </div>

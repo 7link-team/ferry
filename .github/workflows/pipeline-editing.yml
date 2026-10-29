@@ -92,6 +92,7 @@ jobs:
           for suite in actions-canvas named-connection-ui repository-auth-ui actions-ui marketplace-ui templates-ui build-ui; do
             node "scripts/test-$suite.mjs" || result=1
           done
+          node scripts/test-manual-approval.mjs || result=1
           exit "$result"
       - name: Code connections and repository authorization on all three databases
         if: ${{ !cancelled() && steps.backend.outcome == 'success' }}

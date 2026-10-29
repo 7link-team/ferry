@@ -50,6 +50,8 @@ pub struct Hello {
     pub agent_version: String,
     #[serde(default)]
     pub managed_updates: bool,
+    #[serde(default)]
+    pub supports_monitor: bool,
 }
 
 /// Runner -> server, first frame on a session connection. The session id is in
@@ -107,6 +109,8 @@ pub enum Report {
     /// heartbeat: silence in this direction is what makes the server hang up.
     Metrics {
         load1: f64,
+        #[serde(default)]
+        cpu_percent: f64,
         memory_used: u64,
         memory_total: u64,
         disk_used: u64,
@@ -118,6 +122,31 @@ pub enum Report {
         session: String,
         error: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskUsage {
+    pub name: String,
+    pub mount: String,
+    pub total: u64,
+    pub used: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkUsage {
+    pub name: String,
+    pub received: u64,
+    pub transmitted: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostMonitor {
+    pub cpu_percent: f64,
+    pub load1: f64,
+    pub memory_used: u64,
+    pub memory_total: u64,
+    pub disks: Vec<DiskUsage>,
+    pub networks: Vec<NetworkUsage>,
 }
 
 /// What a dedicated session connection carries.
@@ -134,6 +163,7 @@ pub enum SessionKind {
     Exec,
     /// Directory listing and deletion: metadata only, no bulk data.
     Files,
+    Monitor,
 }
 
 /// One directory entry. Mirrors the server's `channel::DirEntry`, which cannot
@@ -195,6 +225,16 @@ pub enum Session {
     ListDir {
         path: String,
     },
+    Monitor,
+    MonitorResult {
+        metrics: HostMonitor,
+    },
+    CreateFile {
+        path: String,
+    },
+    CreateDir {
+        path: String,
+    },
     DeleteFile {
         path: String,
     },
@@ -244,14 +284,22 @@ mod tests {
             arch: "x86_64".into(),
             agent_version: "0.1.0".into(),
             managed_updates: false,
+            supports_monitor: true,
         };
         let text = serde_json::to_string(&hello).unwrap();
         assert!(text.contains(r#""type":"enroll""#), "{text}");
         let back: Hello = serde_json::from_str(&text).unwrap();
         assert!(matches!(back.auth, Auth::Enroll { token } if token == "7f3a"));
         assert_eq!(back.ip_address, "192.168.0.10");
+        assert!(back.supports_monitor);
         let mut legacy: serde_json::Value = serde_json::from_str(&text).unwrap();
         legacy.as_object_mut().unwrap().remove("ip_address");
+        legacy.as_object_mut().unwrap().remove("supports_monitor");
+        assert!(
+            !serde_json::from_value::<Hello>(legacy.clone())
+                .unwrap()
+                .supports_monitor
+        );
         assert_eq!(
             serde_json::from_value::<Hello>(legacy).unwrap().ip_address,
             ""
@@ -281,6 +329,7 @@ mod tests {
             Report::Pong,
             Report::Metrics {
                 load1: 0.5,
+                cpu_percent: 12.5,
                 memory_used: 1,
                 memory_total: 2,
                 disk_used: 3,

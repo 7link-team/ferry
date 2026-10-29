@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { parseActions, editActionJob, editActionStep, connectActionJobs, removeActionJob, ensureActionCheckout, addActionJob, DEFAULT_ACTIONS } from "./actions-workflow";
 
+it("starts with neutral numbered steps and retains Action inputs in YAML", () => {
+  expect(parseActions(DEFAULT_ACTIONS).jobs[0]!.steps[0]!.name).toBe("步骤1");
+  const changed = editActionStep(DEFAULT_ACTIONS, "build", 0, { uses: "actions/setup-node@v4", run: null, with: { "node-version": "20", cache: "npm" } });
+  expect(parseActions(changed).jobs[0]!.steps[0]!.with).toEqual({ "node-version": "20", cache: "npm" });
+});
+
 const source = `# preserved workflow comment
 name: build
 on: workflow_dispatch

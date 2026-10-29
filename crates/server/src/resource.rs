@@ -136,7 +136,7 @@ fn filters<E: EntityTrait>(spec: &Spec, query: &ListQuery) -> Result<Condition> 
         let values: Vec<Value> = options
             .iter()
             .map(|option| {
-                if name.ends_with("_id") {
+                if name.ends_with("_id") || name == "target_ref" {
                     Ok(Id::reference(option)?.into())
                 } else {
                     Ok(option.clone().into())
@@ -273,5 +273,25 @@ mod tests {
                 .contains("WHERE \"hosts\".\"workspace_id\" = $1")
         );
         assert_eq!(statement.values.unwrap().0, vec![1_i64.into()]);
+    }
+
+    #[test]
+    fn alert_target_filter_binds_a_numeric_host_id() {
+        use crate::entities::alert_events;
+        use sea_orm::QueryTrait;
+        let spec = Spec {
+            search: &[],
+            filters: &["target_ref"],
+            sortable: &["id"],
+            default_sort: "id",
+        };
+        let q = ListQuery::parse(&spec, &raw(&[("target_ref", "109174082875949056")])).unwrap();
+        let statement = alert_events::Entity::find()
+            .filter(conditions::<alert_events::Entity>(&spec, &Id::from(1), &q).unwrap())
+            .build(sea_orm::DbBackend::Postgres);
+        assert_eq!(
+            statement.values.unwrap().0,
+            vec![1_i64.into(), 109174082875949056_i64.into()]
+        );
     }
 }

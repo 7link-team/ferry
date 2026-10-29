@@ -17,6 +17,8 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
 };
+use ferry_protocol::HostMonitor;
+use futures::StreamExt;
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
     sea_query::{Expr, ExprTrait},
@@ -24,6 +26,7 @@ use sea_orm::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 // ---------------------------------------------------------------- 主机组
 
@@ -354,6 +357,145 @@ const HOST_SPEC: Spec = Spec {
 pub const CONNECTIONS: [&str; 2] = ["runner", "ssh"];
 pub const STATES: [&str; 3] = ["online", "offline", "unknown"];
 
+fn monitor_summary(m: &HostMonitor) -> String {
+    let root = m
+        .disks
+        .iter()
+        .find(|disk| disk.mount == "/" || disk.mount == "C:\\")
+        .or_else(|| m.disks.first());
+    json!({
+        "cpu_percent": (m.cpu_percent * 10.0).round() / 10.0,
+        "load1": (m.load1 * 100.0).round() / 100.0,
+        "mem_used": m.memory_used,
+        "mem_total": m.memory_total,
+        "disk_used": root.map_or(0, |disk| disk.used),
+        "disk_total": root.map_or(0, |disk| disk.total),
+    })
+    .to_string()
+}
+
+async fn sample_host(s: &AppState, workspace: Id, id: Id) -> Result<HostMonitor> {
+    let channel = crate::remote::open(s, &workspace, &id).await?;
+    let monitor = channel.monitor().await?;
+    hosts::Entity::update_many()
+        .col_expr(hosts::Column::State, Expr::value("online"))
+        .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
+        .col_expr(
+            hosts::Column::Metrics,
+            Expr::value(monitor_summary(&monitor)),
+        )
+        .filter(hosts::Column::WorkspaceId.eq(workspace))
+        .filter(hosts::Column::Id.eq(id))
+        .exec(&s.db)
+        .await?;
+    Ok(monitor)
+}
+
+pub async fn monitor_host(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+) -> Result<Json<HostMonitor>> {
+    scope.require("hosts.read")?;
+    Ok(Json(sample_host(&s, scope.workspace_id, id).await?))
+}
+
+pub async fn ssh_heartbeat(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(30));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = drain.changed() => break,
+            _ = tick.tick() => {
+                let rows = match hosts::Entity::find().filter(hosts::Column::Connection.eq("ssh")).all(&s.db).await {
+                    Ok(rows) => rows,
+                    Err(error) => { tracing::warn!(%error, "读取 SSH 探测主机失败"); continue; }
+                };
+                futures::stream::iter(rows).for_each_concurrent(8, |row| {
+                    let s = s.clone();
+                    async move {
+                        if let Err(error) = sample_host(&s, Id::from(row.workspace_id), Id::from(row.id)).await {
+                            tracing::debug!(host_id=row.id, %error, "SSH 主机探测失败");
+                            let _ = hosts::Entity::update_many()
+                                .col_expr(hosts::Column::State, Expr::value("offline"))
+                                .filter(hosts::Column::Id.eq(row.id))
+                                .filter(hosts::Column::WorkspaceId.eq(row.workspace_id))
+                                .exec(&s.db).await;
+                        }
+                    }
+                }).await;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod jump_tests {
+    use super::*;
+    use sea_orm::{ActiveValue::Set, Database};
+    use sea_orm_migration::MigratorTrait;
+
+    #[tokio::test]
+    async fn jump_must_be_a_direct_ssh_host_in_the_same_workspace() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        crate::migration::Migrator::up(&db, None).await.unwrap();
+        for (id, workspace, connection, jump) in [
+            (1, 1, "ssh", 0),
+            (2, 1, "ssh", 0),
+            (3, 1, "runner", 0),
+            (4, 2, "ssh", 0),
+            (5, 1, "ssh", 2),
+        ] {
+            hosts::Entity::insert(hosts::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(workspace),
+                name: Set(format!("host-{id}")),
+                address: Set("127.0.0.1".into()),
+                port: Set(22),
+                username: Set("user".into()),
+                connection: Set(connection.into()),
+                state: Set("offline".into()),
+                group_id: Set(0),
+                description: Set(String::new()),
+                host_key: Set(String::new()),
+                runner_key_hash: Set(String::new()),
+                jump_host_id: Set(jump),
+                seen_at: Set(0),
+                created_at: Set(0),
+                updated_at: Set(0),
+                version: Set(1),
+                os: Set(String::new()),
+                arch: Set(String::new()),
+                agent_version: Set(String::new()),
+                metrics: Set(String::new()),
+                credential_id: Set(0),
+                ..Default::default()
+            })
+            .exec(&db)
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            validate_jump(&db, Id::from(1), Id::from(1), "2", "ssh")
+                .await
+                .unwrap(),
+            Id::from(2)
+        );
+        for candidate in ["1", "3", "4", "5"] {
+            assert!(
+                validate_jump(&db, Id::from(1), Id::from(1), candidate, "ssh")
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(
+            validate_jump(&db, Id::from(1), Id::from(3), "2", "runner")
+                .await
+                .is_err()
+        );
+    }
+}
+
 fn host_json(row: &hosts::Model) -> Value {
     json!({
         "id": Id::from(row.id),
@@ -365,6 +507,7 @@ fn host_json(row: &hosts::Model) -> Value {
         "state": row.state,
         "group_id": Id::from(row.group_id),
         "credential_id": Id::from(row.credential_id),
+        "jump_host_id": Id::from(row.jump_host_id),
         "description": row.description,
         "seen_at": row.seen_at,
         "created_at": row.created_at,
@@ -390,6 +533,8 @@ pub struct HostBody {
     group_id: String,
     #[serde(default)]
     credential_id: String,
+    #[serde(default)]
+    jump_host_id: String,
     #[serde(default)]
     description: String,
     #[serde(default)]
@@ -418,6 +563,30 @@ fn check_host(body: &HostBody, creating: bool) -> Result<(String, String)> {
         }
     }
     Ok((name, connection.to_owned()))
+}
+
+async fn validate_jump(
+    db: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    host: Id,
+    jump: &str,
+    connection: &str,
+) -> Result<Id> {
+    let jump = Id::reference(jump)?;
+    if jump == Id::from(0) {
+        return Ok(jump);
+    }
+    if connection != "ssh" || jump == host {
+        return Err(ApiError::bad("只能为 SSH 主机选择另一台跳板主机。"));
+    }
+    hosts::Entity::find_by_id(i64::from(jump))
+        .filter(hosts::Column::WorkspaceId.eq(workspace))
+        .filter(hosts::Column::Connection.eq("ssh"))
+        .filter(hosts::Column::JumpHostId.eq(0))
+        .one(db)
+        .await?
+        .ok_or_else(|| ApiError::bad("跳板主机必须是当前工作空间中可直连的 SSH 主机。"))?;
+    Ok(jump)
 }
 
 pub async fn list_hosts(
@@ -514,6 +683,7 @@ pub(crate) async fn create_host_in(
     let (name, connection) = check_host(&body, true)?;
     let (id, now) = (s.next_id()?, db::now());
     validate_membership(tx, scope, &body.group_id).await?;
+    let jump = validate_jump(tx, scope.workspace_id, id, &body.jump_host_id, &connection).await?;
     hosts::Entity::insert(hosts::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
@@ -525,6 +695,7 @@ pub(crate) async fn create_host_in(
         state: Set("unknown".to_owned()),
         group_id: Set(i64::from(Id::reference(&body.group_id)?)),
         credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
+        jump_host_id: Set(i64::from(jump)),
         description: Set(body.description.trim().to_owned()),
         seen_at: Set(0),
         created_at: Set(now),
@@ -565,6 +736,26 @@ pub async fn update_host(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    let jump = validate_jump(
+        &tx,
+        scope.workspace_id,
+        id,
+        &body.jump_host_id,
+        &existing.connection,
+    )
+    .await?;
+    if jump != Id::from(0)
+        && hosts::Entity::find()
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(hosts::Column::JumpHostId.eq(id))
+            .count(&tx)
+            .await?
+            > 0
+    {
+        return Err(ApiError::conflict(
+            "这台主机正作为其他主机的跳板，不能再配置跳板主机。",
+        ));
+    }
     let mut update = hosts::Entity::update_many()
         .col_expr(hosts::Column::Name, Expr::value(name.clone()))
         .col_expr(hosts::Column::Port, Expr::value(body.port))
@@ -577,6 +768,7 @@ pub async fn update_host(
             hosts::Column::CredentialId,
             Expr::value(Id::reference(&body.credential_id)?),
         )
+        .col_expr(hosts::Column::JumpHostId, Expr::value(jump))
         .col_expr(
             hosts::Column::Description,
             Expr::value(body.description.trim()),
@@ -633,6 +825,17 @@ async fn host_is_free(
     workspace_id: &Id,
     id: &Id,
 ) -> Result<()> {
+    if hosts::Entity::find()
+        .filter(hosts::Column::WorkspaceId.eq(*workspace_id))
+        .filter(hosts::Column::JumpHostId.eq(*id))
+        .count(conn)
+        .await?
+        > 0
+    {
+        return Err(ApiError::conflict(
+            "这台主机正作为跳板主机使用，请先调整引用它的目标主机。",
+        ));
+    }
     crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
     crate::alerts::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
     use crate::entities::{deployment_revision_targets, deployment_target_states, deployments};

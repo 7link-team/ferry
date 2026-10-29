@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { RunnerConnection, runnerInstallCommand, runnerServerOrigin } from "./RunnerConnection";
+import { HostConnectionCommand, RunnerConnection, runnerInstallCommand, runnerServerOrigin } from "./RunnerConnection";
 
 it("accepts only HTTP(S) origins, without credentials, paths or query", () => {
   expect(runnerServerOrigin(" https://runner.example:8443/ ")).toBe("https://runner.example:8443");
@@ -51,6 +51,26 @@ beforeEach(() => {
   }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+it("keeps the host command visible offline and replaces it only after confirmed reset", async () => {
+  let online = true;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => ({
+    ok: true, status: 200,
+    json: async () => url.endsWith("/connection-command")
+      ? { token: init.method === "POST" ? "new-token" : "old-token", server: "https://example.com", state: init.method === "POST" ? "offline" : "online" }
+      : { state: online ? "online" : "offline" },
+  })));
+  await act(async () => root.render(<HostConnectionCommand workspace="ops" hostId="h1" />));
+  expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toContain("old-token");
+  online = false;
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).toContain("已断开连接");
+  expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toContain("old-token");
+  await click("重置连接");
+  expect(document.body.textContent).toContain("旧命令和令牌将失效");
+  expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "确认重置")!.click());
+  expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toContain("new-token");
+});
 it("creates a 15 minute scoped token, copies command, and reports online only once", async () => {
   const connected = vi.fn(), writeText = vi.fn(async () => {});
   Object.defineProperty(navigator,"clipboard",{configurable:true, value:{writeText}});
@@ -66,7 +86,7 @@ it("creates a 15 minute scoped token, copies command, and reports online only on
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(connected).not.toHaveBeenCalled();
   status.host_state = "online";
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(connected).toHaveBeenCalledTimes(1);
-  expect(host.textContent).toContain("主机已连接"); expect(host.querySelector("a")?.href).toContain("/ops/host/hosts/h1");
+  expect(host.textContent).toContain("主机已连接"); expect(host.querySelector("a")?.href).toContain("/ops/host/nodes/h1");
   const count = requests.length;
   await act(async () => vi.advanceTimersByTimeAsync(6000)); expect(requests).toHaveLength(count);
 });

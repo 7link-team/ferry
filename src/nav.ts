@@ -71,7 +71,7 @@ export const nav: NavGroup[] = [
     key: "host",
     label: "主机",
     items: [
-      { key: "hosts", label: "主机", resource: "hosts", permission: "hosts.read" },
+      { key: "hosts", label: "节点", resource: "hosts", permission: "hosts.read" },
       { key: "host-groups", label: "主机组", resource: "host-groups", permission: "host-groups.read", hidden: true, parent: "hosts" },
       { key: "tags", label: "标签", resource: "tags", permission: "tags.read" },
       { key: "cron-jobs", label: "定时任务", resource: "cron-jobs", params: { scope: "host" }, permission: "cron-jobs.read" },

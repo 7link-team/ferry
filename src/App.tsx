@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, FolderOpen, FolderTree, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2 } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -13,10 +13,12 @@ import { cn } from "cn";
 import { api, errorText, type Identity } from "./api";
 import { DeploymentDetail } from "./components/DeploymentDetail";
 import { PipelineRunDetail } from "./components/PipelineRunDetail";
-import { RunnerConnection } from "./components/RunnerConnection";
+import type { PipelineRun } from "./pipeline";
+import { HostConnectionCommand } from "./components/RunnerConnection";
 import { HostWorkspace } from "./components/HostWorkspace";
+import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog";
 import { ResourceForm } from "./components/ResourceForm";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HostMonitor } from "./components/HostMonitor";
 import { ResourceTable } from "./components/ResourceTable";
 import { Platform } from "./Platform";
 import { Dashboard } from "./components/Dashboard";
@@ -32,9 +34,10 @@ export function App() {
   const route = useRoute();
   useEffect(() => {
     const pipelineGroup = location.pathname.match(/^\/([^/]+)\/build\/(?:pipelines\/groups|pipeline-groups)(?:\/([^/]+))?/);
-    const hostGroup = location.pathname.match(/^\/([^/]+)\/host\/host-groups(?:\/([^/]+))?/);
+    const hostGroup = location.pathname.match(/^\/([^/]+)\/(?:host|infrastructure)\/host-groups(?:\/([^/]+))?/);
     const legacy = pipelineGroup ?? hostGroup;
     if (legacy) navigate({ workspace: legacy[1]!, group: pipelineGroup ? "build" : "host", item: pipelineGroup ? "pipelines" : "hosts", mode: "list" }, legacy[2] && legacy[2] !== "new" ? { group_id: legacy[2] } : {} , { replace: true });
+    else if (/^\/[^/]+\/(?:host\/hosts|infrastructure\/hosts)(?:\/|$)/.test(location.pathname)) navigate(route, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
   }, [route]);
   const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
@@ -355,6 +358,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             <DeploymentDetail key={`${current.slug}/${item.resource}/${route.id}`} workspace={current.slug} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
             <PipelineRunDetail key={`${current.slug}/${route.id}`} workspace={current.slug} runId={route.id} permissions={permissions} />
+          ) : route.mode === "view" && item.resource === "pipelines" && route.id && formConfig && lists["pipeline-runs"] ? (
+            <PipelineDetail key={`${current.slug}/${route.id}`} workspace={current.slug} pipelineId={route.id} permissions={permissions} form={formConfig} runs={lists["pipeline-runs"]} />
           ) : route.mode === "view" && item.resource === "hosts" && route.id ? (
             // A host's detail page is the form plus the two live panes; the
             // tab is in the URL so a terminal link can be shared directly.
@@ -363,6 +368,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               hostId={route.id}
               permissions={permissions}
               form={formConfig}
+              alerts={lists["alert-rules"]}
+              alertEvents={lists["alert-events"]}
             />
           ) : formConfig ? (
             <div className="min-h-0 overflow-auto">
@@ -381,6 +388,22 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
       </div>
     </div>
   );
+}
+
+function PipelineDetail({ workspace, pipelineId, permissions, form, runs }: {
+  workspace: string;
+  pipelineId: string;
+  permissions: Set<string>;
+  form: NonNullable<ReturnType<typeof formConfigs>[string]>;
+  runs: NonNullable<ReturnType<typeof listConfigs>["pipeline-runs"]>;
+}) {
+  const [tab, setTab] = useQueryValue("tab", "config");
+  return <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div role="tablist" aria-label="流水线详情" className="flex gap-1 border-b">
+      {([["config", "配置"], ["runs", "执行记录"]] as const).map(([value, label]) => <Button key={value} type="button" role="tab" aria-selected={tab === value} variant="ghost" className={cn("rounded-none border-b-2", tab === value ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab(value)}>{label}</Button>)}
+    </div>
+    {tab === "runs" ? <ResourceTable key={pipelineId} config={{ ...runs, fixed: { pipeline_id: pipelineId }, actions: [{ label: "查看", permission: "pipelines.read", to: (row: PipelineRun) => ({ group: "build", item: "runs", id: row.id, mode: "view" as const }) }] }} workspace={workspace} permissions={permissions} /> : <div className="min-h-0 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></div>}
+  </div>;
 }
 
 function PipelineList({ config, workspace, permissions }: {
@@ -425,7 +448,7 @@ function HostList({ config, workspace, permissions }: {
     setGroupId(id);
   };
   return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 sm:flex-row">
-    {permissions.has("host-groups.read") && <GroupSidebar workspace={workspace} permissions={permissions} resource="host-groups" noun="主机" active={groupId} onSelect={select} />}
+    {permissions.has("host-groups.read") && <GroupSidebar workspace={workspace} permissions={permissions} resource="host-groups" noun="节点" active={groupId} onSelect={select} />}
     <div className="flex min-h-0 min-w-0 flex-1 flex-col"><ResourceTable key={groupId} config={tableConfig} workspace={workspace} permissions={permissions} /></div>
   </div>;
 }
@@ -438,6 +461,7 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<{ group?: GroupNode; parentId: string }>();
+  const [deleting, setDeleting] = useState<GroupNode>();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -467,8 +491,8 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
     [rows[index], rows[next]] = [rows[next]!, rows[index]!];
     setBusy(true); setError("");
     try {
-      await api(`/workspaces/${encodeURIComponent(workspace)}/host-groups/actions/reorder`, {
-        method: "POST", body: JSON.stringify({ parent_id: group.parent_id ?? "", ids: rows.map(row => row.id) }),
+      await api(`/workspaces/${encodeURIComponent(workspace)}/${resource}/actions/reorder`, {
+        method: "POST", body: JSON.stringify(resource === "host-groups" ? { parent_id: group.parent_id ?? "", ids: rows.map(row => row.id) } : { ids: rows.map(row => row.id) }),
       });
       setRevision(value => value + 1);
     } catch (cause) { setError(errorText(cause)); }
@@ -477,27 +501,28 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
   const renderGroup = (group: GroupNode, depth: number): React.ReactNode => <div key={group.id}>
     <div className={cn("group flex min-w-0 items-center rounded", active === group.id ? "bg-accent" : "hover:bg-accent")} style={{ paddingLeft: depth * 12 }}>
       <button type="button" aria-current={active === group.id ? "page" : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}>{group.name}</button>
-      {resource === "host-groups" && permissions.has("host-groups.update") && <>
-        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`上移分组 ${group.name}`} title="上移" disabled={busy || siblings(group.parent_id ?? "")[0]?.id === group.id} onClick={() => void moveGroup(group, -1)}><ArrowUp className="size-3.5" /></Button>
-        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`下移分组 ${group.name}`} title="下移" disabled={busy || siblings(group.parent_id ?? "").at(-1)?.id === group.id} onClick={() => void moveGroup(group, 1)}><ArrowDown className="size-3.5" /></Button>
+      {permissions.has(`${resource}.update`) && <>
+        <Button variant="ghost" size="icon" className="size-7 shrink-0 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={`上移分组 ${group.name}`} title="上移" disabled={busy || siblings(group.parent_id ?? "")[0]?.id === group.id} onClick={() => void moveGroup(group, -1)}><ArrowUp className="size-3.5" /></Button>
+        <Button variant="ghost" size="icon" className="size-7 shrink-0 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={`下移分组 ${group.name}`} title="下移" disabled={busy || siblings(group.parent_id ?? "").at(-1)?.id === group.id} onClick={() => void moveGroup(group, 1)}><ArrowDown className="size-3.5" /></Button>
       </>}
-      {resource === "host-groups" && canCreate && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`在${group.name}下新建分组`} title="新建子分组" onClick={() => open(undefined, group.id)}><Plus className="size-3.5" /></Button>}
-      {permissions.has(`${resource}.update`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`编辑分组 ${group.name}`} title="编辑分组" onClick={() => open(group, group.parent_id ?? "")}><Pencil className="size-3.5" /></Button>}
-      {permissions.has(`${resource}.delete`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`删除分组 ${group.name}`} title="删除分组" onClick={async () => {
-        if (!confirm(`删除分组“${group.name}”？`)) return;
-        try { await deleteResource(workspace, resource, group.id); if (active === group.id) onSelect(""); setRevision(value => value + 1); }
-        catch (cause) { setError(errorText(cause)); }
-      }}><Trash2 className="size-3.5" /></Button>}
+      {resource === "host-groups" && canCreate && <Button variant="ghost" size="icon" className="size-7 shrink-0 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={`在${group.name}下新建分组`} title="新建子分组" onClick={() => open(undefined, group.id)}><Plus className="size-3.5" /></Button>}
+      {permissions.has(`${resource}.update`) && <Button variant="ghost" size="icon" className="size-7 shrink-0 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={`编辑分组 ${group.name}`} title="编辑分组" onClick={() => open(group, group.parent_id ?? "")}><Pencil className="size-3.5" /></Button>}
+      {permissions.has(`${resource}.delete`) && <Button variant="ghost" size="icon" className="size-7 shrink-0 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={`删除分组 ${group.name}`} title={`删除分组 ${group.name}`} onClick={() => setDeleting(group)}><Trash2 className="size-3.5" /></Button>}
     </div>
     {resource === "host-groups" && siblings(group.id).map(child => renderGroup(child, depth + 1))}
   </div>;
-  return <aside aria-label={`${noun}分组`} className="flex w-full shrink-0 flex-col gap-1 border-b pb-3 sm:w-56 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:pr-3">
+  return <aside aria-label={resource === "host-groups" ? "主机分组" : `${noun}分组`} className="flex w-full shrink-0 flex-col gap-1 border-b pb-3 sm:w-56 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:pr-3">
+    {deleting && <DeleteConfirmDialog action="删除分组" target={deleting.name} onClose={() => setDeleting(undefined)} onConfirm={async () => {
+      await deleteResource(workspace, resource, deleting.id);
+      if (active === deleting.id) onSelect("");
+      setRevision(value => value + 1);
+    }} />}
     <div className="mb-1 flex items-center gap-1 px-2 text-sm font-medium"><FolderTree className="size-4" />分组<span className="flex-1" />
-      {canCreate && <Button variant="ghost" size="icon" className="size-7" aria-label="新建分组" title="新建分组" onClick={() => open()}><Plus className="size-4" /></Button>}
+      {canCreate && <Button variant="ghost" size="icon" className="size-7 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label="新建分组" title="新建分组" onClick={() => open()}><Plus className="size-4" /></Button>}
     </div>
     <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("")}>全部{noun}</button>
-    <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("0")}>未分组</button>
-    {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, "zh-CN")) : groups).map(group => renderGroup(group, 0))}
+    <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("0")}>未分组{noun}</button>
+    {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)) : groups).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, "zh-CN")).map(group => renderGroup(group, 0))}
     {error && !editing && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
     <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">
       <Dialog.Title className="text-lg font-semibold">{editing?.group ? "编辑分组" : "新建分组"}</Dialog.Title>
@@ -528,15 +553,20 @@ function HostDetail({
   hostId,
   permissions,
   form,
+  alerts,
+  alertEvents,
 }: {
   workspace: string;
   hostId: string;
   permissions: Set<string>;
   form: ReturnType<typeof formConfigs>[string] | undefined;
+  alerts: ReturnType<typeof listConfigs>["alert-rules"] | undefined;
+  alertEvents: ReturnType<typeof listConfigs>["alert-events"] | undefined;
 }) {
   // `?tab=` rather than component state: a shared link should reopen on the
   // terminal if that is what the sender was looking at.
   const [tab, setTab] = useQueryValue("tab", "info");
+  const [alertView, setAlertView] = useState<"rules" | "events">("rules");
   useEffect(() => {
     if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
   }, [tab, workspace, hostId]);
@@ -554,36 +584,40 @@ function HostDetail({
   }, [workspace, hostId, canEnroll]);
   const canConnect = canEnroll && connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner";
 
-  const panes = [
-    { value: "info", label: "信息", enabled: true },
-    { value: "connect", label: "接入 Agent", enabled: canConnect },
-  ].filter((pane) => pane.enabled);
-  const active = panes.some((pane) => pane.value === tab) ? tab : "info";
-
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-2 rounded border px-3 text-sm hover:bg-accent"><SquareTerminal className="size-4" />终端</a>}
-      {permissions.has("hosts.files") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "files" })} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-2 rounded border px-3 text-sm hover:bg-accent"><FolderOpen className="size-4" />文件</a>}
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b">
+      <div role="tablist" aria-label="主机详情" className="flex gap-1">
+        <Button type="button" role="tab" title="基本信息" aria-selected={tab === "info"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "info" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("info")}><Info className="size-4" />基本信息</Button>
+        <Button type="button" role="tab" title="监控" aria-selected={tab === "monitor"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "monitor" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("monitor")}><Activity className="size-4" />监控</Button>
+        {permissions.has("alerts.read") && <Button type="button" role="tab" title="报警监控" aria-selected={tab === "alerts"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "alerts" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("alerts")}><Bell className="size-4" />报警监控</Button>}
+      </div>
+      <div className="flex items-center gap-2">
+      {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label="打开终端" title="打开终端"><SquareTerminal className="size-4" /></a>}
+      {permissions.has("hosts.files") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "files" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label="打开文件" title="打开文件"><FolderOpen className="size-4" /></a>}
+      {permissions.has("hosts.update") && <Button asChild variant="outline" size="sm"><a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "edit" }, {})}><Pencil className="size-4" />编辑</a></Button>}
+      </div>
     </div>
-    <Tabs value={active} onValueChange={setTab} className="grid min-h-0 flex-1 grid-rows-[auto_1fr] gap-3">
-      <TabsList>
-        {panes.map((pane) => (
-          <TabsTrigger key={pane.value} value={pane.value}>
-            {pane.label}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      <TabsContent value="info" className="min-h-0 overflow-auto">
+      <div role="tabpanel" aria-label={tab === "monitor" ? "监控" : tab === "alerts" ? "报警监控" : "基本信息"} className={cn("min-h-0 overflow-auto pt-5", tab === "alerts" && "flex flex-1 flex-col")}>
+        {tab === "monitor" ? <HostMonitor workspace={workspace} hostId={hostId} /> : tab === "alerts" && alerts && alertEvents ? <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <div role="tablist" aria-label="主机报警记录" className="flex gap-1">
+              <Button type="button" role="tab" aria-selected={alertView === "rules"} size="sm" variant={alertView === "rules" ? "secondary" : "ghost"} onClick={() => setAlertView("rules")}>报警规则</Button>
+              <Button type="button" role="tab" aria-selected={alertView === "events"} size="sm" variant={alertView === "events" ? "secondary" : "ghost"} onClick={() => setAlertView("events")}>告警事件</Button>
+            </div>
+            <span className="flex-1" />
+            {alertView === "rules" && permissions.has("alerts.create") && <Button type="button" size="sm" onClick={() => navigate({ workspace, group: "deploy", item: "alerts", mode: "new" }, { target_kind: "host", target_ref: hostId })}><Plus className="size-4" />新增报警规则</Button>}
+          </div>
+          {alertView === "rules" ? <ResourceTable key={`${hostId}/rules`} config={{ ...alerts, fixed: { target_kind: "host", target_ref: hostId }, filters: (alerts.filters ?? []).filter(filter => filter.key !== "target_kind"), toolbar: { ...alerts.toolbar, create: false }, actions: alerts.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alerts", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
+            : <ResourceTable key={`${hostId}/events`} config={{ ...alertEvents, fixed: { target_kind: "host", target_ref: hostId }, filters: (alertEvents.filters ?? []).filter(filter => filter.key !== "rule_id"), actions: alertEvents.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alert-events", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />}
+        </div> : <>
         {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">无法确认 Agent 接入方式：{connectionError}</p>}
-        {form && (
-          <ResourceForm config={form} workspace={workspace} permissions={permissions} />
-        )}
-      </TabsContent>
-      <TabsContent value="connect" className="min-h-0 overflow-auto">
-        {active === "connect" && canConnect && <div className="max-w-2xl p-1"><RunnerConnection workspace={workspace} hostId={hostId} inline /></div>}
-      </TabsContent>
-    </Tabs>
+        <div className={cn("mx-auto grid w-full max-w-6xl gap-8", canConnect && "xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]")}>
+          {form && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />}
+          {canConnect && <HostConnectionCommand workspace={workspace} hostId={hostId} compact />}
+        </div>
+        </>}
+      </div>
     </div>
   );
 }

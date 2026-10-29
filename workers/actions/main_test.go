@@ -9,7 +9,33 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nektos/act/pkg/model"
 )
+
+func TestManualGateWorkflowStillLoadsExecutableJob(t *testing.T) {
+	workflow := `name: gate
+on: workflow_dispatch
+jobs:
+  gate:
+    needs: []
+    runs-on: self-hosted
+    steps:
+      - run: echo approved
+  deploy:
+    needs: gate
+    runs-on: self-hosted
+    steps:
+      - run: echo ready
+`
+	parsed, err := model.ReadWorkflow(strings.NewReader(workflow), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.GetJob("deploy") == nil {
+		t.Fatal("act did not find the executable job after a manual gate")
+	}
+}
 
 func repository(t *testing.T) string {
 	t.Helper()

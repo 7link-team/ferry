@@ -8,10 +8,23 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
+  Download,
   Eye,
   File as FileIcon,
+  FileArchive,
+  FileAudio,
+  FileCode2,
+  FileImage,
+  FileJson2,
+  FilePlus2,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
   Folder,
+  FolderPlus,
   Link as LinkIcon,
   Loader2,
   RefreshCw,
@@ -26,6 +39,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { errorText } from "../api";
 import { base } from "../resource";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 interface Entry {
   name: string;
@@ -34,8 +48,27 @@ interface Entry {
   mode: number;
   modified_at: number;
 }
+const imageTypes = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const textTypes = /\.(txt|log|md|markdown|json|jsonc|ya?ml|toml|xml|csv|ini|conf|config|env|properties|sh|bash|zsh|ps1|bat|cmd|sql|py|js|jsx|ts|tsx|css|scss|html?|go|rs|java|c|cc|cpp|h|hpp|rb|php|vue|svelte|dockerfile)$/i;
+const textNames = /^(Dockerfile|Makefile|CMakeLists\.txt|\.gitignore|\.gitattributes|\.env(?:\..+)?|LICENSE|README)$/i;
+function fileIcon(name: string) {
+  if (imageTypes.test(name)) return FileImage;
+  if (/\.jsonc?$/i.test(name)) return FileJson2;
+  if (/\.(csv|xlsx?|ods)$/i.test(name)) return FileSpreadsheet;
+  if (/\.(zip|tar|gz|tgz|7z|rar)$/i.test(name)) return FileArchive;
+  if (/\.(mp3|wav|ogg|flac)$/i.test(name)) return FileAudio;
+  if (/\.(mp4|webm|mov|avi)$/i.test(name)) return FileVideo;
+  if (/\.(md|markdown|txt|log|pdf)$/i.test(name)) return FileText;
+  if (textTypes.test(name) || textNames.test(name)) return FileCode2;
+  return FileIcon;
+}
+function FileKindIcon({ name }: { name: string }) {
+  const Icon = fileIcon(name);
+  return <Icon className="size-4 shrink-0 text-muted-foreground" />;
+}
 type Preview = { name: string; path: string; kind: "text" | "image"; value: string; original: string; url?: string };
 const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ default: module.HostTerminal })));
+let nextPaneId = 0;
 
 const units = ["B", "KB", "MB", "GB", "TB"];
 function size(bytes: number) {
@@ -60,7 +93,11 @@ export function parent(dir: string) {
 }
 
 export function HostFiles({ workspace, hostId, canTerminal = false, initialPath = "/", onOpenTerminal }: { workspace: string; hostId: string; canTerminal?: boolean; initialPath?: string; onOpenTerminal?: (directory: string) => void }) {
+  const paneId = useRef(++nextPaneId);
+  const pagePath = useRef(location.pathname);
+  const currentPath = useRef(initialPath);
   const [path, setPath] = useState(initialPath);
+  const [trail, setTrail] = useState({ paths: [initialPath], index: 0 });
   const [draft, setDraft] = useState(initialPath);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +106,9 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   const [terminalDirectory, setTerminalDirectory] = useState<string>();
   const [preview, setPreview] = useState<Preview>();
   const [previewing, setPreviewing] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<Entry>();
+  const [creating, setCreating] = useState<"file" | "directory">();
+  const [newName, setNewName] = useState("");
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview?.url]);
   const picker = useRef<HTMLInputElement>(null);
   const openTerminal = (directory: string) => {
@@ -80,7 +120,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   const endpoint = `/api${base(workspace, "hosts")}/${encodeURIComponent(hostId)}/files`;
 
   const load = useCallback(
-    async (target: string) => {
+    async (target: string, remember = false): Promise<boolean> => {
       setLoading(true);
       setError("");
       try {
@@ -90,11 +130,22 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         const body = await response.json();
         if (!response.ok) throw new Error(body.error ?? "读取目录失败。");
         setEntries(body.items as Entry[]);
+        const changed = target !== currentPath.current;
+        currentPath.current = target;
         setPath(target);
         setDraft(target);
+        if (remember) setTrail(current => current.paths[current.index] === target ? current : {
+          paths: [...current.paths.slice(0, current.index + 1), target], index: current.index + 1,
+        });
+        if (remember && changed) {
+          const state = history.state ?? {};
+          history.pushState({ ...state, ferryFilePaths: { ...state.ferryFilePaths, [paneId.current]: target } }, "", location.href);
+        }
+        return true;
       } catch (cause) {
         setError(errorText(cause));
         setEntries([]);
+        return false;
       } finally {
         setLoading(false);
       }
@@ -103,8 +154,27 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   );
 
   useEffect(() => {
+    setTrail({ paths: [initialPath], index: 0 });
     void load(initialPath);
   }, [load, initialPath]);
+  useEffect(() => {
+    const restore = (event: PopStateEvent) => {
+      if (location.pathname !== pagePath.current) return;
+      const target = event.state?.ferryFilePaths?.[paneId.current] ?? initialPath;
+      void load(target);
+      setTrail(current => {
+        const index = current.paths.indexOf(target);
+        return index < 0 ? { paths: [target], index: 0 } : { ...current, index };
+      });
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [initialPath, load]);
+  const moveHistory = async (offset: number) => {
+    const index = trail.index + offset;
+    const target = trail.paths[index];
+    if (target) history.go(offset);
+  };
 
   const upload = async (file: File) => {
     setBusy(`上传 ${file.name}…`);
@@ -129,7 +199,6 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   };
 
   const remove = async (entry: Entry) => {
-    if (!window.confirm(`确认删除 ${entry.name}？此操作无法撤销。`)) return;
     setBusy(`删除 ${entry.name}…`);
     try {
       const response = await fetch(
@@ -141,11 +210,31 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         throw new Error(body.error ?? "删除失败。");
       }
       await load(path);
-    } catch (cause) {
-      setError(errorText(cause));
     } finally {
       setBusy("");
     }
+  };
+
+  const createEntry = async () => {
+    const name = newName.trim();
+    if (!name || name === "." || name === ".." || /[\\/\x00-\x1f\x7f]/.test(name)) {
+      setError("请输入不含路径分隔符的文件或文件夹名称。");
+      return;
+    }
+    setBusy(`创建 ${name}…`); setError("");
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "X-Ferry-Request": "1", "Content-Type": "application/json" },
+        body: JSON.stringify({ path: join(path, name), kind: creating }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? `创建失败（${response.status}）。`);
+      }
+      setCreating(undefined); setNewName("");
+      await load(path);
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(""); }
   };
 
   const closePreview = () => {
@@ -153,7 +242,11 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
     setPreview(undefined);
   };
   const openPreview = async (entry: Entry) => {
-    const image = /\.(png|jpe?g|gif|webp|bmp)$/i.test(entry.name);
+    const image = imageTypes.test(entry.name);
+    if (!image && !textTypes.test(entry.name) && !textNames.test(entry.name)) {
+      setError(`暂不支持预览“${entry.name}”；请下载后使用对应程序打开。`);
+      return;
+    }
     const limit = image ? 12 * 1024 * 1024 : 2 * 1024 * 1024;
     if (entry.size > limit) { setError(`文件超过${image ? "12" : "2"} MB，请下载后查看。`); return; }
     const target = join(path, entry.name);
@@ -208,6 +301,20 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
 
   return (
     <div className="flex h-full min-h-0 min-w-0 gap-3 max-lg:flex-col">
+    {pendingDelete && <DeleteConfirmDialog target={join(path, pendingDelete.name)} onClose={() => setPendingDelete(undefined)} onConfirm={() => remove(pendingDelete)} />}
+    <Dialog.Root open={!!creating} onOpenChange={open => { if (!open && !busy) { setCreating(undefined); setError(""); } }}>
+      <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
+          <Dialog.Title className="text-base font-semibold">新建{creating === "directory" ? "文件夹" : "文件"}</Dialog.Title>
+          <Dialog.Description className="mt-1 truncate text-sm text-muted-foreground" title={path}>位置：{path}</Dialog.Description>
+          <form className="mt-4 space-y-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
+            <Input autoFocus aria-label="名称" value={newName} onChange={event => setNewName(event.target.value)} />
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!busy} onClick={() => setCreating(undefined)}>取消</Button><Button type="submit" disabled={!!busy || !newName.trim()}>{busy ? "创建中…" : "创建"}</Button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
     <div
       className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_auto_1fr] gap-3"
       onDragOver={(event) => event.preventDefault()}
@@ -221,22 +328,24 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         className="flex flex-wrap gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          void load(draft.trim() || "/");
+          void load(draft.trim() || "/", true);
         }}
       >
-        <Button type="button" size="icon" variant="outline" onClick={() => void load(parent(path))}
+        <Button type="button" size="icon" variant="outline" onClick={() => void moveHistory(-1)} disabled={trail.index === 0} aria-label="后退" title="后退"><ArrowLeft /></Button>
+        <Button type="button" size="icon" variant="outline" onClick={() => void moveHistory(1)} disabled={trail.index >= trail.paths.length - 1} aria-label="前进" title="前进"><ArrowRight /></Button>
+        <Button type="button" size="icon" variant="outline" onClick={() => void load(parent(path), true)}
                 disabled={path === "/"} aria-label="上级目录">
           <ArrowUp />
         </Button>
         <Input aria-label="目录路径" value={draft} onChange={(event) => setDraft(event.target.value)} className="min-w-32 w-auto flex-1 font-mono" />
-        <Button type="submit" variant="outline">转到</Button>
+        <Button type="submit" variant="outline" size="icon" aria-label="转到目录" title="转到目录"><ArrowUp className="rotate-90" /></Button>
         <Button type="button" variant="outline" size="icon" onClick={() => void load(path)} aria-label="刷新">
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
         {canTerminal && <Button type="button" variant="outline" size="icon" aria-label="在当前目录打开终端" title={`在 ${path} 打开终端`} onClick={() => openTerminal(path)}><SquareTerminal /></Button>}
-        <Button type="button" onClick={() => picker.current?.click()} disabled={!!busy}>
-          <Upload /> 上传
-        </Button>
+        <Button type="button" variant="outline" size="icon" aria-label="新建文件夹" title="新建文件夹" onClick={() => { setCreating("directory"); setNewName(""); setError(""); }}><FolderPlus /></Button>
+        <Button type="button" variant="outline" size="icon" aria-label="新建文件" title="新建文件" onClick={() => { setCreating("file"); setNewName(""); setError(""); }}><FilePlus2 /></Button>
+        <Button type="button" variant="outline" size="icon" aria-label="上传文件" title="上传文件" onClick={() => picker.current?.click()} disabled={!!busy}><Upload /></Button>
         <input
           ref={picker}
           type="file"
@@ -260,14 +369,15 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
       </div>
 
       <div className="min-h-0 overflow-auto rounded-lg border border-border bg-card">
-        <table className="w-full min-w-[560px] border-separate border-spacing-0 text-sm">
+        <table className="w-full min-w-[680px] table-fixed border-separate border-spacing-0 text-sm">
+          <colgroup><col /><col className="w-24" /><col className="w-20" /><col className="w-44" /><col className="w-32" /></colgroup>
           <thead>
             <tr>
               {["名称", "大小", "权限", "修改时间", "操作"].map((label, index) => (
                 <th
                   key={label}
                   className={`sticky top-0 z-10 bg-muted px-3 py-2 font-medium text-muted-foreground shadow-[inset_0_-1px_0_var(--border)] ${
-                    index === 0 ? "text-left" : index === 4 ? "text-right" : "text-right"
+                    index === 4 ? "text-right" : "text-left"
                   }`}
                 >
                   {label}
@@ -278,34 +388,30 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
           <tbody>
             {entries.map((entry) => (
               <tr key={entry.name} className="group">
-                <td className="border-b border-border px-3 py-1.5 group-hover:bg-accent">
+                <td className="min-w-0 border-b border-border px-3 py-1.5 text-left group-hover:bg-accent">
                   {entry.kind === "directory" ? (
                     <button
                       type="button"
-                      className="inline-flex items-center gap-2 hover:underline"
-                      onClick={() => void load(join(path, entry.name))}
+                      className="flex w-full min-w-0 items-center gap-2 text-left hover:underline"
+                      onClick={() => void load(join(path, entry.name), true)}
                     >
-                      <Folder className="size-4 text-muted-foreground" />
-                      {entry.name}
+                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate" title={entry.name}>{entry.name}</span>
                     </button>
                   ) : (
-                    <button type="button" className="inline-flex items-center gap-2 hover:underline" onClick={() => void openPreview(entry)} disabled={entry.kind !== "file"}>
-                      {entry.kind === "symlink" ? (
-                        <LinkIcon className="size-4 text-muted-foreground" />
-                      ) : (
-                        <FileIcon className="size-4 text-muted-foreground" />
-                      )}
-                      {entry.name}
+                    <button type="button" className="flex w-full min-w-0 items-center gap-2 text-left hover:underline" onClick={() => void openPreview(entry)} disabled={entry.kind !== "file"}>
+                      {entry.kind === "symlink" ? <LinkIcon className="size-4 shrink-0 text-muted-foreground" /> : <FileKindIcon name={entry.name} />}
+                      <span className="min-w-0 truncate" title={entry.name}>{entry.name}</span>
                     </button>
                   )}
                 </td>
-                <td className="border-b border-border px-3 py-1.5 text-right text-muted-foreground group-hover:bg-accent">
+                <td className="border-b border-border px-3 py-1.5 text-left text-muted-foreground group-hover:bg-accent">
                   {entry.kind === "directory" ? "—" : size(entry.size)}
                 </td>
-                <td className="border-b border-border px-3 py-1.5 text-right font-mono text-xs text-muted-foreground group-hover:bg-accent">
+                <td className="border-b border-border px-3 py-1.5 text-left font-mono text-xs text-muted-foreground group-hover:bg-accent">
                   {(entry.mode & 0o777).toString(8).padStart(3, "0")}
                 </td>
-                <td className="border-b border-border px-3 py-1.5 text-right text-muted-foreground group-hover:bg-accent">
+                <td className="border-b border-border px-3 py-1.5 text-left text-muted-foreground group-hover:bg-accent">
                   {entry.modified_at ? new Date(entry.modified_at).toLocaleString("zh-CN") : "—"}
                 </td>
                 <td className="border-b border-border px-3 py-1.5 text-right whitespace-nowrap group-hover:bg-accent">
@@ -314,17 +420,21 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
                   {entry.kind !== "directory" && (
                     // A real link so the browser streams the download itself.
                     <a
-                      className="mr-3 text-primary hover:underline"
+                      className="mr-1 inline-flex size-7 items-center justify-center text-primary hover:bg-accent"
                       href={`${endpoint}/content?path=${encodeURIComponent(join(path, entry.name))}`}
                       download={entry.name}
+                      aria-label={`下载 ${entry.name}`}
+                      title={`下载 ${entry.name}`}
                     >
-                      下载
+                      <Download className="size-4" />
                     </a>
                   )}
                   <button
                     type="button"
-                    className="text-destructive hover:underline"
-                    onClick={() => void remove(entry)}
+                    className="inline-flex size-7 items-center justify-center text-destructive hover:bg-accent"
+                    aria-label={`删除 ${entry.name}`}
+                    title={`删除 ${entry.name}`}
+                    onClick={() => setPendingDelete(entry)}
                   >
                     <Trash2 className="inline size-3.5" />
                   </button>

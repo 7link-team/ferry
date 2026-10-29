@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -42,6 +42,17 @@ try {
   p.on('dialog', d => d.accept());
   const root='/workspaces/tenant';
   const host=await post(owner,root+'/hosts',{name:'Cron UI runner',connection:'runner'});
+  await p.goto(`${origin}/tenant/host/nodes/${host.id}?tab=alerts`);
+  await p.getByRole('tab',{name:'报警监控'}).waitFor();
+  const [eventsResponse]=await Promise.all([
+    p.waitForResponse(response=>response.url().includes('/alert-events?') && response.url().includes(`target_ref=${host.id}`) && response.ok()),
+    p.getByRole('tab',{name:'告警事件'}).click(),
+  ]);
+  assert.equal((await eventsResponse.json()).total,0);
+  await p.getByRole('tab',{name:'报警规则'}).click();
+  await p.getByRole('button',{name:'新增报警规则'}).click();
+  await p.getByLabel('目标主机',{exact:false}).waitFor();
+  assert.equal(await p.getByLabel('目标主机',{exact:false}).textContent(), 'Cron UI runner');
   await p.goto(`${origin}/tenant/deploy/alerts`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
@@ -65,6 +76,7 @@ try {
   await p.getByRole('textbox',{name:/^名称/}).fill('Edited alert');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Edited alert'}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('Edited alert'));
   await p.goto(`${origin}/tenant/deploy/alert-events`);
   await p.getByRole('cell',{name:'Offline browser',exact:true}).waitFor();
