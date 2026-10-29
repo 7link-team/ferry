@@ -4,13 +4,16 @@ import { nav } from "./nav";
 it("pipeline classification uses shared resource forms and filters", () => {
  const form=formConfigs("ops").pipelines!;
  const keys=form.sections.flatMap(section=>section.fields.map(field=>field.key));
- expect(keys).toEqual(expect.arrayContaining(["group_id","application_id","tag_ids","environment_ids"]));
- expect(listConfigs("ops").pipelines!.filters!.map(filter=>filter.key)).toEqual(expect.arrayContaining(["group_id","application_id","tag_id","environment_id"]));
- for(const resource of ["pipeline-groups","pipeline-environments"]) {
-  expect(formConfigs("ops")[resource]).toBeDefined();
-  expect(listConfigs("ops")[resource]).toBeDefined();
-  expect(nav.find(group=>group.key==="build")!.items.find(item=>item.resource===resource)?.parent).toBe("pipelines");
- }
+ expect(keys).toEqual(expect.arrayContaining(["group_id","tag_ids"]));
+ expect(keys).not.toContain("application_id");
+ expect(keys).not.toContain("description");
+ expect(keys).not.toContain("environment_ids");
+ const filters=listConfigs("ops").pipelines!.filters!.map(filter=>filter.key);
+ expect(filters).toEqual(expect.arrayContaining(["group_id","application_id","tag_id"]));
+ expect(filters).not.toContain("environment_id");
+ expect(formConfigs("ops")["pipeline-groups"]).toBeDefined();
+ expect(listConfigs("ops")["pipeline-groups"]).toBeDefined();
+ expect(nav.find(group=>group.key==="build")!.items.find(item=>item.resource==="pipeline-groups")?.parent).toBe("pipelines");
 });
 it("existing pipeline editors can edit without fetching newly introduced classification permissions", () => {
  const fields=formConfigs("ops",new Set(["pipelines.read","pipelines.update","hosts.read","host-groups.read","repositories.read"])).pipelines!.sections.flatMap(section=>section.fields);

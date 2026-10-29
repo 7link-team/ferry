@@ -6,7 +6,15 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
-  server: { proxy: { "/api": "http://127.0.0.1:4290" } },
+  server: { proxy: { "/api": {
+    target: "http://127.0.0.1:4290",
+    ws: true,
+    configure(proxy) {
+      proxy.on("proxyReq", (proxyReq, request) => {
+        if (request.headers.host) proxyReq.setHeader("host", request.headers.host);
+      });
+    },
+  } } },
   build: {
     outDir: "dist",
     emptyOutDir: true,

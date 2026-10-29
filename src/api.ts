@@ -25,8 +25,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
   if (response.status === 401 && path !== "/sessions")
     window.dispatchEvent(new Event("ferry:unauthorized"));
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(data.error ?? "操作失败，请重试。", response.status);
+  const plainText = response.headers?.get("content-type")?.startsWith("text/plain") ?? false;
+  const data = plainText ? {} : await response.json().catch(() => ({}));
+  const detail = !response.ok && plainText ? (await response.text()).trim() : "";
+  if (!response.ok) throw new ApiError(data.error ?? (detail && detail.length <= 160 ? detail : "操作失败，请重试。"), response.status);
   return data as T;
 }
 

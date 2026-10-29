@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { Loader2, LogOut, Moon, Palette, Sun } from "lucide-react";
+import { FolderTree, Loader2, LogOut, Moon, Palette, Pencil, Plus, Sun, Trash2 } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,6 +25,7 @@ import { Entry } from "./Entry";
 import { findGroup, findItem, nav, type NavItem, type NavGroup } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useQueryValue, useRoute } from "./router";
+import { createResource, deleteResource, listResource, patchResource } from "./resource";
 import { PALETTES, useTheme } from "./theme";
 
 const HostTerminal = lazy(() =>
@@ -31,6 +34,12 @@ const HostTerminal = lazy(() =>
 
 export function App() {
   const route = useRoute();
+  useEffect(() => {
+    const pipelineGroup = location.pathname.match(/^\/([^/]+)\/build\/(?:pipelines\/groups|pipeline-groups)(?:\/([^/]+))?/);
+    const hostGroup = location.pathname.match(/^\/([^/]+)\/host\/host-groups(?:\/([^/]+))?/);
+    const legacy = pipelineGroup ?? hostGroup;
+    if (legacy) navigate({ workspace: legacy[1]!, group: pipelineGroup ? "build" : "host", item: pipelineGroup ? "pipelines" : "hosts", mode: "list" }, legacy[2] && legacy[2] !== "new" ? { group_id: legacy[2] } : {} , { replace: true });
+  }, [route]);
   const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -154,8 +163,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   });
 
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
-  const relatedItems = group.items.filter(i => (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
+  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.resource];
+
+  if (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit"))
+    return <div className="h-full min-h-0 min-w-0">
+      {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : formConfig ? (
+        <ResourceForm key={`${current.slug}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.slug} permissions={permissions} pipelineWorkspace />
+      ) : <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />}
+    </div>;
 
   return (
     <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[48px_1fr]">
@@ -274,6 +290,10 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                 </a>
               </li>
               <li aria-hidden>/</li>
+              {item.parent && <>
+                <li><a className="hover:text-foreground" {...to(group.key, parentItem.key, parentItem.params)}>{parentItem.label}</a></li>
+                <li aria-hidden>/</li>
+              </>}
               <li>
                 {route.mode === "list" ? (
                   <span aria-current="page" className="text-foreground">
@@ -289,7 +309,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                 <>
                   <li aria-hidden>/</li>
                   <li aria-current="page" className="text-foreground">
-                    {route.mode === "new" ? "创建" : route.mode === "edit" ? "编辑" : "详情"}
+                    {route.mode === "new" ? item.resource === "hosts" ? "添加" : "创建" : route.mode === "edit" ? "编辑" : "详情"}
                   </li>
                 </>
               )}
@@ -297,11 +317,11 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           </nav>
           <h1 className="mt-1.5 mb-3 text-xl font-semibold">
             {item.label}
-            {route.mode === "new" && " · 创建"}
+            {route.mode === "new" && (item.resource === "hosts" ? " · 添加" : " · 创建")}
             {route.mode === "edit" && " · 编辑"}
           </h1>
 
-          {relatedItems.length > 1 && <nav aria-label={`${parentItem.label}页面`} className="mb-3 flex flex-wrap gap-3">
+          {relatedItems.length > 1 && parentItem.key !== "pipelines" && <nav aria-label={`${parentItem.label}页面`} className="mb-3 flex flex-wrap gap-3">
             {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
           </nav>}
           {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
@@ -311,7 +331,17 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
               <div className="flex min-h-0 min-w-0 flex-col">
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.slug} workspace={current.slug} />}
-              {(preferences || preferencesError) ? <ResourceTable
+              {(preferences || preferencesError) ? item.resource === "pipelines" ? <PipelineList
+                key={current.slug}
+                config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }}
+                workspace={current.slug}
+                permissions={permissions}
+              /> : item.resource === "hosts" ? <HostList
+                key={current.slug}
+                config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }}
+                workspace={current.slug}
+                permissions={permissions}
+              /> : <ResourceTable
                 key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
                 workspace={current.slug}
@@ -351,6 +381,125 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
       </div>
     </div>
   );
+}
+
+function PipelineList({ config, workspace, permissions }: {
+  config: NonNullable<ReturnType<typeof listConfigs>["pipelines"]>;
+  workspace: string;
+  permissions: Set<string>;
+}) {
+  const [groupId, setGroupId] = useQueryValue("group_id", "");
+  const tableConfig = useMemo(() => ({
+    ...config,
+    fixed: { ...config.fixed, ...(groupId ? { group_id: groupId } : {}) },
+    filters: config.filters?.filter(filter => filter.key !== "group_id") ?? [],
+  }), [config, groupId]);
+  const select = (id: string) => {
+    const query = new URLSearchParams(location.search);
+    query.delete("page");
+    query.delete("at");
+    history.replaceState(history.state, "", `${location.pathname}${query.size ? `?${query}` : ""}`);
+    setGroupId(id);
+  };
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 sm:flex-row">
+    {permissions.has("pipeline-groups.read") && <GroupSidebar workspace={workspace} permissions={permissions} resource="pipeline-groups" noun="流水线" active={groupId} onSelect={select} />}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col"><ResourceTable key={groupId} config={tableConfig} workspace={workspace} permissions={permissions} /></div>
+  </div>;
+}
+
+function HostList({ config, workspace, permissions }: {
+  config: NonNullable<ReturnType<typeof listConfigs>["hosts"]>;
+  workspace: string;
+  permissions: Set<string>;
+}) {
+  const [groupId, setGroupId] = useQueryValue("group_id", "");
+  const tableConfig = useMemo(() => ({
+    ...config,
+    fixed: { ...config.fixed, ...(groupId ? { group_id: groupId } : {}) },
+    filters: config.filters?.filter(filter => filter.key !== "group_id") ?? [],
+  }), [config, groupId]);
+  const select = (id: string) => {
+    const query = new URLSearchParams(location.search);
+    query.delete("page"); query.delete("at");
+    history.replaceState(history.state, "", `${location.pathname}${query.size ? `?${query}` : ""}`);
+    setGroupId(id);
+  };
+  return <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 sm:flex-row">
+    {permissions.has("host-groups.read") && <GroupSidebar workspace={workspace} permissions={permissions} resource="host-groups" noun="主机" active={groupId} onSelect={select} />}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col"><ResourceTable key={groupId} config={tableConfig} workspace={workspace} permissions={permissions} /></div>
+  </div>;
+}
+
+type GroupNode = { id: string; name: string; description: string; parent_id?: string; version: number };
+function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect }: {
+  workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups"; noun: string; active: string; onSelect: (id: string) => void;
+}) {
+  const [groups, setGroups] = useState<GroupNode[]>([]);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<{ group?: GroupNode; parentId: string }>();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+  const canCreate = permissions.has(`${resource}.create`);
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      const rows: GroupNode[] = [];
+      for (let page = 1; ; page++) {
+        const result = await listResource<GroupNode>(workspace, resource, { page, page_size: 200 });
+        rows.push(...result.items);
+        if (page * result.page_size >= result.total) break;
+      }
+      if (live) { setGroups(rows); setError(""); }
+    };
+    void load().catch(cause => { if (live) setError(errorText(cause)); });
+    return () => { live = false; };
+  }, [workspace, resource, revision]);
+  const open = (group?: GroupNode, parentId = "") => { setEditing({ ...(group ? { group } : {}), parentId }); setName(group?.name ?? ""); setDescription(group?.description ?? ""); setError(""); };
+  const renderGroup = (group: GroupNode, depth: number): React.ReactNode => <div key={group.id}>
+    <div className={cn("group flex min-w-0 items-center rounded", active === group.id ? "bg-accent" : "hover:bg-accent")} style={{ paddingLeft: depth * 12 }}>
+      <button type="button" aria-current={active === group.id ? "page" : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}>{group.name}</button>
+      {resource === "host-groups" && canCreate && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`在${group.name}下新建分组`} title="新建子分组" onClick={() => open(undefined, group.id)}><Plus className="size-3.5" /></Button>}
+      {permissions.has(`${resource}.update`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`编辑分组 ${group.name}`} title="编辑分组" onClick={() => open(group, group.parent_id ?? "")}><Pencil className="size-3.5" /></Button>}
+      {permissions.has(`${resource}.delete`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`删除分组 ${group.name}`} title="删除分组" onClick={async () => {
+        if (!confirm(`删除分组“${group.name}”？`)) return;
+        try { await deleteResource(workspace, resource, group.id); if (active === group.id) onSelect(""); setRevision(value => value + 1); }
+        catch (cause) { setError(errorText(cause)); }
+      }}><Trash2 className="size-3.5" /></Button>}
+    </div>
+    {resource === "host-groups" && groups.filter(child => child.parent_id === group.id).map(child => renderGroup(child, depth + 1))}
+  </div>;
+  return <aside aria-label={`${noun}分组`} className="flex w-full shrink-0 flex-col gap-1 border-b pb-3 sm:w-56 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:pr-3">
+    <div className="mb-1 flex items-center gap-1 px-2 text-sm font-medium"><FolderTree className="size-4" />分组<span className="flex-1" />
+      {canCreate && <Button variant="ghost" size="icon" className="size-7" aria-label="新建分组" title="新建分组" onClick={() => open()}><Plus className="size-4" /></Button>}
+    </div>
+    <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("")}>全部{noun}</button>
+    <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("0")}>未分组</button>
+    {groups.filter(group => resource !== "host-groups" || !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)).map(group => renderGroup(group, 0))}
+    {error && !editing && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
+    <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">
+      <Dialog.Title className="text-lg font-semibold">{editing?.group ? "编辑分组" : "新建分组"}</Dialog.Title>
+      <Dialog.Description className="sr-only">设置分组名称和说明</Dialog.Description>
+      <form className="mt-4 space-y-4" onSubmit={async event => {
+        event.preventDefault(); if (!editing || !name.trim()) return;
+        setBusy(true); setError("");
+        try {
+          const values = { name: name.trim(), description, ...(resource === "host-groups" ? { parent_id: editing.parentId } : {}) };
+          if (editing.group) await patchResource(workspace, resource, editing.group.id, { ...values, version: editing.group.version });
+          else await createResource(workspace, resource, values);
+          setEditing(undefined); setRevision(value => value + 1);
+        } catch (cause) { setError(errorText(cause)); }
+        finally { setBusy(false); }
+      }}>
+        <label className="block space-y-2 text-sm">名称<Input value={name} maxLength={60} required onChange={event => setName(event.target.value)} /></label>
+        {resource === "host-groups" && <label className="block space-y-2 text-sm">上级分组<select className="w-full rounded-md border border-input bg-background px-3 py-2" value={editing?.parentId ?? ""} onChange={event => setEditing(current => current ? { ...current, parentId: event.target.value } : current)}><option value="">顶级分组</option>{groups.filter(group => group.id !== editing?.group?.id).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
+        <label className="block space-y-2 text-sm">说明<Input value={description} onChange={event => setDescription(event.target.value)} /></label>
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button type="submit" disabled={busy || !name.trim()}>{busy ? "保存中…" : "保存"}</Button></div>
+      </form>
+    </Dialog.Content></Dialog.Portal></Dialog.Root>
+  </aside>;
 }
 
 function HostDetail({
@@ -416,7 +565,7 @@ function HostDetail({
         )}
       </TabsContent>
       <TabsContent value="files" className="min-h-0">
-        {active === "files" && <HostFiles workspace={workspace} hostId={hostId} />}
+        {active === "files" && <HostFiles workspace={workspace} hostId={hostId} canTerminal={permissions.has("hosts.terminal")} />}
       </TabsContent>
     </Tabs>
   );

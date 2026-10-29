@@ -1,6 +1,6 @@
 import { importResources, exportResources } from "./components/ResourceTransfer";
 import { RunnerConnection } from "./components/RunnerConnection";
-import { DEFAULT_ACTIONS } from "./actions-workflow";
+import { DEFAULT_ACTIONS, parseActions } from "./actions-workflow";
 import { api } from "./api";
 /**
  * Every resource page in one place: a `ListConfig` and a `FormConfig` per
@@ -192,7 +192,15 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
     const parameters = JSON.parse(row.parameters) as TemplateParameter[];
     const typed = Object.fromEntries(Object.entries(values).filter(([key,value]) => !(parameters.find(p => p.name === key)?.type === "integer" && value === "")).map(([key,value]) => [key, parameters.find(p => p.name === key)?.type === "boolean" ? value === "true" : value]));
     const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/actions/render`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
-    return { [field]: result[field], ...(resource === "pipeline-templates" ? { definition_format: "legacy", executor_bindings: [], checkout_bindings: [], graph_layout: {} } : {}) };
+    if (resource === "pipeline-templates") {
+      const rendered = JSON.parse(result[field] ?? "{}") as Record<string, unknown>;
+      if (rendered.engine === "github-actions" && typeof rendered.workflow === "string") {
+        parseActions(rendered.workflow);
+        return { definition: rendered.workflow, definition_format: "github-actions", executor_bindings: rendered.executor_bindings ?? [], checkout_bindings: rendered.checkout_bindings ?? [], graph_layout: rendered.graph_layout ?? {} };
+      }
+      return { definition: result[field], definition_format: "legacy", executor_bindings: [], checkout_bindings: [], graph_layout: {} };
+    }
+    return { [field]: result[field] };
   },
 });
 
@@ -286,16 +294,16 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     })])),
     pipelines: list({
       resource: "pipelines", rowKey: (r: Pipeline) => r.id,
+      toolbar: { create: { label: "创建流水线" } },
       filters: [{ key: "q", label: "名称", type: "text" },
         {key:"group_id",label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
         {key:"application_id",label:"应用",type:"select",options:namedOptions(workspace,"deployments")},
-        {key:"tag_id",label:"标签",type:"select",options:tagOptions(workspace)},
-        {key:"environment_id",label:"环境",type:"select",options:namedOptions(workspace,"pipeline-environments")}],
+        {key:"tag_id",label:"标签",type:"select",options:tagOptions(workspace)}],
       columns: [
         { key: "name", label: "名称" },
         {key:"group_name",label:"分组"},{key:"application_name",label:"应用"},
         {key:"tags",label:"标签",render:row=><span className="flex flex-wrap gap-1">{row.tags?.map(tag=><Badge key={tag.id} variant="secondary">{tag.name}</Badge>)}</span>},
-        {key:"environments",label:"可选环境",render:row=>row.environments?.map(environment=>environment.name).join("、")||"默认执行器"}, { key: "repository_id", label: "仓库 ID" },
+        { key: "repository_id", label: "仓库 ID" },
         { key: "target_kind", label: "目标类型", render: (r) => label(TARGETS, r.target_kind) },
         { key: "target_ref", label: "目标 ID" }, { key: "description", label: "备注" },
       ],
@@ -359,7 +367,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
 
     hosts: list({
       resource: "hosts",
-      toolbar: { content: { permission: "hosts.enroll", render: reload => <RunnerConnection workspace={workspace} onConnected={reload} /> } },
+      toolbar: { create: { label: "添加主机" }, content: { permission: "hosts.enroll", render: reload => <RunnerConnection workspace={workspace} onConnected={reload} /> } },
       rowKey: (row: Host) => row.id,
       filters: [
         { key: "tag_id", label: "标签", type: "select", options: tagOptions(workspace) },
@@ -664,9 +672,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
         {key:"group_id",when:()=>!permissions||permissions.has("pipeline-groups.read"),label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
-        {key:"application_id",when:()=>!permissions||permissions.has("deployments.read"),label:"关联应用",type:"select",options:namedOptions(workspace,"deployments")},
         {key:"tag_ids",when:()=>!permissions||permissions.has("tags.read"),label:"标签",type:"multiselect",options:tagOptions(workspace),span:2,createOption:{label:"新建标签",permission:"tags.create",fields:[{key:"name",label:"名称",type:"text",required:true}],create:async values=>{const row=await createResource<{id:string}>(workspace,"tags",values);return {value:row.id,label:String(values.name)};}}},
-        {key:"environment_ids",when:()=>!permissions||permissions.has("pipeline-environments.read"),label:"执行环境",type:"multiselect",options:namedOptions(workspace,"pipeline-environments"),span:2,help:"运行时选择一个环境，提供该环境的变量和默认执行器；任务指定的执行器优先。",createOption:{label:"新建执行环境",permission:"pipeline-environments.create",fields:[{key:"name",label:"名称",type:"text",required:true},{key:"target_kind",label:"默认执行器类型",type:"select",options:TARGETS,required:true},{key:"target_ref",label:"默认主机",type:"select",options:namedOptions(workspace,"hosts"),required:true,when:d=>d.target_kind==="host"},{key:"target_ref",label:"默认主机组",type:"select",options:namedOptions(workspace,"host-groups"),required:true,when:d=>d.target_kind==="host-group"}],create:async values=>{const row=await createResource<{id:string}>(workspace,"pipeline-environments",values);return {value:row.id,label:String(values.name)};}}},
         { key: "repository_id", label: "仓库", type: "pipeline-repository", when:d=>d.definition_format!=="github-actions", options: namedOptions(workspace, "repositories"), span: 2 },
         { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, when:d=>d.definition_format!=="github-actions", resetOnChange: ["target_ref"] },
         { key: "target_ref", label: "目标主机", type: "select", required: true,
@@ -677,7 +683,6 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
           options: async () => (await Promise.all(["hosts", "host-groups"].filter(resource=>!permissions||permissions.has(`${resource}.read`)).map(async (resource) => (await namedOptions(workspace, resource)()).map(option => ({ value: `${resource === "hosts" ? "host" : "host-group"}:${option.value}`, label: `${resource === "hosts" ? "主机" : "主机组"} · ${option.label}` }))))).flat() },
         { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2, when: d => d.definition_format !== "github-actions",
           help: "逐步执行；env 支持 value 或 valueFrom: variable/变量名（二选一）。变量按全局→构建→当前流水线覆盖，触发时加密保存快照，日志脱敏。" },
-        { key: "description", label: "备注", type: "textarea", span: 2 },
       ] }],
     }),
     "host-groups": form({
@@ -737,7 +742,13 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
               required: true,
               options: sshCredentialOptions(workspace),
               span: 2,
-              help: "在「构建 → 授权认证」里维护。密钥与密码只存在服务端，连接时才解密。",
+              help: "密码与私钥由服务端加密保存，连接时才解密。",
+              createOption: { label: "添加登录凭据", permission: "credentials.create", fields: [
+                { key: "name", label: "凭据名称", type: "text", required: true },
+                { key: "kind", label: "类型", type: "select", required: true, options: CREDENTIAL_KINDS.filter(option => option.value === "password" || option.value === "ssh-key") },
+                { key: "secret", label: "密码", type: "password", required: true, span: 2, when: values => values.kind === "password" },
+                { key: "secret", label: "SSH 私钥", type: "secret", required: true, span: 2, when: values => values.kind === "ssh-key" },
+              ], create: async values => { const row = await createResource<{ id: string }>(workspace, "credentials", { ...values, username: "", description: "" }); return { value: row.id, label: String(values.name) }; } },
               when: (draft: Partial<Host>) => draft.connection === "ssh",
             },
           ],

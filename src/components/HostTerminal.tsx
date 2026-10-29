@@ -28,7 +28,7 @@ function paletteFrom(element: HTMLElement) {
   };
 }
 
-export function HostTerminal({ workspace, hostId }: { workspace: string; hostId: string }) {
+export function HostTerminal({ workspace, hostId, directory }: { workspace: string; hostId: string; directory?: string }) {
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal>(null);
   const [status, setStatus] = useState<Status>("connecting");
@@ -61,7 +61,10 @@ export function HostTerminal({ workspace, hostId }: { workspace: string; hostId:
     );
     socket.binaryType = "arraybuffer";
 
-    socket.onopen = () => setStatus("open");
+    socket.onopen = () => {
+      setStatus("open");
+      if (directory && !/[\x00-\x1f\x7f]/.test(directory)) socket.send(new TextEncoder().encode(`cd '${directory.replaceAll("'", "'\\''")}'\r`));
+    };
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
         const message = JSON.parse(event.data) as { type: string; error?: string };
@@ -108,7 +111,7 @@ export function HostTerminal({ workspace, hostId }: { workspace: string; hostId:
       term.dispose();
       terminal.current = null;
     };
-  }, [workspace, hostId]);
+  }, [workspace, hostId, directory]);
 
   // Re-theme in place. Recreating the terminal would kill a live session just
   // because someone toggled dark mode.
@@ -119,7 +122,7 @@ export function HostTerminal({ workspace, hostId }: { workspace: string; hostId:
   }, [resolved]);
 
   return (
-    <div className="flex min-h-0 flex-col gap-2">
+    <div className="flex h-full min-h-[320px] flex-col gap-2">
       <div className="flex items-center gap-2 text-sm">
         <span
           className={

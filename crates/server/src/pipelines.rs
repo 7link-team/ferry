@@ -136,18 +136,16 @@ async fn check(
     if node_only {
         let document = crate::actions::document(&stored).expect("validated Actions document");
         let (jobs, _) = crate::actions::parse(&document)?;
-        if body.environment_ids.as_ref().is_none_or(Vec::is_empty) {
-            for job in jobs {
-                if !document.executor_bindings.iter().any(|binding| {
-                    binding.job_id == job.key
-                        && !binding.target_ref.is_empty()
-                        && binding.target_ref != "0"
-                }) {
-                    return Err(ApiError::bad(format!(
-                        "请为任务 {} 选择执行器，或绑定运行环境。",
-                        job.name
-                    )));
-                }
+        for job in jobs {
+            if !document.executor_bindings.iter().any(|binding| {
+                binding.job_id == job.key
+                    && !binding.target_ref.is_empty()
+                    && binding.target_ref != "0"
+            }) {
+                return Err(ApiError::bad(format!(
+                    "请为任务 {} 选择执行主机。",
+                    job.name
+                )));
             }
         }
     }

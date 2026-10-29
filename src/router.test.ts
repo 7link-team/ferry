@@ -15,3 +15,18 @@ describe("platform route boundary", () => {
     }
   });
 });
+
+describe("pipeline group routes", () => {
+  it("keeps group pages under pipelines", () => {
+    for (const path of [
+      "/ops/build/pipelines/groups",
+      "/ops/build/pipelines/groups/new",
+      "/ops/build/pipelines/groups/123",
+      "/ops/build/pipelines/groups/123/edit",
+    ]) {
+      const route = parse(path);
+      expect(route).toMatchObject({ workspace: "ops", group: "build", item: "pipeline-groups" });
+      expect(href(route, {})).toBe(path);
+    }
+  });
+});

@@ -16,8 +16,10 @@ import { Dialog } from "radix-ui";
 import { ActionsEditor } from "./ActionsEditor";
 import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
+import { RunnerConnection } from "./RunnerConnection";
 import { ManifestEditor } from "./ManifestEditor";
-import { Loader2 } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Play, Save, SlidersHorizontal, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -61,11 +63,13 @@ export function ResourceForm<T extends Record<string, unknown>>({
   workspace,
   permissions,
   onSaved,
+  pipelineWorkspace = false,
 }: {
   config: FormConfig<T>;
   workspace: string;
   permissions: Set<string>;
   onSaved?: () => void;
+  pipelineWorkspace?: boolean;
 }) {
   const route = useRoute();
   const creating = route.mode === "new";
@@ -77,6 +81,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const [loading, setLoading] = useState(!creating || !!copyId);
   const [saving, setSaving] = useState(false);
   const [pendingAction, setPendingAction] = useState<RowAction<T>>();
+  const [pendingActionRow, setPendingActionRow] = useState<T>();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [templateDialog, setTemplateDialog] = useState<"import" | "export" | null>(() => new URLSearchParams(location.search).has("template") && pipelineWorkspace ? "import" : null);
+  const [templateName, setTemplateName] = useState("");
+  const [templateDescription, setTemplateDescription] = useState("");
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const [templateError, setTemplateError] = useState("");
+  const [editorMode, setEditorMode] = useState<"visual" | "yaml">("visual");
   const [unavailableOptions, setUnavailableOptions] = useState<Record<string, boolean>>({});
   const reportOptions = useCallback((key: string, blocked: boolean) => {
     setUnavailableOptions(current => current[key] === blocked ? current : { ...current, [key]: blocked });
@@ -113,23 +125,67 @@ export function ResourceForm<T extends Record<string, unknown>>({
   },[route.mode,route.id,workspace,config,draft]);
   const backToList = href({ ...route, mode: "list" }, {});
   const canEdit = permissions.has(`${config.permissionResource ?? config.resource}.${creating ? "create" : "update"}`);
+  const workspaceEditor = pipelineWorkspace && config.resource === "pipelines" && (creating || route.mode === "edit");
+
+  const renderField = (field: FormField<T>) => (
+    <Field
+      key={field.key}
+      field={field}
+      workspace={workspace}
+      reportOptions={reportOptions}
+      value={draft[field.key]}
+      stored={!!draft[field.stored ?? `has_${field.key}`]}
+      creating={creating}
+      draft={draft}
+      permissions={permissions}
+      readOnly={readOnly || (!creating && !!field.immutable)}
+      asText={readOnly}
+      fillHeight={workspaceEditor && field.type === "actions-editor"}
+      {...(workspaceEditor ? { editorMode, onEditorModeChange: setEditorMode } : {})}
+      onChange={(value) => setDraft((d) => ({
+        ...d,
+        ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
+        ...(["repository-source", "pipeline-repository", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+      }) as Partial<T>)}
+    />
+  );
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (readOnly || !canEdit || loading || optionsBlocked) return;
+    const runAfterSave = workspaceEditor && (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "save-run";
     setSaving(true);
     setError("");
+    let savedId: string | undefined;
     try {
       if (creating) {
-        await createResource(workspace, config.resource, draft, config.endpoint);
+        const created = await createResource<{ id: string } | undefined>(workspace, config.resource, draft, config.endpoint);
+        savedId = created?.id;
       } else {
         // `version` rides along so the server can refuse a stale write.
         await patchResource(workspace, config.resource, route.id!, draft, config.endpoint);
+        savedId = route.id;
+      }
+      onSaved?.();
+      if (runAfterSave && savedId) {
+        const action = config.viewActions?.find(candidate => candidate.permission === "pipelines.run");
+        if (action && permissions.has("pipelines.run")) {
+          const saved = await getResource<T>(workspace, config.resource, savedId, config.endpoint);
+          if (action.parameters?.(saved).length) {
+            setPendingActionRow(saved);
+            setPendingAction(action);
+          } else {
+            await action.action?.(saved);
+          }
+          return;
+        }
       }
       navigate({ ...route, mode: "list" }, {});
-      onSaved?.();
     } catch (cause) {
-      setError(errorText(cause));
+      if (creating && savedId) {
+        toast.error(`流水线已保存，但执行失败：${errorText(cause)}`);
+        navigate({ ...route, id: savedId, mode: "edit" }, {});
+      } else setError(errorText(cause));
     } finally {
       setSaving(false);
     }
@@ -143,8 +199,77 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </p>
     );
 
+  const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background py-2" role="tablist" aria-label="接入方式">
+    {([ ["runner", "代理 Runner"], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
+  </div>;
+
+  if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="max-w-3xl space-y-4 pb-8">
+    {hostConnectionTabs}
+    {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">当前角色没有代理接入权限。</p>}
+  </div>;
+
+  if (workspaceEditor) {
+    const fields = config.sections.flatMap(section => section.fields).filter(field => !field.when || field.when(draft));
+    const editor = fields.find(field => field.key === "definition");
+    const settings = fields.filter(field => field.key !== "name" && field !== editor && field.key !== "application_id" && field.key !== "description");
+    const closeAction = () => {
+      setPendingAction(undefined);
+      if (creating && pendingActionRow && "id" in pendingActionRow)
+        navigate({ ...route, id: String(pendingActionRow.id), mode: "edit" }, {});
+    };
+    return <form className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
+      <header className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-2 sm:min-h-14 sm:px-4">
+        <Button type="button" variant="ghost" size="icon" aria-label="返回流水线" title="返回流水线" onClick={() => navigate({ ...route, mode: "list" }, {})}><ArrowLeft /></Button>
+        <Input aria-label="流水线名称" placeholder="流水线名称" required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} />
+        <Button type="button" variant="ghost" size="sm" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(open => !open)}><SlidersHorizontal className="size-4" />流水线设置</Button>
+        {editor?.type === "actions-editor" && <div className="flex gap-1" role="tablist" aria-label="流水线编辑模式">
+          <Button type="button" role="tab" aria-selected={editorMode === "visual"} variant={editorMode === "visual" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("visual")}>可视化</Button>
+          <Button type="button" role="tab" aria-selected={editorMode === "yaml"} variant={editorMode === "yaml" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("yaml")}>YAML</Button>
+        </div>}
+        {config.generator && <Button type="button" variant="ghost" size="sm" onClick={() => setTemplateDialog("import")}><Download />从模板导入</Button>}
+        {permissions.has("pipeline-templates.create") && <Button type="button" variant="ghost" size="sm" onClick={() => { setTemplateError(""); setTemplateDialog("export"); }}><Upload />保存为模板</Button>}
+        <div className="ml-auto flex gap-2">
+          <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />保存</Button>
+          {permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />保存并执行</Button>}
+        </div>
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3 sm:px-4">
+        {error && <p role="alert" className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {settingsOpen && <div className="mb-3 space-y-4 border-b pb-3">
+            <div className="grid gap-4 sm:grid-cols-2">{settings.map(renderField)}</div>
+        </div>}
+        {editor && <div className="flex min-h-0 flex-1 flex-col">{renderField(editor)}</div>}
+      </main>
+      {pendingAction && <ResourceActionDialog action={pendingAction} row={pendingActionRow!} workspace={workspace} permissions={permissions} onClose={closeAction} onDone={() => setPendingAction(undefined)} />}
+      <Dialog.Root open={templateDialog !== null} onOpenChange={open => { if (!open && !templateBusy) setTemplateDialog(null); }}><Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
+          <Dialog.Title className="text-lg font-semibold">{templateDialog === "import" ? "从模板导入" : "保存为模板"}</Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm text-muted-foreground">{templateDialog === "import" ? "选择模板并生成配置到当前流水线。" : "将当前流水线配置保存为可复用模板。"}</Dialog.Description>
+          {templateDialog === "import" && config.generator && <div className="mt-4"><FormGenerator config={config.generator} compactWhenUnused={false} listMode report={reportOptions} onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }} /></div>}
+          {templateDialog === "export" && <div className="mt-4 space-y-4">
+            <label className="block space-y-2 text-sm">模板名称<Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></label>
+            <label className="block space-y-2 text-sm">说明<Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></label>
+            {templateError && <p role="alert" className="text-sm text-destructive">{templateError}</p>}
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>取消</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
+              setTemplateBusy(true); setTemplateError("");
+              try {
+                const content = draft.definition_format === "github-actions" ? JSON.stringify({ engine: "github-actions", workflow: draft.definition, executor_bindings: draft.executor_bindings ?? [], checkout_bindings: draft.checkout_bindings ?? [], graph_layout: draft.graph_layout ?? {} }) : String(draft.definition ?? "");
+                await createResource(workspace, "pipeline-templates", { name: templateName.trim(), description: templateDescription, content, parameters: "[]" });
+                setTemplateDialog(null); toast.success("模板已保存");
+              }
+              catch (cause) { setTemplateError(errorText(cause)); }
+              finally { setTemplateBusy(false); }
+            }}>{templateBusy ? "保存中…" : "保存模板"}</Button></div>
+          </div>}
+        </Dialog.Content>
+      </Dialog.Portal></Dialog.Root>
+    </form>;
+  }
+
   return (
     <form className={cn("min-w-0 w-full space-y-6 pb-8", config.width !== "full" && "max-w-3xl")} onSubmit={submit}>
+      {hostConnectionTabs}
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -152,7 +277,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       )}
 
       {pendingAction && <ResourceActionDialog action={pendingAction} row={draft as T} workspace={workspace} permissions={permissions} onClose={() => setPendingAction(undefined)} onDone={() => { setPendingAction(undefined); if(route.id) void getResource<T>(workspace,config.resource,route.id,config.endpoint).then(setDraft).catch(cause=>setError(errorText(cause))); }} />}
-      {creating && config.generator && <FormGenerator config={config.generator} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
+      {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
       {readOnly && config.viewActions && <div className="flex flex-wrap gap-2">{config.viewActions.filter(action=>(!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T))).map(action=>action.to ? <Button key={action.label} variant="outline" asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.label}</a></Button> : <Button key={action.label} type="button" variant="outline" disabled={saving} onClick={async()=>{
         if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
@@ -162,7 +287,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         catch(cause){setError(errorText(cause));}finally{setSaving(false);}
       }}>{action.label}</Button>)}</div>}
       {config.sections.map((section, index) => {
-        const fields = section.fields.filter((field) => !field.when || field.when(draft));
+        const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
           <fieldset key={section.title ?? index} className="space-y-4">
@@ -172,26 +297,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
               </legend>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
-              {fields.map((field) => (
-                <Field
-                  key={field.key}
-                  field={field}
-                  workspace={workspace}
-                  reportOptions={reportOptions}
-                  value={draft[field.key]}
-                  stored={!!draft[field.stored ?? `has_${field.key}`]}
-                  creating={creating}
-                  draft={draft}
-                  permissions={permissions}
-                  readOnly={readOnly || (!creating && !!field.immutable)}
-                  asText={readOnly}
-                  onChange={(value) => setDraft((d) => ({
-                    ...d,
-                    ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-                    ...(["repository-source", "pipeline-repository", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
-                  }) as Partial<T>)}
-                />
-              ))}
+              {fields.map(renderField)}
             </div>
           </fieldset>
         );
@@ -213,7 +319,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
           <>
             <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
-              {creating ? "创建" : "保存"}
+              {creating ? config.resource === "hosts" ? "添加主机" : "创建" : "保存"}
             </Button>
             <Button type="button" variant="outline" asChild>
               <a href={backToList}>取消</a>
@@ -225,8 +331,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
   );
 }
 
-function FormGenerator<T>({ config, report, onGenerated }: {
+function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report, onGenerated }: {
   config: NonNullable<FormConfig<T>["generator"]>;
+  compactWhenUnused: boolean;
+  listMode?: boolean;
   report: (key: string, blocked: boolean) => void;
   onGenerated: (value: Partial<T>) => void;
 }) {
@@ -250,14 +358,19 @@ function FormGenerator<T>({ config, report, onGenerated }: {
     return () => { live = false; };
   }, [id, attempt, config]);
   useEffect(() => { report("$generator", !!id && (!generated || busy)); return () => report("$generator", false); }, [id, generated, busy, report]);
-  return <section aria-label="从模板生成" className="space-y-4 rounded-md border p-4">
-    <h2 className="font-medium">从模板生成配置</h2>
-    <label className="flex flex-col gap-2 text-sm">模板
+  const compact = compactWhenUnused && !id;
+  return <section aria-label="从模板生成" className={cn(compact ? "flex flex-wrap items-center gap-3" : listMode ? "space-y-4" : "space-y-4 rounded-md border p-4")}>
+    {!listMode && <h2 className={cn("font-medium", compact && "text-sm")}>从模板生成配置</h2>}
+    {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label="模板列表">
+      {optionsLoading && <p className="py-3 text-sm text-muted-foreground">正在加载模板…</p>}
+      {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">暂无模板</p>}
+      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{option.label}</button>)}
+    </div> : <label className="flex min-w-0 flex-col gap-2 text-sm"><span className={compact ? "sr-only" : undefined}>模板</span>
       <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
-        <SelectTrigger><SelectValue placeholder="选择模板" /></SelectTrigger>
+        <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder="选择模板" /></SelectTrigger>
         <SelectContent><SelectItem value="__none">不使用模板</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
       </Select>
-    </label>
+    </label>}
     {(error || optionsError) && <p role="alert" className="text-sm text-destructive">{error || optionsError}</p>}
     {id && <>
       {template && <><p className="text-sm text-muted-foreground">{template.name} · 版本 {template.version}</p>
@@ -324,6 +437,9 @@ function Field<T>({
   permissions,
   onChange,
   reportOptions,
+  fillHeight = false,
+  editorMode,
+  onEditorModeChange,
 }: {
   field: FormField<T>;
   workspace?: string;
@@ -336,6 +452,9 @@ function Field<T>({
   permissions: Set<string>;
   onChange: (value: unknown) => void;
   reportOptions: (key: string, blocked: boolean) => void;
+  fillHeight?: boolean;
+  editorMode?: "visual" | "yaml";
+  onEditorModeChange?: (mode: "visual" | "yaml") => void;
 }) {
   const { options, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
   const [creatingOption, setCreatingOption] = useState(false);
@@ -362,7 +481,7 @@ function Field<T>({
 
   if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
 
-  if (field.type === "actions-editor") return <div className="min-w-0 sm:col-span-2"><ActionsEditor draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
+  if (field.type === "actions-editor") return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={draft} options={options} readOnly={readOnly} fillHeight={fillHeight} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
   if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
   if (field.type === "pipeline-repository") return <div className="min-w-0 sm:col-span-2"><PipelineRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
@@ -372,6 +491,7 @@ function Field<T>({
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value as string[] : []);
+    if (asText) return <Wrapper field={field}>{label}<p className="text-sm">{options.filter(option => selected.has(option.value)).map(option => option.label).join("、") || "—"}</p></Wrapper>;
     const toggle = (key: string, checked: boolean) => {
       const next = new Set(selected);
       if (checked) {
@@ -416,18 +536,23 @@ function Field<T>({
       <label className="flex flex-col gap-1.5">
         {label}
         {field.type === "select" ? (
-          <Select value={text} onValueChange={onChange} disabled={readOnly}>
-            <SelectTrigger>
-              <SelectValue placeholder={field.placeholder ?? "请选择"} />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <>
+            <div className="flex items-center gap-2"><Select value={text} onValueChange={onChange} disabled={readOnly}>
+              <SelectTrigger className="min-w-0 flex-1">
+                <SelectValue placeholder={field.placeholder ?? "请选择"} />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>
+            {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">暂无可选{field.label}，可在此添加。</p>}
+            {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{ label: field.createOption.label, parameters: () => field.createOption!.fields, action: async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange(added.value); } }} />}
+          </>
         ) : field.type === "textarea" || field.type === "secret" || field.type === "code" ? (
           // A `secret` has to be a textarea, not <input type=password>: an
           // HTML input cannot hold newlines, so pasting a PEM private key

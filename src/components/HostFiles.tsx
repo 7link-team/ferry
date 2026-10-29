@@ -6,7 +6,7 @@
  * a raw `fetch(PUT)` with the File as the body — not FormData, which would
  * force the whole file into memory on both ends.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   File as FileIcon,
@@ -14,8 +14,10 @@ import {
   Link as LinkIcon,
   Loader2,
   RefreshCw,
+  SquareTerminal,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +31,7 @@ interface Entry {
   mode: number;
   modified_at: number;
 }
+const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ default: module.HostTerminal })));
 
 const units = ["B", "KB", "MB", "GB", "TB"];
 function size(bytes: number) {
@@ -52,14 +55,19 @@ export function parent(dir: string) {
   return cut <= 0 ? "/" : dir.slice(0, cut);
 }
 
-export function HostFiles({ workspace, hostId }: { workspace: string; hostId: string }) {
+export function HostFiles({ workspace, hostId, canTerminal = false }: { workspace: string; hostId: string; canTerminal?: boolean }) {
   const [path, setPath] = useState("/");
   const [draft, setDraft] = useState("/");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
+  const [terminalDirectory, setTerminalDirectory] = useState<string>();
   const picker = useRef<HTMLInputElement>(null);
+  const openTerminal = (directory: string) => {
+    if (/[\x00-\x1f\x7f]/.test(directory)) { setError("目录路径包含控制字符，无法打开终端。"); return; }
+    setTerminalDirectory(directory);
+  };
 
   const endpoint = `/api${base(workspace, "hosts")}/${encodeURIComponent(hostId)}/files`;
 
@@ -133,8 +141,9 @@ export function HostFiles({ workspace, hostId }: { workspace: string; hostId: st
   };
 
   return (
+    <div className="flex h-full min-h-0 min-w-0 gap-3 max-lg:flex-col">
     <div
-      className="grid min-h-0 grid-rows-[auto_auto_1fr] gap-3"
+      className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_auto_1fr] gap-3"
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault();
@@ -153,11 +162,12 @@ export function HostFiles({ workspace, hostId }: { workspace: string; hostId: st
                 disabled={path === "/"} aria-label="上级目录">
           <ArrowUp />
         </Button>
-        <Input value={draft} onChange={(event) => setDraft(event.target.value)} className="font-mono" />
+        <Input aria-label="目录路径" value={draft} onChange={(event) => setDraft(event.target.value)} className="font-mono" />
         <Button type="submit" variant="outline">转到</Button>
         <Button type="button" variant="outline" size="icon" onClick={() => void load(path)} aria-label="刷新">
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
+        {canTerminal && <Button type="button" variant="outline" size="icon" aria-label="在当前目录打开终端" title={`在 ${path} 打开终端`} onClick={() => openTerminal(path)}><SquareTerminal /></Button>}
         <Button type="button" onClick={() => picker.current?.click()} disabled={!!busy}>
           <Upload /> 上传
         </Button>
@@ -234,6 +244,7 @@ export function HostFiles({ workspace, hostId }: { workspace: string; hostId: st
                   {entry.modified_at ? new Date(entry.modified_at).toLocaleString("zh-CN") : "—"}
                 </td>
                 <td className="border-b border-border px-3 py-1.5 text-right whitespace-nowrap group-hover:bg-accent">
+                  {canTerminal && entry.kind === "directory" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={`在 ${entry.name} 打开终端`} title="在此目录打开终端" onClick={() => openTerminal(join(path, entry.name))}><SquareTerminal className="size-4" /></Button>}
                   {entry.kind !== "directory" && (
                     // A real link so the browser streams the download itself.
                     <a
@@ -264,6 +275,11 @@ export function HostFiles({ workspace, hostId }: { workspace: string; hostId: st
           </tbody>
         </table>
       </div>
+    </div>
+    {terminalDirectory && <aside aria-label="目录终端" className="flex min-h-[360px] min-w-0 flex-col border-t pt-3 lg:min-h-0 lg:w-[min(42vw,40rem)] lg:shrink-0 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3">
+      <div className="mb-2 flex items-center gap-2"><SquareTerminal className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate font-mono text-sm" title={terminalDirectory}>{terminalDirectory}</span><Button type="button" variant="ghost" size="icon" aria-label="关闭目录终端" onClick={() => setTerminalDirectory(undefined)}><X className="size-4" /></Button></div>
+      <div className="min-h-0 flex-1"><Suspense fallback={<p role="status">正在加载终端…</p>}><HostTerminal workspace={workspace} hostId={hostId} directory={terminalDirectory} /></Suspense></div>
+    </aside>}
     </div>
   );
 }

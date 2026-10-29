@@ -23,7 +23,7 @@ export interface Route {
 }
 
 export function parse(pathname = location.pathname): Route {
-  const [workspace = "", group = "", item = "", third = "", fourth = ""] = pathname
+  const [workspace = "", group = "", item = "", third = "", fourth = "", fifth = ""] = pathname
     .replace(/^\/+|\/+$/g, "")
     .split("/");
   if (workspace === "_platform") {
@@ -34,15 +34,18 @@ export function parse(pathname = location.pathname): Route {
   const fallback = nav[0]!;
   const resolved = nav.find((g) => g.key === group) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
-  const resolvedItem = legacyRepository ? "repositories" :
+  const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
+  const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
+  const detail = pipelineGroups ? fourth : third;
+  const action = pipelineGroups ? fifth : fourth;
   const mode = legacyRepository ? "list" :
-    third === "new" ? "new" : third ? (fourth === "edit" ? "edit" : "view") : "list";
+    detail === "new" ? "new" : detail ? (action === "edit" ? "edit" : "view") : "list";
   return {
     workspace,
     group: resolved.key,
     item: resolvedItem,
-    ...(mode === "view" || mode === "edit" ? { id: third } : {}),
+    ...(mode === "view" || mode === "edit" ? { id: detail } : {}),
     mode,
   };
 }
@@ -55,7 +58,9 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const search = params.toString();
-  return `${r.workspace === "_platform" ? `/_platform/${r.item}` : `/${r.workspace}/${r.group}/${r.item}`}${tail}${search ? `?${search}` : ""}`;
+  const base = r.workspace === "_platform" ? `/_platform/${r.item}` :
+    r.group === "build" && r.item === "pipeline-groups" ? `/${r.workspace}/build/pipelines/groups` : `/${r.workspace}/${r.group}/${r.item}`;
+  return `${base}${tail}${search ? `?${search}` : ""}`;
 }
 
 const listeners = new Set<() => void>();

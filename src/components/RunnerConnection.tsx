@@ -10,7 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 type Platform = "linux" | "macos" | "windows";
 type Token = { id: string; token: string; expires_at: number; server: string };
 type TokenStatus = { id: string; expires_at: number; used_at: number; host_id: string; state: "pending" | "expired" | "connected"; host_state: "online" | "offline" | "" };
-type Props = { workspace: string; hostId?: string; onConnected?: () => void; inline?: boolean };
+type Props = { workspace: string; hostId?: string; onConnected?: () => void; inline?: boolean; autoGenerate?: boolean };
 
 export function runnerServerOrigin(value: string): string {
   const raw = value.trim();
@@ -35,7 +35,7 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
   return `(umask 077; dir=$(mktemp -d) || exit 1; trap 'rm -rf "$dir"' EXIT; export FERRY_TOKEN=${sh(token)}; curl -fsSL --proto-redir '=https' ${sh(`${origin}/api/runners/install.sh`)} -o "$dir/install.sh" && sh "$dir/install.sh" --server ${sh(origin)})`;
 }
 
-function ConnectionFlow({ workspace, hostId, onConnected }: Props) {
+function ConnectionFlow({ workspace, hostId, onConnected, autoGenerate }: Props) {
   const [platform, setPlatform] = useState<Platform>("linux");
   const [server, setServer] = useState(() => window.location.origin);
   const [token, setToken] = useState<Token>();
@@ -49,6 +49,7 @@ function ConnectionFlow({ workspace, hostId, onConnected }: Props) {
   const callback = useRef(onConnected);
   callback.current = onConnected;
   const notified = useRef(false);
+  const autoStarted = useRef(false);
   const serverId = useId();
   const path = `/workspaces/${encodeURIComponent(workspace)}/runner-tokens`;
   const connected = status?.state === "connected" && status.host_state === "online";
@@ -99,6 +100,11 @@ function ConnectionFlow({ workspace, hostId, onConnected }: Props) {
     } catch (cause) { if (!controller.signal.aborted) setError(errorText(cause)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   };
+  useEffect(() => {
+    if (!autoGenerate || autoStarted.current) return;
+    autoStarted.current = true;
+    void generate();
+  }, [autoGenerate]);
   const copy = async () => {
     try { await navigator.clipboard.writeText(command); setCopied(true); setError(""); }
     catch { setError("无法访问剪贴板，请选中下方命令手动复制。"); }

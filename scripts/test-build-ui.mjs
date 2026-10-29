@@ -177,7 +177,21 @@ try {
   assert(assets.some((url) => /\/assets\/xterm-.*\.js/.test(url)), 'terminal did not load xterm chunk');
   assert.deepEqual(errors, []);
   pass('xterm excluded from initial pages, lazy terminal loads and connects to real runner');
-  assert(passed >= 4, `expected at least 4 acceptance groups, got ${passed}`);
+  await page.getByRole('tab', { name: '文件', exact: true }).click();
+  await page.getByLabel('目录路径').fill('/tmp');
+  const directoryLoaded = page.waitForResponse(response => response.url().includes('path=%2Ftmp') && response.ok());
+  await page.getByRole('button', { name: '转到', exact: true }).click();
+  await directoryLoaded;
+  await until(async () => (await page.getByRole('button', { name: '在当前目录打开终端' }).getAttribute('title')) === '在 /tmp 打开终端');
+  await page.getByRole('button', { name: '在当前目录打开终端' }).click();
+  const directoryPanel = page.getByLabel('目录终端');
+  await directoryPanel.getByText('已连接', { exact: true }).waitFor();
+  await directoryPanel.locator('.xterm-screen').click();
+  await page.keyboard.type('pwd');
+  await page.keyboard.press('Enter');
+  await until(async () => (await directoryPanel.locator('.xterm-screen').innerText()).includes('/tmp'));
+  pass('file directory terminal opens a real shell in the selected directory');
+  assert(passed >= 5, `expected at least 5 acceptance groups, got ${passed}`);
   console.log(`${passed} passed, 0 failed, 0 skipped`);
 } catch (error) {
   if (page) console.error(await page.locator("body").innerText());
