@@ -10,7 +10,7 @@
 - 未完成：T17 Windows 桌面免交互、免重复 UAC 的独立升级器。真实第三方私有账户验收未完成；K8s/Helm 按用户要求暂缓。
 - 约束：磁盘空间受限，不在本地执行 Rust/Go 编译和测试；重构建与打包使用 GitHub Actions。不新建 worktree。忽略误发的其他项目需求。
 - 长期决策见 [ADR.md](ADR.md)。状态与决策现统一维护于根目录，取代原 `.claude` 路径及“仅保留本地、不提交状态文件”的旧约定；本文不得保存凭据或临时敏感信息。
-- 本次整理：两份记录已迁至根目录，引用已修正；文档提交 `30260e4` 连同功能分支已快进合并并推送到 `main`。本地和远程 `feat/actions-pipelines`、`feat/platform-initialization` 已删除。`feat/workspace-management` 和 `fix/desktop-upgrade-lifecycle` 仍被其他工作区占用，保留；前者还有未提交记录。当前主工作区位于 `main`。类型检查通过，前端 98 项通过、1 项平台跳过；运行时代码与已通过完整验收的 alpha.13 一致。主分支构建 `40803470243` 和镜像 `40803470338` 已触发，记录时尚在运行，不能视为通过。本次文档整理不改变 alpha.13 发布产物，勿自动重复发版。
+- 本次整理：两份记录已迁至根目录，引用已修正；文档提交 `30260e4` 连同功能分支已快进合并并推送到 `main`。本地和远程 `feat/actions-pipelines`、`feat/platform-initialization` 已删除。后续已检查并归档旧工作区的独有验收记录，删除 `ferry-platform`、`ferry-desktop-fix` 两个工作区及对应本地分支，并删除远程 `fix/desktop-upgrade-lifecycle`；远程原本没有 `feat/workspace-management`。仅保留主工作区与 main 分支。当前主工作区位于 `main`。类型检查通过，前端 98 项通过、1 项平台跳过；运行时代码与已通过完整验收的 alpha.13 一致。主分支构建 `40803470243` 和镜像 `40803470338` 已触发，记录时尚在运行，不能视为通过。本次文档整理不改变 alpha.13 发布产物，勿自动重复发版。
 
 ## 历史交接记录
 
@@ -229,3 +229,5 @@ User continued after nextalpha proposal, explicitlyauthorizes packaging/publicat
 - 当时主工作区集成验收：类型检查、构建、44 项前端测试、99 项 Rust 测试/1 项跳过、17 组 API、工作空间与变量页面浏览器测试通过。
 - 临时数据库容器及卷已在当时删除。旧记录中“等待 T8 保留语义”的待办已被后续用户决策及发布状态取代，不再作为当前待办。
 - 两个旧分支的全部提交现均已包含在 main；没有需额外合并的源代码。旧工作区新增的 T9 超管决策已由 ADR.md 的 T9 条目完整覆盖。
+
+- 清理完成：删除前两个分支均通过 main 祖先检查；有用记录已提交归档（37a1926）。删除的是旧工作区及约 5 GB 构建缓存，node_modules 仅解除软链接，主项目依赖保留。没有删除未合并代码，未改动任何发布标签。
