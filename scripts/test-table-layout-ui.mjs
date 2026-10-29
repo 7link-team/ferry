@@ -16,7 +16,7 @@ const backend = `http://127.0.0.1:${port}`;
 const log = await open(join(work, 'server.log'), 'w');
 const env = { ...process.env, FERRY_DATA_DIR: work, FERRY_BIND: `127.0.0.1:${port}` };
 delete env.FERRY_DATABASE_URL;
-const server = spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'), [], { env, stdio: ['ignore', log.fd, log.fd] });
+const server = spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'), [], { env, stdio: ['ignore', log.fd, log.fd], windowsHide: true });
 let browser, vite;
 try {
   for (let i = 0; ; i++) {
@@ -25,7 +25,11 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  vite = await viteServer({ server: { host: '127.0.0.1', port: 0, proxy: { '/api': backend } } });
+  const frontend = netServer();
+  await new Promise(r => frontend.listen(0, '127.0.0.1', r));
+  const frontendPort = frontend.address().port;
+  await new Promise(r => frontend.close(r));
+  vite = await viteServer({ server: { host: '127.0.0.1', port: frontendPort, strictPort: true, proxy: { '/api': { target: backend, ws: true } } } });
   await vite.listen();
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
