@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -70,8 +70,10 @@ try {
   assert.equal(await p.getByLabel('标识',{exact:false}).inputValue(),'custom-copy');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'custom-copy'}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('custom-copy'));
   await p.getByRole('row').filter({hasText:'UI dictionary'}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('UI dictionary'));
   const get=async path => (await owner.request.get(`${origin}/api${path}`)).json();
   const heartbeat=(await get(root+'/settings')).items.find(r=>r.key==='heartbeat_timeout_seconds');

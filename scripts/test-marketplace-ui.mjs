@@ -25,7 +25,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -87,6 +87,7 @@ try {
     assert.equal(templates.total,1);assert.equal(templates.items[0].name,'Browser app');
     await p.goto(`${origin}/tenant/deploy/marketplace-sources`);
     await p.getByRole('row').filter({has:p.getByRole('cell',{name:'Browser source',exact:true})}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});
     assert(authorizedSyncs>0,'marketplace sync used the selected connection credential');
     assert.deepEqual(errors,[]);

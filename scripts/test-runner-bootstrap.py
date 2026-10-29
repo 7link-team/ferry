@@ -284,18 +284,23 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         assert (state/'runner.json').read_bytes() == identity
         assert api(host_path)['state'] == 'online' and api(update_path)['ready']
         print('PASS consumed installation command returns 401 and preserves the healthy native service', flush=True)
-        # A fresh command authorizes the download, but existing native identity
-        # means reinstall must not consume its newly generated enrolment token.
+        # The explicit bootstrap rebind rotates credentials and restarts the
+        # service, while keeping the same registered host.
         enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
         installer_env['FERRY_TOKEN'] = enrollment['token']
         command(*install_args, env=installer_env, timeout=150)
-        assert service_pid() == first_pid, 'reinstall restarted the service'
-        assert (state/'runner.json').read_bytes() == identity, 'reinstall replaced identity'
-        assert api(host_path)['state'] == 'online'
-        assert token_status(enrollment['id'])['state'] == 'pending'
-        assert token_status(enrollment['id'])['used_at'] == 0
+        wait(lambda: token_status(enrollment['id'])['state'] == 'connected', 'rebind consumes fresh token')
+        wait(lambda: api(host_path)['state'] == 'online' and api(update_path)['ready'], 'rebound service is ready')
+        assert service_pid() > 0 and service_pid() != first_pid, 'rebind must restart service'
+        rebound_identity = (state/'runner.json').read_bytes()
+        assert rebound_identity != identity, 'rebind must rotate the long-term key'
+        assert json.loads(rebound_identity)['host_id'] == host, 'rebind must preserve host ID'
+        assert token_status(enrollment['id'])['used_at'] > 0
         assert metadata_requests == [True, False, True]
-        print('PASS fresh installation command preserves native PID/host identity without consuming its token', flush=True)
+        first_pid, identity = service_pid(), rebound_identity
+        print('PASS fresh installation command rotates credentials, restarts native service and preserves host ID', flush=True)
+        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        installer_env['FERRY_TOKEN'] = enrollment['token']
         artifact['bytes'] = corrupt
         rejected = command(*install_args, env=installer_env, timeout=150, check=False)
         assert rejected.returncode != 0, 'tampered executable was accepted'

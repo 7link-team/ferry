@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const errors = [], requests = [];
@@ -92,10 +92,12 @@ try {
   await p.getByRole('row').filter({hasText:'guest@example.invalid'}).getByRole('cell',{name:'Custom edited',exact:true}).waitFor();
   await p.screenshot({path:'/tmp/workspace-members.png',fullPage:true});
   await p.getByRole('row').filter({hasText:'guest@example.invalid'}).getByRole('button',{name:'移除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认移除',exact:true}).click();
   await p.getByRole('cell',{name:'owner@example.invalid',exact:true}).waitFor();
   await p.waitForFunction(() => !document.body.innerText.includes('guest@example.invalid'));
   await p.goto(`${origin}/tenant/ops/roles`);
   await p.getByRole('row').filter({hasText:'Custom edited'}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(() => !document.body.innerText.includes('Custom edited'));
   await p.goto(`${origin}/tenant/dashboard/overview`);
   await p.getByRole('heading',{name:'近期操作',exact:true}).waitFor();

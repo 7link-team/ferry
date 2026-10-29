@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -68,6 +68,7 @@ try {
   await p.getByRole('textbox',{name:/^名称/}).fill('UI edited');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('row').filter({hasText:'UI edited'}).getByRole('button',{name:'删除',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('UI edited'));
   for (const scope of ['build','deploy']) {
     await p.goto(`${origin}/tenant/${scope}/cron-jobs/new`);

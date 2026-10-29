@@ -74,10 +74,11 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
     else
       fail=$((fail + 1))
       echo "    FAIL $1: want /$2/ got: $(echo "$3" | head -c 200)"
+      printf '::error::%s\n' "$name: $1: expected /$2/; got $(echo "$3" | head -c 200 | tr '\n' ' ')"
     fi
   }
 
-  python3 scripts/test-setup.py "$B" "$dir" || { kill "$pid"; wait "$pid"; return 1; }
+  python3 scripts/test-setup.py "$B" "$dir" || { kill "$pid"; wait "$pid"; total_fail=$((total_fail + 1)); return 1; }
 
   c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"测试员"}' "$B/users" >/dev/null
   ck "duplicate email"  "已注册"        "$(c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"x"}' "$B/users")"
@@ -143,7 +144,9 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
     python3 -I -c "import json,sys;print(json.dumps([h['id'] for h in json.load(sys.stdin)['items']]))")
   ck "bulk delete"      '"deleted":3'   "$(c -X POST -d "{\"ids\":$ids}" "$B/workspaces/ops/hosts/actions/bulk-delete")"
   ck "dashboard counts" '"hosts":10'    "$(c "$B/workspaces/ops/dashboard")"
-  ck "state grouping"   '"unknown":10'  "$(c "$B/workspaces/ops/dashboard")"
+  # SSH probes can mark unreachable hosts offline while this suite is running.
+  # Every host still belongs to exactly one dashboard state; none is online.
+  ck "state grouping" '^10$' "$(c "$B/workspaces/ops/dashboard" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);print(sum(v["states"]["hosts"].values()) if not v["states"]["hosts"].get("online",0) else -1)')"
   ck "activity"         '"resource":"hosts"' "$(c "$B/workspaces/ops/activity?page_size=3")"
   ck "activity sort"    '"page":1'      "$(c "$B/workspaces/ops/activity?sort=-created_at")"
   ck "create tag"       '"id"'          "$(c -X POST -d '{"name":"prod","color":"#4f9cf9"}' "$B/workspaces/ops/tags")"

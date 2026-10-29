@@ -66,6 +66,6 @@ else:
         assert (result.returncode == 0) == success, (label, result.stdout, result.stderr)
         assert marker.exists() == success, (label, 'unverified artifact executed')
         if success:
-            assert marker.read_text().splitlines() == ['service', 'install', '--server', server, '--name', 'installer-test']
+            assert marker.read_text().splitlines() == ['service', 'install', '--server', server, '--name', 'installer-test', '--rebind']
             assert Path(str(marker)+'.token').read_text() == env['FERRY_TOKEN']
         print('PASS', label)

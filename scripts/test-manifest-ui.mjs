@@ -25,7 +25,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -92,7 +92,8 @@ try {
   await editor.getByRole('button',{name:'表单编辑',exact:true}).click();
   assert.equal(await source.inputValue(),'services: [');
   await source.fill(beforeInvalid);
-  await service(1).getByRole('button',{name:'删除服务',exact:true}).click();
+  await service(1).getByRole('button',{name:'删除服务 web',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除服务',exact:true}).click();
   await editor.getByRole('button',{name:'源码编辑',exact:true}).click();
   // Restore the explicitly deleted service, then import advanced fields.
   manifest.metadata.labels = { release:'01' };
@@ -153,6 +154,7 @@ try {
       await service(1).getByLabel('流水线 ID',{exact:true}).fill(pipeline.id);
       await service(1).getByLabel('产物相对路径',{exact:true}).fill('bin/server');
       await service(1).getByRole('button',{name:'删除端口 1',exact:true}).click();
+  await p.getByRole('dialog').getByRole('button',{name:'确认删除端口',exact:true}).click();
     }
     if(mode==='stack') {
       await editor.getByText('应用高级配置：更新策略、标签与模式覆盖',{exact:true}).click();
