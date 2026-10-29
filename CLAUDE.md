@@ -115,9 +115,9 @@ Non-trivial work needs a design first: what changes and why, what is reused, wha
 
 **Conversation is ephemeral; state must be persisted.** Anything whose loss would cause incorrect continuation belongs in project state: current phase, completed and remaining work, important decisions, confirmed constraints, scope boundaries, known issues and blockers, verification results, next action, Subagent results, integration status.
 
-Use `.claude/task-state.md` for long or multi-stage tasks (skip trivial ones) and `.claude/decisions.md` for decision records. Don't create other state files.
+Use root-level `MEMORY.md` for long or multi-stage tasks (skip trivial ones) and `ADR.md` for decision records. Don't create other state files.
 
-**`task-state.md` is a compact record, not a transcript** — no reasoning history, no command-by-command narrative, small enough to be useful for recovery. Format (adapt to an established project format if one exists, but keep the semantics):
+**`MEMORY.md` is a compact record, not a transcript** — no reasoning history, no command-by-command narrative, small enough to be useful for recovery. Format (adapt to an established project format if one exists, but keep the semantics):
 
 ```markdown
 # Task State
@@ -144,13 +144,13 @@ Use `.claude/task-state.md` for long or multi-stage tasks (skip trivial ones) an
 
 **Context safety.** Don't hoard command output, repeated source, test logs, failed approaches or Subagent transcripts — keep compact summaries. Don't guess remaining tokens; once substantial work has accumulated, persist state. The goal is not to avoid compression but to make it safe.
 
-**State authority.** Reconstruct state in this order: (1) source and filesystem → (2) Git state and diff → (3) actually executed test/build results → (4) durable task state → (5) conversation history. If `task-state.md` claims something the code doesn't contain, reconcile before continuing. A stale state file never overrides observable repository reality.
+**State authority.** Reconstruct state in this order: (1) source and filesystem → (2) Git state and diff → (3) actually executed test/build results → (4) durable task state → (5) conversation history. If `MEMORY.md` claims something the code doesn't contain, reconcile before continuing. A stale state file never overrides observable repository reality.
 
 ## 8. Recovery After Context Loss
 
 Enter **Recovery Mode** when context was compressed, earlier history is unavailable, the task seems inconsistent with memory, a long task resumes after interruption, or you are unsure what is already implemented:
 
-Stop speculative changes → read this file, `task-state.md` and `decisions.md` → inspect Git status and diff, the source files, the tests and the actual verification results → compare durable state against repository reality → resolve discrepancies → reconstruct the phase and remaining work → identify the exact next safe action → update state if needed → only then resume.
+Stop speculative changes → read this file, `MEMORY.md` and `ADR.md` → inspect Git status and diff, the source files, the tests and the actual verification results → compare durable state against repository reality → resolve discrepancies → reconstruct the phase and remaining work → identify the exact next safe action → update state if needed → only then resume.
 
 Recovery is never "read state → continue." If state and repository disagree, investigate; don't trust either blindly. Never continue on a vague memory of the previous conversation.
 

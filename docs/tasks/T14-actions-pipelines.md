@@ -10,7 +10,7 @@ Goal: use GitHub Actions YAML with an executable React Flow editor, right-hand j
 - UI extends ResourceForm DSL with an Actions editor; use existing shared list/forms for classification resources. Retain existing theme, permission checks, optimistic concurrency, activity audit and cross-workspace checks.
 
 ## Execution / testing
-Execute directly on feat/actions-pipelines, reuse current build cache because local disk space is constrained. Local durable state remains .claude/task-state.md, never staged. No new ledger files. Finish with independent read-only code review.
+Execute directly on feat/actions-pipelines, reuse current build cache because local disk space is constrained. Durable state is maintained in root-level MEMORY.md; long-term decisions are recorded in ADR.md. No new ledger files. Finish with independent read-only code review.
 
 ### 1. Engine feasibility
 - [x] Compare pinned original act and Gitea fork using same actual workflows: dependency/outputs, matrix, composite/JavaScript/container actions, logs, timeout and cancellation.
