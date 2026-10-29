@@ -192,6 +192,8 @@ try {
   }
   console.log('PASS: tray registration, blank-address login, launcher hide/restore, single instance, automatic upgrade resume, persistent identity and service cleanup');
 } catch (error) {
+  const detail = String(error.stack || error).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+  console.error(`::error::Desktop smoke failure: ${detail}`);
   console.error('Desktop smoke failure:', error);
   console.error('Native windows:', nativeWindows());
   console.error('Webviews:', browser?.contexts().flatMap(context => context.pages().map(page => page.url())));

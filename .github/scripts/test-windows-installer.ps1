@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+try {
 $installer = (Get-ChildItem release-assets -Filter '*-setup.exe' | Select-Object -First 1).FullName
 if (-not $installer) { throw 'NSIS installer missing' }
 $config = Get-Content desktop/tauri.conf.json -Raw | ConvertFrom-Json
@@ -78,4 +79,9 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
         if (Test-Path "$($scope.Hive):\$registryPath") { throw 'Uninstall registration was not removed' }
         Write-Output "PASS: $($scope.Mode) install, update and uninstall"
     }
+}
+} catch {
+    $detail = $_.Exception.Message.Replace('%', '%25').Replace([char]13, '%0D').Replace([char]10, '%0A')
+    Write-Output "::error::$detail"
+    throw
 }
