@@ -13,6 +13,7 @@ try {
  await page.getByRole('button',{name:'添加串行任务',exact:true}).click();
  assert.match(await page.evaluate(()=>window.canvasDraft.definition),/needs:\n\s+- build/);
  await page.getByRole('button',{name:'添加并行任务',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===2,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),2);
  await page.getByRole('button',{name:'添加拉取代码步骤',exact:true}).click();
  await page.getByText('Repository selector').click();
@@ -21,6 +22,7 @@ try {
  assert.equal((await page.evaluate(()=>window.canvasDraft.checkout_bindings)).length,0);
  await page.getByRole('button',{name:'新任务',exact:true}).last().click();
  await page.getByRole('checkbox',{name:'构建',exact:true}).uncheck();
+ await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===1,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),1);
  await page.getByRole('button',{name:'构建',exact:true}).first().click();
  const beforeCycle=await page.evaluate(()=>window.canvasDraft.definition);
@@ -29,6 +31,7 @@ try {
  assert.equal(await page.evaluate(()=>window.canvasDraft.definition),beforeCycle);
  await page.reload();
  await page.getByRole('button',{name:'构建',exact:true}).first().click();
+ await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===1,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),1);
  assert.equal(await page.evaluate(()=>window.canvasDraft.definition),beforeCycle);
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:900});await page.waitForTimeout(350);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`overflow at ${width}`);const canvas=await page.getByLabel('流水线画布',{exact:true}).boundingBox();assert(canvas.width>200);for(const node of await page.locator('.react-flow__node').all()){const box=await node.boundingBox();assert(box.x>=canvas.x-1 && box.x+box.width<=canvas.x+canvas.width+1,`node clipped at ${width}: ${JSON.stringify({box,canvas})}`);}}

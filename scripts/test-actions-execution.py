@@ -145,7 +145,7 @@ def accept(context):
 
     for label, display_names in [('same', ['Build', 'Build']), ('normalized', ['编译', '测试'])]:
         docker_jobs = {job: {'name': display_names[index], 'runs-on': 'container', 'steps': [
-            {'run': f"test '${{{{ github.job }}}}' = {job}; echo CONTAINER_READY_{job}; sleep 12; echo CONTAINER_FINISHED_{job}"},
+            {'shell': 'sh', 'run': f"test '${{{{ github.job }}}}' = {job}; echo CONTAINER_READY_{job}; sleep 12; echo CONTAINER_FINISHED_{job}"},
         ]} for index, job in enumerate(['left', 'right'])}
         docker_pipeline = create('pipelines', {
             'name': 'Container identity ' + label, 'definition_format': 'github-actions',
