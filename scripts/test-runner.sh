@@ -290,6 +290,9 @@ UP_CODE=$(c -X PUT --data-binary "@$WORK/source.bin" -H "Content-Type: applicati
 ck "upload accepted" "^204$" "$UP_CODE"
 ck "the file on the host matches" "^$SUM_IN$" \
   "$(shasum -a 256 "$BIG" 2>/dev/null | awk '{print $1}')"
+chmod 750 "$BIG"
+ck "overwrite accepted" "^204$" "$(c -X PUT --data-binary "@$WORK/source.bin" -H "Content-Type: application/octet-stream" "$B/workspaces/ops/hosts/$HOST_A/files/content?path=$BIG" -o /dev/null -w '%{http_code}')"
+ck "overwrite preserves file mode" "^750$" "$(python3 -I -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$BIG")"
 
 DOWN_CODE=$(c "$B/workspaces/ops/hosts/$HOST_A/files/content?path=$BIG" \
   -o "$WORK/back.bin" -w '%{http_code}')

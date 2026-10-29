@@ -457,6 +457,10 @@ async fn main() -> anyhow::Result<()> {
             get(hosts::list_groups).post(hosts::create_group),
         )
         .route(
+            "/{workspace}/host-groups/actions/reorder",
+            post(hosts::reorder_groups),
+        )
+        .route(
             "/{workspace}/host-groups/{id}",
             get(hosts::get_group)
                 .patch(hosts::update_group)

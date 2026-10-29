@@ -13,6 +13,7 @@ import { duration, stateBadge, type PipelineRun } from "./pipeline";
 import { deploymentState, type Deployment, type Revision } from "./deployment";
 import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
+import { FolderOpen, SquareTerminal } from "lucide-react";
 import { createResource, deleteResource, listResource, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option, RowAction } from "./components/dsl";
 
@@ -408,6 +409,8 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       ],
       actions: [
         { label: "查看", permission: "hosts.read", to: (row: Host) => ({ id: row.id, mode: "view" }) },
+        { label: "打开终端", icon: <SquareTerminal className="size-4" />, newTab: true, permission: "hosts.terminal", to: (row: Host) => ({ id: row.id, mode: "workspace" }), query: () => ({ tool: "terminal" }) },
+        { label: "打开文件", icon: <FolderOpen className="size-4" />, newTab: true, permission: "hosts.files", to: (row: Host) => ({ id: row.id, mode: "workspace" }), query: () => ({ tool: "files" }) },
         { label: "接入 Agent", permission: "hosts.enroll", when: (row: Host) => row.connection === "runner", to: (row: Host) => ({ id: row.id, mode: "view" }), query: () => ({ tab: "connect" }) },
         {
           label: "测试连接",

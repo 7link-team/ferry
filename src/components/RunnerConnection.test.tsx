@@ -26,7 +26,9 @@ it("quotes tokens and prevents insecure redirects or Windows temporary script ex
   expect(ps).toContain("-ErrorAction Stop");
   expect(ps).toContain("-Server ''https://example.com''");
   expect(ps).toContain("$previousModulePath = $env:PSModulePath");
-  expect(ps).toContain("$env:PSModulePath = $null; & powershell.exe");
+  expect(ps).toContain("$env:PSModulePath = $null");
+  expect(ps).toContain("-Verb RunAs");
+  expect(ps).toContain("PipeSecurity");
   expect(ps).toContain("$env:PSModulePath = $previousModulePath");
 });
 let root: Root, host: HTMLDivElement;
@@ -128,6 +130,27 @@ function powershell.exe {
   & $global:nativePowerShell @args
   $global:LASTEXITCODE = $LASTEXITCODE
 }
+function Start-Process {
+  param($FilePath, $Verb, $ArgumentList, [switch]$PassThru)
+  if ($Verb -ne 'RunAs' -or -not $PassThru) { throw 'Elevation was not requested' }
+  $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($ArgumentList[-1]))
+  if ($decoded.Contains('fixture-token')) { throw 'Token leaked to elevated argv' }
+  $pipeName = [regex]::Match($decoded, 'ferry-runner-[0-9a-f]{32}').Value
+  if (-not $pipeName) { throw 'Elevated command did not receive a pipe name' }
+  $worker = @'
+$pipe = [IO.Pipes.NamedPipeClientStream]::new('.', '__PIPE__', [IO.Pipes.PipeDirection]::In)
+try {
+  $pipe.Connect(10000)
+  $reader = [IO.StreamReader]::new($pipe)
+  if ($reader.ReadLine() -ne 'fixture-token') { exit 2 }
+  if ($env:RUNNER_COMMAND_TEST_CASE -ne 'success') { exit 1 }
+} finally { $pipe.Dispose() }
+'@.Replace('__PIPE__', $pipeName)
+  $global:childCalls++
+  $workerEncoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($worker))
+  return Microsoft.PowerShell.Management\\Start-Process -FilePath $global:nativePowerShell -ArgumentList @('-NoProfile', '-EncodedCommand', $workerEncoded) -PassThru -WindowStyle Hidden
+}
+$isAdministrator = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 foreach ($original in @('fixture-original', $null)) {
   foreach ($case in @('success', 'installer-failure', 'download-failure')) {
     $env:FERRY_TOKEN = $original
@@ -137,12 +160,12 @@ foreach ($original in @('fixture-original', $null)) {
     $env:RUNNER_COMMAND_TEST_CASE = $case
     $global:childCalls = 0
     $failed = $false
-    try { ${command} } catch { $failed = $true }
+    try { ${command} } catch { $failed = $true; if ($case -eq 'success') { throw } }
     if ($env:FERRY_TOKEN -ne $original) { throw 'Token was not restored' }
     if ($env:PSModulePath -ne $original) { throw 'Module path was not restored' }
     $env:PSModulePath = $savedModulePath
     if ($failed -ne ($case -ne 'success')) { throw "Unexpected result: $case" }
-    $expectedCalls = $(if ($case -eq 'download-failure') { 0 } else { 1 })
+    $expectedCalls = $(if ($isAdministrator -and $case -eq 'download-failure') { 0 } else { 1 })
     if ($global:childCalls -ne $expectedCalls) { throw 'Child invocation count mismatch' }
   }
 }
@@ -150,7 +173,6 @@ Write-Output 'environment restored'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("environment restored");
-  expect(output.match(/child executed/g)).toHaveLength(2);
 });
 
 it("requires HTTPS for remote installation but permits exact loopback HTTP origins", () => {

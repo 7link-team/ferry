@@ -63,7 +63,7 @@ try {
   assert.match(await command.inputValue(), /-MaximumRedirection 0/);
   assert.match(await command.inputValue(), /-EncodedCommand/);
   assert.doesNotMatch(await command.inputValue(), /-OutFile/);
-  await page.getByText('支持 x64；请以管理员身份打开 PowerShell。', { exact: true }).waitFor();
+  await page.getByText('支持 x64；在 PowerShell 中执行命令后确认管理员授权。', { exact: true }).waitFor();
   await page.getByRole('tab', { name: 'macOS', exact: true }).click();
   assert.match(await command.inputValue(), /install.sh/);
   const address = page.getByLabel('2. 目标主机可访问的服务地址');

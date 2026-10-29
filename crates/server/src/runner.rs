@@ -388,6 +388,14 @@ fn reported_name(hostname: &str) -> String {
     }
 }
 
+fn reported_address(address: &str) -> Option<String> {
+    address
+        .parse::<std::net::IpAddr>()
+        .ok()
+        .filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        .map(|ip| ip.to_string())
+}
+
 /// Exchanges a token for the host row it owns and the long-lived key it keeps.
 async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String, String)> {
     let (token_id, workspace_id, bound_host) = consume_token(&s.db, token).await?;
@@ -400,7 +408,7 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
             id: Set(id.into()),
             workspace_id: Set(workspace_id.into()),
             name: Set(reported_name(&hello.hostname)),
-            address: Set(String::new()),
+            address: Set(reported_address(&hello.ip_address).unwrap_or_default()),
             port: Set(0),
             username: Set(String::new()),
             connection: Set("runner".into()),
@@ -423,7 +431,7 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
         .await?;
         id
     } else {
-        let affected = hosts::Entity::update_many()
+        let mut update = hosts::Entity::update_many()
             .col_expr(hosts::Column::RunnerKeyHash, Expr::value(fingerprint(&key)))
             .col_expr(hosts::Column::Os, Expr::value(hello.os.clone()))
             .col_expr(hosts::Column::Arch, Expr::value(hello.arch.clone()))
@@ -437,7 +445,11 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
             .col_expr(
                 hosts::Column::Version,
                 sea_orm::ExprTrait::add(Expr::col(hosts::Column::Version), 1_i64),
-            )
+            );
+        if let Some(address) = reported_address(&hello.ip_address) {
+            update = update.col_expr(hosts::Column::Address, Expr::value(address));
+        }
+        let affected = update
             .filter(hosts::Column::WorkspaceId.eq(workspace_id))
             .filter(hosts::Column::Id.eq(bound_host))
             .filter(hosts::Column::Connection.eq("runner"))
@@ -551,7 +563,7 @@ async fn control(s: AppState, mut socket: WebSocket) {
     live().insert(host_id.clone(), registration.clone());
     // Enrolment already wrote the facts; a reconnect refreshes them.
     if matches!(hello.auth, wire::Auth::Key { .. }) {
-        let _ = hosts::Entity::update_many()
+        let mut update = hosts::Entity::update_many()
             .col_expr(hosts::Column::State, Expr::value("online"))
             .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
             .col_expr(hosts::Column::Os, Expr::value(hello.os.clone()))
@@ -559,7 +571,11 @@ async fn control(s: AppState, mut socket: WebSocket) {
             .col_expr(
                 hosts::Column::AgentVersion,
                 Expr::value(hello.agent_version.clone()),
-            )
+            );
+        if let Some(address) = reported_address(&hello.ip_address) {
+            update = update.col_expr(hosts::Column::Address, Expr::value(address));
+        }
+        let _ = update
             .filter(hosts::Column::Id.eq(row_id))
             .exec(&s.db)
             .await;
@@ -1627,6 +1643,17 @@ mod tests {
         assert_eq!(reported_name("  web-01 "), "web-01");
         assert_eq!(reported_name(""), "未命名主机");
         assert_eq!(reported_name(&"x".repeat(200)).chars().count(), 60);
+    }
+
+    #[test]
+    fn runner_address_accepts_only_usable_ips() {
+        assert_eq!(
+            reported_address("192.168.0.130"),
+            Some("192.168.0.130".into())
+        );
+        for address in ["", "localhost", "127.0.0.1", "0.0.0.0"] {
+            assert_eq!(reported_address(address), None);
+        }
     }
 }
 

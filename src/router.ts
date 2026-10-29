@@ -19,7 +19,7 @@ export interface Route {
   group: string;
   item: string;
   id?: string;
-  mode: "list" | "new" | "view" | "edit";
+  mode: "list" | "new" | "view" | "edit" | "workspace";
 }
 
 export function parse(pathname = location.pathname): Route {
@@ -40,12 +40,12 @@ export function parse(pathname = location.pathname): Route {
   const detail = pipelineGroups ? fourth : third;
   const action = pipelineGroups ? fifth : fourth;
   const mode = legacyRepository ? "list" :
-    detail === "new" ? "new" : detail ? (action === "edit" ? "edit" : "view") : "list";
+    detail === "new" ? "new" : detail ? (group === "host" && item === "hosts" && action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
   return {
     workspace,
     group: resolved.key,
     item: resolvedItem,
-    ...(mode === "view" || mode === "edit" ? { id: detail } : {}),
+    ...(mode === "view" || mode === "edit" || mode === "workspace" ? { id: detail } : {}),
     mode,
   };
 }
@@ -54,7 +54,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   const current = parse();
   const r = { ...current, ...route };
   const tail =
-    r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : "";
+    r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : r.mode === "workspace" ? `/${r.id}/workspace` : "";
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const search = params.toString();

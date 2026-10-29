@@ -43,6 +43,8 @@ pub struct Hello {
     pub version: u32,
     pub auth: Auth,
     pub hostname: String,
+    #[serde(default)]
+    pub ip_address: String,
     pub os: String,
     pub arch: String,
     pub agent_version: String,
@@ -237,6 +239,7 @@ mod tests {
                 token: "7f3a".into(),
             },
             hostname: "web-01".into(),
+            ip_address: "192.168.0.10".into(),
             os: "linux".into(),
             arch: "x86_64".into(),
             agent_version: "0.1.0".into(),
@@ -246,6 +249,13 @@ mod tests {
         assert!(text.contains(r#""type":"enroll""#), "{text}");
         let back: Hello = serde_json::from_str(&text).unwrap();
         assert!(matches!(back.auth, Auth::Enroll { token } if token == "7f3a"));
+        assert_eq!(back.ip_address, "192.168.0.10");
+        let mut legacy: serde_json::Value = serde_json::from_str(&text).unwrap();
+        legacy.as_object_mut().unwrap().remove("ip_address");
+        assert_eq!(
+            serde_json::from_value::<Hello>(legacy).unwrap().ip_address,
+            ""
+        );
 
         for frame in [
             Control::Welcome {

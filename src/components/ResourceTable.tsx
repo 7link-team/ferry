@@ -18,7 +18,7 @@
  *   - The footer sits outside the scroll container. As a sticky child it
  *     jitters inside iOS Safari's rubber-band scroll.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ResourceActionDialog } from "./ResourceForm";
 import type { RowAction } from "./dsl";
 import {
@@ -429,6 +429,8 @@ export function ResourceTable<T>({
                               <RowActionButton
                                 key={action.label}
                                 label={action.label}
+                                icon={action.icon}
+                                newTab={action.newTab}
                                 disabled={busy || action.disabled?.(row)}
                                 disabledReason={action.disabledReason?.(row)}
                                 destructive={action.destructive}
@@ -580,6 +582,8 @@ export function ResourceTable<T>({
 
 function RowActionButton({
   label,
+  icon,
+  newTab,
   destructive,
   to,
   onNavigate,
@@ -588,6 +592,8 @@ function RowActionButton({
   disabledReason,
 }: {
   label: string;
+  icon?: ReactNode;
+  newTab?: boolean | undefined;
   disabled?: boolean | undefined;
   disabledReason?: string | undefined;
   destructive?: boolean | undefined;
@@ -601,17 +607,22 @@ function RowActionButton({
     return (
       <a
         href={to}
+        {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        aria-label={icon ? label : undefined}
+        title={icon ? label : undefined}
         className={cn(
           "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
+          icon && "inline-flex size-7 items-center justify-center align-middle",
           destructive ? "text-destructive" : "text-primary",
         )}
         onClick={(event) => {
+          if (newTab) return;
           if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
           event.preventDefault();
           onNavigate?.();
         }}
       >
-        {label}
+        {icon ?? label}
       </a>
     );
   return (
@@ -619,13 +630,14 @@ function RowActionButton({
       type="button"
       className={cn(
         "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
+        icon && "inline-flex size-7 items-center justify-center align-middle",
         destructive ? "text-destructive" : "text-primary",
       )}
       disabled={disabled}
       title={disabled ? disabledReason : undefined}
       onClick={() => void onRun?.()}
     >
-      {label}
+      {icon ?? label}
     </button>
   );
 }

@@ -30,7 +30,59 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
   const sh = (s: string) => `'${s.replaceAll("'", "'\"'\"'")}'`;
   const ps = (s: string) => `'${s.replaceAll("'", "''")}'`;
   if (platform === "windows") {
-    return `& { $previousToken = $env:FERRY_TOKEN; $previousModulePath = $env:PSModulePath; try { $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop; $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)}`)}; $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload)); $env:FERRY_TOKEN = ${ps(token)}; $env:PSModulePath = $null; & powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded; if ($LASTEXITCODE -ne 0) { throw '安装失败，请查看上方错误。' } } finally { $env:FERRY_TOKEN = $previousToken; $env:PSModulePath = $previousModulePath } }`;
+    return `& {
+  $ErrorActionPreference = 'Stop'
+  $previousToken = $env:FERRY_TOKEN
+  $previousModulePath = $env:PSModulePath
+  try {
+    $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+    if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+      $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
+      $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)}`)}
+      $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
+      $env:FERRY_TOKEN = ${ps(token)}
+      $env:PSModulePath = $null
+      & powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded
+      if ($LASTEXITCODE -ne 0) { throw '安装失败，请查看上方错误。' }
+    } else {
+      $pipeName = 'ferry-runner-' + [Guid]::NewGuid().ToString('N')
+      $security = [IO.Pipes.PipeSecurity]::new()
+      $security.AddAccessRule([IO.Pipes.PipeAccessRule]::new($principal.Identity.User, 'ReadWrite', 'Allow'))
+      $security.AddAccessRule([IO.Pipes.PipeAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'), 'ReadWrite', 'Allow'))
+      $pipe = [IO.Pipes.NamedPipeServerStream]::new($pipeName, 'Out', 1, 'Byte', 'Asynchronous', 0, 0, $security)
+      try {
+        $payload = @'
+$ErrorActionPreference = 'Stop'
+$pipe = [IO.Pipes.NamedPipeClientStream]::new('.', '__PIPE__', [IO.Pipes.PipeDirection]::In)
+try {
+  $pipe.Connect(120000)
+  $reader = [IO.StreamReader]::new($pipe)
+  $env:FERRY_TOKEN = $reader.ReadLine()
+  $env:PSModulePath = $null
+  $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri '__SERVER__/api/runners/install.ps1' -MaximumRedirection 0 -ErrorAction Stop
+  & ([ScriptBlock]::Create($bootstrap.Content)) -Server '__SERVER__'
+} catch {
+  [Console]::Error.WriteLine($_.ToString())
+  Read-Host 'Installation failed. Press Enter to close this window'
+  exit 1
+} finally { $env:FERRY_TOKEN = $null; $pipe.Dispose() }
+'@.Replace('__PIPE__', $pipeName).Replace('__SERVER__', ${ps(origin)})
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
+        $process = Start-Process powershell.exe -Verb RunAs -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -PassThru
+        try {
+          $wait = $pipe.WaitForConnectionAsync()
+          if (-not $wait.Wait(120000)) { throw '等待管理员窗口连接超时。' }
+          $wait.GetAwaiter().GetResult()
+          $writer = [IO.StreamWriter]::new($pipe)
+          $writer.AutoFlush = $true
+          $writer.WriteLine(${ps(token)})
+          $process.WaitForExit()
+          if ($process.ExitCode -ne 0) { throw '安装失败，请查看管理员窗口中的错误。' }
+        } finally { $process.Dispose() }
+      } finally { $pipe.Dispose() }
+    }
+  } finally { $env:FERRY_TOKEN = $previousToken; $env:PSModulePath = $previousModulePath }
+}`;
   }
   return `(umask 077; dir=$(mktemp -d) || exit 1; trap 'rm -rf "$dir"' EXIT; export FERRY_TOKEN=${sh(token)}; curl -fsSL --proto-redir '=https' ${sh(`${origin}/api/runners/install.sh`)} -o "$dir/install.sh" && sh "$dir/install.sh" --server ${sh(origin)})`;
 }
@@ -118,7 +170,7 @@ function ConnectionFlow({ workspace, hostId, onConnected, autoGenerate }: Props)
         <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}>
           <TabsList aria-label="主机操作系统" className="w-full"><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList>
         </Tabs>
-        <p className="text-xs text-muted-foreground">{platform === "windows" ? "支持 x64；请以管理员身份打开 PowerShell。" : "自动识别 x64 / ARM64；安装系统服务时可能需要输入 sudo 密码。"}</p>
+        <p className="text-xs text-muted-foreground">{platform === "windows" ? "支持 x64；在 PowerShell 中执行命令后确认管理员授权。" : "自动识别 x64 / ARM64；安装系统服务时可能需要输入 sudo 密码。"}</p>
       </div>
       <div className="space-y-2">
         <label className="font-medium" htmlFor={serverId}>2. 目标主机可访问的服务地址</label>

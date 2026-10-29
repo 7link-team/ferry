@@ -38,6 +38,8 @@ export interface Column<T> {
 
 export interface RowAction<T> {
   label: string;
+  icon?: ReactNode;
+  newTab?: boolean;
   permission?: string;
   /** Navigating action: becomes a real link. */
   to?: (row: T) => Partial<Route>;

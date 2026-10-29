@@ -314,6 +314,11 @@ async fn hold(
             version: wire::VERSION,
             auth,
             hostname,
+            ip_address: local_ip_address::local_ip()
+                .ok()
+                .filter(|address| !address.is_loopback() && !address.is_unspecified())
+                .map(|address| address.to_string())
+                .unwrap_or_default(),
             os,
             arch,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),

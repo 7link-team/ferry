@@ -258,10 +258,17 @@ pub async fn upload(
         body.into_data_stream()
             .map_err(|error| ApiError(StatusCode::BAD_REQUEST, format!("上传中断：{error}"))),
     );
-    open(&s, &scope.workspace_id, &id)
-        .await?
-        .write_file(path, 0o644, stream)
-        .await?;
+    let channel = open(&s, &scope.workspace_id, &id).await?;
+    let (parent, name) = path.rsplit_once('/').unwrap_or(("/", path));
+    let parent = if parent.is_empty() { "/" } else { parent };
+    let mode = channel
+        .list_dir(parent)
+        .await
+        .ok()
+        .and_then(|entries| entries.into_iter().find(|entry| entry.name == name))
+        .map(|entry| entry.mode & 0o777)
+        .unwrap_or(0o644);
+    channel.write_file(path, mode, stream).await?;
     crate::hosts::activity(
         &s,
         &scope,

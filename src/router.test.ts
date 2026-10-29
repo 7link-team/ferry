@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { href, parse } from "./router";
 
+it("round trips the standalone host workspace route", () => {
+  const path = "/ops/host/hosts/123/workspace";
+  expect(parse(path)).toMatchObject({ workspace: "ops", group: "host", item: "hosts", id: "123", mode: "workspace" });
+  expect(href(parse(path), {})).toBe(path);
+});
+
 describe("platform route boundary", () => {
   it("keeps the previously valid platform workspace in the tenant router", () => {
     expect(parse("/platform/assets/hosts").workspace).toBe("platform");

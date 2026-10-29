@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import { FolderTree, Loader2, LogOut, Moon, Palette, Pencil, Plus, Sun, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, FolderOpen, FolderTree, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2 } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { api, errorText, type Identity } from "./api";
 import { DeploymentDetail } from "./components/DeploymentDetail";
 import { PipelineRunDetail } from "./components/PipelineRunDetail";
 import { RunnerConnection } from "./components/RunnerConnection";
-import { HostFiles } from "./components/HostFiles";
+import { HostWorkspace } from "./components/HostWorkspace";
 import { ResourceForm } from "./components/ResourceForm";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResourceTable } from "./components/ResourceTable";
@@ -27,10 +27,6 @@ import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useQueryValue, useRoute } from "./router";
 import { createResource, deleteResource, listResource, patchResource } from "./resource";
 import { PALETTES, useTheme } from "./theme";
-
-const HostTerminal = lazy(() =>
-  import("./components/HostTerminal").then((module) => ({ default: module.HostTerminal })),
-);
 
 export function App() {
   const route = useRoute();
@@ -97,6 +93,10 @@ export function App() {
     return <Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} />;
+  if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
+    const current = identity.workspaces.find(workspace => workspace.slug === route.workspace);
+    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={route.workspace} hostId={route.id} permissions={new Set(current.permissions)} />;
+  }
   return <Workspace identity={identity} onSignedOut={reload} />;
 }
 
@@ -430,7 +430,7 @@ function HostList({ config, workspace, permissions }: {
   </div>;
 }
 
-type GroupNode = { id: string; name: string; description: string; parent_id?: string; version: number };
+type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number };
 function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect }: {
   workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups"; noun: string; active: string; onSelect: (id: string) => void;
 }) {
@@ -457,9 +457,30 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
     return () => { live = false; };
   }, [workspace, resource, revision]);
   const open = (group?: GroupNode, parentId = "") => { setEditing({ ...(group ? { group } : {}), parentId }); setName(group?.name ?? ""); setDescription(group?.description ?? ""); setError(""); };
+  const siblings = (parentId: string) => groups.filter(group => (group.parent_id || "0") === (parentId || "0"))
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, "zh-CN") || a.id.localeCompare(b.id));
+  const moveGroup = async (group: GroupNode, direction: -1 | 1) => {
+    const rows = siblings(group.parent_id ?? "");
+    const index = rows.findIndex(row => row.id === group.id);
+    const next = index + direction;
+    if (next < 0 || next >= rows.length || busy) return;
+    [rows[index], rows[next]] = [rows[next]!, rows[index]!];
+    setBusy(true); setError("");
+    try {
+      await api(`/workspaces/${encodeURIComponent(workspace)}/host-groups/actions/reorder`, {
+        method: "POST", body: JSON.stringify({ parent_id: group.parent_id ?? "", ids: rows.map(row => row.id) }),
+      });
+      setRevision(value => value + 1);
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setBusy(false); }
+  };
   const renderGroup = (group: GroupNode, depth: number): React.ReactNode => <div key={group.id}>
     <div className={cn("group flex min-w-0 items-center rounded", active === group.id ? "bg-accent" : "hover:bg-accent")} style={{ paddingLeft: depth * 12 }}>
       <button type="button" aria-current={active === group.id ? "page" : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}>{group.name}</button>
+      {resource === "host-groups" && permissions.has("host-groups.update") && <>
+        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`上移分组 ${group.name}`} title="上移" disabled={busy || siblings(group.parent_id ?? "")[0]?.id === group.id} onClick={() => void moveGroup(group, -1)}><ArrowUp className="size-3.5" /></Button>
+        <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`下移分组 ${group.name}`} title="下移" disabled={busy || siblings(group.parent_id ?? "").at(-1)?.id === group.id} onClick={() => void moveGroup(group, 1)}><ArrowDown className="size-3.5" /></Button>
+      </>}
       {resource === "host-groups" && canCreate && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`在${group.name}下新建分组`} title="新建子分组" onClick={() => open(undefined, group.id)}><Plus className="size-3.5" /></Button>}
       {permissions.has(`${resource}.update`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`编辑分组 ${group.name}`} title="编辑分组" onClick={() => open(group, group.parent_id ?? "")}><Pencil className="size-3.5" /></Button>}
       {permissions.has(`${resource}.delete`) && <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={`删除分组 ${group.name}`} title="删除分组" onClick={async () => {
@@ -468,7 +489,7 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
         catch (cause) { setError(errorText(cause)); }
       }}><Trash2 className="size-3.5" /></Button>}
     </div>
-    {resource === "host-groups" && groups.filter(child => child.parent_id === group.id).map(child => renderGroup(child, depth + 1))}
+    {resource === "host-groups" && siblings(group.id).map(child => renderGroup(child, depth + 1))}
   </div>;
   return <aside aria-label={`${noun}分组`} className="flex w-full shrink-0 flex-col gap-1 border-b pb-3 sm:w-56 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:pr-3">
     <div className="mb-1 flex items-center gap-1 px-2 text-sm font-medium"><FolderTree className="size-4" />分组<span className="flex-1" />
@@ -476,7 +497,7 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
     </div>
     <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("")}>全部{noun}</button>
     <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-accent font-medium" : "hover:bg-accent")} onClick={() => onSelect("0")}>未分组</button>
-    {groups.filter(group => resource !== "host-groups" || !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)).map(group => renderGroup(group, 0))}
+    {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, "zh-CN")) : groups).map(group => renderGroup(group, 0))}
     {error && !editing && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
     <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">
       <Dialog.Title className="text-lg font-semibold">{editing?.group ? "编辑分组" : "新建分组"}</Dialog.Title>
@@ -516,6 +537,9 @@ function HostDetail({
   // `?tab=` rather than component state: a shared link should reopen on the
   // terminal if that is what the sender was looking at.
   const [tab, setTab] = useQueryValue("tab", "info");
+  useEffect(() => {
+    if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
+  }, [tab, workspace, hostId]);
   const canEnroll = permissions.has("hosts.enroll");
   const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string }>();
   const [connectionError, setConnectionError] = useState("");
@@ -533,13 +557,16 @@ function HostDetail({
   const panes = [
     { value: "info", label: "信息", enabled: true },
     { value: "connect", label: "接入 Agent", enabled: canConnect },
-    { value: "terminal", label: "终端", enabled: permissions.has("hosts.terminal") },
-    { value: "files", label: "文件", enabled: permissions.has("hosts.files") },
   ].filter((pane) => pane.enabled);
   const active = panes.some((pane) => pane.value === tab) ? tab : "info";
 
   return (
-    <Tabs value={active} onValueChange={setTab} className="grid min-h-0 grid-rows-[auto_1fr] gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-2 rounded border px-3 text-sm hover:bg-accent"><SquareTerminal className="size-4" />终端</a>}
+      {permissions.has("hosts.files") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "files" })} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-2 rounded border px-3 text-sm hover:bg-accent"><FolderOpen className="size-4" />文件</a>}
+    </div>
+    <Tabs value={active} onValueChange={setTab} className="grid min-h-0 flex-1 grid-rows-[auto_1fr] gap-3">
       <TabsList>
         {panes.map((pane) => (
           <TabsTrigger key={pane.value} value={pane.value}>
@@ -556,18 +583,8 @@ function HostDetail({
       <TabsContent value="connect" className="min-h-0 overflow-auto">
         {active === "connect" && canConnect && <div className="max-w-2xl p-1"><RunnerConnection workspace={workspace} hostId={hostId} inline /></div>}
       </TabsContent>
-      {/* Mounted only while selected: an unseen tab must not hold a pty open. */}
-      <TabsContent value="terminal" className="min-h-0">
-        {active === "terminal" && (
-          <Suspense fallback={<div role="status">正在加载终端…</div>}>
-            <HostTerminal workspace={workspace} hostId={hostId} />
-          </Suspense>
-        )}
-      </TabsContent>
-      <TabsContent value="files" className="min-h-0">
-        {active === "files" && <HostFiles workspace={workspace} hostId={hostId} canTerminal={permissions.has("hosts.terminal")} />}
-      </TabsContent>
     </Tabs>
+    </div>
   );
 }
 

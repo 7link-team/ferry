@@ -18,7 +18,7 @@ use axum::{
     http::StatusCode,
 };
 use sea_orm::{
-    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, Set,
+    ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
     sea_query::{Expr, ExprTrait},
 };
 use serde::Deserialize;
@@ -30,8 +30,8 @@ use std::collections::{HashMap, HashSet};
 const GROUP_SPEC: Spec = Spec {
     search: &["name", "description"],
     filters: &["parent_id"],
-    sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    sortable: &["name", "position", "created_at", "updated_at"],
+    default_sort: "position",
 };
 
 fn group_json(row: &host_groups::Model) -> Value {
@@ -40,6 +40,7 @@ fn group_json(row: &host_groups::Model) -> Value {
         "name": row.name,
         "description": row.description,
         "parent_id": Id::from(row.parent_id),
+        "position": row.position,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "version": row.version,
@@ -122,12 +123,22 @@ pub(crate) async fn create_group_in(
     let name = check_name(&body.name)?;
     let (id, now) = (s.next_id()?, db::now());
     validate_parent(tx, scope, id, &body.parent_id).await?;
+    let parent_id = Id::reference(&body.parent_id)?;
+    let position = host_groups::Entity::find()
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::ParentId.eq(parent_id))
+        .order_by_desc(host_groups::Column::Position)
+        .one(tx)
+        .await?
+        .map(|group| group.position + 1)
+        .unwrap_or(0);
     host_groups::Entity::insert(host_groups::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
         name: Set(name.clone()),
         description: Set(body.description.trim().to_owned()),
-        parent_id: Set(i64::from(Id::reference(&body.parent_id)?)),
+        parent_id: Set(i64::from(parent_id)),
+        position: Set(position),
         created_at: Set(now),
         updated_at: Set(now),
         version: Set(1),
@@ -200,6 +211,61 @@ pub async fn update_group(
         "host-groups",
         &id,
         json!({"name": name}),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+pub struct ReorderGroupsBody {
+    parent_id: String,
+    ids: Vec<String>,
+}
+
+pub async fn reorder_groups(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<ReorderGroupsBody>,
+) -> Result<Json<Value>> {
+    scope.require("host-groups.update")?;
+    let parent_id = Id::reference(&body.parent_id)?;
+    let ids = body
+        .ids
+        .iter()
+        .map(|id| Id::reference(id))
+        .collect::<Result<Vec<_>>>()?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let siblings = host_groups::Entity::find()
+        .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(host_groups::Column::ParentId.eq(parent_id))
+        .all(&tx)
+        .await?;
+    let expected: HashSet<i64> = siblings.iter().map(|group| group.id).collect();
+    let actual: HashSet<i64> = ids.iter().map(|id| i64::from(*id)).collect();
+    if actual != expected || ids.len() != siblings.len() {
+        return Err(ApiError::bad("分组顺序已变化，请刷新后重试。"));
+    }
+    for (position, id) in ids.iter().enumerate() {
+        host_groups::Entity::update_many()
+            .col_expr(host_groups::Column::Position, Expr::value(position as i64))
+            .col_expr(
+                host_groups::Column::Version,
+                Expr::col(host_groups::Column::Version).add(1),
+            )
+            .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(host_groups::Column::Id.eq(*id))
+            .exec(&tx)
+            .await?;
+    }
+    activity_in(
+        &s,
+        &tx,
+        &scope,
+        "reorder",
+        "host-groups",
+        &parent_id,
+        json!({"ids": body.ids}),
     )
     .await?;
     tx.commit().await?;
@@ -494,9 +560,13 @@ pub async fn update_host(
     // `connection` is deliberately absent: changing how an enrolled host is
     // reached would invalidate its key or its stored credential silently.
     let tx = membership_transaction(&s, &scope, &body.group_id).await?;
-    let affected = hosts::Entity::update_many()
+    let existing = hosts::Entity::find_by_id(i64::from(id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let mut update = hosts::Entity::update_many()
         .col_expr(hosts::Column::Name, Expr::value(name.clone()))
-        .col_expr(hosts::Column::Address, Expr::value(body.address.trim()))
         .col_expr(hosts::Column::Port, Expr::value(body.port))
         .col_expr(hosts::Column::Username, Expr::value(body.username.trim()))
         .col_expr(
@@ -515,7 +585,11 @@ pub async fn update_host(
         .col_expr(
             hosts::Column::Version,
             Expr::col(hosts::Column::Version).add(1),
-        )
+        );
+    if existing.connection == "ssh" {
+        update = update.col_expr(hosts::Column::Address, Expr::value(body.address.trim()));
+    }
+    let affected = update
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::Id.eq(id))
         .filter(hosts::Column::Version.eq(body.version))

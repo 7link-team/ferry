@@ -90,7 +90,40 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineClassification),
             Box::new(RunnerUpdateState),
             Box::new(NamedCodeConnections),
+            Box::new(HostGroupOrder),
         ]
+    }
+}
+
+struct HostGroupOrder;
+impl MigrationName for HostGroupOrder {
+    fn name(&self) -> &str {
+        "host_group_order_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for HostGroupOrder {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "host_groups",
+                "position",
+                Table::alter()
+                    .table(Alias::new("host_groups"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("position"))
+                            .big_integer()
+                            .not_null()
+                            .default(0_i64),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
     }
 }
 

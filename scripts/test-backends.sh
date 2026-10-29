@@ -98,15 +98,20 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
     echo "    FAIL session cookie looks guessable: '${cookie_value}' (len ${#cookie_value})"
   fi
 
-  local group
+  local group group2
   group=$(c -X POST -d '{"name":"生产组"}' "$B/workspaces/ops/host-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   [ -n "$group" ] || { echo "    FAIL could not create a host group"; fail=$((fail + 1)); }
+  group2=$(c -X POST -d '{"name":"备用组"}' "$B/workspaces/ops/host-groups" |
+    python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
+  ck "group order rejects missing sibling" "顺序已变化" "$(c -X POST -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\"]}" "$B/workspaces/ops/host-groups/actions/reorder")"
+  ck "group order saves" '"ok":true' "$(c -X POST -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\",\"$group\"]}" "$B/workspaces/ops/host-groups/actions/reorder")"
+  ck "group order reads back" "^$group2,$group$" "$(c "$B/workspaces/ops/host-groups" | python3 -I -c "import json,sys;print(','.join(row['id'] for row in json.load(sys.stdin)['items']))")"
   for i in $(seq 1 12); do
     c -X POST -d "{\"name\":\"web-$(printf %02d "$i")\",\"connection\":\"ssh\",\"address\":\"10.0.0.$i\",\"port\":22,\"username\":\"root\",\"group_id\":\"$group\"}" \
       "$B/workspaces/ops/hosts" >/dev/null
   done
-  c -X POST -d '{"name":"agent-01","connection":"runner"}' "$B/workspaces/ops/hosts" >/dev/null
+  c -X POST -d '{"name":"agent-01","connection":"runner","address":"192.168.0.130"}' "$B/workspaces/ops/hosts" >/dev/null
 
   ck "total"            '"total":13'    "$(c "$B/workspaces/ops/hosts?page_size=5")"
   ck "page size"        '"page_size":5' "$(c "$B/workspaces/ops/hosts?page_size=5")"
@@ -131,6 +136,7 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   # The second update carries the same version, so it must be refused.
   ck "stale update"     "已被他人修改"   "$(c -X PATCH -d '{"name":"again","version":1}' "$B/workspaces/ops/hosts/$host")"
   ck "read back"        'agent-renamed' "$(c "$B/workspaces/ops/hosts/$host")"
+  ck "runner address survives metadata edit" '"address":"192.168.0.130"' "$(c "$B/workspaces/ops/hosts/$host")"
 
   local ids
   ids=$(c "$B/workspaces/ops/hosts?q=web-1&page_size=50" |

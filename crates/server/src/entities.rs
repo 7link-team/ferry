@@ -149,6 +149,7 @@ pub mod host_groups {
         pub name: String,
         pub description: String,
         pub parent_id: i64,
+        pub position: i64,
         pub created_at: i64,
         pub updated_at: i64,
         pub version: i64,
