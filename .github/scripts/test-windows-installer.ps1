@@ -81,7 +81,7 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
     }
 }
 } catch {
-    $detail = $_.Exception.Message.Replace('%', '%25').Replace([char]13, '%0D').Replace([char]10, '%0A')
+    $detail = $_.Exception.Message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
     Write-Output "::error::$detail"
     throw
 }
