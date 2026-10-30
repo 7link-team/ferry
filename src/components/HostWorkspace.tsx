@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react";
 import { ArrowLeft, Columns2, FolderOpen, Plus, Rows2, SquareTerminal, X } from "lucide-react";
 import { api, errorText } from "../api";
 import { href } from "../router";
@@ -119,10 +119,10 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
       </div>)}
       <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="新建标签" title="新建标签" onClick={() => addTab(canTerminal ? "terminal" : "files")}><Plus className="size-4" /></Button>
     </div>
-    {tabs.map(tab => <div key={tab.id} role="tabpanel" className={activeTab === tab.id ? "relative min-h-0 min-w-0 flex-1 overflow-hidden" : "hidden"}>
+    {tabs.map(tab => <div key={tab.id} role="tabpanel" className={activeTab === tab.id ? "relative min-h-0 min-w-0 flex-1 overflow-hidden max-[480px]:flex max-[480px]:flex-col max-[480px]:overflow-y-auto" : "hidden"}>
       {/* Flat keyed siblings preserve live terminal sessions when the split tree changes. */}
-      {arrange(tab.root).map(({ node, rect }) => <div key={node.id} className="absolute flex min-h-0 min-w-0 overflow-hidden border-r border-b"
-        style={{ left: `${rect.left}%`, top: `${rect.top}%`, width: `${rect.width}%`, height: `${rect.height}%` }}>
+      {arrange(tab.root).map(({ node, rect }) => <div key={node.id} className="absolute left-[var(--pane-left)] top-[var(--pane-top)] flex h-[var(--pane-height)] w-[var(--pane-width)] min-h-0 min-w-0 overflow-hidden border-r border-b max-[480px]:relative max-[480px]:top-0 max-[480px]:left-0 max-[480px]:h-[420px] max-[480px]:w-full max-[480px]:shrink-0"
+        style={{ "--pane-left": `${rect.left}%`, "--pane-top": `${rect.top}%`, "--pane-width": `${rect.width}%`, "--pane-height": `${rect.height}%` } as CSSProperties}>
         {renderPane(node, tab, "children" in tab.root)}
       </div>)}
     </div>)}

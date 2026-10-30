@@ -118,6 +118,34 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 });
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'ferry-host-groups.png'), fullPage: true });
   await page.setViewportSize({ width: 1920, height: 900 });
+  // Hold one host's probe open while another row and navigation stay usable.
+  let finishProbe;
+  let secondProbe = false;
+  await page.route('**/api/workspaces/ops/hosts**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/workspaces/ops/hosts') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+      items: ['h1', 'h2'].map((id, index) => ({ id, name: `build-0${index + 1}`, connection: 'runner', state: 'online', tags: [], tag_ids: [], group_id: 'g1', seen_at: Date.now(), version: 1 })), total: 2, page: 1, page_size: 20,
+    }) });
+    if (path.endsWith('/h1/actions/test-connection')) {
+      await new Promise(done => { finishProbe = done; });
+      return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' });
+    }
+    if (path.endsWith('/h2/actions/test-connection')) { secondProbe = true; return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' }); }
+    return route.fallback();
+  });
+  await page.reload();
+  const firstRow = page.getByRole('row').filter({ hasText: 'build-01' });
+  const secondRow = page.getByRole('row').filter({ hasText: 'build-02' });
+  await firstRow.getByRole('button', { name: '测试连接' }).click();
+  assert.equal(await firstRow.getByRole('button', { name: '测试连接' }).isDisabled(), true);
+  assert.equal(await secondRow.getByRole('button', { name: '测试连接' }).isEnabled(), true);
+  assert.equal(await firstRow.getByRole('link', { name: '查看', exact: true }).isEnabled(), true);
+  await secondRow.getByRole('button', { name: '测试连接' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('button[aria-label="测试连接"][aria-busy="true"]').length === 1);
+  assert.equal(secondProbe, true);
+  const completed = page.waitForResponse(response => response.url().endsWith('/h1/actions/test-connection'));
+  finishProbe(); await completed;
+  console.log('PASS pending node probe leaves other nodes and navigation interactive');
   await page.goto(`${origin}/ops/host/nodes/h1/edit`);
   const form = page.locator('main form');
   await form.waitFor();

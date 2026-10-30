@@ -159,6 +159,8 @@ export function ResourceTable<T>({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [refresh, setRefresh] = useState(() => readRefresh(config.resource, config.defaultRefresh));
   const [busy, setBusy] = useState(false);
+  const runningActions = useRef(new Set<string>());
+  const [busyActions, setBusyActions] = useState<Set<string>>(new Set());
   const [pendingAction,setPendingAction]=useState<{action:RowAction<T>;row:T}>();
   const [pendingDelete, setPendingDelete] = useState<{ action: string; target: string; run: () => Promise<void> }>();
   const reloadToken = useRef(0);
@@ -479,9 +481,10 @@ export function ResourceTable<T>({
                               <RowActionButton
                                 key={action.label}
                                 label={action.label}
-                                icon={action.icon ?? actionIcon(action.label)}
+                                icon={busyActions.has(JSON.stringify([config.resource, key, action.label])) ? <Loader2 className="size-4 animate-spin" /> : action.icon ?? actionIcon(action.label)}
                                 newTab={action.newTab}
-                                disabled={busy || action.disabled?.(row)}
+                                disabled={busy || busyActions.has(JSON.stringify([config.resource, key, action.label])) || action.disabled?.(row)}
+                                loading={busyActions.has(JSON.stringify([config.resource, key, action.label]))}
                                 disabledReason={action.disabledReason?.(row)}
                                 destructive={action.destructive}
                                 {...(action.to
@@ -502,14 +505,18 @@ export function ResourceTable<T>({
                                           return;
                                         }
                                         if(action.parameters?.(row).length){setPendingAction({action,row});return;}
-                                        setBusy(true);
+                                        const actionKey = JSON.stringify([config.resource, key, action.label]);
+                                        if (runningActions.current.has(actionKey)) return;
+                                        runningActions.current.add(actionKey);
+                                        setBusyActions(new Set(runningActions.current));
                                         try {
                                           await action.action!(row);
                                           reload();
                                         } catch (cause) {
-                                          setError(errorText(cause));
+                                          setError(`${rowName(row, key)}：${errorText(cause)}`);
                                         } finally {
-                                          setBusy(false);
+                                          runningActions.current.delete(actionKey);
+                                          setBusyActions(new Set(runningActions.current));
                                         }
                                       },
                                     }
@@ -649,12 +656,14 @@ function RowActionButton({
   onRun,
   disabled,
   disabledReason,
+  loading,
 }: {
   label: string;
   icon?: ReactNode;
   newTab?: boolean | undefined;
   disabled?: boolean | undefined;
   disabledReason?: string | undefined;
+  loading?: boolean | undefined;
   destructive?: boolean | undefined;
   to?: string | undefined;
   onNavigate?: (() => void) | undefined;
@@ -693,6 +702,7 @@ function RowActionButton({
         destructive ? "text-destructive" : "text-primary",
       )}
       disabled={disabled}
+      aria-busy={loading || undefined}
       aria-label={label}
       title={disabled && disabledReason ? `${label}：${disabledReason}` : label}
       onClick={() => void onRun?.()}
