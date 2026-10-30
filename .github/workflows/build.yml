@@ -297,6 +297,7 @@ jobs:
           node scripts/test-named-connection-ui.mjs
           node scripts/test-runner-connection-ui.mjs
           node scripts/test-host-workspace-ui.mjs
+          node scripts/test-host-workspace.mjs
           node scripts/test-table-layout-ui.mjs
       - name: Pipeline environments and classification acceptance
         if: matrix.harness == 'pipelines'

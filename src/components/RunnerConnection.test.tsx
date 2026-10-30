@@ -4,6 +4,37 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HostConnectionCommand, RunnerConnection, runnerInstallCommand, runnerServerOrigin } from "./RunnerConnection";
 
+it.skipIf(process.platform !== "win32")("rejects legacy Runner help before native installation with an actionable error", () => {
+  const harness = `
+$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) 'scripts/runner-install.ps1'), [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+$assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$installHelp' }, $true)
+$guard = $assignment.Parent.Statements | Where-Object { $_.Extent.StartOffset -gt $assignment.Extent.EndOffset } | Select-Object -First 1
+if (-not $guard) { throw 'Runner compatibility check missing' }
+$check = [ScriptBlock]::Create($assignment.Extent.Text + [Environment]::NewLine + $guard.Extent.Text)
+function FixtureRunner {
+  if (($args -join ' ') -ne 'service install --help') { throw 'Test must never install a service' }
+  $global:LASTEXITCODE = 0
+  $global:fixtureHelp
+}
+$binary = 'FixtureRunner'; $lines = @('fixture-version')
+$global:fixtureHelp = 'Usage: service install --server <SERVER> --name <NAME>'
+$rejected = $false
+try { & $check } catch {
+  if ($_.Exception.Message -notlike '*Update the Ferry server*Nothing installed.*') { throw }
+  $rejected = $true
+}
+if (-not $rejected) { throw 'Legacy Runner must be rejected' }
+$global:fixtureHelp = '      --rebind'
+& $check
+Write-Output 'PASS legacy rejection and compatible CLI'
+`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
+  expect(output).toContain("PASS legacy rejection and compatible CLI");
+});
+
 it("accepts only HTTP(S) origins, without credentials, paths or query", () => {
   expect(runnerServerOrigin(" https://runner.example:8443/ ")).toBe("https://runner.example:8443");
   for (const value of ["file:///tmp", "https://user:pass@example.com", "https://example.com/api", "https://example.com/foo/..", "https://example.com/?x=1", "https://example.com/#x", "https://example.com\\evil"]) expect(() => runnerServerOrigin(value)).toThrow();

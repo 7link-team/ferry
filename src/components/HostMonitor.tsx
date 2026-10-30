@@ -3,7 +3,7 @@ import { Activity, HardDrive, MemoryStick, Network, RotateCw } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { api, errorText } from "../api";
 
-interface Monitor {
+export interface Monitor {
   cpu_percent: number;
   load1: number;
   memory_used: number;
@@ -12,7 +12,7 @@ interface Monitor {
   networks: { name: string; received: number; transmitted: number }[];
 }
 
-function isMonitor(value: unknown): value is Monitor {
+export function isMonitor(value: unknown): value is Monitor {
   if (!value || typeof value !== "object") return false;
   const row = value as Partial<Monitor>;
   return typeof row.cpu_percent === "number" && Number.isFinite(row.cpu_percent)

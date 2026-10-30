@@ -138,8 +138,20 @@ async fn state_workspace(s: &AppState, host_id: &Id) -> Option<Id> {
 /// lifetime of the session: dropping it would close the remote connection.
 async fn pump(socket: WebSocket, mut pty: Box<dyn channel::Pty>, _channel: Box<dyn HostChannel>) {
     let (mut sink, mut stream) = socket.split();
+    // Protocol-level heartbeats never reach the PTY or the user's shell.
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
+    let mut last_pong = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            _ = heartbeat.tick() => {
+                if last_pong.elapsed() > Duration::from_secs(70) {
+                    let _ = sink.send(Message::Text(json!({"type":"error","error":"终端连接心跳超时，请重新连接。"}).to_string().into())).await;
+                    break;
+                }
+                if sink.send(Message::Ping(bytes::Bytes::new())).await.is_err() {
+                    break;
+                }
+            },
             // Terminal output.
             output = pty.read() => match output {
                 Ok(Some(bytes)) => {
@@ -177,6 +189,7 @@ async fn pump(socket: WebSocket, mut pty: Box<dyn channel::Pty>, _channel: Box<d
                     }
                 }
                 Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Pong(_))) => { last_pong = tokio::time::Instant::now(); },
                 Some(Ok(_)) => {}
                 Some(Err(_)) => break,
             },

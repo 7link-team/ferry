@@ -52,15 +52,21 @@ async fn download(client: &reqwest::Client, url: &str, limit: usize) -> Result<V
         .get(url)
         .send()
         .await
-        .map_err(|_| ApiError::bad("无法下载 Runner 发布清单，请检查服务器外网连接。"))?
+        .map_err(|_| {
+            ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "无法下载 Runner 发布清单，请检查服务器外网连接。".into(),
+            )
+        })?
         .error_for_status()
         .map_err(|_| ApiError::bad("当前版本的 Runner 发布包尚不可用，请等待发布完成。"))?;
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| ApiError::bad("Runner 发布清单下载中断。"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|_| {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Runner 发布清单下载中断。".into(),
+        )
+    })? {
         if bytes.len() + chunk.len() > limit {
             return Err(ApiError::bad("Runner 发布清单超过大小限制。"));
         }

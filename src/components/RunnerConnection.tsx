@@ -38,6 +38,7 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
   try {
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+      Write-Host 'Fetching Runner installation script...'
       $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
       $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)}`)}
       $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
@@ -56,10 +57,12 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
 $ErrorActionPreference = 'Stop'
 $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', '__PIPE__', [IO.Pipes.PipeDirection]::In)
 try {
+  Write-Host 'Waiting for installation credentials...'
   $pipe.Connect(120000)
   $reader = [IO.StreamReader]::new($pipe)
   $env:FERRY_TOKEN = $reader.ReadLine()
   $env:PSModulePath = $null
+  Write-Host 'Fetching Runner installation script...'
   $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri '__SERVER__/api/runners/install.ps1' -MaximumRedirection 0 -ErrorAction Stop
   & ([ScriptBlock]::Create($bootstrap.Content)) -Server '__SERVER__'
 } catch {

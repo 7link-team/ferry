@@ -299,6 +299,24 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         assert metadata_requests == [True, False, True]
         first_pid, identity = service_pid(), rebound_identity
         print('PASS fresh installation command rotates credentials, restarts native service and preserves host ID', flush=True)
+        # Moving the advertised server address must work with explicit fresh
+        # enrolment, without disclosing the previous address's connection key.
+        moved_origin = origin.replace('127.0.0.1', 'localhost')
+        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        installer_env['FERRY_TOKEN'] = enrollment['token']
+        moved_args = [str(arg).replace(origin, moved_origin) for arg in install_args]
+        command(*moved_args, env=installer_env, timeout=150)
+        wait(lambda: token_status(enrollment['id'])['state'] == 'connected', 'new-address service enrols')
+        wait(lambda: api(host_path)['state'] == 'online' and api(update_path)['ready'], 'new-address service ready')
+        moved_identity = (state/'runner.json').read_bytes()
+        assert service_pid() != first_pid and service_pid() > 0
+        assert json.loads(moved_identity)['host_id'] == host
+        assert moved_identity != identity
+        assert json.loads((state/'service.json').read_text())['server'] == moved_origin
+        assert metadata_requests == [True, False, True, True]
+        first_pid, identity = service_pid(), moved_identity
+        install_args = moved_args
+        print('PASS explicit server-address migration stops old service, rotates its key and preserves target host', flush=True)
         enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
         installer_env['FERRY_TOKEN'] = enrollment['token']
         artifact['bytes'] = corrupt
@@ -308,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         assert service_pid() == first_pid
         assert (state/'runner.json').read_bytes() == identity
         assert api(host_path)['state'] == 'online' and api(update_path)['ready']
-        assert metadata_requests == [True, False, True, True]
+        assert metadata_requests == [True, False, True, True, True]
         assert token_status(enrollment['id'])['state'] == 'pending'
         print('PASS tampered download rejected before execution; original native service remains healthy', flush=True)
     except Exception:

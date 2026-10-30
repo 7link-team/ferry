@@ -12,6 +12,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useTheme } from "../theme";
+import { TerminalMetrics } from "./HostTelemetry";
 
 type Status = "connecting" | "open" | "closed" | "error";
 
@@ -122,8 +123,8 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
   }, [resolved]);
 
   return (
-    <div className="flex h-full min-h-[320px] flex-col gap-2">
-      <div className="flex items-center gap-2 text-sm">
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden">
+      <div className="flex shrink-0 items-center gap-3 overflow-x-auto whitespace-nowrap text-sm" title={error || undefined}>
         <span
           className={
             status === "open"
@@ -138,6 +139,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
           {status === "closed" && "会话已结束"}
           {status === "error" && (error || "连接失败")}
         </span>
+        {status === "open" && <TerminalMetrics />}
       </div>
       <div
         ref={mount}

@@ -98,23 +98,32 @@ impl Settings {
         }
     }
 
+    fn validate_rebind(&self, old: &Self) -> anyhow::Result<()> {
+        self.validate()?;
+        anyhow::ensure!(
+            old.state_dir == self.state_dir
+                && old.service_name == self.service_name
+                && old.user_service == self.user_service,
+            "已有服务使用其他状态目录、服务名称或服务范围，不能重新绑定"
+        );
+        anyhow::ensure!(self.token.is_some(), "重新绑定需要新令牌");
+        Ok(())
+    }
+
     fn rebind(&self, path: &Path) -> anyhow::Result<bool> {
         self.validate()?;
         if !regular_file(path)? {
             return Ok(false);
         }
         let old = Self::load(path)?;
-        anyhow::ensure!(
-            old.server.trim_end_matches('/') == self.server.trim_end_matches('/')
-                && old.state_dir == self.state_dir
-                && old.service_name == self.service_name
-                && old.user_service == self.user_service,
-            "已有服务连接到其他地址或状态目录；为保护主机身份，不能重新绑定"
-        );
-        anyhow::ensure!(self.token.is_some(), "重新绑定需要新令牌");
-        if old.token == self.token {
+        self.validate_rebind(&old)?;
+        if old.token == self.token
+            && old.server.trim_end_matches('/') == self.server.trim_end_matches('/')
+        {
             return Ok(false);
         }
+        // Explicit --rebind carries a fresh enrolment token. Never send the old
+        // server's key to the new server; enrol into the host selected by that token.
         match std::fs::remove_file(crate::Enrolment::path(&self.state_dir)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -406,7 +415,11 @@ impl Identity {
         let mut rebound = false;
         if rebind && regular_file(&config)? {
             let old = Settings::load(&config)?;
-            if old.token != settings.token {
+            settings.validate_rebind(&old)?;
+            if old.token != settings.token
+                || old.server.trim_end_matches('/') != settings.server.trim_end_matches('/')
+            {
+                println!("正在停止旧 Runner 服务，等待进程退出…");
                 self.control("stop")?;
                 rebound = settings.rebind(&config)?;
             }
@@ -438,6 +451,7 @@ impl Identity {
             }
         }
         self.register(&binary, &config)?;
+        println!("正在启动 Runner 服务…");
         self.control("start")
     }
 }
@@ -689,6 +703,60 @@ mod tests {
         assert_eq!(Settings::load(&path).unwrap().token.as_deref(), Some("new"));
         assert!(!dir.join("runner.json").exists());
         assert!(!replacement.rebind(&path).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn explicit_rebind_allows_server_move_without_reusing_old_identity() {
+        let dir = scratch();
+        let original = Settings {
+            server: "http://127.0.0.1:5173".into(),
+            token: Some("old".into()),
+            state_dir: dir.clone(),
+            service_name: "fixture-agent".into(),
+            user_service: true,
+        };
+        let path = dir.join("service.json");
+        original.store(&path).unwrap();
+        std::fs::write(
+            dir.join("runner.json"),
+            br#"{"host_id":"123","key":"old-key"}"#,
+        )
+        .unwrap();
+        let replacement = Settings {
+            server: "http://127.0.0.1:4291".into(),
+            token: Some("fresh-host-token".into()),
+            ..original.clone()
+        };
+        // An ordinary reinstall remains unable to redirect an existing identity.
+        assert!(replacement.store(&path).is_err());
+        assert!(replacement.rebind(&path).unwrap());
+        let saved = Settings::load(&path).unwrap();
+        assert_eq!(saved.server, replacement.server);
+        assert_eq!(saved.token, replacement.token);
+        assert!(!dir.join("runner.json").exists());
+        assert!(!replacement.rebind(&path).unwrap());
+        for invalid in [
+            Settings {
+                state_dir: dir.join("other"),
+                ..replacement.clone()
+            },
+            Settings {
+                service_name: "other".into(),
+                ..replacement.clone()
+            },
+            Settings {
+                user_service: false,
+                ..replacement.clone()
+            },
+            Settings {
+                token: None,
+                ..replacement.clone()
+            },
+        ] {
+            assert!(invalid.rebind(&path).is_err());
+            assert_eq!(Settings::load(&path).unwrap().server, replacement.server);
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

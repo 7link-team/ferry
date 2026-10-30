@@ -4,6 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+Write-Host "Preparing Runner installation from $Server..."
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -57,39 +58,88 @@ try {
     $client = [Net.Http.HttpClient]::new($handler)
     $client.Timeout = [TimeSpan]::FromSeconds(300)
     function Save-Download([Uri]$Url, [string]$Path, [long]$Limit, [bool]$Metadata) {
-        $deadline = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($(if ($Metadata) { 60 } else { 300 })))
-        try {
+        $originalUrl = $Url
+        $attempt = 0
+        while ($true) {
+          $attempt++
+          $Url = $originalUrl
+          [long]$offset = if (-not $Metadata -and (Test-Path -LiteralPath $Path)) { (Get-Item -LiteralPath $Path).Length } else { 0 }
+          if (-not $Metadata -and $offset -eq $Limit) { return }
+          if ($offset -gt $Limit) { throw 'Download exceeds size limit.' }
+          $retryable = $false
+          $deadline = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($(if ($Metadata) { 60 } else { 300 })))
+          try {
             for ($redirect = 0; $redirect -le 5; $redirect++) {
                 if (-not $Metadata -and $Url.Scheme -ne 'https') { throw 'Artifact URL and redirects must use HTTPS.' }
                 $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $Url)
                 $response = $null
                 try {
                     if ($Metadata) { $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $env:FERRY_TOKEN) }
+                    if ($offset -gt 0) { $request.Headers.Range = [Net.Http.Headers.RangeHeaderValue]::new($offset, $null) }
+                    $retryable = $true
                     $response = $client.SendAsync($request, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $deadline.Token).GetAwaiter().GetResult()
+                    $retryable = $false
                     if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
                         if ($Metadata -or $redirect -eq 5 -or -not $response.Headers.Location) { throw 'Unexpected download redirect.' }
                         $Url = [Uri]::new($Url, $response.Headers.Location)
                         continue
                     }
-                    $null = $response.EnsureSuccessStatusCode()
-                    if ($response.Content.Headers.ContentLength -gt $Limit) { throw 'Download exceeds size limit.' }
+                    $status = [int]$response.StatusCode
+                    if (-not $response.IsSuccessStatusCode) {
+                        # Expired redirected artifact links are refreshed from the original release URL.
+                        $retryable = $status -in @(408, 429) -or $status -ge 500 -or (-not $Metadata -and $status -in @(401, 403))
+                        throw "Download returned HTTP $status."
+                    }
+                    if ($status -eq 206) {
+                        $range = $response.Content.Headers.ContentRange
+                        if ($Metadata -or -not $range -or $range.Unit -ne 'bytes' -or $range.From -ne $offset -or $range.Length -ne $Limit -or $range.To -ge $Limit) { throw 'Invalid download Content-Range; nothing installed.' }
+                    } elseif ($status -eq 200) {
+                        if ($offset -gt 0) { Write-Host 'Server does not support resume; restarting download.' }
+                        $offset = 0
+                    } else { throw "Unexpected download HTTP $status." }
+                    if ($response.Content.Headers.ContentLength -gt ($Limit - $offset)) { throw 'Download exceeds size limit.' }
+                    $retryable = $true
                     $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-                    $outputStream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                    $retryable = $false
+                    $mode = if ($offset -gt 0) { [IO.FileMode]::Append } else { [IO.FileMode]::Create }
+                    $outputStream = [IO.File]::Open($Path, $mode, [IO.FileAccess]::Write, [IO.FileShare]::None)
                     try {
                         $buffer = [byte[]]::new(65536)
-                        [long]$total = 0
-                        while (($count = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult()) -gt 0) {
+                        [long]$total = $offset
+                        $progress = [Diagnostics.Stopwatch]::StartNew()
+                        while ($true) {
+                            $retryable = $true
+                            $count = $inputStream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult()
+                            $retryable = $false
+                            if ($count -eq 0) { break }
                             $total += $count
                             if ($total -gt $Limit) { throw 'Download exceeds size limit.' }
                             $outputStream.Write($buffer, 0, $count)
+                            if (-not $Metadata -and $progress.Elapsed.TotalSeconds -ge 3) {
+                                Write-Host ('Downloaded {0:N1} / {1:N1} MiB...' -f ($total / 1MB), ($Limit / 1MB))
+                                $progress.Restart()
+                            }
+                        }
+                        if ((-not $Metadata -and $total -ne $Limit) -or ($null -ne $response.Content.Headers.ContentLength -and ($total - $offset) -ne $response.Content.Headers.ContentLength)) {
+                            $retryable = $true
+                            throw 'Download interrupted before all bytes arrived.'
                         }
                     } finally { $outputStream.Dispose(); $inputStream.Dispose() }
                     return
                 } finally { if ($response) { $response.Dispose() }; $request.Dispose() }
             }
-        } finally { $deadline.Dispose() }
+          } catch {
+            if ($_.Exception -is [Management.Automation.PipelineStoppedException]) { throw }
+            if (-not $retryable) { throw }
+            $delay = [Math]::Min(10, $attempt * 2)
+            [long]$saved = if (-not $Metadata -and (Test-Path -LiteralPath $Path)) { (Get-Item -LiteralPath $Path).Length } else { 0 }
+            Write-Host ('Download interrupted. Retry {0} in {1}s; saved {2:N1} MiB. Press Ctrl+C to cancel.' -f $attempt, $delay, ($saved / 1MB))
+            Start-Sleep -Seconds $delay
+          } finally { $deadline.Dispose() }
+        }
     }
     $metadataPath = Join-Path $stage 'metadata'
+    Write-Host 'Fetching verified release metadata...'
     Save-Download ($Server.TrimEnd('/') + '/api/runners/install/x86_64-pc-windows-msvc') $metadataPath 8192 $true
     $metadata = [IO.File]::ReadAllText($metadataPath)
     $lines = $metadata.Split([char]10)
@@ -99,13 +149,20 @@ try {
     $size = [long]$lines[3]
     if ($size -gt 268435456) { throw 'Artifact exceeds size limit.' }
     $binary = Join-Path $stage 'runner.exe'
+    Write-Host ('Downloading Runner {0} ({1:N1} MiB)...' -f $lines[0], ($size / 1MB))
     Save-Download $url $binary $size $false
+    Write-Host 'Verifying downloaded Runner size and SHA256...'
     if ((Get-Item -LiteralPath $binary).Length -ne $size) { throw 'Artifact size mismatch; nothing installed.' }
     if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash.ToLowerInvariant() -cne $lines[2]) { throw 'Artifact SHA256 mismatch; nothing installed.' }
+    $installHelp = & $binary service install --help | Out-String
+    if ($LASTEXITCODE -ne 0 -or $installHelp -notmatch '(?m)^\s+--rebind\b') {
+        throw "Runner $($lines[0]) does not support connection rebinding. Update the Ferry server and copy a new connection command from the updated page. Nothing installed."
+    }
     Write-Host "Installing Runner $($lines[0]) as ${Name}..."
     # The token remains in the inherited environment, never the process argv.
     & $binary service install --server $Server --name $Name --rebind
     if ($LASTEXITCODE -ne 0) { throw "Native service installation failed (exit $LASTEXITCODE)." }
+    Write-Host "Runner service ${Name} installed. Check the host connection status in Ferry."
 } finally {
     if ($client) { $client.Dispose() }
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
