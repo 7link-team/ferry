@@ -1,3 +1,22 @@
+## Release20 source ready — 2026-10-30 17:24 +08
+- FINAL frontend142PASS; final build/typecheckPASS;32combination shared-detail browserPASS; existinghostworkspaceUI(file/splits/group/probeconcurrency)PASS. RelevantRust crates runner/server/protocol allPASS (server142PASS2ignored; runner22PASS1ignored +CLI3; protocol5). RealWindowsPTYhome+idleheartbeat+mixedsplitsPASS.
+- Local cargo test --workspace NOTfullyPASS: preexisting desktop-updater exclusive named-pipe peer test cannot connect under this ordinary user (AccessDenied); no updatercodechanged. Native privilegedWindowsCI must verify service/installer. Added actualnativeWindowsservice terminal prompt/no-serviceprofile assertions to existingnativeacceptance. Not runlocalSYSTEMservice.
+- SelfreviewPASS scope/reuse/minimality; scopedsource ready; publictagnotyetcreated. Next commitandpushrelease tag20 viaSSH; monitorallgatedCI; onlypushmainafterreleasetagpasses toavoidconcurrentduplicatefullruns; thenverifyassets/imageandupgradeordinary4291.
+
+## Detail polish verification checkpoint — 2026-10-30 17:20 +08
+- Shared readonly section cards, responsive auto-fit section columns, field label/value rhythm and full width. Host runner command is a peer section. Skill UI UX Pro Max applied; actual screenshots viewed1920light/1280dark/375dark. Browser32 combinations (4resource types x4widths x2themes)PASS; existinghostworkspaceUI next/pending.
+- Real isolated Windows runner+backend+Chrome PASS: fresh PTY prompt contains USERPROFILE, mixed splits/metrics/RTT and22s idleheartbeat. Raw nativeConPTY fixture now answers cursorpositionrequest (otherwise onlyESC[6n arrived). NoactualSYSTEMservicechanged. Windows unit runner22PASS1ignored+CLI3PASS earlier.
+- Frontend142PASS+buildPASS. Cargo check --workspace logFinishedPASS (wrapper exitwasstale diffcheckresult). Firstfulltestattempt collidedwithexecutingfixtureRunner.exe; nowfixturecompleted, rerunning cargo test --workspace sequentially. No assertionsweakened.
+- Version bumpedalpha20 acrossCargo/npm/desktop andlocks. Release notpushedyet. HTTPSGitcredential unavailable; SSHBatchMode ls-remote works. Use existingtagpushreleaseworkflow (gatedalltests)ratherthanAPI credentials. Neverprinttokens/requestnewtokens.
+
+## Current request — Windows terminal home + shared detail polish + alpha.20
+- User explicitly requests logged-in user home directory instead of systemprofile, all basic information pages polish with UI UX Pro Max, tests and a public release; update local4291 afterward.
+- Installed/read C:/Users/FullStack/.agents/skills/ui-ux-pro-max/SKILL.md; design search initial landing pattern rejected, narrowed enterprise-dashboard style matched. Reuse existing tokens, lucide and shared ResourceForm. Direct execution; no subagents.
+- Implemented Windows default terminal CWD: ordinary USERPROFILE; LocalSystem queries active console/RDP token profile; headless PUBLIC then system drive. Identity remains service account. Native WTS/handles freed. UI shared readonly detail sections and fields, full-width layout; host command alongside at 2xl. Explicit directory behavior unchanged.
+- Current validation: frontend142 PASS, build PASS. Runner test command --lib was inapplicable (binary crate), correct tests next; browser screenshots/release not done yet. Local REST commit2b12f4a not yet pushed, public latest19.
+- Preserve service4291 PID70048 target/debug/ferry-server-rest-oauth.exe + data/dev-backend. Never touch5173/4290/4292 or installedSYSTEMRunner (prior policy rejection, no workaround). Backup original instance/key/data before ordinary backend restart.
+- Next: native/unit/browser tests, visual inspection light/dark/narrow/wide; alpha20 version; push/run full CI; verified publication; local ordinary backend upgrade.
+
 # Project Memory
 
 ## Workspace IDs + canonical REST paths — 2026-10-30 16:35 +08

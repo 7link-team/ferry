@@ -390,6 +390,82 @@ fn pty_size(cols: u16, rows: u16) -> portable_pty::PtySize {
     }
 }
 
+/// A service's profile is not a useful working directory for an operator.
+#[cfg(windows)]
+fn is_service_profile(path: &std::path::Path) -> bool {
+    let path = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    path.trim_end_matches('\\').ends_with("\\systemprofile") || path.contains("\\serviceprofiles\\")
+}
+
+#[cfg(windows)]
+fn terminal_directory() -> std::path::PathBuf {
+    use std::{os::windows::ffi::OsStringExt, ptr};
+    use windows_sys::Win32::{
+        Foundation::CloseHandle, System::RemoteDesktop::*, UI::Shell::GetUserProfileDirectoryW,
+    };
+
+    // Ordinary standalone runners keep their own user's home. LocalSystem can
+    // query the active console/RDP user's profile without changing shell identity.
+    if let Some(home) = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from) {
+        if home.is_dir() && !is_service_profile(&home) {
+            return home;
+        }
+    }
+    unsafe {
+        let mut sessions = ptr::null_mut();
+        let mut count = 0;
+        if WTSEnumerateSessionsW(ptr::null_mut(), 0, 1, &mut sessions, &mut count) != 0 {
+            let console = WTSGetActiveConsoleSessionId();
+            let entries = if count == 0 || sessions.is_null() {
+                &[]
+            } else {
+                std::slice::from_raw_parts(sessions, count as usize)
+            };
+            let mut active: Vec<_> = entries
+                .iter()
+                .filter(|session| session.State == WTSActive)
+                .map(|session| session.SessionId)
+                .collect();
+            WTSFreeMemory(sessions.cast());
+            active.sort_by_key(|id| (*id != console, *id));
+            for session in active {
+                let mut token = ptr::null_mut();
+                if WTSQueryUserToken(session, &mut token) == 0 {
+                    continue;
+                }
+                let mut size = 0;
+                GetUserProfileDirectoryW(token, ptr::null_mut(), &mut size);
+                let mut buffer = vec![0u16; size as usize];
+                let found = size > 0
+                    && GetUserProfileDirectoryW(token, buffer.as_mut_ptr(), &mut size) != 0;
+                CloseHandle(token);
+                if found {
+                    let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+                    let home =
+                        std::path::PathBuf::from(std::ffi::OsString::from_wide(&buffer[..end]));
+                    if home.is_dir() && !is_service_profile(&home) {
+                        return home;
+                    }
+                }
+            }
+        }
+    }
+    // Headless hosts may have no interactive user. Use the public user folder,
+    // then the system drive, rather than a private Windows service directory.
+    std::env::var_os("PUBLIC")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(format!(
+                "{}\\",
+                std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())
+            ))
+        })
+}
+
 async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<()> {
     use std::io::{Read, Write};
     let pty = portable_pty::native_pty_system()
@@ -397,6 +473,8 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
         .context("无法分配伪终端")?;
     let mut command = portable_pty::CommandBuilder::new(login_shell());
     command.env("TERM", "xterm-256color");
+    #[cfg(windows)]
+    command.cwd(terminal_directory());
     let child = pty.slave.spawn_command(command).context("无法启动 shell")?;
     // Dropping the slave is what lets the reader see EOF when the shell exits.
     drop(pty.slave);
@@ -537,6 +615,29 @@ mod tests {
         assert!(tiny.cols >= 2 && tiny.rows >= 1);
         let normal = pty_size(120, 40);
         assert_eq!((normal.cols, normal.rows), (120, 40));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn terminal_starts_in_a_user_directory_not_a_service_profile() {
+        assert!(is_service_profile(std::path::Path::new(
+            r"C:\Windows\System32\config\systemprofile"
+        )));
+        assert!(is_service_profile(std::path::Path::new(
+            r"C:\Windows\ServiceProfiles\LocalService"
+        )));
+        assert!(is_service_profile(std::path::Path::new(
+            "C:/WINDOWS/system32/config/SYSTEMPROFILE/"
+        )));
+        let home = terminal_directory();
+        assert!(home.is_dir());
+        assert!(!is_service_profile(&home));
+        if let Some(expected) = std::env::var_os("USERPROFILE") {
+            let expected = std::path::PathBuf::from(expected);
+            if expected.is_dir() && !is_service_profile(&expected) {
+                assert_eq!(home, expected);
+            }
+        }
     }
 
     #[tokio::test]

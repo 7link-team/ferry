@@ -620,7 +620,7 @@ function HostDetail({
             : <ResourceTable key={`${hostId}/events`} config={{ ...alertEvents, fixed: { target_kind: "host", target_ref: hostId }, filters: (alertEvents.filters ?? []).filter(filter => filter.key !== "rule_id"), actions: alertEvents.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alert-events", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />}
         </div> : <>
         {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">无法确认 Agent 接入方式：{connectionError}</p>}
-        <div className={cn("mx-auto grid w-full max-w-6xl gap-8", canConnect && "xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]")}>
+        <div className={cn("grid w-full min-w-0 items-start gap-6", canConnect && "2xl:grid-cols-[minmax(0,1.5fr)_minmax(22rem,1fr)]")}>
           {form && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />}
           {canConnect && <HostConnectionCommand workspace={workspace} hostId={hostId} compact />}
         </div>

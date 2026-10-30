@@ -213,3 +213,7 @@ Decision: user approved independent updater, ordinary helper for CurrentUser and
 - Compatibility：旧页面书签在登录后通过身份中的可访问工作空间映射为 ID，保留详情和查询；API 拒绝 slug，不增加旧 API 别名。Runner 机器连接协议与安装分发端点维持兼容。
 - Supersedes：旧的 slug/菜单分组页面路径和 `/actions/{verb}` 接口约定；不涉及数据库迁移。
 - Status：用户已批准，当前实现以 MEMORY.md 验证记录为准。
+
+## Windows terminal start and resource detail layout — 2026-10-30
+- User requests a user directory as the default Windows terminal CWD. Prefer own user profile, then active console/RDP user profile when running as LocalSystem; no logged-in user falls back to PUBLIC/system drive. Do not change service identity or permissions.
+- All schema-driven detail pages reuse ResourceForm with dedicated read-only section/field styling and available width. Existing editors, secrets, permissions, actions and routes retain their behavior.

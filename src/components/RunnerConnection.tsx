@@ -251,7 +251,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
     } catch (cause) { setError(errorText(cause)); throw cause; }
     finally { setBusy(false); }
   };
-  return <section className={compact ? "min-w-0 space-y-3 border-t pt-4 text-sm xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0" : "mt-5 space-y-3 border-t pt-5 text-sm"} aria-label="当前连接命令">
+  return <section className={compact ? "min-w-0 space-y-4 rounded-xl border bg-card p-5 text-sm" : "mt-5 space-y-3 border-t pt-5 text-sm"} aria-label="当前连接命令">
     <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">当前连接命令</h2><span className={state === "online" ? "text-primary" : "text-muted-foreground"}>{state === "online" ? "已连接" : state === "offline" ? "已断开连接" : "等待连接"}</span></div>
     <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}><TabsList aria-label="主机操作系统"><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList></Tabs>
     <label className="block space-y-1"><span>主机可访问的服务地址</span><Input value={server} onChange={event => { setServer(event.target.value); setCopied(false); }} aria-label="主机可访问的服务地址" /></label>

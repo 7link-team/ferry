@@ -81,6 +81,12 @@ try {
   // Read actual control frames: browser devtools omit protocol-level Ping/Pong.
   let pings = 0, opened = false, ended = false, output = '', buffered = Buffer.alloc(0);
   heartbeatSocket = createConnection({ host: '127.0.0.1', port });
+  const sendFrame = (opcode, payload) => {
+    const mask = randomBytes(4), frame = Buffer.alloc(6 + payload.length);
+    frame[0] = 0x80 | opcode; frame[1] = 0x80 | payload.length; mask.copy(frame, 2);
+    for (let i = 0; i < payload.length; i++) frame[6 + i] = payload[i] ^ mask[i % 4];
+    heartbeatSocket.write(frame);
+  };
   heartbeatSocket.on('connect', () => heartbeatSocket.write(
     `GET /api/workspaces/${workspace_tools}/nodes/${host.id}/terminal-sessions?cols=80&rows=24 HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\nSec-WebSocket-Version: 13\r\nOrigin: ${origin}\r\nCookie: ${cookie}\r\n\r\n`,
   ));
@@ -98,18 +104,25 @@ try {
       else if (length === 127) { if (buffered.length < 10) return; length = Number(buffered.readBigUInt64BE(2)); offset = 10; }
       if (buffered.length < offset + length) return;
       const payload = buffered.subarray(offset, offset + length); buffered = buffered.subarray(offset + length);
-      if (opcode === 2) output += payload.toString();
+      if (opcode === 2) {
+        output += payload.toString();
+        // ConPTY waits for the terminal's cursor-position reply before cmd.exe
+        // emits its prompt. A real xterm client supplies this automatically.
+        if (process.platform === 'win32' && output.endsWith('\x1b[6n')) sendFrame(2, Buffer.from('\x1b[1;1R'));
+      }
       if (opcode === 8) ended = true;
       if (opcode === 9) {
         pings++;
-        const mask = randomBytes(4), frame = Buffer.alloc(6 + payload.length);
-        frame[0] = 0x8a; frame[1] = 0x80 | payload.length; mask.copy(frame, 2);
-        for (let i = 0; i < payload.length; i++) frame[6 + i] = payload[i] ^ mask[i % 4];
-        heartbeatSocket.write(frame);
+        sendFrame(10, payload);
       }
     }
   });
   await until(() => opened && output.length > 0, 'PTY initial output');
+  if (process.platform === 'win32') {
+    await until(() => output.toLowerCase().includes(process.env.USERPROFILE.toLowerCase()), 'Windows PTY user home prompt');
+    assert(!output.toLowerCase().includes('system32\\config\\systemprofile'), 'terminal must not start in a service profile');
+    console.log('PASS Windows PTY starts in the user home directory');
+  }
   await new Promise(done => setTimeout(done, 1_000));
   const before = output;
   await new Promise(done => setTimeout(done, 22_000));

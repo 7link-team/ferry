@@ -275,7 +275,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <form className={cn("min-w-0 w-full space-y-6 pb-8", config.width !== "full" && "mx-auto max-w-6xl")} onSubmit={submit}>
+    <form className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : ["space-y-6", config.width !== "full" && "mx-auto max-w-6xl"])} onSubmit={submit}>
       {hostConnectionTabs}
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -307,16 +307,16 @@ export function ResourceForm<T extends Record<string, unknown>>({
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
-          <fieldset key={section.title ?? index} className="space-y-4">
-            {section.title && (
-              <legend className="mb-2 text-sm font-medium text-muted-foreground">
-                {section.title}
-              </legend>
+          <section key={section.title ?? index} aria-label={section.title ?? (readOnly ? index === 0 ? "基本信息" : "其他信息" : undefined)} className={readOnly ? cn("detail-section", fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type)) && "col-span-full") : "space-y-4"}>
+            {(section.title || readOnly) && (
+              <h2 className={readOnly ? "detail-section-title" : "mb-2 text-sm font-medium text-muted-foreground"}>
+                {section.title ?? (index === 0 ? "基本信息" : "其他信息")}
+              </h2>
             )}
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className={readOnly ? "detail-fields grid sm:grid-cols-2" : "grid gap-4 sm:grid-cols-2"}>
               {fields.map(renderField)}
             </div>
-          </fieldset>
+          </section>
         );
       })}
 
@@ -610,7 +610,7 @@ const Wrapper = <T,>({
   field: FormField<T>;
   children: React.ReactNode;
 }) => (
-  <div className={cn("flex flex-col gap-1.5", field.span === 2 && "sm:col-span-2")}>{children}</div>
+  <div className={cn("resource-field flex min-w-0 flex-col gap-1.5", field.span === 2 && "sm:col-span-2")}>{children}</div>
 );
 
 /** Shared field rendering and modal lifecycle for parameterized row actions. */

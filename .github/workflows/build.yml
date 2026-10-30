@@ -299,6 +299,7 @@ jobs:
           node scripts/test-host-workspace-ui.mjs
           node scripts/test-host-workspace.mjs
           node scripts/test-table-layout-ui.mjs
+          node scripts/test-resource-details-ui.mjs
       - name: Pipeline environments and classification acceptance
         if: matrix.harness == 'pipelines'
         run: python3 scripts/test-pipeline-classification.py

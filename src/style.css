@@ -43,6 +43,57 @@
   --ring: oklch(0.705 0.015 286.067);
 }
 
+/* Resource details share the form schema, with a dedicated reading layout. */
+@layer components {
+  .resource-detail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 38rem), 1fr));
+    @apply items-start gap-6;
+  }
+  .resource-detail > :not(.detail-section) {
+    grid-column: 1 / -1;
+  }
+  .detail-section {
+    @apply min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground;
+  }
+  .detail-section-title {
+    @apply flex items-center gap-2.5 border-b bg-muted/25 px-5 py-3.5 text-sm font-semibold;
+  }
+  .detail-section-title::before {
+    content: "";
+    @apply h-3.5 w-0.5 rounded-full bg-primary;
+  }
+  .detail-fields {
+    @apply min-w-0 px-5;
+  }
+  .detail-fields > * {
+    @apply min-w-0 border-b border-border/60 py-4;
+  }
+  .detail-fields > .resource-field {
+    @apply gap-2;
+  }
+  .detail-fields > .resource-field > span:first-child {
+    @apply text-xs font-normal leading-5 text-muted-foreground;
+  }
+  .detail-fields > .resource-field > p {
+    @apply text-sm font-medium leading-6 [overflow-wrap:anywhere];
+  }
+  .detail-fields > .resource-field > button {
+    @apply self-start;
+  }
+  .detail-fields > :last-child {
+    @apply border-b-0;
+  }
+  @media (min-width: 640px) {
+    .detail-fields {
+      @apply gap-x-8;
+    }
+    .detail-fields > :nth-last-child(2):nth-child(odd):not(.sm\:col-span-2) {
+      @apply border-b-0;
+    }
+  }
+}
+
 .dark {
   --background: oklch(0.141 0.005 285.823);
   --foreground: oklch(0.985 0 0);

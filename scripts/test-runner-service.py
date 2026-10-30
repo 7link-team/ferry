@@ -203,6 +203,15 @@ jobs:
                         print('Terminal control:', repr(data), flush=True)
                 return bytes(output)
             initial_output = terminal_output(2)
+            if platform.system() == 'Windows':
+                for _ in range(4):
+                    if re.search(rb'[A-Za-z]:\\[^\r\n]*>', initial_output):
+                        break
+                    initial_output += terminal_output(2)
+                assert re.search(rb'[A-Za-z]:\\[^\r\n]*>', initial_output), 'native service terminal must emit a working-directory prompt'
+                assert b'systemprofile' not in initial_output.lower(), 'native service terminal must not start in systemprofile'
+                assert b'serviceprofiles' not in initial_output.lower(), 'native service terminal must not start in a service profile'
+                print('PASS native Windows service terminal starts outside service profiles', flush=True)
             print('Terminal initial output:', repr(initial_output), flush=True)
             upgrade('9.9.9')
             time.sleep(.5)
