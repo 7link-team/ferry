@@ -184,9 +184,10 @@ try {
   await page.getByRole('button', { name: '切换为文件', exact: true }).click();
   const directory = '/tmp';
   await page.getByLabel('目录路径').fill(directory);
-  const directoryLoaded = page.waitForResponse(response => new URL(response.url()).searchParams.get('path') === directory && response.ok());
-  await page.getByRole('button', { name: '转到', exact: true }).click();
-  await directoryLoaded;
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).searchParams.get('path') === directory && response.ok()),
+    page.getByRole('button', { name: '转到目录', exact: true }).click(),
+  ]);
   await until(async () => (await page.getByRole('button', { name: '在当前目录打开终端' }).getAttribute('title')) === `在 ${directory} 打开终端`);
   await page.getByRole('button', { name: '在当前目录打开终端' }).click();
   const directoryPanel = page.locator('section').filter({ has: page.locator('.xterm-screen') });
