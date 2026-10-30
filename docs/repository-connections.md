@@ -49,6 +49,20 @@ https://<平台域名>/api/repository-auth/callback
 
 Codeup 使用个人访问令牌。中心版填写组织 ID；默认网站为 `https://codeup.aliyun.com`，API 为 `https://openapi-rdc.aliyuncs.com`。Region 版填写对应的网站和 API 地址，组织 ID 可留空。由于 Codeup 令牌接口不返回 Git 登录用户名，还需填写用于实际拉取的 Git 用户名。连接以成功读取组织内可访问仓库为准。
 
+### Codeup 配置与排查
+
+1. 在云效创建个人访问令牌，授予代码仓库、分支只读权限以及通过 HTTPS 拉取代码所需的权限。令牌权限和账号本身的仓库权限必须同时满足；能列出仓库不代表一定允许 Git 下载。
+2. 在当前工作空间的授权认证中创建“令牌”凭据，填写 Codeup 的 Git 用户名与令牌。不要把阿里云 AccessKey、本平台登录令牌或 SSH 私钥填到个人访问令牌中。
+3. 创建代码连接，选择 Codeup 并引用上述凭据。中心版从云效组织管理后台获取组织 ID；Region 版使用实例域名作为 API 地址，组织 ID 留空。网站地址需与返回的 HTTPS 仓库地址同源。
+4. 在流水线的“拉取代码”步骤选择该连接和仓库。仓库和分支均可加载下一页；分页失败可重试当前页。分支输入框也接受标签或完整提交 SHA，留空使用 Git 默认 HEAD。Codeup 仓库列表没有提供默认分支字段，因此不会假设为 `main` 或 `master`。
+5. 在受支持的执行器上运行后，检查拉取的提交 SHA 与预期一致。当前 Actions 执行器需要 Linux 或 macOS；Codeup 连接本身不依赖执行器操作系统。
+
+连接和凭据支持独立复用、修改与轮换。替换凭据后刷新仓库/分支并重新执行验证；已有流水线继续引用连接 ID，不需要把令牌写进 YAML。删除正在被引用的凭据会被阻止。
+
+401 表示令牌无效或过期；403 应检查令牌授权范围及账号仓库权限；404 应检查组织 ID、仓库可见性和接入点；429 表示限流，可稍后重试。服务错误、异常 JSON 和错误列表结构均会明确报错。不会跟随 API 重定向发送令牌，也不会把上游错误正文中的凭据回显。
+
+接口依据：[服务接入点](https://help.aliyun.com/zh/yunxiao/developer-reference/service-access-point-domain)、[仓库列表](https://help.aliyun.com/zh/yunxiao/developer-reference/listrepositories-query-code-base-list)、[分支列表](https://help.aliyun.com/zh/yunxiao/developer-reference/listbranches-query-the-list-of-branches)。使用新版 `x-yunxiao-token` PAT 接口，不使用旧版 AccessKey 签名 API。分支查询中的仓库完整路径只编码一次，保留组织/分组层级及中文、空格等字符。
+
 市场来源的 API 主机必须与仓库主机一致，官方例外为 GitHub 的 `api.github.com` 和 Codeup 的 `openapi-rdc.aliyuncs.com`。不会通过重定向转发认证信息。
 
 ## 市场索引

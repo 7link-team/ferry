@@ -1496,6 +1496,7 @@ dependencies = [
  "futures",
  "hex",
  "mime_guess",
+ "percent-encoding",
  "quick-xml",
  "rand 0.8.8",
  "reqwest",

@@ -16,8 +16,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import base64,hashlib,uuid
-from urllib.parse import urlparse,parse_qs,urlencode
+from urllib.parse import urlparse,parse_qs,urlencode,quote,unquote
 codes={};refreshes=[];fail_refresh=False
+codeup_fixture = {'mode': 'normal'}
 class Receiver(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed=urlparse(self.path);query=parse_qs(parsed.query)
@@ -27,12 +28,42 @@ class Receiver(BaseHTTPRequestHandler):
         access=query.get('access_token',[None])[0] or self.headers.get('PRIVATE-TOKEN') or self.headers.get('x-yunxiao-token') or self.headers.get('Authorization','').removeprefix('Bearer ').removeprefix('token ')
         if not access or not any(v in access for v in ['initial-access','renewed-access','valid-personal-token']):
             self.send_response(401);self.end_headers();return
+        if '/oapi/v1/codeup/' in parsed.path:
+            # Official PAT API contract: arrays, camelCase, encoded FULL repository path,
+            # and response-header pagination (including servers returning fewer than requested).
+            assert self.headers.get('x-yunxiao-token') == access
+            assert not query.get('access_token') and not self.headers.get('Authorization')
+            mode = codeup_fixture['mode']
+            if isinstance(mode, int):
+                self.send_response(mode);self.end_headers();self.wfile.write(access.encode());return
+            if mode == 'redirect':
+                self.send_response(302);self.send_header('Location',api_base+'/stolen-token');self.end_headers();return
+            page = int(query.get('page',['1'])[0])
+            assert query.get('perPage') == ['50']
+            prefix = '/oapi/v1/codeup/' + ('organizations/test-org/' if '/organizations/' in parsed.path else '') + 'repositories'
+            if parsed.path == prefix:
+                value = [] if page > 1 else [{'id':2813489,'name':'repository','pathWithNamespace':'test-org/team/repository','webUrl':api_base+'/test-org/team/repository'}]
+                if mode == 'empty': value=[]
+                if mode == 'full-final':value=[dict(value[0],id=n) for n in range(50)]
+                if mode == 'wrong-origin':value[0]['webUrl']='https://attacker.example.invalid/repository'
+                if mode == 'pages' and page == 2:
+                    value = [{'id':2813490,'name':'second','pathWithNamespace':'test-org/team/second','webUrl':api_base+'/test-org/team/second'}]
+            elif parsed.path.endswith('/branches'):
+                repository = parsed.path[len(prefix)+1:-len('/branches')]
+                if not parsed.path.startswith(prefix+'/') or '/' in repository or unquote(repository) != 'test-org/team/' + ('\u4e2d\u6587 + repo' if mode == 'encoded' else 'repository'):
+                    self.send_response(400);self.end_headers();return
+                value = [{'name':'develop','defaultBranch':True},{'name':'release/test','defaultBranch':False}] if page == 1 else [{'name':'feature/\u4e2d\u6587'}]
+            else:
+                self.send_response(404);self.end_headers();return
+            payload = b'{broken-json' if mode == 'invalid-json' else json.dumps({'error':'not an array'} if mode == 'invalid-shape' else value).encode()
+            self.send_response(200);self.send_header('Content-Length',str(len(payload)))
+            if mode == 'total-pages':self.send_header('x-total-pages','2')
+            else:self.send_header('x-next-page','2' if mode == 'pages' and page == 1 else '')
+            self.end_headers();self.wfile.write(payload);return
         listing=parsed.path.endswith('/user/repos') or parsed.path.endswith('/projects') or parsed.path.endswith('/repositories')
         if listing:
             if query.get('page',['1'])[0]=='2':value=[]
             else:value=[{'name':'repository','full_name':'owner/repository','clone_url':api_base+'/owner/repository.git','webUrl':api_base+'/owner/repository','default_branch':'develop'}]
-            if '/codeup/' in parsed.path:
-                for row in value:row.pop('clone_url',None)
             payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
         if parsed.path.endswith('/branches'):
             payload=json.dumps([{'name':'develop'},{'name':'release/test'}]).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
@@ -104,7 +135,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
     def launch():
         proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
         for _ in range(150):
-            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
+            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text(encoding='utf8'))
             try:
                 if request(anonymous, '/status')['ok']: return proc
             except OSError: pass
@@ -115,7 +146,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
     try:
         admin, owner, guest, outsider = client(), client(), client(), client()
         password = 'temporary-workspace-password'
-        request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
+        request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text(encoding='utf8').strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
         workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
@@ -158,6 +189,48 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         check(plain['url']==api_base+'/owner/repository.git' and 'default_branch' not in plain,'plain Git connection stores URL without branch')
         request(owner,root+'/code-connections/'+plain['id'],method='DELETE',expected=204)
         for row in [linked,linked2]:request(owner,root+'/code-connections/'+row['id'],method='DELETE',expected=204)
+        codeup_body = {'name':'Codeup central','provider':'codeup','credential_id':shared,'base_url':api_base,'api_url':api_base,'organization':'test-org'}
+        codeup = request(owner,root+'/code-connections',codeup_body,expected=201)
+        codeup_root = root+'/code-connections/'+codeup['id']
+        codeup_fixture['mode'] = 'pages'
+        first = request(owner,codeup_root+'/repositories')
+        check(first['has_more'] and first['items'][0]['full_name']=='test-org/team/repository','Codeup native fields and short-page response-header pagination')
+        second = request(owner,codeup_root+'/repositories?page=2')
+        check(not second['has_more'] and second['items'][0]['name']=='second','Codeup last page follows response headers')
+        branch_query = '?'+urlencode({'url':first['items'][0]['url']})
+        check(request(owner,codeup_root+'/branches'+branch_query)['has_more'],'Codeup branch response headers expose next page')
+        check(request(owner,codeup_root+'/branches'+branch_query+'&page=2')['items']==[{'name':'feature/\u4e2d\u6587'}],'Codeup branches retain slash and Unicode')
+        codeup_fixture['mode'] = 'encoded'
+        for path in ['test-org/team/\u4e2d\u6587 + repo',quote('test-org/team/\u4e2d\u6587 + repo',safe='/')]:
+            branches=request(owner,codeup_root+'/branches?'+urlencode({'url':api_base+'/'+path+'.git'}))
+            check(branches['items'][1]['name']=='release/test','Codeup repository path encoded exactly once')
+        for mode in [401,403,404,429,500,'redirect','invalid-json','invalid-shape']:
+            codeup_fixture['mode']=mode
+            error=request(owner,codeup_root+'/repositories',expected=400)
+            check('valid-personal-token' not in json.dumps(error) and 'error' in error,'Codeup provider failure sanitized: '+str(mode))
+            request(owner,root+'/code-connections',dict(codeup_body,name='Must not persist'),expected=400)
+        codeup_fixture['mode']='normal'
+        for mode,expected_more,expected_count in [('full-final',False,50),('empty',False,0),('total-pages',True,1)]:
+            codeup_fixture['mode']=mode
+            page=request(owner,codeup_root+'/repositories')
+            check(page['has_more']==expected_more and len(page['items'])==expected_count,'Codeup pagination edge: '+mode)
+        codeup_fixture['mode']='wrong-origin'
+        request(owner,codeup_root+'/repositories',expected=400)
+        codeup_fixture['mode']='normal'
+        check(request(owner,root+'/code-connections')['total']==1,'Codeup failed validations never create additional connections')
+        no_username=request(owner,root+'/credentials',{'name':'Missing Git username','kind':'token','secret':'valid-personal-token'},expected=201)['id']
+        request(owner,root+'/code-connections',dict(codeup_body,credential_id=no_username),expected=400)
+        request(owner,root+'/credentials/'+no_username,method='DELETE',expected=204)
+        request(owner,root+'/code-connections',dict(codeup_body,organization='bad/organization'),expected=400)
+        request(owner,root+'/code-connections',dict(codeup_body,api_url='',organization=''),expected=400)
+        request(guest,codeup_root+'/repositories',expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/code-connections/'+codeup['id']+'/repositories',expected=404)
+        request(owner,codeup_root+'/repositories?page=0',expected=400)
+        request(owner,codeup_root+'/branches'+branch_query+'&page=10001',expected=400)
+        region=request(owner,root+'/code-connections',dict(codeup_body,name='Codeup Region',organization=''),expected=201)
+        check(request(owner,root+'/code-connections/'+region['id']+'/branches'+branch_query)['items'],'Codeup Region omits organizations path segment')
+        request(owner,root+'/code-connections/'+region['id'],method='DELETE',expected=204)
+        request(owner,codeup_root,method='DELETE',expected=204)
         request(owner,root+'/credentials/'+shared,method='DELETE',expected=204)
         request(owner,root+'/credentials/'+wrong,method='DELETE',expected=204)
         def status(provider):return next(r for r in request(owner,root+'/repository-providers')['items'] if r['id']==provider)
@@ -306,7 +379,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 stored=conn.execute('SELECT repository_oauth FROM platform_state').fetchone()[0]
                 check(stored.startswith('v1.') and 'fixture-client-secret' not in stored,'platform OAuth application configuration encrypted at rest')
-                check(all(v not in (data/'server.log').read_text() for v in ['fixture-client-secret','valid-personal-token','inline-private-password']),'secrets absent from server logs')
+                check(all(v not in (data/'server.log').read_text(encoding='utf8') for v in ['fixture-client-secret','valid-personal-token','inline-private-password']),'secrets absent from server logs')
         for rid in created_repos:request(owner,root+'/repositories/'+rid,method='DELETE',expected=204)
         audit=request(owner,root+'/activity?page_size=200')
 
@@ -317,7 +390,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         check(all(r['credential_id'] is None for r in request(owner,root+'/repository-providers')['items']),'credential deletion removes linked authorization secrets')
         print(f'{checks} checks passed (isolated OAuth provider, not live external account acceptance)',flush=True)
     except Exception:
-        log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
+        log.flush();print((data/'server.log').read_text(encoding='utf8')[-5000:],flush=True)
         raise
     finally:
         if proc.poll() is None:proc.terminate();proc.wait(timeout=30)

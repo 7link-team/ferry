@@ -321,6 +321,46 @@ fn http() -> Result<reqwest::Client> {
         .build()
         .map_err(|_| ApiError::bad("无法初始化授权连接。"))
 }
+
+// Codeup may return fewer items than requested; the documented response headers
+// determine whether another page exists. Keep the row-count fallback for proxies
+// that omit them, and for the other providers' existing contracts.
+fn codeup_has_more(response: &reqwest::Response, page: u32) -> Option<bool> {
+    if let Some(next) = response
+        .headers()
+        .get("x-next-page")
+        .and_then(|v| v.to_str().ok())
+    {
+        if next.trim().is_empty() {
+            return Some(false);
+        }
+        if let Ok(next) = next.trim().parse::<u32>() {
+            return Some(next > page);
+        }
+    }
+    response
+        .headers()
+        .get("x-total-pages")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u32>().ok())
+        .map(|total| page < total)
+}
+
+async fn repository_response(response: reqwest::Response, kind: &str) -> Result<Value> {
+    if kind == "codeup" && !response.status().is_success() {
+        let message = match response.status().as_u16() {
+            401 => "Codeup令牌无效或已过期，请更新授权认证。",
+            403 => "Codeup拒绝访问，请检查令牌的代码仓库、分支只读权限及账号的仓库权限。",
+            404 => "Codeup资源不存在或不可见，请检查组织ID、仓库地址和API接入点。",
+            429 => "Codeup请求过于频繁，请稍后重试。",
+            500..=599 => "Codeup服务暂时不可用，请稍后重试。",
+            300..=399 => "Codeup接入点返回重定向，请填写最终API地址；不会转发令牌。",
+            _ => "Codeup请求失败，请检查接入点和授权配置。",
+        };
+        return Err(ApiError::bad(message));
+    }
+    response_json(response).await
+}
 fn token_data(value: &Value) -> Result<(&str, i64, Option<&str>)> {
     let valid = |v: &str| {
         !v.is_empty() && v.len() < 65536 && !v.chars().any(|c| c.is_control() || c.is_whitespace())
@@ -940,13 +980,14 @@ async fn remote_repositories(
             query.append_pair("membership", "true");
         }
     }
-    let value = response_json(
-        authorize_request(http()?.get(url), kind, access, personal)
-            .send()
-            .await
-            .map_err(|_| ApiError::bad("读取代码平台仓库失败，请检查接入点和网络。"))?,
-    )
-    .await?;
+    let response = authorize_request(http()?.get(url), kind, access, personal)
+        .send()
+        .await
+        .map_err(|_| ApiError::bad("读取代码平台仓库失败，请检查接入点和网络。"))?;
+    let has_more = (kind == "codeup")
+        .then(|| codeup_has_more(&response, page))
+        .flatten();
+    let value = repository_response(response, kind).await?;
     let rows = value
         .as_array()
         .ok_or_else(|| ApiError::bad("代码平台返回了无效仓库列表。"))?;
@@ -984,7 +1025,7 @@ async fn remote_repositories(
         items.push(json!({"name":text(&["name"]),"full_name":text(&["full_name","path_with_namespace","pathWithNamespace","name"]),
             "url":url,"default_branch":text(&["default_branch","defaultBranch"])}));
     }
-    Ok(json!({"items":items,"page":page,"has_more":rows.len()==50}))
+    Ok(json!({"items":items,"page":page,"has_more":has_more.unwrap_or(rows.len()==50)}))
 }
 pub async fn connect_token(
     State(s): State<AppState>,
@@ -1909,6 +1950,12 @@ pub async fn connection_branches(
     if path.is_empty() {
         return Err(ApiError::bad("请选择有效仓库。"));
     }
+    // Url::path is already escaped. Decode before pushing API path segments to
+    // avoid turning %E4 into %25E4 for Unicode, spaces and literal percent signs.
+    let path = percent_encoding::percent_decode_str(path)
+        .decode_utf8()
+        .map_err(|_| ApiError::bad("仓库路径编码无效。"))?;
+    let path = path.as_ref();
     let token = row
         .token_config
         .as_deref()
@@ -1960,15 +2007,17 @@ pub async fn connection_branches(
             },
             "50",
         );
+    ensure_fresh(&s, scope.workspace_id, row.credential_id.into()).await?;
     let (_, _, secret) =
         crate::credentials::unseal(&s, &scope.workspace_id, &row.credential_id.into()).await?;
-    let value = response_json(
-        authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
-            .send()
-            .await
-            .map_err(|_| ApiError::bad("读取仓库分支失败。"))?,
-    )
-    .await?;
+    let response = authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
+        .send()
+        .await
+        .map_err(|_| ApiError::bad("读取仓库分支失败。"))?;
+    let has_more = (row.provider == "codeup")
+        .then(|| codeup_has_more(&response, query.page))
+        .flatten();
+    let value = repository_response(response, &row.provider).await?;
     let rows = value
         .as_array()
         .ok_or_else(|| ApiError::bad("代码平台返回了无效分支列表。"))?;
@@ -1982,6 +2031,6 @@ pub async fn connection_branches(
         .map(|name| json!({"name":name}))
         .collect::<Vec<_>>();
     Ok(Json(
-        json!({"items":items,"page":query.page,"has_more":rows.len()==50}),
+        json!({"items":items,"page":query.page,"has_more":has_more.unwrap_or(rows.len()==50)}),
     ))
 }

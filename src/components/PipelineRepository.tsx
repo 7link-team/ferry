@@ -17,8 +17,9 @@ export function PipelineRepository(props:Props) {
   return <CheckoutRepository {...props} jobId={props.jobId} stepIndex={props.stepIndex}/>;
 }
 function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,onValidityChange}:Props & {jobId:string;stepIndex:number}) {
-  const [branches,setBranches]=useState<string[]>([]);
-  const [error,setError]=useState("");
+  const [branchRequest,setBranchRequest]=useState({source:'',page:1,revision:0});
+  const [branchResult,setBranchResult]=useState({source:'',items:[] as string[],page:0,hasMore:false,error:''});
+  const [loadingBranches,setLoadingBranches]=useState(false);
   const branchList=useId();
   const jobs=parseActions(String(draft.definition)).jobs;
   const job=jobs.find(row=>row.id===jobId)!;
@@ -27,19 +28,24 @@ function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,o
   const current=bindings.find(row=>row.job_id===jobId && row.step_id===step.id);
   const data=useConnectionRepositories(workspace,current?.connection_id);
   const {connection,root}=data;
+  const branchSource=JSON.stringify([root,connection?.id,connection?.provider,current?.repository_url]);
+  const branchPage=branchRequest.source===branchSource?branchRequest.page:1;
+  const branchData=branchResult.source===branchSource?branchResult:undefined;
   const nativeSource=!!(step.with as Record<string,unknown>|undefined)?.repository;
   const legacy=!!draft.repository_id && draft.repository_id!=="0";
   const missing=!current ? !legacy&&!nativeSource : !current.connection_id||!current.repository_url;
   useEffect(()=>{onValidityChange(!readOnly && missing);return()=>onValidityChange(false);},[missing,readOnly,onValidityChange]);
   useEffect(()=>{
-    setBranches([]);
-    if(!connection || connection.provider==='git' || !current?.repository_url)return;
+    if(readOnly || !connection || connection.provider==='git' || !current?.repository_url){setLoadingBranches(false);return;}
     const controller=new AbortController();
-    void api<{items:{name:string}[]}>(`${root}/${encodeURIComponent(connection.id)}/branches?url=${encodeURIComponent(current.repository_url)}`,{signal:controller.signal})
-      .then(value=>{if(!controller.signal.aborted)setBranches(value.items.map(row=>row.name));})
-      .catch(cause=>{if(!controller.signal.aborted)setError(errorText(cause));});
+    setLoadingBranches(true);
+    setBranchResult(previous=>previous.source===branchSource?{...previous,error:''}:{source:branchSource,items:[],page:0,hasMore:false,error:''});
+    void api<{items:{name:string}[];has_more:boolean}>(`${root}/${encodeURIComponent(connection.id)}/branches?url=${encodeURIComponent(current.repository_url)}&page=${branchPage}`,{signal:controller.signal})
+      .then(value=>{if(!controller.signal.aborted)setBranchResult(previous=>({source:branchSource,items:[...new Set([...(branchPage>1&&previous.source===branchSource?previous.items:[]),...value.items.map(row=>row.name)])],page:branchPage,hasMore:value.has_more,error:''}));})
+      .catch(cause=>{if(!controller.signal.aborted)setBranchResult(previous=>({...previous,error:errorText(cause)}));})
+      .finally(()=>{if(!controller.signal.aborted)setLoadingBranches(false);});
     return()=>controller.abort();
-  },[root,connection?.id,connection?.provider,current?.repository_url]);
+  },[root,connection?.id,connection?.provider,current?.repository_url,branchSource,branchPage,branchRequest.revision,readOnly]);
   function change(patch:Partial<Binding>) {
     let stepId=typeof step.id==='string'?step.id:'';
     if(!stepId){let n=1;while(job.steps.some(row=>row.id===`checkout_${n}`))n++;stepId=`checkout_${n}`;}
@@ -54,12 +60,14 @@ function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,o
   return <section aria-label="拉取代码配置" className="min-w-0 space-y-3">
     <ConnectionRepositoryFields workspace={workspace} data={data} connectionId={current?.connection_id??''} repositoryUrl={current?.repository_url??''} repositoryLabel="节点仓库" onChange={selected=>change({connection_id:selected.connection_id,repository_url:selected.url,ref:selected.default_branch})}/>
     {current?.repository_url&&<>
-      <label className="block space-y-2"><span className="text-sm">分支 / 标签 / Commit</span><Input aria-label="分支 / 标签 / Commit" list={branchList} value={current.ref} placeholder="选择或输入；留空使用仓库默认 HEAD" onChange={event=>change({ref:event.target.value})}/><datalist id={branchList}>{branches.map(name=><option key={name} value={name}>{name}</option>)}</datalist></label>
+      <label className="block space-y-2"><span className="text-sm">分支 / 标签 / Commit</span><Input aria-label="分支 / 标签 / Commit" list={branchList} value={current.ref} placeholder="选择或输入；留空使用仓库默认 HEAD" onChange={event=>change({ref:event.target.value})}/><datalist id={branchList}>{branchData?.items.map(name=><option key={name} value={name}>{name}</option>)}</datalist></label>
+      {loadingBranches&&<p role="status" className="text-xs text-muted-foreground">正在读取仓库分支…</p>}
+      {branchData?.hasMore&&!branchData.error&&<Button type="button" variant="outline" disabled={loadingBranches} onClick={()=>setBranchRequest({source:branchSource,page:branchData.page+1,revision:branchRequest.revision})}>加载更多分支</Button>}
+      {branchData?.error&&<div className="space-y-2"><p role="alert" className="text-sm text-destructive">{branchData.error}</p><Button type="button" variant="outline" disabled={loadingBranches} onClick={()=>setBranchRequest({source:branchSource,page:branchData.page+1,revision:branchRequest.revision+1})}>重试读取分支</Button></div>}
       <label className="block space-y-2"><span className="text-sm">检出目录</span><Input aria-label="检出目录" value={current.path} placeholder="默认工作目录；多仓库可填写不同子目录" onChange={event=>change({path:event.target.value})}/></label>
     </>}
     {!current&&legacy&&<p className="text-xs text-muted-foreground">该历史流水线沿用已保存的仓库。选择连接后，此步骤使用独立来源。</p>}
     {!current&&nativeSource&&<p className="text-xs text-muted-foreground">当前使用 YAML 中的 checkout 参数；选择连接后按此节点配置拉取。</p>}
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
   </section>;
 }
 
@@ -95,8 +103,8 @@ function ConnectionRepositoryFields({workspace,data,connectionId,repositoryUrl,r
     <div className="flex flex-wrap gap-3 text-xs"><a className="underline" href={href({workspace,group:'build',item:'repositories',mode:'new',id:''},{})} target="_blank" rel="noopener noreferrer">新建仓库连接</a><Button type="button" size="sm" variant="ghost" onClick={()=>setRevision(value=>value+1)}>刷新连接</Button></div>
     {!connections.length&&<p className="text-xs text-muted-foreground">尚无可用仓库连接。先创建连接，再返回选择。</p>}
     {connection?.provider==='git'?<label className="block space-y-2"><span className="text-sm">Git 仓库地址</span><Input aria-label="Git 仓库地址" value={repositoryUrl} onChange={event=>onChange({connection_id:connectionId,name:connection.name,url:event.target.value,default_branch:''})}/></label>:connectionId&&<label className="block space-y-2"><span className="text-sm">仓库</span><select aria-label={repositoryLabel} className={selectClass} value={repositoryUrl} disabled={loading&&page===1} onChange={event=>{const selected=repositories.find(row=>row.url===event.target.value);onChange({connection_id:connectionId,name:selected?.name??'',url:event.target.value,default_branch:selected?.default_branch??''});}}><option value="">{loading?'正在读取可见仓库…':'请选择可见仓库'}</option>{repositoryUrl&&!repositories.some(row=>row.url===repositoryUrl)&&<option value={repositoryUrl}>{repositoryUrl}</option>}{repositories.map(row=><option key={row.url} value={row.url}>{row.full_name||row.name}</option>)}</select></label>}
-    {hasMore&&<Button type="button" variant="outline" disabled={loading} onClick={()=>setPage(value=>value+1)}>加载更多仓库</Button>}
-    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    {hasMore&&!error&&<Button type="button" variant="outline" disabled={loading} onClick={()=>setPage(value=>value+1)}>加载更多仓库</Button>}
+    {error&&<div className="space-y-2"><p role="alert" className="text-sm text-destructive">{error}</p><Button type="button" variant="outline" disabled={loading} onClick={()=>setRevision(value=>value+1)}>重试读取仓库</Button></div>}
   </>;
 }
 /** Marketplace sources can bind a new connection repository or retain a legacy repository ID. */

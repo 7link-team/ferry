@@ -26,10 +26,11 @@ const provider=createHttpServer(async(request,response)=>{
     assert.equal(form.get('client_secret'),'fixture-client-secret');
     response.setHeader('Content-Type','application/json');response.end(JSON.stringify({access_token:'fixture-browser-access-token',refresh_token:'fixture-browser-refresh-token',expires_in:3600}));return;
   }
-  if(url.pathname.startsWith('/team/test-repo.git/')) {
+  const gitPrefix=['/team/test-repo.git/','/test-org/team/test-repo.git/'].find(prefix=>url.pathname.startsWith(prefix));
+  if(gitPrefix) {
     const expected='Basic '+Buffer.from('browser-authorized-user:valid-personal-token').toString('base64');
     if(request.headers.authorization!==expected) {response.writeHead(401,{'WWW-Authenticate':'Basic realm="private"'});response.end();return;}
-    const path=url.pathname.slice('/team/test-repo.git/'.length);
+    const path=url.pathname.slice(gitPrefix.length);
     if(path.includes('..')) {response.writeHead(400);response.end();return;}
     try {response.end(await readFile(join(work,'repository.git',path)));}
     catch {response.writeHead(404);response.end();}
@@ -38,6 +39,20 @@ const provider=createHttpServer(async(request,response)=>{
   const token=url.searchParams.get('access_token') || request.headers['private-token'] || request.headers['x-yunxiao-token'] || (request.headers.authorization ?? '').replace(/^(Bearer|token) /,'');
   if (!['fixture-browser-access-token','valid-personal-token'].includes(token)) {response.writeHead(401);response.end();return;}
   response.setHeader('Content-Type','application/json');
+  if(url.pathname.startsWith('/oapi/v1/codeup/')) {
+    assert.equal(request.headers['x-yunxiao-token'],'valid-personal-token');
+    assert.equal(url.searchParams.get('perPage'),'50');
+    const prefix='/oapi/v1/codeup/organizations/test-org/repositories';
+    if(url.pathname===prefix) {
+      response.setHeader('x-next-page','');
+      response.end(JSON.stringify([{id:2813489,name:'test-repo',pathWithNamespace:'test-org/team/test-repo',webUrl:providerOrigin+'/test-org/team/test-repo'}]));
+    } else {
+      assert.equal(url.pathname,prefix+'/test-org%2Fteam%2Ftest-repo/branches');
+      const first=url.searchParams.get('page')==='1';response.setHeader('x-next-page',first?'2':'');
+      response.end(JSON.stringify([{name:first?'develop':'release/test',defaultBranch:first}]));
+    }
+    return;
+  }
   if (url.pathname.endsWith('/branches')) response.end(JSON.stringify([{name:'develop'},{name:'release'}]));
   else if (url.pathname.endsWith('/user')) response.end(JSON.stringify({login:'browser-authorized-user'}));
   else if (url.pathname.endsWith('/repos') || url.pathname.endsWith('/projects') || url.pathname.endsWith('/repositories')) response.end(JSON.stringify([{name:'repo-'.repeat(15),full_name:'team/test-repo',clone_url:providerOrigin+'/team/test-repo.git',default_branch:'develop'}]));
@@ -49,7 +64,7 @@ const providerOrigin=`http://127.0.0.1:${provider.address().port}`;
 const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
 const seed=join(work,'seed');await mkdir(seed);
 await writeFile(join(seed,'build.sh'),'set -eu\nmkdir -p output\nprintf "built-from-private-repository\\n" > output/result.txt\ngit rev-parse HEAD >> output/result.txt\n');
-const git=(...args)=>execFileSync('git',['-C',seed,...args],{windowsHide:true,env:{...process.env,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'}});
+const git=(...args)=>execFileSync('git',['-c','core.autocrlf=false','-C',seed,...args],{windowsHide:true,env:{...process.env,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'}});
 git('init','--quiet','--initial-branch','develop');git('add','build.sh');git('commit','--quiet','-m','fixture');
 const sourceCommit=git('rev-parse','HEAD').toString().trim();
 execFileSync('git',['clone','--bare','--quiet',seed,join(work,'repository.git')],{windowsHide:true});
@@ -188,6 +203,19 @@ try {
   const giteeConnection=rows.items.find(row=>row.provider==='gitee'&&row.name==='Gitee connection');assert(giteeConnection);assert.equal(giteeConnection.credential_id,personalCredential.id);assert(!('default_branch' in giteeConnection));
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
+  await p.getByLabel('代码平台',{exact:true}).selectOption('codeup');
+  await p.getByLabel(/^连接名称/).fill('Codeup private checkout');
+  await p.getByLabel('授权认证',{exact:true}).selectOption(personalCredential.id);
+  await p.getByLabel('Codeup 组织 ID',{exact:true}).fill('test-org');
+  await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
+  await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
+  await p.getByLabel('平台 API 地址',{exact:true}).fill(providerOrigin);
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
+  rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
+  const codeupConnection=rows.items.find(row=>row.provider==='codeup');assert(codeupConnection);
+
   const passwordCredential=await post(owner,root+'/credentials',{name:'Reusable Git password',kind:'password',username:'git-user',secret:'generic-private-password',description:''});
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('git');
@@ -216,10 +244,12 @@ try {
   await p.getByLabel('任务执行器',{exact:true}).selectOption(buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
   await p.getByLabel('步骤类型').selectOption('checkout');
-  await p.getByLabel('仓库连接',{exact:true}).selectOption(giteeConnection.id);
-  await p.getByLabel('节点仓库',{exact:true}).selectOption(providerOrigin+'/team/test-repo.git');
-  assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),'develop');
+  await p.getByLabel('仓库连接',{exact:true}).selectOption(codeupConnection.id);
+  await p.getByLabel('节点仓库',{exact:true}).selectOption(providerOrigin+'/test-org/team/test-repo.git');
+  assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),'');
   await p.locator('datalist option[value="develop"]').waitFor({state:'attached'});
+  await p.getByRole('button',{name:'加载更多分支',exact:true}).click();
+  await p.locator('datalist option[value="release/test"]').waitFor({state:'attached'});
   await p.getByLabel('分支 / 标签 / Commit',{exact:true}).fill(sourceCommit);
   assert.equal(await p.getByLabel('流水线名称').inputValue(),'Build from connection');
   await p.getByRole('tab',{name:'YAML',exact:true}).click();
@@ -233,11 +263,11 @@ try {
   await p.waitForURL(`**/workspaces/${workspace_tenant}/pipelines`);
   const builds=await (await owner.request.get(origin+'/api'+root+'/pipelines')).json();
   const build=builds.items.find(row=>row.name==='Build from connection');assert(build);
-  const binding=build.checkout_bindings.find(row=>row.job_id==='build'&&row.step_id===checkout.id);assert(binding);assert.equal(binding.connection_id,giteeConnection.id);assert.equal(binding.repository_url,providerOrigin+'/team/test-repo.git');assert.equal(binding.ref,sourceCommit);
+  const binding=build.checkout_bindings.find(row=>row.job_id==='build'&&row.step_id===checkout.id);assert(binding);assert.equal(binding.connection_id,codeupConnection.id);assert.equal(binding.repository_url,providerOrigin+'/test-org/team/test-repo.git');assert.equal(binding.ref,sourceCommit);
   assert.equal(build.executor_bindings.find(row=>row.job_id==='build').target_ref,buildHost.id);
   await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/`+build.id+'/edit');
   await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:/步骤2/}).click();
-  assert.equal(await p.getByLabel('仓库连接',{exact:true}).inputValue(),giteeConnection.id);assert.equal(await p.getByLabel('节点仓库',{exact:true}).inputValue(),providerOrigin+'/team/test-repo.git');assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),sourceCommit);
+  assert.equal(await p.getByLabel('仓库连接',{exact:true}).inputValue(),codeupConnection.id);assert.equal(await p.getByLabel('节点仓库',{exact:true}).inputValue(),providerOrigin+'/test-org/team/test-repo.git');assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),sourceCommit);
   const run=await post(owner,root+'/pipelines/'+build.id+'/runs',{});
   let result;
   for(let i=0;;i++) {
@@ -245,11 +275,12 @@ try {
     if(!['queued','running'].includes(result.state))break;
     assert(i<1200,'build timed out');await new Promise(r=>setTimeout(r,100));
   }
+  if(result.state!=='succeeded')console.error('RUN LOGS',await (await owner.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id+'/logs')).json());
   assert.equal(result.state,'succeeded',JSON.stringify(result.steps));
   assert.equal(result.artifacts.length,1);
   const archive=await owner.request.get(origin+'/api'+root+'/pipeline-artifacts/'+result.artifacts[0].id+'/content');
   assert(archive.ok());
-  const content=execFileSync('python3',['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
+  const content=execFileSync(process.env.PYTHON_BINARY||'python3',['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
   assert.equal(content,'built-from-private-repository\n'+sourceCommit+'\n');
   console.log('PASS: browser-selected connection -> authenticated private Git checkout -> checked-in build script -> exact commit artifact');
   console.log('PASS: checkout node browses named connection/repository/branch, persists stable binding and task executor through save/reload');
