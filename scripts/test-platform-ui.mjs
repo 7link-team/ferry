@@ -24,7 +24,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const errors = [], requests = [];
@@ -61,7 +61,7 @@ try {
   await concurrentPage.getByText('平台已初始化，请登录。').waitFor();
   await concurrentPage.getByRole('button', { name: '登录', exact: true }).waitFor();
   assert.equal(await concurrentPage.getByRole('button', { name: '初始化并进入平台' }).count(), 0, 'concurrent setup loser can immediately sign in');
-  assert.equal(new URL(page.url()).pathname, '/_platform/workspaces');
+  assert.equal(new URL(page.url()).pathname, '/platform/workspaces');
   await page.getByRole('button', { name: '创建工作空间', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('First workspace');
   await page.getByLabel('标识', { exact: false }).fill('first');
@@ -72,9 +72,11 @@ try {
   const row = page.getByRole('row').filter({ hasText: 'First workspace' });
   const enter = row.getByRole('link', { name: '进入工作空间', exact: true });
   if (!(await enter.isVisible())) await row.getByRole('button').last().click();
+  const entryPath = new URL(await enter.getAttribute('href'), origin).pathname;
+  assert.match(entryPath, /^\/workspaces\/\d+\//, 'workspace entry uses its Snowflake ID');
   await page.getByRole('link', { name: '进入工作空间', exact: true }).click();
   await page.getByRole('button', { name: '平台管理', exact: true }).waitFor();
-  assert(new URL(page.url()).pathname.startsWith('/first/'), 'new workspace can be entered without stale identity redirect');
+  assert.equal(new URL(page.url()).pathname, entryPath, 'new workspace can be entered without stale identity redirect');
   await page.getByRole('button', { name: '平台管理', exact: true }).click();
   await page.getByRole('cell', { name: 'admin@example.invalid', exact: true }).waitFor();
   await page.getByRole('row').filter({ hasText: 'admin@example.invalid' }).getByRole('link', { name: '编辑', exact: true }).click();

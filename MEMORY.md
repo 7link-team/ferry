@@ -1,3 +1,15 @@
+## alpha20 gated failure diagnosis — 2026-10-30 17:34 +08
+- No publicalpha20release: fulltag41033093830 correctlyblocked bytests. Backends assertions stillcalled /workspaces/repo-other, foreignrepo creationbecameemptythenreferencechecksfailed. FIXEDfixturecaptureothersnowflakeIDandallcrossworkspacecalls; allassertionsretained.
+- BuildUIfailed firstplatformbrowser old /_platform/workspaces assertion; FIXEDcanonicalplatformpath+workspaceentryIDassertion; actualWindowsChromebrowsernowPASSfullplatformflow. AddedChromeoverrideforlocalverification.
+- Deploymentcompose/docker logs showaction(render)stillcalled /render not /renderings; FIXEDrender+acknowledgeoperationmappingexplicitly. No productcodechange. ActualfulltagLinuxchecks/nativeLinux/nativeMac/SSH/Runner/pipelines/groups/variablesPASSED; nativeWindowsandremainingdesktopstillrunning.
+- Isolateddiagnosticworktree data/alpha20-diagnostics branchfeat/alpha20-release-diagnostics3595f29 (DO NOTmerge). Readcompletedjoblogs using normalworkflowtoken, stripAuthonsignedredirect, emittedpublicfailuretail. Diagnosticrun41033923974job123990007545confirmedbothrootcauses. Firstdiagnostic401fromundefinedgithub.token fixedwithenv. HTTPSCLIauthmissing; SSHworks.
+- Neednewreleasealpha21: preserveunpublishedfailedtag20, bump21afterfixturesready; pushmain+tag21fullgates. Local4291still19; latestdebug20exe built; noSYSTEMserviceoperations.
+
+## alpha20 publication started — 2026-10-30 17:25 +08
+- Source/tag653a42ff4f4e98bc3dde447ca20d67bf6e59a4c0, v0.1.0-alpha.20 pushedviaSSH. FulltagCI41033093830; imageversion41033093901. NeedmainimagebuildforsameSHA, sopushmainnow (supersedespreviousmainafterreleaseplan). NativeandallE2Egatesrequired; publicreleaseonlygatedworkflow.
+- Localfinalserver/runner20buildcurrentlysession5820; local4291still19originalPID70048. NoSYSTEMRunneroperations. Publicreleaseverificationhelpers actually TEMP/ferry-release-tools/verify-release.mjs +verify-image.mjs; not.github/scripts.
+- NextwatchfullCIandmainimage; iffailureinspectsourceandcorrectwithoutweakeningtestsormovingpublishedtags; publicverifyexactSHA/assets/signatures; backup+ordinarylocal4291restart.
+
 ## Release20 source ready — 2026-10-30 17:24 +08
 - FINAL frontend142PASS; final build/typecheckPASS;32combination shared-detail browserPASS; existinghostworkspaceUI(file/splits/group/probeconcurrency)PASS. RelevantRust crates runner/server/protocol allPASS (server142PASS2ignored; runner22PASS1ignored +CLI3; protocol5). RealWindowsPTYhome+idleheartbeat+mixedsplitsPASS.
 - Local cargo test --workspace NOTfullyPASS: preexisting desktop-updater exclusive named-pipe peer test cannot connect under this ordinary user (AccessDenied); no updatercodechanged. Native privilegedWindowsCI must verify service/installer. Added actualnativeWindowsservice terminal prompt/no-serviceprofile assertions to existingnativeacceptance. Not runlocalSYSTEMservice.

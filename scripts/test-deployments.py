@@ -116,7 +116,7 @@ def main():
 
     def app(id): return api(f'/workspaces/{workspace_ops}/deployments/' + id)
     def action(id, verb, body=None, status=200):
-        operation = dict(preview='previews', apply='executions', rollback='rollbacks').get(verb, verb)
+        operation = dict(render='renderings', preview='previews', apply='executions', rollback='rollbacks', acknowledge='acknowledgements')[verb]
         return api(f'/workspaces/{workspace_ops}/deployments/{id}/{operation}', body or {}, status=status)
     def preview(id, revision=None): return action(id, 'preview', {'revision_id':revision} if revision else {})
     def start(id, revision=None):

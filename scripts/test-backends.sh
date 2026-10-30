@@ -219,9 +219,12 @@ print(json.dumps({
   ck "repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/repositories/$repo")"
   ck "repository deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/repositories/$repo")"
   ck "repository audit exists" '"resource":"repositories"' "$(c "$B/workspaces/$workspace_id/activity?resource=repositories")"
-  ck "repository second workspace" '"slug":"repo-other"' "$(c -X POST -d '{"name":"Other","slug":"repo-other"}' "$B/workspaces")"
-  ck "repository foreign credential rejected" '"error"' "$(c -X POST -d "{\"name\":\"foreign\",\"url\":\"https://example.com/repo\",\"credential_id\":\"$cred\"}" "$B/workspaces/repo-other/repositories")"
-  ck "repository workspace isolation" '"total":0' "$(c "$B/workspaces/repo-other/repositories")"
+  local other_workspace_body other_workspace_id
+  other_workspace_body=$(c -X POST -d '{"name":"Other","slug":"repo-other"}' "$B/workspaces")
+  ck "repository second workspace" '"slug":"repo-other"' "$other_workspace_body"
+  other_workspace_id=$(printf '%s' "$other_workspace_body" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  ck "repository foreign credential rejected" '"error"' "$(c -X POST -d "{\"name\":\"foreign\",\"url\":\"https://example.com/repo\",\"credential_id\":\"$cred\"}" "$B/workspaces/$other_workspace_id/repositories")"
+  ck "repository workspace isolation" '"total":0' "$(c "$B/workspaces/$other_workspace_id/repositories")"
   ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/$workspace_id/activity?resource=repositories")"
 
 
@@ -234,8 +237,8 @@ print(json.dumps({
   ckn "variable detail does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/$workspace_id/variables/$variable")"
   ckn "variable list does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/$workspace_id/variables?scope=global&scope_ref=0")"
   ck "variable duplicate" '409$' "$(c -w '%{http_code}' -X POST -d '{"name":"db-url","value":"other"}' "$B/workspaces/$workspace_id/variables")"
-  ck "variable other workspace cannot read" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/variables/$variable")"
-  ck "variable other workspace cannot reveal" '404$' "$(c -w '%{http_code}' -X POST -d '{}' "$B/workspaces/repo-other/variables/$variable/disclosures")"
+  ck "variable other workspace cannot read" '404$' "$(c -w '%{http_code}' "$B/workspaces/$other_workspace_id/variables/$variable")"
+  ck "variable other workspace cannot reveal" '404$' "$(c -w '%{http_code}' -X POST -d '{}' "$B/workspaces/$other_workspace_id/variables/$variable/disclosures")"
   ck "variable missing scope object" '400$' "$(c -w '%{http_code}' -X POST -d '{"name":"object","scope":"deploy","scope_ref":"999","value":"x"}' "$B/workspaces/$workspace_id/variables")"
   revealed=$(c -X POST -d '{}' "$B/workspaces/$workspace_id/variables/$variable/disclosures")
   ck "variable exact whitespace multiline and dollar" '^True$' "$(printf '%s' "$revealed" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"] == "  variable-test-secret\n$literal  ")')"
@@ -255,7 +258,7 @@ print(json.dumps({
   local pipeline pipeline_body pipeline_payload pipeline_repo foreign_repo
   pipeline_repo=$(c -X POST -d '{"name":"pipeline-repo","url":"https://example.com/pipeline.git"}' "$B/workspaces/$workspace_id/repositories" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  foreign_repo=$(c -X POST -d '{"name":"foreign-repo","url":"https://example.com/foreign.git"}' "$B/workspaces/repo-other/repositories" |
+  foreign_repo=$(c -X POST -d '{"name":"foreign-repo","url":"https://example.com/foreign.git"}' "$B/workspaces/$other_workspace_id/repositories" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   pipeline_payload=$(python3 -I -c '
 import json,sys
@@ -290,14 +293,14 @@ print(json.dumps({"name":"pipeline-build","repository_id":sys.argv[1],"target_ki
   pipeline_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["version"]=2;print(json.dumps(v))')
   ck "pipeline update validates references" '400$' "$(c -w '%{http_code}' -X PATCH -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/$workspace_id/pipelines/$pipeline")"
   ck "pipeline referenced repository protected" '409$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/repositories/$pipeline_repo")"
-  ck "pipeline isolated list" '"total":0' "$(c "$B/workspaces/repo-other/pipelines")"
-  ck "pipeline isolated detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/pipelines/$pipeline")"
-  ck "pipeline isolated delete" '404$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/repo-other/pipelines/$pipeline")"
+  ck "pipeline isolated list" '"total":0' "$(c "$B/workspaces/$other_workspace_id/pipelines")"
+  ck "pipeline isolated detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$other_workspace_id/pipelines/$pipeline")"
+  ck "pipeline isolated delete" '404$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$other_workspace_id/pipelines/$pipeline")"
 
   local group_payload group_pipeline other_host other_group other_payload
-  other_host=$(c -X POST -d '{"name":"other-host","connection":"runner"}' "$B/workspaces/repo-other/nodes" |
+  other_host=$(c -X POST -d '{"name":"other-host","connection":"runner"}' "$B/workspaces/$other_workspace_id/nodes" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  other_group=$(c -X POST -d '{"name":"other-group"}' "$B/workspaces/repo-other/node-groups" |
+  other_group=$(c -X POST -d '{"name":"other-group"}' "$B/workspaces/$other_workspace_id/node-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   ck "pipeline foreign host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref "$other_host")" "$B/workspaces/$workspace_id/pipelines")"
   group_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c '
@@ -313,7 +316,7 @@ v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind=
     ck "pipeline missing foreign or wrong-table group" '400$' "$(c -w '%{http_code}' -X POST -d "$invalid_group" "$B/workspaces/$workspace_id/pipelines")"
   done
   other_payload=$(printf '%s' "$group_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["target_ref"]=sys.argv[1];print(json.dumps(v))' "$other_group")
-  ck "pipeline isolated update" '404$' "$(c -w '%{http_code}' -X PATCH -d "$other_payload" "$B/workspaces/repo-other/pipelines/$pipeline")"
+  ck "pipeline isolated update" '404$' "$(c -w '%{http_code}' -X PATCH -d "$other_payload" "$B/workspaces/$other_workspace_id/pipelines/$pipeline")"
   ck "pipeline group delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/pipelines/$group_pipeline")"
   ck "pipeline delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/pipelines/$pipeline")"
   ck "pipeline deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/pipelines/$pipeline")"
