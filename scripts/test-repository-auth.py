@@ -155,6 +155,25 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         # Connection creation has no concrete repository or branch. Reuse vault references.
+        scoped = {}
+        for module in ['host', 'build', 'deploy']:
+            scoped[module] = request(owner, root+'/credentials', {'name':module+' credential', 'scope':module, 'kind':'password', 'secret':'scope-fixture-secret'}, expected=201)['id']
+        for module, identity in scoped.items():
+            result = request(owner, root+'/credentials?scope='+module+'&page_size=1')
+            check(result['total']==1 and [v['id'] for v in result['items']]==[identity], module+' credential page is isolated with correct pagination')
+            row = request(owner, root+'/credentials/'+identity)
+            check(row['scope']==module and 'secret' not in row and row['has_secret'], module+' metadata preserves ownership without exposing secret')
+            request(owner, root+'/credentials/'+identity, dict(row, name='renamed '+module), method='PATCH')
+            row = request(owner, root+'/credentials/'+identity)
+            request(owner, root+'/credentials/'+identity, dict(row, scope='deploy' if module!='deploy' else 'host'), method='PATCH', expected=409)
+            legacy = dict(row)
+            legacy.pop('scope')
+            request(owner, root+'/credentials/'+identity, legacy, method='PATCH')
+            check(request(owner, root+'/credentials/'+identity)['scope']==module, module+' legacy edits retain module ownership')
+        request(owner, root+'/credentials?scope=global', expected=400)
+        request(owner, root+'/credentials', {'name':'Invalid module', 'scope':'global', 'kind':'token', 'secret':'scope-fixture-secret'}, expected=400)
+        for identity in scoped.values():
+            request(owner, root+'/credentials/'+identity, method='DELETE', expected=204)
         shared=request(owner,root+'/credentials',{'name':'Reusable PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token'},expected=201)['id']
         count=request(owner,root+'/credentials')['total']
         credential_before=request(owner,root+'/credentials/'+shared)

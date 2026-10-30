@@ -262,6 +262,7 @@ pub mod credentials {
         pub id: i64,
         pub workspace_id: i64,
         pub name: String,
+        pub scope: String,
         pub kind: String,
         pub username: String,
         pub description: String,

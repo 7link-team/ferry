@@ -35,6 +35,7 @@ export function parse(pathname = location.pathname, search = location.search): R
       .filter(item => resourceName(item.resource) === resource)
       .map(item => ({ group, item })));
     const selected = candidates.find(({ item }) => scope && item.params?.scope === scope)
+      ?? (resource === "credentials" ? candidates.find(({ item }) => item.params?.scope === "build") : undefined)
       ?? candidates.find(({ item }) => !item.hidden) ?? candidates[0];
     const group = selected?.group ?? nav[0]!;
     const item = selected?.item ?? group.items[0]!;

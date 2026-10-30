@@ -114,7 +114,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
     let live = true;
     setLoading(true);
     getResource<T>(workspace, config.resource, id, config.endpoint)
-      .then((row) => live && (setDraft(creating && config.copy ? config.copy(row) : row), setError("")))
+      .then((row) => {
+        if (config.resource === "credentials" && row.scope !== config.blank.scope) throw new Error("此授权认证属于其他模块，请从对应模块进入。");
+        if (live) { setDraft(creating && config.copy ? config.copy(row) : row); setError(""); }
+      })
       .catch((cause: unknown) => live && setError(errorText(cause)))
       .finally(() => live && setLoading(false));
     return () => {

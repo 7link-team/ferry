@@ -46,7 +46,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
     void (async () => {
       const all: Credential[] = [];
       for (let page = 1; active; page++) {
-        const data = await api<{items: Credential[];total?: number;page_size?: number}>(`${root}/credentials?page=${page}&page_size=200`);
+        const data = await api<{items: Credential[];total?: number;page_size?: number}>(`${root}/credentials?scope=build&page=${page}&page_size=200`);
         all.push(...data.items);
         if (!data.items.length || all.length >= (data.total ?? all.length)) break;
       }
@@ -129,7 +129,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
     {provider && (provider === "git" || method === "token") && <>
       <label className="block space-y-2"><span className="text-sm font-medium">授权认证</span><select aria-label="授权认证" className={selectClass} value={credentialId} disabled={loadingCredentials} onChange={event => onChange({ credential_id: event.target.value })}><option value="0">{provider === "git" ? "无需授权（公开仓库）" : "请选择个人访问令牌"}</option>{hasCredential && !availableCredentials.some(row => row.id === credentialId) && <option value={credentialId}>保留已绑定的授权认证 · {credentialId}</option>}{availableCredentials.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
       {loadingCredentials ? <p role="status" className="text-sm text-muted-foreground">正在读取授权认证…</p> : !availableCredentials.length && !credentialError && <p role="status" className="text-sm text-muted-foreground">没有可用的授权认证，请先新建后刷新列表。</p>}
-      <div className="flex flex-wrap items-center gap-3"><a className="text-sm text-primary underline underline-offset-4" href={`/workspaces/${encodeURIComponent(workspace)}/credentials/new`} target="_blank" rel="noopener noreferrer">新建授权认证</a><Button type="button" variant="outline" disabled={loadingCredentials} onClick={() => setRefresh(value => value + 1)}>刷新授权认证</Button></div>
+      <div className="flex flex-wrap items-center gap-3"><a className="text-sm text-primary underline underline-offset-4" href={`/workspaces/${encodeURIComponent(workspace)}/credentials/new?scope=build`} target="_blank" rel="noopener noreferrer">新建授权认证</a><Button type="button" variant="outline" disabled={loadingCredentials} onClick={() => setRefresh(value => value + 1)}>刷新授权认证</Button></div>
       <p className="text-xs text-muted-foreground">{provider === "git" ? "可复用访问令牌、账号密码或 SSH 私钥。" : "选择已保存的个人访问令牌；连接只引用授权认证，不复制密钥。"}</p>
       {provider === "git" ? <label className="block space-y-2"><span className="text-sm font-medium">Git 仓库地址（可选）</span><Input aria-label="Git 仓库地址（可选）" value={String(draft.url ?? "")} placeholder="可在流水线拉取代码步骤中填写" onChange={event => onChange({ url: event.target.value })} /></label> : <>
         {provider === "codeup" && <label className="block space-y-2"><span className="text-sm font-medium">Codeup 组织 ID</span><Input aria-label="Codeup 组织 ID" value={String(draft.organization ?? "")} onChange={event => onChange({ organization: event.target.value })} /><span className="block text-xs text-muted-foreground">中心版必填组织 ID；Region 版可留空，并在下方填写实例的网站和 API 地址。授权认证需填写 Git 用户名，令牌需具备代码仓库、分支只读权限和 Git 拉取权限。</span></label>}

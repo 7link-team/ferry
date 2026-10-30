@@ -56,6 +56,55 @@ it("shows alert rules and events for the current host", async () => {
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/alert-events?") && String(url).includes("target_ref=42"))).toBe(true);
 });
 
+it("keeps connection details in basic information and paged repository tabs", async () => {
+  required = false;
+  permissions = ["repositories.read", "repositories.update"];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/workspaces/2/code-connections/42") return { ok: true, status: 200, json: async () => ({ id: "42", name: "Team Codeup", provider: "codeup", credential_id: "11", organization: "org", version: 1 }) };
+    if (url.startsWith("/api/workspaces/2/code-connections/42/repositories")) {
+      const second = new URL(url, location.origin).searchParams.get("page") === "2";
+      return { ok: true, status: 200, json: async () => ({ items: [{ name: second ? "second" : "first", full_name: second ? "org/second" : "org/first", url: "https://git.example.invalid/repo.git", default_branch: "main" }], has_more: !second }) };
+    }
+    return original(url, options);
+  }));
+  history.replaceState({}, "", "/workspaces/2/code-connections/42");
+  await act(async () => root.render(<App />));
+  const tabs = host.querySelector('[role="tablist"][aria-label="仓库连接详情"]')!;
+  expect(tabs.textContent).toBe("基本信息仓库列表");
+  expect(host.textContent).toContain("Team Codeup");
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/42/repositories"))).toBe(false);
+  await act(async () => tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.focus());
+  expect(location.search).toContain("tab=repositories");
+  expect(host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain("org/first");
+  expect(host.textContent).not.toContain("共 0 条");
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!.click());
+  expect(host.textContent).toContain("org/second");
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!.disabled).toBe(true);
+  await act(async () => tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')[0]!.focus());
+  expect(location.pathname).toBe("/workspaces/2/code-connections/42");
+  expect(host.textContent).toContain("Team Codeup");
+});
+
+it("scopes credential menus, lists and create payloads to the current module", async () => {
+  required = false;
+  permissions = ["credentials.read", "credentials.create"];
+  for (const scope of ["host", "build", "deploy"]) {
+    history.replaceState({}, "", `/workspaces/2/credentials?scope=${scope}`);
+    await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); root.render(<App />); });
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/credentials?") && new URL(String(url), location.origin).searchParams.get("scope") === scope)).toBe(true);
+    const create = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "创建")!;
+    await act(async () => create.click());
+    expect(location.search).toContain(`scope=${scope}`);
+    const form = host.querySelector("main form") ?? host.querySelector("form")!;
+    const input = form.querySelector<HTMLInputElement>('input[type="text"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, `${scope} login`); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await act(async () => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    const posted = [...vi.mocked(fetch).mock.calls].reverse().find(([url, options]) => String(url) === "/api/workspaces/2/credentials" && options?.method === "POST");
+    expect(JSON.parse(String(posted?.[1]?.body)).scope).toBe(scope);
+  }
+});
+
 it("has one repository entry and no separate authorization tabs", async () => {
   required = false;
   permissions = ["repositories.read", "repositories.create", "credentials.read", "credentials.create"];

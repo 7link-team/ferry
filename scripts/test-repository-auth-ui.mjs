@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const codes=new Map();
+let failCodeupRepositoryBrowse=false;
 const provider=createHttpServer(async(request,response)=>{
   const url=new URL(request.url,'http://localhost');
   if(url.pathname==='/login/oauth/authorize') {
@@ -44,8 +45,10 @@ const provider=createHttpServer(async(request,response)=>{
     assert.equal(url.searchParams.get('perPage'),'50');
     const prefix='/oapi/v1/codeup/organizations/test-org/repositories';
     if(url.pathname===prefix) {
-      response.setHeader('x-next-page','');
-      response.end(JSON.stringify([{id:2813489,name:'test-repo',pathWithNamespace:'test-org/team/test-repo',webUrl:providerOrigin+'/test-org/team/test-repo'}]));
+      if(failCodeupRepositoryBrowse) {response.writeHead(403);response.end('{}');return;}
+      const first=url.searchParams.get('page')==='1';
+      response.setHeader('x-next-page',first?'2':'');
+      response.end(JSON.stringify([{id:first?2813489:2813490,name:first?'test-repo':'second',pathWithNamespace:first?'test-org/team/test-repo':'test-org/team/second',webUrl:providerOrigin+(first?'/test-org/team/test-repo':'/test-org/team/second')}]));
     } else {
       assert.equal(url.pathname,prefix+'/test-org%2Fteam%2Ftest-repo/branches');
       const first=url.searchParams.get('page')==='1';response.setHeader('x-next-page',first?'2':'');
@@ -184,8 +187,8 @@ try {
   await credentialPage.getByRole('combobox',{name:/类型/}).click();await credentialPage.getByRole('option',{name:'访问令牌',exact:true}).click();
   await credentialPage.getByLabel(/^账号/).fill('browser-authorized-user');
   await credentialPage.getByLabel(/^内容/).fill('valid-personal-token');
-  await credentialPage.getByRole('button',{name:'创建',exact:true}).click();await credentialPage.waitForURL(`**/workspaces/${workspace_tenant}/credentials`);
-  const credentialRows=await (await owner.request.get(`${origin}/api${root}/credentials`)).json();
+  await credentialPage.getByRole('button',{name:'创建',exact:true}).click();await credentialPage.waitForURL(`**/workspaces/${workspace_tenant}/credentials?scope=build`);
+  const credentialRows=await (await owner.request.get(`${origin}/api${root}/credentials?scope=build`)).json();
   const personalCredential=credentialRows.items.find(row=>row.name==='Reusable Gitee PAT');assert(personalCredential);assert(!('secret' in personalCredential));assert(personalCredential.has_secret);
   await credentialPage.close();
   assert.equal(await p.getByLabel(/^连接名称/).inputValue(),'Gitee connection');assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
@@ -216,9 +219,48 @@ try {
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const codeupConnection=rows.items.find(row=>row.provider==='codeup');assert(codeupConnection);
 
+  await p.setViewportSize({width:1280,height:900});
+  const connectionPath=`${origin}/workspaces/${workspace_tenant}/code-connections/${codeupConnection.id}`;
+  await p.goto(connectionPath);
+  const detailTabs=p.getByRole('tablist',{name:'仓库连接详情',exact:true});
+  await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).waitFor();
+  await p.getByText('Codeup private checkout',{exact:true}).waitFor();
+  await detailTabs.getByRole('tab',{name:'仓库列表',exact:true}).click();
+  await p.getByRole('cell',{name:'test-org/team/test-repo',exact:true}).waitFor();
+  assert.equal(new URL(p.url()).pathname,new URL(connectionPath).pathname);
+  await p.getByRole('button',{name:'下一页',exact:true}).click();
+  await p.getByRole('cell',{name:'test-org/team/second',exact:true}).waitFor();
+  assert(await p.getByRole('button',{name:'下一页',exact:true}).isDisabled());
+  await p.reload();await p.getByRole('cell',{name:'test-org/team/second',exact:true}).waitFor();
+  failCodeupRepositoryBrowse=true;
+  await p.getByRole('button',{name:'刷新',exact:true}).click();await p.getByRole('alert').filter({hasText:'Codeup拒绝访问'}).waitFor();
+  failCodeupRepositoryBrowse=false;
+  await p.getByRole('button',{name:'刷新',exact:true}).click();await p.getByRole('cell',{name:'test-org/team/second',exact:true}).waitFor();
+  await p.getByRole('button',{name:'上一页',exact:true}).click();await p.getByRole('cell',{name:'test-org/team/test-repo',exact:true}).waitFor();
+  await p.setViewportSize({width:390,height:844});
+  assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'connection repository table fits mobile viewport');
+  await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).click();await p.getByText('Codeup private checkout',{exact:true}).waitFor();
+  console.log('PASS: connection detail tabs, Codeup repository pagination, reload deep link, permission failure/retry and mobile layout');
+
   const passwordCredential=await post(owner,root+'/credentials',{name:'Reusable Git password',kind:'password',username:'git-user',secret:'generic-private-password',description:''});
+  const hostCredential=await post(owner,root+'/credentials',{scope:'host',name:'Node SSH only',kind:'password',username:'operator',secret:'host-only-fixture-password'});
+  const appCredential=await post(owner,root+'/credentials',{scope:'deploy',name:'Application only',kind:'token',secret:'app-only-fixture-token'});
+  for (const [scope, visible, hidden] of [['host','Node SSH only',['Reusable Git password','Application only']],['build','Reusable Git password',['Node SSH only','Application only']],['deploy','Application only',['Reusable Git password','Node SSH only']]]) {
+    await p.goto(`${origin}${root}/credentials?scope=${scope}`);
+    await p.getByRole('cell',{name:visible,exact:true}).waitFor();
+    for(const name of hidden)assert.equal(await p.getByRole('cell',{name,exact:true}).count(),0,scope+' list excludes other modules');
+  }
+  await p.goto(`${origin}${root}/nodes/new`);
+  await p.getByRole('tab',{name:'SSH',exact:true}).click();
+  const sshSelector=p.getByRole('combobox',{name:/登录凭据/});await sshSelector.click();
+  await p.getByRole('option',{name:/Node SSH only/}).waitFor();
+  assert.equal(await p.getByRole('option',{name:/Reusable Git password/}).count(),0);
+  await p.keyboard.press('Escape');
+  assert(hostCredential.id&&appCredential.id);
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('git');
+  assert.equal(await p.getByLabel('授权认证',{exact:true}).locator('option').filter({hasText:'Node SSH only'}).count(),0);
+  assert.equal(await p.getByLabel('授权认证',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);
   await p.getByLabel('Git 仓库地址（可选）',{exact:true}).fill(providerOrigin+'/generic.git');
   await p.getByLabel('授权认证',{exact:true}).selectOption(passwordCredential.id);
   await p.getByLabel(/^连接名称/).fill('Generic with password');

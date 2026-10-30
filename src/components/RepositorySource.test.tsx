@@ -21,7 +21,7 @@ beforeEach(()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();vi.restoreAllMocks();});
 it("named platform connections select credential IDs without repository, branch or secret inputs",async()=>{
  await mount();
- expect(requests.some(url=>url.includes("/credentials"))).toBe(true);
+ expect(requests.some(url=>url.includes("/credentials?scope=build&"))).toBe(true);
  await select("授权认证","11");
  expect(patch).toHaveBeenLastCalledWith({credential_id:"11"});
  expect(validity).toHaveBeenLastCalledWith(false);
@@ -29,7 +29,7 @@ it("named platform connections select credential IDs without repository, branch 
  expect(host.textContent).not.toContain("选择平台仓库");
  expect(host.textContent).not.toContain("默认分支");
  expect(host.querySelector('[aria-label="授权认证"]')?.textContent).not.toContain("Deploy key");
- expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/workspaces/ops/credentials/new");
+ expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/workspaces/ops/credentials/new?scope=build");
 });
 it("ordinary Git permits an optional URL and all existing Git credential kinds",async()=>{
  await mount({name:"Git connection",provider:"git",credential_id:"0"});

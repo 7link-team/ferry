@@ -768,6 +768,7 @@ async fn save_connection(
             workspace_id: Set(scope.workspace_id.into()),
             name: Set(format!("{} · {}", kind, account).chars().take(60).collect()),
             kind: Set("token".into()),
+            scope: Set("build".into()),
             username: Set(account.into()),
             secret: Set(sealed),
             description: Set("仓库连接管理；请在仓库表单中重新连接。".into()),

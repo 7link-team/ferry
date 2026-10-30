@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ResourceTable } from "./ResourceTable";
 import { navigate } from "../router";
 import type { ListConfig } from "./dsl";
+import { listResource } from "../resource";
 
 vi.mock("../router", () => ({
   useRoute: () => ({ workspace: "ops", group: "host", item: "hosts", mode: "list" }),
@@ -21,6 +22,27 @@ beforeEach(() => {
   element = document.createElement("div"); document.body.append(element); root = createRoot(element);
 });
 afterEach(async () => { await act(async () => root.unmount()); element.remove(); vi.clearAllMocks(); });
+it("shows refresh failures even when a remote page already contains rows, then recovers", async () => {
+  const first = { items: [{ id: "1", name: "Repository" }], total: 0, page: 1, page_size: 50, has_more: true };
+  vi.mocked(listResource).mockResolvedValueOnce(first);
+  const config: ListConfig<{ id: string; name: string }> = {
+    resource: "connection-repositories", pagination: "next", rowKey: row => row.id,
+    columns: [{ key: "name", label: "仓库名称" }], toolbar: { create: false },
+  };
+  await act(async () => root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+  const next = () => element.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!;
+  expect(next().disabled).toBe(false);
+  expect(element.textContent).not.toContain("共 0 条");
+  const refresh = () => [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "刷新")!;
+  vi.mocked(listResource).mockRejectedValueOnce(new Error("Provider HTTP 403"));
+  await act(async () => refresh().click());
+  expect(element.querySelector('[role="alert"]')?.textContent).toBe("Provider HTTP 403");
+  expect(next().disabled).toBe(true);
+  vi.mocked(listResource).mockResolvedValueOnce({ ...first, has_more: false });
+  await act(async () => refresh().click());
+  expect(element.querySelector('[role="alert"]')).toBeNull();
+  expect(next().disabled).toBe(true);
+});
 it("isolates pending actions to their own row/button and allows concurrent probes and navigation", async () => {
   const finish = new Map<string, () => void>();
   const action = vi.fn((row: { id: string }) => new Promise<void>(done => finish.set(row.id, done)));

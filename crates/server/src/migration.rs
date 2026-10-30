@@ -94,6 +94,7 @@ impl MigratorTrait for Migrator {
             Box::new(HostConnectionCommand),
             Box::new(HostJump),
             Box::new(PipelineGroupOrder),
+            Box::new(CredentialScopes),
         ]
     }
 }
@@ -2858,5 +2859,105 @@ impl MigrationTrait for NamedCodeConnections {
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct CredentialScopes;
+impl MigrationName for CredentialScopes {
+    fn name(&self) -> &str {
+        "credential_scopes_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for CredentialScopes {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        use sea_orm::ConnectionTrait;
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "credentials",
+                "scope",
+                Table::alter()
+                    .table(Alias::new("credentials"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("scope"))
+                            .string_len(20)
+                            .not_null()
+                            .default("build"),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        // Preserve credential IDs, ciphertext/AAD and all historical references.
+        m.get_connection().execute_unprepared(
+            "UPDATE credentials SET scope = 'deploy' WHERE EXISTS (SELECT 1 FROM repositories r INNER JOIN marketplace_sources m ON m.repository_id = r.id AND m.workspace_id = r.workspace_id WHERE r.workspace_id = credentials.workspace_id AND r.credential_id = credentials.id)"
+        ).await?;
+        m.get_connection().execute_unprepared(
+            "UPDATE credentials SET scope = 'host' WHERE EXISTS (SELECT 1 FROM hosts WHERE hosts.workspace_id = credentials.workspace_id AND hosts.credential_id = credentials.id)"
+        ).await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod credential_scope_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, EntityTrait, QueryOrder};
+
+    #[tokio::test]
+    async fn upgrade_preserves_legacy_credentials_and_host_bindings() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::connect(format!(
+            "sqlite://{}?mode=rwc",
+            dir.path().join("upgrade.sqlite").display()
+        ))
+        .await
+        .unwrap();
+        Migrator::up(&db, Some(Migrator::migrations().len() as u32 - 1))
+            .await
+            .unwrap();
+        db.execute_unprepared("INSERT INTO credentials (id,workspace_id,name,kind,username,description,secret,created_at,updated_at,version) VALUES (1,10,'SSH','password','root','','sealed-host',1,2,3),(2,10,'Git','token','','','sealed-git',1,2,4),(3,20,'Other tenant','token','','','sealed-other',1,2,5)").await.unwrap();
+        db.execute_unprepared("INSERT INTO hosts (id,workspace_id,name,address,connection,credential_id,created_at,updated_at) VALUES (4,10,'Node','127.0.0.1','ssh',1,1,2),(5,10,'Invalid tenant binding','127.0.0.2','ssh',3,1,2)").await.unwrap();
+        db.execute_unprepared("INSERT INTO credentials (id,workspace_id,name,kind,username,description,secret,created_at,updated_at,version) VALUES (6,10,'Application','token','','','sealed-app',1,2,6)").await.unwrap();
+        db.execute_unprepared("INSERT INTO repositories (id,workspace_id,name,provider,url,default_branch,credential_id,description,created_at,updated_at,version) VALUES (7,10,'Application repository','git','https://git.example.invalid/app.git','main',6,'',1,2,1)").await.unwrap();
+        db.execute_unprepared("INSERT INTO marketplace_sources (id,workspace_id,name,repository_id,config,state,last_error,synced_at,run_as,version,created_at,updated_at) VALUES (8,10,'Application source',7,'{}','idle','',0,0,1,1,2)").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        use crate::entities::{credentials, hosts};
+        let rows = credentials::Entity::find()
+            .order_by_asc(credentials::Column::Id)
+            .all(&db)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.iter().map(|v| v.scope.as_str()).collect::<Vec<_>>(),
+            ["host", "build", "build", "deploy"]
+        );
+        assert_eq!(
+            rows.iter()
+                .map(|v| (v.id, v.secret.as_str(), v.version))
+                .collect::<Vec<_>>(),
+            [
+                (1, "sealed-host", 3),
+                (2, "sealed-git", 4),
+                (3, "sealed-other", 5),
+                (6, "sealed-app", 6)
+            ]
+        );
+        assert_eq!(
+            hosts::Entity::find_by_id(4)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .credential_id,
+            1
+        );
     }
 }

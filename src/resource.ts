@@ -6,6 +6,7 @@
 import { api } from "./api";
 
 export interface Envelope<T> {
+  has_more?: boolean;
   items: T[];
   total: number;
   page: number;

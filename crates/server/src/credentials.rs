@@ -1,4 +1,4 @@
-//! 授权认证 — the credential store shared by SSH hosts and Git repositories.
+//! 授权认证 — module-owned credentials backed by one encrypted store.
 //!
 //! The secret half never leaves the server. List and detail report only
 //! whether one is set; there is no endpoint that returns a stored secret, not
@@ -32,7 +32,7 @@ use std::collections::HashMap;
 
 const SPEC: Spec = Spec {
     search: &["name", "username"],
-    filters: &["kind"],
+    filters: &["kind", "scope"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
@@ -45,6 +45,7 @@ struct Summary {
     id: i64,
     name: String,
     kind: String,
+    scope: String,
     username: String,
     description: String,
     has_secret: bool,
@@ -61,6 +62,7 @@ fn summary_query() -> Select<credentials::Entity> {
             Column::Id,
             Column::Name,
             Column::Kind,
+            Column::Scope,
             Column::Username,
             Column::Description,
             Column::CreatedAt,
@@ -75,6 +77,7 @@ fn to_json(row: &Summary) -> Value {
         "id": Id::from(row.id),
         "name": row.name,
         "kind": row.kind,
+        "scope": row.scope,
         "username": row.username,
         "description": row.description,
         // Whether a secret exists, never the secret.
@@ -87,6 +90,8 @@ fn to_json(row: &Summary) -> Value {
 
 #[derive(Deserialize)]
 pub struct Body {
+    #[serde(default)]
+    scope: Option<String>,
     name: String,
     #[serde(default)]
     kind: String,
@@ -102,7 +107,17 @@ pub struct Body {
     version: i64,
 }
 
+fn check_scope(value: &str) -> Result<()> {
+    if !["host", "build", "deploy"].contains(&value) {
+        return Err(ApiError::bad("请选择授权认证所属模块：主机、构建或应用。"));
+    }
+    Ok(())
+}
+
 fn check(body: &Body, creating: bool) -> Result<String> {
+    if let Some(value) = &body.scope {
+        check_scope(value)?;
+    }
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
         return Err(ApiError::bad("请填写名称（60 字以内）。"));
@@ -128,6 +143,9 @@ pub async fn list(
     Query(raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("credentials.read")?;
+    if let Some(value) = raw.get("scope") {
+        check_scope(value)?;
+    }
     let query = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) =
         resource::list(&s.db, &SPEC, summary_query(), &scope.workspace_id, &query).await?;
@@ -188,6 +206,7 @@ pub(crate) async fn create_in(
         workspace_id: Set(i64::from(scope.workspace_id)),
         name: Set(name.clone()),
         kind: Set(body.kind.trim().to_owned()),
+        scope: Set(body.scope.unwrap_or_else(|| "build".into())),
         username: Set(body.username.trim().to_owned()),
         description: Set(body.description.trim().to_owned()),
         secret: Set(sealed),
@@ -274,6 +293,9 @@ pub async fn update(
         .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(credentials::Column::Id.eq(id))
         .filter(credentials::Column::Version.eq(body.version));
+    if let Some(module) = &body.scope {
+        update = update.filter(credentials::Column::Scope.eq(module));
+    }
     if let Some(sealed) = &rotated {
         update = update.col_expr(credentials::Column::Secret, Expr::value(sealed.clone()));
     }
@@ -421,6 +443,7 @@ mod tests {
             workspace_id: Set(1),
             name: Set("credential".into()),
             kind: Set("password".into()),
+            scope: Set("build".into()),
             username: Set(String::new()),
             description: Set(String::new()),
             secret: Set("sealed-value-must-stay-in-database".into()),

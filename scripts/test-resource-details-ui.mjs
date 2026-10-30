@@ -22,7 +22,7 @@ try {
       nodes: [{ id: 'n1', name: 'Production node', connection: 'ssh', address: longAddress, port: 22, username: 'operator', credential_id: 'c1', group_id: 'g1', tag_ids: ['t1'], version: 1 }],
       'node-groups': [{ id: 'g1', name: 'Production', parent_id: '0' }],
       tags: [{ id: 't1', name: 'Critical', color: '#2563eb' }],
-      credentials: [{ id: 'c1', name: 'SSH login', kind: 'password', username: 'operator', description: 'Operations credential', has_secret: true }],
+      credentials: [{ id: 'c1', name: 'SSH login', scope: 'build', kind: 'password', username: 'operator', description: 'Operations credential', has_secret: true }],
       members: [{ id: 'm1', name: 'Workspace owner', email: 'owner@example.invalid', role_name: 'Owner', owner: true }],
     };
     let value;

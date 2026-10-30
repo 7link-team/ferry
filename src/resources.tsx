@@ -60,6 +60,7 @@ export interface Activity {
 export interface Credential {
   id: string;
   name: string;
+  scope: string;
   kind: string;
   username: string;
   description: string;
@@ -114,8 +115,13 @@ function ago(at: number) {
 /** Group options for the filter and the form, loaded once per render pass. */
 /** SSH login needs a password or a key; a token is for Git, not for sshd. */
 const sshCredentialOptions = (workspace: string) => async (): Promise<Option[]> => {
-  const page = await listResource<Credential>(workspace, "credentials", { page_size: 200 });
-  return page.items
+  const credentials: Credential[] = [];
+  for (let page = 1; ; page++) {
+    const result = await listResource<Credential>(workspace, "credentials", { page, page_size: 200, scope: "host" });
+    credentials.push(...result.items);
+    if (page * result.page_size >= result.total) break;
+  }
+  return credentials
     .filter((c) => c.kind === "password" || c.kind === "ssh-key")
     .map((c) => ({ value: c.id, label: `${c.name}（${label(CREDENTIAL_KINDS, c.kind)}）` }));
 };
@@ -540,7 +546,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
         },
       ],
       toolbar: { import: false, export: false },
-      empty: "还没有凭据。SSH 主机和 Git 仓库都从这里取登录信息。",
+      empty: "当前模块还没有授权认证，添加后可在本模块中选择使用。",
     }),
 
     activity: list({
@@ -763,7 +769,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
                 { key: "kind", label: "类型", type: "select", required: true, options: CREDENTIAL_KINDS.filter(option => option.value === "password" || option.value === "ssh-key") },
                 { key: "secret", label: "密码", type: "password", required: true, span: 2, when: values => values.kind === "password" },
                 { key: "secret", label: "SSH 私钥", type: "secret", required: true, span: 2, when: values => values.kind === "ssh-key" },
-              ], create: async values => { const row = await createResource<{ id: string }>(workspace, "credentials", { ...values, username: "", description: "" }); return { value: row.id, label: String(values.name) }; } },
+              ], create: async values => { const row = await createResource<{ id: string }>(workspace, "credentials", { ...values, scope: "host", username: "", description: "" }); return { value: row.id, label: String(values.name) }; } },
               when: (draft: Partial<Host>) => draft.connection === "ssh",
             },
           ],
@@ -794,11 +800,11 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
     credentials: form({
       resource: "credentials",
       heading: (r: Credential) => r.name,
-      blank: { name: "", kind: "password", username: "", description: "", secret: "" },
+      blank: { name: "", scope: "build", kind: "password", username: "", description: "", secret: "" },
       sections: [
         {
           fields: [
-            { key: "name", label: "名称", type: "text", required: true, placeholder: "例如 生产机 root" },
+            { key: "name", label: "名称", type: "text", required: true, placeholder: "输入便于识别的凭据名称" },
             {
               key: "kind",
               label: "类型",
@@ -808,7 +814,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
               immutable: true,
               help: "创建后不可更改：改类型等于换一条凭据。",
             },
-            { key: "username", label: "账号", type: "text", placeholder: "root" },
+            { key: "username", label: "账号", type: "text", placeholder: "填写目标服务的登录账号" },
             {
               key: "secret",
               label: "内容",

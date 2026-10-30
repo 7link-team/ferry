@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { href, parse } from "./router";
 
 const workspace = "109124796398174208";
+it("preserves each module through credential list, create, detail and edit links", () => {
+  for (const scope of ["host", "build", "deploy"]) {
+    for (const suffix of ["", "/new", "/123", "/123/edit"]) {
+      const path = `/workspaces/${workspace}/credentials${suffix}`;
+      const route = parse(path, `?scope=${scope}`);
+      expect(route.group).toBe(scope);
+      expect(href(route, {})).toBe(`${path}?scope=${scope}`);
+    }
+  }
+  expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("build");
+});
 it("round trips node workspace URLs without changing snowflake precision", () => {
   const path = `/workspaces/${workspace}/nodes/109174082875949056/workspace`;
   expect(parse(path)).toMatchObject({ workspace, group: "host", item: "hosts", id: "109174082875949056", mode: "workspace" });

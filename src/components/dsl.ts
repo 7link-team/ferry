@@ -69,6 +69,8 @@ export interface ListConfig<T> {
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
   defaultPageSize?: number;
+  /** Remote providers expose a next page without a reliable total count. */
+  pagination?: "next";
   defaultRefresh?: number;
   rowKey: (row: T) => string;
   filters?: Filter[];

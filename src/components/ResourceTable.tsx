@@ -281,6 +281,7 @@ export function ResourceTable<T>({
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       {pendingDelete && <DeleteConfirmDialog action={pendingDelete.action} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
       <div className="flex flex-col gap-3">
+        {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
         {!!config.filters?.length && (
           <form
             className="flex flex-wrap items-end gap-3"
@@ -457,7 +458,7 @@ export function ResourceTable<T>({
                               aria-label="选择此行"
                             />
                           )}
-                          {(page - 1) * pageSize + index + 1}
+                          {(config.pagination === "next" ? 0 : (page - 1) * pageSize) + index + 1}
                         </span>
                       </td>
                       {config.columns.map((column) => (
@@ -532,7 +533,7 @@ export function ResourceTable<T>({
               <tr>
                 <td colSpan={columnCount} className="px-3 py-16 text-center text-muted-foreground">
                   {error ? (
-                    <span className="text-destructive">{error}</span>
+                    <span role="alert" className="text-destructive">{error}</span>
                   ) : (
                     (config.empty ?? "没有符合条件的记录。")
                   )}
@@ -582,19 +583,19 @@ export function ResourceTable<T>({
           </>
         )}
         <span className="flex-1" />
-        <span className="text-muted-foreground">共 {total} 条</span>
+        <span className="text-muted-foreground">{config.pagination === "next" ? `第 ${page} 页 · 本页 ${rows.length} 条` : `共 ${total} 条`}</span>
         <nav className="flex items-center gap-1" aria-label="分页">
           <Button
             size="icon"
             variant="outline"
             className="size-8"
-            disabled={page <= 1}
+            disabled={page <= 1 || loading}
             onClick={() => setPage(page - 1)}
             aria-label="上一页"
           >
             <ChevronLeft />
           </Button>
-          {pageRange(page, pageCount).map((value, index) =>
+          {(config.pagination === "next" ? [] : pageRange(page, pageCount)).map((value, index) =>
             value === null ? (
               <span key={`gap-${index}`} className="px-1 text-muted-foreground">
                 …
@@ -616,14 +617,14 @@ export function ResourceTable<T>({
             size="icon"
             variant="outline"
             className="size-8"
-            disabled={page >= pageCount}
+            disabled={loading || (config.pagination === "next" ? !!error || !data?.has_more : page >= pageCount)}
             onClick={() => setPage(page + 1)}
             aria-label="下一页"
           >
             <ChevronRight />
           </Button>
         </nav>
-        <Select
+        {config.pagination !== "next" && <Select
           value={String(pageSize)}
           onValueChange={(value) => {
             setPageSize(Number(value));
@@ -640,7 +641,7 @@ export function ResourceTable<T>({
               </SelectItem>
             ))}
           </SelectContent>
-        </Select>
+        </Select>}
       </div>
     </div>
   );

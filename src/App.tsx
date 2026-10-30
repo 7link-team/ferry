@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2, X } from "lucide-react";
-import { Dialog } from "radix-ui";
+import { Dialog, Tabs } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -362,6 +362,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             ) : (
               <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
             )
+          ) : route.mode === "view" && item.resource === "code-connections" && route.id && formConfig ? (
+            <RepositoryConnectionDetail key={`${current.id}/${route.id}`} workspace={current.id} connectionId={route.id} permissions={permissions} form={formConfig} />
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
             <DeploymentDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
@@ -555,6 +557,35 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
       </form>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </aside>;
+}
+
+function RepositoryConnectionDetail({ workspace, connectionId, permissions, form }: {
+  workspace: string; connectionId: string; permissions: Set<string>;
+  form: ReturnType<typeof formConfigs>[string];
+}) {
+  const [tab, setTab] = useQueryValue("tab", "info");
+  const repositories = useMemo(() => ({
+    resource: "connection-repositories", permissionResource: "repositories",
+    endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/repositories`,
+    pagination: "next" as const,
+    rowKey: (row: { url: string; name: string; full_name: string; default_branch: string }) => row.url,
+    columns: [
+      { key: "full_name", label: "仓库名称", render: (row: { name: string; full_name: string }) => row.full_name || row.name },
+      { key: "url", label: "仓库地址" },
+      { key: "default_branch", label: "默认分支", render: (row: { default_branch: string }) => row.default_branch || "—" },
+    ],
+    toolbar: { create: false, import: false, export: false, refresh: [0] },
+    empty: "此连接下暂无可见仓库，请检查仓库权限；普通 Git 连接请在拉取代码步骤填写仓库地址。",
+  }), [workspace, connectionId]);
+  const activeTab = tab === "repositories" ? "repositories" : "info";
+  return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
+    <Tabs.List aria-label="仓库连接详情" className="flex gap-1 border-b">
+      {([["info", "基本信息", Info], ["repositories", "仓库列表", FolderTree]] as const).map(([value, label, Icon]) =>
+        <Tabs.Trigger key={value} value={value} asChild><Button variant="ghost" size="sm" className={cn("rounded-none border-b-2", activeTab === value ? "border-primary text-primary" : "border-transparent")}><Icon className="size-4" />{label}</Button></Tabs.Trigger>)}
+    </Tabs.List>
+    <Tabs.Content value="info" className="min-h-0 flex-1 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></Tabs.Content>
+    <Tabs.Content value="repositories" className="flex min-h-0 flex-1 flex-col overflow-auto"><ResourceTable config={repositories} workspace={workspace} permissions={permissions} /></Tabs.Content>
+  </Tabs.Root>;
 }
 
 function HostDetail({
