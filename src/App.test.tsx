@@ -72,7 +72,7 @@ it("groups deployment history and configuration files under application deployme
   permissions = ["deployments.read", "config-templates.read"];
   history.replaceState({}, "", "/workspaces/2/config-templates");
   await act(async () => root.render(<App />));
-  expect(host.querySelector('nav[aria-label="部署"]')?.textContent).toBe("应用部署");
+  expect(host.querySelector('nav[aria-label="应用"]')?.textContent).toBe("应用部署");
   const pages = host.querySelector('nav[aria-label="应用部署页面"]')!;
   expect(pages.textContent).toBe("应用部署部署历史应用配置文件");
   expect(host.textContent).toContain("nginx.conf");

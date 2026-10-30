@@ -1,3 +1,15 @@
+## User steering implemented ? 2026-10-30 18:39 +08
+- Useradded: nodealertcreationmustnotnavigateoutofhostcontext; renamefirstlevelDeploytoApplication. ImplementednavlabelApplication(sharedbreadcrumbs), nodealertin-placedialogwithfixedcurrenthosttarget,save/cancelstayandrefreshlocalrules. ResourceFormreusesrender/validation/APIwithcreateInPlace+onCancel; ignoresquerycopy/targetprefillsinthismode.
+- ActualfullalertsChromiumPASS onisolatedlatestbackend inclnewopen/cancel/saveunchangedURL,fixedhostPOST,inplacerefresh; existingglobalalertCRUD/liveofflineevents/historyPASS. LocaluniqueROOTfrontend142PASS23files(excludedtemporarydiagnosticworktree); typecheck+productionUI+embeddedbackendbuildPASS. Copiedfreshalpha21exe; start-alpha21.ps1expectedbundleupdatedfromactualdistindex.
+- Product/UIchangedaftera22, so DONOTPUBLISHa22oldfull41039315782(nowstarted). Previous4d34full41037139577completed19PASSonlyknownbrowserfixtureFAIL; allWindows/macOSdesktop/nativeandSwarmPASS. Needcommitnewproductchanges, cancelobsoletea22runandnewredundantpush; ONEnewworkflow_dispatchexactfinalSHA. Version21stillno21tag/publicrelease.
+- Local4291still19. Releaseandimageverification,backup/localupgrade,cleanupstillpending. NoSYSTEMRunnerupgrade.
+
+## Final stable source queued ? 2026-10-30 18:30 +08
+- EXACT final source a22d735c3690a0722f68eb7a35bb1526657db1ef; onlytest+memoryafter4d34fd5productfix. Fullworkflow_dispatch41039315782currentlyqueuedbehind41037139577 (17PASS,known1browserfixtureFAIL,2desktoprunning). DoNOTdispatchanotherfull. Redundantmainpush41039220244cancelled. Diagnostic9221ce9didthisdispatchonce.
+- FINALsourceimage41039220130 SUCCESSbotharches,sourceOCIsha-a22d735...published. No21publicrelease/tagyet. PromoteONLYfull41039315782afterSUCCESS,guardmaina22d735. Thenserver-image.ymlrelease_tagv0.1.0-alpha.21; verifyreleaseandimageexacta22SHA.
+- Actual4291still19; freshcompiled21serveralpha21exeproductmatchesa22(source4d34compiled,lastcommittestonly),embeddedindex-DZyrk5E2.js. Postpublicationbackup/snapshot+start-alpha21.ps1+verify. InstalledSYSTEMRunnerMUSTNOTupgrade/retrypriorpolicydenial. Usercanrunnewcommand.
+- Oldfull41037139577 provednativeWindowsserviceandSwarm3roundPASSandallnewdetailbrowser32casesPASS. Newfullneedscompletefinalevidence. Temporarydiagnosticbranch9221ce9+worktreedata/alpha20-diagnosticsdonotmerge,cleanupafterrelease.
+
 ## Remaining browser timing fixture ? 2026-10-30 18:25 +08
 - Full41037139577 now13PASS1FAIL6running. IMPORTANT nativeWindowsserviceandSwarm3consecutiveroundsPASS: previousrepairsverified.
 - Solebuild-ui failure is test-build-ui.mjs188 directory navigation awaitresponse timedout. AllprecedingbrowsergatesPASS includingnewdetail32matrix, realterminal/splits/idle, repository/actions etc. Diagnostic41038822996/job124006224344 confirmsDOMshowsrootlistingandtimeoutwaiting/tmp.

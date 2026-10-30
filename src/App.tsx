@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2, X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -377,6 +377,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               permissions={permissions}
               form={formConfig}
               alerts={lists["alert-rules"]}
+              alertForm={forms["alert-rules"]}
               alertEvents={lists["alert-events"]}
             />
           ) : formConfig ? (
@@ -562,6 +563,7 @@ function HostDetail({
   permissions,
   form,
   alerts,
+  alertForm,
   alertEvents,
 }: {
   workspace: string;
@@ -569,12 +571,21 @@ function HostDetail({
   permissions: Set<string>;
   form: ReturnType<typeof formConfigs>[string] | undefined;
   alerts: ReturnType<typeof listConfigs>["alert-rules"] | undefined;
+  alertForm: ReturnType<typeof formConfigs>[string] | undefined;
   alertEvents: ReturnType<typeof listConfigs>["alert-events"] | undefined;
 }) {
   // `?tab=` rather than component state: a shared link should reopen on the
   // terminal if that is what the sender was looking at.
   const [tab, setTab] = useQueryValue("tab", "info");
   const [alertView, setAlertView] = useState<"rules" | "events">("rules");
+  const [creatingAlert, setCreatingAlert] = useState(false);
+  const [alertRevision, setAlertRevision] = useState(0);
+  const nodeAlertForm = useMemo(() => alertForm ? {
+    ...alertForm,
+    blank: { ...alertForm.blank, target_kind: "host", target_ref: hostId },
+    sections: alertForm.sections.map(section => ({ ...section, fields: section.fields.filter(field => field.key !== "target_kind" && field.key !== "target_ref") })),
+  } : undefined, [alertForm, hostId]);
+  useEffect(() => setCreatingAlert(false), [workspace, hostId]);
   useEffect(() => {
     if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
   }, [tab, workspace, hostId]);
@@ -594,6 +605,14 @@ function HostDetail({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <Dialog.Root open={creatingAlert} onOpenChange={setCreatingAlert}><Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
+      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border bg-background p-6 shadow-lg">
+        <div className="mb-1 flex items-center justify-between gap-3"><Dialog.Title className="text-lg font-semibold">新增报警规则</Dialog.Title><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label="关闭" title="关闭"><X className="size-4" /></Button></Dialog.Close></div>
+        <Dialog.Description className="mb-5 text-sm text-muted-foreground">规则关联当前节点，保存后会更新此节点的报警规则列表。</Dialog.Description>
+        {nodeAlertForm && <ResourceForm config={nodeAlertForm} workspace={workspace} permissions={permissions} createInPlace onCancel={() => setCreatingAlert(false)} onSaved={() => { setCreatingAlert(false); setAlertRevision(value => value + 1); }} />}
+      </Dialog.Content>
+    </Dialog.Portal></Dialog.Root>
     <div className="flex flex-wrap items-center justify-between gap-2 border-b">
       <div role="tablist" aria-label="主机详情" className="flex gap-1">
         <Button type="button" role="tab" title="基本信息" aria-selected={tab === "info"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "info" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("info")}><Info className="size-4" />基本信息</Button>
@@ -614,9 +633,9 @@ function HostDetail({
               <Button type="button" role="tab" aria-selected={alertView === "events"} size="sm" variant={alertView === "events" ? "secondary" : "ghost"} onClick={() => setAlertView("events")}>告警事件</Button>
             </div>
             <span className="flex-1" />
-            {alertView === "rules" && permissions.has("alerts.create") && <Button type="button" size="sm" onClick={() => navigate({ workspace, group: "deploy", item: "alerts", mode: "new" }, { target_kind: "host", target_ref: hostId })}><Plus className="size-4" />新增报警规则</Button>}
+            {alertView === "rules" && alertForm && permissions.has("alerts.create") && <Button type="button" size="sm" onClick={() => setCreatingAlert(true)}><Plus className="size-4" />新增报警规则</Button>}
           </div>
-          {alertView === "rules" ? <ResourceTable key={`${hostId}/rules`} config={{ ...alerts, fixed: { target_kind: "host", target_ref: hostId }, filters: (alerts.filters ?? []).filter(filter => filter.key !== "target_kind"), toolbar: { ...alerts.toolbar, create: false }, actions: alerts.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alerts", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
+          {alertView === "rules" ? <ResourceTable key={`${hostId}/rules/${alertRevision}`} config={{ ...alerts, fixed: { target_kind: "host", target_ref: hostId }, filters: (alerts.filters ?? []).filter(filter => filter.key !== "target_kind"), toolbar: { ...alerts.toolbar, create: false }, actions: alerts.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alerts", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
             : <ResourceTable key={`${hostId}/events`} config={{ ...alertEvents, fixed: { target_kind: "host", target_ref: hostId }, filters: (alertEvents.filters ?? []).filter(filter => filter.key !== "rule_id"), actions: alertEvents.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alert-events", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />}
         </div> : <>
         {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">无法确认 Agent 接入方式：{connectionError}</p>}

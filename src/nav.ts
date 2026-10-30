@@ -34,7 +34,7 @@ export const nav: NavGroup[] = [
   },
   {
     key: "deploy",
-    label: "部署",
+    label: "应用",
     items: [
       { key: "apps", label: "应用部署", resource: "deployments", permission: "deployments.read" },
       { key: "revisions", label: "部署历史", resource: "deployment-revisions", hidden: true, parent: "apps", permission: "deployments.read" },

@@ -65,6 +65,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
   workspace,
   permissions,
   onSaved,
+  createInPlace = false,
+  onCancel,
   pipelineWorkspace = false,
   showViewNavigation = true,
 }: {
@@ -72,13 +74,16 @@ export function ResourceForm<T extends Record<string, unknown>>({
   workspace: string;
   permissions: Set<string>;
   onSaved?: () => void;
+  createInPlace?: boolean;
+  onCancel?: () => void;
   pipelineWorkspace?: boolean;
   showViewNavigation?: boolean;
 }) {
-  const route = useRoute();
+  const pageRoute = useRoute();
+  const route = createInPlace ? { ...pageRoute, mode: "new" as const } : pageRoute;
   const creating = route.mode === "new";
-  const copyId = creating ? new URLSearchParams(location.search).get("copy") : null;
-  const blankDraft = creating && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
+  const copyId = creating && !createInPlace ? new URLSearchParams(location.search).get("copy") : null;
+  const blankDraft = creating && !createInPlace && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
     ? { ...config.blank, target_kind: "host", target_ref: new URLSearchParams(location.search).get("target_ref") ?? "" } as Partial<T>
     : config.blank;
   const [draft, setDraft] = useState<Partial<T>>(blankDraft);
@@ -174,6 +179,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         savedId = route.id;
       }
       onSaved?.();
+      if (createInPlace) return;
       if (runAfterSave && savedId) {
         const action = config.viewActions?.find(candidate => candidate.permission === "pipelines.run");
         if (action && permissions.has("pipelines.run")) {
@@ -325,9 +331,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
               {saving && <Loader2 className="animate-spin" />}
               {creating ? config.resource === "hosts" ? "添加主机" : "创建" : "保存"}
             </Button>
-            <Button type="button" variant="outline" asChild>
+            {onCancel ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>取消</Button> : <Button type="button" variant="outline" asChild>
               <a href={backToList}>取消</a>
-            </Button>
+            </Button>}
       </div>}
     </form>
   );
