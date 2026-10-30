@@ -217,3 +217,8 @@ Decision: user approved independent updater, ordinary helper for CurrentUser and
 ## Windows terminal start and resource detail layout — 2026-10-30
 - User requests a user directory as the default Windows terminal CWD. Prefer own user profile, then active console/RDP user profile when running as LocalSystem; no logged-in user falls back to PUBLIC/system drive. Do not change service identity or permissions.
 - All schema-driven detail pages reuse ResourceForm with dedicated read-only section/field styling and available width. Existing editors, secrets, permissions, actions and routes retain their behavior.
+
+## 节点报警上下文与应用菜单 — 2026-10-30
+- 用户要求节点详情新增报警规则时保留层级与上下文。复用 ResourceForm 在详情弹窗内创建，固定关联当前节点，忽略外部查询中的复制和目标预填；保存后刷新当前规则列表，保存及取消均不跳转到其他模块。不增加重复 API 或页面资源路由。
+- 一级菜单“部署”改为“应用”，共享导航定义同时更新菜单、无障碍名称和面包屑。现有资源 URL、部署操作名称及 API 权限语义不变。
+- 已随 `v0.1.0-alpha.21` 交付，源码 `2d9d3b5`；完整 CI 和实际浏览器验收通过，4291 开发服务已更新。后续状态以 MEMORY.md 顶部为准。

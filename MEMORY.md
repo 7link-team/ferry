@@ -1,3 +1,21 @@
+## 已交付 alpha.21 — 2026-10-30 19:12 +08
+- 本次需求完成：Windows 新终端默认进入合适的用户目录；共享基本信息详情页统一布局；节点报警规则弹窗原地新增、固定当前节点并原地刷新；一级菜单及面包屑“部署”改为“应用”。沿用现有表单、权限、主题和 REST 资源路径。
+- 公开版本：https://github.com/7link-team/ferry/releases/tag/v0.1.0-alpha.21 ，精确源码 `2d9d3b5d514a72566ad70be13ac6f012f4789894`。完整构建 `41042531825` 全部 21 项成功；验证后发布 `41045714809` 成功。不要重复触发发布。
+- 公开文件验证通过：21 个资源及其校验和、签名 Runner 清单和 5 个目标、5 个桌面更新绑定；已下载并验证 Windows 安装器及 Runner。镜像源构建 `41042259816`、版本发布 `41045978084` 成功；amd64/arm64 与同一源码匹配，版本摘要 `sha256:5f57e95f0d82333133eec1764b3aee84b9c3382db9cec9bc6bfcd5a9b99e7d8c`。
+- 本机 `http://127.0.0.1:4291/` 已升级到 `0.1.0-alpha.21`，普通开发后端 PID `73080`，最终页面包 `index-CsDZsTmT.js` 已通过 HTTP 检查。保留实例 `46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2`、原资源 ID、数据库完整性和密钥；备份目录 `data/backups/pre-alpha17-20261030-190918`。仍使用 `data/dev-backend`，未操作 5173/4290/4292。
+- 本地验收：独立前端 142 项通过、类型检查及生产构建通过；后端 142 项通过/2 项忽略；真实 Chromium 验证节点报警弹窗打开/取消/保存 URL 不变、目标绑定、原地刷新及既有报警 CRUD/离线事件/历史。Windows 终端目录及多平台服务生命周期、签名升级回滚、所有桌面包、三库、部署和流水线由完整 CI 验证通过。
+- Swarm 发布验收发现旧任务可能误报新版本就绪，已增加本次执行版本匹配并通过连续三轮实测；旧路由和异步加载的测试夹具错误也已修正，没有弱化断言。
+- 临时诊断工作区 `data/alpha20-diagnostics` 与本地/远程 `feat/alpha20-release-diagnostics` 分支已清理，诊断工作流未合入主分支。自审与原始需求验收通过；无待发布或待升级的 4291 操作。
+- 限制：此前自动审批审查拒绝了升级本机 SYSTEM Runner 服务，未重试或绕过。因此该服务未自动更新；用户需在节点详情执行本版连接命令，Runner 升级后新终端才使用新目录。真实第三方私有 OAuth 账号仍未验证，范围未扩大。
+- 下文全部属于历史检查点，已由本节交付状态取代，不得照抄旧的构建、发布或升级操作。
+
+## FINAL node-alert source verification active ? 2026-10-30 18:42 +08
+- Exactmain2d9d3b5d514a72566ad70be13ac6f012f4789894,version21. Fullworkflow_dispatch41042531825STARTED20jobs; image41042259816sameSHAqueued/runningamd64+arm64. DONOTdispatchanotherbuild. Supersededa22full41039315782andnewpush41042259674cancelledbydiagnostic74f1c31/run41042330146. Old4d34full41037139577ended19PASSonlyknownbrowserracefixtureFAIL.
+- PromoteONLY41042531825aftercompletedSUCCESS; guardeddispatchpreparedignoreddata/maintenance/alpha21-publish-dispatch.ymlwithcurrentSHA/runIDandUTF8releasenotesincludingnewmenuandnodealertdialog. Toexecute,copythatfiletodiagnosticworktreeworkflow,commitpushONLYdiagnosticbranch. Theninspectpublish-verified.ymlmainrunandpublicrelease. Dispatchserver-image.ymlrelease_tagv0.1.0-alpha.21AFTERrelease. Verifyrelease+imagehelperswith2d9d3b5exactSHA.
+- Localbackendalpha21exeFRESHbuildfinalUIindex-CsDZsTmT.js; isolatedactualalertsChromiumPASSnewdialogopen/cancel/savefixedhost+unchangedURL+refreshandoldCRUD/liveofflineevents/history. UniqueROOTfrontend142PASS23files(excludediagnosticworktree),typecheckbuildPASS.
+- Actual4291remains19,doafterrelease: capturedata/maintenance/alpha20-state.py; start-alpha21.ps1(backsupsDB/key+guardold4291ordinaryprocess+starts21); verifyalpha20-state.py; statusinstance/masterkey/IDs/currentembeddedUI. DoNOTupgradeSYSTEMRunner(priorautomaticreviewdenied,donotretry/workaround); no5173/4290/4292touch.
+- Afterpublicreleaseandlocalupgrade,cleanupdiagnosticworktreeandlocal/remotebranch(no merge),persistfinalMEMORY+ADR,commitdocswith[skip ci]toavoidanotherunneededbuild. FinalresponseChineseconcise+CLAUDEack+release+localURL+Runnerupgradecaveat+NextStep. No21tag/publicreleaseyet.
+
 ## User steering implemented ? 2026-10-30 18:39 +08
 - Useradded: nodealertcreationmustnotnavigateoutofhostcontext; renamefirstlevelDeploytoApplication. ImplementednavlabelApplication(sharedbreadcrumbs), nodealertin-placedialogwithfixedcurrenthosttarget,save/cancelstayandrefreshlocalrules. ResourceFormreusesrender/validation/APIwithcreateInPlace+onCancel; ignoresquerycopy/targetprefillsinthismode.
 - ActualfullalertsChromiumPASS onisolatedlatestbackend inclnewopen/cancel/saveunchangedURL,fixedhostPOST,inplacerefresh; existingglobalalertCRUD/liveofflineevents/historyPASS. LocaluniqueROOTfrontend142PASS23files(excludedtemporarydiagnosticworktree); typecheck+productionUI+embeddedbackendbuildPASS. Copiedfreshalpha21exe; start-alpha21.ps1expectedbundleupdatedfromactualdistindex.
