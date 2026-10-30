@@ -14,6 +14,13 @@ import time
 import urllib.request
 import urllib.error
 
+if os.environ.get('GITHUB_ACTIONS'):
+    def report_failure(kind, error, trace):
+        message = f'{kind.__name__}: {error}'.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print(f'::error::{message}', flush=True)
+        sys.__excepthook__(kind, error, trace)
+    sys.excepthook = report_failure
+
 old, new = map(lambda p: str(Path(p).resolve()), sys.argv[1:])
 with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
     with socket.socket() as sock:
@@ -48,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
     with open(Path(directory)/'server.log', 'wb') as log:
         process = launch(old, log)
         try:
-            subprocess.run(['python3', 'scripts/test-setup.py', origin, directory, '--legacy'], check=True)
+            subprocess.run([sys.executable, 'scripts/test-setup.py', origin, directory, '--legacy'], check=True)
             api('/users', {'email':'upgrade@example.invalid','password':'correct-horse-battery','name':'upgrade'})
             api('/workspaces', {'slug':'upgrade','name':'upgrade'})
             host=create('hosts', {'name':'saved-host','connection':'runner'})
@@ -88,6 +95,8 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     assert after.get('tag_ids') == [] and after.get('tags') == []
                     before[path]['tag_ids'] = []
                     before[path]['tags'] = []
+                    assert after['jump_host_id'] == before[path].get('jump_host_id', '0')
+                    before[path].setdefault('jump_host_id', '0')
                 if '/pipelines/' in path:
                     defaults={'definition_format':'legacy','executor_bindings':[],'checkout_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
                     for key,value in defaults.items():

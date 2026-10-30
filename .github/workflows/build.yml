@@ -288,6 +288,7 @@ jobs:
       - name: Marketplace and browser repository authorization
         if: matrix.harness == 'build-ui'
         run: |
+          trap 'echo "::error::Browser acceptance failed: $BASH_COMMAND"' ERR
           node scripts/test-marketplace-ui.mjs
           node scripts/test-repository-auth-ui.mjs
           node scripts/test-actions-ui.mjs

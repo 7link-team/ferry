@@ -71,7 +71,11 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           docker tag ferry-server:check "$IMAGE:sha-$GITHUB_SHA-$ARCH"
-          docker push "$IMAGE:sha-$GITHUB_SHA-$ARCH"
+          if ! docker push "$IMAGE:sha-$GITHUB_SHA-$ARCH" 2>&1 | tee push.log; then
+            detail=$(tail -n 10 push.log | tr '\n' ' ')
+            echo "::error::Registry push failed: $detail"
+            exit 1
+          fi
 
   publish:
     needs: build

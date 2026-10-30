@@ -73,7 +73,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -211,7 +211,7 @@ try {
   await p.getByLabel('流水线名称').fill('Build from connection');
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);
-  await p.getByRole('button',{name:'构建',exact:true}).first().click();
+  await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:'任务 1',exact:true}).click();
   await p.getByLabel('任务执行器',{exact:true}).selectOption(buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
   await p.getByLabel('步骤类型').selectOption('checkout');
@@ -235,7 +235,7 @@ try {
   const binding=build.checkout_bindings.find(row=>row.job_id==='build'&&row.step_id===checkout.id);assert(binding);assert.equal(binding.connection_id,giteeConnection.id);assert.equal(binding.repository_url,providerOrigin+'/team/test-repo.git');assert.equal(binding.ref,sourceCommit);
   assert.equal(build.executor_bindings.find(row=>row.job_id==='build').target_ref,buildHost.id);
   await p.goto(origin+'/tenant/build/pipelines/'+build.id+'/edit');
-  await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:/拉取代码/}).click();
+  await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:/步骤2/}).click();
   assert.equal(await p.getByLabel('仓库连接',{exact:true}).inputValue(),giteeConnection.id);assert.equal(await p.getByLabel('节点仓库',{exact:true}).inputValue(),providerOrigin+'/team/test-repo.git');assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),sourceCommit);
   const run=await post(owner,root+'/pipelines/'+build.id+'/actions/run',{});
   let result;
