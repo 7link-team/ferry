@@ -36,21 +36,21 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
-  await post(owner,root+'/hosts',{name:'Dictionary host',connection:'runner'});
-  await p.goto(`${origin}/tenant/ops/settings`);
+  const root=`/workspaces/${workspace_tenant}`;
+  await post(owner,root+'/nodes',{name:'Dictionary host',connection:'runner'});
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/settings`);
   await p.getByRole('row').filter({hasText:'default_page_size'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByLabel('值',{exact:false}).fill('37');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'37',exact:true}).waitFor();
-  const request=p.waitForRequest(r=>r.url().includes('/api/workspaces/tenant/hosts?') && new URL(r.url()).searchParams.get('page_size')==='37');
-  await p.goto(`${origin}/tenant/host/hosts`); await request;
+  const request=p.waitForRequest(r=>r.url().includes(`/api/workspaces/${workspace_tenant}/nodes?`) && new URL(r.url()).searchParams.get('page_size')==='37');
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`); await request;
   assert.equal(new URL(p.url()).searchParams.get('page_size'),null,'default page size is not a stale URL override');
-  await p.goto(`${origin}/tenant/ops/dictionaries`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('row').filter({hasText:'host-state'}).getByRole('link',{name:'编辑',exact:true}).click();
   const field=p.getByLabel('字典项（JSON 数组）',{exact:false});
   const items=JSON.parse(await field.inputValue());
@@ -58,9 +58,9 @@ try {
   await field.fill(JSON.stringify(items));
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'host-state',exact:true}).waitFor();
-  await p.goto(`${origin}/tenant/host/hosts`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`);
   await p.getByRole('cell',{name:'等待接入',exact:true}).waitFor();
-  await p.goto(`${origin}/tenant/ops/dictionaries`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('标识',{exact:false}).fill('custom');
   await p.getByRole('textbox',{name:/^名称/}).fill('UI dictionary');
@@ -78,7 +78,7 @@ try {
   const get=async path => (await owner.request.get(`${origin}/api${path}`)).json();
   const heartbeat=(await get(root+'/settings')).items.find(r=>r.key==='heartbeat_timeout_seconds');
   const updated=await owner.request.patch(`${origin}/api${root}/settings/${heartbeat.id}`,{headers,data:{version:heartbeat.version,value:40}});assert(updated.ok());
-  const runner=await post(owner,root+'/hosts',{name:'Silent runner',connection:'runner'});
+  const runner=await post(owner,root+'/nodes',{name:'Silent runner',connection:'runner'});
   const {token}=await post(owner,root+'/runner-tokens',{host_id:runner.id});
   const socket=new WebSocket(origin.replace('http:','ws:')+'/api/runners/connect');
   const started=Date.now();
@@ -91,7 +91,7 @@ try {
   // Receive probes without replying: the configured 40s deadline must close it.
   await closed;
   assert(Date.now()-started>=38000 && Date.now()-started<55000,'real connection uses configured heartbeat timeout');
-  assert.equal((await get(root+'/hosts/'+runner.id)).state,'offline');
+  assert.equal((await get(root+'/nodes/'+runner.id)).state,'offline');
   console.log('PASS: silent real runner connection closes after configured 40 seconds');
   assert.deepEqual(errors,[]);
   console.log('PASS: shared settings edit, actual 37-row requests, dictionary labels in host table, dictionary create/copy/delete, no browser errors');

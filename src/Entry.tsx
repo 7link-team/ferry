@@ -11,7 +11,7 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, ApiError, errorText } from "./api";
-import { navigate } from "./router";
+import { navigate, parse } from "./router";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
 
@@ -196,11 +196,11 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
                 event.preventDefault();
                 const body = fields(event.currentTarget);
                 void run(async () => {
-                  const created = await api<{ slug: string }>("/workspaces", {
+                  const created = await api<{ id: string }>("/workspaces", {
                     method: "POST",
                     body: JSON.stringify(body),
                   });
-                  enter(created.slug);
+                  enter(created.id);
                   onReady();
                 });
               }}
@@ -224,11 +224,11 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
                 event.preventDefault();
                 const body = fields(event.currentTarget);
                 void run(async () => {
-                  const joined = await api<{ slug: string }>("/workspaces/actions/join", {
+                  const joined = await api<{ id: string }>("/workspace-memberships", {
                     method: "POST",
                     body: JSON.stringify(body),
                   });
-                  enter(joined.slug);
+                  enter(joined.id);
                   onReady();
                 });
               }}
@@ -247,12 +247,6 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
 }
 
 /** Only rewrites the workspace segment, so a deep link keeps its destination. */
-function enter(slug: string) {
-  const parts = location.pathname.replace(/^\/+/, "").split("/");
-  if (parts.length > 1 && parts[1]) {
-    parts[0] = slug;
-    history.replaceState(history.state, "", `/${parts.join("/")}${location.search}`);
-  } else {
-    navigate({ workspace: slug, mode: "list" }, {}, { replace: true });
-  }
+function enter(workspaceId: string) {
+  navigate({ ...parse(), workspace: workspaceId }, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
 }

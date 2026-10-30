@@ -59,15 +59,24 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
+        check(isinstance(workspace_tenant, str) and int(workspace_tenant) > 2**53,
+              'workspace Snowflake ID is an exact JSON string beyond JavaScript integer precision')
+        for invalid in ['tenant', 'other', '0', '-1', '1e18', '999999999999999999999999999']:
+            request(owner, f'/workspaces/{invalid}/nodes', expected=404)
+            request(admin, f'/workspaces/{invalid}/nodes', expected=404)
+        request(owner, f'/workspaces/{workspace_other}/nodes', expected=404)
+        request(outsider, root+'/nodes', expected=404)
+        check(True, 'workspace IDs enforce tenant isolation; names and invalid IDs are rejected for all roles')
         code = request(owner, root+'/members/invitation')['code']
         rotated = request(owner, root+'/members/invitation', method='POST')['code']
         check(code != rotated, 'invitation rotation changes secret')
-        request(guest, '/workspaces/actions/join', {'code':code}, expected=400)
-        request(guest, '/workspaces/actions/join', {'code':rotated})
-        request(guest, '/workspaces/actions/join', {'code':rotated}, expected=409)
+        request(guest, '/workspace-memberships', {'code':code}, expected=400)
+        joined = request(guest, '/workspace-memberships', {'code':rotated})
+        check(joined['id'] == workspace_tenant, 'joining returns the same canonical workspace ID')
+        request(guest, '/workspace-memberships', {'code':rotated}, expected=409)
         check(request(owner, root+'/members')['total'] == 2, 'join appears in member list')
         rows = request(owner, root+'/members?q=guest')['items']
         check(len(rows)==1 and rows[0]['email']=='guest@example.invalid', 'member search uses public profile')
@@ -94,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/roles',body,expected=409)
         request(owner,root+'/roles/'+rid,dict(body,version=0),'PATCH',409)
         request(owner,root+'/roles/'+rid,dict(body,version=1,name='Operator revised'),'PATCH')
-        foreign=request(outsider,'/workspaces/other/roles')['items'][0]['id']
+        foreign=request(outsider,f'/workspaces/{workspace_other}/roles')['items'][0]['id']
         request(owner,root+'/roles/'+foreign,expected=404)
         request(owner,root+'/members/'+mid,{'version':1,'role_id':foreign},'PATCH',404)
         request(owner,root+'/members/'+mid,{'version':1,'role_id':rid},'PATCH')
@@ -103,14 +112,14 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(request(guest,'/me')['workspaces'][0]['role_name']=='Operator revised','role assignment effective without re-login')
         summary=request(guest,root+'/dashboard')
         check(summary['counts']=={'hosts':0} and summary['recent'] is None and summary['failures_24h']=={}, 'dashboard hides unauthorized metrics and activities')
-        host_id=request(guest,root+'/hosts',{'name':'Runner','connection':'runner'},expected=201)['id']
+        host_id=request(guest,root+'/nodes',{'name':'Runner','connection':'runner'},expected=201)['id']
         summary=request(owner,root+'/dashboard')
         check(summary['counts']['hosts']==1 and summary['counts']['members']==2 and summary['counts']['roles']==6, 'dashboard counts reflect real tenant rows')
         check(summary['states']['hosts']['unknown']==1 and summary['runners'][0]['seen_at'] is None and summary['runners'][0]['lag_ms'] is None, 'unreported runner is not shown as healthy')
         check(len(summary['recent'])>0 and all('details' not in a for a in summary['recent']), 'recent activities expose safe summary')
-        check(request(outsider,'/workspaces/other/dashboard')['counts']['hosts']==0,'dashboard tenant isolation')
+        check(request(outsider,f'/workspaces/{workspace_other}/dashboard')['counts']['hosts']==0,'dashboard tenant isolation')
         pipeline_id=request(owner,root+'/pipelines',{'name':'Dashboard failure','target_kind':'host','target_ref':host_id,'definition':json.dumps({'workdir':'/tmp/workspace-test','steps':[{'name':'offline','run':'true'}]})},expected=201)['id']
-        run_id=request(owner,root+'/pipelines/'+pipeline_id+'/actions/run',{},expected=201)['id']
+        run_id=request(owner,root+'/pipelines/'+pipeline_id+'/runs',{},expected=201)['id']
         for _ in range(100):
             state=request(owner,root+'/pipeline-runs/'+run_id)['state']
             if state not in ('queued','running'): break
@@ -132,6 +141,19 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         with concurrent.futures.ThreadPoolExecutor() as pool:
             results=list(pool.map(lambda _: request(owner,root+'/roles',{'name':'Race','permissions':[]},expected=None), range(2)))
         check(sorted(r[0] for r in results)==[200,409],'concurrent duplicate role creation serialized')
+        for resource in ['node-groups', 'pipeline-groups']:
+            first = request(owner, root+'/'+resource, {'name':'First'}, expected=201)['id']
+            second = request(owner, root+'/'+resource, {'name':'Second'}, expected=201)['id']
+            order = {'ids':[second, first]}
+            if resource == 'node-groups': order['parent_id'] = '0'
+            request(owner, root+'/'+resource+'/ordering', order, method='PATCH')
+            rows = request(owner, root+'/'+resource)['items']
+            check([row['id'] for row in sorted(rows, key=lambda row: row['position'])] == [second, first],
+                  resource+' ordering uses PATCH and persists the requested order')
+        removable = request(owner, root+'/nodes', {'name':'Temporary node','connection':'runner'}, expected=201)['id']
+        request(owner, root+'/nodes', {'ids':[removable]}, method='DELETE')
+        request(owner, root+'/nodes/'+removable, expected=404)
+        check(True, 'DELETE node collection removes only the selected node')
         print(f'{checks} checks passed',flush=True)
     finally:
         proc.terminate(); proc.wait(timeout=20); log.close()

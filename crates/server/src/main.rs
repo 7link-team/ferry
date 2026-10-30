@@ -189,11 +189,11 @@ async fn main() -> anyhow::Result<()> {
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
         .route(
-            "/{workspace}/repository-auth/{provider}/actions/connect",
+            "/{workspace}/repository-providers/{provider}/connections",
             post(repository_auth::connect_token),
         )
         .route(
-            "/{workspace}/repository-auth/{provider}/repositories",
+            "/{workspace}/repository-providers/{provider}/repositories",
             get(repository_auth::browse_repositories),
         )
         .route(
@@ -214,9 +214,12 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/code-connections/{id}/branches",
             get(repository_auth::connection_branches),
         )
-        .route("/{workspace}/repository-auth", get(repository_auth::list))
         .route(
-            "/{workspace}/repository-auth/{provider}/actions/authorize",
+            "/{workspace}/repository-providers",
+            get(repository_auth::list),
+        )
+        .route(
+            "/{workspace}/repository-providers/{provider}/authorizations",
             post(repository_auth::start),
         )
         .route(
@@ -230,13 +233,13 @@ async fn main() -> anyhow::Result<()> {
                 .delete(marketplace::delete_source),
         )
         .route(
-            "/{workspace}/marketplace-sources/{id}/actions/sync",
+            "/{workspace}/marketplace-sources/{id}/synchronizations",
             post(marketplace::sync),
         )
         .route("/{workspace}/marketplace", get(marketplace::list))
         .route("/{workspace}/marketplace/{id}", get(marketplace::get))
         .route(
-            "/{workspace}/marketplace/{id}/actions/install",
+            "/{workspace}/marketplace/{id}/installations",
             post(marketplace::install),
         )
         .route(
@@ -261,15 +264,12 @@ async fn main() -> anyhow::Result<()> {
                 .patch(cron_jobs::update)
                 .delete(cron_jobs::delete),
         )
-        .route(
-            "/{workspace}/cron-jobs/{id}/actions/run-now",
-            post(cron_jobs::run_now),
-        )
+        .route("/{workspace}/cron-jobs/{id}/runs", post(cron_jobs::run_now))
         .route("/{workspace}/cron-jobs/{id}/runs", get(cron_jobs::history))
         .route("/{workspace}/cron-runs", get(cron_jobs::list_runs))
         .route("/{workspace}/cron-runs/{id}", get(cron_jobs::get_run))
         .route(
-            "/{workspace}/cron-runs/{id}/actions/acknowledge",
+            "/{workspace}/cron-runs/{id}/acknowledgements",
             post(cron_jobs::acknowledge),
         )
         .route("/{workspace}/preferences", get(maintenance::preferences))
@@ -299,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(variables::remove),
         )
         .route(
-            "/{workspace}/variables/{id}/actions/reveal",
+            "/{workspace}/variables/{id}/disclosures",
             post(variables::reveal),
         )
         .route(
@@ -325,27 +325,27 @@ async fn main() -> anyhow::Result<()> {
             get(deployments::revisions_for_deployment),
         )
         .route(
-            "/{workspace}/deployments/{id}/actions/render",
+            "/{workspace}/deployments/{id}/renderings",
             post(deployments::render),
         )
         .route(
-            "/{workspace}/deployments/{id}/actions/preview",
+            "/{workspace}/deployments/{id}/previews",
             post(deployments::preview),
         )
         .route(
-            "/{workspace}/deployments/{id}/actions/apply",
+            "/{workspace}/deployments/{id}/executions",
             post(deployments::apply),
         )
         .route(
-            "/{workspace}/deployments/{id}/actions/rollback",
+            "/{workspace}/deployments/{id}/rollbacks",
             post(deployments::rollback),
         )
         .route(
-            "/{workspace}/deployments/{id}/actions/acknowledge",
+            "/{workspace}/deployments/{id}/acknowledgements",
             post(deployments::acknowledge),
         )
         .route(
-            "/{workspace}/pipelines/{id}/actions/run",
+            "/{workspace}/pipelines/{id}/runs",
             post(pipeline_runs::trigger),
         )
         .route(
@@ -359,12 +359,12 @@ async fn main() -> anyhow::Result<()> {
                 .delete(templates::configs::delete),
         )
         .route(
-            "/{workspace}/config-templates/{id}/actions/render",
+            "/{workspace}/config-templates/{id}/renderings",
             post(templates::configs::render),
         )
         .route("/{workspace}/pipeline-artifacts", get(artifacts::list))
         .route(
-            "/{workspace}/pipeline-artifacts/{id}/download",
+            "/{workspace}/pipeline-artifacts/{id}/content",
             get(artifacts::download),
         )
         .route(
@@ -372,8 +372,8 @@ async fn main() -> anyhow::Result<()> {
             get(pipeline_contexts::groups::list).post(pipeline_contexts::groups::create),
         )
         .route(
-            "/{workspace}/pipeline-groups/actions/reorder",
-            post(pipeline_contexts::reorder_groups),
+            "/{workspace}/pipeline-groups/ordering",
+            axum::routing::patch(pipeline_contexts::reorder_groups),
         )
         .route(
             "/{workspace}/pipeline-groups/{id}",
@@ -399,11 +399,11 @@ async fn main() -> anyhow::Result<()> {
             get(pipeline_runs::log_list),
         )
         .route(
-            "/{workspace}/pipeline-runs/{id}/actions/cancel",
+            "/{workspace}/pipeline-runs/{id}/cancellations",
             post(pipeline_runs::cancel),
         )
         .route(
-            "/{workspace}/pipeline-runs/{id}/jobs/{key}/approve",
+            "/{workspace}/pipeline-runs/{id}/jobs/{key}/approvals",
             post(pipeline_runs::approve),
         )
         .route(
@@ -417,7 +417,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(templates::apps::delete),
         )
         .route(
-            "/{workspace}/app-templates/{id}/actions/render",
+            "/{workspace}/app-templates/{id}/renderings",
             post(templates::apps::render),
         )
         .route(
@@ -431,7 +431,7 @@ async fn main() -> anyhow::Result<()> {
                 .delete(templates::pipelines::delete),
         )
         .route(
-            "/{workspace}/pipeline-templates/{id}/actions/render",
+            "/{workspace}/pipeline-templates/{id}/renderings",
             post(templates::pipelines::render),
         )
         .route("/{workspace}/dashboard", get(hosts::dashboard))
@@ -462,47 +462,48 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/{workspace}/activity", get(hosts::list_activity))
         .route(
-            "/{workspace}/host-groups",
+            "/{workspace}/node-groups",
             get(hosts::list_groups).post(hosts::create_group),
         )
         .route(
-            "/{workspace}/host-groups/actions/reorder",
-            post(hosts::reorder_groups),
+            "/{workspace}/node-groups/ordering",
+            axum::routing::patch(hosts::reorder_groups),
         )
         .route(
-            "/{workspace}/host-groups/{id}",
+            "/{workspace}/node-groups/{id}",
             get(hosts::get_group)
                 .patch(hosts::update_group)
                 .delete(hosts::delete_group),
         )
         .route(
-            "/{workspace}/hosts",
-            get(hosts::list_hosts).post(hosts::create_host),
+            "/{workspace}/nodes",
+            get(hosts::list_hosts)
+                .post(hosts::create_host)
+                .delete(hosts::bulk_delete_hosts),
         )
         .route(
-            "/{workspace}/hosts/{id}",
+            "/{workspace}/nodes/{id}",
             get(hosts::get_host)
                 .patch(hosts::update_host)
                 .delete(hosts::delete_host),
         )
         .route(
-            "/{workspace}/hosts/actions/bulk-delete",
-            post(hosts::bulk_delete_hosts),
-        )
-        .route(
-            "/{workspace}/hosts/{id}/actions/test-connection",
+            "/{workspace}/nodes/{id}/connection-tests",
             post(remote::test_connection),
         )
-        .route("/{workspace}/hosts/{id}/monitor", get(hosts::monitor_host))
-        .route("/{workspace}/hosts/{id}/terminal", get(remote::terminal))
+        .route("/{workspace}/nodes/{id}/metrics", get(hosts::monitor_host))
         .route(
-            "/{workspace}/hosts/{id}/files",
+            "/{workspace}/nodes/{id}/terminal-sessions",
+            get(remote::terminal),
+        )
+        .route(
+            "/{workspace}/nodes/{id}/files",
             get(remote::list_dir)
                 .post(remote::create_entry)
                 .delete(remote::delete_file),
         )
         .route(
-            "/{workspace}/hosts/{id}/files/content",
+            "/{workspace}/nodes/{id}/files/content",
             // The global JSON limit must not apply here: an upload is streamed
             // straight to the host and is never held in memory, so capping it
             // at the body limit would cap every file at 256 KiB.
@@ -513,11 +514,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/{workspace}/runner-tokens", post(runner::create_token))
         .route("/{workspace}/runner-tokens/{id}", get(runner::token_status))
         .route(
-            "/{workspace}/hosts/{id}/connection-command",
+            "/{workspace}/nodes/{id}/connection-credentials",
             get(runner::connection_command).post(runner::reset_connection_command),
         )
         .route(
-            "/{workspace}/hosts/{id}/runner-update",
+            "/{workspace}/nodes/{id}/runner-updates",
             get(runner::update_status).post(runner::start_update),
         )
         .route(
@@ -598,9 +599,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/users", post(auth::register))
         .route("/api/sessions", post(auth::login).delete(auth::logout))
         .route("/api/me", get(auth::me))
-        .route("/api/repository-auth/callback",get(repository_auth::complete))
+        .route("/api/repository-providers/callback",get(repository_auth::complete))
         .route("/api/workspaces", post(workspace::create))
-        .route("/api/workspaces/actions/join", post(workspace::join))
+        .route("/api/workspace-memberships", post(workspace::join))
         .nest("/api/workspaces", workspace_api)
         .fallback(assets::serve)
         .layer(DefaultBodyLimit::max(256 * 1024))
@@ -771,7 +772,7 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     {
         return (StatusCode::FORBIDDEN, "不允许此来源发起操作。").into_response();
     }
-    let oauth_callback = req.uri().path() == "/api/repository-auth/callback";
+    let oauth_callback = req.uri().path() == "/api/repository-providers/callback";
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());

@@ -267,7 +267,7 @@ impl OAuthSettings {
         {
             return Err(ApiError::bad("请在平台设置中配置有效公开访问地址。"));
         }
-        Ok(endpoint(&url, "api/repository-auth/callback")?.to_string())
+        Ok(endpoint(&url, "api/repository-providers/callback")?.to_string())
     }
 }
 fn config_fingerprint(config: &Provider) -> String {
@@ -525,11 +525,7 @@ pub async fn complete(
         .ok_or_else(|| ApiError::bad("授权状态无效或已过期，请从原工作空间重新发起授权。"))?;
     let scope = Scope::for_actor(&s, pending.workspace_id.into(), account.user.id).await?;
     scope.require("credentials.create")?;
-    let workspace = crate::entities::workspaces::Entity::find_by_id(pending.workspace_id)
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?
-        .slug;
+    let workspace = scope.workspace_id;
     let flow = {
         let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
         let row = flows::Entity::find()
@@ -551,13 +547,13 @@ pub async fn complete(
     .map_err(|_| ApiError::bad("授权状态损坏，请重新授权。"))?;
     let return_path = if proof["popup"].as_bool() == Some(true) {
         format!(
-            "/{workspace}/build/repositories/new?oauth_popup=1&provider={}&oauth_channel={}",
+            "/workspaces/{workspace}/code-connections/new?oauth_popup=1&provider={}&oauth_channel={}",
             flow.provider,
             proof["channel"].as_str().unwrap_or("")
         )
     } else {
         format!(
-            "/{workspace}/build/repositories/new?provider={}",
+            "/workspaces/{workspace}/code-connections/new?provider={}",
             flow.provider
         )
     };

@@ -86,7 +86,7 @@ it("keeps the host command visible offline and replaces it only after confirmed 
   let online = true;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => ({
     ok: true, status: 200,
-    json: async () => url.endsWith("/connection-command")
+    json: async () => url.endsWith("/connection-credentials")
       ? { token: init.method === "POST" ? "new-token" : "old-token", server: "https://example.com", state: init.method === "POST" ? "offline" : "online" }
       : { state: online ? "online" : "offline" },
   })));
@@ -117,7 +117,7 @@ it("creates a 15 minute scoped token, copies command, and reports online only on
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(connected).not.toHaveBeenCalled();
   status.host_state = "online";
   await act(async () => vi.advanceTimersByTimeAsync(3000)); expect(connected).toHaveBeenCalledTimes(1);
-  expect(host.textContent).toContain("主机已连接"); expect(host.querySelector("a")?.href).toContain("/ops/host/nodes/h1");
+  expect(host.textContent).toContain("主机已连接"); expect(host.querySelector("a")?.href).toContain("/workspaces/ops/nodes/h1");
   const count = requests.length;
   await act(async () => vi.advanceTimersByTimeAsync(6000)); expect(requests).toHaveLength(count);
 });

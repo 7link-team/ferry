@@ -60,13 +60,13 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
-        group=request(owner,root+'/host-groups',{'name':'Cron group'},expected=201)['id']
-        host=request(owner,root+'/hosts',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
+        request(guest,'/workspace-memberships',{'code':invitation})
+        group=request(owner,root+'/node-groups',{'name':'Cron group'},expected=201)['id']
+        host=request(owner,root+'/nodes',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
         token=request(owner,root+'/runner-tokens',{'host_id':host},expected=201)['token']
         runner=subprocess.Popen(['target/debug/ferry-runner','--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
         def eventually(fn,timeout=30):
@@ -76,12 +76,12 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 if value:return value
                 time.sleep(.1)
             raise AssertionError('timed out waiting for expected state')
-        eventually(lambda:request(owner,root+'/hosts/'+host)['state']=='online')
-        eventually(lambda:(result[0]==200 and result[1].get('ok')) if (result:=request(owner,root+'/hosts/'+host+'/actions/test-connection',{},expected=None)) else False)
+        eventually(lambda:request(owner,root+'/nodes/'+host)['state']=='online')
+        eventually(lambda:(result[0]==200 and result[1].get('ok')) if (result:=request(owner,root+'/nodes/'+host+'/connection-tests',{},expected=None)) else False)
         def create(body,c=owner): return request(c,root+'/cron-jobs',body,expected=201)['id']
         def job(id):return request(owner,root+'/cron-jobs/'+id)
         def runs(id):return request(owner,root+'/cron-jobs/'+id+'/runs')['items']
-        def execute(id):return request(owner,root+'/cron-jobs/'+id+'/actions/run-now',{},expected=202)['id']
+        def execute(id):return request(owner,root+'/cron-jobs/'+id+'/runs',{},expected=202)['id']
         def run(id):return request(owner,root+'/cron-runs/'+id)
         def done(id):return eventually(lambda: (r if r['state'] not in ('queued','running') else None) if (r:=run(id)) else None)
         def update(id,**values):return request(owner,root+'/cron-jobs/'+id,dict(job(id),**values),'PATCH')
@@ -89,10 +89,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         cid=create(body)
         check(job(cid)['next_run_at']==0 and job(cid)['run_as_name']=='Owner','disabled job and execution identity persisted')
         request(guest,root+'/cron-jobs',body,expected=403)
-        request(guest,root+'/cron-jobs/'+cid+'/actions/run-now',{},expected=403)
-        request(outsider,'/workspaces/other/cron-jobs/'+cid,expected=404)
-        request(outsider,'/workspaces/other/cron-jobs/'+cid+'/runs',expected=404)
-        request(owner,root+'/hosts/'+host,method='DELETE',expected=409)
+        request(guest,root+'/cron-jobs/'+cid+'/runs',{},expected=403)
+        request(outsider,f'/workspaces/{workspace_other}/cron-jobs/'+cid,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/cron-jobs/'+cid+'/runs',expected=404)
+        request(owner,root+'/nodes/'+host,method='DELETE',expected=409)
         check(True,'tenant, permission and target reference guards enforced')
         for changes in [{'schedule':'bad'},{'timezone':'Bad/Zone'},{'scope':'build'},{'timeout_seconds':0},{'max_retries':11}]:
             request(owner,root+'/cron-jobs',dict(body,**changes),expected=400)
@@ -100,12 +100,12 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(True,'schedule/action/timeout/retry validation and CAS enforced')
         first=execute(cid);finished=done(first)
         check(finished['state']=='succeeded' and 'CRON_OK' in finished['output'],'real runner command succeeds and records output')
-        request(outsider,'/workspaces/other/cron-runs/'+first,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/cron-runs/'+first,expected=404)
         check('printf CRON_OK' in finished['config'],'run records immutable configuration snapshot')
         update(cid,command='printf UPDATED')
         check('printf CRON_OK' in run(first)['config'],'editing job does not alter old snapshot')
         grouped=create(dict(body,name='Group command',target_kind='host-group',target_ref=group))
-        request(owner,root+'/host-groups/'+group,method='DELETE',expected=409)
+        request(owner,root+'/node-groups/'+group,method='DELETE',expected=409)
         check(done(execute(grouped))['state']=='succeeded','real group command uses member HostChannel')
         counter=shlex.quote(str(data/'attempts'))
         retry=create(dict(body,name='Retry',command=f'n=$(cat {counter} 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > {counter}; [ "$n" -ge 3 ]',max_retries=2))
@@ -116,15 +116,15 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=409)
         result=done(pending)
         check(result['state']=='needs-review' and result['attempt']==1,'uncertain timeout never retries despite configured retries')
-        request(owner,root+'/cron-jobs/'+uncertain+'/actions/run-now',{},expected=409)
-        request(owner,root+'/cron-runs/'+pending+'/actions/acknowledge',{'version':result['version'],'note':''},expected=400)
+        request(owner,root+'/cron-jobs/'+uncertain+'/runs',{},expected=409)
+        request(owner,root+'/cron-runs/'+pending+'/acknowledgements',{'version':result['version'],'note':''},expected=400)
         time.sleep(3) # The remote sleep must finish before the operator confirms it.
-        request(owner,root+'/cron-runs/'+pending+'/actions/acknowledge',{'version':result['version'],'note':'Remote command has finished.'})
+        request(owner,root+'/cron-runs/'+pending+'/acknowledgements',{'version':result['version'],'note':'Remote command has finished.'})
         check(run(pending)['state']=='failed','operator acknowledgement resolves uncertain execution')
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=204)
         overlap=create(dict(body,name='Overlap',schedule='* * * * * *',enabled=True,command='sleep 2; echo SCHEDULED'))
         eventually(lambda:any(r['state']=='running' for r in runs(overlap)))
-        request(owner,root+'/cron-jobs/'+overlap+'/actions/run-now',{},expected=409)
+        request(owner,root+'/cron-jobs/'+overlap+'/runs',{},expected=409)
         eventually(lambda:any(r['state']=='skipped' for r in runs(overlap)))
         update(overlap,enabled=False)
         eventually(lambda:all(r['state'] not in ('queued','running') for r in runs(overlap)))
@@ -156,8 +156,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         eventually(lambda:any(r['state']=='skipped' for r in runs(missed)))
         update(missed,enabled=False)
         check(any('停机' in run(r['id'])['output'] for r in runs(missed) if r['state']=='skipped'),'downtime occurrence recorded as skipped, not replayed')
-        eventually(lambda:request(owner,root+'/hosts/'+host)['state']=='online')
-        eventually(lambda:(result[0]==200 and result[1].get('ok')) if (result:=request(owner,root+'/hosts/'+host+'/actions/test-connection',{},expected=None)) else False)
+        eventually(lambda:request(owner,root+'/nodes/'+host)['state']=='online')
+        eventually(lambda:(result[0]==200 and result[1].get('ok')) if (result:=request(owner,root+'/nodes/'+host+'/connection-tests',{},expected=None)) else False)
         # Desktop-owned drain must wait for the active command and preserve its final result.
         marker=data/'drain-started';release=data/'drain-release'
         draining=create(dict(body,name='Drain',command=f'touch {shlex.quote(str(marker))}; while [ ! -f {shlex.quote(str(release))} ]; do sleep .1; done; echo DRAIN_DONE'))

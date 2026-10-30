@@ -27,23 +27,29 @@ import { Entry } from "./Entry";
 import { findGroup, findItem, nav, type NavItem, type NavGroup } from "./nav";
 import { formConfigs, listConfigs } from "./resources";
 import { href, navigate, useQueryValue, useRoute } from "./router";
-import { createResource, deleteResource, listResource, patchResource } from "./resource";
+import { base, createResource, deleteResource, listResource, patchResource } from "./resource";
 import { PALETTES, useTheme } from "./theme";
 
 export function App() {
   const route = useRoute();
-  useEffect(() => {
-    const pipelineGroup = location.pathname.match(/^\/([^/]+)\/build\/(?:pipelines\/groups|pipeline-groups)(?:\/([^/]+))?/);
-    const hostGroup = location.pathname.match(/^\/([^/]+)\/(?:host|infrastructure)\/host-groups(?:\/([^/]+))?/);
-    const legacy = pipelineGroup ?? hostGroup;
-    if (legacy) navigate({ workspace: legacy[1]!, group: pipelineGroup ? "build" : "host", item: pipelineGroup ? "pipelines" : "hosts", mode: "list" }, legacy[2] && legacy[2] !== "new" ? { group_id: legacy[2] } : {} , { replace: true });
-    else if (/^\/[^/]+\/(?:host\/hosts|infrastructure\/hosts)(?:\/|$)/.test(location.pathname)) navigate(route, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
-  }, [route]);
   const [identity, setIdentity] = useState<Identity>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
   const [deferredSetup, setDeferredSetup] = useState(false);
+  useEffect(() => {
+    if (!identity) return;
+    const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
+      ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
+    if (!current && route.workspace !== "_platform") return;
+    const query = Object.fromEntries(new URLSearchParams(location.search));
+    if (route.item === "host-groups" || route.item === "pipeline-groups") {
+      if (route.id) query.group_id = route.id;
+      navigate({ ...route, workspace: current?.id ?? route.workspace, item: route.item === "host-groups" ? "hosts" : "pipelines", mode: "list" }, query, { replace: true });
+    } else if (!location.pathname.startsWith("/platform/") && !location.pathname.startsWith(`/workspaces/${current?.id}/`)) {
+      navigate({ ...route, workspace: current?.id ?? route.workspace }, query, { replace: true });
+    }
+  }, [identity, route]);
 
   const reload = () => {
     setLoading(true);
@@ -97,8 +103,9 @@ export function App() {
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} />;
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
-    const current = identity.workspaces.find(workspace => workspace.slug === route.workspace);
-    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={route.workspace} hostId={route.id} permissions={new Set(current.permissions)} />;
+    const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
+      ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
+    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} />;
   }
   return <Workspace identity={identity} onSignedOut={reload} />;
 }
@@ -109,27 +116,28 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const [joining, setJoining] = useState(false);
 
   const current =
-    identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
-  const slug = current?.slug ?? "";
+    identity.workspaces.find((w) => w.id === route.workspace)
+      ?? identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
+  const workspaceId = current?.id ?? "";
 
   // A URL naming a workspace the account cannot open is corrected once, in
   // place, rather than showing a dead page. Every hook runs before the early
   // return below, so the hook order never depends on the data.
   useEffect(() => {
-    if (slug && route.workspace !== slug)
-      navigate({ ...route, workspace: slug }, {}, { replace: true });
-  }, [route.workspace, slug]);
+    if (workspaceId && route.workspace !== workspaceId)
+      navigate({ ...route, workspace: workspaceId }, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
+  }, [route.workspace, workspaceId]);
 
   const [preferences, setPreferences] = useState<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>();
   const [preferencesError, setPreferencesError] = useState("");
   useEffect(() => {
     let live=true; setPreferences(undefined); setPreferencesError("");
-    if (slug) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>(`/workspaces/${slug}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError("工作空间显示配置加载失败，暂用默认值。");});
+    if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>(`/workspaces/${workspaceId}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError("工作空间显示配置加载失败，暂用默认值。");});
     return ()=>{live=false;};
-  },[slug,route.item,route.mode]);
+  },[workspaceId,route.item,route.mode]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(slug, permissions, onSignedOut, preferences?.dictionaries["host-state"]), [slug, permissions, onSignedOut, preferences]);
-  const forms = useMemo(() => formConfigs(slug, permissions), [slug, permissions]);
+  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, preferences?.dictionaries["host-state"]), [workspaceId, permissions, onSignedOut, preferences]);
+  const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions]);
 
   // Keep the form configuration stable while background preferences refresh.
   // ResourceForm reloads its draft when its configuration changes.
@@ -157,11 +165,11 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     .filter((g) => g.items.length);
 
   const to = (groupKey: string, itemKey: string, params?: Record<string, string>) => ({
-    href: href({ workspace: current.slug, group: groupKey, item: itemKey, mode: "list" }, params ?? {}),
+    href: href({ workspace: current.id, group: groupKey, item: itemKey, mode: "list" }, params ?? {}),
     onClick: (event: React.MouseEvent) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      navigate({ workspace: current.slug, group: groupKey, item: itemKey, mode: "list" }, params ?? {});
+      navigate({ workspace: current.id, group: groupKey, item: itemKey, mode: "list" }, params ?? {});
     },
   });
 
@@ -172,7 +180,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   if (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit"))
     return <div className="h-full min-h-0 min-w-0">
       {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : formConfig ? (
-        <ResourceForm key={`${current.slug}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.slug} permissions={permissions} pipelineWorkspace />
+        <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace />
       ) : <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />}
     </div>;
 
@@ -234,13 +242,13 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           <DropdownMenuContent align="end">
             {identity.workspaces.map((w) => (
               <DropdownMenuItem
-                key={w.slug}
+                key={w.id}
                 onClick={() =>
-                  navigate({ workspace: w.slug, group: route.group, item: route.item, mode: "list" }, {})
+                  navigate({ workspace: w.id, group: route.group, item: route.item, mode: "list" }, {})
                 }
               >
                 {w.name}
-                {w.slug === current.slug && " ✓"}
+                {w.id === current.id && " ✓"}
               </DropdownMenuItem>
             ))}
             <DropdownMenuItem onClick={() => setJoining(true)}>创建/加入工作空间</DropdownMenuItem>
@@ -331,23 +339,23 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           {preferencesError && <p role="alert">{preferencesError}</p>}
           </div>
           {item.permission && !permissions.has(item.permission) ? <p role="alert">当前角色没有访问此页面的权限。</p> : route.mode === "list" ? (
-            item.resource === "dashboard" ? <Dashboard key={current.slug} workspace={current.slug} /> : listConfig ? (
+            item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
               <div className="flex min-h-0 min-w-0 flex-col">
-              {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.slug} workspace={current.slug} />}
+              {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}
               {(preferences || preferencesError) ? item.resource === "pipelines" ? <PipelineList
-                key={current.slug}
+                key={current.id}
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }}
-                workspace={current.slug}
+                workspace={current.id}
                 permissions={permissions}
               /> : item.resource === "hosts" ? <HostList
-                key={current.slug}
+                key={current.id}
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }}
-                workspace={current.slug}
+                workspace={current.id}
                 permissions={permissions}
               /> : <ResourceTable
-                key={`${current.slug}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
+                key={`${current.id}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
-                workspace={current.slug}
+                workspace={current.id}
                 permissions={permissions}
               /> : <p role="status">正在加载工作空间配置…</p>}
               </div>
@@ -355,16 +363,16 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
             )
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
-            <DeploymentDetail key={`${current.slug}/${item.resource}/${route.id}`} workspace={current.slug} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
+            <DeploymentDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipeline-runs" && route.id ? (
-            <PipelineRunDetail key={`${current.slug}/${route.id}`} workspace={current.slug} runId={route.id} permissions={permissions} />
+            <PipelineRunDetail key={`${current.id}/${route.id}`} workspace={current.id} runId={route.id} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "pipelines" && route.id && formConfig && lists["pipeline-runs"] ? (
-            <PipelineDetail key={`${current.slug}/${route.id}`} workspace={current.slug} pipelineId={route.id} permissions={permissions} form={formConfig} runs={lists["pipeline-runs"]} />
+            <PipelineDetail key={`${current.id}/${route.id}`} workspace={current.id} pipelineId={route.id} permissions={permissions} form={formConfig} runs={lists["pipeline-runs"]} />
           ) : route.mode === "view" && item.resource === "hosts" && route.id ? (
             // A host's detail page is the form plus the two live panes; the
             // tab is in the URL so a terminal link can be shared directly.
             <HostDetail
-              workspace={current.slug}
+              workspace={current.id}
               hostId={route.id}
               permissions={permissions}
               form={formConfig}
@@ -374,10 +382,10 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           ) : formConfig ? (
             <div className="min-h-0 overflow-auto">
               <ResourceForm
-                key={`${current.slug}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
+                key={`${current.id}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
                 {...(item.resource === "roles" || item.resource === "members" ? { onSaved: onSignedOut } : {})}
                 config={formConfig}
-                workspace={current.slug}
+                workspace={current.id}
                 permissions={permissions}
               />
             </div>
@@ -491,8 +499,8 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
     [rows[index], rows[next]] = [rows[next]!, rows[index]!];
     setBusy(true); setError("");
     try {
-      await api(`/workspaces/${encodeURIComponent(workspace)}/${resource}/actions/reorder`, {
-        method: "POST", body: JSON.stringify(resource === "host-groups" ? { parent_id: group.parent_id ?? "", ids: rows.map(row => row.id) } : { ids: rows.map(row => row.id) }),
+      await api(`${base(workspace, resource)}/ordering`, {
+        method: "PATCH", body: JSON.stringify(resource === "host-groups" ? { parent_id: group.parent_id ?? "", ids: rows.map(row => row.id) } : { ids: rows.map(row => row.id) }),
       });
       setRevision(value => value + 1);
     } catch (cause) { setError(errorText(cause)); }
@@ -577,7 +585,7 @@ function HostDetail({
     setConnection(undefined); setConnectionError("");
     if (!canEnroll) return;
     const controller = new AbortController();
-    void api<{ connection: string }>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}`, { signal: controller.signal })
+    void api<{ connection: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`, { signal: controller.signal })
       .then(host => { if (!controller.signal.aborted) setConnection({ workspace, hostId, kind: host.connection }); })
       .catch(cause => { if (!controller.signal.aborted) setConnectionError(errorText(cause)); });
     return () => controller.abort();

@@ -36,12 +36,12 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
-  const host=await post(owner,root+'/hosts',{name:'Template host',connection:'runner'});
+  const root=`/workspaces/${workspace_tenant}`;
+  const host=await post(owner,root+'/nodes',{name:'Template host',connection:'runner'});
   await post(owner,root+'/variables',{name:'token',scope:'deploy',kind:'secret',value:'secret-not-in-template'});
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
   for (const [group,resource,target,field,label] of [
@@ -50,7 +50,7 @@ try {
   ]) {
     const app=field==='manifest';
     const name=`UI ${resource}`;
-    await p.goto(`${origin}/tenant/${group}/${resource}`);
+    await p.goto(`${origin}/workspaces/${workspace_tenant}/${resource}`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByLabel('名称',{exact:false}).fill(name);
     if (app) {
@@ -106,7 +106,7 @@ try {
       const objects=await get(root+'/pipelines');
       assert.equal(objects.total,1);
       assert.equal(objects.items[0].target_ref,host.id);
-      await p.goto(`${origin}/tenant/build/pipelines/new`);
+      await p.goto(`${origin}/workspaces/${workspace_tenant}/pipelines/new`);
       await p.getByRole('button',{name:'从模板导入',exact:true}).click();
       await p.getByRole('dialog').getByRole('option',{name,exact:true}).click();
       await p.getByRole('dialog').getByText(/版本 2/).waitFor();
@@ -161,14 +161,14 @@ try {
     const objects=await get(root+'/'+(app?'deployments':'pipelines'));
     assert.equal(objects.total,1);
     assert.equal(objects.items[0].target_ref,host.id);
-    await p.goto(`${origin}/tenant/${group}/${target}/new`);
+    await p.goto(`${origin}/workspaces/${workspace_tenant}/${target === 'apps' ? 'deployments' : target}/new`);
     await p.getByRole('region',{name:'从模板生成'}).getByRole('combobox').click();
     await p.getByRole('option',{name,exact:true}).click();
     await p.getByText(/版本 2/).waitFor();
     assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
     console.log(`PASS ${resource}: UI create/copy/edit/delete, template selection, parameters, generate, conflict/reload, real resource creation`);
   }
-  await p.goto(`${origin}/tenant/deploy/config-templates`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('名称',{exact:false}).fill('Runtime file');
   await p.getByLabel('应用配置文件内容',{exact:false}).fill('port={{ .Values.port }}\n');

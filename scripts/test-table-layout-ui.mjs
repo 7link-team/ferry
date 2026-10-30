@@ -43,7 +43,7 @@ try {
     return response.json();
   }
   await post('/setup', { name: 'Layout Admin', email: 'layout@example.invalid', password: 'temporary-layout-password', token: (await readFile(join(work, 'setup-token'), 'utf8')).trim() });
-  await post('/workspaces', { name: 'Layout', slug: 'layout' });
+  const workspace_layout = (await post('/workspaces', { name: 'Layout', slug: 'layout' })).id;
   async function openList(path) {
     await page.goto(origin + path);
     await page.getByRole('navigation', { name: '分页', exact: true }).waitFor();
@@ -67,29 +67,29 @@ try {
     assert(g.scroll.bottom <= g.footer.top, `${label}: footer overlaps data`);
     assert(g.pageHeight <= g.viewport + 1 && g.pageWidth <= g.width + 1, `${label}: outer page scrolls`);
   }
-  await openList('/layout/build/credentials');
+  await openList(`/workspaces/${workspace_layout}/credentials`);
   fills(await geometry(), 'empty list');
   console.log('PASS empty list fills available viewport');
-  const seed = i => post('/workspaces/layout/credentials', { name: `Credential ${String(i).padStart(3, '0')}`, kind: 'token', username: 'user-' + 'x'.repeat(180), secret: 'fixture-only' });
+  const seed = i => post(`/workspaces/${workspace_layout}/credentials`, { name: `Credential ${String(i).padStart(3, '0')}`, kind: 'token', username: 'user-' + 'x'.repeat(180), secret: 'fixture-only' });
   await seed(0);
-  await openList('/layout/build/credentials');
+  await openList(`/workspaces/${workspace_layout}/credentials`);
   fills(await geometry(), 'single row');
   await page.locator('tbody tr').first().locator('td').nth(1).click();
-  assert.match(page.url(), /\/layout\/build\/credentials\/\d+$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
   await page.getByText('Credential 000', { exact: true }).waitFor();
-  await openList('/layout/build/credentials');
+  await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().focus();
   await page.keyboard.press('Enter');
-  assert.match(page.url(), /\/layout\/build\/credentials\/\d+$/);
-  await openList('/layout/build/credentials');
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
+  await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().getByRole('link', { name: '编辑' }).click();
-  assert.match(page.url(), /\/layout\/build\/credentials\/\d+\/edit$/);
-  await openList('/layout/build/credentials');
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
+  await openList(`/workspaces/${workspace_layout}/credentials`);
   console.log('PASS single row keeps footer at bottom');
   for (let i = 1; i < 65; i++) await seed(i);
   for (const viewport of [{ width: 1280, height: 800 }, { width: 900, height: 600 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await openList('/layout/build/credentials?page_size=100');
+    await openList(`/workspaces/${workspace_layout}/credentials?page_size=100`);
     const before = await geometry();
     fills(before, `many rows ${viewport.width}`);
     assert(before.scrollHeight > before.clientHeight, 'vertical overflow is inside table');
@@ -108,7 +108,7 @@ try {
     console.log(`PASS ${viewport.width}x${viewport.height}: data scrolls both axes; header/footer/edge columns fixed`);
   }
   await page.setViewportSize({ width: 1280, height: 800 });
-  await openList('/layout/ops/members');
+  await openList(`/workspaces/${workspace_layout}/members`);
   fills(await geometry(), 'members invitation');
   await page.getByRole('button', { name: '查看邀请码', exact: true }).click();
   await page.getByRole('button', { name: '复制邀请码', exact: true }).waitFor();

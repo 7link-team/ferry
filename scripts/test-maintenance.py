@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real HTTP maintenance acceptance; optional empty FERRY_TEST_DATABASE_URL."""
+from contextlib import closing
 import http.cookiejar
 import json
 import os
@@ -58,23 +59,23 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
+        request(guest,'/workspace-memberships',{'code':invitation})
         settings=request(owner,root+'/settings')['items']
         check(len(settings)==3,'three typed settings seeded')
         prefs=request(guest,root+'/preferences')
         check(prefs['default_page_size']==20 and len(prefs['dictionaries']['host-state'])==3,'members receive presentation preferences')
         setting=next(r for r in settings if r['key']=='default_page_size'); sid=setting['id']
         request(guest,root+'/settings/'+sid,{'version':1,'value':37},'PATCH',403)
-        request(outsider,'/workspaces/other/settings/'+sid,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/settings/'+sid,expected=404)
         request(owner,root+'/settings/'+sid,{'version':1,'value':201},'PATCH',400)
         request(owner,root+'/settings/'+sid,{'version':1,'value':37},'PATCH')
         request(owner,root+'/settings/'+sid,{'version':1,'value':38},'PATCH',409)
         check(request(guest,root+'/preferences')['default_page_size']==37,'updated page size is applied to preferences')
-        check(request(outsider,'/workspaces/other/preferences')['default_page_size']==20,'settings tenant isolation')
+        check(request(outsider,f'/workspaces/{workspace_other}/preferences')['default_page_size']==20,'settings tenant isolation')
         body={'key':'custom','name':'Custom','items':json.dumps([{'value':'a','label':'Alpha'},{'value':'b','label':'Beta'}])}
         did=request(owner,root+'/dictionaries',body,expected=201)['id'];url=root+'/dictionaries/'+did
         request(guest,root+'/dictionaries',body,expected=403)
@@ -85,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,url,dict(body,version=1,items=json.dumps([{'value':'b','label':'Revised'}])),'PATCH')
         request(owner,url,dict(body,version=1),'PATCH',409)
         check(json.loads(request(owner,url)['items'])==[{'value':'b','label':'Revised'}],'dictionary update replaces children atomically')
-        request(outsider,'/workspaces/other/dictionaries/'+did,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/dictionaries/'+did,expected=404)
         check(request(owner,root+'/dictionaries?q=custom')['total']==1,'dictionary search works')
         builtin=next(r for r in request(owner,root+'/dictionaries')['items'] if r['key']=='host-state')
         built=request(owner,root+'/dictionaries/'+builtin['id'])
@@ -101,9 +102,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(len(events)==4,'dictionary writes audited')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             import sqlite3
-            host=request(owner,root+'/hosts',{'name':'Offline','connection':'runner'},expected=201)['id']
+            host=request(owner,root+'/nodes',{'name':'Offline','connection':'runner'},expected=201)['id']
             pid=request(owner,root+'/pipelines',{'name':'Retention','target_kind':'host','target_ref':host,'definition':json.dumps({'workdir':'/tmp/retention','steps':[{'name':'test','run':'true'}]})},expected=201)['id']
-            rid=request(owner,root+'/pipelines/'+pid+'/actions/run',{},expected=201)['id']
+            rid=request(owner,root+'/pipelines/'+pid+'/runs',{},expected=201)['id']
             for _ in range(100):
                 run=request(owner,root+'/pipeline-runs/'+rid)
                 if run['state']=='failed': break
@@ -114,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             app=request(owner,root+'/deployments',appbody,expected=201)['id']
             uncertain=request(owner,root+'/deployments',dict(appbody,name='Uncertain'),expected=201)['id']
             proc.terminate();proc.wait(timeout=20)
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 conn.execute('UPDATE pipeline_runs SET finished_at=? WHERE id=?',(int(time.time()*1000)-3*86400000,rid))
                 workspace=conn.execute('SELECT workspace_id FROM deployments WHERE id=?',(app,)).fetchone()[0]
                 old=int(time.time()*1000)-3*86400000
@@ -135,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 if status==404:break
                 time.sleep(.1)
             check(status==404,'explicit retention removes expired completed history')
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 check(conn.execute('SELECT count(*) FROM pipeline_run_steps WHERE run_id=?',(rid,)).fetchone()[0]==0 and conn.execute('SELECT count(*) FROM pipeline_run_logs WHERE run_id=?',(rid,)).fetchone()[0]==0,'retention deletes child logs and steps')
             for _ in range(100):
                 status,_=request(owner,root+'/deployment-revisions/101',expected=None)

@@ -21,23 +21,23 @@ try {
  const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
  const post=async(path,data)=>{const response=await context.request.post(origin+'/api'+path,{headers:{'X-Ferry-Request':'1'},data});assert(response.ok(),await response.text());return response.json()};
  await post('/setup',{email:'admin@example.invalid',name:'Admin',password:'temporary-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
- await post('/workspaces',{name:'Actions',slug:'actions'});
- const root='/workspaces/actions';
- const host=await post(root+'/hosts',{name:'Local runner',connection:'runner'});
+ const workspace_actions = (await post('/workspaces',{name:'Actions',slug:'actions'})).id;
+ const root=`/workspaces/${workspace_actions}`;
+ const host=await post(root+'/nodes',{name:'Local runner',connection:'runner'});
  const token=await post(root+'/runner-tokens',{host_id:host.id});
  runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',token.token,'--state-dir',join(work,'runner')],{stdio:'ignore',windowsHide:true});
- await eventually(async()=>((await(await context.request.get(origin+'/api'+root+'/hosts/'+host.id)).json()).state==='online'));
+ await eventually(async()=>((await(await context.request.get(origin+'/api'+root+'/nodes/'+host.id)).json()).state==='online'));
  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.stack??error.message));
  const yamlEditor=page.locator('.monaco-editor .view-lines');
  const readYaml=async()=>{await yamlEditor.click();await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('ControlOrMeta+C');return page.evaluate(()=>navigator.clipboard.readText());};
  const setYaml=async value=>{await yamlEditor.click();await page.keyboard.press('ControlOrMeta+A');await page.evaluate(text=>navigator.clipboard.writeText(text),value);await page.keyboard.press('ControlOrMeta+V');};
  // Create classification resources through the same shared forms users use.
- await page.goto(origin+'/actions/build/pipelines');
+ await page.goto(origin+`/workspaces/${workspace_actions}/pipelines`);
  await page.getByRole('button',{name:'新建分组'}).click();
  const groupDialog=page.getByRole('dialog');await groupDialog.getByLabel('名称').fill('Browser group');
  await groupDialog.getByRole('button',{name:'保存',exact:true}).click();
  await groupDialog.waitFor({state:'hidden'});
- await page.goto(origin+'/actions/build/pipelines/new');
+ await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/new`);
  await page.getByLabel('流水线名称').fill('Canvas pipeline');
  await page.getByRole('button',{name:'流水线设置'}).click();
  await page.getByRole('combobox',{name:'分组',exact:true}).click();
@@ -107,9 +107,9 @@ jobs:
  await eventually(async()=>await page.getByRole('button',{name:'保存',exact:true}).isEnabled());
 
  await page.getByRole('button',{name:'保存',exact:true}).click();
- await page.waitForURL('**/actions/build/pipelines');
+ await page.waitForURL(`**/workspaces/${workspace_actions}/pipelines`);
  const list=await(await context.request.get(origin+'/api'+root+'/pipelines')).json();const pipeline=list.items.find(row=>row.name==='Canvas pipeline');assert(pipeline);assert(pipeline.graph_layout.build && pipeline.graph_layout.build.x!==24, "dragged layout was not saved");assert(Math.abs(pipeline.graph_layout.build.x-keyboardX)<0.001,"keyboard layout was not saved (CSS serializes coordinates to three decimals)");
- await page.goto(origin+'/actions/build/pipelines/'+pipeline.id+'/edit');
+ await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await page.getByRole('button',{name:'Compile edited',exact:true}).waitFor();
  await page.getByRole('button',{name:/Compile source/}).click();
  assert.equal(await page.getByLabel('执行命令',{exact:true}).inputValue(),'echo ACTIONS_BROWSER_OK');
@@ -120,9 +120,9 @@ jobs:
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),host.id);
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:1000});await eventually(async()=>page.getByLabel('流水线画布',{exact:true}).evaluate(canvas=>{const bounds=canvas.getBoundingClientRect();return [...canvas.querySelectorAll('.react-flow__node')].every(node=>{const box=node.getBoundingClientRect();return box.left>=bounds.left-1&&box.right<=bounds.right+1;});}));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`canvas overflow at ${width}`);}
  await page.setViewportSize({width:1440,height:1000});
- await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
+ await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id);
  await page.getByRole('button',{name:'触发',exact:true}).click();
- await page.waitForURL('**/actions/build/runs/*');
+ await page.waitForURL(`**/workspaces/${workspace_actions}/pipeline-runs/*`);
  const run={id:page.url().split('/').at(-1)};
 
  const result=await eventually(async()=>{const row=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();return ['queued','running','cancelling'].includes(row.state)?null:row});
@@ -134,7 +134,7 @@ jobs:
   assert.equal(result.state,'succeeded',JSON.stringify(result));
   assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
  }
- await page.goto(origin+'/actions/build/pipelines/'+pipeline.id);
+ await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id);
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();
  assert(await page.getByLabel('任务名称',{exact:true}).isDisabled());
  assert.equal(await page.locator('button[title="在此任务后添加串行任务"],button[title="添加并行任务"]').count(),0);
@@ -151,16 +151,16 @@ jobs:
  const restricted=await browser.newContext();
  const signup=await restricted.request.post(origin+'/api/users',{headers:{'X-Ferry-Request':'1'},data:{email:'editor@example.invalid',name:'Editor',password:'temporary-editor-password'}});assert(signup.ok(),await signup.text());
  const invitation=await(await context.request.get(origin+'/api'+root+'/members/invitation')).json();
- const joined=await restricted.request.post(origin+'/api/workspaces/actions/join',{headers:{'X-Ferry-Request':'1'},data:{code:invitation.code}});assert(joined.ok(),await joined.text());
+ const joined=await restricted.request.post(origin+'/api/workspace-memberships',{headers:{'X-Ferry-Request':'1'},data:{code:invitation.code}});assert(joined.ok(),await joined.text());
  const role=await post(root+'/roles',{name:'Existing pipeline editor',permissions:['pipelines.read','pipelines.update','hosts.read','repositories.read']});
  const members=await(await context.request.get(origin+'/api'+root+'/members')).json();
  const member=members.items.find(row=>row.email==='editor@example.invalid');assert(member);
  const assigned=await context.request.patch(origin+'/api'+root+'/members/'+member.id,{headers:{'X-Ferry-Request':'1'},data:{role_id:role.id,version:member.version}});assert(assigned.ok(),await assigned.text());
  const editor=await restricted.newPage();editor.on('pageerror',error=>errors.push(error.stack??error.message));
- await editor.goto(origin+'/actions/build/pipelines/'+pipeline.id+'/edit');
+ await editor.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await editor.getByLabel('流水线名称').fill('Restricted edit saved');
  await editor.getByRole('button',{name:'保存',exact:true}).click();
- await editor.waitForURL('**/actions/build/pipelines');
+ await editor.waitForURL(`**/workspaces/${workspace_actions}/pipelines`);
  const edited=await(await context.request.get(origin+'/api'+root+'/pipelines/'+pipeline.id)).json();
  assert.equal(edited.name,'Restricted edit saved');assert.deepEqual(edited.environment_ids,pipeline.environment_ids);assert.equal(edited.group_id,pipeline.group_id);assert.deepEqual(edited.tag_ids,pipeline.tag_ids);
  await restricted.close();

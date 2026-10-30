@@ -97,7 +97,7 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
     cancelRequest.current = controller;
     setBusy(true);
     try {
-      await api(`${endpoint}/actions/cancel`, { method: "POST", body: "{}", signal: controller.signal });
+      await api(`${endpoint}/cancellations`, { method: "POST", body: "{}", signal: controller.signal });
       if (!controller.signal.aborted) reload.current();
     } catch (cause) {
       if (!controller.signal.aborted) setError(errorText(cause));
@@ -108,7 +108,7 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
   const approve = async (key: string) => {
     setBusy(true);
     try {
-      await api(`${endpoint}/jobs/${encodeURIComponent(key)}/approve`, { method: "POST", body: "{}" });
+      await api(`${endpoint}/jobs/${encodeURIComponent(key)}/approvals`, { method: "POST", body: "{}" });
       reload.current();
     } catch (cause) {
       setError(errorText(cause));

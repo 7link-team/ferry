@@ -90,7 +90,7 @@ it("只读无取消按钮；授权按钮与确认文案如实", async () => {
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent?.includes("停止等待"))!.click());
   expect(confirm).toHaveBeenCalledWith(expect.stringContaining("目标主机上的命令可能继续执行完毕"));
-  expect(requests.some((s) => s.endsWith("/actions/cancel"))).toBe(true);
+  expect(requests.some((s) => s.endsWith("/cancellations"))).toBe(true);
 });
 it("向上阅读不跳底；底部新日志跟随", async () => {
   await mount(); const el = host.querySelector('[aria-label="执行日志"]') as HTMLDivElement;

@@ -30,19 +30,20 @@ const until = async (check, label) => {
 try {
   await until(async () => (await fetch(origin + '/api/status')).ok, 'backend');
   await api('/setup', { name: 'Workspace test', email: 'workspace@example.invalid', password: 'temporary-workspace-password', token: (await readFile(join(work, 'setup-token'), 'utf8')).trim() });
-  await api('/workspaces', { name: 'Tools', slug: 'tools' });
-  const host = await api('/workspaces/tools/hosts', { name: 'Workspace Runner', connection: 'runner' });
-  const { token } = await api('/workspaces/tools/runner-tokens', { host_id: host.id });
+  const workspace_tools = (await api('/workspaces', { name: 'Tools', slug: 'tools' })).id;
+  const host = await api(`/workspaces/${workspace_tools}/nodes`, { name: 'Workspace Runner', connection: 'runner' });
+  const { token } = await api(`/workspaces/${workspace_tools}/runner-tokens`, { host_id: host.id });
   runner = spawn(resolve(process.env.RUNNER_BINARY || 'target/debug/ferry-runner'), ['--server', origin, '--token', token, '--state-dir', join(work, 'runner')], { env, stdio: 'ignore', windowsHide: true });
-  await until(async () => (await api(`/workspaces/tools/hosts/${host.id}`)).state === 'online', 'runner');
+  await until(async () => (await api(`/workspaces/${workspace_tools}/nodes/${host.id}`)).state === 'online', 'runner');
   browser = await chromium.launch({ headless: true, ...(process.env.CHROME_BINARY ? { executablePath: process.env.CHROME_BINARY } : {}) });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies(cookie.split('; ').map(value => { const at = value.indexOf('='); return { name: value.slice(0, at), value: value.slice(at + 1), url: origin }; }));
   const page = await context.newPage();
   const errors = []; const sessions = [];
   page.on('pageerror', error => errors.push(error.message));
-  page.on('websocket', ws => { if (ws.url().includes('/terminal?')) sessions.push({ ws, closed: false }); ws.on('close', () => { const item = sessions.find(value => value.ws === ws); if (item) item.closed = true; }); });
-  await page.goto(`${origin}/tools/host/nodes/${host.id}/workspace?tool=terminal`);
+  page.on('websocket', ws => { if (ws.url().includes('/terminal-sessions?')) sessions.push({ ws, closed: false }); ws.on('close', () => { const item = sessions.find(value => value.ws === ws); if (item) item.closed = true; }); });
+  await page.goto(`${origin}/tools/host/hosts/${host.id}/workspace?tool=terminal`);
+  await page.waitForURL(`${origin}/workspaces/${workspace_tools}/nodes/${host.id}/workspace?tool=terminal`);
   await page.getByLabel('实时主机监控').waitFor({ timeout: 20_000 });
   await page.getByLabel(/主机连接延迟：\d+ ms/).waitFor({ timeout: 20_000 });
   await until(() => sessions.length === 1, 'original terminal session');
@@ -81,7 +82,7 @@ try {
   let pings = 0, opened = false, ended = false, output = '', buffered = Buffer.alloc(0);
   heartbeatSocket = createConnection({ host: '127.0.0.1', port });
   heartbeatSocket.on('connect', () => heartbeatSocket.write(
-    `GET /api/workspaces/tools/hosts/${host.id}/terminal?cols=80&rows=24 HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\nSec-WebSocket-Version: 13\r\nOrigin: ${origin}\r\nCookie: ${cookie}\r\n\r\n`,
+    `GET /api/workspaces/${workspace_tools}/nodes/${host.id}/terminal-sessions?cols=80&rows=24 HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\nSec-WebSocket-Version: 13\r\nOrigin: ${origin}\r\nCookie: ${cookie}\r\n\r\n`,
   ));
   heartbeatSocket.on('close', () => { ended = true; });
   heartbeatSocket.on('data', data => {

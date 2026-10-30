@@ -197,11 +197,13 @@ handler 只能拿到 `Scope`，`workspace_id` 永远来自路径校验结果，*
 
 ### 5.2 URL 契约
 
+工作空间 URL 和 API 都仅使用已有雪花 ID 的十进制字符串；名称及 slug 仅为展示/历史元数据。前端资源路径为 `/workspaces/{workspaceId}/{resource}`，接口为 `/api/workspaces/{workspaceId}/{resource}`。菜单分组不进入路径；共享资源的业务范围用 `scope` 查询参数表达。ID 全程使用字符串，禁止转成 JavaScript Number。登录后旧页面书签按可访问工作空间映射到 ID 并替换历史记录，保留详情、过滤条件和终端模式；API 不接受 slug。名称变更不改变资源地址，ID 不代表权限，成员状态和权限仍由服务端逐请求验证。
+
 ```
-/{workspace}/{group}/{item}             列表
-/{workspace}/{group}/{item}/new         创建
-/{workspace}/{group}/{item}/{id}        详情（表单的只读模式）
-/{workspace}/{group}/{item}/{id}/edit   编辑
+/workspaces/{workspaceId}/{resource}             列表
+/workspaces/{workspaceId}/{resource}/new         创建
+/workspaces/{workspaceId}/{resource}/{id}        详情（表单的只读模式）
+/workspaces/{workspaceId}/{resource}/{id}/edit   编辑
 ```
 
 查询串承载**全部视图状态**：
@@ -237,20 +239,20 @@ export function useScrollSync(ready: boolean) { ... }
 所有资源统一在工作空间下，资源名用**复数、小写、连字符**：
 
 ```
-GET    /api/workspaces/{ws}/hosts                 列表
-POST   /api/workspaces/{ws}/hosts                 创建       → 201
-GET    /api/workspaces/{ws}/hosts/{id}            详情
-PATCH  /api/workspaces/{ws}/hosts/{id}            局部修改
-PUT    /api/workspaces/{ws}/hosts/{id}            整体替换
-DELETE /api/workspaces/{ws}/hosts/{id}            删除       → 204
+GET    /api/workspaces/{workspaceId}/nodes                 列表
+POST   /api/workspaces/{workspaceId}/nodes                 创建       → 201
+GET    /api/workspaces/{workspaceId}/nodes/{id}            详情
+PATCH  /api/workspaces/{workspaceId}/nodes/{id}            局部修改
+PUT    /api/workspaces/{workspaceId}/nodes/{id}            整体替换
+DELETE /api/workspaces/{workspaceId}/nodes/{id}            删除       → 204
 ```
 
-非 CRUD 的动作一律挂在 `/actions/` 下，动词只出现在这里，不污染资源路径：
+非 CRUD 操作用名词子资源表达，由 HTTP 方法表示操作；不使用 `/actions/{verb}`：
 
 ```
-POST   /api/workspaces/{ws}/hosts/{id}/actions/test-connection
-POST   /api/workspaces/{ws}/hosts/actions/bulk-delete        批量（体内带 ids）
-POST   /api/workspaces/{ws}/pipelines/{id}/actions/run
+POST   /api/workspaces/{workspaceId}/nodes/{id}/connection-tests
+DELETE /api/workspaces/{workspaceId}/nodes        批量（体内带 ids）
+POST   /api/workspaces/{workspaceId}/pipelines/{id}/runs
 ```
 
 > 批量删除不用带请求体的 `DELETE`——中间代理会丢掉 `DELETE` 的 body，这是实际踩过的坑。
@@ -258,10 +260,10 @@ POST   /api/workspaces/{ws}/pipelines/{id}/actions/run
 导入导出也是固定形状：
 
 ```
-GET    /api/workspaces/{ws}/hosts/template?format=xlsx       下载导入模板
-GET    /api/workspaces/{ws}/hosts/export?format=csv|xlsx     导出（沿用列表的全部过滤条件）
-POST   /api/workspaces/{ws}/hosts/imports                    上传 → 返回预览与逐行错误
-POST   /api/workspaces/{ws}/hosts/imports/{id}/commit        确认写入
+GET    /api/workspaces/{workspaceId}/nodes/import-template?format=xlsx       下载导入模板
+GET    /api/workspaces/{workspaceId}/nodes/exports?format=csv|xlsx     导出（沿用列表的全部过滤条件）
+POST   /api/workspaces/{workspaceId}/nodes/imports                    上传 → 返回预览与逐行错误
+POST   /api/workspaces/{workspaceId}/nodes/imports/{id}/commit        确认写入
 ```
 
 导入**永远两步**：先预览再提交。一次性导入无法让人看清将要发生什么。
@@ -310,7 +312,7 @@ POST   /api/workspaces/{ws}/hosts/imports/{id}/commit        确认写入
 
 ```ts
 export interface ListConfig<T> {
-  /** REST 资源名，拼成 /api/workspaces/{ws}/{resource} */
+  /** REST 资源名，拼成 /api/workspaces/{workspaceId}/{resource} */
   resource: string;
   rowKey: (row: T) => string;
 
@@ -586,7 +588,7 @@ runner ── WS /api/runners/sessions/a1b2 ────────────
 ### 9.4 远程终端
 
 ```
-浏览器 xterm.js ──WS──▶ /api/workspaces/{ws}/hosts/{id}/terminal ──▶ HostChannel::pty
+浏览器 xterm.js ──WS──▶ /api/workspaces/{workspaceId}/nodes/{id}/terminal-sessions ──▶ HostChannel::pty
 ```
 
 - 浏览器到服务的 WS 与服务到主机的通道**对拷字节**，中间不解析、不缓冲整屏。
@@ -597,10 +599,10 @@ runner ── WS /api/runners/sessions/a1b2 ────────────
 ### 9.5 双向文件传输
 
 ```
-GET    /api/workspaces/{ws}/hosts/{id}/files?path=/etc            目录列表
-GET    /api/workspaces/{ws}/hosts/{id}/files/content?path=/etc/nginx.conf   下载
-PUT    /api/workspaces/{ws}/hosts/{id}/files/content?path=…        上传
-DELETE /api/workspaces/{ws}/hosts/{id}/files?path=…                删除
+GET    /api/workspaces/{workspaceId}/nodes/{id}/files?path=/etc            目录列表
+GET    /api/workspaces/{workspaceId}/nodes/{id}/files/content?path=/etc/nginx.conf   下载
+PUT    /api/workspaces/{workspaceId}/nodes/{id}/files/content?path=…        上传
+DELETE /api/workspaces/{workspaceId}/nodes/{id}/files?path=…                删除
 ```
 
 - **两个方向都流式**，服务不把整个文件读进内存，也不在服务端落盘中转。大文件传输不应该让服务的内存随文件大小走。
@@ -750,15 +752,15 @@ deployments.target_ref   → hosts.id | host_groups.id | clusters.id
 ### 10.5 接口
 
 ```
-GET    /api/workspaces/{ws}/deployments                      列表
-POST   /api/workspaces/{ws}/deployments                      创建（manifest + 模式 + 目标）
-GET    /api/workspaces/{ws}/deployments/{id}                 详情
-PATCH  /api/workspaces/{ws}/deployments/{id}                 修改
-POST   /api/workspaces/{ws}/deployments/{id}/actions/render  纯渲染，不接触目标
-POST   /api/workspaces/{ws}/deployments/{id}/actions/preview  渲染 + 与线上对比
-POST   /api/workspaces/{ws}/deployments/{id}/actions/apply   执行
-POST   /api/workspaces/{ws}/deployments/{id}/actions/rollback 回滚到指定 revision
-GET    /api/workspaces/{ws}/deployments/{id}/revisions       历史
+GET    /api/workspaces/{workspaceId}/deployments                      列表
+POST   /api/workspaces/{workspaceId}/deployments                      创建（manifest + 模式 + 目标）
+GET    /api/workspaces/{workspaceId}/deployments/{id}                 详情
+PATCH  /api/workspaces/{workspaceId}/deployments/{id}                 修改
+POST   /api/workspaces/{workspaceId}/deployments/{id}/renderings  纯渲染，不接触目标
+POST   /api/workspaces/{workspaceId}/deployments/{id}/previews  渲染 + 与线上对比
+POST   /api/workspaces/{workspaceId}/deployments/{id}/executions   执行
+POST   /api/workspaces/{workspaceId}/deployments/{id}/rollbacks 回滚到指定 revision
+GET    /api/workspaces/{workspaceId}/deployments/{id}/revisions       历史
 ```
 
 `render` 不碰目标，所以给所有能读的人用；`apply` 要 `deployments.apply`，`rollback` 要 `deployments.rollback`。
@@ -797,9 +799,9 @@ Helm 是个特例：它自己就是模版系统。Ferry 不重新实现它——
 一张表、一个模块、一个 API、一个调度器。三个菜单项是**同一个页面的三种预置过滤**。
 
 ```
-GET  /api/workspaces/{ws}/cron-jobs?scope=host|build|deploy
-POST /api/workspaces/{ws}/cron-jobs/{id}/actions/run-now
-GET  /api/workspaces/{ws}/cron-jobs/{id}/runs        执行历史
+GET  /api/workspaces/{workspaceId}/cron-jobs?scope=host|build|deploy
+POST /api/workspaces/{workspaceId}/cron-jobs/{id}/runs
+GET  /api/workspaces/{workspaceId}/cron-jobs/{id}/runs        执行历史
 ```
 
 `scope` 只影响两件事：在哪个菜单下列出，以及创建时可选的动作类型（主机 scope 给「在主机/主机组上执行命令」，构建 scope 给「触发流水线」，部署 scope 给「重启/重新部署应用」）。**调度、并发控制、超时、重试、历史记录、错误通知全部是同一份代码。**
@@ -814,7 +816,7 @@ GET  /api/workspaces/{ws}/cron-jobs/{id}/runs        执行历史
 ### 10.2 密钥变量
 
 ```
-GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
+GET /api/workspaces/{workspaceId}/variables?scope=global|deploy|build&scope_ref={id}
 ```
 
 同一张表、同一套接口。「维护 → 密钥变量（全局）」就是 `scope=global`。读取时按「全局 → 模块 → 具体对象」逐层覆盖合并，越具体的优先；界面在详情里标出每个值来自哪一层，不然排查「为什么这个变量不是我设的值」会很痛苦。
@@ -856,7 +858,7 @@ GET /api/workspaces/{ws}/variables?scope=global|deploy|build&scope_ref={id}
 一个接口回全部数据，不让首页发十几个请求：
 
 ```
-GET /api/workspaces/{ws}/dashboard
+GET /api/workspaces/{workspaceId}/dashboard
 → {
     counts:  { hosts: 42, deployments: 18, pipelines: 7, cron_jobs: 12, ... },
     states:  { hosts: { online: 38, offline: 3, unknown: 1 }, deployments: {...} },
@@ -988,13 +990,13 @@ T4 落地字段：
 ### 17.4 接口
 
 ```
-GET    /api/workspaces/{ws}/repositories            仓库（标准 CRUD）
-GET    /api/workspaces/{ws}/pipelines               流水线（标准 CRUD）
-POST   /api/workspaces/{ws}/pipelines/{id}/actions/run     触发一次执行
-GET    /api/workspaces/{ws}/pipeline-runs                  执行历史
-GET    /api/workspaces/{ws}/pipeline-runs/{id}             一次执行的详情与各步状态
-GET    /api/workspaces/{ws}/pipeline-runs/{id}/logs?after={seq}   增量日志
-POST   /api/workspaces/{ws}/pipeline-runs/{id}/actions/cancel     取消
+GET    /api/workspaces/{workspaceId}/repositories            仓库（标准 CRUD）
+GET    /api/workspaces/{workspaceId}/pipelines               流水线（标准 CRUD）
+POST   /api/workspaces/{workspaceId}/pipelines/{id}/runs     触发一次执行
+GET    /api/workspaces/{workspaceId}/pipeline-runs                  执行历史
+GET    /api/workspaces/{workspaceId}/pipeline-runs/{id}             一次执行的详情与各步状态
+GET    /api/workspaces/{workspaceId}/pipeline-runs/{id}/logs?after={seq}   增量日志
+POST   /api/workspaces/{workspaceId}/pipeline-runs/{id}/cancellations     取消
 ```
 
 触发接口可省略请求体；可传 `{ "branch": "main", "commit": "<sha>" }` 作为模板上下文。branch 缺省使用登记仓库的默认分支，commit 缺省为空字符串；引擎不自动追加 checkout 命令，实际拉取行为由步骤定义控制。

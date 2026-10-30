@@ -36,13 +36,13 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
-  const host=await post(owner,root+'/hosts',{name:'Cron UI runner',connection:'runner'});
-  await p.goto(`${origin}/tenant/host/nodes/${host.id}?tab=alerts`);
+  const root=`/workspaces/${workspace_tenant}`;
+  const host=await post(owner,root+'/nodes',{name:'Cron UI runner',connection:'runner'});
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes/${host.id}?tab=alerts`);
   await p.getByRole('tab',{name:'报警监控'}).waitFor();
   const [eventsResponse]=await Promise.all([
     p.waitForResponse(response=>response.url().includes('/alert-events?') && response.url().includes(`target_ref=${host.id}`) && response.ok()),
@@ -53,7 +53,7 @@ try {
   await p.getByRole('button',{name:'新增报警规则'}).click();
   await p.getByLabel('目标主机',{exact:false}).waitFor();
   assert.equal(await p.getByLabel('目标主机',{exact:false}).textContent(), 'Cron UI runner');
-  await p.goto(`${origin}/tenant/deploy/alerts`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/alerts`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
   await p.getByLabel('目标主机',{exact:false}).click();
@@ -61,7 +61,7 @@ try {
   await p.getByRole('checkbox',{name:'启用',exact:true}).click();
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Offline browser'}).getByRole('link',{name:'告警事件',exact:true}).click();
-  await p.waitForURL('**/deploy/alert-events*');
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/alert-events*`);
   for(let i=0;;i++) {
     const events=await (await owner.request.get(`${origin}/api${root}/alert-events`)).json();
     if(events.total===1)break;
@@ -78,7 +78,7 @@ try {
   await p.getByRole('row').filter({hasText:'Edited alert'}).getByRole('button',{name:'删除',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('Edited alert'));
-  await p.goto(`${origin}/tenant/deploy/alert-events`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/alert-events`);
   await p.getByRole('cell',{name:'Offline browser',exact:true}).waitFor();
   assert.deepEqual(errors,[]);
   console.log('PASS: alert creation, real offline event, history/detail navigation, edit/delete, preserved history and no browser errors');

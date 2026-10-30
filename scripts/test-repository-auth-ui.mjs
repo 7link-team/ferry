@@ -85,14 +85,14 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   const yamlEditor = p.locator('.monaco-editor .view-lines');
   const readYaml = async () => { await yamlEditor.click(); await p.keyboard.press('ControlOrMeta+A'); await p.keyboard.press('ControlOrMeta+C'); return p.evaluate(() => navigator.clipboard.readText()); };
   const setYaml = async value => { await yamlEditor.click(); await p.keyboard.press('ControlOrMeta+A'); await p.evaluate(text => navigator.clipboard.writeText(text), value); await p.keyboard.press('ControlOrMeta+V'); };
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
+  const root=`/workspaces/${workspace_tenant}`;
   const platform=await context.newPage();platform.on('pageerror',e=>errors.push(e.message));
   await platform.goto(`${origin}/_platform/settings/1/edit`);
   await platform.getByLabel('平台公开访问地址',{exact:true}).fill(origin);
@@ -104,14 +104,15 @@ try {
   await platform.getByLabel('GitHub API 地址',{exact:true}).fill(providerOrigin);
   await platform.getByRole('button',{name:'保存',exact:true}).click();
   await platform.getByText('平台设置已保存，立即生效。',{exact:true}).waitFor();
+  await platform.waitForFunction(expected => [...document.querySelectorAll('input')].some(input => input.value === expected), origin+'/api/repository-providers/callback');
   await platform.getByLabel('GitHub 应用 ID',{exact:true}).waitFor();
   assert.equal(await platform.getByLabel('GitHub 应用密钥',{exact:true}).count(),0,'stored app secret is not returned');
-  assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-auth/callback');
+  assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-providers/callback');
 
-  await p.goto(`${origin}/tenant/build/repositories`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections`);
   assert.equal(await p.getByRole('navigation',{name:'仓库页面',exact:true}).count(),0,'no separate repository authorization tabs');
   assert.equal(await p.getByRole('link',{name:'平台授权',exact:true}).count(),0);
-  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('github');
   await p.getByLabel(/^连接名称/).fill('Preserved draft');
   await p.getByLabel(/^备注/).fill('Keep this during OAuth');
@@ -122,24 +123,24 @@ try {
   const popupPromise=p.waitForEvent('popup');
   await p.getByRole('button',{name:'打开网页授权',exact:true}).click();
   const popup=await popupPromise;
-  await p.waitForURL(url=>/^\/tenant\/build\/repositories\/[^/]+$/.test(url.pathname)&&!url.pathname.endsWith('/new'));
+  await p.waitForURL(url=>/^\/workspaces\/\d+\/code-connections\/[^/]+$/.test(url.pathname)&&!url.pathname.endsWith('/new'));
   if(!popup.isClosed())await popup.waitForEvent('close');
   assert(popup.isClosed(),'OAuth callback closes only its popup');
   let rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   assert.equal(rows.items.length,1,'OAuth must create only one named connection without a second form submit');
   const oauthConnection=rows.items[0];
   assert.equal(oauthConnection.name,'Preserved draft');assert.equal(oauthConnection.description,'Keep this during OAuth');assert.equal(oauthConnection.provider,'github');assert.notEqual(oauthConnection.credential_id,'0');
-  assert.equal(new URL(p.url()).pathname,`/tenant/build/repositories/${oauthConnection.id}`);
+  assert.equal(new URL(p.url()).pathname,`/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}`);
   const firstCredential=oauthConnection.credential_id;
 
   // Reauthorization updates this named connection, preserving its ID and credential references.
-  await p.goto(`${origin}/tenant/build/repositories/${oauthConnection.id}/edit`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}/edit`);
   await p.getByLabel(/^连接名称/).fill('Reauthorized connection');
   await p.getByLabel(/^备注/).fill('Saved during reauthorization');
   const reauthPopupPromise=p.waitForEvent('popup');
   await p.getByRole('button',{name:'重新网页授权',exact:true}).click();
   const reauthPopup=await reauthPopupPromise;
-  await p.waitForURL(`**/tenant/build/repositories/${oauthConnection.id}`);
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}`);
   if(!reauthPopup.isClosed())await reauthPopup.waitForEvent('close');
   assert(reauthPopup.isClosed());
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
@@ -147,7 +148,7 @@ try {
   assert.equal(rows.items[0].name,'Reauthorized connection');assert.equal(rows.items[0].description,'Saved during reauthorization');
 
   const invalidCredential=await post(owner,root+'/credentials',{name:'Invalid platform PAT',kind:'token',username:'browser-authorized-user',secret:'invalid-token',description:''});
-  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('gitee');
   await p.getByLabel(/^连接名称/).fill('Gitee connection');
   await p.getByLabel('授权认证',{exact:true}).selectOption(invalidCredential.id);
@@ -168,7 +169,7 @@ try {
   await credentialPage.getByRole('combobox',{name:/类型/}).click();await credentialPage.getByRole('option',{name:'访问令牌',exact:true}).click();
   await credentialPage.getByLabel(/^账号/).fill('browser-authorized-user');
   await credentialPage.getByLabel(/^内容/).fill('valid-personal-token');
-  await credentialPage.getByRole('button',{name:'创建',exact:true}).click();await credentialPage.waitForURL('**/tenant/build/credentials');
+  await credentialPage.getByRole('button',{name:'创建',exact:true}).click();await credentialPage.waitForURL(`**/workspaces/${workspace_tenant}/credentials`);
   const credentialRows=await (await owner.request.get(`${origin}/api${root}/credentials`)).json();
   const personalCredential=credentialRows.items.find(row=>row.name==='Reusable Gitee PAT');assert(personalCredential);assert(!('secret' in personalCredential));assert(personalCredential.has_secret);
   await credentialPage.close();
@@ -182,32 +183,32 @@ try {
   await p.getByRole('button',{name:'创建',exact:true}).click();
   const savedResponse=await saveConnection;assert(savedResponse.ok(),await savedResponse.text());
   const savedBody=savedResponse.request().postDataJSON();assert.equal(savedBody.credential_id,personalCredential.id);assert(!('token' in savedBody)&&!('secret' in savedBody));assert(!('default_branch' in savedBody));
-  await p.waitForURL('**/tenant/build/repositories');
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const giteeConnection=rows.items.find(row=>row.provider==='gitee'&&row.name==='Gitee connection');assert(giteeConnection);assert.equal(giteeConnection.credential_id,personalCredential.id);assert(!('default_branch' in giteeConnection));
-  await p.goto(`${origin}/tenant/build/repositories/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
   const passwordCredential=await post(owner,root+'/credentials',{name:'Reusable Git password',kind:'password',username:'git-user',secret:'generic-private-password',description:''});
-  await p.goto(`${origin}/tenant/build/repositories/new`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('git');
   await p.getByLabel('Git 仓库地址（可选）',{exact:true}).fill(providerOrigin+'/generic.git');
   await p.getByLabel('授权认证',{exact:true}).selectOption(passwordCredential.id);
   await p.getByLabel(/^连接名称/).fill('Generic with password');
   await p.getByRole('button',{name:'创建',exact:true}).click();
-  await p.waitForURL('**/tenant/build/repositories');
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   assert(rows.items.some(row=>row.provider==='git'&&row.name==='Generic with password'&&row.credential_id===passwordCredential.id));
 
-  const buildHost=await post(owner,root+'/hosts',{name:'Connected build host',connection:'runner'});
+  const buildHost=await post(owner,root+'/nodes',{name:'Connected build host',connection:'runner'});
   const runnerToken=await post(owner,root+'/runner-tokens',{host_id:buildHost.id});
   runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',runnerToken.token,'--state-dir',join(work,'runner')],{stdio:'ignore',windowsHide:true});
   for(let i=0;;i++) {
-    const host=await (await owner.request.get(origin+'/api'+root+'/hosts/'+buildHost.id)).json();
+    const host=await (await owner.request.get(origin+'/api'+root+'/nodes/'+buildHost.id)).json();
     if(host.state==='online')break;
     assert(i<100,'runner connection timed out');await new Promise(r=>setTimeout(r,100));
   }
   await p.setViewportSize({width:1280,height:900});
-  await p.goto(origin+'/tenant/build/pipelines/new');
+  await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/new`);
   await p.getByLabel('流水线名称').fill('Build from connection');
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);
@@ -229,15 +230,15 @@ try {
   definition.setIn(['jobs','build','steps'],[checkout,{...command,run:'sh build.sh'},{uses:'actions/upload-artifact@v4',with:{name:'result',path:'output/result.txt','if-no-files-found':'error'}}]);
   await setYaml(definition.toString());
   await p.getByRole('button',{name:'保存',exact:true}).click();
-  await p.waitForURL('**/tenant/build/pipelines');
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/pipelines`);
   const builds=await (await owner.request.get(origin+'/api'+root+'/pipelines')).json();
   const build=builds.items.find(row=>row.name==='Build from connection');assert(build);
   const binding=build.checkout_bindings.find(row=>row.job_id==='build'&&row.step_id===checkout.id);assert(binding);assert.equal(binding.connection_id,giteeConnection.id);assert.equal(binding.repository_url,providerOrigin+'/team/test-repo.git');assert.equal(binding.ref,sourceCommit);
   assert.equal(build.executor_bindings.find(row=>row.job_id==='build').target_ref,buildHost.id);
-  await p.goto(origin+'/tenant/build/pipelines/'+build.id+'/edit');
+  await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/`+build.id+'/edit');
   await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:/步骤2/}).click();
   assert.equal(await p.getByLabel('仓库连接',{exact:true}).inputValue(),giteeConnection.id);assert.equal(await p.getByLabel('节点仓库',{exact:true}).inputValue(),providerOrigin+'/team/test-repo.git');assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),sourceCommit);
-  const run=await post(owner,root+'/pipelines/'+build.id+'/actions/run',{});
+  const run=await post(owner,root+'/pipelines/'+build.id+'/runs',{});
   let result;
   for(let i=0;;i++) {
     result=await (await owner.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();
@@ -246,7 +247,7 @@ try {
   }
   assert.equal(result.state,'succeeded',JSON.stringify(result.steps));
   assert.equal(result.artifacts.length,1);
-  const archive=await owner.request.get(origin+'/api'+root+'/pipeline-artifacts/'+result.artifacts[0].id+'/download');
+  const archive=await owner.request.get(origin+'/api'+root+'/pipeline-artifacts/'+result.artifacts[0].id+'/content');
   assert(archive.ok());
   const content=execFileSync('python3',['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
   assert.equal(content,'built-from-private-repository\n'+sourceCommit+'\n');

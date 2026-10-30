@@ -78,17 +78,17 @@ try {
   };
   execFileSync(process.env.PYTHON_BINARY || 'python3', ['scripts/test-setup.py', `${origin}/api`, join(work, 'data')], { windowsHide: true });
   await api('/users', { email: 'ui@example.invalid', name: 'UI acceptance', password: 'temporary-ui-password' });
-  await api('/workspaces', { name: 'UI acceptance', slug: 'ops' });
-  await api('/workspaces/ops/variables', { name: 'build-ui-secret', scope: 'build', kind: 'secret', value: 'browser-managed-build-secret' });
-  const group = await api('/workspaces/ops/host-groups', { name: 'UI group' });
-  const host = await api('/workspaces/ops/hosts', { name: 'UI runner', connection: 'runner', group_id: group.id });
-  const token = await api('/workspaces/ops/runner-tokens', { host_id: host.id });
+  const workspace_ops = (await api('/workspaces', { name: 'UI acceptance', slug: 'ops' })).id;
+  await api(`/workspaces/${workspace_ops}/variables`, { name: 'build-ui-secret', scope: 'build', kind: 'secret', value: 'browser-managed-build-secret' });
+  const group = await api(`/workspaces/${workspace_ops}/node-groups`, { name: 'UI group' });
+  const host = await api(`/workspaces/${workspace_ops}/nodes`, { name: 'UI runner', connection: 'runner', group_id: group.id });
+  const token = await api(`/workspaces/${workspace_ops}/runner-tokens`, { host_id: host.id });
   await launch(resolve(process.env.RUNNER_BINARY || 'target/debug/ferry-runner'), ['--server', origin, '--token', token.token, '--state-dir', join(work, 'runner')]);
-  await until(async () => (await api(`/workspaces/ops/hosts/${host.id}`)).state === 'online');
+  await until(async () => (await api(`/workspaces/${workspace_ops}/nodes/${host.id}`)).state === 'online');
   page = await context.newPage();
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const assets = []; context.on('request', (request) => assets.push(request.url()));
-  await page.goto(`${origin}/ops/build/repositories`);
+  await page.goto(`${origin}/workspaces/${workspace_ops}/code-connections`);
   await page.getByRole('button', { name: '创建连接', exact: true }).waitFor();
   let releasePreferences;
   const preferencesGate = new Promise(resolve => { releasePreferences = resolve; });
@@ -110,9 +110,9 @@ try {
   // executing pipelines saved by earlier releases, with the original assertions.
   // Seed a concrete repository as an older release would have persisted it;
   // new connection/source-node checkout is covered by repository-auth-ui.
-  await api('/workspaces/ops/repositories',{name:'UI repository',provider:'git',url:`http://127.0.0.1:${gitPort}/source.git`,default_branch:branch});
-  const legacy=await api('/workspaces/ops/pipelines',{name:'Legacy seed',target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:join(work,'build-{{run}}'),steps:[{name:'Seed',run:'true'}]})});
-  await page.goto(`${origin}/ops/build/pipelines/${legacy.id}/edit`);
+  await api(`/workspaces/${workspace_ops}/repositories`,{name:'UI repository',provider:'git',url:`http://127.0.0.1:${gitPort}/source.git`,default_branch:branch});
+  const legacy=await api(`/workspaces/${workspace_ops}/pipelines`,{name:'Legacy seed',target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:join(work,'build-{{run}}'),steps:[{name:'Seed',run:'true'}]})});
+  await page.goto(`${origin}/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
   await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
   await page.getByRole('button', { name: '流水线设置', exact: true }).click();
   await page.getByRole('combobox', { name: '仓库',exact:true }).selectOption({label:'UI repository'});
@@ -144,7 +144,7 @@ try {
   const requests = [];
   page.on('request', (request) => { if (/pipeline-runs\/[^/]+(?:\/logs\?|$)/.test(request.url())) requests.push(request.url()); });
   await page.getByRole('button', { name: '触发', exact: true }).click();
-  await page.waitForURL(/\/ops\/build\/runs\/\d+/);
+  await page.waitForURL(/\/workspaces\/\d+\/pipeline-runs\/\d+/);
   await page.getByLabel('任务步骤和日志', { exact: true }).getByText('运行中', { exact: true }).waitFor();
   await page.getByLabel('任务步骤和日志', { exact: true }).getByText(/CLONE_OK/).waitFor();
   await page.getByLabel('任务步骤和日志', { exact: true }).getByText('运行中', { exact: true }).waitFor();
@@ -171,7 +171,7 @@ try {
   assert.deepEqual(errors, []);
   pass('execution history, no trigger action in history, no browser exceptions');
   assert(!assets.some((url) => /\/assets\/xterm-.*\.js/.test(url)), 'xterm loaded before terminal selection');
-  await page.goto(`${origin}/ops/host/nodes/${host.id}`);
+  await page.goto(`${origin}/workspaces/${workspace_ops}/nodes/${host.id}`);
   const terminalPage = context.waitForEvent('page');
   await page.getByRole('link', { name: '打开终端', exact: true }).click();
   page = await terminalPage;

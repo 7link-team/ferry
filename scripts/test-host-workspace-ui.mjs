@@ -24,32 +24,32 @@ try {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
-    if (path === '/api/me') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: { id: 'u1', name: 'Tester', email: 'test@example.invalid', is_superadmin: false }, workspaces: [{ id: 'w1', slug: 'ops', name: 'Ops', role_name: 'Owner', permissions: ['hosts.read', 'hosts.update', 'hosts.delete', 'hosts.enroll', 'hosts.files', 'hosts.terminal', 'host-groups.read', 'host-groups.update', 'host-groups.delete'] }] }) });
+    if (path === '/api/me') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ user: { id: 'u1', name: 'Tester', email: 'test@example.invalid', is_superadmin: false }, workspaces: [{ id: '109124796398174208', slug: 'ops', name: 'Ops', role_name: 'Owner', permissions: ['hosts.read', 'hosts.update', 'hosts.delete', 'hosts.enroll', 'hosts.files', 'hosts.terminal', 'host-groups.read', 'host-groups.update', 'host-groups.delete'] }] }) });
     if (path === '/api/setup') return route.fulfill({ contentType: 'application/json', body: '{"required":false}' });
-    if (path === '/api/workspaces/ops/preferences') return route.fulfill({ contentType: 'application/json', body: '{"default_page_size":20,"dictionaries":{}}' });
-    if (path === '/api/workspaces/ops/tags') return route.fulfill({ contentType: 'application/json', body: '{"items":[],"total":0,"page":1,"page_size":200}' });
-    if (path === '/api/workspaces/ops/host-groups/actions/reorder' && request.method() === 'POST') {
+    if (path === '/api/workspaces/109124796398174208/preferences') return route.fulfill({ contentType: 'application/json', body: '{"default_page_size":20,"dictionaries":{}}' });
+    if (path === '/api/workspaces/109124796398174208/tags') return route.fulfill({ contentType: 'application/json', body: '{"items":[],"total":0,"page":1,"page_size":200}' });
+    if (path === '/api/workspaces/109124796398174208/node-groups/ordering' && request.method() === 'PATCH') {
       const body = request.postDataJSON();
       assert.deepEqual(body, { parent_id: '0', ids: ['g2', 'g1'] });
       groups = body.ids.map((id, position) => ({ ...groups.find(group => group.id === id), position, version: 2 }));
       reordered = true;
       return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' });
     }
-    if (path === '/api/workspaces/ops/host-groups') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: groups, total: groups.length, page: 1, page_size: 200 }) });
-    if (path === '/api/workspaces/ops/hosts') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [{ id: 'h1', name: 'build-01', address: '192.168.0.130', connection: 'runner', state: 'online', tags: [], tag_ids: [], group_id: 'g1', seen_at: Date.now(), version: 1 }], total: 1, page: 1, page_size: 20 }) });
-    if (path === '/api/workspaces/ops/hosts/h1') return route.fulfill({ contentType: 'application/json', body: '{"id":"h1","name":"build-01","connection":"runner"}' });
-    if (path === '/api/workspaces/ops/hosts/h1/files') {
+    if (path === '/api/workspaces/109124796398174208/node-groups') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: groups, total: groups.length, page: 1, page_size: 200 }) });
+    if (path === '/api/workspaces/109124796398174208/nodes') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [{ id: 'h1', name: 'build-01', address: '192.168.0.130', connection: 'runner', state: 'online', tags: [], tag_ids: [], group_id: 'g1', seen_at: Date.now(), version: 1 }], total: 1, page: 1, page_size: 20 }) });
+    if (path === '/api/workspaces/109124796398174208/nodes/h1') return route.fulfill({ contentType: 'application/json', body: '{"id":"h1","name":"build-01","connection":"runner"}' });
+    if (path === '/api/workspaces/109124796398174208/nodes/h1/files') {
       if (request.method() === 'POST') { createdEntry = request.postDataJSON(); return route.fulfill({ status: 201, body: '' }); }
       if (request.method() === 'DELETE') { deletedPath = url.searchParams.get('path'); return route.fulfill({ status: 204, body: '' }); }
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ path: url.searchParams.get('path'), items: [{ name: 'logs', kind: 'directory', size: 0, mode: 493, modified_at: 0 }, { name: 'note.txt', kind: 'file', size: 12, mode: 420, modified_at: 0 }, { name: longName, kind: 'file', size: 12, mode: 420, modified_at: 0 }] }) });
     }
-    if (path === '/api/workspaces/ops/hosts/h1/files/content') {
+    if (path === '/api/workspaces/109124796398174208/nodes/h1/files/content') {
       if (request.method() === 'PUT') { saved = request.postData() ?? ''; return route.fulfill({ status: 204, body: '' }); }
       return route.fulfill({ status: 200, contentType: 'application/octet-stream', body: url.searchParams.get('path') === '/new.txt' ? '' : 'hello world\n' });
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: `fixture missing ${path}` }) });
   });
-  await page.goto(`${origin}/ops/host/nodes/h1/workspace?tool=files`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
   await page.getByRole('heading', { name: 'build-01' }).waitFor();
   await page.setViewportSize({ width: 900, height: 800 });
   const longLabel = page.locator('table tbody span[title]').filter({ hasText: longName }).first();
@@ -99,7 +99,7 @@ try {
   assert.equal(mobilePanes.length, 3);
   for (let index = 1; index < mobilePanes.length; index++) assert(mobilePanes[index].top >= mobilePanes[index - 1].bottom - 1, 'mobile panes do not overlap');
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'ferry-host-workspace-mobile.png'), fullPage: true });
-  await page.goto(`${origin}/ops/host/nodes`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
   const terminalLink = page.getByRole('link', { name: '打开终端' });
   await terminalLink.waitFor();
   const actions = await page.locator('table tbody tr').first().locator('td').last().locator('a,button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
@@ -108,7 +108,7 @@ try {
   await page.getByRole('dialog').getByText('确认删除“build-01”？').waitFor();
   await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
   assert.equal(await terminalLink.getAttribute('target'), '_blank');
-  assert.equal(new URL(await terminalLink.getAttribute('href'), origin).pathname, '/ops/host/nodes/h1/workspace');
+  assert.equal(new URL(await terminalLink.getAttribute('href'), origin).pathname, '/workspaces/109124796398174208/nodes/h1/workspace');
   await page.getByRole('button', { name: '上移分组 Beta' }).click();
   assert.equal(reordered, true);
   await page.waitForFunction(() => {
@@ -121,16 +121,16 @@ try {
   // Hold one host's probe open while another row and navigation stay usable.
   let finishProbe;
   let secondProbe = false;
-  await page.route('**/api/workspaces/ops/hosts**', async route => {
+  await page.route('**/api/workspaces/109124796398174208/nodes**', async route => {
     const path = new URL(route.request().url()).pathname;
-    if (path === '/api/workspaces/ops/hosts') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+    if (path === '/api/workspaces/109124796398174208/nodes') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
       items: ['h1', 'h2'].map((id, index) => ({ id, name: `build-0${index + 1}`, connection: 'runner', state: 'online', tags: [], tag_ids: [], group_id: 'g1', seen_at: Date.now(), version: 1 })), total: 2, page: 1, page_size: 20,
     }) });
-    if (path.endsWith('/h1/actions/test-connection')) {
+    if (path.endsWith('/h1/connection-tests')) {
       await new Promise(done => { finishProbe = done; });
       return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' });
     }
-    if (path.endsWith('/h2/actions/test-connection')) { secondProbe = true; return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' }); }
+    if (path.endsWith('/h2/connection-tests')) { secondProbe = true; return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' }); }
     return route.fallback();
   });
   await page.reload();
@@ -143,10 +143,10 @@ try {
   await secondRow.getByRole('button', { name: '测试连接' }).click();
   await page.waitForFunction(() => document.querySelectorAll('button[aria-label="测试连接"][aria-busy="true"]').length === 1);
   assert.equal(secondProbe, true);
-  const completed = page.waitForResponse(response => response.url().endsWith('/h1/actions/test-connection'));
+  const completed = page.waitForResponse(response => response.url().endsWith('/h1/connection-tests'));
   finishProbe(); await completed;
   console.log('PASS pending node probe leaves other nodes and navigation interactive');
-  await page.goto(`${origin}/ops/host/nodes/h1/edit`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/edit`);
   const form = page.locator('main form');
   await form.waitFor();
   const bounds = await form.boundingBox();

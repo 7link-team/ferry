@@ -19,7 +19,7 @@ it("shows individual disks and network interfaces from the host monitor endpoint
   }) }));
   vi.stubGlobal("fetch", fetch);
   await act(async () => root.render(<HostMonitor workspace="ops" hostId="h1" />));
-  expect(fetch).toHaveBeenCalledWith("/api/workspaces/ops/hosts/h1/monitor", expect.anything());
+  expect(fetch).toHaveBeenCalledWith("/api/workspaces/ops/nodes/h1/metrics", expect.anything());
   expect(host.textContent).toContain("24.3%");
   expect(host.textContent).toContain("/data");
   expect(host.textContent).toContain("eth0");

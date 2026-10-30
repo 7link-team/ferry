@@ -20,17 +20,17 @@ try {
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     let body;
-    if (path === '/api/me') body = { user: { id: 'u1', name: 'Tester', email: 'tester@example.invalid', is_superadmin: false }, workspaces: [{ id: 'w1', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions }] };
+    if (path === '/api/me') body = { user: { id: 'u1', name: 'Tester', email: 'tester@example.invalid', is_superadmin: false }, workspaces: [{ id: '109124796398174208', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions }] };
     else if (path === '/api/setup') body = { required: false };
     else if (path.endsWith('/preferences')) body = { default_page_size: 20, dictionaries: {} };
-    else if (path === '/api/workspaces/ops/hosts') { listReads++; body = { items: [host()], total: 1, page: 1, page_size: 20 }; }
-    else if (path === '/api/workspaces/ops/hosts/h1') body = host();
-    else if (path === '/api/workspaces/ops/hosts/h1/monitor') body = { cpu_percent: 12.5, load1: 0.2, memory_used: 1024, memory_total: 4096, disks: [{ name: 'system', mount: '/', used: 1024, total: 4096 }], networks: [{ name: 'eth0', received: 10, transmitted: 20 }] };
-    else if (path === '/api/workspaces/ops/hosts/h1/connection-command') {
+    else if (path === '/api/workspaces/109124796398174208/nodes') { listReads++; body = { items: [host()], total: 1, page: 1, page_size: 20 }; }
+    else if (path === '/api/workspaces/109124796398174208/nodes/h1') body = host();
+    else if (path === '/api/workspaces/109124796398174208/nodes/h1/metrics') body = { cpu_percent: 12.5, load1: 0.2, memory_used: 1024, memory_total: 4096, disks: [{ name: 'system', mount: '/', used: 1024, total: 4096 }], networks: [{ name: 'eth0', received: 10, transmitted: 20 }] };
+    else if (path === '/api/workspaces/109124796398174208/nodes/h1/connection-credentials') {
       if (request.method() === 'POST') { resets++; currentToken = `fixture-reset-${resets}`; online = false; }
       body = { token: currentToken, server: 'https://fixture.example:8443', state: online ? 'online' : 'offline' };
     }
-    else if (path === '/api/workspaces/ops/runner-tokens' && request.method() === 'POST') {
+    else if (path === '/api/workspaces/109124796398174208/runner-tokens' && request.method() === 'POST') {
       creates++;
       const input = request.postDataJSON();
       assert.equal(input.ttl_minutes, 15);
@@ -41,7 +41,7 @@ try {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   const exactButton = name => page.getByRole('button', { name, exact: true });
-  await page.goto(`${origin}/ops/host/nodes/new`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/new`);
   const command = page.getByRole('textbox', { name: '安装命令' });
   await command.waitFor({ timeout: 10000 });
   assert.match(await command.inputValue(), /fixture-secret-1/);
@@ -53,10 +53,10 @@ try {
   assert.match(await command.inputValue(), /install.sh/);
   console.log('PASS new Runner host shows a ready-to-copy Linux/Windows command without saving');
 
-  await page.goto(`${origin}/ops/host/nodes`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
   assert.equal(await exactButton('连接主机').count(), 0);
-  await page.goto(`${origin}/ops/host/nodes/h1`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1`);
   const current = page.getByRole('textbox', { name: '当前连接命令' });
   await current.waitFor();
   assert.match(await current.inputValue(), /fixture-current-token/);
@@ -90,13 +90,13 @@ try {
   console.log('PASS SSH detail has no Agent command');
 
   permissions = ['hosts.read']; connection = 'runner';
-  await page.goto(`${origin}/ops/host/nodes`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
-  await page.goto(`${origin}/ops/host/nodes/h1?tab=connect`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1?tab=connect`);
   assert.equal(await page.getByRole('textbox', { name: '当前连接命令' }).count(), 0);
   assert.equal(await exactButton('重置连接').count(), 0);
   permissions = ['hosts.read', 'hosts.create', 'hosts.enroll'];
-  await page.goto(`${origin}/ops/host/nodes/new`);
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/new`);
   await command.waitFor();
   await page.getByRole('tab', { name: 'SSH', exact: true }).click();
   assert.equal(await page.getByRole('tab', { name: '代理 Runner' }).count(), 1);
@@ -108,7 +108,7 @@ try {
   console.log('PASS new host switches Runner to SSH and back with the tabs retained');
 
   permissions = ['pipelines.read', 'pipelines.create', 'pipeline-groups.read'];
-  await page.goto(`${origin}/ops/build/pipelines/new`);
+  await page.goto(`${origin}/workspaces/109124796398174208/pipelines/new`);
   await page.getByRole('tab', { name: 'YAML', exact: true }).click();
   await page.locator('.monaco-editor').waitFor({ timeout: 20000 });
   assert.equal(await page.getByRole('textbox', { name: 'GitHub Actions YAML' }).count(), 1);

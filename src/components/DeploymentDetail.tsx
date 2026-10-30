@@ -1,3 +1,4 @@
+import { operationResource } from "../resource";
 import { useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { base } from "../resource";
@@ -51,7 +52,7 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
     setBusy(true); setError("");
     const controller = new AbortController(); actionRequest.current = controller;
     try {
-      const result = await api<Preview & { artifact: string }>(`${root}/${app.id}/actions/${verb}`, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
+      const result = await api<Preview & { artifact: string }>(`${root}/${app.id}/${operationResource(verb)}`, { method: "POST", body: JSON.stringify(body), signal: controller.signal });
       if (controller.signal.aborted) return;
       if (verb === "preview") { setPreview(result); setRendered(undefined); }
       else if (verb === "render") setRendered(result.artifact);

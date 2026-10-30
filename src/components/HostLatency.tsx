@@ -21,7 +21,7 @@ export function HostLatency({ workspace, hostId }: { workspace: string; hostId: 
       const started = performance.now();
       try {
         const result = await api<{ ok: boolean; stderr?: string }>(
-          `/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}/actions/test-connection`,
+          `/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/connection-tests`,
           { method: "POST", signal: controller.signal },
         );
         if (!result.ok) throw new Error(result.stderr || "主机连接检测失败");

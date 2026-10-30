@@ -28,8 +28,8 @@ it("Actions executor options do not request inaccessible host groups", async () 
  try {
   const editor=formConfigs("ops",new Set(["hosts.read"])).pipelines!.sections.flatMap(section=>section.fields).find(field=>field.type==="actions-editor")!;
   await (editor.options as ()=>Promise<unknown>)();
-  expect(calls.some(url=>url.includes('/hosts'))).toBe(true);
-  expect(calls.some(url=>url.includes('/host-groups'))).toBe(false);
+  expect(calls.some(url=>url.includes('/nodes'))).toBe(true);
+  expect(calls.some(url=>url.includes('/node-groups'))).toBe(false);
  } finally {globalThis.fetch=previous;}
 });
 it("restricted pipeline lists do not load inaccessible classification filters", () => {

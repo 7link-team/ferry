@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Repository authorization acceptance against isolated HTTP providers; optional empty FERRY_TEST_DATABASE_URL."""
+from contextlib import closing
 import http.cookiejar
 import json
 import os
@@ -90,7 +91,9 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
-        if path.startswith("/repository-auth/callback"):assert response.headers["Referrer-Policy"]=="no-referrer"
+        if path.startswith("/repository-providers/callback"):assert response.headers["Referrer-Policy"]=="no-referrer"
+        if path.startswith('/repository-providers/callback') and response.code == 303:
+            assert urlparse(response.headers['Location']).path == f'/workspaces/{workspace_tenant}/code-connections/new'
         raw = response.read()
         try: value = json.loads(raw) if raw else None
         except ValueError: raise AssertionError((path, response.code, raw))
@@ -115,11 +118,11 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
+        request(guest,'/workspace-memberships',{'code':invitation})
         # Connection creation has no concrete repository or branch. Reuse vault references.
         shared=request(owner,root+'/credentials',{'name':'Reusable PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token'},expected=201)['id']
         count=request(owner,root+'/credentials')['total']
@@ -144,7 +147,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         renamed=request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,name='Renamed team',version=linked['version']),method='PATCH')
         check(renamed['name']=='Renamed team' and request(owner,root+'/code-connections/'+linked2['id'])['name']=='Second GitHub','update targets only selected named connection')
         request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,version=linked['version']),method='PATCH',expected=409)
-        request(outsider,'/workspaces/other/code-connections',connection_body,expected=400)
+        request(outsider,f'/workspaces/{workspace_other}/code-connections',connection_body,expected=400)
         wrong=request(owner,root+'/credentials',{'name':'Password not PAT','kind':'password','username':'user','secret':'valid-personal-token'},expected=201)['id']
         request(owner,root+'/code-connections',dict(connection_body,credential_id=wrong),expected=400)
         invalid=request(owner,root+'/credentials',{'name':'Invalid PAT','kind':'token','secret':'rejected-secret'},expected=201)['id']
@@ -157,14 +160,14 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         for row in [linked,linked2]:request(owner,root+'/code-connections/'+row['id'],method='DELETE',expected=204)
         request(owner,root+'/credentials/'+shared,method='DELETE',expected=204)
         request(owner,root+'/credentials/'+wrong,method='DELETE',expected=204)
-        def status(provider):return next(r for r in request(owner,root+'/repository-auth')['items'] if r['id']==provider)
+        def status(provider):return next(r for r in request(owner,root+'/repository-providers')['items'] if r['id']==provider)
         def authorize(provider,options=None):
-            url=request(owner,root+'/repository-auth/'+provider+'/actions/authorize'+('?'+urlencode(options) if options else ''),{})['url']
+            url=request(owner,root+'/repository-providers/'+provider+'/authorizations'+('?'+urlencode(options) if options else ''),{})['url']
             try:owner.open(url)
             except urllib.error.HTTPError as response:
                 assert response.code==302;return response.headers['Location'][len(base):]
             raise AssertionError('provider did not redirect')
-        request(guest,root+'/repository-auth/github/actions/authorize',{},expected=403)
+        request(guest,root+'/repository-providers/github/authorizations',{},expected=403)
         role=request(owner,root+'/roles',{'name':'Authorize only','permissions':['credentials.create']})['id']
         member=request(owner,root+'/members?q=guest')['items'][0]
         request(owner,root+'/members/'+member['id'],{'version':member['version'],'role_id':role},'PATCH')
@@ -173,7 +176,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         for provider in ['github','gitlab','gitee']:
             callback=authorize(provider)
             request(guest,callback,expected=400)
-            request(outsider,callback.replace("/workspaces/tenant/","/workspaces/other/"),expected=400)
+            request(outsider,callback.replace(f"/workspaces/{workspace_tenant}/",f"/workspaces/{workspace_other}/"),expected=400)
             request(owner,callback,expected=303)
             request(owner,callback,expected=400)
             connected=status(provider)
@@ -184,7 +187,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             request(owner,root+'/repositories',{'name':'Wrong origin','url':'https://attacker.example.invalid/repo.git','credential_id':credential},expected=400)
             repo=request(owner,root+'/repositories',{'name':provider,'url':api_base+'/owner/repository.git','credential_id':credential},expected=201)['id'];repositories.append(repo)
             sid=request(owner,root+'/marketplace-sources',{'name':provider,'repository_id':repo,'provider':provider,'api_base':api_base,'project':'owner/repository','organization':'','branch':'main','index_path':'marketplace.json'},expected=201)['id'];sources.append(sid)
-            request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{})
+            request(owner,root+'/marketplace-sources/'+sid+'/synchronizations',{})
             check(provider in refreshes and status(provider)['state']=='connected',provider+' expiring authorization refreshes before real market fetch')
             before=credential
             request(owner,authorize(provider),expected=303)
@@ -208,26 +211,26 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         check(True,'cancelled authorization consumes single-use state')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             import sqlite3
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 stored=conn.execute('SELECT secret FROM credentials').fetchall()+conn.execute('SELECT refresh_secret FROM repository_connections').fetchall()
                 check(all(r[0].startswith('v1.') for r in stored) and 'initial-access' not in str(stored),'access and refresh tokens encrypted at rest')
             expired_callback=authorize('github')
             expired_state=parse_qs(urlparse(expired_callback).query)['state'][0]
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 conn.execute('UPDATE repository_oauth_flows SET expires_at=0 WHERE state_hash=?', (hashlib.sha256(expired_state.encode()).hexdigest(),))
             request(owner,expired_callback,expected=400)
             check(True,'expired authorization state cannot exchange a code')
             before_refresh=len(refreshes)
             proc.terminate();proc.wait(timeout=30)
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 conn.execute("UPDATE repository_connections SET state='refreshing' WHERE provider='github'")
             proc=launch()
             check(status('github')['state']=='reauthorize' and len(refreshes)==before_refresh,'interrupted refresh requires reauthorization without replaying token exchange')
-            request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+            request(owner,root+'/marketplace-sources/'+sources[0]+'/synchronizations',{},expected=400)
             check(len(refreshes)==before_refresh,'execution cannot reuse credentials with uncertain refresh outcome')
             request(owner,authorize('github'),expected=303)
             fail_refresh=True
-            request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+            request(owner,root+'/marketplace-sources/'+sources[0]+'/synchronizations',{},expected=400)
             check(status('github')['state']=='reauthorize','refresh rejection reports reauthorization requirement')
             fail_refresh=False;request(owner,authorize('github'),expected=303)
             check(status('github')['state']=='connected','new web authorization clears rejected refresh state')
@@ -236,7 +239,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         env['REPOSITORY_OAUTH_GITHUB_API_URL']=api_base+'/changed-api'
         proc=launch()
         before_refresh=len(refreshes)
-        request(owner,root+'/marketplace-sources/'+sources[0]+'/actions/sync',{},expected=400)
+        request(owner,root+'/marketplace-sources/'+sources[0]+'/synchronizations',{},expected=400)
         check(len(refreshes)==before_refresh,'changed authorization endpoint rejects old credentials before token refresh or API fetch')
         env['REPOSITORY_OAUTH_GITHUB_API_URL']=api_base
         proc.terminate();proc.wait(timeout=30)
@@ -256,10 +259,10 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         settings=request(admin,'/platform/settings/1')
         check(settings['oauth_source'].startswith('平台设置') and status('gitea')['web_available'],'new Gitea OAuth configuration is effective without restart')
         request(owner,authorize('gitea'),expected=303)
-        browse=request(owner,root+'/repository-auth/gitea/repositories')
+        browse=request(owner,root+'/repository-providers/gitea/repositories')
         check(browse['account']=='authorized-user' and browse['items'][0]['default_branch']=='develop','Gitea browser authorization returns selectable repositories')
         request(admin,'/platform/settings/1',{'version':settings['version'],'registration_enabled':True,'oauth_github_enabled':False,'oauth_github_client_secret':''},'PATCH')
-        request(owner,root+'/repository-auth/github/actions/authorize',{},expected=400)
+        request(owner,root+'/repository-providers/github/authorizations',{},expected=400)
         check(not status('github')['web_available'],'disable applies immediately without falling back to environment variables')
         settings=request(admin,'/platform/settings/1')
         check(settings['oauth_github_has_client_secret'],'blank secret retains existing encrypted application secret')
@@ -277,10 +280,10 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         for provider in ['github','gitlab','gitee','gitea','codeup']:
             before=request(owner,root+'/credentials')['total']
             connection_body={'token':'invalid-token','base_url':api_base,'api_url':api_base,'organization':'test-org','username':'codeup-user'}
-            request(owner,root+'/repository-auth/'+provider+'/actions/connect',connection_body,expected=400)
+            request(owner,root+'/repository-providers/'+provider+'/connections',connection_body,expected=400)
             check(request(owner,root+'/credentials')['total']==before,provider+' rejects invalid token without saving a credential')
             connection_body['token']='valid-personal-token'
-            result=request(owner,root+'/repository-auth/'+provider+'/actions/connect',connection_body)
+            result=request(owner,root+'/repository-providers/'+provider+'/connections',connection_body)
             check(result['credential_id'] and len(result['items'])==1,provider+' PAT verifies actual repository access and creates a connection')
             repo=result['items'][0]
             rid=request(owner,root+'/repositories',{'name':provider+' connected','provider':provider,'url':repo['url'],'default_branch':repo['default_branch'],'credential_id':result['credential_id']},expected=201)['id'];created_repos.append(rid)
@@ -288,9 +291,9 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             check(saved['provider']==provider and saved['credential_id']==result['credential_id'],provider+' repository is saved with its connected authorization')
             request(owner,root+'/repositories/'+rid,{'name':saved['name'],'url':saved['url'],'credential_id':saved['credential_id'],'version':saved['version']},'PATCH')
             check(request(owner,root+'/repositories/'+rid)['provider']==provider,provider+' legacy update without provider preserves source binding')
-            request(outsider,'/workspaces/other/repositories',{'name':'Stolen','provider':provider,'url':repo['url'],'credential_id':result['credential_id']},expected=400)
+            request(outsider,f'/workspaces/{workspace_other}/repositories',{'name':'Stolen','provider':provider,'url':repo['url'],'credential_id':result['credential_id']},expected=400)
             request(owner,root+'/repositories',{'name':'Wrong host','provider':provider,'url':'https://attacker.example.invalid/repo.git','credential_id':result['credential_id']},expected=400)
-            check(request(owner,root+'/repository-auth/'+provider+'/repositories?page=2')['items']==[],provider+' pagination remains in the same connection')
+            check(request(owner,root+'/repository-providers/'+provider+'/repositories?page=2')['items']==[],provider+' pagination remains in the same connection')
         before=request(owner,root+'/credentials')['total']
         inline={'kind':'password','username':'git-user','secret':'inline-private-password'}
         request(owner,root+'/repositories',{'name':'','provider':'git','url':api_base+'/generic.git','inline_credential':inline},expected=400)
@@ -300,7 +303,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             saved=request(owner,root+'/repositories/'+rid)
             check(saved['credential_id']!='0' and 'inline-private-password' not in json.dumps(saved),'generic Git '+kind+' saves encrypted authorization with repository')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 stored=conn.execute('SELECT repository_oauth FROM platform_state').fetchone()[0]
                 check(stored.startswith('v1.') and 'fixture-client-secret' not in stored,'platform OAuth application configuration encrypted at rest')
                 check(all(v not in (data/'server.log').read_text() for v in ['fixture-client-secret','valid-personal-token','inline-private-password']),'secrets absent from server logs')
@@ -311,7 +314,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         for sid in sources:request(owner,root+'/marketplace-sources/'+sid,method='DELETE',expected=204)
         for repo in repositories:request(owner,root+'/repositories/'+repo,method='DELETE',expected=204)
         for credential in request(owner,root+'/credentials')['items']:request(owner,root+'/credentials/'+credential['id'],method='DELETE',expected=204)
-        check(all(r['credential_id'] is None for r in request(owner,root+'/repository-auth')['items']),'credential deletion removes linked authorization secrets')
+        check(all(r['credential_id'] is None for r in request(owner,root+'/repository-providers')['items']),'credential deletion removes linked authorization secrets')
         print(f'{checks} checks passed (isolated OAuth provider, not live external account acceptance)',flush=True)
     except Exception:
         log.flush();print((data/'server.log').read_text()[-5000:],flush=True)

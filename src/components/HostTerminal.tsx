@@ -58,7 +58,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
       `${scheme}//${location.host}/api/workspaces/${encodeURIComponent(workspace)}` +
-        `/hosts/${encodeURIComponent(hostId)}/terminal?cols=${term.cols}&rows=${term.rows}`,
+        `/nodes/${encodeURIComponent(hostId)}/terminal-sessions?cols=${term.cols}&rows=${term.rows}`,
     );
     socket.binaryType = "arraybuffer";
 

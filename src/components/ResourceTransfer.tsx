@@ -55,7 +55,7 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
           <Dialog.Description className="text-sm text-muted-foreground">下载模板填写后预览，确认才新增记录。支持 CSV／XLSX，每次最多 1000 行、8MB；引用填写当前空间的 ID，密钥列不会回显。</Dialog.Description>
           <Dialog.Close asChild><Button size="icon" variant="ghost" disabled={busy} className="absolute right-3 top-3" aria-label="关闭导入"><X /></Button></Dialog.Close>
           <div className="flex flex-wrap gap-2">
-            {(["xlsx", "csv"] as const).map(format => <Button key={format} variant="outline" size="sm" disabled={busy} onClick={() => void run(() => download(`${endpoint}/template?format=${format}`, `${resource}-template.${format}`))}>下载 {format.toUpperCase()} 模板</Button>)}
+            {(["xlsx", "csv"] as const).map(format => <Button key={format} variant="outline" size="sm" disabled={busy} onClick={() => void run(() => download(`${endpoint}/import-template?format=${format}`, `${resource}-template.${format}`))}>下载 {format.toUpperCase()} 模板</Button>)}
           </div>
           <label className="grid gap-2 text-sm">选择导入文件<Input type="file" accept=".csv,.xlsx" disabled={busy || !!preview} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} /></label>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -77,7 +77,7 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
               setPreview(await api<Preview>(`${endpoint}/imports`, { method: "POST", body: form }));
             })}>预览导入</Button>}
             {preview?.valid && <Button disabled={busy} onClick={() => void run(async () => {
-              const result = await api<{items: unknown[]}>(`${endpoint}/imports/${preview.id}/commit`, { method: "POST" });
+              const result = await api<{items: unknown[]}>(`${endpoint}/imports/${preview.id}/commits`, { method: "POST" });
               setPreview(undefined); setFile(undefined); setOpen(false); onChanged(); toast.success(`已新增 ${result.items.length} 项`);
             })}>确认新增 {preview.count} 项</Button>}
           </div>
@@ -85,7 +85,7 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
       </Dialog.Portal>
     </Dialog.Root>}
     {canExport && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline" disabled={busy}>{busy && !open ? <Loader2 className="animate-spin" /> : <Download />} 导出</Button></DropdownMenuTrigger>
-      <DropdownMenuContent align="end">{(["xlsx", "csv"] as const).map(format => <DropdownMenuItem key={format} onSelect={() => void run(() => download(`${endpoint}/export${queryString({ ...params, format })}`, `${resource}.${format}`))}>导出 {format.toUpperCase()}（当前筛选全部记录）</DropdownMenuItem>)}</DropdownMenuContent>
+      <DropdownMenuContent align="end">{(["xlsx", "csv"] as const).map(format => <DropdownMenuItem key={format} onSelect={() => void run(() => download(`${endpoint}/exports${queryString({ ...params, format })}`, `${resource}.${format}`))}>导出 {format.toUpperCase()}（当前筛选全部记录）</DropdownMenuItem>)}</DropdownMenuContent>
     </DropdownMenu>}
   </>;
 }

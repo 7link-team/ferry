@@ -12,8 +12,11 @@ export interface Envelope<T> {
   page_size: number;
 }
 
+export const resourceName = (resource: string) =>
+  resource === "hosts" ? "nodes" : resource === "host-groups" ? "node-groups" : resource;
+
 export const base = (workspace: string, resource: string) =>
-  `/workspaces/${encodeURIComponent(workspace)}/${resource}`;
+  `/workspaces/${encodeURIComponent(workspace)}/${resourceName(resource)}`;
 
 /** Drops empty values so a cleared filter leaves the URL instead of sending `=`. */
 export function queryString(params: Record<string, string | number | undefined>) {
@@ -56,20 +59,31 @@ export const patchResource = <T>(
 export const deleteResource = (workspace: string, resource: string, id: string) =>
   api<void>(`${base(workspace, resource)}/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-/** Non-CRUD verbs live under /actions/, per the REST contract.
- *  Collection-level: POST /{resource}/actions/{verb} */
+const operationResources: Record<string, string> = {
+  "test-connection": "connection-tests", run: "runs", "run-now": "runs",
+  cancel: "cancellations", acknowledge: "acknowledgements", reveal: "disclosures",
+  render: "renderings", preview: "previews", apply: "executions", rollback: "rollbacks",
+  sync: "synchronizations", install: "installations", reorder: "ordering",
+};
+export const operationResource = (action: string) => {
+  const name = operationResources[action];
+  if (!name) throw new Error(`Unknown resource operation: ${action}`);
+  return name;
+};
+
+/** Collection operations use HTTP methods and named subresources. */
 export const runAction = <T>(
   workspace: string,
   resource: string,
   action: string,
   body: unknown,
 ) =>
-  api<T>(`${base(workspace, resource)}/actions/${action}`, {
-    method: "POST",
+  api<T>(action === "bulk-delete" ? base(workspace, resource) : `${base(workspace, resource)}/${operationResource(action)}`, {
+    method: action === "bulk-delete" ? "DELETE" : action === "reorder" ? "PATCH" : "POST",
     body: JSON.stringify(body),
   });
 
-/** Item-level: POST /{resource}/{id}/actions/{verb} */
+/** Item operations create a named subresource rather than calling an RPC verb. */
 export const runItemAction = <T>(
   workspace: string,
   resource: string,
@@ -77,7 +91,7 @@ export const runItemAction = <T>(
   action: string,
   body: unknown,
 ) =>
-  api<T>(`${base(workspace, resource)}/${encodeURIComponent(id)}/actions/${action}`, {
+  api<T>(`${base(workspace, resource)}/${encodeURIComponent(id)}/${operationResource(action)}`, {
     method: "POST",
     body: JSON.stringify(body),
   });

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { formConfigs } from "./resources";
 afterEach(() => vi.unstubAllGlobals());
 it("legacy pipeline templates select the legacy editor instead of treating JSON as Actions YAML", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/actions/render") ? {definition:'{"workdir":"/tmp/build","steps":[{"name":"Build","run":"echo ok"}]}'} : {parameters:"[]"} })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/renderings") ? {definition:'{"workdir":"/tmp/build","steps":[{"name":"Build","run":"echo ok"}]}'} : {parameters:"[]"} })));
   const config = formConfigs("ops", new Set(["pipeline-templates.read"])).pipelines!;
   const generated = await config.generator!.generate("1", 1, {});
   expect(generated.definition_format).toBe("legacy");

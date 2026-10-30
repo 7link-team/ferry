@@ -71,7 +71,7 @@ pub struct Host {
 
 // ------------------------------------------------------------------ 终端
 
-/// `GET .../hosts/{id}/terminal` upgraded to a WebSocket.
+/// `GET .../nodes/{id}/terminal-sessions` upgraded to a WebSocket.
 ///
 /// Browser -> server: binary frames are keystrokes, text frames are JSON
 /// control (`{"type":"resize","cols":120,"rows":40}`).
@@ -355,7 +355,7 @@ pub async fn delete_file(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST .../hosts/{id}/actions/test-connection` — proves the stored details
+/// `POST .../nodes/{id}/connection-tests` — proves the stored details
 /// actually reach the machine, before anyone relies on them.
 pub async fn test_connection(
     State(s): State<AppState>,

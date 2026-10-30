@@ -32,10 +32,11 @@ def main():
     def check(value,label):
         nonlocal checks
         assert value,label;checks+=1;print('PASS',label,flush=True)
-    root='/workspaces/classify'
-    def create(resource,body,base=root):return api(base+'/'+resource,body,status=201)['id']
-    def detail(resource,id):return api(root+'/'+resource+'/'+id)
-    def trigger(id,environment=None,status=201):return api(root+'/pipelines/'+id+'/actions/run',{} if environment is None else {'environment_id':environment},status=status)
+    def create(resource,body,base=None):
+        resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
+        return api((base or root)+'/'+resource,body,status=201)['id']
+    def detail(resource,id):return api(root+'/'+{'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)+'/'+id)
+    def trigger(id,environment=None,status=201):return api(root+'/pipelines/'+id+'/runs',{} if environment is None else {'environment_id':environment},status=status)
     def done(id):
         def finished():
             row=detail('pipeline-runs',id)
@@ -49,8 +50,9 @@ def main():
             except OSError:return False
         eventually(ready)
         api('/setup',{'token':(work/'setup-token').read_text().strip(),'email':'classify@example.invalid','name':'Admin','password':'temporary-test-password'})
-        api('/workspaces',{'name':'Classify','slug':'classify'})
-        api('/workspaces',{'name':'Other','slug':'other'})
+        workspace_classify = api('/workspaces',{'name':'Classify','slug':'classify'})['id']
+        workspace_other = api('/workspaces',{'name':'Other','slug':'other'})['id']
+        root=f'/workspaces/{workspace_classify}'
         group=create('pipeline-groups',{'name':'Backend'})
         host_ids=[]
         for index in range(2):
@@ -77,7 +79,7 @@ def main():
             check(api(root+'/pipelines?'+key+'='+value)['total']==1,'filter '+key)
         trigger(pipeline,status=400)
         check(True,'bound pipeline requires explicit environment')
-        foreign=create('pipeline-environments',{'name':'Foreign','target_kind':'host','target_ref':create('hosts',{'name':'Foreign','connection':'runner'},'/workspaces/other')},'/workspaces/other')
+        foreign=create('pipeline-environments',{'name':'Foreign','target_kind':'host','target_ref':create('hosts',{'name':'Foreign','connection':'runner'},f'/workspaces/{workspace_other}')},f'/workspaces/{workspace_other}')
         trigger(pipeline,foreign,status=400)
         create_body=dict(body,name='Foreign binding',environment_ids=[foreign])
         api(root+'/pipelines',create_body,status=400)
@@ -97,7 +99,7 @@ def main():
         check(frozen['state']=='succeeded' and frozen['host_id']==host_ids[0] and frozen['environment_name']=='Staging','trigger freezes environment name, host and variable value')
         api(root+'/variables/'+variable_ids[0],method='DELETE',status=409)
         check(True,'selected environment variable in use cannot be deleted')
-        api(root+'/hosts/'+host_ids[1],method='DELETE',status=409)
+        api(root+'/nodes/'+host_ids[1],method='DELETE',status=409)
         check(True,'environment default host is protected from deletion')
         cron_body={'name':'Scheduled environment','scope':'build','schedule':'0 0 1 1 *','timezone':'UTC','enabled':False,'action':'pipeline','target_kind':'pipeline','target_ref':pipeline,'timeout_seconds':30,'environment_id':environments[1]}
         cron=create('cron-jobs',cron_body)

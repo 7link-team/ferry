@@ -52,7 +52,7 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
 
   useEffect(() => {
     const controller = new AbortController();
-    void api<{ name: string }>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}`, { signal: controller.signal })
+    void api<{ name: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`, { signal: controller.signal })
       .then(host => { if (!controller.signal.aborted) setHostName(host.name); })
       .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); });
     return () => controller.abort();
@@ -87,10 +87,9 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
   const renderPane = (node: Pane, tab: WorkspaceTab, canClose: boolean): React.ReactNode => {
     return <section aria-label={node.kind === "terminal" ? "终端分屏" : "文件分屏"} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
       <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
-        {node.kind === "terminal" ? <SquareTerminal className="size-4 shrink-0" /> : <FolderOpen className="size-4 shrink-0" />}
-        <span className="min-w-0 flex-1 truncate text-sm" title={node.directory}>{node.directory || (node.kind === "terminal" ? "终端" : "文件")}</span>
         {canTerminal && <Button variant="ghost" size="icon" className="size-7" aria-label="切换为终端" title="终端" disabled={node.kind === "terminal"} onClick={() => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: "terminal" })) }))}><SquareTerminal className="size-4" /></Button>}
         {canFiles && <Button variant="ghost" size="icon" className="size-7" aria-label="切换为文件" title="文件" disabled={node.kind === "files"} onClick={() => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ id: old.id, kind: "files" })) }))}><FolderOpen className="size-4" /></Button>}
+        <span className="min-w-0 flex-1 truncate text-sm" title={node.directory}>{node.directory || (node.kind === "terminal" ? "终端" : "文件")}</span>
         <Button variant="ghost" size="icon" className="size-7" aria-label="左右分屏" title="左右分屏" onClick={() => split(node.id, "horizontal", node.kind)}><Columns2 className="size-4" /></Button>
         <Button variant="ghost" size="icon" className="size-7" aria-label="上下分屏" title="上下分屏" onClick={() => split(node.id, "vertical", node.kind)}><Rows2 className="size-4" /></Button>
         {canClose && <Button variant="ghost" size="icon" className="size-7" aria-label="关闭分屏" title="关闭分屏" onClick={() => closePane(node.id)}><X className="size-4" /></Button>}

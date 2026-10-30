@@ -96,11 +96,19 @@ pub fn routes() -> Router<AppState> {
         "deployment-revisions",
     ] {
         let extension = Extension(Resource(resource));
-        let path = format!("/{{workspace}}/{resource}");
-        router = router.route(&format!("{path}/export"), get(export).layer(extension));
+        let name = match resource {
+            "hosts" => "nodes",
+            "host-groups" => "node-groups",
+            _ => resource,
+        };
+        let path = format!("/{{workspace}}/{name}");
+        router = router.route(&format!("{path}/exports"), get(export).layer(extension));
         if fields(resource).is_ok() {
             router = router
-                .route(&format!("{path}/template"), get(template).layer(extension))
+                .route(
+                    &format!("{path}/import-template"),
+                    get(template).layer(extension),
+                )
                 .route(
                     &format!("{path}/imports"),
                     post(preview)
@@ -110,7 +118,7 @@ pub fn routes() -> Router<AppState> {
                         .layer(extension),
                 )
                 .route(
-                    &format!("{path}/imports/{{id}}/commit"),
+                    &format!("{path}/imports/{{id}}/commits"),
                     post(commit).layer(extension),
                 )
                 .route(

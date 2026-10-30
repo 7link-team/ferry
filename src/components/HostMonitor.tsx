@@ -67,7 +67,7 @@ export function HostMonitor({ workspace, hostId }: { workspace: string; hostId: 
     const refresh = () => {
       if (busy) return;
       busy = true;
-      void api<Monitor>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}/monitor`)
+      void api<Monitor>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/metrics`)
       .then(value => {
         if (!isMonitor(value)) throw new Error("监控接口尚未提供有效数据，请更新后端服务。");
         if (live) { const at = Date.now(); setMonitor(value); setSamples(current => [...current, { at, monitor: value }].slice(-60)); setError(""); setUpdatedAt(at); }

@@ -205,3 +205,11 @@ Decision: user approved independent updater, ordinary helper for CurrentUser and
 - Reason：用户要求保留有价值的记录并移至根目录，供不同开发工具共同使用；采用标准拼写 MEMORY。
 - Scope：项目文档及其引用；不改变运行时行为。原路径不再维护。
 - Status：已实施。历史记录保留，当前状态摘要优先于历史检查点。
+
+## 工作空间 ID 与统一资源路径 — 2026-10-30
+- Decision：用户明确选择统一资源路径、去掉菜单分组。页面 `/workspaces/{workspaceId}/{resource}`，API `/api/workspaces/{workspaceId}/{resource}`；节点为 `nodes`、主机分组为 `node-groups`。平台页面 `/platform/{resource}`。菜单和面包屑保留业务层次。
+- Identity：使用数据库已有雪花 ID，JSON 和浏览器全程保留十进制字符串。名称/slug 不再作为接口作用域索引；保留 metadata，不修改既有 ID、数据和权限资源名。
+- Operations：HTTP 方法配合名词子资源（`runs`、`connection-tests`、`cancellations`、`renderings` 等）；排序用 PATCH `ordering`，批量删除用 DELETE 集合。共享资源用 `scope` 查询参数。
+- Compatibility：旧页面书签在登录后通过身份中的可访问工作空间映射为 ID，保留详情和查询；API 拒绝 slug，不增加旧 API 别名。Runner 机器连接协议与安装分发端点维持兼容。
+- Supersedes：旧的 slug/菜单分组页面路径和 `/actions/{verb}` 接口约定；不涉及数据库迁移。
+- Status：用户已批准，当前实现以 MEMORY.md 验证记录为准。

@@ -176,12 +176,12 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         wait(ready, 'backend startup')
         api('/setup', {'name':'Bootstrap Test','email':'bootstrap@example.invalid',
                       'password':'temporary-bootstrap-password','token':(root/'server/setup-token').read_text().strip()})
-        api('/workspaces', {'name':'Bootstrap','slug':'bootstrap'})
-        host = api('/workspaces/bootstrap/hosts', {'name':'Bootstrap runner','connection':'runner'})['id']
-        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        workspace_bootstrap = api('/workspaces', {'name':'Bootstrap','slug':'bootstrap'})['id']
+        host = api(f'/workspaces/{workspace_bootstrap}/nodes', {'name':'Bootstrap runner','connection':'runner'})['id']
+        enrollment = api(f'/workspaces/{workspace_bootstrap}/runner-tokens', {'host_id':host})
         token = enrollment['token']
         def token_status(token_id):
-            return api('/workspaces/bootstrap/runner-tokens/' + token_id)
+            return api(f'/workspaces/{workspace_bootstrap}/runner-tokens/' + token_id)
         expected_target = {
             ('Linux','x86_64'):'x86_64-unknown-linux-gnu', ('Linux','aarch64'):'aarch64-unknown-linux-gnu',
             ('Darwin','x86_64'):'x86_64-apple-darwin', ('Darwin','arm64'):'aarch64-apple-darwin',
@@ -241,8 +241,8 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
             install_args = [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', expression]
         else:
             install_args = ['/bin/sh', repo/'scripts/runner-install.sh', '--server', origin, '--name', name]
-        host_path = '/workspaces/bootstrap/hosts/' + host
-        update_path = host_path + '/runner-update'
+        host_path = f'/workspaces/{workspace_bootstrap}/nodes/' + host
+        update_path = host_path + '/runner-updates'
         if windows:
             # Existing unsafe state must never be promoted to trusted service
             # state. Keep its content and ACL intact when installation rejects it.
@@ -286,7 +286,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         print('PASS consumed installation command returns 401 and preserves the healthy native service', flush=True)
         # The explicit bootstrap rebind rotates credentials and restarts the
         # service, while keeping the same registered host.
-        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        enrollment = api(f'/workspaces/{workspace_bootstrap}/runner-tokens', {'host_id':host})
         installer_env['FERRY_TOKEN'] = enrollment['token']
         command(*install_args, env=installer_env, timeout=150)
         wait(lambda: token_status(enrollment['id'])['state'] == 'connected', 'rebind consumes fresh token')
@@ -302,7 +302,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         # Moving the advertised server address must work with explicit fresh
         # enrolment, without disclosing the previous address's connection key.
         moved_origin = origin.replace('127.0.0.1', 'localhost')
-        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        enrollment = api(f'/workspaces/{workspace_bootstrap}/runner-tokens', {'host_id':host})
         installer_env['FERRY_TOKEN'] = enrollment['token']
         moved_args = [str(arg).replace(origin, moved_origin) for arg in install_args]
         command(*moved_args, env=installer_env, timeout=150)
@@ -317,7 +317,7 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         first_pid, identity = service_pid(), moved_identity
         install_args = moved_args
         print('PASS explicit server-address migration stops old service, rotates its key and preserves target host', flush=True)
-        enrollment = api('/workspaces/bootstrap/runner-tokens', {'host_id':host})
+        enrollment = api(f'/workspaces/{workspace_bootstrap}/runner-tokens', {'host_id':host})
         installer_env['FERRY_TOKEN'] = enrollment['token']
         artifact['bytes'] = corrupt
         rejected = command(*install_args, env=installer_env, timeout=150, check=False)

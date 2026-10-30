@@ -3,16 +3,17 @@
  * reopens the same page, the same filters, the same page of rows and the same
  * scroll offset after login.
  *
- *   /{workspace}/{group}/{item}            list
- *   /{workspace}/{group}/{item}/new        create
- *   /{workspace}/{group}/{item}/{id}       detail (the form in read-only mode)
- *   /{workspace}/{group}/{item}/{id}/edit  edit
+ *   /workspaces/{workspaceId}/{resource}            list
+ *   /workspaces/{workspaceId}/{resource}/new        create
+ *   /workspaces/{workspaceId}/{resource}/{id}       detail (the form in read-only mode)
+ *   /workspaces/{workspaceId}/{resource}/{id}/edit  edit
  *
  * Filters, `page`, `page_size` and `at` (scroll offset) live in the query and
  * are written with replaceState, so typing in a filter never grows history.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { nav } from "./nav";
+import { resourceName } from "./resource";
 
 export interface Route {
   workspace: string;
@@ -22,7 +23,25 @@ export interface Route {
   mode: "list" | "new" | "view" | "edit" | "workspace";
 }
 
-export function parse(pathname = location.pathname): Route {
+export function parse(pathname = location.pathname, search = location.search): Route {
+  const segments = pathname.replace(/^\/+|\/+$/g, "").split("/");
+  if (segments[0] === "platform") {
+    return parse('/_platform/' + segments.slice(1).join('/'), search);
+  }
+  if (segments[0] === "workspaces") {
+    const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
+    const scope = new URLSearchParams(search).get("scope");
+    const candidates = nav.flatMap(group => group.items
+      .filter(item => resourceName(item.resource) === resource)
+      .map(item => ({ group, item })));
+    const selected = candidates.find(({ item }) => scope && item.params?.scope === scope)
+      ?? candidates.find(({ item }) => !item.hidden) ?? candidates[0];
+    const group = selected?.group ?? nav[0]!;
+    const item = selected?.item ?? group.items[0]!;
+    const mode = detail === "new" ? "new" : detail ? (action === "workspace" ? "workspace" : action === "edit" ? "edit" : "view") : "list";
+    return { workspace, group: group.key, item: item.key, mode,
+      ...(mode === "view" || mode === "edit" || mode === "workspace" ? { id: detail } : {}) };
+  }
   const [workspace = "", group = "", item = "", third = "", fourth = "", fifth = ""] = pathname
     .replace(/^\/+|\/+$/g, "")
     .split("/");
@@ -58,10 +77,11 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
     r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : r.mode === "workspace" ? `/${r.id}/workspace` : "";
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
+  const item = nav.find(group => group.key === r.group)?.items.find(item => item.key === r.item);
+  for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
+  const base = r.workspace === "_platform" ? `/platform/${r.item}` :
+    `/workspaces/${encodeURIComponent(r.workspace)}/${resourceName(item?.resource ?? r.item)}`;
   const search = params.toString();
-  const base = r.workspace === "_platform" ? `/_platform/${r.item}` :
-    r.group === "build" && r.item === "pipeline-groups" ? `/${r.workspace}/build/pipelines/groups` :
-    r.group === "host" && r.item === "hosts" ? `/${r.workspace}/host/nodes` : `/${r.workspace}/${r.group}/${r.item}`;
   return `${base}${tail}${search ? `?${search}` : ""}`;
 }
 

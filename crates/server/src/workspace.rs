@@ -337,11 +337,13 @@ impl FromRequestParts<AppState> for Scope {
             Path::<std::collections::HashMap<String, String>>::from_request_parts(parts, s)
                 .await
                 .map_err(|_| ApiError::missing())?;
-        let slug = params
+        let workspace = params
             .get("workspace")
-            .ok_or_else(ApiError::missing)?
-            .clone();
-        Self::for_user(s, slug, account.user).await
+            .filter(|value| value.bytes().all(|byte| byte.is_ascii_digit()))
+            .and_then(|value| value.parse::<Id>().ok())
+            .filter(|id| i64::from(*id) > 0)
+            .ok_or_else(ApiError::missing)?;
+        Self::for_user(s, workspace, account.user).await
     }
 }
 
@@ -354,13 +356,9 @@ impl Scope {
             .one(&s.db)
             .await?
             .ok_or_else(ApiError::forbidden)?;
-        let ws = workspaces::Entity::find_by_id(i64::from(workspace))
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?;
         Self::for_user(
             s,
-            ws.slug,
+            workspace,
             crate::auth::User {
                 id: row.id.into(),
                 email: row.email,
@@ -370,10 +368,9 @@ impl Scope {
         )
         .await
     }
-    async fn for_user(s: &AppState, slug: String, user: crate::auth::User) -> Result<Self> {
+    async fn for_user(s: &AppState, workspace: Id, user: crate::auth::User) -> Result<Self> {
         if user.is_superadmin {
-            let row = workspaces::Entity::find()
-                .filter(workspaces::Column::Slug.eq(slug))
+            let row = workspaces::Entity::find_by_id(i64::from(workspace))
                 .one(&s.db)
                 .await?
                 .ok_or_else(ApiError::missing)?;
@@ -408,7 +405,7 @@ impl Scope {
                     .to(workspace_roles::Column::Id)
                     .into(),
             )
-            .filter(workspaces::Column::Slug.eq(slug.clone()))
+            .filter(workspaces::Column::Id.eq(i64::from(workspace)))
             .filter(workspace_members::Column::UserId.eq(i64::from(user.id)))
             .filter(workspace_members::Column::State.eq("active"))
             .into_model::<Membership>()
@@ -421,7 +418,6 @@ impl Scope {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let _ = slug;
         Ok(Self {
             workspace_id: Id::from(row.id),
             user: user,
@@ -595,7 +591,9 @@ pub async fn join(
     .exec(&tx)
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({"slug": row.slug, "name": row.name})))
+    Ok(Json(
+        json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name}),
+    ))
 }
 
 /// The permission catalogue the role editor renders. Static, but served so the

@@ -80,13 +80,14 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         owner_id = request(owner, '/users', {'name':'Owner','email':'owner@example.invalid','password':password})['id']
         outsider_id = request(outsider, '/users', {'name':'Outsider','email':'outsider@example.invalid','password':password})['id']
         ws = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces/tenant/hosts', expected=404)
+        workspace_tenant = ws['id']
+        request(outsider, f'/workspaces/{workspace_tenant}/nodes', expected=404)
         for path in ['/platform/users', '/platform/workspaces', '/platform/settings/1']:
             request(owner, path, expected=403)
             request(anonymous, path, expected=401)
         request(owner, '/platform/users/'+owner_id, {'version':1,'active':True,'is_superadmin':True}, 'PATCH', 403)
         check(not request(owner, '/me')['user']['is_superadmin'], 'workspace owner cannot self-elevate or access platform')
-        check(request(admin, '/workspaces/tenant/hosts')['total'] == 0, 'superadmin can enter an unjoined workspace')
+        check(request(admin, f'/workspaces/{workspace_tenant}/nodes')['total'] == 0, 'superadmin can enter an unjoined workspace')
         check(request(admin, '/me')['workspaces'][0]['slug'] == 'tenant', 'superadmin identity includes all workspaces')
         users = request(admin, '/platform/users?q=owner&page_size=1')
         check(users['total'] == 1 and len(users['items']) == 1, 'global list uses search and pagination')
@@ -94,11 +95,14 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/platform/users?sort=password_hash', expected=400)
         request(admin, '/platform/users?workspace_id=1', expected=400)
         created = request(admin, '/platform/workspaces', {'name':'New workspace','slug':'platform'})
+        workspace_platform = created['id']
         check(created['slug'] == 'platform', 'legacy-valid platform workspace slug remains available')
         row = request(admin, '/platform/workspaces/'+ws['id'])
         request(admin, '/platform/workspaces/'+ws['id'], {'name':'Renamed','version':row['version']}, 'PATCH')
         request(admin, '/platform/workspaces/'+ws['id'], {'name':'Stale','version':row['version']}, 'PATCH', 409)
         check(request(admin, '/platform/workspaces/'+ws['id'])['name'] == 'Renamed', 'workspace rename protects stale writes')
+        check(request(owner, f'/workspaces/{workspace_tenant}/nodes')['total'] == 0,
+              'workspace rename keeps existing ID-based resource URLs valid')
         for active, superadmin in [(False, True), (True, False)]:
             request(admin, '/platform/users/'+admin_id, {'version':1, 'active':active, 'is_superadmin':superadmin}, 'PATCH', 409)
         check(request(admin, '/me')['user']['is_superadmin'], 'last active admin cannot be disabled or demoted')

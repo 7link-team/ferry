@@ -76,13 +76,13 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
-        group=request(owner,root+'/host-groups',{'name':'Cron group'},expected=201)['id']
-        host=request(owner,root+'/hosts',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
+        request(guest,'/workspace-memberships',{'code':invitation})
+        group=request(owner,root+'/node-groups',{'name':'Cron group'},expected=201)['id']
+        host=request(owner,root+'/nodes',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
         token=request(owner,root+'/runner-tokens',{'host_id':host},expected=201)['token']
         def eventually(fn,timeout=30):
             end=time.monotonic()+timeout
@@ -98,8 +98,8 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         body={'name':'Offline','target_kind':'host','target_ref':host,'metric':'offline','threshold':0,'enabled':True,'webhook':webhook}
         rid=create(body)
         request(guest,root+'/alert-rules',body,expected=403)
-        request(outsider,'/workspaces/other/alert-rules/'+rid,expected=404)
-        request(owner,root+'/hosts/'+host,method='DELETE',expected=409)
+        request(outsider,f'/workspaces/{workspace_other}/alert-rules/'+rid,expected=404)
+        request(owner,root+'/nodes/'+host,method='DELETE',expected=409)
         check(True,'tenant, permission and target reference protection')
         for change in [{'metric':'bad'},{'webhook':'file:///etc/passwd'},{'webhook':'https://user:password@example.invalid'},{'metric':'memory-percent','threshold':101}]:
             request(owner,root+'/alert-rules',dict(body,**change),expected=400)
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
                 check(stored.startswith('v1.') and 'fixture-private-token' not in stored,'webhook stored as authenticated ciphertext')
         event=eventually(lambda:next((e for e in events(rid) if 'HTTP 204' in e['trigger_delivery']),None))
         check(event['state']=='firing','offline host triggers a real event and webhook')
-        request(outsider,'/workspaces/other/alert-events/'+event['id'],expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/alert-events/'+event['id'],expected=404)
         time.sleep(4.5)
         check(len(events(rid))==1 and len(notifications)==1,'continuous abnormality produces one event and one notification')
         runner=subprocess.Popen(['target/debug/ferry-runner','--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
@@ -134,22 +134,22 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         check(True,'threshold recovery sends exactly one failed recovery attempt')
         job=request(owner,root+'/cron-jobs',{'name':'Failing job','scope':'host','schedule':'0 * * * *','timezone':'UTC','enabled':False,'action':'command','target_kind':'host','target_ref':host,'command':'exit 7','timeout_seconds':10},expected=201)['id']
         execution=create(dict(body,name='Job failed',target_kind='cron-job',target_ref=job,metric='execution-failed',webhook=''))
-        request(owner,root+'/cron-jobs/'+job+'/actions/run-now',{},expected=202)
+        request(owner,root+'/cron-jobs/'+job+'/runs',{},expected=202)
         eventually(lambda:any(e['state']=='firing' for e in events(execution)))
         check(True,'real scheduled command failure triggers execution alert')
         old=request(owner,root+'/cron-jobs/'+job)
         request(owner,root+'/cron-jobs/'+job,dict(old,command='true'),'PATCH')
-        request(owner,root+'/cron-jobs/'+job+'/actions/run-now',{},expected=202)
+        request(owner,root+'/cron-jobs/'+job+'/runs',{},expected=202)
         eventually(lambda:any(e['state']=='recovered' for e in events(execution)))
         check(True,'subsequent actual success recovers execution alert')
         request(owner,root+'/cron-jobs/'+job,method='DELETE',expected=409)
         pipeline=request(owner,root+'/pipelines',{'name':'Monitored pipeline','target_kind':'host','target_ref':host,'definition':json.dumps({'workdir':str(data/'pipeline'),'steps':[{'name':'Failure','run':'exit 9'}]})},expected=201)['id']
         pipeline_rule=create(dict(body,name='Pipeline failure',target_kind='pipeline',target_ref=pipeline,metric='execution-failed',webhook=''))
-        request(owner,root+'/pipelines/'+pipeline+'/actions/run',{},expected=201)
+        request(owner,root+'/pipelines/'+pipeline+'/runs',{},expected=201)
         eventually(lambda:any(e['state']=='firing' for e in events(pipeline_rule)))
         old=request(owner,root+'/pipelines/'+pipeline)
         request(owner,root+'/pipelines/'+pipeline,dict(old,definition=json.dumps({'workdir':str(data/'pipeline'),'steps':[{'name':'Success','run':'true'}]})),'PATCH')
-        request(owner,root+'/pipelines/'+pipeline+'/actions/run',{},expected=201)
+        request(owner,root+'/pipelines/'+pipeline+'/runs',{},expected=201)
         eventually(lambda:any(e['state']=='recovered' for e in events(pipeline_rule)))
         check(True,'real pipeline failure and success drive alert transitions')
         dashboard=request(owner,root+'/dashboard')
@@ -183,7 +183,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
             proc.stdin.close();proc.wait(timeout=30);proc=launch()
             eventually(lambda:request(owner,root+'/alert-events')['total']==1)
             check(request(owner,root+'/alert-events/'+str(retained))['state']=='firing','configured retention removes expired recovered events and protects active event')
-        drain_host=request(owner,root+'/hosts',{'name':'Drain monitor target','connection':'runner'},expected=201)['id']
+        drain_host=request(owner,root+'/nodes',{'name':'Drain monitor target','connection':'runner'},expected=201)['id']
         drain_rule=create(dict(body,name='Drain delivery',target_ref=drain_host,webhook=f'http://127.0.0.1:{receiver.server_port}/slow'))
         eventually(slow_started.is_set)
         proc.stdin.close();time.sleep(.4)

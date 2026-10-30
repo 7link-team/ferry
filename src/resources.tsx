@@ -201,7 +201,7 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
     const row = await api<Template>(`/workspaces/${workspace}/${resource}/${id}`);
     const parameters = JSON.parse(row.parameters) as TemplateParameter[];
     const typed = Object.fromEntries(Object.entries(values).filter(([key,value]) => !(parameters.find(p => p.name === key)?.type === "integer" && value === "")).map(([key,value]) => [key, parameters.find(p => p.name === key)?.type === "boolean" ? value === "true" : value]));
-    const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/actions/render`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
+    const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/renderings`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
     if (resource === "pipeline-templates") {
       const rendered = JSON.parse(result[field] ?? "{}") as Record<string, unknown>;
       if (rendered.engine === "github-actions" && typeof rendered.workflow === "string") {
@@ -331,7 +331,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       columns: [
         { key: "path", label: "文件路径" }, { key: "run_id", label: "执行 ID" },
         { key: "size", label: "大小（字节）", sortable: true }, { key: "sha256", label: "SHA-256" },
-        { key: "download", label: "下载", render: (r: { id: string; path: string }) => <a className="text-primary underline" href={`/api/workspaces/${encodeURIComponent(workspace)}/pipeline-artifacts/${r.id}/download`} download>下载 {r.path}</a> },
+        { key: "download", label: "下载", render: (r: { id: string; path: string }) => <a className="text-primary underline" href={`/api/workspaces/${encodeURIComponent(workspace)}/pipeline-artifacts/${r.id}/content`} download>下载 {r.path}</a> },
       ],
       toolbar: { create: false, import: false, export: false },
       empty: "还没有构建产物。在流水线定义的 artifacts 中声明相对文件路径，构建成功后会自动归档。",

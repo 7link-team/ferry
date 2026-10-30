@@ -36,16 +36,16 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
-  const host=await post(owner,root+'/hosts',{name:'Cron UI runner',connection:'runner'});
+  const root=`/workspaces/${workspace_tenant}`;
+  const host=await post(owner,root+'/nodes',{name:'Cron UI runner',connection:'runner'});
   const {token}=await post(owner,root+'/runner-tokens',{host_id:host.id});
   runner=spawn(resolve('target/debug/ferry-runner'),['--server',origin,'--token',token,'--state-dir',join(work,'runner')],{stdio:['ignore',log.fd,log.fd],windowsHide:true});
-  for(let i=0;;i++) {const r=await owner.request.get(`${origin}/api${root}/hosts/${host.id}`);if((await r.json()).state==='online')break;assert(i<200);await new Promise(r=>setTimeout(r,100));}
-  await p.goto(`${origin}/tenant/host/cron-jobs`);
+  for(let i=0;;i++) {const r=await owner.request.get(`${origin}/api${root}/nodes/${host.id}`);if((await r.json()).state==='online')break;assert(i<200);await new Promise(r=>setTimeout(r,100));}
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/cron-jobs?scope=host`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('UI command');
   await p.getByLabel('时区',{exact:false}).fill('Asia/Singapore');
@@ -55,7 +55,7 @@ try {
   await p.getByRole('textbox',{name:/^命令/}).fill('echo CRON_BROWSER');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'UI command'}).getByRole('button',{name:'立即执行',exact:true}).click();
-  await p.waitForURL('**/host/cron-runs/*');
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/cron-runs/*?scope=host`);
   await p.locator('p.font-mono').filter({hasText:'退出码 0'}).waitFor();
   const id=new URL(p.url()).pathname.split('/').pop();
   const run=await (await owner.request.get(`${origin}/api${root}/cron-runs/${id}`)).json();
@@ -63,7 +63,7 @@ try {
   await p.getByRole('link',{name:'返回任务',exact:true}).click();
   await p.getByRole('link',{name:'执行历史',exact:true}).click();
   await p.getByRole('cell',{name:'成功',exact:true}).waitFor();
-  await p.goto(`${origin}/tenant/host/cron-jobs`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/cron-jobs?scope=host`);
   await p.getByRole('row').filter({hasText:'UI command'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('UI edited');
   await p.getByRole('button',{name:'保存',exact:true}).click();
@@ -71,7 +71,7 @@ try {
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
   await p.waitForFunction(()=>!document.body.innerText.includes('UI edited'));
   for (const scope of ['build','deploy']) {
-    await p.goto(`${origin}/tenant/${scope}/cron-jobs/new`);
+    await p.goto(`${origin}/workspaces/${workspace_tenant}/cron-jobs/new?scope=${scope}`);
     const selected=await p.getByLabel('所属模块',{exact:false}).innerText();
     assert(selected.includes(scope==='build'?'构建':'部署'));
     await p.getByLabel('动作',{exact:false}).click();

@@ -20,7 +20,7 @@ export function HostTelemetry({ workspace, hostId, enabled, children }: {
       const controller = new AbortController(); request = controller;
       const timeout = setTimeout(() => controller.abort(), 8_000);
       try {
-        const monitor = await api<unknown>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}/monitor`, { signal: controller.signal });
+        const monitor = await api<unknown>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/metrics`, { signal: controller.signal });
         if (!isMonitor(monitor)) throw new Error("监控接口尚未提供有效数据");
         if (!disposed) setSample({ monitor });
       } catch (cause) {

@@ -168,10 +168,10 @@ c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -b "$J
 python3 scripts/test-setup.py "$B" "$DATA" || die "platform setup failed"
 
 c -X POST -d '{"email":"ops@x.com","password":"correct-horse-battery","name":"运维员"}' "$B/users" >/dev/null
-c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces" >/dev/null
-c -X POST -d '{"name":"另一个","slug":"other"}' "$B/workspaces" >/dev/null
-HOST_A=$(c -X POST -d '{"name":"agent-01","connection":"runner"}' "$B/workspaces/ops/hosts" | field id)
-HOST_B=$(c -X POST -d '{"name":"remote-01","connection":"runner"}' "$B/workspaces/other/hosts" | field id)
+WORKSPACE_OPS=$(c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces" | field id)
+WORKSPACE_OTHER=$(c -X POST -d '{"name":"另一个","slug":"other"}' "$B/workspaces" | field id)
+HOST_A=$(c -X POST -d '{"name":"agent-01","connection":"runner"}' "$B/workspaces/$WORKSPACE_OPS/nodes" | field id)
+HOST_B=$(c -X POST -d '{"name":"remote-01","connection":"runner"}' "$B/workspaces/$WORKSPACE_OTHER/nodes" | field id)
 [ -n "$HOST_A" ] && [ -n "$HOST_B" ] || die "could not create hosts — is main.rs wired? (see the header of this script)"
 echo "== workspace ops host $HOST_A / workspace other host $HOST_B"
 
@@ -182,7 +182,7 @@ mint() { # mint <workspace> <host-id>
 # --------------------------------------------------------- 1. bad tokens refused
 
 echo "== enrolment"
-TOKEN=$(mint ops "$HOST_A")
+TOKEN=$(mint "$WORKSPACE_OPS" "$HOST_A")
 [ -n "$TOKEN" ] || die "no enrolment token — is POST /{workspace}/runner-tokens wired?"
 ck "a token is minted" '^[0-9a-f]\{64\}$' "$TOKEN"
 
@@ -196,7 +196,7 @@ run_once() { # run_once <state-dir> <token> ; prints the runner's own output
 }
 ck "garbage token refused" "注册令牌无效" "$(run_once "$WORK/s-garbage" "not-a-real-token")"
 
-EXPIRED=$(mint ops "$HOST_A")
+EXPIRED=$(mint "$WORKSPACE_OPS" "$HOST_A")
 python3 -I -c "
 import sqlite3,sys
 db=sqlite3.connect(sys.argv[1]); db.execute('PRAGMA journal_mode=WAL')
@@ -216,10 +216,10 @@ RLOG="$WORK/runner.log"
 "$RUNNER" --server "http://127.0.0.1:$PORT" --token "$TOKEN" --state-dir "$STATE" >"$RLOG" 2>&1 &
 RUNNER_PID=$!
 for _ in $(seq 1 40); do
-  [ "$(c "$B/workspaces/ops/hosts/$HOST_A" | field state)" = online ] && break
+  [ "$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A" | field state)" = online ] && break
   sleep 0.5
 done
-ck "host goes online" "online" "$(c "$B/workspaces/ops/hosts/$HOST_A" | field state)"
+ck "host goes online" "online" "$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A" | field state)"
 ck "the key was stored" '"host_id"' "$(cat "$STATE/runner.json" 2>/dev/null)"
 ck "and only for its owner" "^600$" \
   "$(python3 -I -c "import os,sys;print(oct(os.stat(sys.argv[1]).st_mode)[-3:])" "$STATE/runner.json")"
@@ -229,23 +229,23 @@ ck "re-using the same token fails" "已被使用\|注册令牌无效" "$(run_onc
 
 echo "== channel"
 ck "test-connection succeeds (exec round trip, code 0)" '"ok":true' \
-  "$(c -X POST "$B/workspaces/ops/hosts/$HOST_A/actions/test-connection")"
+  "$(c -X POST "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/connection-tests")"
 
 # Exercise HostChannel::exec through the existing pipeline API. There is no
 # hosts/actions/exec route; skipping that nonexistent route hid these checks.
 EXEC_PIPELINE=$(python3 -I -c 'import json,sys
 print(json.dumps({"name":"runner-exec", "target_kind":"host", "target_ref":sys.argv[1],
  "definition":json.dumps({"workdir":sys.argv[2], "steps":[{"name":"exec", "run":"echo out; echo err 1>&2; exit 7"}]})}))' "$HOST_A" "$WORK/exec" |
-  c -X POST --data-binary @- "$B/workspaces/ops/pipelines" | field id)
+  c -X POST --data-binary @- "$B/workspaces/$WORKSPACE_OPS/pipelines" | field id)
 [ -n "$EXEC_PIPELINE" ] || die "could not create exec pipeline"
-EXEC_RUN=$(c -X POST "$B/workspaces/ops/pipelines/$EXEC_PIPELINE/actions/run" | field id)
+EXEC_RUN=$(c -X POST "$B/workspaces/$WORKSPACE_OPS/pipelines/$EXEC_PIPELINE/runs" | field id)
 [ -n "$EXEC_RUN" ] || die "could not trigger exec pipeline"
 for _ in $(seq 1 60); do
-  EXEC=$(c "$B/workspaces/ops/pipeline-runs/$EXEC_RUN")
+  EXEC=$(c "$B/workspaces/$WORKSPACE_OPS/pipeline-runs/$EXEC_RUN")
   [ "$(printf '%s' "$EXEC" | field state)" = failed ] && break
   sleep 0.5
 done
-EXEC_LOGS=$(c "$B/workspaces/ops/pipeline-runs/$EXEC_RUN/logs?after=0")
+EXEC_LOGS=$(c "$B/workspaces/$WORKSPACE_OPS/pipeline-runs/$EXEC_RUN/logs?after=0")
 EXEC_STREAMS=$(printf '%s' "$EXEC_LOGS" | python3 -I -c 'import json,sys
 items=json.load(sys.stdin)["items"]
 for stream in ("stdout", "stderr"):
@@ -257,25 +257,25 @@ ck "exec returns the code" '"exit_code":7' "$EXEC"
 # The runner's `Session::Failed` path, which is how every remote error reaches
 # the operator. Reachable without adding a route.
 ck "a missing directory reports why" "无法打开目录" \
-  "$(c "$B/workspaces/ops/hosts/$HOST_A/files?path=/nonexistent-ferry-path")"
+  "$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=/nonexistent-ferry-path")"
 
 XFER="$WORK/xfer"
 mkdir -p "$XFER/subdir"
 echo "alpha" >"$XFER/alpha.txt"
-LIST=$(c "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER")
+LIST=$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=$XFER")
 ck "list_dir finds the file"    '"name":"alpha.txt"'  "$LIST"
 ck "list_dir types a directory" '"kind":"directory"'  "$LIST"
 ck "list_dir reports a size"    '"size":6'            "$LIST"
-ck "create directory" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created\",\"kind\":\"directory\"}" "$B/workspaces/ops/hosts/$HOST_A/files" -o /dev/null -w '%{http_code}')"
-ck "create file" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/ops/hosts/$HOST_A/files" -o /dev/null -w '%{http_code}')"
+ck "create directory" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created\",\"kind\":\"directory\"}" "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files" -o /dev/null -w '%{http_code}')"
+ck "create file" "^201$" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files" -o /dev/null -w '%{http_code}')"
 ck "created file is empty" "^0$" "$(wc -c <"$XFER/created/empty.txt" | tr -d ' ')"
-ck "duplicate create is refused" "名称是否重复" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/ops/hosts/$HOST_A/files")"
-ck "delete created file" "^204$" "$(c -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER/created/empty.txt" -o /dev/null -w '%{http_code}')"
-ck "delete created directory" "^204$" "$(c -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER/created" -o /dev/null -w '%{http_code}')"
+ck "duplicate create is refused" "名称是否重复" "$(c -X POST -d "{\"path\":\"$XFER/created/empty.txt\",\"kind\":\"file\"}" "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files")"
+ck "delete created file" "^204$" "$(c -X DELETE "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=$XFER/created/empty.txt" -o /dev/null -w '%{http_code}')"
+ck "delete created directory" "^204$" "$(c -X DELETE "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=$XFER/created" -o /dev/null -w '%{http_code}')"
 
 COOKIE="ferry_session=$(grep ferry_session "$JAR" | awk '{print $7}' | tail -1)"
 PTY=$(python3 -I scripts/ws-probe.py terminal \
-  "ws://127.0.0.1:$PORT/api/workspaces/ops/hosts/$HOST_A/terminal?cols=80&rows=24" "$COOKIE")
+  "ws://127.0.0.1:$PORT/api/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/terminal-sessions?cols=80&rows=24" "$COOKIE")
 ck "pty echoes the command's output" "hello"  "$PTY"
 ck "resize reaches the tty"          "37 111" "$PTY"
 
@@ -292,15 +292,15 @@ RSS_BEFORE=$(rss)
 SAMPLER=$!
 
 UP_CODE=$(c -X PUT --data-binary "@$WORK/source.bin" -H "Content-Type: application/octet-stream" \
-  "$B/workspaces/ops/hosts/$HOST_A/files/content?path=$BIG" -o /dev/null -w '%{http_code}')
+  "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files/content?path=$BIG" -o /dev/null -w '%{http_code}')
 ck "upload accepted" "^204$" "$UP_CODE"
 ck "the file on the host matches" "^$SUM_IN$" \
   "$(shasum -a 256 "$BIG" 2>/dev/null | awk '{print $1}')"
 chmod 750 "$BIG"
-ck "overwrite accepted" "^204$" "$(c -X PUT --data-binary "@$WORK/source.bin" -H "Content-Type: application/octet-stream" "$B/workspaces/ops/hosts/$HOST_A/files/content?path=$BIG" -o /dev/null -w '%{http_code}')"
+ck "overwrite accepted" "^204$" "$(c -X PUT --data-binary "@$WORK/source.bin" -H "Content-Type: application/octet-stream" "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files/content?path=$BIG" -o /dev/null -w '%{http_code}')"
 ck "overwrite preserves file mode" "^750$" "$(python3 -I -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$BIG")"
 
-DOWN_CODE=$(c "$B/workspaces/ops/hosts/$HOST_A/files/content?path=$BIG" \
+DOWN_CODE=$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files/content?path=$BIG" \
   -o "$WORK/back.bin" -w '%{http_code}')
 ck "download served" "^200$" "$DOWN_CODE"
 ck "the download matches too" "^$SUM_IN$" "$(shasum -a 256 "$WORK/back.bin" | awk '{print $1}')"
@@ -317,18 +317,18 @@ else
 fi
 
 ck "deleting a non-empty directory is refused, not recursive" "请确认目录为空" \
-  "$(c -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$XFER")"
+  "$(c -X DELETE "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=$XFER")"
 ck "delete removes it" "^204$" \
-  "$(c -o /dev/null -w '%{http_code}' -X DELETE "$B/workspaces/ops/hosts/$HOST_A/files?path=$BIG")"
+  "$(c -o /dev/null -w '%{http_code}' -X DELETE "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/files?path=$BIG")"
 if [ -e "$BIG" ]; then bad "the file is still on the host after DELETE"; else ok "and it is really gone"; fi
 
 # -------------------------------------------------------- 5. workspace isolation
 
 echo "== isolation"
 ck "B's own runner host is unreachable" "代理未连接" \
-  "$(c "$B/workspaces/other/hosts/$HOST_B/files?path=/tmp")"
+  "$(c "$B/workspaces/$WORKSPACE_OTHER/nodes/$HOST_B/files?path=/tmp")"
 ck "A's host is invisible from B" "不存在" \
-  "$(c "$B/workspaces/other/hosts/$HOST_A/files?path=/tmp")"
+  "$(c "$B/workspaces/$WORKSPACE_OTHER/nodes/$HOST_A/files?path=/tmp")"
 
 KEY=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['key'])" "$STATE/runner.json")
 FORGED=$(python3 -I scripts/ws-probe.py frame "ws://127.0.0.1:$PORT/api/runners/connect" \
@@ -350,7 +350,7 @@ ck "an unknown session id is refused" "该会话不存在" "$STOLEN"
 # ------------------------------------------------- 6. reconnect on its own
 
 echo "== reconnect"
-SEEN_BEFORE=$(c "$B/workspaces/ops/hosts/$HOST_A" | field seen_at)
+SEEN_BEFORE=$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A" | field seen_at)
 kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 sleep 2
 if kill -0 "$RUNNER_PID" 2>/dev/null; then
@@ -361,13 +361,13 @@ fi
 start_server
 RECONNECTED=no
 for _ in $(seq 1 60); do
-  NOW=$(c "$B/workspaces/ops/hosts/$HOST_A" | field seen_at)
+  NOW=$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A" | field seen_at)
   if [ -n "$NOW" ] && [ "$NOW" -gt "${SEEN_BEFORE:-0}" ]; then RECONNECTED=yes; break; fi
   sleep 1
 done
 ck "runner reconnected by itself (seen_at advanced)" "^yes$" "$RECONNECTED"
 ck "and the channel works again" '"ok":true' \
-  "$(c -X POST "$B/workspaces/ops/hosts/$HOST_A/actions/test-connection")"
+  "$(c -X POST "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A/connection-tests")"
 
 # ------------------------------------------------------------------- result
 

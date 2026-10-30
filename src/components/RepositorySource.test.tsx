@@ -29,7 +29,7 @@ it("named platform connections select credential IDs without repository, branch 
  expect(host.textContent).not.toContain("选择平台仓库");
  expect(host.textContent).not.toContain("默认分支");
  expect(host.querySelector('[aria-label="授权认证"]')?.textContent).not.toContain("Deploy key");
- expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/ops/build/credentials/new");
+ expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/workspaces/ops/credentials/new");
 });
 it("ordinary Git permits an optional URL and all existing Git credential kinds",async()=>{
  await mount({name:"Git connection",provider:"git",credential_id:"0"});
@@ -57,15 +57,15 @@ it("OAuth validates the popup sender and navigates directly to the created conne
  const opened={closed:false,close:vi.fn(),location:{href:"about:blank"}};
  vi.spyOn(window,"open").mockReturnValue(opened as unknown as Window);
  vi.stubGlobal("BroadcastChannel",class {onmessage=null;close(){} });
- vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);return {ok:true,status:200,json:async()=>url.includes("/actions/authorize")?{url:"https://github.example.invalid/oauth"}:{items:url.includes("/credentials")?credentials:[{id:"github",web_available:true}]}};}));
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);return {ok:true,status:200,json:async()=>url.includes("/authorizations")?{url:"https://github.example.invalid/oauth"}:{items:url.includes("/credentials")?credentials:[{id:"github",web_available:true}]}};}));
  await mount();await select("平台授权方式","web");
  await act(async()=>[...host.querySelectorAll("button")].find(button=>button.textContent==="打开网页授权")!.click());
- const url=new URL(requests.find(url=>url.includes("/actions/authorize"))!,location.origin);
+ const url=new URL(requests.find(url=>url.includes("/authorizations"))!,location.origin);
  expect(url.searchParams.get("name")).toBe("Team connection");expect(url.searchParams.get("channel")).toBeTruthy();
  await act(async()=>window.dispatchEvent(new MessageEvent("message",{origin:"https://attacker.invalid",source:opened as unknown as Window,data:{type:"repository-authorized",provider:"github",status:"connected",connection_id:"45"}})));
  expect(location.pathname).toBe("/ops/build/repositories/new");
  await act(async()=>window.dispatchEvent(new MessageEvent("message",{origin:location.origin,source:opened as unknown as Window,data:{type:"repository-authorized",provider:"github",status:"connected",connection_id:"45"}})));
- expect(location.pathname).toBe("/ops/build/repositories/45");expect(patch).not.toHaveBeenCalled();
+ expect(location.pathname).toBe("/workspaces/ops/code-connections/45");expect(patch).not.toHaveBeenCalled();
  expect(requests.some(url=>url.includes("/repositories?"))).toBe(false);
 });
 it("credential loading is visible and resolves into the existing picker",async()=>{
@@ -78,11 +78,11 @@ it("credential loading is visible and resolves into the existing picker",async()
 it("reauthorizing a saved OAuth connection sends its ID without clearing the existing binding",async()=>{
  const opened={closed:false,close:vi.fn(),location:{href:"about:blank"}};vi.spyOn(window,"open").mockReturnValue(opened as unknown as Window);
  vi.stubGlobal("BroadcastChannel",class {onmessage=null;close(){} });
- vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);return {ok:true,status:200,json:async()=>url.includes("/actions/authorize")?{url:"https://github.example.invalid/oauth"}:{items:url.includes("/credentials")?credentials:[{id:"github",web_available:true}]}};}));
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);return {ok:true,status:200,json:async()=>url.includes("/authorizations")?{url:"https://github.example.invalid/oauth"}:{items:url.includes("/credentials")?credentials:[{id:"github",web_available:true}]}};}));
  await mount({id:"44",name:"Saved OAuth",provider:"github",credential_id:"11",authorization:"oauth"});
  expect(validity).toHaveBeenLastCalledWith(false);
  await act(async()=>[...host.querySelectorAll("button")].find(button=>button.textContent==="重新网页授权")!.click());
- expect(new URL(requests.find(url=>url.includes("/actions/authorize"))!,location.origin).searchParams.get("connection_id")).toBe("44");
+ expect(new URL(requests.find(url=>url.includes("/authorizations"))!,location.origin).searchParams.get("connection_id")).toBe("44");
  expect(patch).not.toHaveBeenCalled();
  await act(async()=>[...host.querySelectorAll("button")].find(button=>button.textContent==="取消授权")!.click());
  expect(validity).toHaveBeenLastCalledWith(false);expect(opened.close).toHaveBeenCalled();

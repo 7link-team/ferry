@@ -58,15 +58,16 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
+        request(guest,'/workspace-memberships',{'code':invitation})
         import csv, io, sqlite3, zipfile
         from concurrent.futures import ThreadPoolExecutor
         import openpyxl
         def upload(resource, rows=None, raw=None, ext='csv', c=owner, status=200):
+            resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
             if raw is None:
                 out=io.StringIO(); writer=csv.DictWriter(out,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows);raw=out.getvalue().encode()
             boundary='transfer-test-boundary'
@@ -77,24 +78,27 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             data=json.loads(response.read());assert response.code==status,(response.code,data)
             return data
         def download(resource,kind='export',fmt='csv',query='',c=owner,status=200):
+            resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
+            kind = {'export':'exports', 'template':'import-template'}.get(kind, kind)
             req=urllib.request.Request(base+root+'/'+resource+'/'+kind+'?format='+fmt+query,headers={'X-Ferry-Request':'1'})
             try:response=c.open(req,timeout=90)
             except urllib.error.HTTPError as e:response=e
             data=response.read();assert response.code==status,(response.code,data)
             return data
         def commit(resource,preview,c=owner,status=200):
-            return request(c,root+'/'+resource+'/imports/'+preview['id']+'/commit',{},expected=status)
+            resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
+            return request(c,root+'/'+resource+'/imports/'+preview['id']+'/commits',{},expected=status)
         def xlsx(rows):
             book=openpyxl.Workbook();sheet=book.active
             for row in rows:sheet.append(row)
             out=io.BytesIO();book.save(out);return out.getvalue()
-        def count(resource):return request(owner,root+'/'+resource)['total']
+        def count(resource):return request(owner,root+'/'+{'hosts':'nodes', 'host-groups':'node-groups'}.get(resource,resource))['total']
         first=upload('hosts',[{'name':'CSV host','connection':'runner','description':'first\nsecond,"quoted"'}])
         check(first['valid'] and first['rows'][0]['row']==2 and count('hosts')==0,'CSV preview validates without committing hosts')
         check(count('activity')==0,'preview rolls back creation audit')
         result=commit('hosts',first);host=result['items'][0]['id']
         check(count('hosts')==1 and commit('hosts',first)==result,'commit creates once and repeat is idempotent')
-        check(request(owner,root+'/hosts/'+host)['description']=='first\nsecond,"quoted"','CSV Unicode/quotes/newlines round trip')
+        check(request(owner,root+'/nodes/'+host)['description']=='first\nsecond,"quoted"','CSV Unicode/quotes/newlines round trip')
         invalid=upload('hosts',[{'name':'valid but rolled back','connection':'runner'},{'name':'bad','connection':'missing'}])
         check(not invalid['valid'] and invalid['rows'][1]['error'] and invalid['id'] is None and count('hosts')==1,'invalid row prevents pending batch and all business mutations')
         typed=upload('hosts',[{'name':'Invalid typed','connection':'ssh','address':'localhost','username':'root','port':'not-a-number'}])
@@ -137,7 +141,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         commit('variables',atomic,status=409)
         check(request(owner,root+'/variables?q=batch-first')['total']==0,'commit revalidates and rolls back preceding rows on conflict')
         permission=upload('tags',[{'name':'Actor bound'}]);commit('tags',permission,c=guest,status=403)
-        request(outsider,'/workspaces/other/tags/imports/'+permission['id']+'/commit',{},expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/tags/imports/'+permission['id']+'/commits',{},expected=404)
         upload('tags',[{'name':'Denied'}],c=guest,status=403)
         check(secret.encode() not in download('credentials',c=guest),'read-only member export uses the same masked projection as list')
         check(True,'import ownership, workspace isolation and export permissions enforced')
@@ -211,10 +215,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         copied_xlsx=request(owner,root+'/pipelines?q=Actions%20XLSX%20imported')['items'][0]
         check(copied_xlsx['checkout_bindings']==actions_body['checkout_bindings'],'Actions XLSX roundtrip preserves complete checkout binding')
         check(all(copied[key]==actions_body[key] for key in ['group_id','application_id','tag_ids','environment_ids']),'Actions CSV roundtrip preserves group, application, tags and environments')
-        secondary=request(owner,root+'/hosts',{'name':'Actions-only target','connection':'runner'},expected=201)['id']
+        secondary=request(owner,root+'/nodes',{'name':'Actions-only target','connection':'runner'},expected=201)['id']
         scoped=dict(actions_body,name='Secondary executor',executor_bindings=[{'job_id':'build','target_kind':'host','target_ref':secondary,'image':'host'}])
         request(owner,root+'/pipelines',scoped,expected=201)
-        request(owner,root+'/hosts/'+secondary,method='DELETE',expected=409)
+        request(owner,root+'/nodes/'+secondary,method='DELETE',expected=409)
         check(True,'host referenced only by an Actions job cannot be deleted')
         repo=request(owner,root+'/repositories')['items'][0]['id']
         p=upload('marketplace-sources',[{'name':'Imported source','repository_id':repo,'provider':'github','api_base':'https://api.github.com','project':'example/repository','branch':'main','index_path':'index.json'}])
@@ -242,38 +246,38 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         tagged=upload('hosts',[{'name':'Tagged host','connection':'runner','tag_ids':json.dumps([tag])}])
         assert tagged['valid'],tagged
         hid=commit('hosts',tagged)['items'][0]['id']
-        saved=request(owner,root+'/hosts/'+hid)
+        saved=request(owner,root+'/nodes/'+hid)
         check(saved['tag_ids']==[tag] and saved['tags'][0]['name']=='Production','host tags import persists association and readable labels')
-        filtered=request(owner,root+'/hosts?tag_id='+tag)
+        filtered=request(owner,root+'/nodes?tag_id='+tag)
         check(filtered['total']==1 and filtered['items'][0]['id']==hid,'host tag filtering shares pagination and tenant scope')
         check('Tagged host' in download('hosts',query='&tag_id='+tag).decode('utf-8-sig'),'host export preserves tag filter')
         request(owner,root+'/tags/'+tag,method='DELETE',expected=409)
-        old=dict(saved);old.pop('tag_ids');request(owner,root+'/hosts/'+hid,old,method='PATCH')
-        check(request(owner,root+'/hosts/'+hid)['tag_ids']==[tag],'legacy host updates preserve omitted tag associations')
-        request(owner,root+'/hosts/'+hid,dict(saved,tag_ids=[]),method='PATCH',expected=409)
-        check(request(owner,root+'/hosts/'+hid)['tag_ids']==[tag],'stale host edit cannot clear tag associations')
-        foreign=request(outsider,'/workspaces/other/tags',{'name':'Foreign'},expected=201)['id']
-        current=request(owner,root+'/hosts/'+hid)
-        request(owner,root+'/hosts/'+hid,dict(current,tag_ids=[foreign]),method='PATCH',expected=400)
-        check(request(owner,root+'/hosts/'+hid)==current,'foreign tag rejection rolls back the whole host update')
-        request(owner,root+'/hosts/'+hid,dict(current,tag_ids=[tag,tag]),method='PATCH',expected=400)
-        request(owner,root+'/hosts/'+hid,dict(current,tag_ids=[]),method='PATCH')
-        check(request(owner,root+'/hosts/'+hid)['tag_ids']==[],'explicit empty tag array clears association')
+        old=dict(saved);old.pop('tag_ids');request(owner,root+'/nodes/'+hid,old,method='PATCH')
+        check(request(owner,root+'/nodes/'+hid)['tag_ids']==[tag],'legacy host updates preserve omitted tag associations')
+        request(owner,root+'/nodes/'+hid,dict(saved,tag_ids=[]),method='PATCH',expected=409)
+        check(request(owner,root+'/nodes/'+hid)['tag_ids']==[tag],'stale host edit cannot clear tag associations')
+        foreign=request(outsider,f'/workspaces/{workspace_other}/tags',{'name':'Foreign'},expected=201)['id']
+        current=request(owner,root+'/nodes/'+hid)
+        request(owner,root+'/nodes/'+hid,dict(current,tag_ids=[foreign]),method='PATCH',expected=400)
+        check(request(owner,root+'/nodes/'+hid)==current,'foreign tag rejection rolls back the whole host update')
+        request(owner,root+'/nodes/'+hid,dict(current,tag_ids=[tag,tag]),method='PATCH',expected=400)
+        request(owner,root+'/nodes/'+hid,dict(current,tag_ids=[]),method='PATCH')
+        check(request(owner,root+'/nodes/'+hid)['tag_ids']==[],'explicit empty tag array clears association')
         request(owner,root+'/tags/'+tag,method='DELETE',expected=204)
         tag=request(owner,root+'/tags',{'name':'Cleanup'},expected=201)['id']
-        current=request(owner,root+'/hosts/'+hid)
-        request(owner,root+'/hosts/'+hid,dict(current,tag_ids=[tag]),method='PATCH')
-        request(owner,root+'/hosts/actions/bulk-delete',{'ids':[hid]},expected=200)
+        current=request(owner,root+'/nodes/'+hid)
+        request(owner,root+'/nodes/'+hid,dict(current,tag_ids=[tag]),method='PATCH')
+        request(owner,root+'/nodes',{'ids':[hid]},method='DELETE',expected=200)
         request(owner,root+'/tags/'+tag,method='DELETE',expected=204)
         check(True,'host bulk deletion removes associations so tags can be deleted')
-        parent=request(owner,root+'/host-groups',{'name':'Parent'},expected=201)['id']
-        child=request(owner,root+'/host-groups',{'name':'Child','parent_id':parent},expected=201)['id']
-        foreign=request(outsider,'/workspaces/other/host-groups',{'name':'Other parent'},expected=201)['id']
-        request(owner,root+'/host-groups',{'name':'Wrong parent','parent_id':foreign},expected=400)
-        request(owner,root+'/host-groups/'+parent,{'name':'Parent','parent_id':child,'version':1},method='PATCH',expected=400)
-        request(owner,root+'/host-groups/'+parent,method='DELETE',expected=409)
-        request(owner,root+'/host-groups/'+child,method='DELETE',expected=204)
-        request(owner,root+'/host-groups/'+parent,method='DELETE',expected=204)
+        parent=request(owner,root+'/node-groups',{'name':'Parent'},expected=201)['id']
+        child=request(owner,root+'/node-groups',{'name':'Child','parent_id':parent},expected=201)['id']
+        foreign=request(outsider,f'/workspaces/{workspace_other}/node-groups',{'name':'Other parent'},expected=201)['id']
+        request(owner,root+'/node-groups',{'name':'Wrong parent','parent_id':foreign},expected=400)
+        request(owner,root+'/node-groups/'+parent,{'name':'Parent','parent_id':child,'version':1},method='PATCH',expected=400)
+        request(owner,root+'/node-groups/'+parent,method='DELETE',expected=409)
+        request(owner,root+'/node-groups/'+child,method='DELETE',expected=204)
+        request(owner,root+'/node-groups/'+parent,method='DELETE',expected=204)
         check(True,'group ancestry rejects foreign parents/cycles and protects children')
         large=upload('config-templates',[{'name':'Large first','content':'a'*180000,'parameters':'[]'},{'name':'Large second','content':'b'*180000,'parameters':'[]'}])
         check(large['valid'] and large['count']==2,'multipart upload above normal JSON body limit is supported within file limit')

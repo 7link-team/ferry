@@ -25,7 +25,7 @@ try {
     assert(i < 200, 'server startup timed out');
     await new Promise(r => setTimeout(r, 100));
   }
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const errors = [];
 
@@ -37,13 +37,13 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
+  const root=`/workspaces/${workspace_tenant}`;
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
-  await p.goto(`${origin}/tenant/host/tags`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/tags`);
   await p.getByRole('button',{name:'导入',exact:true}).click();
   const dialog=p.getByRole('dialog');
   await dialog.getByRole('heading',{name:'导入数据'}).waitFor();
@@ -82,7 +82,7 @@ try {
   assert.equal(csv.suggestedFilename(),'tags.csv');
   assert((await readFile(await csv.path(),'utf8')).includes('UI imported'));
   console.log('PASS export menu downloads real CSV with imported data');
-  await p.goto(`${origin}/tenant/build/credentials`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/credentials`);
   await p.getByRole('button',{name:'导入',exact:true}).click();
   await file.setInputFiles({name:'secret.csv',mimeType:'text/csv',buffer:Buffer.from('name,kind,secret\nPrivate token,token,never-visible-secret\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
@@ -91,16 +91,16 @@ try {
   await dialog.getByRole('button',{name:'确认新增 1 项'}).click();
   await dialog.waitFor({state:'hidden'});
   assert.equal((await get(root+'/credentials')).total,1);
-  const hostBody=await post(owner,root+'/hosts',{name:'Tagged in browser',connection:'runner'});
-  await p.goto(`${origin}/tenant/host/hosts`);
+  const hostBody=await post(owner,root+'/nodes',{name:'Tagged in browser',connection:'runner'});
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`);
   await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByRole('checkbox',{name:'UI imported',exact:true}).check();
-  const updatingHost=p.waitForResponse(r=>r.url().endsWith('/hosts/'+hostBody.id)&&r.request().method()==='PATCH');
+  const updatingHost=p.waitForResponse(r=>r.url().endsWith('/nodes/'+hostBody.id)&&r.request().method()==='PATCH');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   const updatedHost=await updatingHost; assert(updatedHost.ok(),await updatedHost.text());
-  assert.equal((await get(root+'/hosts/'+hostBody.id)).tags[0]?.name,'UI imported');
+  assert.equal((await get(root+'/nodes/'+hostBody.id)).tags[0]?.name,'UI imported');
   await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByText('UI imported',{exact:true}).waitFor();
-  await post(owner,root+'/hosts',{name:'Not tagged',connection:'runner'});
+  await post(owner,root+'/nodes',{name:'Not tagged',connection:'runner'});
   await p.getByRole('combobox',{name:'标签',exact:true}).click();
   await p.getByRole('option',{name:'UI imported',exact:true}).click();
   await p.getByRole('button',{name:'搜索',exact:true}).click();
@@ -109,13 +109,14 @@ try {
   await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByRole('checkbox',{name:'UI imported',exact:true}).uncheck();
   await p.getByRole('button',{name:'保存',exact:true}).click();
-  const tagged=(await get(root+'/hosts?q=Tagged in browser')).items[0];
+  const tagged=(await get(root+'/nodes?q=Tagged in browser')).items[0];
   assert.deepEqual(tagged.tag_ids,[]);
   console.log('PASS real host tag multiselect, list labels, filter and removal');
   let pagesChecked=0;
   for (const group of nav) for (const item of group.items) {
-    const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${item.resource}` && r.request().method()==='GET');
-    await p.goto(`${origin}/tenant/${group.key}/${item.key}`);
+    const resource = ({hosts:'nodes', 'host-groups':'node-groups'})[item.resource] || item.resource;
+    const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${resource}` && r.request().method()==='GET');
+    await p.goto(`${origin}/workspaces/${workspace_tenant}/${resource}${item.params ? '?'+new URLSearchParams(item.params) : ''}`);
     const response=await loaded;
     assert(response.ok(),`${item.resource}: ${await response.text()}`);
     await p.locator('main').waitFor();

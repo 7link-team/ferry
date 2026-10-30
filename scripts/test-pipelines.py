@@ -86,7 +86,8 @@ def main():
         return p
 
     def create(resource, body, ws='ops'):
-        return api(f'/workspaces/{ws}/{resource}', body, status=201)['id']
+        resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
+        return api(f'/workspaces/{workspace_ids[ws]}/{resource}', body, status=201)['id']
 
     def pipeline(host, steps, ws='ops', repo=None, target_kind='host', artifacts=None):
         definition = {'workdir': root_dir + '/{{run}}',
@@ -96,16 +97,16 @@ def main():
         definition['steps']=[dict(step) for step in steps]
         definition['steps'][0]['run']='{{ .Values.command }}'
         template=create('pipeline-templates',{'name':'live-template','content':json.dumps(definition),'parameters':json.dumps([{'name':'command','type':'string'}])},ws)
-        generated=api(f'/workspaces/{ws}/pipeline-templates/{template}/actions/render',{'version':1,'values':{'command':first_command}})['definition']
+        generated=api(f'/workspaces/{workspace_ids[ws]}/pipeline-templates/{template}/renderings',{'version':1,'values':{'command':first_command}})['definition']
         return create('pipelines', {'name': 'live-' + uuid.uuid4().hex[:8], 'target_kind': target_kind,
             'target_ref': host, 'repository_id': repo if repo is not None else repo_id,
             'definition': generated}, ws)
 
     def trigger(pid, ws='ops', values=None):
-        return api(f'/workspaces/{ws}/pipelines/{pid}/actions/run', body=values, method='POST', status=201)
+        return api(f'/workspaces/{workspace_ids[ws]}/pipelines/{pid}/runs', body=values, method='POST', status=201)
 
     def detail(rid, ws='ops'):
-        return api(f'/workspaces/{ws}/pipeline-runs/{rid}')
+        return api(f'/workspaces/{workspace_ids[ws]}/pipeline-runs/{rid}')
 
     def done(rid, seconds=30):
         def poll():
@@ -116,7 +117,7 @@ def main():
     def logs(rid):
         after, items = 0, []
         while True:
-            row = api(f'/workspaces/ops/pipeline-runs/{rid}/logs?after={after}')
+            row = api(f'/workspaces/{workspace_ops}/pipeline-runs/{rid}/logs?after={after}')
             if not row['items']:
                 assert row['next_seq'] == after
                 break
@@ -194,17 +195,19 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         command(['python3', 'scripts/test-setup.py', base, str(work / 'data')])
         api('/users', {'email': 'test@example.invalid', 'password': 'correct-horse-battery', 'name': 'test'})
         workspace = api('/workspaces', {'name': 'ops', 'slug': 'ops'})
-        api('/workspaces', {'name': 'other', 'slug': 'other'})
+        workspace_ops = workspace['id']
+        workspace_other = api('/workspaces', {'name': 'other', 'slug': 'other'})['id']
+        workspace_ids = dict(ops=workspace_ops, other=workspace_other)
         group = create('host-groups', {'name': 'execution-group'})
         runner = create('hosts', {'name': 'real-runner', 'connection': 'runner', 'group_id': group})
-        token = api('/workspaces/ops/runner-tokens', {'host_id': runner}, status=201)['token']
+        token = api(f'/workspaces/{workspace_ops}/runner-tokens', {'host_id': runner}, status=201)['token']
         launch(['target/debug/ferry-runner', '--server', base[:-4], '--token', token,
                 '--state-dir', str(work / 'runner')], 'runner.log')
-        eventually(lambda: api('/workspaces/ops/hosts/' + runner)['state'] == 'online')
+        eventually(lambda: api(f'/workspaces/{workspace_ops}/nodes/' + runner)['state'] == 'online')
         ssh_cred = create('credentials', {'name': 'ssh', 'kind': 'password', 'username': 'ferry', 'secret': 'ferry-test'})
         ssh = create('hosts', {'name': 'real-ssh', 'connection': 'ssh', 'address': '127.0.0.1',
                               'port': ssh_port, 'username': 'ferry', 'credential_id': ssh_cred, 'group_id': group})
-        eventually(lambda: api('/workspaces/ops/hosts/' + ssh + '/actions/test-connection', method='POST')['ok'])
+        eventually(lambda: api(f'/workspaces/{workspace_ops}/nodes/' + ssh + '/connection-tests', method='POST')['ok'])
         cred = create('credentials', {'name': 'git', 'kind': 'password', 'username': username, 'secret': secret})
         repo_id = create('repositories', {'name': 'private', 'url': repo_url, 'default_branch': 'main', 'credential_id': cred})
         sampler = threading.Thread(target=sample, daemon=True)
@@ -252,7 +255,7 @@ jobs:
                 'executor_bindings':[{'job_id':'compile','target_kind':'host','target_ref':runner,'image':'host'},{'job_id':'verify','target_kind':'host','target_ref':ssh,'image':'host'}],
                 'graph_layout':{'compile':{'x':10,'y':20},'verify':{'x':350,'y':20}}}
             actions_id=create('pipelines',actions_body)
-            saved=api('/workspaces/ops/pipelines/'+actions_id)
+            saved=api(f'/workspaces/{workspace_ops}/pipelines/'+actions_id)
             check('Actions YAML and executor bindings persist',saved['definition']==workflow and saved['definition_format']=='github-actions' and len(saved['executor_bindings'])==2)
             actions_run=trigger(actions_id)['id'];all_runs.append(actions_run)
             actions_result=done(actions_run, 180)
@@ -293,7 +296,7 @@ jobs:
                     return int(match.group(1)) if match else None
                 child=eventually(live_pid)
                 check(label+' Actions logs arrive while command is running',detail(cancel_run)['state']=='running')
-                api('/workspaces/ops/pipeline-runs/'+cancel_run+'/actions/cancel',method='POST')
+                api(f'/workspaces/{workspace_ops}/pipeline-runs/'+cancel_run+'/cancellations',method='POST')
                 cancelled=done(cancel_run)
                 check(label+' Actions cancellation waits for terminal job state',cancelled['state']=='cancelled' and all(j['state'] not in ('queued','running') for j in cancelled['jobs']))
                 if label=='runner':
@@ -305,17 +308,17 @@ jobs:
 
         # New path: provider connection -> choose visible repo in build -> real private checkout/build.
         for provider in ['github','gitlab','gitee','gitea','codeup']:
-            connection=api('/workspaces/ops/repository-auth/'+provider+'/actions/connect',{'token':secret,'username':'connected-git-user','base_url':f'http://127.0.0.1:{git_port}','api_url':f'http://127.0.0.1:{git_port}','organization':'fixture'})
+            connection=api(f'/workspaces/{workspace_ops}/repository-providers/'+provider+'/connections',{'token':secret,'username':'connected-git-user','base_url':f'http://127.0.0.1:{git_port}','api_url':f'http://127.0.0.1:{git_port}','organization':'fixture'})
             selected=connection['items'][0]
             selection=dict(selected,provider=provider,credential_id=connection['credential_id'])
             no_checkout={'workdir':root_dir+'/binding-{{run}}','steps':[{'name':'binding','run':'true'}]}
             bound=create('pipelines',{'name':'Connected binding '+provider,'target_kind':'host','target_ref':runner,'repository_selection':selection,'definition':json.dumps(no_checkout)})
-            bound_repo=api('/workspaces/ops/pipelines/'+bound)['repository_id']
+            bound_repo=api(f'/workspaces/{workspace_ops}/pipelines/'+bound)['repository_id']
             check(provider+' pipeline materializes connected repository without a separate create',bound_repo!='0')
             definition={'workdir':root_dir+'/connected-{{run}}','steps':[{'name':'Checkout','checkout':True,'timeout_seconds':30},{'name':'Build checked-in script','run':'sh build.sh'}],'artifacts':['output/result.txt']}
             for kind, host in [('runner',runner),('ssh',ssh)]:
                 pid=create('pipelines',{'name':'Connected '+provider+' '+kind,'target_kind':'host','target_ref':host,'repository_selection':selection,'definition':json.dumps(definition)})
-                check(provider+' '+kind+' pipeline reuses exact repository binding',api('/workspaces/ops/pipelines/'+pid)['repository_id']==bound_repo)
+                check(provider+' '+kind+' pipeline reuses exact repository binding',api(f'/workspaces/{workspace_ops}/pipelines/'+pid)['repository_id']==bound_repo)
                 rid=trigger(pid)['id'];all_runs.append(rid)
                 result=done(rid)
                 check(provider+' '+kind+' actual private checkout and build succeeds',result['state']=='succeeded',str(result['steps']))
@@ -327,19 +330,19 @@ jobs:
 
 
         # Atomic source binding: validation/stale writes never leave orphan repositories.
-        counts=lambda: api('/workspaces/ops/repositories')['total']
+        counts=lambda: api(f'/workspaces/{workspace_ops}/repositories')['total']
         before=counts()
         selection=dict(selection,name='Never materialized',url=repo_url+'-not-created')
         source_body={'name':'Invalid bound build','target_kind':'host','target_ref':runner,'repository_selection':selection,'definition':'{}'}
-        api('/workspaces/ops/pipelines',source_body,status=400)
+        api(f'/workspaces/{workspace_ops}/pipelines',source_body,status=400)
         check('invalid pipeline rolls back newly bound repository',counts()==before)
-        existing=api('/workspaces/ops/pipelines/'+pid)
-        api('/workspaces/ops/pipelines/'+pid,dict(existing,version=0,repository_selection=selection),method='PATCH',status=409)
+        existing=api(f'/workspaces/{workspace_ops}/pipelines/'+pid)
+        api(f'/workspaces/{workspace_ops}/pipelines/'+pid,dict(existing,version=0,repository_selection=selection),method='PATCH',status=409)
         check('stale pipeline update creates no repository',counts()==before)
         foreign=create('hosts',{'name':'foreign-runner','connection':'runner'},'other')
-        api('/workspaces/other/pipelines',dict(source_body,target_ref=foreign,definition=json.dumps(definition)),status=400)
-        check('cross-workspace platform selection rejected',api('/workspaces/other/repositories')['total']==0)
-        api('/workspaces/ops/pipelines',{'name':'No source checkout','target_kind':'host','target_ref':runner,'definition':json.dumps(definition)},status=400)
+        api(f'/workspaces/{workspace_other}/pipelines',dict(source_body,target_ref=foreign,definition=json.dumps(definition)),status=400)
+        check('cross-workspace platform selection rejected',api(f'/workspaces/{workspace_other}/repositories')['total']==0)
+        api(f'/workspaces/{workspace_ops}/pipelines',{'name':'No source checkout','target_kind':'host','target_ref':runner,'definition':json.dumps(definition)},status=400)
         invalid_credential=create('credentials',{'name':'Revoked checkout credential','kind':'password','username':username,'secret':'invalid-fixture-token'})
         invalid_repo=create('repositories',{'name':'Revoked checkout repository','url':repo_url,'credential_id':invalid_credential,'default_branch':'main'})
         for kind, host in [('runner',runner),('ssh',ssh)]:
@@ -375,18 +378,18 @@ jobs:
             digest=hashlib.sha256(value.encode()).hexdigest()
             build=pipeline(host,[{'name':'variables','run':f'test "$(printf %s "$TOKEN" | python3 -c \'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())\' )" = {digest}; result=$?; printf "%s" "$TOKEN"; printf "%s" "$TOKEN" >&2; exit $result'}])
             object_var=create('variables',{'name':'build-token','scope':'build','scope_ref':build,'kind':'secret','value':value})
-            definition=json.loads(api('/workspaces/ops/pipelines/'+build)['definition'])
+            definition=json.loads(api(f'/workspaces/{workspace_ops}/pipelines/'+build)['definition'])
             definition['env']=[{'name':'TOKEN','valueFrom':'variable/build-token'}]
-            row=api('/workspaces/ops/pipelines/'+build); row['definition']=json.dumps(definition)
-            api('/workspaces/ops/pipelines/'+build,row,method='PATCH')
+            row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
+            api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
             marker=root_dir+'/variables-'+kind
             blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
             blocked=trigger(blocker)['id']; all_runs.append(blocked)
             eventually(lambda: local_or_ssh(kind, f'if [ -f {marker}-entered ]; then echo yes; fi').strip()=='yes')
             rid=trigger(build)['id']; all_runs.append(rid)
             check(kind+' variable run waits in queue',detail(rid)['state']=='queued')
-            rotated=api('/workspaces/ops/variables/'+object_var); rotated['value']='rotated-'+kind
-            api('/workspaces/ops/variables/'+object_var,rotated,method='PATCH')
+            rotated=api(f'/workspaces/{workspace_ops}/variables/'+object_var); rotated['value']='rotated-'+kind
+            api(f'/workspaces/{workspace_ops}/variables/'+object_var,rotated,method='PATCH')
             local_or_ssh(kind,f'touch {marker}-release')
             done(blocked)
             result=done(rid); output=''.join(v['chunk'] for v in logs(rid))
@@ -394,7 +397,7 @@ jobs:
             check(kind+' managed variables redact stdout/stderr before storage',value not in output and value.split('\n')[0] not in output and '[REDACTED]' in output)
             check(kind+' variable provenance records scope and original version',result['variables'][0]['scope_ref']==build and result['variables'][0]['version']==1)
             check(kind+' run API never exposes encrypted or plaintext variable snapshots','variable_snapshot' not in json.dumps(result) and value not in json.dumps(result))
-            api('/workspaces/ops/variables/'+object_var,method='DELETE',status=409)
+            api(f'/workspaces/{workspace_ops}/variables/'+object_var,method='DELETE',status=409)
             check(kind+' referenced build variable cannot be deleted',True)
             # The captured value is encrypted at rest, not embedded in the run definition.
             if not os.environ.get('FERRY_TEST_DATABASE_URL'):
@@ -405,14 +408,14 @@ jobs:
                     saved=db.execute('SELECT definition, variable_snapshot FROM pipeline_runs WHERE id=?',(int(rid),)).fetchone()
                 check(kind+' history keeps encrypted variable snapshot',bool(saved[1]) and value not in ''.join(saved))
             definition['env']=[{'name':'TOKEN','valueFrom':'variable/missing-token'}]
-            row=api('/workspaces/ops/pipelines/'+build); row['definition']=json.dumps(definition)
-            api('/workspaces/ops/pipelines/'+build,row,method='PATCH')
-            api('/workspaces/ops/pipelines/'+build+'/actions/run',{},status=400)
+            row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
+            api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
+            api(f'/workspaces/{workspace_ops}/pipelines/'+build+'/runs',{},status=400)
             check(kind+' undefined build variable refuses enqueue',True)
-            api('/workspaces/ops/variables/'+object_var,method='DELETE',status=204)
-            api('/workspaces/ops/pipelines/'+build,method='DELETE',status=204)
-        api('/workspaces/ops/variables/'+build_var,method='DELETE',status=204)
-        api('/workspaces/ops/variables/'+global_var,method='DELETE',status=204)
+            api(f'/workspaces/{workspace_ops}/variables/'+object_var,method='DELETE',status=204)
+            api(f'/workspaces/{workspace_ops}/pipelines/'+build,method='DELETE',status=204)
+        api(f'/workspaces/{workspace_ops}/variables/'+build_var,method='DELETE',status=204)
+        api(f'/workspaces/{workspace_ops}/variables/'+global_var,method='DELETE',status=204)
 
         # Keep each credential process observable long enough for ps sampling.
         # The old ASKPASS path includes the username in Git's password-prompt argv.
@@ -438,12 +441,12 @@ jobs:
             artifacts = row['artifacts']
             check(kind+' successful build archives declared output with content hash', len(artifacts)==1 and artifacts[0]['path']=='payload.txt' and len(artifacts[0]['sha256'])==64)
             artifact=artifacts[0]
-            with opener.open(base+'/workspaces/ops/pipeline-artifacts/'+artifact['id']+'/download') as response:
+            with opener.open(base+f'/workspaces/{workspace_ops}/pipeline-artifacts/'+artifact['id']+'/content') as response:
                 archived=response.read()
             import hashlib
             check(kind+' artifact download matches original bytes and sha256', archived.strip()==b'local-private-repository' and hashlib.sha256(archived).hexdigest()==artifact['sha256'] and len(archived)==artifact['size'])
             local_or_ssh(kind, f"printf changed > {root_dir}/{run['number']}/payload.txt")
-            with opener.open(base+'/workspaces/ops/pipeline-artifacts/'+artifact['id']+'/download') as response:
+            with opener.open(base+f'/workspaces/{workspace_ops}/pipeline-artifacts/'+artifact['id']+'/content') as response:
                 check(kind+' archived output is independent of mutable build directory', response.read()==archived)
             missing=trigger(pipeline(host,[{'name':'build','run':'true'}],artifacts=['missing.bin']))['id']; all_runs.append(missing)
             missing_row=done(missing)
@@ -477,7 +480,7 @@ jobs:
                                           {'name': 'skip', 'run': 'echo SHOULD_NOT_RUN'}]))['id']; all_runs.append(rid)
             eventually(lambda: detail(rid)['steps'][0]['state'] == 'running')
             time.sleep(.4)
-            api(f'/workspaces/ops/pipeline-runs/{rid}/actions/cancel', method='POST')
+            api(f'/workspaces/{workspace_ops}/pipeline-runs/{rid}/cancellations', method='POST')
             row = done(rid)
             check(f'6 {kind} running cancellation', row['state'] == 'cancelled' and
                   [s['state'] for s in row['steps']] == ['cancelled', 'skipped'],
@@ -495,7 +498,7 @@ jobs:
               and row['steps'][0]['name'] == 'group ' + str(row['number']), 'selected runner; expanded step name')
         empty_group = create('host-groups', {'name': 'empty'})
         empty = pipeline(empty_group, [{'name': 'empty', 'run': 'true'}], target_kind='host-group')
-        api('/workspaces/ops/pipelines/' + empty + '/actions/run', method='POST', status=400)
+        api(f'/workspaces/{workspace_ops}/pipelines/' + empty + '/runs', method='POST', status=400)
         check('empty group refuses execution', True, 'HTTP 400')
         pid = pipeline(runner, [{'name': 'number', 'run': 'true'}])
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -515,15 +518,15 @@ jobs:
         definition = json.dumps({'workdir': '/tmp/test', 'steps': [{'name': 'test', 'run': 'true'}]})
         for label, target, repo in [('repository', runner, other_repo), ('host', other_host, repo_id)]:
             body = {'name': 'cross', 'definition': definition, 'target_kind': 'host', 'target_ref': target, 'repository_id': repo}
-            response = api('/workspaces/ops/pipelines', body, status=400)
+            response = api(f'/workspaces/{workspace_ops}/pipelines', body, status=400)
             check(f'8 cross-workspace {label} refused', '当前工作空间' in response['error'], 'HTTP 400')
-        for suffix, method in [('', 'GET'), ('/logs?after=0', 'GET'), ('/actions/cancel', 'POST')]:
-            api('/workspaces/other/pipeline-runs/' + all_runs[0] + suffix, method=method, status=404)
+        for suffix, method in [('', 'GET'), ('/logs?after=0', 'GET'), ('/cancellations', 'POST')]:
+            api(f'/workspaces/{workspace_other}/pipeline-runs/' + all_runs[0] + suffix, method=method, status=404)
             check('run scope isolation ' + method + suffix, True, 'HTTP 404')
         own = pipeline(other_host, [{'name': 'other', 'run': 'true'}], ws='other', repo=other_repo)
         foreign = trigger(own, 'other')
         check('workspace numbering starts independently', foreign['number'] == 1, f'number={foreign["number"]}')
-        history = api('/workspaces/ops/pipeline-runs?state=succeeded&sort=-number&page_size=2')
+        history = api(f'/workspaces/{workspace_ops}/pipeline-runs?state=succeeded&sort=-number&page_size=2')
         check('history shared list envelope/filter/order', len(history['items']) == 2 and history['page_size'] == 2
               and history['items'][0]['number'] > history['items'][1]['number'])
         sample_stop.set(); sampler.join(10)
@@ -533,7 +536,7 @@ jobs:
             joined = '\n'.join(data)
             check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined and all(value not in joined for value in variable_secrets)
                   and '/step' in joined, f'samples={len(data)}, observed step argv={"/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
-        activity = json.dumps(api('/workspaces/ops/activity?page_size=200'))
+        activity = json.dumps(api(f'/workspaces/{workspace_ops}/activity?page_size=200'))
         all_text = ''.join(i['chunk'] for rid in all_runs for i in logs(rid))
         check('7 all stored logs and activity omit credential plaintext',
               all(value not in text for value in [secret, username, *variable_secrets] for text in [activity, all_text]))
@@ -569,7 +572,7 @@ jobs:
             restart_id = create('pipelines', dict(actions_body, name='Interrupted Actions', definition=restart_workflow, executor_bindings=[], graph_layout={}))
             def runner_reconnected():
                 try:
-                    return api('/workspaces/ops/hosts/'+runner+'/actions/test-connection', method='POST')['ok']
+                    return api(f'/workspaces/{workspace_ops}/nodes/'+runner+'/connection-tests', method='POST')['ok']
                 except AssertionError:
                     return False
             eventually(runner_reconnected)
@@ -589,13 +592,13 @@ jobs:
         # A real read-only membership exercises permission gates, not a mock Scope.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users', {'email': 'viewer@example.invalid', 'password': 'correct-horse-battery', 'name': 'viewer'})
-        api('/workspaces/actions/join', {'code': workspace['join_code']})
+        api('/workspace-memberships', {'code': workspace['join_code']})
         for suffix in ['', '/' + all_runs[0], '/' + all_runs[0] + '/logs?after=0']:
-            api('/workspaces/ops/pipeline-runs' + suffix)
+            api(f'/workspaces/{workspace_ops}/pipeline-runs' + suffix)
             check('read-only user can read run ' + suffix, True, 'HTTP 200')
-        api('/workspaces/ops/pipelines/' + pid + '/actions/run', method='POST', status=403)
+        api(f'/workspaces/{workspace_ops}/pipelines/' + pid + '/runs', method='POST', status=403)
         check('trigger requires pipelines.run', True, 'HTTP 403')
-        api('/workspaces/ops/pipeline-runs/' + all_runs[0] + '/actions/cancel', method='POST', status=403)
+        api(f'/workspaces/{workspace_ops}/pipeline-runs/' + all_runs[0] + '/cancellations', method='POST', status=403)
         check('cancel requires pipelines.run', True, 'HTTP 403')
         check('minimum acceptance check count', CHECKS >= 39, f'checks={CHECKS + 1}, minimum=40')
         print(f'\n{CHECKS - len(FAILURES)} passed, {len(FAILURES)} failed, 0 skipped', flush=True)

@@ -34,7 +34,7 @@ it.each([[30, "text-success"], [150, "text-warning"], [450, "text-destructive"]]
     expect(element.firstElementChild?.className).toContain(color);
     expect(element.querySelector("svg")?.getAttribute("class")).toContain("animate-pulse");
     expect(element.firstElementChild?.getAttribute("title")).toContain("包含连接建立和探测命令处理时间");
-    expect(vi.mocked(fetch).mock.calls[0]![0]).toBe("/api/workspaces/ops/hosts/1/actions/test-connection");
+    expect(vi.mocked(fetch).mock.calls[0]![0]).toBe("/api/workspaces/ops/nodes/1/connection-tests");
   },
 );
 

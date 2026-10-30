@@ -224,7 +224,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
   const [confirmReset, setConfirmReset] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const path = `/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}/connection-command`;
+  const path = `/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/connection-credentials`;
   useEffect(() => {
     const controller = new AbortController();
     void api<{ token: string; server: string; state: string }>(path, { signal: controller.signal })
@@ -234,7 +234,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
   }, [path]);
   useEffect(() => {
     const timer = setInterval(() => {
-      void api<{ state: string }>(`/workspaces/${encodeURIComponent(workspace)}/hosts/${encodeURIComponent(hostId)}`)
+      void api<{ state: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`)
         .then(value => setState(value.state)).catch(() => {});
     }, 5000);
     return () => clearInterval(timer);

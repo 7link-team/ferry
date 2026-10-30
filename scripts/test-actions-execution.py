@@ -5,6 +5,7 @@ import shutil
 
 
 def accept(context):
+    workspace_ops = context['workspace_ops']
     api, create, trigger, done, logs, check = (context[key] for key in ('api', 'create', 'trigger', 'done', 'logs', 'check'))
     command, work, name = (context[key] for key in ('command', 'work', 'name'))
     runner, ssh, credential, repo_url, root_dir = (context[key] for key in ('runner', 'ssh', 'cred', 'repo_url', 'root_dir'))
@@ -48,7 +49,7 @@ def accept(context):
                 {'job_id': job, 'target_kind': 'host', 'target_ref': target, 'image': 'host'}
                 for job, target in [('left', runner), ('right', runner), ('join', ssh)]], 'graph_layout': {}}
     pipeline = create('pipelines', body)
-    saved = api('/workspaces/ops/pipelines/' + pipeline)
+    saved = api(f'/workspaces/{workspace_ops}/pipelines/' + pipeline)
     check('Actions saves with node executors and no global host or repository', saved['target_ref'] == '0' and saved['repository_id'] == '0')
     check('Independent checkout bindings round trip without credentials', saved['checkout_bindings'] == bindings and context['secret'] not in json.dumps(saved))
     run = trigger(pipeline)['id']
@@ -102,7 +103,7 @@ def accept(context):
         return matches if len(matches) == 2 else None
 
     pids = context['eventually'](children, 60)
-    api('/workspaces/ops/pipeline-runs/' + cancelled_run + '/actions/cancel', method='POST')
+    api(f'/workspaces/{workspace_ops}/pipeline-runs/' + cancelled_run + '/cancellations', method='POST')
     cancelled = done(cancelled_run, 60)
     check('Cancellation waits for both concurrently running executors', cancelled['state'] == 'cancelled' and all(job['state'] not in ['running', 'queued'] for job in cancelled['jobs']))
     try:
@@ -135,7 +136,7 @@ def accept(context):
     import urllib.request
     import zipfile
     archive = artifact_result['artifacts'][0]
-    request = urllib.request.Request(context['base'] + '/workspaces/ops/pipeline-artifacts/' + archive['id'] + '/download')
+    request = urllib.request.Request(context['base'] + f'/workspaces/{workspace_ops}/pipeline-artifacts/' + archive['id'] + '/content')
     with context['opener'].open(request, timeout=15) as response:
         downloaded = response.read()
     with zipfile.ZipFile(io.BytesIO(downloaded)) as zipped:

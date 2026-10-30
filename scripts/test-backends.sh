@@ -85,7 +85,10 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"测试员"}' "$B/users" >/dev/null
   ck "duplicate email"  "已注册"        "$(c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"x"}' "$B/users")"
   ck "weak password"    "至少 10"       "$(c -X POST -d '{"email":"w@x.com","password":"short","name":"W"}' "$B/users")"
-  ck "create workspace" '"slug":"ops"'  "$(c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces")"
+  local workspace_body workspace_id
+  workspace_body=$(c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces")
+  ck "create workspace" '"slug":"ops"' "$workspace_body"
+  workspace_id=$(echo "$workspace_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin)['id'])")
   ck "duplicate slug"   "已被占用"      "$(c -X POST -d '{"name":"X","slug":"ops"}' "$B/workspaces")"
   ck "identity"         '"拥有者"'      "$(c "$B/me")"
 
@@ -102,56 +105,56 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   fi
 
   local group group2
-  group=$(c -X POST -d '{"name":"生产组"}' "$B/workspaces/ops/host-groups" |
+  group=$(c -X POST -d '{"name":"生产组"}' "$B/workspaces/$workspace_id/node-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   [ -n "$group" ] || { echo "    FAIL could not create a host group"; fail=$((fail + 1)); }
-  group2=$(c -X POST -d '{"name":"备用组"}' "$B/workspaces/ops/host-groups" |
+  group2=$(c -X POST -d '{"name":"备用组"}' "$B/workspaces/$workspace_id/node-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "group order rejects missing sibling" "顺序已变化" "$(c -X POST -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\"]}" "$B/workspaces/ops/host-groups/actions/reorder")"
-  ck "group order saves" '"ok":true' "$(c -X POST -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\",\"$group\"]}" "$B/workspaces/ops/host-groups/actions/reorder")"
-  ck "group order reads back" "^$group2,$group$" "$(c "$B/workspaces/ops/host-groups" | python3 -I -c "import json,sys;print(','.join(row['id'] for row in json.load(sys.stdin)['items']))")"
+  ck "group order rejects missing sibling" "顺序已变化" "$(c -X PATCH -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\"]}" "$B/workspaces/$workspace_id/node-groups/ordering")"
+  ck "group order saves" '"ok":true' "$(c -X PATCH -d "{\"parent_id\":\"0\",\"ids\":[\"$group2\",\"$group\"]}" "$B/workspaces/$workspace_id/node-groups/ordering")"
+  ck "group order reads back" "^$group2,$group$" "$(c "$B/workspaces/$workspace_id/node-groups" | python3 -I -c "import json,sys;print(','.join(row['id'] for row in json.load(sys.stdin)['items']))")"
   for i in $(seq 1 12); do
     c -X POST -d "{\"name\":\"web-$(printf %02d "$i")\",\"connection\":\"ssh\",\"address\":\"10.0.0.$i\",\"port\":22,\"username\":\"root\",\"group_id\":\"$group\"}" \
-      "$B/workspaces/ops/hosts" >/dev/null
+      "$B/workspaces/$workspace_id/nodes" >/dev/null
   done
-  c -X POST -d '{"name":"agent-01","connection":"runner","address":"192.168.0.130"}' "$B/workspaces/ops/hosts" >/dev/null
+  c -X POST -d '{"name":"agent-01","connection":"runner","address":"192.168.0.130"}' "$B/workspaces/$workspace_id/nodes" >/dev/null
 
-  ck "total"            '"total":13'    "$(c "$B/workspaces/ops/hosts?page_size=5")"
-  ck "page size"        '"page_size":5' "$(c "$B/workspaces/ops/hosts?page_size=5")"
-  ck "paging + sort"    'web-11'        "$(c "$B/workspaces/ops/hosts?page=3&page_size=5&sort=name")"
-  ck "descending sort"  'web-12'        "$(c "$B/workspaces/ops/hosts?page_size=1&sort=-name")"
+  ck "total"            '"total":13'    "$(c "$B/workspaces/$workspace_id/nodes?page_size=5")"
+  ck "page size"        '"page_size":5' "$(c "$B/workspaces/$workspace_id/nodes?page_size=5")"
+  ck "paging + sort"    'web-11'        "$(c "$B/workspaces/$workspace_id/nodes?page=3&page_size=5&sort=name")"
+  ck "descending sort"  'web-12'        "$(c "$B/workspaces/$workspace_id/nodes?page_size=1&sort=-name")"
   # web-01..web-12, so the prefix web-1 matches 10, 11 and 12.
-  ck "search"           '"total":3'     "$(c "$B/workspaces/ops/hosts?q=web-1")"
-  ck "search is case-insensitive" '"total":3' "$(c "$B/workspaces/ops/hosts?q=WEB-1")"
-  ck "filter"           '"total":12'    "$(c "$B/workspaces/ops/hosts?connection=ssh")"
-  ck "two filters"      '"total":12'    "$(c "$B/workspaces/ops/hosts?connection=ssh&group_id=$group")"
-  ck "comma means IN"   '"total":13'    "$(c "$B/workspaces/ops/hosts?connection=ssh,runner")"
-  ck "unknown filter"   "不支持按"       "$(c "$B/workspaces/ops/hosts?evil=1")"
-  ck "unknown sort"     "不支持按"       "$(c "$B/workspaces/ops/hosts?sort=password_hash")"
-  ck "page past end"    '"items":\[\]'  "$(c "$B/workspaces/ops/hosts?page=99")"
-  ck "ssh validation"   "需要填写主机地址" "$(c -X POST -d '{"name":"b","connection":"ssh"}' "$B/workspaces/ops/hosts")"
-  ck "group in use"     "请先移出"       "$(c -X DELETE "$B/workspaces/ops/host-groups/$group")"
+  ck "search"           '"total":3'     "$(c "$B/workspaces/$workspace_id/nodes?q=web-1")"
+  ck "search is case-insensitive" '"total":3' "$(c "$B/workspaces/$workspace_id/nodes?q=WEB-1")"
+  ck "filter"           '"total":12'    "$(c "$B/workspaces/$workspace_id/nodes?connection=ssh")"
+  ck "two filters"      '"total":12'    "$(c "$B/workspaces/$workspace_id/nodes?connection=ssh&group_id=$group")"
+  ck "comma means IN"   '"total":13'    "$(c "$B/workspaces/$workspace_id/nodes?connection=ssh,runner")"
+  ck "unknown filter"   "不支持按"       "$(c "$B/workspaces/$workspace_id/nodes?evil=1")"
+  ck "unknown sort"     "不支持按"       "$(c "$B/workspaces/$workspace_id/nodes?sort=password_hash")"
+  ck "page past end"    '"items":\[\]'  "$(c "$B/workspaces/$workspace_id/nodes?page=99")"
+  ck "ssh validation"   "需要填写主机地址" "$(c -X POST -d '{"name":"b","connection":"ssh"}' "$B/workspaces/$workspace_id/nodes")"
+  ck "group in use"     "请先移出"       "$(c -X DELETE "$B/workspaces/$workspace_id/node-groups/$group")"
 
   local host
-  host=$(c "$B/workspaces/ops/hosts?q=agent-01" |
+  host=$(c "$B/workspaces/$workspace_id/nodes?q=agent-01" |
     python3 -I -c "import json,sys;items=json.load(sys.stdin)['items'];print(items[0]['id'] if items else '')")
-  ck "update"           '"ok":true'     "$(c -X PATCH -d '{"name":"agent-renamed","version":1}' "$B/workspaces/ops/hosts/$host")"
+  ck "update"           '"ok":true'     "$(c -X PATCH -d '{"name":"agent-renamed","version":1}' "$B/workspaces/$workspace_id/nodes/$host")"
   # The second update carries the same version, so it must be refused.
-  ck "stale update"     "已被他人修改"   "$(c -X PATCH -d '{"name":"again","version":1}' "$B/workspaces/ops/hosts/$host")"
-  ck "read back"        'agent-renamed' "$(c "$B/workspaces/ops/hosts/$host")"
-  ck "runner address survives metadata edit" '"address":"192.168.0.130"' "$(c "$B/workspaces/ops/hosts/$host")"
+  ck "stale update"     "已被他人修改"   "$(c -X PATCH -d '{"name":"again","version":1}' "$B/workspaces/$workspace_id/nodes/$host")"
+  ck "read back"        'agent-renamed' "$(c "$B/workspaces/$workspace_id/nodes/$host")"
+  ck "runner address survives metadata edit" '"address":"192.168.0.130"' "$(c "$B/workspaces/$workspace_id/nodes/$host")"
 
   local ids
-  ids=$(c "$B/workspaces/ops/hosts?q=web-1&page_size=50" |
+  ids=$(c "$B/workspaces/$workspace_id/nodes?q=web-1&page_size=50" |
     python3 -I -c "import json,sys;print(json.dumps([h['id'] for h in json.load(sys.stdin)['items']]))")
-  ck "bulk delete"      '"deleted":3'   "$(c -X POST -d "{\"ids\":$ids}" "$B/workspaces/ops/hosts/actions/bulk-delete")"
-  ck "dashboard counts" '"hosts":10'    "$(c "$B/workspaces/ops/dashboard")"
+  ck "bulk delete"      '"deleted":3'   "$(c -X DELETE -d "{\"ids\":$ids}" "$B/workspaces/$workspace_id/nodes")"
+  ck "dashboard counts" '"hosts":10'    "$(c "$B/workspaces/$workspace_id/dashboard")"
   # SSH probes can mark unreachable hosts offline while this suite is running.
   # Every host still belongs to exactly one dashboard state; none is online.
-  ck "state grouping" '^10$' "$(c "$B/workspaces/ops/dashboard" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);print(sum(v["states"]["hosts"].values()) if not v["states"]["hosts"].get("online",0) else -1)')"
-  ck "activity"         '"resource":"hosts"' "$(c "$B/workspaces/ops/activity?page_size=3")"
-  ck "activity sort"    '"page":1'      "$(c "$B/workspaces/ops/activity?sort=-created_at")"
-  ck "create tag"       '"id"'          "$(c -X POST -d '{"name":"prod","color":"#4f9cf9"}' "$B/workspaces/ops/tags")"
+  ck "state grouping" '^10$' "$(c "$B/workspaces/$workspace_id/dashboard" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);print(sum(v["states"]["hosts"].values()) if not v["states"]["hosts"].get("online",0) else -1)')"
+  ck "activity"         '"resource":"hosts"' "$(c "$B/workspaces/$workspace_id/activity?page_size=3")"
+  ck "activity sort"    '"page":1'      "$(c "$B/workspaces/$workspace_id/activity?sort=-created_at")"
+  ck "create tag"       '"id"'          "$(c -X POST -d '{"name":"prod","color":"#4f9cf9"}' "$B/workspaces/$workspace_id/tags")"
 
   # Credentials: the secret goes in and must never come back out. A long
   # multi-line value is used on purpose — MySQL's default VARCHAR(255) would
@@ -159,31 +162,31 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   # "cannot decrypt".
   local pem cred
   pem="-----BEGIN OPENSSH PRIVATE KEY-----\n$(printf 'b3BlbnNzaC1rZXktdjEAAAAA%.0s' $(seq 1 40))\n-----END OPENSSH PRIVATE KEY-----"
-  cred=$(c -X POST -d "{\"name\":\"prod-key\",\"kind\":\"ssh-key\",\"username\":\"root\",\"secret\":\"$pem\"}" "$B/workspaces/ops/credentials" |
+  cred=$(c -X POST -d "{\"name\":\"prod-key\",\"kind\":\"ssh-key\",\"username\":\"root\",\"secret\":\"$pem\"}" "$B/workspaces/$workspace_id/credentials" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "create credential"  '"has_secret":true'  "$(c "$B/workspaces/ops/credentials/$cred")"
-  ckn "secret never returned by detail"  'BEGIN OPENSSH'  "$(c "$B/workspaces/ops/credentials/$cred")"
-  ckn "secret never returned by list"    'BEGIN OPENSSH'  "$(c "$B/workspaces/ops/credentials")"
-  ck "credential needs a secret"  "请填写凭据内容"  "$(c -X POST -d '{"name":"empty","kind":"password"}' "$B/workspaces/ops/credentials")"
-  ck "credential needs a known kind"  "请选择凭据类型"  "$(c -X POST -d '{"name":"x","kind":"magic","secret":"y"}' "$B/workspaces/ops/credentials")"
+  ck "create credential"  '"has_secret":true'  "$(c "$B/workspaces/$workspace_id/credentials/$cred")"
+  ckn "secret never returned by detail"  'BEGIN OPENSSH'  "$(c "$B/workspaces/$workspace_id/credentials/$cred")"
+  ckn "secret never returned by list"    'BEGIN OPENSSH'  "$(c "$B/workspaces/$workspace_id/credentials")"
+  ck "credential needs a secret"  "请填写凭据内容"  "$(c -X POST -d '{"name":"empty","kind":"password"}' "$B/workspaces/$workspace_id/credentials")"
+  ck "credential needs a known kind"  "请选择凭据类型"  "$(c -X POST -d '{"name":"x","kind":"magic","secret":"y"}' "$B/workspaces/$workspace_id/credentials")"
   # Editing without a secret must keep the stored one rather than blanking it.
-  ck "rename keeps the secret"  '"ok":true'  "$(c -X PATCH -d '{"name":"prod-key-2","version":1}' "$B/workspaces/ops/credentials/$cred")"
-  ck "and it is still set"      '"has_secret":true'  "$(c "$B/workspaces/ops/credentials/$cred")"
+  ck "rename keeps the secret"  '"ok":true'  "$(c -X PATCH -d '{"name":"prod-key-2","version":1}' "$B/workspaces/$workspace_id/credentials/$cred")"
+  ck "and it is still set"      '"has_secret":true'  "$(c "$B/workspaces/$workspace_id/credentials/$cred")"
   # A host in use pins its credential.
-  c -X POST -d "{\"name\":\"ssh-host\",\"connection\":\"ssh\",\"address\":\"10.0.0.99\",\"port\":22,\"username\":\"root\",\"credential_id\":\"$cred\"}" "$B/workspaces/ops/hosts" >/dev/null
-  ck "credential in use cannot be deleted"  "还有 1 台主机"  "$(c -X DELETE "$B/workspaces/ops/credentials/$cred")"
+  c -X POST -d "{\"name\":\"ssh-host\",\"connection\":\"ssh\",\"address\":\"10.0.0.99\",\"port\":22,\"username\":\"root\",\"credential_id\":\"$cred\"}" "$B/workspaces/$workspace_id/nodes" >/dev/null
+  ck "credential in use cannot be deleted"  "还有 1 台主机"  "$(c -X DELETE "$B/workspaces/$workspace_id/credentials/$cred")"
   # A repository pins its credential too; the host check alone used to let a
   # repository keep a reference to a deleted credential.
   local repo_cred
-  repo_cred=$(c -X POST -d '{"name":"git-token","kind":"token","secret":"ghp_example"}' "$B/workspaces/ops/credentials" |
+  repo_cred=$(c -X POST -d '{"name":"git-token","kind":"token","secret":"ghp_example"}' "$B/workspaces/$workspace_id/credentials" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  c -X POST -d "{\"name\":\"pinned\",\"url\":\"https://example.com/a.git\",\"credential_id\":\"$repo_cred\"}" "$B/workspaces/ops/repositories" >/dev/null
+  c -X POST -d "{\"name\":\"pinned\",\"url\":\"https://example.com/a.git\",\"credential_id\":\"$repo_cred\"}" "$B/workspaces/$workspace_id/repositories" >/dev/null
   # A pipeline pins its target host; both the single and the batch delete must
   # refuse, not just the one named in the report. The payload is built with
   # python because the definition is JSON nested inside JSON and bash quoting
   # silently produced an empty id the first time.
   local pinned_host pipeline_payload
-  pinned_host=$(c -X POST -d '{"name":"pipeline-target","connection":"runner"}' "$B/workspaces/ops/hosts" |
+  pinned_host=$(c -X POST -d '{"name":"pipeline-target","connection":"runner"}' "$B/workspaces/$workspace_id/nodes" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   [ -n "$pinned_host" ] || { echo "    FAIL could not create the pinned host"; fail=$((fail + 1)); }
   pipeline_payload=$(python3 -I -c "
@@ -194,63 +197,63 @@ print(json.dumps({
   'target_kind': 'host',
   'target_ref': sys.argv[1],
 }))" "$pinned_host")
-  ck "pipeline pinning a host is created" '"id"' "$(c -X POST -d "$pipeline_payload" "$B/workspaces/ops/pipelines")"
-  ck "host used by a pipeline cannot be deleted"  "条流水线以这台主机为目标"  "$(c -X DELETE "$B/workspaces/ops/hosts/$pinned_host")"
-  ck "nor by the batch delete"                    "条流水线以这台主机为目标"  "$(c -X POST -d "{\"ids\":[\"$pinned_host\"]}" "$B/workspaces/ops/hosts/actions/bulk-delete")"
+  ck "pipeline pinning a host is created" '"id"' "$(c -X POST -d "$pipeline_payload" "$B/workspaces/$workspace_id/pipelines")"
+  ck "host used by a pipeline cannot be deleted"  "条流水线以这台主机为目标"  "$(c -X DELETE "$B/workspaces/$workspace_id/nodes/$pinned_host")"
+  ck "nor by the batch delete"                    "条流水线以这台主机为目标"  "$(c -X DELETE -d "{\"ids\":[\"$pinned_host\"]}" "$B/workspaces/$workspace_id/nodes")"
 
-  ck "credential used by a repository cannot be deleted"  "还有 1 个仓库"  "$(c -X DELETE "$B/workspaces/ops/credentials/$repo_cred")"
+  ck "credential used by a repository cannot be deleted"  "还有 1 个仓库"  "$(c -X DELETE "$B/workspaces/$workspace_id/credentials/$repo_cred")"
   # Repositories share credentials but never include credential data in audit details.
   local repo repo_body
-  repo_body=$(c -X POST -d '{"name":"repo-public","url":"https://example.com/a/b.git"}' "$B/workspaces/ops/repositories")
+  repo_body=$(c -X POST -d '{"name":"repo-public","url":"https://example.com/a/b.git"}' "$B/workspaces/$workspace_id/repositories")
   ck "create repository" '"id"' "$repo_body"
   repo=$(printf '%s' "$repo_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "repository default branch" '"default_branch":"main"' "$(c "$B/workspaces/ops/repositories/$repo")"
-  ck "repository local URL rejected" '"error"' "$(c -X POST -d '{"name":"local","url":"file:///etc"}' "$B/workspaces/ops/repositories")"
-  ck "repository missing credential rejected" '"error"' "$(c -X POST -d '{"name":"missing","url":"https://example.com/repo","credential_id":"missing"}' "$B/workspaces/ops/repositories")"
-  ck "repository real credential accepted" '"id"' "$(c -X POST -d "{\"name\":\"repo-private\",\"url\":\"git@github.com:a/b.git\",\"credential_id\":\"$cred\"}" "$B/workspaces/ops/repositories")"
-  ck "repository name search" '"total":1' "$(c "$B/workspaces/ops/repositories?q=repo-public")"
-  ck "repository URL search" '"total":1' "$(c "$B/workspaces/ops/repositories?q=github.com")"
-  ck "repository update" '"ok":true' "$(c -X PATCH -d '{"name":"repo-updated","url":"ssh://git@example.com/repo","version":1}' "$B/workspaces/ops/repositories/$repo")"
-  ck "repository stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"again","url":"https://example.com/repo","version":1}' "$B/workspaces/ops/repositories/$repo")"
-  ck "repository update validates credential" '"error"' "$(c -X PATCH -d '{"name":"again","url":"https://example.com/repo","credential_id":"missing","version":2}' "$B/workspaces/ops/repositories/$repo")"
-  ck "repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$repo")"
-  ck "repository deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/repositories/$repo")"
-  ck "repository audit exists" '"resource":"repositories"' "$(c "$B/workspaces/ops/activity?resource=repositories")"
+  ck "repository default branch" '"default_branch":"main"' "$(c "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository local URL rejected" '"error"' "$(c -X POST -d '{"name":"local","url":"file:///etc"}' "$B/workspaces/$workspace_id/repositories")"
+  ck "repository missing credential rejected" '"error"' "$(c -X POST -d '{"name":"missing","url":"https://example.com/repo","credential_id":"missing"}' "$B/workspaces/$workspace_id/repositories")"
+  ck "repository real credential accepted" '"id"' "$(c -X POST -d "{\"name\":\"repo-private\",\"url\":\"git@github.com:a/b.git\",\"credential_id\":\"$cred\"}" "$B/workspaces/$workspace_id/repositories")"
+  ck "repository name search" '"total":1' "$(c "$B/workspaces/$workspace_id/repositories?q=repo-public")"
+  ck "repository URL search" '"total":1' "$(c "$B/workspaces/$workspace_id/repositories?q=github.com")"
+  ck "repository update" '"ok":true' "$(c -X PATCH -d '{"name":"repo-updated","url":"ssh://git@example.com/repo","version":1}' "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"again","url":"https://example.com/repo","version":1}' "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository update validates credential" '"error"' "$(c -X PATCH -d '{"name":"again","url":"https://example.com/repo","credential_id":"missing","version":2}' "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/repositories/$repo")"
+  ck "repository audit exists" '"resource":"repositories"' "$(c "$B/workspaces/$workspace_id/activity?resource=repositories")"
   ck "repository second workspace" '"slug":"repo-other"' "$(c -X POST -d '{"name":"Other","slug":"repo-other"}' "$B/workspaces")"
   ck "repository foreign credential rejected" '"error"' "$(c -X POST -d "{\"name\":\"foreign\",\"url\":\"https://example.com/repo\",\"credential_id\":\"$cred\"}" "$B/workspaces/repo-other/repositories")"
   ck "repository workspace isolation" '"total":0' "$(c "$B/workspaces/repo-other/repositories")"
-  ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/ops/activity?resource=repositories")"
+  ckn "repository audit excludes credential references" 'credential_id' "$(c "$B/workspaces/$workspace_id/activity?resource=repositories")"
 
 
   # Shared variables: exercise the actual HTTP boundary on every database.
   local variable variable_body revealed
-  variable_body=$(c -X POST -d '{"name":"db-url","scope":"global","kind":"secret","value":"  variable-test-secret\n$literal  "}' "$B/workspaces/ops/variables")
+  variable_body=$(c -X POST -d '{"name":"db-url","scope":"global","kind":"secret","value":"  variable-test-secret\n$literal  "}' "$B/workspaces/$workspace_id/variables")
   ck "variable create" '"id"' "$variable_body"
   variable=$(printf '%s' "$variable_body" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("id",""))')
-  ck "variable presence" '"has_value":true' "$(c "$B/workspaces/ops/variables/$variable")"
-  ckn "variable detail does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/ops/variables/$variable")"
-  ckn "variable list does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/ops/variables?scope=global&scope_ref=0")"
-  ck "variable duplicate" '409$' "$(c -w '%{http_code}' -X POST -d '{"name":"db-url","value":"other"}' "$B/workspaces/ops/variables")"
+  ck "variable presence" '"has_value":true' "$(c "$B/workspaces/$workspace_id/variables/$variable")"
+  ckn "variable detail does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/$workspace_id/variables/$variable")"
+  ckn "variable list does not expose plaintext or value field" 'variable-test-secret\|"value":' "$(c "$B/workspaces/$workspace_id/variables?scope=global&scope_ref=0")"
+  ck "variable duplicate" '409$' "$(c -w '%{http_code}' -X POST -d '{"name":"db-url","value":"other"}' "$B/workspaces/$workspace_id/variables")"
   ck "variable other workspace cannot read" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/variables/$variable")"
-  ck "variable other workspace cannot reveal" '404$' "$(c -w '%{http_code}' -X POST -d '{}' "$B/workspaces/repo-other/variables/$variable/actions/reveal")"
-  ck "variable missing scope object" '400$' "$(c -w '%{http_code}' -X POST -d '{"name":"object","scope":"deploy","scope_ref":"999","value":"x"}' "$B/workspaces/ops/variables")"
-  revealed=$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")
+  ck "variable other workspace cannot reveal" '404$' "$(c -w '%{http_code}' -X POST -d '{}' "$B/workspaces/repo-other/variables/$variable/disclosures")"
+  ck "variable missing scope object" '400$' "$(c -w '%{http_code}' -X POST -d '{"name":"object","scope":"deploy","scope_ref":"999","value":"x"}' "$B/workspaces/$workspace_id/variables")"
+  revealed=$(c -X POST -d '{}' "$B/workspaces/$workspace_id/variables/$variable/disclosures")
   ck "variable exact whitespace multiline and dollar" '^True$' "$(printf '%s' "$revealed" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["value"] == "  variable-test-secret\n$literal  ")')"
-  ck "variable reveal audited" '"action":"reveal"' "$(c "$B/workspaces/ops/activity?resource=variables")"
-  ckn "variable audit excludes content" 'variable-test-secret' "$(c "$B/workspaces/ops/activity?resource=variables")"
-  ck "variable reveal is not cacheable" 'no-store' "$(c -D - -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
-  ck "variable update keeps value when omitted" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":1,"description":"updated"}' "$B/workspaces/ops/variables/$variable")"
-  ck "variable value preserved" 'variable-test-secret' "$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
-  ck "variable explicit empty replacement" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":2,"value":""}' "$B/workspaces/ops/variables/$variable")"
-  ck "variable empty reveal" '"value":""' "$(c -X POST -d '{}' "$B/workspaces/ops/variables/$variable/actions/reveal")"
-  ck "variable stale edit" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":2,"value":"stale"}' "$B/workspaces/ops/variables/$variable")"
-  ck "variable immutable type" '400$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":3,"kind":"plain"}' "$B/workspaces/ops/variables/$variable")"
-  ck "variable deletion" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/variables/$variable")"
-  ck "variable deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/variables/$variable")"
+  ck "variable reveal audited" '"action":"reveal"' "$(c "$B/workspaces/$workspace_id/activity?resource=variables")"
+  ckn "variable audit excludes content" 'variable-test-secret' "$(c "$B/workspaces/$workspace_id/activity?resource=variables")"
+  ck "variable reveal is not cacheable" 'no-store' "$(c -D - -X POST -d '{}' "$B/workspaces/$workspace_id/variables/$variable/disclosures")"
+  ck "variable update keeps value when omitted" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":1,"description":"updated"}' "$B/workspaces/$workspace_id/variables/$variable")"
+  ck "variable value preserved" 'variable-test-secret' "$(c -X POST -d '{}' "$B/workspaces/$workspace_id/variables/$variable/disclosures")"
+  ck "variable explicit empty replacement" '"ok":true' "$(c -X PATCH -d '{"name":"db-url","version":2,"value":""}' "$B/workspaces/$workspace_id/variables/$variable")"
+  ck "variable empty reveal" '"value":""' "$(c -X POST -d '{}' "$B/workspaces/$workspace_id/variables/$variable/disclosures")"
+  ck "variable stale edit" '409$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":2,"value":"stale"}' "$B/workspaces/$workspace_id/variables/$variable")"
+  ck "variable immutable type" '400$' "$(c -w '%{http_code}' -X PATCH -d '{"name":"db-url","version":3,"kind":"plain"}' "$B/workspaces/$workspace_id/variables/$variable")"
+  ck "variable deletion" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/variables/$variable")"
+  ck "variable deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/variables/$variable")"
 
   # Pipelines: keep the JSON definition a string at the resource boundary.
   local pipeline pipeline_body pipeline_payload pipeline_repo foreign_repo
-  pipeline_repo=$(c -X POST -d '{"name":"pipeline-repo","url":"https://example.com/pipeline.git"}' "$B/workspaces/ops/repositories" |
+  pipeline_repo=$(c -X POST -d '{"name":"pipeline-repo","url":"https://example.com/pipeline.git"}' "$B/workspaces/$workspace_id/repositories" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   foreign_repo=$(c -X POST -d '{"name":"foreign-repo","url":"https://example.com/foreign.git"}' "$B/workspaces/repo-other/repositories" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
@@ -261,65 +264,65 @@ definition={"workdir":"/tmp/{{run}}","env":[{"name":"LONG_VALUE","value":"x"*300
 print(json.dumps({"name":"pipeline-build","repository_id":sys.argv[1],"target_kind":"host",
                   "target_ref":sys.argv[2],"definition":json.dumps(definition),"version":1}))
 ' "$pipeline_repo" "$host")
-  pipeline_body=$(c -X POST -d "$pipeline_payload" "$B/workspaces/ops/pipelines")
+  pipeline_body=$(c -X POST -d "$pipeline_payload" "$B/workspaces/$workspace_id/pipelines")
   ck "pipeline create" '"id"' "$pipeline_body"
   pipeline=$(printf '%s' "$pipeline_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "pipeline long definition round trip" '"LONG_VALUE"' "$(c "$B/workspaces/ops/pipelines/$pipeline" |
+  ck "pipeline long definition round trip" '"LONG_VALUE"' "$(c "$B/workspaces/$workspace_id/pipelines/$pipeline" |
     python3 -I -c 'import json,sys;v=json.load(sys.stdin);d=json.loads(v["definition"]);assert d["env"][0]["value"]=="x"*300;print(json.dumps(d))')"
   # Reuse the valid payload so each refusal exercises exactly one changed field.
   pipeline_variant() {
     printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v[sys.argv[1]]=sys.argv[2];print(json.dumps(v))' "$1" "$2"
   }
-  ck "pipeline malformed JSON" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{')" "$B/workspaces/ops/pipelines")"
-  ck "pipeline foreign repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/ops/pipelines")"
-  ck "pipeline missing repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id missing)" "$B/workspaces/ops/pipelines")"
-  ck "pipeline missing host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref missing)" "$B/workspaces/ops/pipelines")"
-  ck "pipeline invalid target kind" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_kind invalid)" "$B/workspaces/ops/pipelines")"
-  ck "pipeline typo names variable" '{{typo}}.*400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{"workdir":"/tmp","steps":[{"name":"构建","run":"echo {{typo}}"}]}')" "$B/workspaces/ops/pipelines")"
-  ck "pipeline search and filters" '"total":1' "$(c "$B/workspaces/ops/pipelines?q=PIPELINE-BUILD&repository_id=$pipeline_repo&target_kind=host&sort=-updated_at")"
-  ck "pipeline filter excludes" '"total":0' "$(c "$B/workspaces/ops/pipelines?target_kind=host-group")"
-  ck "pipeline unknown sort" '400$' "$(c -w '%{http_code}' "$B/workspaces/ops/pipelines?sort=definition")"
-  ck "pipeline update" '200$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
-  ck "pipeline stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/ops/pipelines/$pipeline")"
-  ck "pipeline version incremented" '"version":2' "$(c "$B/workspaces/ops/pipelines/$pipeline")"
+  ck "pipeline malformed JSON" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{')" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline foreign repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline missing repository" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant repository_id missing)" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline missing host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref missing)" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline invalid target kind" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_kind invalid)" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline typo names variable" '{{typo}}.*400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant definition '{"workdir":"/tmp","steps":[{"name":"构建","run":"echo {{typo}}"}]}')" "$B/workspaces/$workspace_id/pipelines")"
+  ck "pipeline search and filters" '"total":1' "$(c "$B/workspaces/$workspace_id/pipelines?q=PIPELINE-BUILD&repository_id=$pipeline_repo&target_kind=host&sort=-updated_at")"
+  ck "pipeline filter excludes" '"total":0' "$(c "$B/workspaces/$workspace_id/pipelines?target_kind=host-group")"
+  ck "pipeline unknown sort" '400$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/pipelines?sort=definition")"
+  ck "pipeline update" '200$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/$workspace_id/pipelines/$pipeline")"
+  ck "pipeline stale update" '409$' "$(c -w '%{http_code}' -X PATCH -d "$pipeline_payload" "$B/workspaces/$workspace_id/pipelines/$pipeline")"
+  ck "pipeline version incremented" '"version":2' "$(c "$B/workspaces/$workspace_id/pipelines/$pipeline")"
   # The successful update above advanced the version; exercise reference
   # validation with a current version, independently of stale-write rejection.
   pipeline_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["version"]=2;print(json.dumps(v))')
-  ck "pipeline update validates references" '400$' "$(c -w '%{http_code}' -X PATCH -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/ops/pipelines/$pipeline")"
-  ck "pipeline referenced repository protected" '409$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$pipeline_repo")"
+  ck "pipeline update validates references" '400$' "$(c -w '%{http_code}' -X PATCH -d "$(pipeline_variant repository_id "$foreign_repo")" "$B/workspaces/$workspace_id/pipelines/$pipeline")"
+  ck "pipeline referenced repository protected" '409$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/repositories/$pipeline_repo")"
   ck "pipeline isolated list" '"total":0' "$(c "$B/workspaces/repo-other/pipelines")"
   ck "pipeline isolated detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/repo-other/pipelines/$pipeline")"
   ck "pipeline isolated delete" '404$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/repo-other/pipelines/$pipeline")"
 
   local group_payload group_pipeline other_host other_group other_payload
-  other_host=$(c -X POST -d '{"name":"other-host","connection":"runner"}' "$B/workspaces/repo-other/hosts" |
+  other_host=$(c -X POST -d '{"name":"other-host","connection":"runner"}' "$B/workspaces/repo-other/nodes" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  other_group=$(c -X POST -d '{"name":"other-group"}' "$B/workspaces/repo-other/host-groups" |
+  other_group=$(c -X POST -d '{"name":"other-group"}' "$B/workspaces/repo-other/node-groups" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "pipeline foreign host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref "$other_host")" "$B/workspaces/ops/pipelines")"
+  ck "pipeline foreign host" '400$' "$(c -w '%{http_code}' -X POST -d "$(pipeline_variant target_ref "$other_host")" "$B/workspaces/$workspace_id/pipelines")"
   group_payload=$(printf '%s' "$pipeline_payload" | python3 -I -c '
 import json,sys
 v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind="host-group",target_ref=sys.argv[1]);print(json.dumps(v))
 ' "$group")
-  group_pipeline=$(c -X POST -d "$group_payload" "$B/workspaces/ops/pipelines" |
+  group_pipeline=$(c -X POST -d "$group_payload" "$B/workspaces/$workspace_id/pipelines" |
     python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
-  ck "pipeline group and optional repository accepted" '"target_kind":"host-group"' "$(c "$B/workspaces/ops/pipelines/$group_pipeline")"
+  ck "pipeline group and optional repository accepted" '"target_kind":"host-group"' "$(c "$B/workspaces/$workspace_id/pipelines/$group_pipeline")"
   for target in missing "$other_group" "$host"; do
     local invalid_group
     invalid_group=$(printf '%s' "$group_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["target_ref"]=sys.argv[1];print(json.dumps(v))' "$target")
-    ck "pipeline missing foreign or wrong-table group" '400$' "$(c -w '%{http_code}' -X POST -d "$invalid_group" "$B/workspaces/ops/pipelines")"
+    ck "pipeline missing foreign or wrong-table group" '400$' "$(c -w '%{http_code}' -X POST -d "$invalid_group" "$B/workspaces/$workspace_id/pipelines")"
   done
   other_payload=$(printf '%s' "$group_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v["target_ref"]=sys.argv[1];print(json.dumps(v))' "$other_group")
   ck "pipeline isolated update" '404$' "$(c -w '%{http_code}' -X PATCH -d "$other_payload" "$B/workspaces/repo-other/pipelines/$pipeline")"
-  ck "pipeline group delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/pipelines/$group_pipeline")"
-  ck "pipeline delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/pipelines/$pipeline")"
-  ck "pipeline deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/pipelines/$pipeline")"
-  ck "pipeline unreferenced repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/repositories/$pipeline_repo")"
-  ck "pipeline audit exists" '"resource":"pipelines"' "$(c "$B/workspaces/ops/activity?resource=pipelines")"
-  ckn "pipeline audit omits definition" 'LONG_VALUE' "$(c "$B/workspaces/ops/activity?resource=pipelines")"
+  ck "pipeline group delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/pipelines/$group_pipeline")"
+  ck "pipeline delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/pipelines/$pipeline")"
+  ck "pipeline deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/pipelines/$pipeline")"
+  ck "pipeline unreferenced repository delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/repositories/$pipeline_repo")"
+  ck "pipeline audit exists" '"resource":"pipelines"' "$(c "$B/workspaces/$workspace_id/activity?resource=pipelines")"
+  ckn "pipeline audit omits definition" 'LONG_VALUE' "$(c "$B/workspaces/$workspace_id/activity?resource=pipelines")"
 
-  ck "roles"            '"拥有者"'      "$(c "$B/workspaces/ops/roles")"
-  ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/hosts")"
+  ck "roles"            '"拥有者"'      "$(c "$B/workspaces/$workspace_id/roles")"
+  ck "foreign workspace is 404" "不存在" "$(c "$B/workspaces/nope/nodes")"
 
   # T3b: inspect JSON types, not regexes that accept both numbers and strings.
   # The real generator is already >2^53; assert that premise rather than
@@ -336,17 +339,17 @@ v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind=
     fi
   }
   local bigint_body bigint_id bigint_detail
-  bigint_body=$(c -X POST -d "{\"name\":\"bigint-roundtrip\",\"connection\":\"runner\",\"group_id\":\"$group\"}" "$B/workspaces/ops/hosts")
+  bigint_body=$(c -X POST -d "{\"name\":\"bigint-roundtrip\",\"connection\":\"runner\",\"group_id\":\"$group\"}" "$B/workspaces/$workspace_id/nodes")
   ck_json "bigint create ID is a string above 2^53" 'assert type(v["id"]) is str and int(v["id"]) > 2**53' "$bigint_body"
   bigint_id=$(printf '%s' "$bigint_body" | python3 -I -c 'import json,sys;print(json.load(sys.stdin)["id"])')
-  ck_json "bigint list preserves exact string ID and reference" 'assert v["total"] == 1; h=v["items"][0]; assert h["id"] == sys.argv[3] and h["group_id"] == sys.argv[4]' "$(c "$B/workspaces/ops/hosts?q=bigint-roundtrip")" "$bigint_id" "$group"
-  bigint_detail=$(c "$B/workspaces/ops/hosts/$bigint_id")
+  ck_json "bigint list preserves exact string ID and reference" 'assert v["total"] == 1; h=v["items"][0]; assert h["id"] == sys.argv[3] and h["group_id"] == sys.argv[4]' "$(c "$B/workspaces/$workspace_id/nodes?q=bigint-roundtrip")" "$bigint_id" "$group"
+  bigint_detail=$(c "$B/workspaces/$workspace_id/nodes/$bigint_id")
   ck_json "bigint detail ID is a string and string group_id associates" 'assert v["id"] == sys.argv[3] and v["group_id"] == sys.argv[4] and v["credential_id"] == "0"' "$bigint_detail" "$bigint_id" "$group"
-  ck "bigint update" '200$' "$(c -w '%{http_code}' -X PATCH -d "{\"name\":\"bigint-updated\",\"group_id\":\"$group\",\"version\":1}" "$B/workspaces/ops/hosts/$bigint_id")"
-  ck_json "bigint updated detail keeps exact ID" 'assert v["id"] == sys.argv[3] and v["name"] == "bigint-updated" and v["version"] == 2' "$(c "$B/workspaces/ops/hosts/$bigint_id")" "$bigint_id"
-  ck "bigint delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/ops/hosts/$bigint_id")"
-  ck "bigint deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/hosts/$bigint_id")"
-  ck "nonnumeric host path" '404$' "$(c -w '%{http_code}' "$B/workspaces/ops/hosts/not-a-number")"
+  ck "bigint update" '200$' "$(c -w '%{http_code}' -X PATCH -d "{\"name\":\"bigint-updated\",\"group_id\":\"$group\",\"version\":1}" "$B/workspaces/$workspace_id/nodes/$bigint_id")"
+  ck_json "bigint updated detail keeps exact ID" 'assert v["id"] == sys.argv[3] and v["name"] == "bigint-updated" and v["version"] == 2' "$(c "$B/workspaces/$workspace_id/nodes/$bigint_id")" "$bigint_id"
+  ck "bigint delete" '204$' "$(c -w '%{http_code}' -X DELETE "$B/workspaces/$workspace_id/nodes/$bigint_id")"
+  ck "bigint deleted detail" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/nodes/$bigint_id")"
+  ck "nonnumeric host path" '404$' "$(c -w '%{http_code}' "$B/workspaces/$workspace_id/nodes/not-a-number")"
 
   kill $pid 2>/dev/null; wait $pid 2>/dev/null
 

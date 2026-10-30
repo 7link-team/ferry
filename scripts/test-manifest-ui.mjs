@@ -37,16 +37,16 @@ try {
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
   const owner = await browser.newContext();
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
-  await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'});
+  const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
-  const root='/workspaces/tenant';
+  const root=`/workspaces/${workspace_tenant}`;
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
-  const host = await post(owner, root+'/hosts', {name:'Manifest host',connection:'runner'});
+  const host = await post(owner, root+'/nodes', {name:'Manifest host',connection:'runner'});
   await post(owner, root+'/variables', {name:'token',scope:'deploy',kind:'secret',value:'never-visible-value'});
   const config = await post(owner, root+'/config-templates', {name:'app-conf',content:'enabled=true\n',parameters:'[]'});
-  await p.goto(`${origin}/tenant/deploy/apps/new`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/deployments/new`);
   await p.getByRole('textbox',{name:/^名称/}).fill('Visual application');
   await p.getByLabel('目标主机',{exact:false}).click();
   await p.getByRole('option',{name:'Manifest host',exact:true}).click();
@@ -112,7 +112,7 @@ try {
   assert.deepEqual(parse(stored.manifest).overrides,{docker:{},native:{},stack:{},...manifest.overrides});
   assert(saved.request().postDataJSON().manifest.includes('# preserve this comment'));
   console.log('PASS form creates real multi-service deployment with ports, secret references, volumes, files, health/resources and dependencies');
-  await p.goto(`${origin}/tenant/deploy/apps/${created.id}/edit`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/deployments/${created.id}/edit`);
   await service(1).getByLabel('镜像',{exact:false}).fill('nginx:stable');
   await editor.getByText('应用高级配置：更新策略、标签与模式覆盖',{exact:true}).click();
   await editor.getByLabel('应用标签（JSON 对象）',{exact:true}).fill('{');
@@ -131,7 +131,7 @@ try {
   assert.deepEqual(changed.overrides,{docker:{},native:{},stack:{},...manifest.overrides});
   assert.equal(typeof stored.manifest,'string'); // server persists its existing canonical JSON format
   console.log('PASS source/form round trip, malformed source/JSON blocks save, dependency references preserved, edit persists');
-  await p.goto(`${origin}/tenant/deploy/apps/${created.id}/edit`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/deployments/${created.id}/edit`);
   await service(1).getByLabel('镜像',{exact:false}).waitFor();
   assert.equal(await service(1).getByLabel('镜像',{exact:false}).inputValue(),'nginx:stable');
   await service(1).getByRole('heading',{level:3}).evaluate(el=>el.scrollIntoView({block:'start'}));
@@ -143,7 +143,7 @@ try {
   const repo = await post(owner,root+'/repositories',{name:'Artifact repository',url:'https://example.invalid/repo.git',default_branch:'main',credential_id:'0'});
   const pipeline = await post(owner,root+'/pipelines',{name:'Artifact pipeline',repository_id:repo.id,target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:'/tmp/build/{{run}}',steps:[{name:'build',run:'true'}]})});
   for (const [mode,label] of [['docker','Docker'],['native','Native（systemd）'],['stack','Docker Swarm']]) {
-    await p.goto(`${origin}/tenant/deploy/apps/new`);
+    await p.goto(`${origin}/workspaces/${workspace_tenant}/deployments/new`);
     await p.getByRole('textbox',{name:/^名称/}).fill(`Form ${mode}`);
     await p.getByRole('combobox',{name:/^部署模式/}).click();
     await p.getByRole('option',{name:label,exact:true}).click();

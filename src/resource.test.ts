@@ -43,22 +43,23 @@ describe("queryString", () => {
 });
 
 describe("action URLs", () => {
-  it("separates collection-level from item-level verbs", async () => {
-    // Guards the mistake of threading an id through the collection helper,
-    // which yields /hosts/actions/<id>/actions/<verb>.
-    const calls: string[] = [];
+  it("uses HTTP methods and noun subresources for collection and item operations", async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
     const original = globalThis.fetch;
-    globalThis.fetch = (async (url: string) => {
-      calls.push(String(url));
+    globalThis.fetch = (async (url: string, options?: RequestInit) => {
+      calls.push({ url: String(url), method: options?.method });
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     const { runAction, runItemAction } = await import("./resource");
-    await runAction("ws", "hosts", "bulk-delete", {});
-    await runItemAction("ws", "hosts", "h1", "test-connection", {});
+    const workspace = "109124796398174208";
+    await runAction(workspace, "hosts", "bulk-delete", {});
+    await runItemAction(workspace, "hosts", "h1", "test-connection", {});
+    await runAction(workspace, "host-groups", "reorder", {});
     globalThis.fetch = original;
     expect(calls).toEqual([
-      "/api/workspaces/ws/hosts/actions/bulk-delete",
-      "/api/workspaces/ws/hosts/h1/actions/test-connection",
+      { url: `/api/workspaces/${workspace}/nodes`, method: "DELETE" },
+      { url: `/api/workspaces/${workspace}/nodes/h1/connection-tests`, method: "POST" },
+      { url: `/api/workspaces/${workspace}/node-groups/ordering`, method: "PATCH" },
     ]);
   });
 });

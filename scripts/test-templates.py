@@ -58,12 +58,12 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
-        host=request(owner,root+'/hosts',{'name':'Fixture','connection':'runner'},expected=201)['id']
+        request(guest,'/workspace-memberships',{'code':invitation})
+        host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']
         request(owner,root+'/variables',{'name':'token','scope':'deploy','kind':'secret','value':'never-copy-this-secret'},expected=201)
         for resource, field in [('app-templates','manifest'),('pipeline-templates','definition')]:
             app=field=='manifest'
@@ -80,11 +80,11 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             request(guest,path,body,expected=403)
             request(guest,url,dict(body,version=1),method='PATCH',expected=403)
             request(guest,url,method='DELETE',expected=403)
-            foreign='/workspaces/other/'+resource+'/'+tid
+            foreign=f'/workspaces/{workspace_other}/'+resource+'/'+tid
             for method,payload in [('GET',None),('PATCH',dict(body,version=1)),('DELETE',None)]:
                 request(outsider,foreign,payload,method,404)
-            request(outsider,foreign+'/actions/render',{'version':1,'values':values},expected=404)
-            rendered=request(guest,url+'/actions/render',{'version':1,'values':values})[field]
+            request(outsider,foreign+'/renderings',{'version':1,'values':values},expected=404)
+            rendered=request(guest,url+'/renderings',{'version':1,'values':values})[field]
             result=json.loads(rendered)
             if app:
                 check(result['services'][0]['ports'][0]['container']==8080 and result['services'][0]['env'][0]['valueFrom']=='variable/token','typed defaults and secret references')
@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             persisted=json.loads(saved)
             check(persisted['services'][0]['image']==result['services'][0]['image'] if app else persisted==result,resource+' generated configuration creates real resource')
             for invalid in [{},dict(values,unknown='x'),dict(values,**({'port':'80'} if app else {'timeout':'30'})),dict(values,**({'tag':'bad'} if app else {'command':''})),dict(values,**({'port':0} if app else {'timeout':0}))]:
-                request(owner,url+'/actions/render',{'version':1,'values':invalid},expected=400)
+                request(owner,url+'/renderings',{'version':1,'values':invalid},expected=400)
             check(True,resource+' missing/unknown/type/range validation')
             for invalid_params in [params+[{'name':'unused','type':'string'}],params+[params[0]], [dict(p,default=None) for p in params]]:
                 request(owner,path,dict(body,parameters=json.dumps(invalid_params)),expected=400)
@@ -115,8 +115,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             request(owner,path+'/'+copy,method='DELETE',expected=204)
             request(owner,url,dict(body,version=0),method='PATCH',expected=409)
             request(owner,url,dict(body,version=1,name='Revised'),method='PATCH')
-            request(owner,url+'/actions/render',{'version':1,'values':values},expected=409)
-            request(owner,url+'/actions/render',{'version':2,'values':values})
+            request(owner,url+'/renderings',{'version':1,'values':values},expected=409)
+            request(owner,url+'/renderings',{'version':2,'values':values})
             request(owner,url,method='DELETE',expected=204)
             request(owner,url,expected=404)
             check(request(owner,root+'/'+target+'/'+oid)[field]==saved,resource+' update/delete leaves created object independent')
@@ -125,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/members/'+member['id'],{'version':member['version'],'role_id':role},method='PATCH')
         for resource in ['app-templates','pipeline-templates']:
             request(guest,root+'/'+resource,expected=403)
-            request(guest,root+'/'+resource+'/1/actions/render',{'version':1},expected=403)
+            request(guest,root+'/'+resource+'/1/renderings',{'version':1},expected=403)
         check(True,'read permission required for list/render')
         activities=request(owner,root+'/activity?page_size=200')['items']
         logs=[r for r in activities if r['resource'] in ('app-templates','pipeline-templates')]
@@ -134,10 +134,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         config_body={'name':'Runtime config','content':'port={{ .Values.port }}\nsecret={{ .Values.secret }}','parameters':json.dumps([{'name':'port','type':'integer','default':8080},{'name':'secret','type':'string','secret':True,'default':'token'}])}
         config_path=root+'/config-templates'
         config_id=request(owner,config_path,config_body,expected=201)['id']
-        rendered=request(owner,config_path+'/'+config_id+'/actions/render',{'version':1})['content']
+        rendered=request(owner,config_path+'/'+config_id+'/renderings',{'version':1})['content']
         check(rendered=='port=8080\nsecret=<variable/token>','config render exposes reference, never secret plaintext')
         request(guest,config_path,config_body,expected=403)
-        request(outsider,'/workspaces/other/config-templates/'+config_id,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/config-templates/'+config_id,expected=404)
         check(True,'config templates enforce role and workspace boundaries')
         config_manifest={'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'configured'},'services':[{'name':'web','image':'busybox:1.36','files':[{'path':'/etc/app.conf','fromTemplate':config_id}]}]}
         config_app=request(owner,root+'/deployments',{'name':'Configured app','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/config-app','manifest':json.dumps(config_manifest)},expected=201)['id']

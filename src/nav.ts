@@ -1,7 +1,7 @@
 /**
  * The whole menu tree as data. Moving an item between groups — the planned
  * merge of 主机 / 构建 / 部署 into one top-level module — is an edit here and
- * nowhere else. Routes are derived: /{workspace}/{group}/{item}.
+ * nowhere else. Routes are derived: /workspaces/{workspaceId}/{resource}.
  */
 export interface NavItem {
   key: string;

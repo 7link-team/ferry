@@ -32,7 +32,13 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
     if os.environ.get('FERRY_TEST_DATABASE_URL'):
         env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
     client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    upgraded = False
     def api(path, body=None):
+        # Exercise each binary's own contract while comparing unchanged stored IDs/data.
+        if upgraded:
+            path = path.replace('/workspaces/upgrade/', f'/workspaces/{workspace_id}/')
+            path = path.replace('/hosts/', '/nodes/').replace('/host-groups/', '/node-groups/')
+            path = path.replace('/repository-auth', '/repository-providers').replace('/actions/render', '/renderings')
         request = urllib.request.Request(origin+path, data=json.dumps(body).encode() if body is not None else None,
             headers={'Content-Type':'application/json','X-Ferry-Request':'1'})
         with client.open(request, timeout=10) as response:
@@ -57,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
         try:
             subprocess.run([sys.executable, 'scripts/test-setup.py', origin, directory, '--legacy'], check=True)
             api('/users', {'email':'upgrade@example.invalid','password':'correct-horse-battery','name':'upgrade'})
-            api('/workspaces', {'slug':'upgrade','name':'upgrade'})
+            workspace_id = api('/workspaces', {'slug':'upgrade','name':'upgrade'})['id']
             host=create('hosts', {'name':'saved-host','connection':'runner'})
             credential=create('credentials', {'name':'saved-credential','kind':'password','username':'saved-user','secret':'saved-secret'})
             repository=create('repositories', {'name':'saved-repository','url':'https://example.invalid/repo.git','credential_id':credential})
@@ -69,6 +75,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             before={path:api(path) for path in paths}
             roles_before = api('/workspaces/upgrade/roles')['items']
             process.terminate(); process.wait(timeout=20)
+            upgraded = True
             process=launch(new,log)
             for path in paths:
                 after = api(path)

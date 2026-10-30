@@ -24,7 +24,7 @@ beforeEach(() => {
   stored = { id: "10", name: "db-url", kind: "secret", scope: "global", scope_ref: "0", has_value: true, version: 1 };
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     requests.push({ url, method: init.method, body: init.body as string });
-    return { ok: true, status: 200, json: async () => url.endsWith("/reveal") ? { value: "secret-value\n$literal" } : stored };
+    return { ok: true, status: 200, json: async () => url.endsWith("/disclosures") ? { value: "secret-value\n$literal" } : stored };
   }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
@@ -34,7 +34,7 @@ it("secret detail only fetches metadata; reveal is explicit, audited endpoint an
   expect(requests).toHaveLength(1);
   expect(host.textContent).not.toContain("secret-value");
   await click("查看明文（记录审计）");
-  expect(requests.at(-1)).toMatchObject({ url: "/api/workspaces/ops/variables/10/actions/reveal", method: "POST" });
+  expect(requests.at(-1)).toMatchObject({ url: "/api/workspaces/ops/variables/10/disclosures", method: "POST" });
   expect(host.querySelector('[aria-label="变量明文"]')?.textContent).toBe("secret-value\n$literal");
   await click("隐藏明文");
   expect(host.textContent).not.toContain("secret-value");
@@ -48,7 +48,7 @@ it("keeps the selected host when creating an alert rule from its detail page", a
   history.replaceState({}, "", "/ops/deploy/alerts/new?target_kind=host&target_ref=42");
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     requests.push({ url, method: init.method, body: init.body as string });
-    return { ok: true, status: 200, json: async () => url.includes("/hosts")
+    return { ok: true, status: 200, json: async () => url.includes("/nodes")
       ? { items: [{ id: "42", name: "Node 42" }], total: 1, page: 1, page_size: 200 }
       : { id: "99" } };
   }));
@@ -80,7 +80,7 @@ it("unmounting a revealed detail does not carry plaintext into another detail", 
   await act(async () => root.render(<div />));
   await mount();
   expect(host.textContent).not.toContain("secret-value");
-  expect(requests.filter(r => r.url.endsWith("/reveal"))).toHaveLength(1);
+  expect(requests.filter(r => r.url.endsWith("/disclosures"))).toHaveLength(1);
 });
 it("pipeline creation uses a wide form and keeps repository/host settings out of basic fields", async () => {
   history.replaceState({}, "", "/ops/build/pipelines/new");
@@ -127,7 +127,7 @@ it("imports an Actions template into the visual editor with task bindings", asyn
   const permissions = new Set(["pipeline-templates.read"]);
   const config = formConfigs("ops", permissions).pipelines!;
   const generator = config.generator!;
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/actions/render")
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/renderings")
     ? { definition: JSON.stringify({ engine: "github-actions", workflow: DEFAULT_ACTIONS, executor_bindings: [{ job_id: "build", target_kind: "host", target_ref: "1", image: "host" }], checkout_bindings: [], graph_layout: {} }) }
     : { name: "Build template", version: 1, parameters: "[]" } })));
   const imported = await generator.generate("template-1", 1, {});
@@ -140,7 +140,7 @@ it("saves and runs a pipeline from the full-page action bar", async () => {
     requests.push({ url, method: init.method, body: init.body as string });
     const result = url.endsWith("/pipelines") && init.method === "POST" ? { id: "pipeline-1" }
       : url.endsWith("/pipelines/pipeline-1") ? { id: "pipeline-1", name: "Build", environments: [], version: 1 }
-      : url.endsWith("/pipelines/pipeline-1/actions/run") ? { id: "run-1" }
+      : url.endsWith("/pipelines/pipeline-1/runs") ? { id: "run-1" }
       : { items: [], total: 0, page: 1, page_size: 200 };
     return { ok: true, status: init.method === "POST" ? 201 : 200, json: async () => result };
   }));
@@ -152,9 +152,9 @@ it("saves and runs a pipeline from the full-page action bar", async () => {
   await act(async () => host.querySelector<HTMLButtonElement>('button[value="save-run"]')!.click());
   expect(requests.filter(row => row.method === "POST").map(row => row.url)).toEqual([
     "/api/workspaces/ops/pipelines",
-    "/api/workspaces/ops/pipelines/pipeline-1/actions/run",
+    "/api/workspaces/ops/pipelines/pipeline-1/runs",
   ]);
-  expect(location.pathname).toBe("/ops/build/runs/run-1");
+  expect(location.pathname).toBe("/workspaces/ops/pipeline-runs/run-1");
 });
 it("asks for a bound environment after saving before starting a pipeline", async () => {
   history.replaceState({}, "", "/ops/build/pipelines/new");
@@ -173,12 +173,12 @@ it("asks for a bound environment after saving before starting a pipeline", async
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Build"); name.dispatchEvent(new Event("input", { bubbles: true })); });
   await act(async () => host.querySelector<HTMLButtonElement>('button[value="save-run"]')!.click());
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("执行环境");
-  expect(requests.some(row => row.url.endsWith("/actions/run"))).toBe(false);
+  expect(requests.some(row => row.url.endsWith("/runs"))).toBe(false);
   await act(async () => (Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(button => button.textContent === "取消")!).click());
-  expect(location.pathname).toBe("/ops/build/pipelines/pipeline-1/edit");
+  expect(location.pathname).toBe("/workspaces/ops/pipelines/pipeline-1/edit");
 });
 it("shows an install command immediately in the runner host mode", async () => {
-  history.replaceState({}, "", "/ops/host/hosts/new");
+  history.replaceState({}, "", "/ops/host/nodes/new");
   const permissions = new Set(["hosts.create", "hosts.enroll", "credentials.create", "credentials.read"]);
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     requests.push({ url, method: init.method, body: init.body as string });
@@ -189,7 +189,7 @@ it("shows an install command immediately in the runner host mode", async () => {
   }));
   await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions).hosts!} workspace="ops" permissions={permissions} />));
   expect(JSON.parse(requests.find(row => row.url.endsWith("/runner-tokens") && row.method === "POST")!.body!)).toMatchObject({ host_id: "", ttl_minutes: 15 });
-  expect(requests.some(row => row.url.endsWith("/hosts") && row.method === "POST")).toBe(false);
+  expect(requests.some(row => row.url.endsWith("/nodes") && row.method === "POST")).toBe(false);
   expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="安装命令"]')?.value).toContain("fixture-token");
   await act(async () => host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="false"]')!.click());
   expect(host.textContent).toContain("添加主机");
@@ -206,8 +206,8 @@ it("shows an install command immediately in the runner host mode", async () => {
   expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="安装命令"]')?.value).toContain("fixture-token");
 });
 it("shows empty host tags as read-only data without creation instructions", async () => {
-  history.replaceState({}, "", "/ops/host/hosts/10");
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/hosts/10")
+  history.replaceState({}, "", "/ops/host/nodes/10");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/nodes/10")
     ? { id: "10", name: "web-01", connection: "runner", group_id: "0", tag_ids: [], description: "", version: 1 }
     : { items: [], total: 0, page: 1, page_size: 200 } })));
   await act(async () => root.render(<ResourceForm config={formConfigs("ops").hosts!} workspace="ops" permissions={new Set(["hosts.read"])} />));

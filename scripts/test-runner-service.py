@@ -73,16 +73,16 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             except OSError: return False
         wait(ready, 'server startup')
         api('/setup', {'name':'Service Test','email':'service@example.invalid','password':'temporary-service-password','token':(root/'server/setup-token').read_text().strip()})
-        api('/workspaces', {'name':'Service','slug':'service'})
-        host = api('/workspaces/service/hosts', {'name':'Managed runner','connection':'runner'})['id']
-        enrollment = api('/workspaces/service/runner-tokens', {'host_id':host})
+        workspace_service = api('/workspaces', {'name':'Service','slug':'service'})['id']
+        host = api(f'/workspaces/{workspace_service}/nodes', {'name':'Managed runner','connection':'runner'})['id']
+        enrollment = api(f'/workspaces/{workspace_service}/runner-tokens', {'host_id':host})
         token = enrollment['token']
-        token_path = '/workspaces/service/runner-tokens/'+enrollment['id']
+        token_path = f'/workspaces/{workspace_service}/runner-tokens/'+enrollment['id']
         assert api(token_path)['state']=='pending'
         # Registration can consume a token before the host transaction fails.
         # Such an interrupted enrollment must eventually permit regeneration.
-        interrupted_token = api('/workspaces/service/runner-tokens', {})
-        interrupted_path = '/workspaces/service/runner-tokens/' + interrupted_token['id']
+        interrupted_token = api(f'/workspaces/{workspace_service}/runner-tokens', {})
+        interrupted_path = f'/workspaces/{workspace_service}/runner-tokens/' + interrupted_token['id']
         with closing(sqlite3.connect(root/'server/ferry.sqlite')) as fixture_db:
             fixture_db.execute('UPDATE runner_tokens SET used_at=?, expires_at=? WHERE id=?',
                                (int(time.time()*1000), int(time.time()*1000)-1, interrupted_token['id']))
@@ -102,8 +102,8 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         refused(token_path,401)
         refused('/runners/install/invalid',401,'bad')
         refused('/runners/install/invalid',400,token)
-        api('/workspaces', {'name':'Other bootstrap tenant','slug':'other-bootstrap'})
-        refused('/workspaces/other-bootstrap/runner-tokens/'+enrollment['id'],404,authenticated=True)
+        workspace_other_bootstrap = api('/workspaces', {'name':'Other bootstrap tenant','slug':'other-bootstrap'})['id']
+        refused(f'/workspaces/{workspace_other_bootstrap}/runner-tokens/'+enrollment['id'],404,authenticated=True)
         state = root/'state with spaces'
         if system == 'Windows':
             unsafe = root/'unsafe-state'
@@ -114,12 +114,12 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert rejected.returncode != 0, 'must reject user-writable service state'
             assert not (unsafe/'service.json').exists(), 'unsafe install must not persist credentials'
         service('install', '--server', origin, '--token', token, '--state-dir', state)
-        host_path = '/workspaces/service/hosts/'+host
+        host_path = f'/workspaces/{workspace_service}/nodes/'+host
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
         status = api(token_path)
         assert status['state']=='connected' and status['host_id']==host and status['host_state']=='online'
         refused('/runners/install/x86_64-unknown-linux-gnu',401,token)
-        update_path = host_path+'/runner-update'
+        update_path = host_path+'/runner-updates'
         wait(lambda: api(update_path)['ready'], 'supervisor must confirm authenticated worker readiness')
         assert api(update_path)['supported'] is True
         invalid_update = api(update_path, {'version':'9.9.9','manifest':'{}','signature':'invalid'})
@@ -173,13 +173,13 @@ jobs:
           echo VERIFY_FINISHED
 """
                 def pipeline(document, jobs):
-                    return api('/workspaces/service/pipelines', {'name':'upgrade acceptance',
+                    return api(f'/workspaces/{workspace_service}/pipelines', {'name':'upgrade acceptance',
                         'target_kind':'host','target_ref':host,'definition_format':'github-actions','definition':document,
                         'executor_bindings':[{'job_id':job,'target_kind':'host','target_ref':host,'image':'host'} for job in jobs]})['id']
                 def trigger(pipeline_id):
-                    return api('/workspaces/service/pipelines/'+pipeline_id+'/actions/run', {})['id']
-                def run_status(run): return api('/workspaces/service/pipeline-runs/'+run)
-                def run_logs(run): return ''.join(item['chunk'] for item in api('/workspaces/service/pipeline-runs/'+run+'/logs?after=0')['items'])
+                    return api(f'/workspaces/{workspace_service}/pipelines/'+pipeline_id+'/runs', {})['id']
+                def run_status(run): return api(f'/workspaces/{workspace_service}/pipeline-runs/'+run)
+                def run_logs(run): return ''.join(item['chunk'] for item in api(f'/workspaces/{workspace_service}/pipeline-runs/'+run+'/logs?after=0')['items'])
                 print('Starting Actions task before upgrade', flush=True)
                 actions_run = trigger(pipeline(workflow, ['build','verify']))
                 def build_started():
@@ -189,7 +189,7 @@ jobs:
                 wait(build_started, 'first Actions job starts before upgrade', seconds=120)
             import runpy
             ws_module = runpy.run_path(str(Path(__file__).with_name('ws-probe.py')))
-            terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
+            terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal-sessions', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
             def terminal_output(seconds):
                 output = bytearray()
                 for opcode, data in terminal.frames(seconds):
@@ -220,7 +220,7 @@ jobs:
                 print('Creating competing Actions task while upgrade drains', flush=True)
                 later_pipeline = pipeline(later_workflow, ['later'])
                 cancelled_run = trigger(later_pipeline)
-                api('/workspaces/service/pipeline-runs/'+cancelled_run+'/actions/cancel', {})
+                api(f'/workspaces/{workspace_service}/pipeline-runs/'+cancelled_run+'/cancellations', {})
                 wait(lambda: run_status(cancelled_run)['state']=='cancelled', 'waiting task cancels without entering upgrading host')
                 later_run = trigger(later_pipeline)
                 assert not (root/'later.started').exists()

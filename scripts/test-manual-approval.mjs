@@ -31,11 +31,11 @@ try {
     return response.json();
   };
   await post('/setup', { name: 'Approval Admin', email: 'approval@example.invalid', password: 'temporary-approval-password', token: (await readFile(join(work, 'setup-token'), 'utf8')).trim() });
-  await post('/workspaces', { name: 'Approval', slug: 'approval' });
+  const workspace_approval = (await post('/workspaces', { name: 'Approval', slug: 'approval' })).id;
   const workflow = `name: Approval test\non: workflow_dispatch\njobs:\n  first:\n    name: First gate\n    ferry-approval: true\n  second:\n    name: Second gate\n    needs: first\n    ferry-approval: true\n`;
-  const pipeline = await post('/workspaces/approval/pipelines', { name: 'Gated pipeline', definition_format: 'github-actions', definition: workflow });
-  const run = await post(`/workspaces/approval/pipelines/${pipeline.id}/actions/run`);
-  const detail = async () => (await client.get(`/api/workspaces/approval/pipeline-runs/${run.id}`)).json();
+  const pipeline = await post(`/workspaces/${workspace_approval}/pipelines`, { name: 'Gated pipeline', definition_format: 'github-actions', definition: workflow });
+  const run = await post(`/workspaces/${workspace_approval}/pipelines/${pipeline.id}/runs`);
+  const detail = async () => (await client.get(`/api/workspaces/${workspace_approval}/pipeline-runs/${run.id}`)).json();
   const waitFor = async (predicate) => {
     for (let i = 0; i < 100; i++) {
       const current = await detail();
@@ -52,17 +52,17 @@ try {
     try {
       const context = await browser.newContext({ storageState: await client.storageState(), viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();
-      await page.goto(`${origin}/approval/build/runs/${run.id}`);
+      await page.goto(`${origin}/workspaces/${workspace_approval}/pipeline-runs/${run.id}`);
       await page.getByRole('button', { name: '确认继续' }).waitFor();
       await page.screenshot({ path: process.env.FERRY_APPROVAL_SCREENSHOT, fullPage: true });
     } finally { await browser.close(); }
   }
-  await post(`/workspaces/approval/pipeline-runs/${run.id}/jobs/first/approve`);
+  await post(`/workspaces/${workspace_approval}/pipeline-runs/${run.id}/jobs/first/approvals`);
   current = await waitFor(value => value.jobs?.find(job => job.key === 'second')?.state === 'waiting');
   assert.equal(current.jobs.find(job => job.key === 'first').state, 'succeeded');
-  const duplicate = await client.post(`/api/workspaces/approval/pipeline-runs/${run.id}/jobs/first/approve`, { data: {} });
+  const duplicate = await client.post(`/api/workspaces/${workspace_approval}/pipeline-runs/${run.id}/jobs/first/approvals`, { data: {} });
   assert.equal(duplicate.status(), 400);
-  await post(`/workspaces/approval/pipeline-runs/${run.id}/jobs/second/approve`);
+  await post(`/workspaces/${workspace_approval}/pipeline-runs/${run.id}/jobs/second/approvals`);
   current = await waitFor(value => value.state === 'succeeded');
   assert(current.jobs.every(job => job.state === 'succeeded'));
   console.log('PASS manual approval waits, respects dependencies, rejects duplicate approval, and finishes without hosts');

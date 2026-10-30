@@ -75,11 +75,11 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text().strip()})
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
-        request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
-        request(outsider, '/workspaces', {'name':'Other','slug':'other'})
-        root = '/workspaces/tenant'
+        workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
+        workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
+        root = f'/workspaces/{workspace_tenant}'
         invitation=request(owner,root+'/members/invitation')['code']
-        request(guest,'/workspaces/actions/join',{'code':invitation})
+        request(guest,'/workspace-memberships',{'code':invitation})
         credential=request(owner,root+'/credentials',{'name':'Index token','kind':'token','secret':'fixture-provider-token'},expected=201)['id']
         repo=request(owner,root+'/repositories',{'name':'External repository','url':api_base+'/group/repository.git','credential_id':credential},expected=201)['id']
         def eventually(fn,timeout=30):
@@ -100,12 +100,12 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         selected_id=request(owner,root+'/marketplace-sources',selected_body,expected=201)['id']
         selected=source(selected_id);selected_repo=request(owner,root+'/repositories/'+selected['repository_id'])
         check(selected_repo['credential_id']==credential and selected_repo['url']==selection['url'] and selected_repo['default_branch']=='release/non-default','market source atomically materializes selected connection repository and branch')
-        request(owner,root+'/marketplace-sources/'+selected_id+'/actions/sync',{})
+        request(owner,root+'/marketplace-sources/'+selected_id+'/synchronizations',{})
         check(requests[-1][1].get('authorization')=='Bearer fixture-provider-token','selected market source uses existing encrypted connection credential')
         before=request(owner,root+'/repositories')['total']
         request(owner,root+'/marketplace-sources',dict(selected_body,name='Invalid source',api_base='https://wrong.example.invalid',repository_selection=dict(selection,default_branch='rollback-ref')),expected=400)
         check(request(owner,root+'/repositories')['total']==before,'invalid market source rolls back repository materialization')
-        request(outsider,'/workspaces/other/marketplace-sources',selected_body,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/marketplace-sources',selected_body,expected=404)
         changed=dict(selected_body,version=source(selected_id)['version'],repository_selection=dict(selection,default_branch='release/updated'),branch='release/updated')
         request(owner,root+'/marketplace-sources/'+selected_id,changed,method='PATCH')
         changed_repo=source(selected_id)['repository_id']
@@ -118,36 +118,36 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(owner,root+'/code-connections/'+connection,method='DELETE',expected=204)
         for provider in ['github','gitlab','gitee','codeup']:
             sid=request(owner,root+'/marketplace-sources',dict(body,name=provider,provider=provider),expected=201)['id'];sources.append(sid)
-            result=request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{})
+            result=request(owner,root+'/marketplace-sources/'+sid+'/synchronizations',{})
             check(result['templates']==1 and source(sid)['state']=='idle',provider+' source sync validates and stores directory')
             path,headers=requests[-1]
             token=(headers.get('authorization')=='Bearer fixture-provider-token') if provider=='github' else headers.get('private-token')=='fixture-provider-token' if provider=='gitlab' else 'access_token=fixture-provider-token' in path if provider=='gitee' else headers.get('x-yunxiao-token')=='fixture-provider-token'
             check(token,provider+' transport uses documented authentication')
         sid=sources[0];entry=entries(sid)[0]
         request(guest,root+'/marketplace-sources',body,expected=403)
-        request(guest,root+'/marketplace-sources/'+sid+'/actions/sync',{},expected=403)
-        request(outsider,'/workspaces/other/marketplace/'+entry['id'],expected=404)
+        request(guest,root+'/marketplace-sources/'+sid+'/synchronizations',{},expected=403)
+        request(outsider,f'/workspaces/{workspace_other}/marketplace/'+entry['id'],expected=404)
         request(owner,root+'/repositories/'+repo,method='DELETE',expected=409)
         request(owner,root+'/marketplace-sources',dict(body,api_base='http://example.invalid'),expected=400)
         check(True,'tenant, permission, repository references and credential-origin guards enforced')
-        imported=request(owner,root+'/marketplace/'+entry['id']+'/actions/install',{'version':entry['version']},expected=201)['id']
-        request(owner,root+'/marketplace/'+entry['id']+'/actions/install',{'version':0},expected=409)
+        imported=request(owner,root+'/marketplace/'+entry['id']+'/installations',{'version':entry['version']},expected=201)['id']
+        request(owner,root+'/marketplace/'+entry['id']+'/installations',{'version':0},expected=409)
         template=request(owner,root+'/app-templates/'+imported)
-        rendered=request(owner,root+'/app-templates/'+imported+'/actions/render',{'version':1,'values':{}})
+        rendered=request(owner,root+'/app-templates/'+imported+'/renderings',{'version':1,'values':{}})
         check(json.loads(rendered['manifest'])['services'][0]['image']=='busybox:1.36','imported template is valid and uses real template renderer')
         index['templates'][0]['name']='Changed upstream'
-        request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{})
+        request(owner,root+'/marketplace-sources/'+sid+'/synchronizations',{})
         check(entries(sid)[0]['name']=='Changed upstream' and request(owner,root+'/app-templates/'+imported)==template,'sync atomically replaces directory without altering imported template')
         previous=entries(sid)
         index['templates'].append(dict(index['templates'][0]))
-        request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{},expected=400)
+        request(owner,root+'/marketplace-sources/'+sid+'/synchronizations',{},expected=400)
         check(entries(sid)==previous and source(sid)['state']=='failed','invalid duplicate index preserves previous successful directory')
         index['templates'].pop();fixture_status=503
-        request(owner,root+'/marketplace-sources/'+sid+'/actions/sync',{},expected=400)
+        request(owner,root+'/marketplace-sources/'+sid+'/synchronizations',{},expected=400)
         check('503' in source(sid)['last_error'] and entries(sid)==previous,'provider failure is visible and keeps previous directory')
         fixture_status=200
         job=request(owner,root+'/cron-jobs',{'name':'Market sync','scope':'deploy','schedule':'0 * * * *','timezone':'UTC','enabled':False,'action':'sync-marketplace','target_kind':'marketplace-source','target_ref':sid,'timeout_seconds':30},expected=201)['id']
-        run=request(owner,root+'/cron-jobs/'+job+'/actions/run-now',{},expected=202)['id']
+        run=request(owner,root+'/cron-jobs/'+job+'/runs',{},expected=202)['id']
         eventually(lambda:request(owner,root+'/cron-runs/'+run)['state']=='succeeded')
         check(source(sid)['state']=='idle','shared scheduled task executor actually synchronizes market source')
         request(owner,root+'/marketplace-sources/'+sid,method='DELETE',expected=409)

@@ -26,7 +26,7 @@ const lists: Record<string, ListConfig<Row>> = {
     resource: "workspaces", endpoint: "/platform/workspaces", rowKey: r => r.id,
     filters: [{ key: "q", label: "名称或标识", type: "text" }],
     columns: [{ key: "name", label: "名称", sortable: true }, { key: "slug", label: "标识", sortable: true }],
-    actions: [edit, { label: "进入工作空间", to: r => ({ workspace: r.slug, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" }) }],
+    actions: [edit, { label: "进入工作空间", to: r => ({ workspace: r.id, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" }) }],
     toolbar: { create: { label: "创建工作空间" }, import: false, export: false }, empty: "还没有工作空间，创建后即可配置主机和部署。",
   },
 };
@@ -63,7 +63,7 @@ export function Platform({ identity, reload }: { identity: Identity; reload: () 
     if (route.workspace !== "_platform") navigate({ workspace: "_platform", group: "platform", item: "users", mode: "list" }, {}, { replace: true });
     else if (item === "settings" && !route.id) navigate({ ...route, id: "1", mode: "edit" }, {}, { replace: true });
   }, [route.workspace, route.id, item]);
-  if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><p>当前账号没有平台管理权限。</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.slug ?? "", mode: "list" }, {})}>返回工作空间</Button></div>;
+  if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><p>当前账号没有平台管理权限。</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>返回工作空间</Button></div>;
   const form = forms[item]!;
   return <div className="flex h-full flex-col">
     <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">
