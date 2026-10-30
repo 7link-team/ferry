@@ -182,12 +182,12 @@ handler 只能拿到 `Scope`，`workspace_id` 永远来自路径校验结果，*
 | 一级（顶栏） | 左侧菜单 |
 |---|---|
 | 仪表盘 | 仪表盘 |
-| 部署 | 应用部署 · 应用模版 · 应用市场 · 密钥变量 · 报警监控 · 定时任务 |
-| 构建 | 仓库 · 流水线 · 流水线模版 · 授权认证 · 密钥变量 · 定时任务 |
-| 主机 | 主机组 · 主机 · 标签 · 定时任务 |
+| 应用 | 应用部署 · 应用模版 · 应用市场 · 授权认证 · 密钥变量 · 报警监控 · 定时任务 |
+| 构建 | 仓库连接 · 流水线 · 流水线模版 · 授权认证 · 密钥变量 · 定时任务 |
+| 主机 | 节点（含分组目录） · 授权认证 · 标签 · 定时任务 |
 | 维护 | 成员管理 · 角色管理 · 密钥变量（全局） · 配置项 · 字典 · 操作记录 |
 
-> 需求里顶部列了「仪表盘 构建 部署 主机 维护」，又单独描述了「应用」的左侧菜单。本文按**「部署」与「应用」是同一模块**处理，顶栏标签取「部署」，左侧首项「应用部署」。见第 16 节待确认 1。
+> 用户已确认一级菜单使用“应用”。主机、构建、应用的授权认证分别管理，沿用同一 REST 资源与加密存储，以 `scope=host|build|deploy` 隔离页面及选择器。
 
 出现在多个模块下的「定时任务」「密钥变量」是**同一个资源页 + 不同预置参数**，不是多份实现：
 
@@ -840,7 +840,7 @@ GET /api/workspaces/{workspaceId}/variables?scope=global|deploy|build&scope_ref=
 | 主机 | `host_groups` `tags` `host_tags` | 组是树（`parent_id`），标签是多对多 |
 | 主机 | `runner_tokens` | 一次性注册令牌，带 TTL 与使用痕迹 |
 | 构建 | `repositories` `pipelines` `pipeline_templates` `pipeline_runs` `pipeline_steps` | 流水线定义存 JSON，运行实例拆行便于查询 |
-| 构建 | `credentials` | Git 与 SSH 共用；`kind` ∈ password/ssh-key/token，值加密 |
+| 分模块管理 | `credentials` | `scope` ∈ host/build/deploy，创建后固定；各模块独立列表及选择器，底层统一加密；`kind` ∈ password/ssh-key/token |
 | 部署 | `deployments` `app_templates` `deployment_revisions` | `target_kind`/`target_ref` 指向主机、主机组或集群；revision 存**渲染产物**而非 manifest（§10.5） |
 | 部署 | `clusters` | k8s/helm 的目标；kubeconfig 走 §9.6 的保管机制 |
 | 部署 | `alert_rules` `alert_events` | 规则 + 触发记录 |
