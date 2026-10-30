@@ -33,7 +33,9 @@ export function YamlEditor({ value, readOnly, fillHeight, onChange }: {
         theme={theme.resolved === "dark" ? "vs-dark" : "vs"}
         value={value}
         onChange={next => onChange(next ?? "")}
-        options={{ ariaLabel: "GitHub Actions YAML", readOnly, automaticLayout: true, minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, tabSize: 2, wordWrap: "on" }}
+        // Monaco 0.54 word highlighting leaves a rejected debounce promise on
+        // disposal when switching modes. YAML validation/completion stays enabled.
+        options={{ occurrencesHighlight: "off", ariaLabel: "GitHub Actions YAML", readOnly, automaticLayout: true, minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, tabSize: 2, wordWrap: "on" }}
       />
     </div>
   </div>;

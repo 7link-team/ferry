@@ -116,18 +116,20 @@ function readRefresh(resource: string, fallback = 0) {
 /** Options may be static or loaded; both end up here. */
 function useOptions(source: Option[] | (() => Promise<Option[]>) | undefined) {
   const [options, setOptions] = useState<Option[]>(Array.isArray(source) ? source : []);
+  const [error, setError] = useState("");
   useEffect(() => {
+    setError("");
     if (typeof source !== "function") {
       setOptions(Array.isArray(source) ? source : []);
       return;
     }
     let live = true;
-    void source().then((loaded) => live && setOptions(loaded));
+    void source().then((loaded) => live && setOptions(loaded)).catch(cause => { if (live) { setOptions([]); setError(errorText(cause)); } });
     return () => {
       live = false;
     };
   }, [source]);
-  return options;
+  return { options, error };
 }
 
 export function ResourceTable<T>({
@@ -709,10 +711,11 @@ function FilterField({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const options = useOptions(filter.options);
+  const { options, error } = useOptions(filter.options);
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs text-muted-foreground">{filter.label}</span>
+      {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
       {filter.type === "select" ? (
         <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
           <SelectTrigger aria-label={filter.label} size="sm" className="w-40">

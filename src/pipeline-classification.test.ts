@@ -32,3 +32,9 @@ it("Actions executor options do not request inaccessible host groups", async () 
   expect(calls.some(url=>url.includes('/host-groups'))).toBe(false);
  } finally {globalThis.fetch=previous;}
 });
+it("restricted pipeline lists do not load inaccessible classification filters", () => {
+ const filters=listConfigs("ops",new Set(["pipelines.read","pipelines.update","hosts.read"])).pipelines!.filters!;
+ expect(filters.map(filter=>filter.key)).toEqual(["q"]);
+ const permitted=listConfigs("ops",new Set(["pipelines.read","tags.read"])).pipelines!.filters!;
+ expect(permitted.map(filter=>filter.key)).toEqual(["q","tag_id"]);
+});

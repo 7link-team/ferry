@@ -12,7 +12,7 @@ const listener=createServer();await new Promise(r=>listener.listen(0,'127.0.0.1'
 const port=listener.address().port;await new Promise(r=>listener.close(r));
 const origin=`http://127.0.0.1:${port}`, log=await open(join(work,'server.log'),'w');
 const env={...process.env,FERRY_DATA_DIR:work,FERRY_BIND:`127.0.0.1:${port}`};delete env.FERRY_DATABASE_URL;
-const server=spawn(resolve('target/debug/ferry-server'),[],{env,stdio:['ignore',log.fd,log.fd],windowsHide:true});
+const server=spawn(resolve(process.env.FERRY_BINARY || 'target/debug/ferry-server'),[],{env,stdio:['ignore',log.fd,log.fd],windowsHide:true});
 let browser,runner,passed=false;
 async function eventually(fn) { for(let i=0;i<300;i++){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,100));}throw Error('timed out'); }
 try {

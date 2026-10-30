@@ -306,9 +306,9 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
       resource: "pipelines", rowKey: (r: Pipeline) => r.id,
       toolbar: { create: { label: "创建流水线" } },
       filters: [{ key: "q", label: "名称", type: "text" },
-        {key:"group_id",label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
-        {key:"application_id",label:"应用",type:"select",options:namedOptions(workspace,"deployments")},
-        {key:"tag_id",label:"标签",type:"select",options:tagOptions(workspace)}],
+        ...(!permissions || permissions.has("pipeline-groups.read") ? [{key:"group_id",label:"分组",type:"select" as const,options:namedOptions(workspace,"pipeline-groups")}] : []),
+        ...(!permissions || permissions.has("deployments.read") ? [{key:"application_id",label:"应用",type:"select" as const,options:namedOptions(workspace,"deployments")}] : []),
+        ...(!permissions || permissions.has("tags.read") ? [{key:"tag_id",label:"标签",type:"select" as const,options:tagOptions(workspace)}] : [])],
       columns: [
         { key: "name", label: "名称" },
         {key:"group_name",label:"分组"},{key:"application_name",label:"应用"},

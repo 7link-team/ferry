@@ -174,7 +174,9 @@ impl MigrationTrait for HostConnectionCommand {
             (
                 "enroll_token",
                 ColumnDef::new(Alias::new("enroll_token"))
-                    .text()
+                    // A sealed 64-character token fits here. MySQL rejects a
+                    // literal DEFAULT on TEXT when upgrading existing hosts.
+                    .string_len(512)
                     .not_null()
                     .default("")
                     .to_owned(),

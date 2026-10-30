@@ -52,6 +52,7 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   done
   if [ $ready -eq 0 ]; then
     echo "  $name: server never became ready"
+    printf '::error::%s\n' "$name: server never became ready: $(head -c 1500 "$log" | tr '\n' ' ')"
     sed -n '1,20p' "$log"
     kill $pid 2>/dev/null; wait $pid 2>/dev/null
     total_fail=$((total_fail + 1))
@@ -64,6 +65,7 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
     if echo "$3" | grep -q "$2"; then
       fail=$((fail + 1))
       echo "    FAIL $1: /$2/ must not appear, got: $(echo "$3" | head -c 200)"
+      printf '::error::%s\n' "$name: $1: forbidden /$2/ in response"
     else
       pass=$((pass + 1))
     fi
@@ -330,6 +332,7 @@ v=json.load(sys.stdin);v.update(name="group-build",repository_id="",target_kind=
     else
       fail=$((fail + 1))
       echo "    FAIL $label"
+      printf '::error::%s\n' "$name: $label: JSON assertion failed"
     fi
   }
   local bigint_body bigint_id bigint_detail

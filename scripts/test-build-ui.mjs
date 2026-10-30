@@ -199,6 +199,7 @@ try {
   assert(passed >= 5, `expected at least 5 acceptance groups, got ${passed}`);
   console.log(`${passed} passed, 0 failed, 0 skipped`);
 } catch (error) {
+  if (process.env.GITHUB_ACTIONS) console.error(`::error::${String(error.stack || error).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
   if (page) console.error(await page.locator("body").innerText());
   throw error;
 } finally {
