@@ -1,3 +1,17 @@
+## Remaining browser timing fixture ? 2026-10-30 18:25 +08
+- Full41037139577 now13PASS1FAIL6running. IMPORTANT nativeWindowsserviceandSwarm3consecutiveroundsPASS: previousrepairsverified.
+- Solebuild-ui failure is test-build-ui.mjs188 directory navigation awaitresponse timedout. AllprecedingbrowsergatesPASS includingnewdetail32matrix, realterminal/splits/idle, repository/actions etc. Diagnostic41038822996/job124006224344 confirmsDOMshowsrootlistingandtimeoutwaiting/tmp.
+- Causefixturetyped/tmpbeforeinitialrootloadfinished; HostFiles successfulloadnormalizesdraft. Minimalfixtureonlywaitforpathvisible+refreshspinnerhiddenbeforetyping; preservesallrealterminaldirectoryassertions. No unrelatedproductchange.
+- Needcommit/pushfixture, ONEfreshworkflow_dispatchfullwithsigneddryrun; previousfullnotreleaseeligible. Version21untagged. Localbackend21alreadycompiledreadybut4291still19. NoSYSTEMRunnerupgrades.
+
+## Corrected final21 full active ? 2026-10-30 18:15 +08
+- Exactmain4d34fd536c953d2ff39dc5a591608374f1232907 pushed. Fullworkflow_dispatch41037139577 active7PASS0FAIL13running. Retiredsupersededfailed41034810491andcancelledredundantpush41037055189. Do notdispatchanotherfull.
+- Image41037055016 same4d34fd5 inprogressbotharches. No21tag/publicreleaseyet.
+- Alertbrowser nowpassedpreviousfailureandproceededtorepositoryacceptance. Swarm3roundrealtestsrunning. NativeWindowstest141? serverlocal142PASS2ignoredafteraddingGit/bin; frontendalready142PASSbuildPASS.
+- Final21backendcompiledFinisheddevPASS; PowerShellredirectwrapperreportedexit1fromNativeCommandErrorformattedstderr, notcompilefailure. Copiedfreshbinarytarget/debug/ferry-server-alpha21.exe; --version21verified. Local4291still19(PID70048), updateonlyafterpublication.
+- Release notes readyignoreddata/maintenance/alpha21-release-notes.md UTF8viaapply_patch. PromoteONLY41037139577afterfullSUCCESSandguardmainSHAusingpublish-verified.yml normalworkflowdispatch inputsrun_id,title,notes; thenserver-image.ymlrelease_tagv0.1.0-alpha.21. HelpersinTEMP/ferry-release-tools. Temporarydiagnosticbranch b13c382 currentlyonlyretiresoldrun; doNOTpushunchanged. Cleanupafterrelease.
+- Upgradelocal: pythondata/maintenance/alpha20-state.pycapture; start-alpha21.ps1 backup+guards+onlyordinary4291restart; alpha20-state.pyverify; version/embeddedUI/preservedidentitychecks. NoSYSTEMRunnerupgrade(policyrejectedearlier; doNOTretry/bypass). No5173/4290/4292touch.
+
 ## Release21 gate repair ? 2026-10-30 18:00 +08
 - Full41034810491 has three failures: old /alerts UI fixture, Swarm stale Running task convergence, Windows native upgrade polling PermissionError during MoveFileEx journal replacement. Other13passed/4running. Do not publish that source.
 - Fixed alert-rules route. Swarm runtime adds execution revision container label; restart also updates it; convergence inspects actual desired tasks and requires matching revision, preventing old tasks from satisfying readiness. Existing negative readiness acceptance unchanged; actual3roundDockerCI still required.

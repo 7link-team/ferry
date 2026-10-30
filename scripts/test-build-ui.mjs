@@ -183,6 +183,10 @@ try {
   pass('xterm excluded from initial pages, lazy terminal loads and connects to real runner');
   await page.getByRole('button', { name: '切换为文件', exact: true }).click();
   const directory = '/tmp';
+  // Initial directory loading normalizes the path input when it finishes.
+  // Wait for that load before entering a different directory.
+  await page.getByLabel('目录路径').waitFor();
+  await page.getByRole('button', { name: '刷新', exact: true }).locator('.animate-spin').waitFor({ state: 'hidden' });
   await page.getByLabel('目录路径').fill(directory);
   await Promise.all([
     page.waitForResponse(response => new URL(response.url()).searchParams.get('path') === directory && response.ok()),
