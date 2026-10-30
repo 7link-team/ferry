@@ -36,6 +36,7 @@ function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,o
   const missing=!current ? !legacy&&!nativeSource : !current.connection_id||!current.repository_url;
   useEffect(()=>{onValidityChange(!readOnly && missing);return()=>onValidityChange(false);},[missing,readOnly,onValidityChange]);
   useEffect(()=>{
+    setBranchRequest(previous=>previous.source===branchSource?previous:{source:branchSource,page:1,revision:previous.revision});
     if(readOnly || !connection || connection.provider==='git' || !current?.repository_url){setLoadingBranches(false);return;}
     const controller=new AbortController();
     setLoadingBranches(true);

@@ -65,6 +65,9 @@ it('loads additional branches, retries the failed page and preserves the ref',as
  expect(requested).toEqual([1,2,2]);expect(host.querySelector('datalist')?.textContent).toContain('feature/中文');
  expect(host.querySelector('[role="alert"]')).toBeNull();
  expect((host.querySelector('[aria-label="分支 / 标签 / Commit"]') as HTMLInputElement).value).toBe('main');
+ await select('仓库连接','');await select('仓库连接','c1');await select('节点仓库','https://git.example/team/repo.git');
+ expect(requested).toEqual([1,2,2,1]);
+ expect(host.querySelector('datalist')?.textContent).toContain('main');
 });
 
 it('ignores late branch responses after changing source',async()=>{
