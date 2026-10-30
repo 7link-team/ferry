@@ -79,6 +79,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             process=launch(new,log)
             for path in paths:
                 after = api(path)
+                if '/credentials/' in path:
+                    # Existing repository credentials retain their identity and gain build ownership.
+                    assert after['scope'] == 'build'
+                    before[path]['scope'] = 'build'
                 if path == '/me':
                     # This migration adds a public privilege flag, never elevation.
                     assert after['user'].get('is_superadmin', False) is False

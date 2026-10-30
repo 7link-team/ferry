@@ -75,15 +75,15 @@ try {
   await openList(`/workspaces/${workspace_layout}/credentials`);
   fills(await geometry(), 'single row');
   await page.locator('tbody tr').first().locator('td').nth(1).click();
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\?scope=build$/);
   await page.getByText('Credential 000', { exact: true }).waitFor();
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().focus();
   await page.keyboard.press('Enter');
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\?scope=build$/);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().getByRole('link', { name: '编辑' }).click();
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit\?scope=build$/);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   console.log('PASS single row keeps footer at bottom');
   for (let i = 1; i < 65; i++) await seed(i);
