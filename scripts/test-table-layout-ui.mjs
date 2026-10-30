@@ -115,8 +115,14 @@ try {
   fills(await geometry(), 'expanded invitation');
   await openList('/_platform/users');
   fills(await geometry(), 'platform list', 20);
+  // The heading renders before the settings request finishes, as on a busy CI runner.
+  await page.route('**/api/platform/settings/1', async route => {
+    await new Promise(done => setTimeout(done, 200));
+    await route.continue();
+  });
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
   await page.getByRole('heading', { name: '平台设置', exact: true }).waitFor();
+  await page.getByLabel('平台公开访问地址', { exact: true }).waitFor();
   const formScroll = await page.locator('main').evaluate(main => {
     const el = [...main.querySelectorAll('*'), main].find(el => el.scrollHeight > el.clientHeight && ['auto','scroll'].includes(getComputedStyle(el).overflowY));
     if (!el) return false;
@@ -126,6 +132,9 @@ try {
   assert(formScroll, 'long platform form keeps its own scrolling');
   assert.deepEqual(errors, []);
   console.log('PASS member invitation, platform list, and long form scrolling');
+} catch(error) {
+  console.error(`::error::${String(error.stack || error).replaceAll('\r','').replaceAll('\n','%0A')}`);
+  throw error;
 } finally {
   await browser?.close();
   await vite?.close();
