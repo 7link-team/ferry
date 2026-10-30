@@ -208,6 +208,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             codeup_fixture['mode']=mode
             error=request(owner,codeup_root+'/repositories',expected=400)
             check('valid-personal-token' not in json.dumps(error) and 'error' in error,'Codeup provider failure sanitized: '+str(mode))
+            request(owner,codeup_root+'/branches'+branch_query,expected=400)
             request(owner,root+'/code-connections',dict(codeup_body,name='Must not persist'),expected=400)
         codeup_fixture['mode']='normal'
         for mode,expected_more,expected_count in [('full-final',False,50),('empty',False,0),('total-pages',True,1)]:
@@ -217,6 +218,16 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         codeup_fixture['mode']='wrong-origin'
         request(owner,codeup_root+'/repositories',expected=400)
         codeup_fixture['mode']='normal'
+        before_edit=request(owner,codeup_root)
+        codeup_fixture['mode']=403
+        request(owner,codeup_root,dict(codeup_body,name='Rejected edit',version=before_edit['version']),method='PATCH',expected=400)
+        check(request(owner,codeup_root)==before_edit,'Codeup rejected edit preserves original connection and version')
+        codeup_fixture['mode']='normal'
+        current_credential=request(owner,root+'/credentials/'+shared)
+        request(owner,root+'/credentials/'+shared,{'name':'Expired Codeup PAT','kind':'token','username':'authorized-user','secret':'expired-token','version':current_credential['version']},method='PATCH')
+        request(owner,codeup_root+'/repositories',expected=400)
+        request(owner,root+'/credentials/'+shared,{'name':'Renewed Codeup PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token-renewed','version':request(owner,root+'/credentials/'+shared)['version']},method='PATCH')
+        check(request(owner,codeup_root+'/repositories')['items'] and request(owner,codeup_root)['id']==codeup['id'],'Codeup credential rotation restores access without recreating connection')
         check(request(owner,root+'/code-connections')['total']==1,'Codeup failed validations never create additional connections')
         no_username=request(owner,root+'/credentials',{'name':'Missing Git username','kind':'token','secret':'valid-personal-token'},expected=201)['id']
         request(owner,root+'/code-connections',dict(codeup_body,credential_id=no_username),expected=400)
