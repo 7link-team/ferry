@@ -815,6 +815,13 @@ pub(crate) async fn stack_execute(
         serde_json::from_str(&rev.artifact).map_err(|_| ApiError::bad("Swarm历史产物无效。"))?;
     let mut runtime = artifact.clone();
     for service in runtime["services"].as_object_mut().unwrap().values_mut() {
+        // A service update is asynchronous: old Running tasks must never satisfy
+        // readiness for this execution, including when UpdateStatus is still stale.
+        service
+            .as_object_mut()
+            .unwrap()
+            .entry("labels")
+            .or_insert(json!({}))["workspace.revision"] = json!(rev.id.to_string());
         if let Some(paths) = service.as_object_mut().unwrap().remove("env_file") {
             let environment = service
                 .as_object_mut()
@@ -888,7 +895,7 @@ pub(crate) async fn stack_execute(
         }
         if rev.action=="restart" {
             for name in artifact["services"].as_object().unwrap().keys() {
-                command.push_str(&format!("docker service update --force --detach=true {} >/dev/null; ",quote(&format!("{prefix}_{name}"))));
+                command.push_str(&format!("docker service update --force --container-label-add {} --detach=true {} >/dev/null; ",quote(&format!("workspace.revision={}",rev.id)),quote(&format!("{prefix}_{name}"))));
             }
         } else {
             command.push_str(&format!("docker stack deploy --prune --resolve-image never -c {} {}; ",quote(&format!("{stage}/stack.json")),quote(&prefix)));
@@ -899,7 +906,7 @@ pub(crate) async fn stack_execute(
         for (name,service) in artifact["services"].as_object().unwrap() {
             let name=quote(&format!("{prefix}_{name}"));
             let count=service["deploy"]["replicas"].as_u64().unwrap_or(1);
-            command.push_str(&format!("while :; do update=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}' {name}); case \"$update\" in paused|rollback_paused|rollback_completed) echo 'Swarm更新失败或被暂停' >&2; exit 74;; esac; states=$(docker service ps --filter desired-state=running --format '{{{{.CurrentState}}}}' {name}); running=0; ready=true; while IFS= read -r state; do case \"$state\" in Running\\ *) running=$((running+1));; *) ready=false;; esac; done <<STATES\n$states\nSTATES\nif [ \"$ready\" = true ] && [ \"$running\" -eq {count} ] && [ \"$update\" != updating ]; then break; fi; [ $(date +%s) -lt \"$deadline\" ] || {{ echo 'Swarm副本未全部就绪，已超时' >&2; exit 74; }}; sleep 1; done; "));
+            command.push_str(&format!("while :; do update=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}' {name}); case \"$update\" in paused|rollback_paused|rollback_completed) echo 'Swarm更新失败或被暂停' >&2; exit 74;; esac; tasks=$(docker service ps -q --filter desired-state=running {name}); running=0; ready=true; for task in $tasks; do state=$(docker inspect --type task --format '{{{{.Status.State}}}}:{{{{index .Spec.ContainerSpec.Labels \"workspace.revision\"}}}}' \"$task\"); case \"$state\" in running:{revision}) running=$((running+1));; *) ready=false;; esac; done; if [ \"$ready\" = true ] && [ \"$running\" -eq {count} ] && [ \"$update\" != updating ]; then break; fi; [ $(date +%s) -lt \"$deadline\" ] || {{ echo 'Swarm副本未全部就绪，已超时' >&2; exit 74; }}; sleep 1; done; ",revision=rev.id));
         }
         command.push_str(&format!("cp -- {} {}",quote(&format!("{stage}/artifact.json")),quote(&format!("{dir}/compose.json"))));
         let result=ch.exec(&format!("flock -n {} sh -c {}",quote(&format!("{dir}/execution.lock")),quote(&command)),Duration::from_secs(u64::from(timeout)+180)).await?;

@@ -1,3 +1,20 @@
+## Release21 gate repair ? 2026-10-30 18:00 +08
+- Full41034810491 has three failures: old /alerts UI fixture, Swarm stale Running task convergence, Windows native upgrade polling PermissionError during MoveFileEx journal replacement. Other13passed/4running. Do not publish that source.
+- Fixed alert-rules route. Swarm runtime adds execution revision container label; restart also updates it; convergence inspects actual desired tasks and requires matching revision, preventing old tasks from satisfying readiness. Existing negative readiness acceptance unchanged; actual3roundDockerCI still required.
+- Windows native test pending-journal polling now tolerates ONLY Windows PermissionError within existing120s deadline (no assertion weakened). Diagnostic41036894988/job123999831490 confirms exact exception.
+- Local server142PASS/2ignored after including Git/bin (sh required) in subprocess PATH; first attempt failed program-not-found. Script syntax/diff checks next, then commit/main+fresh dispatch full. Remainversion21/no21tag,4291still19. Temporarydiagnosticbranch a6cbaf0 nevermerge.
+
+## Final21 full verification active — 2026-10-30 17:39 +08
+- ONEactualworkflow_dispatch build41034810491 at a58fca28145a2287cbb10340922e5792dd835477,21jobsstarting; releasejobcollectssigneddryrunonlyafterallgates. Redundant20main41033196795and21push41034377667cancelled; confirmedjobscancelled, donotdispatchagain. Original20tag41033093830continuesremainingdesktop/nativeWindowscacheandwillfailknownoldfixtures, no20publicrelease.
+- Mainimage21run41034377860waitsoldmainimage20complete; no21tagyet. Laterpromote41034810491ONLYifcompletedSUCCESSusingpublish-verified.yml(inputsrun_id,title,notes)viaisolatednormalworkflowdispatch; thenserver-image.ymlrelease_tagv0.1.0-alpha.21. NeedguardmainSHAexactbeforepromotion.
+- Final21localfrontendbuildPASSandbackend+RunnerbuildPASS(session62623); copiedserverto target/debug/ferry-server-alpha21.exe (--version21). Noadditionalproductchangesafter653a42f; a58fca2testfixtures/versiononly. Actual4291still19.
+- Tempdiagnosticbranchc02adadnowonlydispatchbuildonce; avoidrepushingunchangedtrigger. Futuremodifyworkflowtostageinspect/publishwithguards. Cleanuptempbranch/worktreeafterverifiedrelease.
+
+## alpha21 verification dispatch — 2026-10-30 17:36 +08
+- Main a58fca28145a2287cbb10340922e5792dd835477 pushed withonlyfixturefixesandversion21; mainpushfull41034377667, image41034377860. Plan superseded: temporarydiagnosticc02adad dispatches build.yml onmainwithrelease-dry-runcollection, cancelsredundantmainpush20/21 runs41033196795/41034377667. Usesnormalworkflowtokenactionswrite; avoidsadditionalunpublishedtags/rebuildingreleaseafterverification. Diagnosticdispatchrun41034479602 queued (priorcancel180run41034365055 queued). Neverresenddispatchwithoutcheckingitran. Finalrelease21mustpromotesuccessfuldryrunviaexistingpublish-verified.yml; thenversionimageviaexistingserver-image.ymlrelease_taginput. Do notmerge temporaryworkflow.
+- No21tag/publicreleaseyet; failed20tagpreserved. Actualfrontend21buildPASS, backend21buildrunning. Isolatednative20tagCIremainingplatformbuildscontinueforsharedcache+Windowsuserhomeverification; knownoldtestsfailed, noreleaseeligible.
+- Ignoredlocalstart-alpha21.ps1readyguardsoriginal19rest-oauthprocessandversion21/index-DZyrk5E2.jsafterstart. Snapshothelperalpha20-state.py capture/verifyvalidatesIDs/vaultkey/instance/noactiveruns; re-captureimmediatelybeforeactualrestart. Mustrunbackupfirst. NoactualSYSTEMRunnerupgrade(policyrejectionpreviously, doNOTworkaround).
+
 ## alpha20 gated failure diagnosis — 2026-10-30 17:34 +08
 - No publicalpha20release: fulltag41033093830 correctlyblocked bytests. Backends assertions stillcalled /workspaces/repo-other, foreignrepo creationbecameemptythenreferencechecksfailed. FIXEDfixturecaptureothersnowflakeIDandallcrossworkspacecalls; allassertionsretained.
 - BuildUIfailed firstplatformbrowser old /_platform/workspaces assertion; FIXEDcanonicalplatformpath+workspaceentryIDassertion; actualWindowsChromebrowsernowPASSfullplatformflow. AddedChromeoverrideforlocalverification.

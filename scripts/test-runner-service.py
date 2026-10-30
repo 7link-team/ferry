@@ -275,7 +275,15 @@ jobs:
                 assert (state/'runner.json').read_bytes()==original
             print('PASS invalid executable and wrong-version health check restore confirmed version', flush=True)
             upgrade('9.9.12')
-            wait(lambda: json.loads((state/'versions.json').read_text()).get('pending') is not None, 'pending activation journal', seconds=120)
+            def pending_activation():
+                try:
+                    return json.loads((state/'versions.json').read_text()).get('pending') is not None
+                except PermissionError:
+                    # MoveFileEx can briefly leave the replaced journal delete-pending
+                    # on Windows. Keep polling within the existing activation deadline.
+                    if system != 'Windows': raise
+                    return False
+            wait(pending_activation, 'pending activation journal', seconds=120)
             server.terminate()
             server.wait(timeout=30)
             server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log)

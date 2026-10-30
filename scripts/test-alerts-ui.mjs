@@ -53,7 +53,7 @@ try {
   await p.getByRole('button',{name:'新增报警规则'}).click();
   await p.getByLabel('目标主机',{exact:false}).waitFor();
   assert.equal(await p.getByLabel('目标主机',{exact:false}).textContent(), 'Cron UI runner');
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/alerts`);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/alert-rules`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
   await p.getByLabel('目标主机',{exact:false}).click();
