@@ -266,6 +266,15 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         codeup_body = {'name':'Codeup central','provider':'codeup','credential_id':shared,'base_url':api_base,'api_url':api_base,'organization':'test-org'}
         codeup = request(owner,root+'/code-connections',codeup_body,expected=201)
         codeup_root = root+'/code-connections/'+codeup['id']
+        codeup_monitor = root+'/code-connection-monitors/'+codeup['id']
+        selected_path = 'test-org/team/\u4e2d\u6587 + 100%20'
+        request(owner,codeup_monitor,dict(settings,version=0,repositories=selected_path,events=['push']),method='PATCH')
+        before_notifications = len(notifications)
+        raw = json.dumps({'object_kind':'push','repository':{'homepage':api_base+'/'+quote(selected_path,safe='/+')+'.git'},'ref':'refs/heads/main','before':'abc','after':'def'}).encode()
+        req = urllib.request.Request(base+'/repository-events/'+codeup['id'],data=raw,headers={'Content-Type':'application/json','X-Codeup-Token':secret,'Codeup-Event':'push'})
+        with urllib.request.urlopen(req,timeout=20) as response: assert response.code==204
+        check(len(notifications)==before_notifications+1 and notifications[-1]['data']['repository']==selected_path,'Codeup selected callback repository matches Unicode, spaces, plus and single-decoded percent path')
+        request(owner,codeup_monitor,dict(settings,version=1,repositories='org/bad\tpath',events=['push']),method='PATCH',expected=400)
         codeup_fixture['mode'] = 'pages'
         first = request(owner,codeup_root+'/repositories')
         check(first['has_more'] and first['items'][0]['full_name']=='test-org/team/repository','Codeup native fields and short-page response-header pagination')

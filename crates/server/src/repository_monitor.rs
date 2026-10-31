@@ -153,7 +153,7 @@ pub async fn update(
     if repositories.len() > 1000
         || repositories
             .iter()
-            .any(|v| v.len() > 400 || !v.contains('/') || v.chars().any(char::is_whitespace))
+            .any(|v| v.len() > 400 || !v.contains('/') || v.chars().any(char::is_control))
     {
         return Err(ApiError::bad(
             "指定仓库须为完整命名空间/仓库路径，每行一个，最多 1000 个。",
@@ -417,8 +417,9 @@ fn normalize(provider: &str, headers: &HeaderMap, payload: &Value) -> Option<Eve
             ],
         );
         if let Ok(url) = reqwest::Url::parse(&url) {
-            repository = url
-                .path()
+            repository = percent_encoding::percent_decode_str(url.path())
+                .decode_utf8()
+                .ok()?
                 .trim_matches('/')
                 .trim_end_matches(".git")
                 .chars()
@@ -679,6 +680,22 @@ mod tests {
                 .iter()
                 .any(|event| event.starts_with("repository."))
         );
+    }
+    #[test]
+    fn webhook_url_paths_match_decoded_repository_names() {
+        for (path, expected) in [
+            (
+                "org/team/%E4%B8%AD%E6%96%87%20+%20repo.git",
+                "org/team/中文 + repo",
+            ),
+            ("org/team/100%2520.git", "org/team/100%20"),
+        ] {
+            let payload = json!({"object_kind":"push","repository":{"homepage":format!("https://codeup.example/{path}")},"ref":"refs/heads/main","before":"abc","after":"def"});
+            let event = normalize("codeup", &HeaderMap::new(), &payload).unwrap();
+            assert_eq!(event.repository, expected);
+        }
+        let invalid = json!({"object_kind":"push","repository":{"homepage":"https://codeup.example/org/%FF"}});
+        assert!(normalize("codeup", &HeaderMap::new(), &invalid).is_none());
     }
     #[test]
     fn platform_event_shapes_preserve_real_repository_reference_and_actions() {
