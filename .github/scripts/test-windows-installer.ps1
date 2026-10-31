@@ -1,4 +1,37 @@
 $ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class InstallerWindowDiagnostics {
+    public delegate bool Callback(IntPtr hwnd, IntPtr state);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(Callback callback, IntPtr state);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
+    [DllImport("user32.dll", SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    public static string CloseProbe(IntPtr hwnd) {
+        bool accepted = PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        return accepted + ":" + Marshal.GetLastWin32Error();
+    }
+    public static IntPtr[] ApplicationWindows(int processId) {
+        var windows = new System.Collections.Generic.List<IntPtr>();
+        EnumWindows((hwnd, state) => {
+            uint owner;
+            GetWindowThreadProcessId(hwnd, out owner);
+            if (owner == (uint)processId && IsWindowVisible(hwnd) && IsWindowEnabled(hwnd)) {
+                var name = new StringBuilder(256);
+                GetClassName(hwnd, name, name.Capacity);
+                if (name.ToString() == "Tauri Window") windows.Add(hwnd);
+            }
+            return true;
+        }, IntPtr.Zero);
+        return windows.ToArray();
+    }
+}
+'@
 try {
 $installer = (Get-ChildItem release-assets -Filter '*-setup.exe' | Select-Object -First 1).FullName
 if (-not $installer) { throw 'NSIS installer missing' }
@@ -58,42 +91,27 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
             $restarted = $null
             while ((Get-Date) -lt $deadline) {
                 $restarted = Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($entry.MainBinaryName)) -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $directory $entry.MainBinaryName) } | Select-Object -First 1
-                if ($restarted -and $restarted.MainWindowHandle -ne 0) { break }
+                if ($restarted -and [InstallerWindowDiagnostics]::ApplicationWindows($restarted.Id).Length -gt 0) { break }
                 Start-Sleep -Milliseconds 200
             }
-            if (-not $restarted -or $restarted.MainWindowHandle -eq 0) { throw 'Update did not automatically restart application' }
+            if (-not $restarted -or [InstallerWindowDiagnostics]::ApplicationWindows($restarted.Id).Length -eq 0) { throw 'Update did not automatically restart application' }
             # Closing the remembered workspace restores settings; close that window as well.
             $closeDeadline = (Get-Date).AddSeconds(30)
             while (-not $restarted.HasExited -and (Get-Date) -lt $closeDeadline) {
                 $restarted.Refresh()
-                if ($restarted.MainWindowHandle -ne 0) {
-                    $windowHandle = $restarted.MainWindowHandle
-                    $windowTitle = $restarted.MainWindowTitle
-                    $closed = $restarted.CloseMainWindow()
-                    Write-Output "Close restarted window: PID=$($restarted.Id) HWND=$windowHandle title=$windowTitle accepted=$closed responding=$($restarted.Responding)"
+                # MainWindowHandle can select the single-instance plugin's invisible
+                # event target (-siw), whose WS_VISIBLE style is only for WM_PAINT.
+                # Close an actual visible Tauri UI window, as the native UI gate does.
+                $windows = [InstallerWindowDiagnostics]::ApplicationWindows($restarted.Id)
+                if ($windows.Length -gt 0) {
+                    $windowHandle = $windows[0]
+                    $closed = [InstallerWindowDiagnostics]::CloseProbe($windowHandle)
+                    Write-Output "Close restarted application window: PID=$($restarted.Id) HWND=$windowHandle accepted:Win32Error=$closed"
                 }
                 if ($restarted.WaitForExit(500)) { break }
             }
             if (-not $restarted.HasExited) {
-                Add-Type @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-public class InstallerWindowDiagnostics {
-    public delegate bool Callback(IntPtr hwnd, IntPtr state);
-    [DllImport("user32.dll")] public static extern bool EnumWindows(Callback callback, IntPtr state);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
-    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
-    [DllImport("user32.dll", SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
-    public static string CloseProbe(IntPtr hwnd) {
-        bool accepted = PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
-        return accepted + ":" + Marshal.GetLastWin32Error();
-    }
-}
-'@
+
                 Write-Host "Final close probe accepted:Win32Error=$([InstallerWindowDiagnostics]::CloseProbe($restarted.MainWindowHandle))"
                 [InstallerWindowDiagnostics]::EnumWindows({ param($handle, $state)
                     $windowProcess = [uint32]0
