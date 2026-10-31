@@ -134,6 +134,11 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
   const origin = runnerServerOrigin(server);
   const sh = (s: string) => `'${s.replaceAll("'", "'\"'\"'")}'`;
   const ps = (s: string) => `'${s.replaceAll("'", "''")}'`;
+  // The child PowerShell fetches and runs the installer itself: passing the
+  // whole script through -EncodedCommand exceeds the Windows command line.
+  const child = (user: boolean) => ps(`$ErrorActionPreference = 'Stop'
+$bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
+& ([ScriptBlock]::Create($bootstrap.Content)) -Server ${ps(origin)}${user ? " -User" : ""}`);
   if (platform === "windows" && scope === "user") {
     return `& {
   $ErrorActionPreference = 'Stop'
@@ -141,8 +146,7 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
   $previousModulePath = $env:PSModulePath
   try {
     Write-Host 'Fetching Runner installation script...'
-    $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
-    $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)} -User`)}
+    $payload = ${child(true)}
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
     $env:FERRY_TOKEN = ${ps(token)}
     $env:PSModulePath = $null
@@ -160,8 +164,7 @@ export function runnerInstallCommand(platform: Platform, server: string, token: 
     $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
     if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
       Write-Host 'Fetching Runner installation script...'
-      $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
-      $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)}`)}
+      $payload = ${child(false)}
       $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
       $env:FERRY_TOKEN = ${ps(token)}
       $env:PSModulePath = $null

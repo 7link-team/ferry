@@ -166,7 +166,9 @@ try {
     if ($User -and $installHelp -notmatch 'Windows logon task') {
         throw "Runner $($lines[0]) does not support current-user installation on Windows. Update the Ferry server, or install as a system service. Nothing installed."
     }
-    $scope = if ($User) { @('--user') } else { @() }
+    # @(...) keeps an array: a one-element if-result unrolls to a string, and
+    # splatting a string passes its characters as separate arguments.
+    $scope = @(if ($User) { '--user' })
     Write-Host "Installing Runner $($lines[0]) as ${Name}$(if ($User) { ' for the current user' })..."
     # The token remains in the inherited environment, never the process argv.
     & $binary service install --server $Server --name $Name --rebind @scope

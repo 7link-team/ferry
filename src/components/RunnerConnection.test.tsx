@@ -51,6 +51,35 @@ Write-Output 'PASS legacy rejection and compatible CLI'
   expect(output).toContain("PASS legacy rejection and compatible CLI");
 });
 
+it.skipIf(process.platform !== "win32")("passes the install scope to the native Runner as whole arguments", () => {
+  // Execute the installer's own scope and install statements against a real
+  // executable that records its argv, exactly as the native Runner receives it.
+  const harness = `
+$ErrorActionPreference = 'Stop'
+$ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) 'scripts/runner-install.ps1'), [ref]$null, [ref]$null)
+$scopeStatement = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$scope' }, $true)
+$installStatement = $ast.Find({ param($node) $node -is [Management.Automation.Language.PipelineAst] -and $node.Extent.Text -like '& $binary service install --server*' }, $true)
+if (-not $scopeStatement -or -not $installStatement) { throw 'Installer scope or install statement missing' }
+$sandbox = Join-Path ([IO.Path]::GetTempPath()) ('runner-args-' + [Guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $sandbox
+try {
+  $binary = Join-Path $sandbox 'runner.exe'
+  Add-Type -OutputAssembly $binary -OutputType ConsoleApplication -TypeDefinition 'public static class Fixture { public static int Main(string[] args) { System.IO.File.WriteAllText(System.Environment.GetEnvironmentVariable("FIXTURE_ARGS"), string.Join("|", args)); return 0; } }'
+  $env:FIXTURE_ARGS = Join-Path $sandbox 'args.txt'
+  $Server = 'https://example.com'; $Name = 'runner-agent'
+  foreach ($User in @($true, $false)) {
+    & ([ScriptBlock]::Create($scopeStatement.Extent.Text + [Environment]::NewLine + $installStatement.Extent.Text))
+    $expected = 'service|install|--server|https://example.com|--name|runner-agent|--rebind' + $(if ($User) { '|--user' } else { '' })
+    $actual = Get-Content -Raw $env:FIXTURE_ARGS
+    if ($actual -ne $expected) { throw "User=$User passed: $actual" }
+  }
+} finally { Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue }
+Write-Output 'PASS installer scope arguments'
+`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
+  expect(output).toContain("PASS installer scope arguments");
+});
+
 it("generates current-user commands without elevation, keeping system commands unchanged", () => {
   const sh = runnerInstallCommand("linux", "https://example.com", "t");
   expect(runnerInstallCommand("linux", "https://example.com", "t", "system")).toBe(sh);
@@ -180,34 +209,46 @@ it.skipIf(process.platform !== "win32")("runs the generated current-user Windows
   const harness = `
 $ErrorActionPreference = 'Stop'
 $global:nativePowerShell = (Get-Command powershell.exe).Source
+# The child downloads the installer itself, so the network mock is injected there.
+$global:childMock = @'
 function Invoke-WebRequest {
   param([switch]$UseBasicParsing, $Uri, $MaximumRedirection, $ErrorAction)
   if ($MaximumRedirection -ne 0) { throw 'Redirects must be disabled' }
-  if ($global:scenario -eq 'download-failure') { throw 'fixture download failure' }
-  return @{ Content = @'
-param([string]$Server, [switch]$User)
-if ($Server -ne 'https://example.com' -or -not $User) { throw 'Installer must receive -Server and -User' }
-if ($env:FERRY_TOKEN -ne 'fixture-token') { throw 'Child token missing' }
-if ($env:RUNNER_COMMAND_TEST_CASE -eq 'installer-failure') { exit 1 }
-'@ }
+  if ($Uri -ne 'https://example.com/api/runners/install.ps1') { throw "Unexpected installer URL $Uri" }
+  if ($env:RUNNER_COMMAND_TEST_CASE -eq 'download-failure') { throw 'fixture download failure' }
+  return @{ Content = @(
+    'param([string]$Server, [switch]$User)',
+    'if ($Server -ne ''https://example.com'' -or -not $User) { throw ''Installer must receive -Server and -User'' }',
+    'if ($env:FERRY_TOKEN -ne ''fixture-token'') { throw ''Child token missing'' }',
+    'if ($env:RUNNER_COMMAND_TEST_CASE -eq ''installer-failure'') { exit 1 }'
+  ) -join [Environment]::NewLine }
 }
+'@
 function Start-Process { throw 'Current-user installation must not request elevation' }
 function powershell.exe {
   if ($env:PSModulePath) { throw 'Child inherited PSModulePath' }
   $global:childCalls++
-  & $global:nativePowerShell @args
+  $index = [array]::IndexOf($args, '-EncodedCommand')
+  if ($index -lt 0) { throw 'Child must receive an encoded bootstrap' }
+  # Regression: the whole installer once travelled here and exceeded the
+  # Windows command line limit. Only a small bootstrap may be passed.
+  if ($args[$index + 1].Length -gt 4000) { throw "Encoded bootstrap too long: $($args[$index + 1].Length)" }
+  $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($args[$index + 1]))
+  if (-not $decoded.Contains('[ScriptBlock]::Create($bootstrap.Content)')) { throw 'Child must fetch and run the installer itself' }
+  $mocked = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($global:childMock + [Environment]::NewLine + $decoded))
+  $forward = @($args); $forward[$index + 1] = $mocked
+  & $global:nativePowerShell @forward
   $global:LASTEXITCODE = $LASTEXITCODE
 }
 foreach ($case in @('success', 'installer-failure', 'download-failure')) {
   $env:FERRY_TOKEN = 'fixture-original'
-  $global:scenario = $case
   $env:RUNNER_COMMAND_TEST_CASE = $case
   $global:childCalls = 0
   $failed = $false
   try { ${command} } catch { $failed = $true; if ($case -eq 'success') { throw } }
   if ($env:FERRY_TOKEN -ne 'fixture-original') { throw 'Token was not restored' }
   if ($failed -ne ($case -ne 'success')) { throw "Unexpected result: $case" }
-  if ($global:childCalls -ne $(if ($case -eq 'download-failure') { 0 } else { 1 })) { throw 'Child invocation count mismatch' }
+  if ($global:childCalls -ne 1) { throw 'Child invocation count mismatch' }
 }
 Write-Output 'current-user command verified'
 `;
@@ -374,24 +415,33 @@ $ErrorActionPreference = 'Stop'
 Import-Module Microsoft.PowerShell.Management
 Import-Module Microsoft.PowerShell.Utility
 $global:nativePowerShell = (Get-Command powershell.exe).Source
+# Administrators run the installer in a child that downloads it itself; the
+# network mock is injected into that child.
+$global:childMock = @'
 function Invoke-WebRequest {
   param([switch]$UseBasicParsing, $Uri, $MaximumRedirection, $ErrorAction)
   if ($MaximumRedirection -ne 0) { throw 'Redirects must be disabled' }
-  if ($global:scenario -eq 'download-failure') { throw 'fixture download failure' }
-  return @{ Content = @'
-param([string]$Server)
-if ($Server -ne 'https://example.com') { throw 'Wrong server parameter' }
-if ($env:FERRY_TOKEN -ne 'fixture-token') { throw 'Child token missing' }
-if ($env:PSModulePath -like '*fixture-original*') { throw 'Child inherited module path' }
-if ($env:RUNNER_COMMAND_TEST_CASE -eq 'installer-failure') { exit 1 }
-Write-Output 'child executed'
-'@ }
+  if ($Uri -ne 'https://example.com/api/runners/install.ps1') { throw "Unexpected installer URL $Uri" }
+  if ($env:RUNNER_COMMAND_TEST_CASE -eq 'download-failure') { throw 'fixture download failure' }
+  return @{ Content = @(
+    'param([string]$Server, [switch]$User)',
+    'if ($Server -ne ''https://example.com'' -or $User) { throw ''Wrong installer parameters'' }',
+    'if ($env:FERRY_TOKEN -ne ''fixture-token'') { throw ''Child token missing'' }',
+    'if ($env:PSModulePath -like ''*fixture-original*'') { throw ''Child inherited module path'' }',
+    'if ($env:RUNNER_COMMAND_TEST_CASE -eq ''installer-failure'') { exit 1 }'
+  ) -join [Environment]::NewLine }
 }
+'@
 function powershell.exe {
   if ($env:PSModulePath) { throw 'Child inherited PSModulePath' }
   if ($env:FERRY_TOKEN -ne 'fixture-token') { throw 'Child token missing' }
   $global:childCalls++
-  & $global:nativePowerShell @args
+  $index = [array]::IndexOf($args, '-EncodedCommand')
+  if ($index -lt 0 -or $args[$index + 1].Length -gt 4000) { throw 'Child must receive a small encoded bootstrap' }
+  $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($args[$index + 1]))
+  if (-not $decoded.Contains('[ScriptBlock]::Create($bootstrap.Content)')) { throw 'Child must fetch and run the installer itself' }
+  $forward = @($args); $forward[$index + 1] = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($global:childMock + [Environment]::NewLine + $decoded))
+  & $global:nativePowerShell @forward
   $global:LASTEXITCODE = $LASTEXITCODE
 }
 function Start-Process {
@@ -429,8 +479,8 @@ foreach ($original in @('fixture-original', $null)) {
     if ($env:PSModulePath -ne $original) { throw 'Module path was not restored' }
     $env:PSModulePath = $savedModulePath
     if ($failed -ne ($case -ne 'success')) { throw "Unexpected result: $case" }
-    $expectedCalls = $(if ($isAdministrator -and $case -eq 'download-failure') { 0 } else { 1 })
-    if ($global:childCalls -ne $expectedCalls) { throw 'Child invocation count mismatch' }
+    # Both the elevated and the administrator paths download inside one child.
+    if ($global:childCalls -ne 1) { throw 'Child invocation count mismatch' }
   }
 }
 Write-Output 'environment restored'
