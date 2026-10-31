@@ -17,7 +17,7 @@ const port=async()=>{const server=netServer();await new Promise(done=>server.lis
 const launch=async(binary,args,env,name)=>{
   const log=await open(join(work,`${name}.log`),'w');logs.push(log);
   const child=spawn(resolve(binary),args,{env,cwd:work,stdio:['ignore',log.fd,log.fd],windowsHide:true});processes.push(child);
-  child.on('error',()=>{});return child;
+  child.on('error',error=>{child.launchError=error;});return child;
 };
 const stop=async child=>{if(child.exitCode!==null)return;child.kill();await Promise.race([new Promise(done=>child.once('exit',done)),sleep(5000)]);};
 const api=async(origin,path,body,method=body===undefined?'GET':'POST',expected=200)=>{
@@ -65,8 +65,8 @@ try {
     upstream.on('error',()=>socket.destroy());socket.on('error',()=>upstream.destroy());socket.on('close',()=>upstream.destroy());upstream.on('close',()=>socket.destroy());
   });
   await new Promise(done=>gateway.listen(0,'127.0.0.1',done));
-  const runner=await launch(runnerBinary,['--server',`http://127.0.0.1:${gateway.address().port}`,'--token',token,'--state-dir',join(work,'runner')],process.env,'runner');
-  await until(async()=>(await api(B,root)).state==='online','Runner control on A');
+  const runner=await launch(runnerBinary,['--server',`http://127.0.0.1:${gateway.address().port}`,'--token',token,'--state-dir',join(work,'runner-state')],process.env,'runner');
+  await until(async()=>{if(runner.launchError)throw runner.launchError;assert.equal(runner.exitCode,null,'Runner exited before connecting');return(await api(B,root)).state==='online';},'Runner control on A');
   const result=await api(B,root+'/connection-tests',{});assert(result.ok);
   console.log('PASS command from B, control on A, dedicated session callback forced to C');
   await until(async()=>(await api(B,root+'/metrics?window_seconds=3600&step_seconds=5')).samples?.length>=2,'real monitor history');
@@ -115,6 +115,10 @@ try {
   console.log('PASS cluster acceptance');
 } catch(error) {
   failed=true;
+  for(const name of ['runner','server-0','server-1','server-2','nats']){
+    const diagnostic=await readFile(join(work,`${name}.log`),'utf8').catch(()=>'(no log)');
+    console.error(`${name} diagnostics:\n${diagnostic.replace(/[a-f0-9]{32,}/gi,'[redacted]').slice(-12000)}`);
+  }
   console.error('Cluster acceptance failed; isolated logs:',work);throw error;
 } finally {
   if(browser)await browser.close();
