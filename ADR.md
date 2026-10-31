@@ -282,7 +282,7 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Alternatives rejected: SYSTEM-wide codex install (runs AI tooling as SYSTEM, separate login); Windows service under a user account (needs admin, password, logon right); interactive-user token impersonation from SYSTEM.
 - Supersedes "Explicit Windows terminal runtime account" above: user chose to withdraw that uncommitted feature (not released). Full pre-withdrawal diff kept in ignored data/maintenance/pre-user-runner-full.diff plus windows_terminal.rs.bak/test-terminal-accounts.mjs.bak.
 - Constraints: existing SYSTEM installations and default behaviour unchanged; no hidden window flashes; self-update/rollback supervisor reused unchanged; old Runner releases must be refused explicitly for Windows user mode.
-- Status: CONFIRMED by user; implementation plan pending confirmation.
+- Status: IMPLEMENTED and released in v0.1.0-alpha.25 (a84b74e).
 - Addendum (user request, 2026-10-31): wherever the Runner install command is shown, also provide a one-click uninstall command for the same platform and install scope. It removes the native registration and the default installation directory (program, connection credentials, host key, logs); system scope requests administrator/sudo, current-user scope does not. The CLI `service uninstall` keeps its data-preserving behaviour.
 
 ## Release alpha.25 scope additions — 2026-10-31
