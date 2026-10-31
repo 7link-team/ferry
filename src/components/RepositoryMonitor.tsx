@@ -126,17 +126,27 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
   </div>;
 }
 
-export function RepositoryEventHistory({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
-  const events = useMemo<ListConfig<Record<string, unknown>>>(() => ({
-    resource: "repository-events", permissionResource: "repositories", endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/events`, rowKey: row => String(row.id), defaultRefresh: 15,
+/**
+ * Repository event list: one connection's history, or (without a connection)
+ * every connection the user owns in the workspace, with its connection name.
+ */
+export function repositoryEventList(workspace: string, connectionId?: string): ListConfig<Record<string, unknown>> {
+  return {
+    resource: "repository-events", permissionResource: "repositories", rowKey: row => String(row.id), defaultRefresh: 15,
+    ...(connectionId ? { endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/events` } : {}),
     filters: [{ key: "q", label: "仓库 / 分支 / 操作人", type: "text" }, { key: "event", label: "事件", type: "select", options: repositoryEventOptions }],
     columns: [
       { key: "created_at", label: "记录时间", sortable: true, render: row => new Date(Number(row.created_at)).toLocaleString() },
+      ...(connectionId ? [] : [{ key: "connection_name", label: "仓库连接" }]),
       { key: "repository", label: "仓库", sortable: true },
       { key: "event", label: "事件", render: row => repositoryEventOptions.find(option => option.value === row.event)?.label ?? String(row.event) },
       { key: "reference", label: "分支 / 标签" }, { key: "summary", label: "摘要" }, { key: "actor", label: "操作人" }, { key: "action", label: "动作" }, { key: "delivery", label: "通知结果" },
     ], actions: [{ label: "查看", to: row => ({ group: "build", item: "repository-events", mode: "view", id: String(row.id) }) }],
     toolbar: { create: false, import: false, export: false }, empty: "尚无匹配事件。事件推送需配置平台 Webhook；主动轮询首次检查仅建立基线。",
-  }), [workspace, connectionId]);
+  };
+}
+
+export function RepositoryEventHistory({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
+  const events = useMemo(() => repositoryEventList(workspace, connectionId), [workspace, connectionId]);
   return <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label="仓库事件记录"><h3 className="text-base font-semibold">事件记录</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>;
 }

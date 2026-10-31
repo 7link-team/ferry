@@ -354,6 +354,9 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             view=request(owner,root+'/repository-events/'+pushed['id'])
             check(view['commits'][0]['short_id']=='b1' and view['total_commits']==1 and view['source']=='polling' and '推送人' in view['note'],'single event detail flattens commits and explains the inferred operator')
             request(outsider,f'/workspaces/{workspace_other}/repository-events/'+pushed['id'],expected=404)
+            overview=request(owner,root+'/repository-events?event=push')
+            check(any(row['id']==pushed['id'] and row['connection_name']=='Codeup central' for row in overview['items']) and overview['total']>=1,'workspace event list spans owned connections with their names')
+            check(request(outsider,f'/workspaces/{workspace_other}/repository-events')['total']==0,'workspace event list never shows other users connections')
             count=request(owner,events_path)['total']
             codeup_fixture['mode']=500;due();failed=await_poll(changed[1])
             check(failed[0]==changed[0] and failed[3] and request(owner,events_path)['total']==count,'failed provider query preserves baseline and never fabricates removals')

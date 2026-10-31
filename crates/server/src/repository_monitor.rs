@@ -518,6 +518,42 @@ fn event_json(row: events::Model) -> Value {
         .unwrap_or(Value::Null);
     json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":row.action,"delivery":row.delivery,"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
 }
+/// Events of every connection the caller owns in this workspace, newest first.
+pub async fn workspace_history(
+    State(s): State<AppState>,
+    scope: Scope,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    let owned = connections::Entity::find()
+        .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(connections::Column::UserId.eq(scope.user.id))
+        .all(&s.db)
+        .await?;
+    let names: HashMap<i64, String> = owned.iter().map(|c| (c.id, c.name.clone())).collect();
+    let query = ListQuery::parse(&HISTORY, &raw)?;
+    let (rows, total) = resource::list::<events::Entity, events::Model>(
+        &s.db,
+        &HISTORY,
+        events::Entity::find().filter(events::Column::ConnectionId.is_in(names.keys().copied())),
+        &scope.workspace_id,
+        &query,
+    )
+    .await?;
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            let name = names.get(&row.connection_id).cloned().unwrap_or_default();
+            let mut value = event_json(row);
+            value["connection_name"] = Value::from(name);
+            value
+        })
+        .collect();
+    Ok(Json(
+        json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
+    ))
+}
+
 /// One event with its detail flattened for the shared detail page.
 pub async fn event(
     State(s): State<AppState>,

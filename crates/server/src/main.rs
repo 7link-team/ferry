@@ -285,6 +285,10 @@ async fn main() -> anyhow::Result<()> {
             get(repository_monitor::history),
         )
         .route(
+            "/{workspace}/repository-events",
+            get(repository_monitor::workspace_history),
+        )
+        .route(
             "/{workspace}/repository-events/{id}",
             get(repository_monitor::event),
         )

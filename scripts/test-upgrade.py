@@ -162,7 +162,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 assert rendered['template_version']==1
             print('PASS: both template schemas can create and render after upgrade')
             assert api('/workspaces/upgrade/preferences')['default_page_size']==20
-            assert api('/workspaces/upgrade/settings')['total']==3
+            assert api('/workspaces/upgrade/settings')['total']==4
             assert api('/workspaces/upgrade/dictionaries')['total']==3
             print('PASS: existing workspace gets typed settings and dictionary defaults after upgrade')
             setup = api('/setup')
