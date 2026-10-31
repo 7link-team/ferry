@@ -343,21 +343,28 @@ impl FromRequestParts<AppState> for Scope {
             .and_then(|value| value.parse::<Id>().ok())
             .filter(|id| i64::from(*id) > 0)
             .ok_or_else(ApiError::missing)?;
-        Self::for_user(s, workspace, account.user).await
+        Self::for_user(&s.db, workspace, account.user).await
     }
 }
 
 impl Scope {
     /// Scheduled work re-resolves account activity, membership and current permissions.
     pub async fn for_actor(s: &AppState, workspace: Id, actor: Id) -> Result<Self> {
+        Self::for_actor_in(&s.db, workspace, actor).await
+    }
+    pub(crate) async fn for_actor_in(
+        db: &impl sea_orm::ConnectionTrait,
+        workspace: Id,
+        actor: Id,
+    ) -> Result<Self> {
         use crate::entities::users;
         let row = users::Entity::find_by_id(i64::from(actor))
             .filter(users::Column::Active.eq(1))
-            .one(&s.db)
+            .one(db)
             .await?
             .ok_or_else(ApiError::forbidden)?;
         Self::for_user(
-            s,
+            db,
             workspace,
             crate::auth::User {
                 id: row.id.into(),
@@ -368,10 +375,14 @@ impl Scope {
         )
         .await
     }
-    async fn for_user(s: &AppState, workspace: Id, user: crate::auth::User) -> Result<Self> {
+    async fn for_user(
+        db: &impl sea_orm::ConnectionTrait,
+        workspace: Id,
+        user: crate::auth::User,
+    ) -> Result<Self> {
         if user.is_superadmin {
             let row = workspaces::Entity::find_by_id(i64::from(workspace))
-                .one(&s.db)
+                .one(db)
                 .await?
                 .ok_or_else(ApiError::missing)?;
             return Ok(Self {
@@ -409,7 +420,7 @@ impl Scope {
             .filter(workspace_members::Column::UserId.eq(i64::from(user.id)))
             .filter(workspace_members::Column::State.eq("active"))
             .into_model::<Membership>()
-            .one(&s.db)
+            .one(db)
             .await?
             // A workspace the caller is not a member of is reported as missing,
             // not forbidden: otherwise the response confirms it exists.

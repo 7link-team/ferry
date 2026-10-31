@@ -600,6 +600,7 @@ function Field<T>({
             placeholder={field.placeholder}
             readOnly={readOnly}
             required={field.required}
+            min={field.min}
             autoComplete={field.type === "password" ? "new-password" : undefined}
             onChange={(event) =>
               onChange(field.type === "number" && event.target.value !== "" ? Number(event.target.value) : event.target.value)
@@ -631,7 +632,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
  const [busy,setBusy]=useState(false),[error,setError]=useState("");
  const report=useCallback((key:string,value:boolean)=>setBlocked(current=>current[key]===value?current:{...current,[key]:value}),[]);
  const fields=action.parameters!(row).filter(field=>!field.when||field.when(values));
- const incomplete=fields.some(field=>field.required&&(values[field.key]===undefined||values[field.key]===null||values[field.key]===""));
+ const incomplete=fields.some(field=>field.required&&(values[field.key]===undefined||values[field.key]===null||values[field.key]===""||(Array.isArray(values[field.key])&&(values[field.key] as unknown[]).length===0)) || (field.type==="number"&&field.min!==undefined&&Number(values[field.key])<field.min));
  return <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)onClose();}}><Dialog.Portal>
   <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
   <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
@@ -641,7 +642,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
     event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
    }}>
-    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,[field.key]:value}))} />)}
+    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),[field.key]:value}))} />)}
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?"处理中…":"确认"+action.label}</Button></div>
    </form>

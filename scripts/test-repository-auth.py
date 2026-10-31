@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse,parse_qs,urlencode,quote,unquote
 codes={};refreshes=[];fail_refresh=False
 codeup_fixture = {'mode': 'normal'}
+poll_fixture = None
 notifications=[]
 notification_status=204
 class Receiver(BaseHTTPRequestHandler):
@@ -45,6 +46,21 @@ class Receiver(BaseHTTPRequestHandler):
             page = int(query.get('page',['1'])[0])
             assert query.get('perPage') == ['50']
             prefix = '/oapi/v1/codeup/' + ('organizations/test-org/' if '/organizations/' in parsed.path else '') + 'repositories'
+            if poll_fixture is not None and parsed.path != prefix:
+                assert query.get('perPage') == ['50']
+                if parsed.path.endswith('/changeRequests'):
+                    assert query.get('projectIds') == ['test-org/team/repository']
+                    value = poll_fixture['requests']
+                elif parsed.path.endswith('/branches'):
+                    assert unquote(parsed.path[len(prefix)+1:-len('/branches')]) == 'test-org/team/repository'
+                    value = poll_fixture['branches']
+                elif parsed.path.endswith('/tags'): value = poll_fixture['tags']
+                else: raise AssertionError(parsed.path)
+                more = parsed.path.endswith('/branches') and len(value)>1 and page==1
+                if parsed.path.endswith('/branches') and len(value)>1: value=value[:1] if page==1 else value[1:]
+                payload=json.dumps(value).encode()
+                self.send_response(200);self.send_header('x-next-page','2' if more else '');self.send_header('Content-Length',str(len(payload)))
+                self.end_headers();self.wfile.write(payload);return
             if parsed.path == prefix:
                 value = [] if page > 1 else [{'id':2813489,'name':'repository','pathWithNamespace':'test-org/team/repository','webUrl':api_base+'/test-org/team/repository'}]
                 if mode == 'empty': value=[]
@@ -275,6 +291,63 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         with urllib.request.urlopen(req,timeout=20) as response: assert response.code==204
         check(len(notifications)==before_notifications+1 and notifications[-1]['data']['repository']==selected_path,'Codeup selected callback repository matches Unicode, spaces, plus and single-decoded percent path')
         request(owner,codeup_monitor,dict(settings,version=1,repositories='org/bad\tpath',events=['push']),method='PATCH',expected=400)
+        # Real scheduler integration. Advance only the private SQLite fixture's due
+        # timestamp; the product interval remains >=60s and is asserted below.
+        if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+            poll_fixture = {'branches':[{'name':'main','commit':{'id':'a'}}], 'tags':[], 'requests':[]}
+            poll_settings = dict(settings,version=1,mode='poll',poll_interval_minutes=1,secret='',webhook='',all_repositories=True,
+                                 events=['repository.created','repository.deleted','push','branch.created','branch.deleted','tag.created','tag.deleted','pull_request','merge'])
+            request(owner,codeup_monitor,dict(poll_settings,poll_interval_minutes=0),method='PATCH',expected=400)
+            polling=request(owner,codeup_monitor,poll_settings,method='PATCH')
+            check(polling['mode']=='poll' and polling['poll_interval_minutes']==1,'poll mode accepts credentials without inbound event secret and enforces minimum interval')
+            try: urllib.request.urlopen(req,timeout=20)
+            except urllib.error.HTTPError as error: check(error.code==404,'poll mode refuses provider callbacks')
+            else: raise AssertionError('poll mode accepted callback')
+            def poll_state():
+                with closing(sqlite3.connect(data/'ferry.sqlite')) as conn:
+                    return conn.execute('SELECT snapshot,last_polled_at,next_poll_at,last_error FROM repository_poll_states WHERE id=?',(codeup['id'],)).fetchone()
+            def await_poll(previous=0):
+                until=time.time()+30
+                while time.time()<until:
+                    state=poll_state()
+                    if state and state[1]>previous:return state
+                    time.sleep(.1)
+                raise AssertionError(('poll timeout',request(owner,codeup_monitor),(data/'server.log').read_text(encoding='utf8')[-4000:]))
+            def due():
+                with closing(sqlite3.connect(data/'ferry.sqlite')) as conn,conn:
+                    conn.execute('UPDATE repository_poll_states SET next_poll_at=0 WHERE id=?',(codeup['id'],))
+            events_path=codeup_root+'/events'
+            initial_count=request(owner,events_path)['total']
+            baseline=await_poll()
+            check(baseline[0].startswith('v1.') and 'main' not in baseline[0] and not baseline[3],'poll baseline is complete and encrypted at rest')
+            check(baseline[2]-baseline[1]>=60000 and request(owner,events_path)['total']==initial_count,'first poll establishes baseline without historical events and schedules at least one minute later')
+            time.sleep(2.2)
+            check(poll_state()[1]==baseline[1],'scheduler does not query before configured interval')
+            poll_fixture['branches']=[{'name':'main','commit':{'id':'b'}},{'name':'feature','commit':{'id':'f'}}]
+            poll_fixture['tags']=[{'name':'v1','commit':{'id':'b'}}]
+            poll_fixture['requests']=[{'localId':1,'state':'UNDER_REVIEW','sourceBranch':'feature','targetBranch':'main','updatedAt':'1'}]
+            due();changed=await_poll(baseline[1])
+            rows=request(owner,events_path)['items']
+            detected={row['event'] for row in rows if str(row['action']).startswith('\u8f6e\u8be2')}
+            check({'push','branch.created','tag.created','pull_request'}<=detected,'Codeup polling detects branch head, new branch, tag and official changeRequests changes')
+            count=request(owner,events_path)['total']
+            codeup_fixture['mode']=500;due();failed=await_poll(changed[1])
+            check(failed[0]==changed[0] and failed[3] and request(owner,events_path)['total']==count,'failed provider query preserves baseline and never fabricates removals')
+            codeup_fixture['mode']='normal';poll_fixture['branches']=[{'name':'main','commit':{'id':'b'}}];poll_fixture['tags']=[]
+            poll_fixture['requests'][0].update(state='MERGED',updatedAt='2',mergedRevision='b')
+            due();await_poll(failed[1])
+            detected={row['event'] for row in request(owner,events_path)['items'] if str(row['action']).startswith('\u8f6e\u8be2')}
+            check({'branch.deleted','tag.deleted','merge'}<=detected,'polling recovers from failure and detects removals and merge exactly from prior successful baseline')
+            count=request(owner,events_path)['total'];previous=poll_state()[1];due();await_poll(previous)
+            check(request(owner,events_path)['total']==count,'unchanged complete snapshot creates no duplicate notifications')
+            persisted=poll_state()
+            proc.stdin.close();proc.wait(timeout=30);proc=launch()
+            check(poll_state()==persisted,'service restart preserves encrypted polling baseline and schedule')
+            poll_fixture['branches'][0]['commit']['id']='c';due();await_poll(persisted[1])
+            check(request(owner,events_path)['total']==count+1,'first observation after restart compares durable baseline instead of losing changes')
+            request(owner,codeup_monitor,dict(settings,version=polling['version'],repositories=selected_path,events=['push']),method='PATCH')
+            check(poll_state() is None,'switching back to push removes polling schedule and baseline')
+            poll_fixture=None
         codeup_fixture['mode'] = 'pages'
         first = request(owner,codeup_root+'/repositories')
         check(first['has_more'] and first['items'][0]['full_name']=='test-org/team/repository','Codeup native fields and short-page response-header pagination')
@@ -323,6 +396,8 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(owner,codeup_root+'/branches'+branch_query+'&page=10001',expected=400)
         region=request(owner,root+'/code-connections',dict(codeup_body,name='Codeup Region',organization=''),expected=201)
         check(request(owner,root+'/code-connections/'+region['id']+'/branches'+branch_query)['items'],'Codeup Region omits organizations path segment')
+        fresh_poll=request(owner,root+'/code-connection-monitors/'+region['id'],dict(settings,version=0,mode='poll',secret='',webhook='',all_repositories=True,events=['repository.created']),method='PATCH')
+        check(fresh_poll['mode']=='poll' and not fresh_poll['has_secret'],'new polling configuration requires no inbound secret or callback setup')
         request(owner,root+'/code-connections/'+region['id'],method='DELETE',expected=204)
         request(owner,codeup_root,method='DELETE',expected=204)
         request(owner,root+'/credentials/'+shared,method='DELETE',expected=204)

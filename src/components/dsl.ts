@@ -116,6 +116,8 @@ export interface FormField<T> {
   label: string;
   type: FieldType;
   required?: boolean;
+  /** Inclusive lower bound for a numeric input. */
+  min?: number;
   createOption?: { label: string; permission: string; fields: FormField<Record<string, unknown>>[]; create: (values: Record<string, unknown>) => Promise<Option> };
   help?: string;
   placeholder?: string;

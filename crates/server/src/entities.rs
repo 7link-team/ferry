@@ -840,6 +840,25 @@ pub mod repository_monitors {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod repository_poll_states {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "repository_poll_states")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub config_version: i64,
+        pub snapshot: String,
+        pub last_polled_at: i64,
+        pub next_poll_at: i64,
+        pub last_error: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod repository_events {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]

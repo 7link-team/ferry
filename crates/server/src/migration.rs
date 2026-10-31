@@ -96,6 +96,7 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineGroupOrder),
             Box::new(CredentialScopes),
             Box::new(RepositoryMonitoring),
+            Box::new(RepositoryPolling),
         ]
     }
 }
@@ -2898,6 +2899,42 @@ impl MigrationTrait for CredentialScopes {
             "UPDATE credentials SET scope = 'host' WHERE EXISTS (SELECT 1 FROM hosts WHERE hosts.workspace_id = credentials.workspace_id AND hosts.credential_id = credentials.id)"
         ).await?;
         Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+struct RepositoryPolling;
+impl MigrationName for RepositoryPolling {
+    fn name(&self) -> &str {
+        "repository_polling_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryPolling {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        let mut table = create_table("repository_poll_states", backend);
+        for name in [
+            "id",
+            "workspace_id",
+            "config_version",
+            "last_polled_at",
+            "next_poll_at",
+        ] {
+            let mut column = ColumnDef::new(Alias::new(name));
+            column.big_integer().not_null();
+            if name == "id" {
+                column.primary_key();
+            }
+            table.col(&mut column);
+        }
+        table.col(long_text("snapshot", backend).not_null());
+        table.col(ColumnDef::new(Alias::new("last_error")).text().not_null());
+        m.create_table(table.to_owned()).await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom(

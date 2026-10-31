@@ -1769,6 +1769,9 @@ pub async fn delete_connection(
     crate::entities::repository_monitors::Entity::delete_by_id(row.id)
         .exec(&tx)
         .await?;
+    crate::entities::repository_poll_states::Entity::delete_by_id(row.id)
+        .exec(&tx)
+        .await?;
     crate::entities::repository_events::Entity::delete_many()
         .filter(crate::entities::repository_events::Column::ConnectionId.eq(row.id))
         .exec(&tx)
@@ -1827,6 +1830,139 @@ pub async fn connection_repositories(
     .await?;
     result["connection_id"] = json!(Id::from(row.id));
     Ok(Json(result))
+}
+
+/// Reuse browsing authorization/refresh and construct pages locally, never
+/// forwarding credentials to an untrusted provider pagination link.
+pub(crate) struct MonitorAccess {
+    provider: String,
+    config: Provider,
+    access: String,
+    personal: bool,
+    organization: String,
+}
+pub(crate) struct MonitorPage {
+    pub rows: Vec<Value>,
+    pub has_more: bool,
+}
+impl MonitorAccess {
+    pub(crate) async fn load(s: &AppState, row: &connections::Model) -> Result<Self> {
+        let config = connection_provider(s, &s.db, row).await?;
+        ensure_fresh(s, row.workspace_id.into(), row.credential_id.into()).await?;
+        let (_, _, access) =
+            crate::credentials::unseal(s, &row.workspace_id.into(), &row.credential_id.into())
+                .await?;
+        let token = row
+            .token_config
+            .as_deref()
+            .map(serde_json::from_str::<TokenConfig>)
+            .transpose()
+            .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+        Ok(Self {
+            provider: row.provider.clone(),
+            config,
+            access,
+            personal: token.is_some(),
+            organization: token.map(|v| v.organization).unwrap_or_default(),
+        })
+    }
+    pub(crate) async fn repositories(&self, page: u32) -> Result<Value> {
+        remote_repositories(
+            &self.provider,
+            &self.config,
+            &self.access,
+            self.personal,
+            &self.organization,
+            page,
+        )
+        .await
+    }
+    pub(crate) async fn resource(
+        &self,
+        path: &str,
+        resource: &str,
+        page: u32,
+    ) -> Result<MonitorPage> {
+        let mut url = self.config.api.clone();
+        let requests = resource == "requests";
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| ApiError::bad("API地址无效。"))?;
+            segments.pop_if_empty();
+            match self.provider.as_str() {
+                "codeup" => {
+                    segments.extend(["oapi", "v1", "codeup"]);
+                    if !self.organization.is_empty() {
+                        segments.push("organizations").push(&self.organization);
+                    }
+                    if requests {
+                        segments.push("changeRequests");
+                    } else {
+                        segments.push("repositories").push(path).push(resource);
+                    }
+                }
+                "gitlab" => {
+                    segments.push("projects").push(path);
+                    if requests {
+                        segments.push("merge_requests");
+                    } else {
+                        segments.push("repository").push(resource);
+                    }
+                }
+                _ => {
+                    segments
+                        .push("repos")
+                        .extend(path.split('/'))
+                        .push(if requests { "pulls" } else { resource });
+                }
+            }
+        }
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("page", &page.to_string()).append_pair(
+                match self.provider.as_str() {
+                    "codeup" => "perPage",
+                    "gitea" => "limit",
+                    _ => "per_page",
+                },
+                "50",
+            );
+            if requests {
+                if self.provider == "codeup" {
+                    query.append_pair("projectIds", path);
+                } else {
+                    query.append_pair("state", "all");
+                }
+                if self.provider == "gitlab" {
+                    query.append_pair("scope", "all");
+                }
+            }
+        }
+        let response = authorize_request(
+            http()?.get(url),
+            &self.provider,
+            &self.access,
+            self.personal,
+        )
+        .send()
+        .await
+        .map_err(|_| ApiError::bad("轮询代码平台失败，请检查接入点和网络。"))?;
+        let more = codeup_has_more(&response, page).or_else(|| {
+            response
+                .headers()
+                .get("link")
+                .and_then(|v| v.to_str().ok())
+                .map(|link| link.contains("rel=\"next\""))
+        });
+        let value = repository_response(response, &self.provider).await?;
+        let rows = value
+            .as_array()
+            .ok_or_else(|| ApiError::bad("代码平台返回了无效列表，未更新监控基线。"))?
+            .clone();
+        let has_more = more.unwrap_or(rows.len() == 50);
+        Ok(MonitorPage { rows, has_more })
+    }
 }
 
 fn validate_git_credential(address: &str, kind: &str) -> Result<()> {

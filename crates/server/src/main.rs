@@ -218,6 +218,8 @@ async fn main() -> anyhow::Result<()> {
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
     let host_monitor_task = tokio::spawn(host_monitor::collect(s.clone(), drain_rx.clone()));
+    let repository_monitor_task =
+        tokio::spawn(repository_monitor::scheduler(s.clone(), drain_rx.clone()));
     let recovery_state = s.clone();
     let mut recovery_stop = drain_rx.clone();
     let recovery_task = tokio::spawn(async move {
@@ -723,6 +725,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = drain.send(true);
     alerts_task.await?;
     host_monitor_task.await?;
+    repository_monitor_task.await?;
     recovery_task.await?;
     cron_task.await?;
     deployment_task.await?;

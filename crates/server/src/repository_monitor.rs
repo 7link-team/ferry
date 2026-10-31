@@ -3,7 +3,7 @@ use crate::{
     db,
     entities::{
         repository_connections as connections, repository_events as events,
-        repository_monitors as monitors,
+        repository_monitors as monitors, repository_poll_states as polls,
     },
     error::{ApiError, Result},
     repository_auth::owned_connection,
@@ -29,6 +29,20 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod polling;
+pub use polling::scheduler;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Mode {
+    #[default]
+    Push,
+    Poll,
+}
+fn default_poll_minutes() -> u32 {
+    1
+}
+
 const KINDS: &[&str] = &[
     "repository.created",
     "repository.deleted",
@@ -46,18 +60,23 @@ const HISTORY: Spec = Spec {
     sortable: &["created_at", "repository", "event"],
     default_sort: "-created_at",
 };
-fn supported_events(provider: &str) -> Vec<&'static str> {
+fn supported_events(provider: &str, mode: Mode) -> Vec<&'static str> {
     KINDS
         .iter()
         .copied()
         .filter(|kind| {
-            provider != "git" && (provider != "codeup" || !kind.starts_with("repository."))
+            provider != "git"
+                && (mode == Mode::Poll || provider != "codeup" || !kind.starts_with("repository."))
         })
         .collect()
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct Config {
+    #[serde(default)]
+    mode: Mode,
+    #[serde(default = "default_poll_minutes")]
+    poll_interval_minutes: u32,
     enabled: bool,
     provider: String,
     all_repositories: bool,
@@ -68,6 +87,10 @@ struct Config {
 }
 #[derive(Deserialize)]
 pub struct Body {
+    #[serde(default)]
+    mode: Mode,
+    #[serde(default = "default_poll_minutes")]
+    poll_interval_minutes: u32,
     version: i64,
     enabled: bool,
     all_repositories: bool,
@@ -91,7 +114,7 @@ fn decode(s: &AppState, row: &monitors::Model) -> Result<Config> {
     .map_err(|_| ApiError::bad("监控配置无法读取。"))
 }
 fn view(row: Option<&monitors::Model>, config: &Config, connection: &connections::Model) -> Value {
-    json!({"id":Id::from(connection.id),"name":"监控通知","provider":connection.provider,"enabled":config.enabled && config.provider==connection.provider,"all_repositories":config.all_repositories,"repositories":config.repositories.join("\n"),"events":config.events,"has_secret":!config.secret.is_empty(),"has_webhook":!config.webhook.is_empty(),"version":row.map_or(0,|r|r.version),"callback_path":format!("/api/repository-events/{}",connection.id),"provider_changed":row.is_some() && config.provider!=connection.provider,"capability_note":if connection.provider=="codeup"{"Codeup 仓库 Webhook 支持推送、标签和合并请求，暂不提供仓库新增/删除事件。全部仓库表示接收范围，仍需在各仓库配置 Webhook。"}else{"仓库新增/删除需要平台提供组织级或系统级事件订阅；普通 Git 不提供平台事件。"}})
+    json!({"id":Id::from(connection.id),"name":"监控通知","provider":connection.provider,"mode":config.mode,"poll_interval_minutes":config.poll_interval_minutes.max(1),"enabled":config.enabled && config.provider==connection.provider,"all_repositories":config.all_repositories,"repositories":config.repositories.join("\n"),"events":config.events,"has_secret":!config.secret.is_empty(),"has_webhook":!config.webhook.is_empty(),"version":row.map_or(0,|r|r.version),"callback_path":format!("/api/repository-events/{}",connection.id),"provider_changed":row.is_some() && config.provider!=connection.provider,"capability_note":if config.mode == Mode::Poll {"使用当前连接凭据比较完整快照。首次检查只建立基线；间隔内发生后又撤销的操作可能无法捕获。仓库移除也可能由权限变化引起；操作人无法可靠确定时不显示。"} else if connection.provider=="codeup"{"Codeup 仓库 Webhook 支持推送、标签和合并请求，暂不提供仓库新增/删除事件。全部仓库表示接收范围，仍需在各仓库配置 Webhook。"}else{"仓库新增/删除需要平台提供组织级或系统级事件订阅；普通 Git 不提供平台事件。"}})
 }
 pub async fn get(
     State(s): State<AppState>,
@@ -107,14 +130,37 @@ pub async fn get(
         Some(row) => decode(&s, row)?,
         None => Config {
             all_repositories: true,
-            events: supported_events(&connection.provider)
+            poll_interval_minutes: default_poll_minutes(),
+            events: supported_events(&connection.provider, Mode::Push)
                 .iter()
                 .map(|v| v.to_string())
                 .collect(),
             ..Default::default()
         },
     };
-    Ok(Json(view(row.as_ref(), &config, &connection)))
+    let mut result = view(row.as_ref(), &config, &connection);
+    let poll = polls::Entity::find_by_id(connection.id).one(&s.db).await?;
+    result["last_polled_at"] = json!(
+        poll.as_ref()
+            .filter(|p| p.last_polled_at > 0)
+            .map(|p| p.last_polled_at)
+    );
+    result["next_poll_at"] = json!(
+        poll.as_ref()
+            .filter(|_| config.enabled && config.mode == Mode::Poll)
+            .map(|p| p.next_poll_at)
+    );
+    result["last_poll_error"] = json!(poll.as_ref().map(|p| p.last_error.as_str()).unwrap_or(""));
+    result["poll_status"] = json!(if !config.enabled {
+        "未启用"
+    } else if poll.as_ref().is_some_and(|p| !p.last_error.is_empty()) {
+        "检查失败，保留上次基线"
+    } else if poll.as_ref().is_some_and(|p| !p.snapshot.is_empty()) {
+        "已建立基线"
+    } else {
+        "等待首次检查"
+    });
+    Ok(Json(result))
 }
 pub async fn update(
     State(s): State<AppState>,
@@ -123,6 +169,12 @@ pub async fn update(
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
     scope.require("repositories.update")?;
+    if body.poll_interval_minutes < 1 {
+        return Err(ApiError::bad("主动轮询间隔不得小于 1 分钟。"));
+    }
+    if body.enabled && body.mode == Mode::Poll {
+        scope.require("credentials.read")?;
+    }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let connection = owned_connection(&tx, &scope, id).await?;
     if !matches!(
@@ -163,7 +215,7 @@ pub async fn update(
         || body
             .events
             .iter()
-            .any(|v| !supported_events(&connection.provider).contains(&v.as_str()))
+            .any(|v| !supported_events(&connection.provider, body.mode).contains(&v.as_str()))
     {
         return Err(ApiError::bad("监控事件类型无效。"));
     }
@@ -202,15 +254,17 @@ pub async fn update(
         }
     }
     if body.enabled
-        && (secret.is_empty()
+        && ((body.mode == Mode::Push && secret.is_empty())
             || body.events.is_empty()
             || (!body.all_repositories && repositories.is_empty()))
     {
         return Err(ApiError::bad(
-            "启用监控前请设置事件密钥、事件类型和仓库范围。",
+            "启用监控前请设置事件类型和仓库范围；事件推送还需设置验证密钥。",
         ));
     }
     let config = Config {
+        mode: body.mode,
+        poll_interval_minutes: body.poll_interval_minutes,
         enabled: body.enabled,
         provider: connection.provider.clone(),
         all_repositories: body.all_repositories,
@@ -243,6 +297,20 @@ pub async fn update(
         )
         .exec_without_returning(&tx)
         .await?;
+    polls::Entity::delete_by_id(connection.id).exec(&tx).await?;
+    if config.enabled && config.mode == Mode::Poll {
+        polls::Entity::insert(polls::ActiveModel {
+            id: Set(connection.id),
+            workspace_id: Set(connection.workspace_id),
+            config_version: Set(row.version),
+            snapshot: Set(String::new()),
+            last_polled_at: Set(0),
+            next_poll_at: Set(db::now()),
+            last_error: Set(String::new()),
+        })
+        .exec_without_returning(&tx)
+        .await?;
+    }
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -486,6 +554,7 @@ pub async fn receive(
         .ok_or_else(ApiError::missing)?;
     let config = decode(&s, &monitor)?;
     if !config.enabled
+        || config.mode != Mode::Push
         || config.provider != connection.provider
         || connection.workspace_id != monitor.workspace_id
     {
@@ -522,12 +591,6 @@ pub async fn receive(
     digest.update(connection.provider.as_bytes());
     digest.update(&bytes);
     let delivery_key = hex::encode(digest.finalize());
-    let event_id = s.next_id()?;
-    let delivery = if config.webhook.is_empty() {
-        "未配置通知地址"
-    } else {
-        "投递中；服务中断不会自动重发"
-    };
     let tx = crate::variables::transaction(&s, connection.workspace_id.into()).await?;
     let current = monitors::Entity::find_by_id(connection.id)
         .one(&tx)
@@ -541,24 +604,45 @@ pub async fn receive(
     {
         return Err(ApiError::conflict("监控配置已变更，请重新发送事件。"));
     }
+    let event_id = record(&s, &tx, &connection, &config, &event, &delivery_key).await?;
+    tx.commit().await?;
+    if let Some(event_id) = event_id {
+        deliver(&s, &connection, &config, event_id, &event).await?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn record(
+    s: &AppState,
+    tx: &impl sea_orm::ConnectionTrait,
+    connection: &connections::Model,
+    config: &Config,
+    event: &Event,
+    delivery_key: &str,
+) -> Result<Option<Id>> {
     // The shared workspace transaction serializes admission across replicas.
     // Check under that lock instead of relying on dialect-specific conflict
     // affected-row counts (MySQL's no-op update has different semantics).
     if events::Entity::find()
         .filter(events::Column::ConnectionId.eq(connection.id))
-        .filter(events::Column::DeliveryKey.eq(&delivery_key))
-        .one(&tx)
+        .filter(events::Column::DeliveryKey.eq(delivery_key))
+        .one(tx)
         .await?
         .is_some()
     {
-        tx.commit().await?;
-        return Ok(StatusCode::NO_CONTENT);
+        return Ok(None);
     }
+    let event_id = s.next_id()?;
+    let delivery = if config.webhook.is_empty() {
+        "未配置通知地址"
+    } else {
+        "投递中；服务中断不会自动重发"
+    };
     events::Entity::insert(events::ActiveModel {
         id: Set(event_id.into()),
         workspace_id: Set(connection.workspace_id),
         connection_id: Set(connection.id),
-        delivery_key: Set(delivery_key),
+        delivery_key: Set(delivery_key.into()),
         event: Set(event.event.clone()),
         repository: Set(event.repository.clone()),
         reference: Set(event.reference.clone()),
@@ -567,23 +651,32 @@ pub async fn receive(
         delivery: Set(delivery.into()),
         created_at: Set(db::now()),
     })
-    .exec_without_returning(&tx)
+    .exec_without_returning(tx)
     .await?;
-    tx.commit().await?;
+    Ok(Some(event_id))
+}
+
+async fn deliver(
+    s: &AppState,
+    connection: &connections::Model,
+    config: &Config,
+    event_id: Id,
+    event: &Event,
+) -> Result<()> {
     if !config.webhook.is_empty() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| ApiError::bad("通知客户端不可用。"))?;
-        let delivery=match client.post(&config.webhook).json(&json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":id,"provider":connection.provider,"event":event.event,"data":event})).send().await {Ok(response) if response.status().is_success()=>format!("已投递 HTTP {}",response.status().as_u16()),Ok(response)=>format!("投递失败 HTTP {}；不自动重试",response.status().as_u16()),Err(_)=>"投递失败或超时；不自动重试".into()};
+        let delivery=match client.post(&config.webhook).json(&json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":event})).send().await {Ok(response) if response.status().is_success()=>format!("已投递 HTTP {}",response.status().as_u16()),Ok(response)=>format!("投递失败 HTTP {}；不自动重试",response.status().as_u16()),Err(_)=>"投递失败或超时；不自动重试".into()};
         events::Entity::update_many()
             .col_expr(events::Column::Delivery, Expr::value(delivery))
             .filter(events::Column::Id.eq(event_id))
             .exec(&s.db)
             .await?;
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -676,7 +769,7 @@ mod tests {
             b"{}"
         ));
         assert!(
-            !supported_events("codeup")
+            !supported_events("codeup", Mode::Push)
                 .iter()
                 .any(|event| event.starts_with("repository."))
         );

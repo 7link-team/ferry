@@ -1,5 +1,10 @@
 # Architecture Decision Records
 
+## Repository monitoring mode selection (2026-10-31, accepted release candidate)
+- Decision: user requested event push or active polling with minimum1minute. Keep legacy mode push by serde default. Poll through saved connection authorization, requiring no inbound Webhook secret; reuse notification history/delivery.
+- Necessary persistence: encrypted SQL snapshot and last/next poll/error state, renewable shared database lease plus configuration/version fencing; no memory-only polling baseline or per-process schedule that duplicates work in cluster deployments. First complete poll creates baseline; errors never produce deletion events or replace the baseline.
+- Limits: polling observes snapshot changes, not a complete audit stream. Missing repository means no longer visible to current credentials, possibly deletion or permission change. Show this distinction in UI and events. Codeup ListChangeRequests uses /oapi/v1/codeup/[organizations/{id}/]changeRequests with projectIds filter, not a repository-nested route.
+
 ## alpha23 combined delivery and native installer verification (2026-10-31)
 - Decision/status: published v0.1.0-alpha.23 from d0ada482f70f70395c43725f70bd086d63d0c85e after successful exact-source full build and image; upgraded ordinary local4291 preserving identities and encrypted credentials. Latest accepted repository namespace List/Group switch ships in this release with monitoring notifications and previously approved cluster/monitoring work.
 - Evidence: Windows upgrade diagnostics identified MainWindowHandle closing the single-instance plugin's transparent WS_VISIBLE helper rather than the UI. Gate now enumerates owned visible enabled Tauri Window class, matching existing native acceptance; original deadlines and exit requirement retained. Existing installer rerun and final full native checks both pass. No additional speculative desktop behavior change.
