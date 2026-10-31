@@ -1,3 +1,4 @@
+import { AutoField } from "./auto-form";
 import { useState } from "react";
 import { api, errorText } from "../api";
 import { Button } from "@/components/ui/button";
@@ -40,10 +41,9 @@ export function Invitation({ workspace }: { workspace: string }) {
         </Button>
         {code && (
           <>
-            <label className="text-sm">
-              邀请码
+            <AutoField label="邀请码" className="text-sm">
               <Input readOnly value={code} />
-            </label>
+            </AutoField>
             <Button
               variant="outline"
               onClick={async () => {

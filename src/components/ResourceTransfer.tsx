@@ -1,3 +1,5 @@
+import { AutoTable } from "./auto-table";
+import { AutoField } from "./auto-form";
 import { useState } from "react";
 import { Dialog } from "radix-ui";
 import { Download, Loader2, Upload, X } from "lucide-react";
@@ -57,16 +59,14 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
           <div className="flex flex-wrap gap-2">
             {(["xlsx", "csv"] as const).map(format => <Button key={format} variant="outline" size="sm" disabled={busy} onClick={() => void run(() => download(`${endpoint}/import-template?format=${format}`, `${resource}-template.${format}`))}>下载 {format.toUpperCase()} 模板</Button>)}
           </div>
-          <label className="grid gap-2 text-sm">选择导入文件<Input type="file" accept=".csv,.xlsx" disabled={busy || !!preview} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} /></label>
+          <AutoField label="选择导入文件" className="grid gap-2 text-sm"><Input type="file" accept=".csv,.xlsx" disabled={busy || !!preview} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} /></AutoField>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {busy && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" /> 正在处理，请稍候…</p>}
           {preview && <>
             <p role="status" className="text-sm">{preview.valid ? `校验通过，将新增 ${preview.count} 项。` : "校验未通过，未保存任何记录。请修正下列错误后重新上传。"}</p>
-            <div className="min-h-0 overflow-auto rounded border">
-              <table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="p-2">原始行号</th><th className="p-2">校验结果</th>{columns.map(key => <th className="p-2" key={key}>{key}</th>)}</tr></thead>
-                <tbody>{preview.rows.map(row => <tr key={row.row} className="border-t"><td className="p-2">{row.row}</td><td className={`min-w-36 p-2 ${row.error ? "text-destructive" : ""}`}>{row.error ?? "通过"}</td>{columns.map(key => <td key={key} className="max-w-72 whitespace-pre-wrap break-words p-2">{typeof row.values[key] === "string" ? String(row.values[key]) : JSON.stringify(row.values[key])}</td>)}</tr>)}</tbody>
-              </table>
-            </div>
+            <AutoTable pagination={false} fill rowKey={row => String(row.row)} minWidth={600} sticky={{ header: true, left: 1 }}
+              state={{ rows: preview.rows, total: preview.rows.length, query: { page: 1, pageSize: Math.max(1, preview.rows.length) } }}
+              columns={[{ field: "row", name: "原始行号", width: "88px" }, { field: "error", name: "校验结果", width: "200px", render: (_value, row) => <span className={row.error ? "text-destructive" : ""}>{row.error ?? "通过"}</span> }, ...columns.map(key => ({ field: key, name: key, width: "220px", render: (_value: unknown, row: Preview["rows"][number]) => <span className="whitespace-pre-wrap break-words">{typeof row.values[key] === "string" ? String(row.values[key]) : JSON.stringify(row.values[key])}</span> }))]} />
           </>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" disabled={busy} onClick={close}>取消</Button>

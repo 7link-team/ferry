@@ -112,16 +112,49 @@ pub fn check_path(path: &str) -> Result<&str> {
     if path.is_empty() {
         return Err(ApiError::bad("请填写路径。"));
     }
-    let trimmed = path.trim_end_matches('/');
-    let path = if trimmed.is_empty() { "/" } else { trimmed };
-    if !path.starts_with('/') {
-        return Err(ApiError::bad("路径必须以 / 开头。"));
+    if ["\\\\?\\", "\\\\.\\", "//?/", "//./"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        return Err(ApiError::bad(
+            "不支持 Windows 设备路径，请填写普通磁盘路径。",
+        ));
     }
-    if path.split('/').any(|part| part == "..") {
+    let drive = path.as_bytes().get(0).is_some_and(u8::is_ascii_alphabetic)
+        && path.as_bytes().get(1) == Some(&b':')
+        && matches!(path.as_bytes().get(2), Some(b'/' | b'\\'));
+    let unc = (path.starts_with("\\\\") || path.starts_with("//"))
+        && path[2..]
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .count()
+            >= 2;
+    let original = path;
+    let trimmed = path.trim_end_matches(if drive || unc {
+        &['/', '\\'][..]
+    } else {
+        &['/'][..]
+    });
+    let path = if trimmed.is_empty() { "/" } else { trimmed };
+    if !path.starts_with('/') && !drive && !unc {
+        return Err(ApiError::bad("请填写绝对路径，例如 /var/log 或 C:/Users。"));
+    }
+    if path
+        .split(if drive || unc {
+            &['/', '\\'][..]
+        } else {
+            &['/'][..]
+        })
+        .any(|part| part == "..")
+    {
         return Err(ApiError::bad("路径不能包含 ..，请填写完整路径。"));
     }
     if path.contains('\0') || path.len() > 4096 {
         return Err(ApiError::bad("路径无效。"));
+    }
+    // A bare drive prefix is relative on Windows; retain its root separator.
+    if drive && path.len() == 2 {
+        return Ok(&original[..3]);
     }
     Ok(path)
 }
@@ -172,5 +205,33 @@ mod tests {
         // Only a whole `..` segment is a parent link.
         assert_eq!(check_path("/etc/..config").unwrap(), "/etc/..config");
         assert_eq!(check_path("/a/b..c/d").unwrap(), "/a/b..c/d");
+    }
+
+    #[test]
+    fn windows_paths_keep_drive_roots_and_reject_relative_or_parent_paths() {
+        for path in [
+            r"C:\",
+            "D:/",
+            "D:/Users/Full Stack",
+            r"C:\Users\Full Stack",
+            r"\\server\share\folder",
+            "//server/share/folder",
+        ] {
+            assert_eq!(check_path(path).unwrap(), path);
+        }
+        for path in [
+            "C:",
+            "C:relative",
+            r"C:\Users\..\Windows",
+            "D:/a/../b",
+            r"D:/a\..\b",
+            r"\\server\share\..",
+            "//server/share/..",
+            r"\\?\C:\",
+            "//?/C:/",
+            r"\\.\PhysicalDrive0",
+        ] {
+            assert!(check_path(path).is_err(), "{path}");
+        }
     }
 }

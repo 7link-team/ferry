@@ -18,14 +18,16 @@
  *   - The footer sits outside the scroll container. As a sticky child it
  *     jitters inside iOS Safari's rubber-band scroll.
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ResourceActionDialog } from "./ResourceForm";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { RowAction } from "./dsl";
 import {
-  ChevronLeft,
-  ChevronRight,
   Cable,
+  ArrowUp,
+  ChevronRight,
+  Folder,
+  GitBranch,
   Copy,
   Download,
   Ellipsis,
@@ -50,7 +52,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -64,14 +65,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
+import { AutoTable } from "./auto-table";
+import { AutoForm, AutoField } from "./auto-form";
 import { cn } from "cn";
 import { errorText } from "../api";
 import {
   PAGE_SIZES,
   REFRESH_INTERVALS,
   listResource,
-  pageRange,
   type Envelope,
 } from "../resource";
 import { href, navigate, useQueryValue, useRoute, useScrollSync } from "../router";
@@ -148,8 +149,8 @@ export function ResourceTable<T>({
   const [pageSize, setPageSize] = useQueryValue("page_size", config.defaultPageSize ?? 20);
   const [sort, setSort] = useQueryValue("sort", "");
   const [tableView, setTableView] = useQueryValue("table_view", "list");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const grouped = !!config.grouping && tableView === "groups";
+  const [folder, setFolder] = useQueryValue("folder", "");
 
   // Two layers: `draft` is what the inputs show, the URL is what has been
   // searched. Typing must not refetch on every keystroke, and the URL must
@@ -174,17 +175,31 @@ export function ResourceTable<T>({
     () => ({
       ...config.fixed,
       ...Object.fromEntries(Object.entries(committed).filter(([, v]) => v !== "")),
-      page,
-      page_size: pageSize,
+      page: grouped ? 1 : page,
+      page_size: grouped ? 100 : pageSize,
       ...(sort ? { sort } : {}),
     }),
-    [config.fixed, committed, page, pageSize, sort],
+    [config.fixed, committed, grouped ? 1 : page, grouped ? 100 : pageSize, sort, grouped],
   );
 
   const load = useCallback(
     (signal?: AbortSignal) => {
       setLoading(true);
-      return listResource<T>(workspace, config.resource, params, signal, config.endpoint)
+      const read = async () => {
+        if (!grouped) return listResource<T>(workspace, config.resource, params, signal, config.endpoint);
+        // Build the namespace directory from every provider page, so folders do
+        // not disappear merely because their repositories are on another page.
+        const items: T[] = [];
+        for (let next = 1; ; next++) {
+          const part = await listResource<T>(workspace, config.resource, { ...params, page: next }, signal, config.endpoint);
+          items.push(...part.items);
+          const more = part.has_more ?? (next * params.page_size < part.total);
+          if (!more) break;
+          if (!part.items.length) throw new Error("仓库分页返回空页，请刷新后重试。");
+        }
+        return { items, total: items.length, page: 1, page_size: items.length };
+      };
+      return read()
         .then((envelope) => {
           setData(envelope);
           setError("");
@@ -195,7 +210,7 @@ export function ResourceTable<T>({
         })
         .finally(() => setLoading(false));
     },
-    [workspace, config.resource, config.endpoint, params],
+    [workspace, config.resource, config.endpoint, params, grouped],
   );
 
   useEffect(() => {
@@ -223,8 +238,27 @@ export function ResourceTable<T>({
   }, [refresh, load]);
 
   const total = data?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const rows = grouped ? [...(data?.items ?? [])].sort((a, b) => config.grouping!.key(a).localeCompare(config.grouping!.key(b))) : data?.items ?? [];
+  const directoryRows = useMemo(() => {
+    if (!grouped) return [];
+    const directories = new Map<string, number>();
+    const files: { name: string; path: string; row?: T; count: number }[] = [];
+    for (const row of data?.items ?? []) {
+      const namespace = config.grouping!.key(row);
+      const prefix = folder ? `${folder}/` : "";
+      if (namespace !== folder && !namespace.startsWith(prefix)) continue;
+      const rest = namespace === folder ? "" : namespace.slice(prefix.length);
+      if (rest) {
+        const path = prefix + rest.split("/")[0];
+        directories.set(path, (directories.get(path) ?? 0) + 1);
+      } else files.push({ name: rowName(row, config.rowKey(row)).split('/').at(-1)!, path: config.rowKey(row), row, count: 0 });
+    }
+    return [...[...directories].sort(([a], [b]) => a.localeCompare(b)).map(([path, count]) => ({ name: path.split('/').at(-1)!, path, count } as { name: string; path: string; row?: T; count: number })), ...files];
+  }, [grouped, data, config, folder]);
+  const enterFolder = (path: string) => { setFolder(path); setPage(1); };
+  useEffect(() => {
+    if (grouped && !loading && page > Math.max(1, Math.ceil(directoryRows.length / pageSize))) setPage(1);
+  }, [grouped, loading, page, pageSize, directoryRows.length, setPage]);
   const scrollRef = useScrollSync(!loading && rows.length > 0);
 
   const search = () => {
@@ -278,17 +312,17 @@ export function ResourceTable<T>({
     }
   };
 
-  const columnCount = config.columns.length + 1 + (visibleActions.length ? 1 : 0);
+
 
   return (
-    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3">
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
       {pendingDelete && <DeleteConfirmDialog action={pendingDelete.action} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
       <div className="flex flex-col gap-3">
         {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
         {!!config.filters?.length && (
-          <form
+          <AutoForm
             className="flex flex-wrap items-end gap-3"
             onSubmit={(event) => {
               event.preventDefault();
@@ -311,7 +345,7 @@ export function ResourceTable<T>({
                 <X /> 清空
               </Button>
             </div>
-          </form>
+          </AutoForm>
         )}
 
         <div className="flex flex-wrap items-center gap-2">
@@ -361,7 +395,7 @@ export function ResourceTable<T>({
 
           <span className="flex-1" />
           {config.grouping && <div role="group" aria-label="列表显示模式" title={`按${config.grouping.label}分组`} className="inline-flex rounded-md border p-0.5">
-            {([["list", "列表", List], ["groups", "分组", FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => setTableView(value)}><Icon className="size-4" />{label}</Button>)}
+            {([["list", "列表", List], ["groups", "分组", FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
           </div>}
 
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
@@ -381,114 +415,36 @@ export function ResourceTable<T>({
         </div>
       </div>
 
-      {/* ------------------------------------------------------------ 列表 */}
-      <div
-        ref={scrollRef}
-        className="min-h-0 min-w-0 overflow-auto rounded-lg border border-border bg-card"
-      >
-        <table className="w-full min-w-max border-separate border-spacing-0 text-sm">
-          <thead>
-            <tr>
-              <th className="sticky top-0 left-0 z-40 w-14 bg-muted px-3 py-2 text-left font-medium text-muted-foreground shadow-[inset_-1px_0_0_var(--border),inset_0_-1px_0_var(--border)]">
-                序号
-              </th>
-              {config.columns.map((column) => (
-                <th
-                  key={column.key}
-                  style={column.width ? { width: column.width } : undefined}
-                  className={cn(
-                    "sticky top-0 z-30 bg-muted px-3 py-2 font-medium text-muted-foreground shadow-[inset_0_-1px_0_var(--border)]",
-                    column.align === "right" ? "text-right" : "text-left",
-                  )}
-                >
-                  {column.sortable ? (
-                    <button
-                      type="button"
-                      className="hover:text-foreground"
-                      onClick={() =>
-                        setSort(
-                          sort === column.key
-                            ? `-${column.key}`
-                            : sort === `-${column.key}`
-                              ? ""
-                              : column.key,
-                        )
-                      }
-                    >
-                      {column.label}
-                      {sort === column.key ? " ↑" : sort === `-${column.key}` ? " ↓" : ""}
-                    </button>
-                  ) : (
-                    column.label
-                  )}
-                </th>
-              ))}
-              {!!visibleActions.length && (
-                <th className="sticky top-0 right-0 z-40 w-px bg-muted px-3 py-2 text-right font-medium text-muted-foreground shadow-[inset_1px_0_0_var(--border),inset_0_-1px_0_var(--border)]">
-                  操作
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && !data
-              ? Array.from({ length: 5 }, (_, index) => (
-                  <tr key={index}>
-                    {Array.from({ length: columnCount }, (_, cell) => (
-                      <td key={cell} className="border-b border-border px-3 py-2">
-                        <Skeleton className="h-4 w-full" />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              : rows.map((row, index) => {
-                  const key = config.rowKey(row);
-                  const group = grouped ? config.grouping!.key(row) : "";
-                  const startsGroup = grouped && (!index || config.grouping!.key(rows[index - 1]!) !== group);
-                  const view = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row)));
-                  const canOpen = !!view || visibleActions.some(action => action.label === "编辑" && action.to && (!action.when || action.when(row)));
-                  const open = () => { if (view?.to) navigate({ ...route, ...view.to(row) }, view.query?.(row) ?? {}); else if (canOpen) navigate({ ...route, id: key, mode: "view" }, {}); };
-                  return (
-                    <Fragment key={key}>
-                    {startsGroup && <tr><td colSpan={columnCount} className="border-b bg-muted/50 px-3 py-2"><button type="button" className="flex w-full items-center gap-2 rounded text-left font-medium transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-primary" aria-expanded={!collapsed.has(group)} onClick={() => setCollapsed(current => { const next = new Set(current); if (next.has(group)) next.delete(group); else next.add(group); return next; })}><ChevronRight className={cn("size-4 transition-transform", !collapsed.has(group) && "rotate-90")} /><FolderTree className="size-4" />{group}<span className="text-xs font-normal text-muted-foreground">{rows.filter(item => config.grouping!.key(item) === group).length} 项 · 当前页</span></button></td></tr>}
-                    <tr hidden={grouped && collapsed.has(group)} className={cn("group", canOpen && "cursor-pointer focus-visible:outline-2 focus-visible:outline-primary")} tabIndex={canOpen ? 0 : undefined}
-                      onClick={event => { if (!(event.target as Element).closest("a,button,input,select,textarea,[role=button],[role=checkbox]")) open(); }}
-                      onKeyDown={event => { if (canOpen && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } }}>
-                      <td className="sticky left-0 z-20 bg-card px-3 py-2 text-muted-foreground shadow-[inset_-1px_0_0_var(--border)] group-hover:bg-accent">
-                        <span className="inline-flex items-center gap-2">
-                          {!!visibleBulk.length && (
-                            <Checkbox
-                              checked={selected.has(key)}
-                              onCheckedChange={(checked) =>
-                                setSelected((current) => {
-                                  const next = new Set(current);
-                                  if (checked) next.add(key);
-                                  else next.delete(key);
-                                  return next;
-                                })
-                              }
-                              aria-label="选择此行"
-                            />
-                          )}
-                          {(config.pagination === "next" ? 0 : (page - 1) * pageSize) + index + 1}
-                        </span>
-                      </td>
-                      {config.columns.map((column) => (
-                        <td
-                          key={column.key}
-                          className={cn(
-                            "border-b border-border px-3 py-2 group-hover:bg-accent",
-                            column.align === "right" && "text-right",
-                          )}
-                        >
-                          {column.render
-                            ? column.render(row)
-                            : String((row as Record<string, unknown>)[column.key] ?? "")}
-                        </td>
-                      ))}
-                      {!!visibleActions.length && (
-                        <td className="sticky right-0 z-20 bg-card px-3 py-2 text-right whitespace-nowrap shadow-[inset_1px_0_0_var(--border)] group-hover:bg-accent">
-                          {visibleActions
+      {grouped ? <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+        <nav aria-label="仓库分组路径" className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border px-2 py-1">
+          <Button size="icon" variant="ghost" aria-label="上级分组" title="上级分组" disabled={!folder} onClick={() => enterFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowUp className="size-4" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => enterFolder("")}>全部仓库</Button>
+          {folder.split('/').filter(Boolean).map((name, index, parts) => <span key={index} className="inline-flex min-w-0 items-center"><ChevronRight className="size-3 shrink-0 text-muted-foreground" /><Button size="sm" variant="ghost" className="max-w-48 truncate" title={name} aria-current={index === parts.length - 1 ? "page" : undefined} onClick={() => enterFolder(parts.slice(0, index + 1).join('/'))}>{name}</Button></span>)}
+        </nav>
+        <AutoTable<(typeof directoryRows)[number]> fill layout="auto" rowKey={entry => entry.path}
+          state={{ rows: directoryRows.slice((page - 1) * pageSize, page * pageSize), total: directoryRows.length, query: { page, pageSize }, loading, error: error || undefined }}
+          columns={[
+            { field: 'name', name: '名称', render: (_value, entry) => entry.row ? <span className="inline-flex items-center gap-2"><GitBranch className="size-4 shrink-0 text-muted-foreground" />{entry.name}</span> : <button type="button" className="inline-flex items-center gap-2 text-left hover:text-primary" onClick={() => enterFolder(entry.path)}><Folder className="size-4 shrink-0 text-primary" />{entry.name}</button> },
+            { field: 'count', name: '内容', render: (_value, entry) => entry.row ? "仓库" : `${entry.count} 个仓库` },
+            ...config.columns.filter(column => column.key !== 'full_name').map(column => ({ field: column.key, name: column.label, render: (_value: unknown, entry: (typeof directoryRows)[number]) => entry.row ? column.render ? column.render(entry.row) : String((entry.row as Record<string, unknown>)[column.key] ?? '') : '—' })),
+          ]}
+          sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
+          onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty="此分组下暂无仓库。" />
+      </div> : <AutoTable<T> fill layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+        columns={config.columns.map(column => ({ field: column.key, name: column.label, width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
+        state={{ rows, total, query: { page, pageSize, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
+        showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={data?.has_more}
+        sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: true }}
+        groupBy={grouped ? config.grouping!.key : undefined} empty={config.empty}
+        onPageChange={setPage}
+        onPageSizeChange={value => { setPageSize(value); setPage(1); }}
+        pageSizeOptions={[...PAGE_SIZES]} onSortChange={key => { setSort(sort === key ? `-${key}` : sort === `-${key}` ? "" : key); setPage(1); }}
+        onRetry={reload} onSelectAll={toggleAll}
+        onToggleSelect={row => setSelected(current => { const next = new Set(current); const key = config.rowKey(row); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
+        rowClickable={row => visibleActions.some(action => (action.label === "查看" || action.label === "编辑") && !!action.to && (!action.when || action.when(row)))}
+        onRowClick={row => { const action = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row))); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); else navigate({ ...route, id: config.rowKey(row), mode: "view" }, {}); }}
+        actionWidth={Math.max(80, visibleActions.length * 36 + 24)}
+        actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <>                          {visibleActions
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
                               <RowActionButton
@@ -535,37 +491,8 @@ export function ResourceTable<T>({
                                     }
                                   : {})}
                               />
-                            ))}
-                        </td>
-                      )}
-                    </tr>
-                    </Fragment>
-                  );
-                })}
-            {!loading && !rows.length && (
-              <tr>
-                <td colSpan={columnCount} className="px-3 py-16 text-center text-muted-foreground">
-                  {error ? (
-                    <span role="alert" className="text-destructive">{error}</span>
-                  ) : (
-                    (config.empty ?? "没有符合条件的记录。")
-                  )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ------------------------------------------------------------ 底部 */}
-      <div className="flex flex-wrap items-center gap-3 pb-3 text-sm">
-        {!!visibleBulk.length && (
-          <label className="flex items-center gap-2">
-            <Checkbox checked={allOnPageSelected} onCheckedChange={toggleAll} />
-            全选
-          </label>
-        )}
-        {!!selected.size && (
+                            ))}</>; } : undefined}
+        footerContent={<>        {!!selected.size && (
           <>
             <span className="text-muted-foreground">已选 {selected.size} 项</span>
             {visibleBulk.map((action) => (
@@ -595,67 +522,8 @@ export function ResourceTable<T>({
             ))}
           </>
         )}
-        <span className="flex-1" />
-        <span className="text-muted-foreground">{config.pagination === "next" ? `第 ${page} 页 · 本页 ${rows.length} 条` : `共 ${total} 条`}</span>
-        <nav className="flex items-center gap-1" aria-label="分页">
-          <Button
-            size="icon"
-            variant="outline"
-            className="size-8"
-            disabled={page <= 1 || loading}
-            onClick={() => setPage(page - 1)}
-            aria-label="上一页"
-          >
-            <ChevronLeft />
-          </Button>
-          {(config.pagination === "next" ? [] : pageRange(page, pageCount)).map((value, index) =>
-            value === null ? (
-              <span key={`gap-${index}`} className="px-1 text-muted-foreground">
-                …
-              </span>
-            ) : (
-              <Button
-                key={value}
-                size="icon"
-                variant={value === page ? "default" : "outline"}
-                className="size-8"
-                onClick={() => setPage(value)}
-                aria-current={value === page ? "page" : undefined}
-              >
-                {value}
-              </Button>
-            ),
-          )}
-          <Button
-            size="icon"
-            variant="outline"
-            className="size-8"
-            disabled={loading || (config.pagination === "next" ? !!error || !data?.has_more : page >= pageCount)}
-            onClick={() => setPage(page + 1)}
-            aria-label="下一页"
-          >
-            <ChevronRight />
-          </Button>
-        </nav>
-        {config.pagination !== "next" && <Select
-          value={String(pageSize)}
-          onValueChange={(value) => {
-            setPageSize(Number(value));
-            setPage(1);
-          }}
-        >
-          <SelectTrigger size="sm" className="w-28">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Array.from(new Set([...PAGE_SIZES, pageSize])).sort((a,b) => a-b).map((size) => (
-              <SelectItem key={size} value={String(size)}>
-                {size} 条/页
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>}
-      </div>
+</>}
+      />}
     </div>
   );
 }
@@ -737,8 +605,7 @@ function FilterField({
 }) {
   const { options, error } = useOptions(filter.options);
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">{filter.label}</span>
+    <AutoField label={filter.label}>
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
       {filter.type === "select" ? (
         <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
@@ -762,7 +629,7 @@ function FilterField({
           onChange={(event) => onChange(event.target.value)}
         />
       )}
-    </label>
+    </AutoField>
   );
 }
 

@@ -12,6 +12,7 @@ desktop/binaries/*
 desktop/gen/
 .env
 .env.local
+.env.production
 tsconfig.tsbuildinfo
 
 # Python acceptance harness cache

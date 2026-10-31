@@ -45,6 +45,9 @@
 
 /* Resource details share the form schema, with a dedicated reading layout. */
 @layer components {
+  .auto-field [aria-invalid="true"] {
+    @apply border-destructive ring-destructive/20;
+  }
   .resource-detail {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 38rem), 1fr));
@@ -69,16 +72,16 @@
   .detail-fields > * {
     @apply min-w-0 border-b border-border/60 py-4;
   }
-  .detail-fields > .resource-field {
+  .detail-fields .resource-field {
     @apply gap-2;
   }
-  .detail-fields > .resource-field > span:first-child {
+  .detail-fields .resource-field > :is(span, label[data-auto-label]):first-child {
     @apply text-xs font-normal leading-5 text-muted-foreground;
   }
-  .detail-fields > .resource-field > p {
+  .detail-fields .resource-field > p {
     @apply text-sm font-medium leading-6 [overflow-wrap:anywhere];
   }
-  .detail-fields > .resource-field > button {
+  .detail-fields .resource-field > button {
     @apply self-start;
   }
   .detail-fields > :last-child {

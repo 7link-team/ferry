@@ -1,3 +1,4 @@
+import { AutoField } from "./auto-form";
 import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 
@@ -69,25 +70,24 @@ export function CronEditor({ value, readOnly, onChange, onValidityChange }: {
   const parsed = readCycle(value);
   useEffect(() => onValidityChange(!!error), [error, onValidityChange]);
   const number = (label: string, current: number, min: number, max: number, key: "interval" | "hour" | "minute" | "day") =>
-    <label className="flex min-w-24 flex-col gap-1 text-sm">{label}<Input aria-label={label} type="number" min={min} max={max} value={current} readOnly={readOnly} onChange={event => {
+    <AutoField label={<>{label}</>} className="flex min-w-24 flex-col gap-1 text-sm"><Input aria-label={label} type="number" min={min} max={max} value={current} readOnly={readOnly} onChange={event => {
       const next = Number(event.target.value);
       if (!Number.isInteger(next) || next < min || next > max) return;
       onChange(expression(parsed.cycle, key === "interval" ? next : parsed.interval, key === "hour" ? next : parsed.hour, key === "minute" ? next : parsed.minute, key === "day" ? next : parsed.day));
-    }} /></label>;
+    }} /></AutoField>;
   return <div className="space-y-3">
-    <label className="block text-sm font-medium" htmlFor="cron-cycle">执行周期</label>
     <div className="flex flex-wrap items-end gap-3">
-      <select id="cron-cycle" aria-label="执行周期类型" className="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm" disabled={readOnly} value={parsed.cycle} onChange={event => onChange(expression(event.target.value as Cycle, 1, 0, 0, 1) || value)}>
+      <AutoField label="执行周期"><select aria-label="执行周期类型" className="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm" disabled={readOnly} value={parsed.cycle} onChange={event => onChange(expression(event.target.value as Cycle, 1, 0, 0, 1) || value)}>
         <option value="minutes">每隔几分钟</option><option value="hours">每隔几小时</option><option value="daily">每天</option><option value="weekly">每周</option><option value="monthly">每月</option><option value="custom" disabled>自定义表达式</option>
-      </select>
+      </select></AutoField>
       {parsed.cycle === "minutes" && number("间隔分钟", parsed.interval, 1, 59, "interval")}
       {parsed.cycle === "hours" && number("间隔小时", parsed.interval, 1, 23, "interval")}
       {(["daily", "weekly", "monthly"] as Cycle[]).includes(parsed.cycle) && <>{number("小时", parsed.hour, 0, 23, "hour")}{number("分钟", parsed.minute, 0, 59, "minute")}</>}
-      {parsed.cycle === "weekly" && <label className="flex flex-col gap-1 text-sm">星期<select aria-label="星期" className="h-9 rounded-md border border-input bg-background px-3" disabled={readOnly} value={parsed.day} onChange={event => onChange(expression("weekly", 1, parsed.hour, parsed.minute, Number(event.target.value)))}>{days.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></label>}
+      {parsed.cycle === "weekly" && <AutoField label="星期" className="flex flex-col gap-1 text-sm"><select aria-label="星期" className="h-9 rounded-md border border-input bg-background px-3" disabled={readOnly} value={parsed.day} onChange={event => onChange(expression("weekly", 1, parsed.hour, parsed.minute, Number(event.target.value)))}>{days.map((day, index) => <option key={day} value={index}>{day}</option>)}</select></AutoField>}
       {parsed.cycle === "monthly" && number("日期", parsed.day, 1, 31, "day")}
       {parsed.cycle === "custom" && <span className="pb-2 text-sm text-muted-foreground">此表达式使用自定义规则</span>}
     </div>
-    <label className="flex flex-col gap-1 text-sm font-medium">Cron 表达式<Input aria-label="Cron 表达式" className="font-mono" value={value} readOnly={readOnly} aria-invalid={!!error} onChange={event => onChange(event.target.value)} /></label>
+    <AutoField label="Cron 表达式" className="flex flex-col gap-1 text-sm font-medium"><Input aria-label="Cron 表达式" className="font-mono" value={value} readOnly={readOnly} aria-invalid={!!error} onChange={event => onChange(event.target.value)} /></AutoField>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </div>;
 }

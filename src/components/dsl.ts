@@ -75,7 +75,7 @@ export interface ListConfig<T> {
   pagination?: "next";
   defaultRefresh?: number;
   rowKey: (row: T) => string;
-  /** Optional grouping of the currently loaded page, preserving remote pagination. */
+  /** Optional namespace directory browser. An empty key places a row at the root. */
   grouping?: { label: string; key: (row: T) => string };
   filters?: Filter[];
   columns: Column<T>[];
@@ -144,14 +144,14 @@ export interface FormConfig<T> {
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
-  sections: { title?: string; fields: FormField<T>[] }[];
+  sections: { title?: string; fullWidth?: boolean; fields: FormField<T>[] }[];
   /** Heading for the detail and edit pages. */
   heading: (row: T) => string;
   /** Values a create form starts from. */
   blank: Partial<T>;
   readOnly?: (row: Partial<T>) => boolean;
   copy?: (row: T) => Partial<T>;
-  viewActions?: RowAction<T>[];
+  viewActions?: (RowAction<T> & { section?: string; iconOnly?: boolean })[];
   pollMs?: (row: Partial<T>) => number;
   generator?: {
     options: Options;

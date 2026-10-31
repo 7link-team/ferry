@@ -1,8 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { HostConnectionCommand, RunnerConnection, runnerInstallCommand, runnerServerOrigin } from "./RunnerConnection";
+import { HostConnectionCommand, RunnerConnection, runnerInstallCommand, runnerServerOrigin, runnerUninstallCommand } from "./RunnerConnection";
 
 it.skipIf(process.platform !== "win32")("rejects legacy Runner help before native installation with an actionable error", () => {
   const harness = `
@@ -11,9 +14,10 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) 'scripts/runner-install.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $assignment = $ast.Find({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$installHelp' }, $true)
-$guard = $assignment.Parent.Statements | Where-Object { $_.Extent.StartOffset -gt $assignment.Extent.EndOffset } | Select-Object -First 1
-if (-not $guard) { throw 'Runner compatibility check missing' }
-$check = [ScriptBlock]::Create($assignment.Extent.Text + [Environment]::NewLine + $guard.Extent.Text)
+$guards = @($assignment.Parent.Statements | Where-Object { $_.Extent.StartOffset -gt $assignment.Extent.EndOffset } | Select-Object -First 2)
+if ($guards.Count -ne 2 -or $guards[1].Extent.Text -notlike '*$User*') { throw 'Runner compatibility checks missing' }
+$check = [ScriptBlock]::Create($assignment.Extent.Text + [Environment]::NewLine + ($guards.Extent.Text -join [Environment]::NewLine))
+$User = $false
 function FixtureRunner {
   if (($args -join ' ') -ne 'service install --help') { throw 'Test must never install a service' }
   $global:LASTEXITCODE = 0
@@ -29,10 +33,178 @@ try { & $check } catch {
 if (-not $rejected) { throw 'Legacy Runner must be rejected' }
 $global:fixtureHelp = '      --rebind'
 & $check
+# Released Runners before Windows current-user support documented --user as
+# Linux/macOS only and refuse it at install time; reject them before installing.
+$User = $true
+$global:fixtureHelp = "      --user    Install for the current user (Linux/macOS), rather than the machine." + [Environment]::NewLine + '      --rebind'
+$rejected = $false
+try { & $check } catch {
+  if ($_.Exception.Message -notlike '*does not support current-user installation*Nothing installed.*') { throw }
+  $rejected = $true
+}
+if (-not $rejected) { throw 'Runner without Windows current-user support must be rejected' }
+$global:fixtureHelp = "      --user    Install for the current user instead of the machine (Windows logon task, systemd --user or LaunchAgent)" + [Environment]::NewLine + '      --rebind'
+& $check
 Write-Output 'PASS legacy rejection and compatible CLI'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
   expect(output).toContain("PASS legacy rejection and compatible CLI");
+});
+
+it("generates current-user commands without elevation, keeping system commands unchanged", () => {
+  const sh = runnerInstallCommand("linux", "https://example.com", "t");
+  expect(runnerInstallCommand("linux", "https://example.com", "t", "system")).toBe(sh);
+  expect(sh).not.toContain("--user");
+  expect(runnerInstallCommand("macos", "https://example.com", "t", "user")).toBe(sh.replace("--server 'https://example.com')", "--server 'https://example.com' --user)"));
+  const ps = runnerInstallCommand("windows", "https://example.com", "t");
+  expect(runnerInstallCommand("windows", "https://example.com", "t", "system")).toBe(ps);
+  const user = runnerInstallCommand("windows", "https://example.com", "t", "user");
+  expect(user).toContain("-Server ''https://example.com'' -User");
+  for (const elevated of ["-Verb RunAs", "PipeSecurity", "IsInRole"]) expect(user).not.toContain(elevated);
+  for (const shared of ["-MaximumRedirection 0", "-EncodedCommand $encoded", "$env:PSModulePath = $null", "$env:FERRY_TOKEN = $previousToken"]) expect(user).toContain(shared);
+});
+
+it("generates one-click uninstall commands for each platform and install scope", () => {
+  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && echo "Runner uninstalled."'`);
+  expect(runnerUninstallCommand("macos", "system")).toBe(runnerUninstallCommand("linux", "system"));
+  const linuxUser = runnerUninstallCommand("linux", "user");
+  expect(linuxUser).toContain('d="$HOME/.local/state/runner-agent"');
+  expect(linuxUser).toContain("service uninstall --name runner-agent --user");
+  expect(linuxUser).not.toContain("sudo");
+  expect(runnerUninstallCommand("macos", "user")).toContain('d="$HOME/Library/Application Support/runner-agent"');
+  const windowsUser = runnerUninstallCommand("windows", "user");
+  expect(windowsUser).toContain("Join-Path $env:LOCALAPPDATA 'runner-agent'");
+  expect(windowsUser).toContain("service uninstall --name runner-agent --user");
+  for (const elevated of ["RunAs", "exit 1", "Get-Service"]) expect(windowsUser).not.toContain(elevated);
+  const windowsSystem = runnerUninstallCommand("windows", "system");
+  expect(windowsSystem).toContain("-Verb RunAs -Wait -PassThru");
+  const payloads = [...windowsSystem.matchAll(/-EncodedCommand'?,? '?([A-Za-z0-9+/=]{20,})/g)].map(m => new TextDecoder("utf-16le").decode(Uint8Array.from(atob(m[1]!), c => c.charCodeAt(0))));
+  expect(payloads).toHaveLength(2);
+  for (const payload of payloads) {
+    expect(payload).toContain("Join-Path $env:ProgramData 'runner-agent'");
+    expect(payload).toContain("service uninstall --name runner-agent\n");
+    expect(payload).toContain("while (Get-Service -Name 'runner-agent'");
+  }
+  expect(payloads[0]).not.toContain("Read-Host");
+  expect(payloads[1]).toContain("Read-Host");
+});
+
+it.skipIf(process.platform === "win32")("runs the current-user Unix uninstall against a fixture Runner and parses the sudo command", () => {
+  const script = `
+set -eu
+export HOME=$(mktemp -d)
+trap 'rm -rf "$HOME"' EXIT
+sh -n -c ${JSON.stringify(runnerUninstallCommand("linux", "system").replace(/^sudo /, ""))}
+root="$HOME/.local/state/runner-agent"
+mkdir -p "$root/versions"
+printf '#!/bin/sh\\nprintf "%%s " "$@" > "$HOME/args"\\nexit "\${FIXTURE_FAIL:-0}"\\n' > "$root/runner-service"
+chmod 700 "$root/runner-service"
+if FIXTURE_FAIL=3 sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}; then echo 'failure must be reported'; exit 1; fi
+[ -x "$root/runner-service" ] || { echo 'failed deregistration must keep files'; exit 1; }
+sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}
+[ "$(cat "$HOME/args")" = "service uninstall --name runner-agent --user " ] || { echo "wrong arguments: $(cat "$HOME/args")"; exit 1; }
+[ ! -e "$root" ] || { echo 'installation directory must be removed'; exit 1; }
+sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}
+echo 'unix uninstall verified'
+`;
+  expect(execFileSync("sh", ["-c", script], { encoding: "utf8" })).toContain("unix uninstall verified");
+});
+
+it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs the current-user uninstall against a fixture Runner", () => {
+  const system = runnerUninstallCommand("windows", "system");
+  const payloads = [...system.matchAll(/-EncodedCommand'?,? '?([A-Za-z0-9+/=]{20,})/g)].map(m => m[1]!);
+  const user = runnerUninstallCommand("windows", "user");
+  const harness = `
+$ErrorActionPreference = 'Stop'
+$systemCommand = @'
+${system}
+'@
+foreach ($text in @($systemCommand) + @(${payloads.map(p => `[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${p}'))`).join(", ")})) {
+  $errors = $null
+  [void][Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$errors)
+  if ($errors.Count) { throw ($errors | Out-String) }
+}
+$sandbox = Join-Path ([IO.Path]::GetTempPath()) ('runner-uninstall-' + [Guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $sandbox
+$fixture = Join-Path $sandbox 'fixture.exe'
+Add-Type -OutputAssembly $fixture -OutputType ConsoleApplication -TypeDefinition 'public static class Fixture { public static int Main(string[] args) { System.IO.File.WriteAllText(System.Environment.GetEnvironmentVariable("FIXTURE_ARGS"), string.Join(" ", args)); return System.Environment.GetEnvironmentVariable("FIXTURE_FAIL") == "1" ? 3 : 0; } }'
+$savedLocal = $env:LOCALAPPDATA
+try {
+  $env:LOCALAPPDATA = Join-Path $sandbox 'local'
+  $env:FIXTURE_ARGS = Join-Path $sandbox 'args.txt'
+  $root = Join-Path $env:LOCALAPPDATA 'runner-agent'
+  # Installed: the registration is removed through the Runner, then all files.
+  $null = New-Item -ItemType Directory -Path (Join-Path $root 'versions')
+  Copy-Item $fixture (Join-Path $root 'runner-service.exe')
+  Set-Content (Join-Path $root 'service.json') '{}'
+  $env:FIXTURE_FAIL = '0'
+  & { ${user} } | Out-Null
+  if ((Get-Content $env:FIXTURE_ARGS) -ne 'service uninstall --name runner-agent --user') { throw 'Wrong uninstall arguments' }
+  if (Test-Path -LiteralPath $root) { throw 'Installation directory must be removed' }
+  # Not installed: succeeds without invoking anything.
+  Remove-Item $env:FIXTURE_ARGS
+  & { ${user} } | Out-Null
+  if (Test-Path $env:FIXTURE_ARGS) { throw 'Nothing should run when not installed' }
+  # A failed deregistration keeps the files, so it can be retried.
+  $null = New-Item -ItemType Directory -Path $root
+  Copy-Item $fixture (Join-Path $root 'runner-service.exe')
+  $env:FIXTURE_FAIL = '1'
+  $failed = $false
+  try { & { ${user} } | Out-Null } catch { $failed = $true }
+  if (-not $failed -or -not (Test-Path (Join-Path $root 'runner-service.exe'))) { throw 'Failure must be reported and keep the installation' }
+} finally {
+  $env:LOCALAPPDATA = $savedLocal
+  Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Output 'uninstall commands verified'
+`;
+  // The embedded payloads exceed the Windows command-line limit for -EncodedCommand.
+  const file = join(mkdtempSync(join(tmpdir(), "runner-uninstall-test-")), "harness.ps1");
+  writeFileSync(file, "﻿" + harness, "utf8");
+  try {
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], { encoding: "utf8", windowsHide: true });
+    expect(output).toContain("uninstall commands verified");
+  } finally { rmSync(dirname(file), { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform !== "win32")("runs the generated current-user Windows command without elevation and restores the environment", () => {
+  const command = runnerInstallCommand("windows", "https://example.com", "fixture-token", "user");
+  const harness = `
+$ErrorActionPreference = 'Stop'
+$global:nativePowerShell = (Get-Command powershell.exe).Source
+function Invoke-WebRequest {
+  param([switch]$UseBasicParsing, $Uri, $MaximumRedirection, $ErrorAction)
+  if ($MaximumRedirection -ne 0) { throw 'Redirects must be disabled' }
+  if ($global:scenario -eq 'download-failure') { throw 'fixture download failure' }
+  return @{ Content = @'
+param([string]$Server, [switch]$User)
+if ($Server -ne 'https://example.com' -or -not $User) { throw 'Installer must receive -Server and -User' }
+if ($env:FERRY_TOKEN -ne 'fixture-token') { throw 'Child token missing' }
+if ($env:RUNNER_COMMAND_TEST_CASE -eq 'installer-failure') { exit 1 }
+'@ }
+}
+function Start-Process { throw 'Current-user installation must not request elevation' }
+function powershell.exe {
+  if ($env:PSModulePath) { throw 'Child inherited PSModulePath' }
+  $global:childCalls++
+  & $global:nativePowerShell @args
+  $global:LASTEXITCODE = $LASTEXITCODE
+}
+foreach ($case in @('success', 'installer-failure', 'download-failure')) {
+  $env:FERRY_TOKEN = 'fixture-original'
+  $global:scenario = $case
+  $env:RUNNER_COMMAND_TEST_CASE = $case
+  $global:childCalls = 0
+  $failed = $false
+  try { ${command} } catch { $failed = $true; if ($case -eq 'success') { throw } }
+  if ($env:FERRY_TOKEN -ne 'fixture-original') { throw 'Token was not restored' }
+  if ($failed -ne ($case -ne 'success')) { throw "Unexpected result: $case" }
+  if ($global:childCalls -ne $(if ($case -eq 'download-failure') { 0 } else { 1 })) { throw 'Child invocation count mismatch' }
+}
+Write-Output 'current-user command verified'
+`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
+  expect(output).toContain("current-user command verified");
 });
 
 it("accepts only HTTP(S) origins, without credentials, paths or query", () => {
@@ -120,6 +292,39 @@ it("creates a 15 minute scoped token, copies command, and reports online only on
   expect(host.textContent).toContain("主机已连接"); expect(host.querySelector("a")?.href).toContain("/workspaces/ops/nodes/h1");
   const count = requests.length;
   await act(async () => vi.advanceTimersByTimeAsync(6000)); expect(requests).toHaveLength(count);
+});
+it("switches both connection surfaces between system service and current-user commands", async () => {
+  const choose = async (label: string) => {
+    const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(t => t.textContent === label)!;
+    expect(tab).toBeDefined();
+    await act(async () => { tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); });
+  };
+  await act(async () => root.render(<RunnerConnection workspace="ops" inline/>));
+  await click("生成安装命令");
+  const command = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="安装命令"]')!.value;
+  expect(host.textContent).toContain("以系统服务运行，开机自动启动");
+  expect(command()).not.toContain("--user");
+  const uninstall = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="卸载命令"]')!.value;
+  expect(uninstall()).toBe(runnerUninstallCommand("linux", "system"));
+  await choose("当前用户");
+  expect(command()).toContain("--server 'https://example.com' --user");
+  expect(uninstall()).toBe(runnerUninstallCommand("linux", "user"));
+  expect(host.textContent).toContain("无需 sudo");
+  await choose("Windows");
+  expect(command()).toContain("-User");
+  expect(command()).not.toContain("RunAs");
+  expect(host.textContent).toContain("仅在该账号登录 Windows 期间运行");
+  await choose("系统服务");
+  expect(command()).toContain("-Verb RunAs");
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/connection-credentials") ? { token: "host-token", server: "https://example.com", state: "online" } : { state: "online" } })));
+  await act(async () => root.unmount()); root = createRoot(host);
+  await act(async () => root.render(<HostConnectionCommand workspace="ops" hostId="h1" />));
+  const current = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')!.value;
+  expect(current()).not.toContain("--user");
+  await choose("Windows");
+  await choose("当前用户");
+  expect(current()).toContain("-User");
+  expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="卸载命令"]')!.value).toBe(runnerUninstallCommand("windows", "user"));
 });
 it("expires commands and permits regeneration; aborts requests on unmount", async () => {
   await act(async () => root.render(<RunnerConnection workspace="ops" inline/>));

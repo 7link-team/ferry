@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native service acceptance. Uses a uniquely named service; preserves no test services.
-macOS uses a per-user LaunchAgent. Linux and Windows require service-install privileges.
+macOS uses a per-user LaunchAgent. Linux and Windows require service-install privileges,
+except RUNNER_TEST_USER_SERVICE=1 on Windows, which tests the unprivileged current-user task.
 Run after cargo build -p ferry-server -p ferry-runner.
 """
 import json, os, platform, re, signal, socket, sqlite3, subprocess, sys, tempfile, time, urllib.request, http.cookiejar
@@ -17,7 +18,8 @@ def interrupted(signum, frame):
 if os.name != 'nt': signal.signal(signal.SIGTERM, interrupted)
 system = platform.system()
 name = 'runner-test-' + str(os.getpid())
-user = ['--user'] if system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
+windows_user = system == 'Windows' and os.environ.get('RUNNER_TEST_USER_SERVICE') == '1'
+user = ['--user'] if windows_user or system == 'Darwin' and not os.environ.get('RUNNER_TEST_SYSTEM_SERVICE') else []
 
 def command(*args, check=True):
     # Rust emits UTF-8; native service tools can emit a legacy code page.
@@ -45,15 +47,46 @@ def pid():
     elif system == 'Linux':
         text = command('systemctl', 'show', name, '--property=MainPID', check=False).stdout
         found = re.search(r'MainPID=(\d+)', text)
+    elif windows_user:
+        # The task keeper restarts this supervisor, as SCM restarts the service.
+        return supervisors()[0] if supervisors() else 0
     else:
         text = command('sc.exe', 'queryex', name, check=False).stdout
         found = re.search(r'PID\s*:\s*(\d+)', text)
     return int(found[1]) if found else 0
 
+def processes():
+    script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress"
+    rows = json.loads(command('powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script).stdout or '[]')
+    return [row for row in rows if row.get('CommandLine')]
+
+def supervisors():
+    return [row['ProcessId'] for row in processes()
+            if 'service supervise' in row['CommandLine'] and f'--name {name}' in row['CommandLine']]
+
+def visible_agent_windows():
+    """Visible top-level windows owned by the agent tree or its console host."""
+    import ctypes
+    from ctypes import wintypes
+    rows = processes()
+    agent = {row['ProcessId'] for row in rows if f'--name {name}' in row['CommandLine']}
+    agent |= {row['ParentProcessId'] for row in rows if row['ProcessId'] in agent}
+    found = []
+    user32 = ctypes.windll.user32
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def each(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if user32.IsWindowVisible(hwnd) and owner.value in agent:
+            found.append(owner.value)
+        return True
+    user32.EnumWindows(each, 0)
+    return found
+
 # Hosted Windows runners grant other accounts write access to their Temp tree.
 # A privileged service must live under an administrator-controlled parent.
 with tempfile.TemporaryDirectory(prefix='runner-service-',
-                                 dir=os.environ['ProgramFiles'] if system == 'Windows' else None) as tmp:
+                                 dir=os.environ['LOCALAPPDATA'] if windows_user else os.environ['ProgramFiles'] if system == 'Windows' else None) as tmp:
     root = Path(tmp)
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
@@ -115,7 +148,38 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
             assert not (unsafe/'service.json').exists(), 'unsafe install must not persist credentials'
         service('install', '--server', origin, '--token', token, '--state-dir', state)
         host_path = f'/workspaces/{workspace_service}/nodes/'+host
+        if windows_user:
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                assert not visible_agent_windows(), 'current-user agent must not show a window'
+                time.sleep(.2)
         wait(lambda: api(host_path)['state']=='online', 'service should enrol automatically')
+        if windows_user:
+            import runpy
+            ws_module = runpy.run_path(str(Path(__file__).with_name('ws-probe.py')))
+            identity_terminal = ws_module['Ws'](origin.replace('http://','ws://')+'/api'+host_path+'/terminal-sessions', '; '.join(f'{cookie.name}={cookie.value}' for cookie in jar))
+            seen = bytearray()
+            def read_terminal(seconds):
+                for opcode, data in identity_terminal.frames(seconds):
+                    if opcode == ws_module['BINARY']:
+                        seen.extend(data)
+                        if b'\x1b[6n' in data:
+                            identity_terminal.send(ws_module['BINARY'], b'\x1b[1;1R')
+            read_terminal(3)
+            identity_terminal.send(ws_module['BINARY'], b'whoami & echo PROFILE=%USERPROFILE% & echo PATH-END=%PATH%=END\r\n')
+            def identity_ready():
+                read_terminal(1)
+                return b'=END' in seen
+            wait(identity_ready, 'current-user terminal output', seconds=20)
+            identity_terminal.close()
+            text = bytes(seen).decode('utf-8', 'replace').lower()
+            expected_user = command('whoami').stdout.strip().lower()
+            assert expected_user in text and 'nt authority\\system' not in text, text[-2000:]
+            assert 'profile=' + os.environ['USERPROFILE'].lower() in text, text[-2000:]
+            user_path = command('powershell.exe', '-NoProfile', '-Command', "[Environment]::GetEnvironmentVariable('Path','User')").stdout.strip().split(';')[0].lower()
+            assert not user_path or user_path in text, (user_path, text[-2000:])
+            assert not visible_agent_windows(), 'terminal session must not show an agent window'
+            print('PASS current-user terminal runs as the installing user with user profile and PATH, without windows', flush=True)
         status = api(token_path)
         assert status['state']=='connected' and status['host_id']==host and status['host_state']=='online'
         refused('/runners/install/x86_64-unknown-linux-gnu',401,token)

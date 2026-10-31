@@ -35,18 +35,33 @@ try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
+  page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
+  let seedCookie = '';
   async function post(path, data) {
-    const response = await context.request.post(`${origin}/api${path}`, { headers: { 'X-Ferry-Request': '1' }, data });
-    assert(response.ok(), `${path}: ${await response.text()}`);
+    // Seed through the backend directly; cookies remain shared with the UI on
+    // 127.0.0.1. Layout assertions still exercise the real frontend/API proxy.
+    const response = await fetch(`${backend}/api${path}`, { method: 'POST', headers: { 'X-Ferry-Request': '1', 'Content-Type': 'application/json', Cookie: seedCookie }, body: JSON.stringify(data), signal: AbortSignal.timeout(30000) });
+    const cookies = response.headers.getSetCookie();
+    if (cookies.length) {
+      seedCookie = cookies.map(cookie => cookie.split(';')[0]).join('; ');
+      await context.addCookies(cookies.map(cookie => {
+        const value = cookie.split(';')[0], at = value.indexOf('=');
+        return { name: value.slice(0, at), value: value.slice(at + 1), url: backend };
+      }));
+    }
+    assert(response.ok, `${path}: ${!response.ok ? await response.text() : response.status}`);
     return response.json();
   }
   await post('/setup', { name: 'Layout Admin', email: 'layout@example.invalid', password: 'temporary-layout-password', token: (await readFile(join(work, 'setup-token'), 'utf8')).trim() });
   const workspace_layout = (await post('/workspaces', { name: 'Layout', slug: 'layout' })).id;
   async function openList(path) {
     await page.goto(origin + path);
-    await page.getByRole('navigation', { name: '分页', exact: true }).waitFor();
+    await page.getByRole('navigation', { name: '分页', exact: true }).waitFor().catch(async error => {
+      console.error('List did not load:', page.url(), await page.locator('body').innerText(), errors);
+      throw error;
+    });
     await page.getByRole('button', { name: '刷新', exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector('button .animate-spin'));
     await page.evaluate(() => document.fonts.ready);
@@ -105,6 +120,21 @@ try {
     assert(Math.abs(after.last.right - before.last.right) < 2, 'action column remains fixed');
     assert(after.data.left < before.data.left - 100 && after.data.top < before.data.top - 100, 'middle data scrolls both axes');
     assert(Math.abs(after.footer.top - before.footer.top) < 2, 'footer never moves with table rows');
+    if (viewport.width === 1280) {
+      const row = page.locator('tbody tr').nth(7);
+      await row.locator('td').last().hover();
+      for (const dark of [false, true]) {
+        await page.evaluate(value => document.documentElement.classList.toggle('dark', value), dark);
+        const colors = await row.locator('td').evaluateAll(cells => cells.map(cell => getComputedStyle(cell).backgroundColor));
+        for (const color of colors) {
+          assert(!color.includes('rgba') && !color.includes('/'), `hover cell must be opaque: ${color}`);
+          assert.notEqual(color, 'transparent');
+        }
+        assert.equal(new Set(colors).size, 1, 'sticky and scrolling cells use the same opaque hover surface');
+      }
+      await page.evaluate(() => document.documentElement.classList.remove('dark'));
+      console.log('PASS opaque sticky hover cells in light and dark themes');
+    }
     console.log(`PASS ${viewport.width}x${viewport.height}: data scrolls both axes; header/footer/edge columns fixed`);
   }
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -113,7 +143,7 @@ try {
   await page.getByRole('button', { name: '查看邀请码', exact: true }).click();
   await page.getByRole('button', { name: '复制邀请码', exact: true }).waitFor();
   fills(await geometry(), 'expanded invitation');
-  await openList('/_platform/users');
+  await openList('/platform/users');
   fills(await geometry(), 'platform list', 20);
   // The heading renders before the settings request finishes, as on a busy CI runner.
   await page.route('**/api/platform/settings/1', async route => {

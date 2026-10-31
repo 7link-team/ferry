@@ -1,0 +1,30 @@
+services:
+  ferry:
+    environment:
+      FERRY_DATABASE_URL: postgres://ferry:${DATABASE_PASSWORD:?Required}@postgres:5432/ferry
+    depends_on:
+      postgres: { condition: service_healthy }
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_DB: ferry
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:?Required}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/postgres-init.sh:/docker-entrypoint-initdb.d/10-ferry.sh:ro
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres -d ferry']
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    stop_grace_period: 60s
+volumes:
+  postgres-data:

@@ -10,7 +10,7 @@ let host: HTMLDivElement;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [{ name: "logs", kind: "directory", size: 0, mode: 493, modified_at: 0 }] }) })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith('/file-systems') ? { platform: "unix", items: [{ path: "/", name: "root", total: 1024, used: 128 }] } : { items: [{ name: "logs", kind: "directory", size: 0, mode: 493, modified_at: 0 }] } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 

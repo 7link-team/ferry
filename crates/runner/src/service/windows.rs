@@ -24,6 +24,9 @@ impl Identity {
         Ok(ServiceManager::local_computer(None::<&str>, access)?)
     }
     pub(super) fn register(&self, binary: &Path, config: &Path) -> anyhow::Result<()> {
+        if self.user {
+            return super::windows_user::register(self, binary, config);
+        }
         let manager = self.manager(true)?;
         let access = ServiceAccess::QUERY_CONFIG
             | ServiceAccess::QUERY_STATUS
@@ -95,6 +98,9 @@ impl Identity {
         Ok(())
     }
     pub(super) fn control(&self, action: &str) -> anyhow::Result<()> {
+        if self.user {
+            return super::windows_user::control(self, action);
+        }
         let manager = self.manager(false)?;
         let service = manager.open_service(
             &self.name,
@@ -138,6 +144,9 @@ impl Identity {
         Ok(())
     }
     pub(super) fn uninstall(&self) -> anyhow::Result<()> {
+        if self.user {
+            return super::windows_user::uninstall(self);
+        }
         let manager = self.manager(false)?;
         let service = match manager.open_service(
             &self.name,
@@ -285,7 +294,7 @@ fn serve() -> anyhow::Result<()> {
     result
 }
 
-pub(super) fn secure_directory(root: &Path) -> anyhow::Result<()> {
+pub(super) fn secure_directory(root: &Path, user: bool) -> anyhow::Result<()> {
     // Paths are data in the child environment, never interpolated PowerShell.
     command(
         Command::new("powershell.exe")
@@ -299,6 +308,7 @@ pub(super) fn secure_directory(root: &Path) -> anyhow::Result<()> {
                 "-Command",
                 include_str!("state-acl.ps1"),
             ])
-            .env("RUNNER_SERVICE_STATE_DIRECTORY", root),
+            .env("RUNNER_SERVICE_STATE_DIRECTORY", root)
+            .env("RUNNER_SERVICE_SCOPE", if user { "user" } else { "system" }),
     )
 }

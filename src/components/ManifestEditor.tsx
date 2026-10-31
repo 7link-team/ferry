@@ -1,3 +1,4 @@
+import { AutoField, FieldControl } from "./auto-form";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseDocument, visit } from "yaml";
 import { Button } from "./ui/button";
@@ -199,66 +200,15 @@ export function ManifestEditor({
     } = {},
   ) => {
     const current = get(path);
-    const props = {
-      "aria-label": label,
-      value: String(current ?? options.fallback ?? ""),
-      disabled: readOnly,
-      onChange: (
-        event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-      ) =>
-        set(
-          path,
-          event.target.value === "" && !options.required
-            ? undefined
-            : options.number && event.target.value !== ""
-              ? Number(event.target.value)
-              : event.target.value,
-        ),
-    };
-    return (
-      <label className="flex min-w-0 flex-col gap-1.5 text-sm">
-        {label}
-        {options.multiline ? (
-          <textarea {...props} className={area} />
-        ) : (
-          <Input
-            {...props}
-            required={options.required}
-            type={options.number ? "number" : "text"}
-            min={options.min}
-            max={options.max}
-            step={options.number ? 1 : undefined}
-          />
-        )}
-        {options.hint && (
-          <span className="text-xs text-muted-foreground">{options.hint}</span>
-        )}
-      </label>
-    );
+    return <AutoField label={label} required={options.required} help={options.hint}>
+      <FieldControl name={label} field={{ name: label, type: options.multiline ? "textarea" : options.number ? "number" : "text", config: { ...(options.min === undefined ? {} : { min: options.min }), ...(options.max === undefined ? {} : { max: options.max }) } }} value={String(current ?? options.fallback ?? "")} required={options.required} disabled={readOnly}
+        onChange={value => set(path, value === "" && !options.required ? undefined : value)} />
+    </AutoField>;
   };
-  const select = (
-    label: string,
-    path: Path,
-    choices: string[],
-    fallback: string,
-  ) => (
-    <label className="flex flex-col gap-1.5 text-sm">
-      {label}
-      <select
-        aria-label={label}
-        className="h-9 rounded-md border border-input bg-background px-2"
-        value={String(get(path) ?? fallback)}
-        disabled={readOnly}
-        onChange={(e) => set(path, e.target.value)}
-      >
-        {[...new Set([...choices, String(get(path) ?? fallback)])].map(
-          (choice) => (
-            <option key={choice}>{choice}</option>
-          ),
-        )}
-      </select>
-    </label>
-  );
+  const select = (label: string, path: Path, choices: string[], fallback: string) => <AutoField label={label}>
+    <FieldControl name={label} field={{ name: label, type: "select", config: { options: [...new Set([...choices, String(get(path) ?? fallback)])].map(value => ({ value, label: value })) } }} value={String(get(path) ?? fallback)} disabled={readOnly} onChange={value => set(path, value)} />
+  </AutoField>;
+
   const rows = (
     title: string,
     path: Path,
@@ -336,8 +286,7 @@ export function ManifestEditor({
       </div>
       {sourceMode || !parsed.data ? (
         <>
-          <label className="flex flex-col gap-2 text-sm">
-            应用配置源码（YAML / JSON）
+          <AutoField label="应用配置源码（YAML / JSON）" className="flex flex-col gap-2 text-sm">
             <textarea
               className={`${area} min-h-80`}
               value={value}
@@ -346,7 +295,7 @@ export function ManifestEditor({
               onChange={(e) => onChange(e.target.value)}
               aria-invalid={syntaxError}
             />
-          </label>
+          </AutoField>
           {parsed.error && (
             <p
               role="alert"
@@ -420,8 +369,7 @@ export function ManifestEditor({
                   )}
                 </div>
                 <div className={grid}>
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    服务名称
+                  <AutoField label="服务名称" className="flex flex-col gap-1.5 text-sm">
                     <Input
                       value={String(service.name ?? "")}
                       required
@@ -453,15 +401,14 @@ export function ManifestEditor({
                         change(changes);
                       }}
                     />
-                  </label>
+                  </AutoField>
                   {text("副本数", p("replicas"), {
                     number: true,
                     min: 1,
                     max: 100,
                     fallback: 1,
                   })}
-                  <label className="flex flex-col gap-1.5 text-sm">
-                    运行来源
+                  <AutoField label="运行来源" className="flex flex-col gap-1.5 text-sm">
                     <select
                       aria-label="运行来源"
                       className="h-9 rounded-md border border-input bg-background px-2"
@@ -492,7 +439,7 @@ export function ManifestEditor({
                       <option value="image">容器镜像</option>
                       <option value="artifact">流水线构建产物（Native）</option>
                     </select>
-                  </label>
+                  </AutoField>
                   {!artifact &&
                     text("镜像", p("image"), {
                       required: true,
@@ -553,8 +500,7 @@ export function ManifestEditor({
                   (row, environment) => (
                     <>
                       {text("变量名称", [...row, "name"], { required: true })}
-                      <label className="flex flex-col gap-1.5 text-sm">
-                        取值方式
+                      <AutoField label="取值方式" className="flex flex-col gap-1.5 text-sm">
                         <select
                           aria-label="取值方式"
                           className="h-9 rounded-md border border-input bg-background px-2"
@@ -584,7 +530,7 @@ export function ManifestEditor({
                           <option value="literal">普通文本</option>
                           <option value="reference">引用已保存变量</option>
                         </select>
-                      </label>
+                      </AutoField>
                       {environment.valueFrom !== undefined
                         ? text("变量引用", [...row, "valueFrom"], {
                             required: true,
@@ -743,8 +689,8 @@ export function ManifestEditor({
                               [...healthPath, "httpGet", "path"],
                               { required: true },
                             )}
-                            <label className="flex flex-col gap-1.5 text-sm">
-                              {label}端口
+                            <AutoField label={<>{label}端口
+                              </>} className="flex flex-col gap-1.5 text-sm">
                               <Input
                                 disabled={readOnly}
                                 value={String(
@@ -759,7 +705,7 @@ export function ManifestEditor({
                                   )
                                 }
                               />
-                            </label>
+                            </AutoField>
                             {text(
                               `${label}周期（秒）`,
                               [...healthPath, "periodSeconds"],
@@ -916,8 +862,8 @@ function JsonField({
     return () => report(fieldId, false);
   }, [fieldId, error, report]);
   return (
-    <label className="flex min-w-0 flex-col gap-1.5 text-sm sm:col-span-2">
-      {label}（JSON 对象）
+    <AutoField label={<>{label}（JSON 对象）
+      </>} className="flex min-w-0 flex-col gap-1.5 text-sm sm:col-span-2">
       <textarea
         className={area}
         aria-label={`${label}（JSON 对象）`}
@@ -943,6 +889,6 @@ function JsonField({
           {error}
         </span>
       )}
-    </label>
+    </AutoField>
   );
 }

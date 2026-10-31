@@ -566,6 +566,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/{workspace}/nodes/{id}/metrics", get(host_monitor::read))
         .route(
+            "/{workspace}/nodes/{id}/file-systems",
+            get(remote::file_systems),
+        )
+        .route(
             "/{workspace}/nodes/{id}/terminal-sessions",
             get(remote::terminal),
         )

@@ -43,7 +43,7 @@ try {
   const root=`/workspaces/${workspace_tenant}`;
   const host=await post(owner,root+'/nodes',{name:'Cron UI runner',connection:'runner'});
   await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes/${host.id}?tab=alerts`);
-  await p.getByRole('tab',{name:'报警监控'}).waitFor();
+  await p.getByRole('tab',{name:'报警',exact:true}).waitFor();
   const [eventsResponse]=await Promise.all([
     p.waitForResponse(response=>response.url().includes('/alert-events?') && response.url().includes(`target_ref=${host.id}`) && response.ok()),
     p.getByRole('tab',{name:'告警事件'}).click(),
@@ -70,7 +70,7 @@ try {
   await nodeAlertDialog.waitFor({state:'hidden'});
   await p.getByRole('row').filter({hasText:'Node scoped rule'}).waitFor();
   assert.equal(p.url(),nodeAlertUrl,'saved node alert must refresh in place');
-  assert.equal(await p.getByRole('tab',{name:'报警监控'}).getAttribute('aria-selected'),'true');
+  assert.equal(await p.getByRole('tab',{name:'报警',exact:true}).getAttribute('aria-selected'),'true');
   await p.goto(`${origin}/workspaces/${workspace_tenant}/alert-rules`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');

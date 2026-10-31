@@ -110,6 +110,25 @@ docker compose up -d --build               # 或本地构建
 的 `targets: "all"` 指的是当前桌面平台的全部安装包格式；Android/iOS 需要另外执行
 `tauri android init` / `tauri ios init`，本项目不执行，也不保留移动端图标与配置。
 
+## 全套 Compose 快速启动
+
+在仓库根目录运行 `python scripts/quickstart.py`，启动 Ferry + PostgreSQL + NATS JetStream + Redis；使用 `--database mysql` 可改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。
+
+部署地址、HTTPS、备份、升级、Redis 当前用途及单机/高可用边界见 [Compose 快速部署](docs/compose-quickstart.md)。
+
+## Runner 安装方式
+
+在节点的“连接主机”中选择安装方式，复制生成的命令到目标主机执行：
+
+| 方式 | 运行身份 | 权限 | 运行时间 |
+|---|---|---|---|
+| 系统服务（默认） | Windows LocalSystem / root | 需要管理员或 sudo | 开机启动 |
+| 当前用户 | 执行命令的账号，使用该账号的用户目录、PATH 和已登录的工具（如 npm 全局安装的 CLI） | 无需管理员或 sudo | Windows 为登录时启动的计划任务；Linux 为 `systemd --user`，注销后停止，除非执行 `loginctl enable-linger`；macOS 为 LaunchAgent |
+
+终端、命令和流水线都以 Runner 的运行身份执行。两种方式都会在异常退出后自动恢复，并支持签名自动升级。Windows 当前用户方式的状态保存在 `%LOCALAPPDATA%\runner-agent`，仅该账号和 SYSTEM 可访问，运行时不显示任何窗口；该账号注销后节点显示离线，下次登录时自动重连。需要 Runner 0.1.0-alpha.25 或更新版本，旧版本会被安装脚本拒绝，不会安装。
+
+更换安装方式时，先在主机上用原安装目录中的 `runner-service service uninstall` 移除原注册（当前用户方式需加 `--user`，系统服务需管理员权限），再在 Ferry 中“重置连接”，然后用新方式运行连接命令。
+
 ## 多实例节点通信
 
 设置 `FERRY_NATS_URL` 启用 NATS JetStream 集群通信；不设置时保持单实例运行。

@@ -1,3 +1,4 @@
+import { AutoForm, AutoFields, AutoField, FieldControl } from "./auto-form";
 /**
  * The one form implementation, in three modes driven by the route:
  *
@@ -115,7 +116,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     setLoading(true);
     getResource<T>(workspace, config.resource, id, config.endpoint)
       .then((row) => {
-        if (config.resource === "credentials" && row.scope !== config.blank.scope) throw new Error("此授权认证属于其他模块，请从对应模块进入。");
+        if (config.resource === "credentials" && row.scope !== config.blank.scope) throw new Error("此凭据属于其他模块，请从对应模块进入。");
         if (live) { setDraft(creating && config.copy ? config.copy(row) : row); setError(""); }
       })
       .catch((cause: unknown) => live && setError(errorText(cause)))
@@ -215,11 +216,20 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </p>
     );
 
+  const visibleViewActions = (config.viewActions ?? []).filter(action => (!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T)));
+  const renderViewAction = (action: NonNullable<FormConfig<T>["viewActions"]>[number]) => action.to ? <Button key={action.label} variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={action.label} title={action.iconOnly ? action.label : undefined} asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.iconOnly ? action.icon : action.label}</a></Button> : <Button key={action.label} type="button" variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={action.label} title={action.iconOnly ? action.label : undefined} disabled={saving} onClick={async()=>{
+        if(action.destructive){setPendingDelete(action);return;}
+        if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
+        setSaving(true);setError("");
+        try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
+        catch(cause){setError(errorText(cause));}finally{setSaving(false);}
+      }}>{action.iconOnly ? action.icon : action.label}</Button>;
+
   const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background py-2" role="tablist" aria-label="接入方式">
     {([ ["runner", "代理 Runner"], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
   </div>;
 
-  if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="mx-auto w-full max-w-6xl space-y-4 pb-8">
+  if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="w-full space-y-4 pb-8">
     {hostConnectionTabs}
     {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">当前角色没有代理接入权限。</p>}
   </div>;
@@ -233,10 +243,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
       if (creating && pendingActionRow && "id" in pendingActionRow)
         navigate({ ...route, id: String(pendingActionRow.id), mode: "edit" }, {});
     };
-    return <form className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
+    return <AutoForm className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
       <header className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-2 sm:min-h-14 sm:px-4">
         <Button type="button" variant="ghost" size="icon" aria-label="返回流水线" title="返回流水线" onClick={() => navigate({ ...route, mode: "list" }, {})}><ArrowLeft /></Button>
-        <Input aria-label="流水线名称" placeholder="流水线名称" required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} />
+        <AutoField label="流水线名称" name="name" hideLabel className="shrink-0"><Input aria-label="流水线名称" placeholder="流水线名称" required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} /></AutoField>
         <Button type="button" variant="ghost" size="sm" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(open => !open)}><SlidersHorizontal className="size-4" />流水线设置</Button>
         {editor?.type === "actions-editor" && <div className="flex gap-1" role="tablist" aria-label="流水线编辑模式">
           <Button type="button" role="tab" aria-selected={editorMode === "visual"} variant={editorMode === "visual" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("visual")}>可视化</Button>
@@ -264,8 +274,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
           <Dialog.Description className="mt-2 text-sm text-muted-foreground">{templateDialog === "import" ? "选择模板并生成配置到当前流水线。" : "将当前流水线配置保存为可复用模板。"}</Dialog.Description>
           {templateDialog === "import" && config.generator && <div className="mt-4"><FormGenerator config={config.generator} compactWhenUnused={false} listMode report={reportOptions} onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }} /></div>}
           {templateDialog === "export" && <div className="mt-4 space-y-4">
-            <label className="block space-y-2 text-sm">模板名称<Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></label>
-            <label className="block space-y-2 text-sm">说明<Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></label>
+            <AutoField label="模板名称" className="block space-y-2 text-sm"><Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></AutoField>
+            <AutoField label="说明" className="block space-y-2 text-sm"><Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></AutoField>
             {templateError && <p role="alert" className="text-sm text-destructive">{templateError}</p>}
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>取消</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
               setTemplateBusy(true); setTemplateError("");
@@ -280,11 +290,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
           </div>}
         </Dialog.Content>
       </Dialog.Portal></Dialog.Root>
-    </form>;
+    </AutoForm>;
   }
 
   return (
-    <form className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : ["space-y-6", config.width !== "full" && "mx-auto max-w-6xl"])} onSubmit={submit}>
+    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
       {hostConnectionTabs}
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -305,26 +315,18 @@ export function ResourceForm<T extends Record<string, unknown>>({
       }} />}
       {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
-      {readOnly && config.viewActions && <div className="flex flex-wrap gap-2">{config.viewActions.filter(action=>(!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T))).map(action=>action.to ? <Button key={action.label} variant="outline" asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.label}</a></Button> : <Button key={action.label} type="button" variant="outline" disabled={saving} onClick={async()=>{
-        if(action.destructive){setPendingDelete(action);return;}
-        if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
-        setSaving(true);setError("");
-        try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
-        catch(cause){setError(errorText(cause));}finally{setSaving(false);}
-      }}>{action.label}</Button>)}</div>}
+      {readOnly && visibleViewActions.some(action => !action.section) && <div className="flex flex-wrap gap-2">{visibleViewActions.filter(action => !action.section).map(renderViewAction)}</div>}
       {config.sections.map((section, index) => {
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
-          <section key={section.title ?? index} aria-label={section.title ?? (readOnly ? index === 0 ? "基本信息" : "其他信息" : undefined)} className={readOnly ? cn("detail-section", fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type)) && "col-span-full") : "space-y-4"}>
+          <section key={section.title ?? index} aria-label={section.title ?? (readOnly ? index === 0 ? "基本信息" : "其他信息" : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : "space-y-4"}>
             {(section.title || readOnly) && (
-              <h2 className={readOnly ? "detail-section-title" : "mb-2 text-sm font-medium text-muted-foreground"}>
+              <div className={readOnly ? "detail-section-title" : "mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground"}><h2 className="min-w-0 flex-1">
                 {section.title ?? (index === 0 ? "基本信息" : "其他信息")}
-              </h2>
+              </h2>{readOnly && section.title && visibleViewActions.filter(action => action.section === section.title).map(renderViewAction)}</div>
             )}
-            <div className={readOnly ? "detail-fields grid sm:grid-cols-2" : "grid gap-4 sm:grid-cols-2"}>
-              {fields.map(renderField)}
-            </div>
+            <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: field.label, type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
           </section>
         );
       })}
@@ -338,7 +340,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
               <a href={backToList}>取消</a>
             </Button>}
       </div>}
-    </form>
+    </AutoForm>
   );
 }
 
@@ -376,12 +378,12 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
       {optionsLoading && <p className="py-3 text-sm text-muted-foreground">正在加载模板…</p>}
       {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">暂无模板</p>}
       {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{option.label}</button>)}
-    </div> : <label className="flex min-w-0 flex-col gap-2 text-sm"><span className={compact ? "sr-only" : undefined}>模板</span>
+    </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>模板</span>} className="flex min-w-0 flex-col gap-2 text-sm">
       <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
         <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder="选择模板" /></SelectTrigger>
         <SelectContent><SelectItem value="__none">不使用模板</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
       </Select>
-    </label>}
+    </AutoField>}
     {(error || optionsError) && <p role="alert" className="text-sm text-destructive">{error || optionsError}</p>}
     {id && <>
       {template && <><p className="text-sm text-muted-foreground">{template.name} · 版本 {template.version}</p>
@@ -427,12 +429,12 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
     </label>}
     {!creating && <p className="text-xs text-muted-foreground">{stored ? "已设置密钥" : "尚未设置密钥"}</p>}
     {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
-    {replacing && <label className="flex flex-col gap-1.5 text-sm font-medium">
-      {field.label}
+    {replacing && <AutoField label={<>{field.label}</>} className="flex flex-col gap-1.5 text-sm font-medium">
+
       <textarea className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} readOnly={readOnly}
         autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? "允许留空；空白和换行会原样保存"} />
-    </label>}
+    </AutoField>}
   </Wrapper>;
 }
 
@@ -543,74 +545,15 @@ function Field<T>({
       </Wrapper>
     );
 
-  return (
-    <Wrapper field={field}>
-      <label className="flex flex-col gap-1.5">
-        {label}
-        {field.type === "select" ? (
-          <>
-            <div className="flex items-center gap-2"><Select value={text} onValueChange={onChange} disabled={readOnly}>
-              <SelectTrigger className="min-w-0 flex-1">
-                <SelectValue placeholder={field.placeholder ?? "请选择"} />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>
-            {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">暂无可选{field.label}，可在此添加。</p>}
-            {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{ label: field.createOption.label, parameters: () => field.createOption!.fields, action: async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange(added.value); } }} />}
-          </>
-        ) : field.type === "textarea" || field.type === "secret" || field.type === "code" ? (
-          // A `secret` has to be a textarea, not <input type=password>: an
-          // HTML input cannot hold newlines, so pasting a PEM private key
-          // into one silently strips them and stores an unusable key. The
-          // cost is that the value is visible while typing; for a key being
-          // pasted that is a fair trade, and nothing is ever rendered back.
-          <textarea
-            className={cn(
-              "min-h-20 rounded-md border border-input bg-transparent px-3 py-2 shadow-xs",
-              "outline-none focus-visible:border-ring focus-visible:ring-[3px]",
-              "focus-visible:ring-ring/50 disabled:opacity-50",
-              field.type === "code" ? "min-h-64 font-mono text-sm" : field.type === "secret" ? "font-mono text-xs" : "text-sm",
-            )}
-            value={text}
-            placeholder={field.placeholder}
-            readOnly={readOnly}
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(event) => onChange(event.target.value)}
-          />
-        ) : field.type === "switch" ? (
-          <Checkbox
-            checked={!!value}
-            disabled={readOnly}
-            onCheckedChange={(checked) => onChange(!!checked)}
-          />
-        ) : (
-          <Input
-            type={
-              field.type === "number" ? "number" : field.type === "text" ? "text" : "password"
-            }
-            value={text}
-            placeholder={field.placeholder}
-            readOnly={readOnly}
-            required={field.required}
-            min={field.min}
-            autoComplete={field.type === "password" ? "new-password" : undefined}
-            onChange={(event) =>
-              onChange(field.type === "number" && event.target.value !== "" ? Number(event.target.value) : event.target.value)
-            }
-          />
-        )}
-      </label>
-      {field.help && <p className="mt-1 text-xs text-muted-foreground">{field.help}</p>}
-    </Wrapper>
-  );
+  return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
+    <div className="flex min-w-0 items-start gap-2">
+      <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type, config: { options, ...(field.min === undefined ? {} : { min: field.min }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
+      {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}
+    </div>
+    {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">暂无可选{field.label}，可在此添加。</p>}
+    {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{ label: field.createOption.label, parameters: () => field.createOption!.fields, action: async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange(added.value); } }} />}
+  </AutoField>;
+
 }
 
 const Wrapper = <T,>({
@@ -620,7 +563,7 @@ const Wrapper = <T,>({
   field: FormField<T>;
   children: React.ReactNode;
 }) => (
-  <div className={cn("resource-field flex min-w-0 flex-col gap-1.5", field.span === 2 && "sm:col-span-2")}>{children}</div>
+  <AutoField name={field.key} className={cn(field.span === 2 && "sm:col-span-2")}>{children}</AutoField>
 );
 
 /** Shared field rendering and modal lifecycle for parameterized row actions. */
@@ -638,14 +581,14 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
   <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
    <Dialog.Title className="text-lg font-semibold">{action.label}</Dialog.Title>
    <Dialog.Description className="mt-2 text-sm text-muted-foreground">{action.description ?? "确认以下执行参数后开始操作。"}</Dialog.Description>
-   <form className="mt-4 space-y-4" onSubmit={async event=>{
+   <AutoForm className="mt-4 space-y-4" onSubmit={async event=>{
     event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
    }}>
     {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),[field.key]:value}))} />)}
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?"处理中…":"确认"+action.label}</Button></div>
-   </form>
+   </AutoForm>
   </Dialog.Content>
  </Dialog.Portal></Dialog.Root>;
 }

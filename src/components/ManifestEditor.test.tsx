@@ -48,8 +48,8 @@ function Harness({ source = fixture, readOnly = false, mode = "compose" }) {
 const button = (name: string, region: ParentNode = host) =>
   [...region.querySelectorAll("button")].find((b) => b.textContent === name || b.getAttribute("aria-label")?.startsWith(name))!;
 const input = (name: string, region: ParentNode = host) =>
-  [...region.querySelectorAll("label")]
-    .find((l) => l.firstChild?.textContent === name)!
+  [...region.querySelectorAll("[data-auto-field]")]
+    .find((l) => l.firstElementChild?.textContent?.trim().startsWith(name))!
     .querySelector("input,textarea,select")! as HTMLInputElement;
 const fill = async (element: Element, value: string) => {
   await act(async () => {

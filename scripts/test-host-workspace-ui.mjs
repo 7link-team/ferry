@@ -13,6 +13,7 @@ try {
   let saved = '';
   let createdEntry;
   let deletedPath;
+  let windowsFiles = false;
   const longName = 'deployment-artifact-with-a-very-long-filename-that-must-remain-left-aligned-and-truncated-in-the-file-list.log';
   let groups = [
     { id: 'g1', name: 'Alpha', description: '', parent_id: '0', position: 0, version: 1 },
@@ -41,8 +42,10 @@ try {
     if (path === '/api/workspaces/109124796398174208/nodes/h1/files') {
       if (request.method() === 'POST') { createdEntry = request.postDataJSON(); return route.fulfill({ status: 201, body: '' }); }
       if (request.method() === 'DELETE') { deletedPath = url.searchParams.get('path'); return route.fulfill({ status: 204, body: '' }); }
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ path: url.searchParams.get('path'), items: [{ name: 'logs', kind: 'directory', size: 0, mode: 493, modified_at: 0 }, { name: 'note.txt', kind: 'file', size: 12, mode: 420, modified_at: 0 }, { name: longName, kind: 'file', size: 12, mode: 420, modified_at: 0 }] }) });
+      const hidden = url.searchParams.get('show_hidden') === 'true' ? [{ name: '.env', kind: 'file', size: 5, mode: 420, modified_at: 0 }, ...(windowsFiles ? [{ name: 'pagefile.sys', kind: 'file', size: 10, mode: 420, modified_at: 0 }] : [])] : [];
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ path: url.searchParams.get('path'), items: [{ name: 'logs', kind: 'directory', size: 0, mode: 493, modified_at: 0 }, { name: 'note.txt', kind: 'file', size: 12, mode: 420, modified_at: 0 }, { name: longName, kind: 'file', size: 12, mode: 420, modified_at: 0 }, ...hidden] }) });
     }
+    if (path === '/api/workspaces/109124796398174208/nodes/h1/file-systems') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ platform: windowsFiles ? 'windows' : 'unix', items: (windowsFiles ? ['C:/', 'D:/', 'E:/'] : ['/', '/mnt/data', '/media/archive']).map(path => ({ path, name: path, total: 1024, used: 128 })) }) });
     if (path === '/api/workspaces/109124796398174208/nodes/h1/files/content') {
       if (request.method() === 'PUT') { saved = request.postData() ?? ''; return route.fulfill({ status: 204, body: '' }); }
       return route.fulfill({ status: 200, contentType: 'application/octet-stream', body: url.searchParams.get('path') === '/new.txt' ? '' : 'hello world\n' });
@@ -86,7 +89,7 @@ try {
   await page.getByRole('button', { name: '上下分屏' }).first().click();
   assert.equal(await page.getByRole('button', { name: '关闭分屏' }).count(), 3);
   await page.getByRole('button', { name: '新建终端' }).click();
-  assert.equal(await page.getByRole('tab').count(), 2);
+  assert.equal(await page.getByRole('tablist', { name: '主机工作标签' }).getByRole('tab').count(), 2);
   await page.getByRole('tab', { name: '文件 1' }).click();
   assert.equal(await page.getByRole('button', { name: '关闭分屏' }).count(), 3);
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'ferry-host-workspace-desktop.png'), fullPage: true });
@@ -154,7 +157,40 @@ try {
   assert(Math.abs(bounds.x - (1920 - bounds.x - bounds.width)) < 200, 'host form is centered on wide screens');
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'host form fits the mobile viewport');
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
+  await page.getByLabel('磁盘分区', { exact: true }).selectOption('/mnt/data');
+  await page.waitForFunction(() => document.querySelector('input[aria-label="目录路径"]').value === '/mnt/data');
+  await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
+  await page.getByRole('button', { name: '预览 .env', exact: true }).waitFor();
+  await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
+  await page.getByRole('button', { name: '预览 .env', exact: true }).waitFor({ state: 'detached' });
+  windowsFiles = true;
+  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
+  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  assert.equal(await page.locator('table tbody tr').count(), 3, 'all Windows drives appear');
+  assert.equal(await page.getByRole('button', { name: '新建文件', exact: true }).isDisabled(), true, 'computer root is not a writable directory');
+  const driveRow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'D:/', exact: true }) });
+  assert.equal(await driveRow.getByRole('button', { name: '在 D:/ 打开终端', exact: true }).getAttribute('title'), '在此盘符打开终端');
+  assert.equal(await driveRow.getByRole('button', { name: /删除/ }).count(), 0);
+  await page.getByLabel('磁盘分区', { exact: true }).selectOption('D:/');
+  await page.waitForFunction(() => document.querySelector('input[aria-label="目录路径"]').value === 'D:/');
+  assert.equal(await page.getByRole('button', { name: '预览 pagefile.sys', exact: true }).count(), 0);
+  await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
+  await page.getByRole('button', { name: '预览 pagefile.sys', exact: true }).waitFor();
+  await page.getByRole('button', { name: '上级目录', exact: true }).click();
+  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  await page.locator('table').getByRole('button', { name: 'E:/', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('input[aria-label="目录路径"]').value === 'E:/');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
+  await page.getByRole('button', { name: '新建标签', exact: true }).click();
+  await page.getByRole('menuitem', { name: '新建文件管理', exact: true }).click();
+  assert.equal(await page.getByRole('tablist', { name: '主机工作标签' }).getByRole('tab').count(), 2);
+  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  await page.getByRole('tab', { name: '文件 1', exact: true }).click();
+  assert.equal(await page.getByRole('textbox', { name: '目录路径', exact: true }).inputValue(), 'E:/');
+  console.log('PASS Unix partitions/hidden toggle and Windows computer root/all drives/cross-drive navigation/hidden system files');
   console.log('PASS host workspace, splits, file edit, list shortcuts and persisted group ordering');
 } finally {
   await browser?.close();

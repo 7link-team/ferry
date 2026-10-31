@@ -1,3 +1,5 @@
+import { AutoTable } from "./auto-table";
+import { AutoForm, AutoField } from "./auto-form";
 /**
  * Two-way file transfer against a host, over whichever channel that host uses.
  *
@@ -13,6 +15,8 @@ import {
   ArrowUp,
   Download,
   Eye,
+  EyeOff,
+  HardDrive,
   File as FileIcon,
   FileArchive,
   FileAudio,
@@ -37,7 +41,7 @@ import {
 import { Dialog } from "radix-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { errorText } from "../api";
+import { api, errorText } from "../api";
 import { base } from "../resource";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
@@ -47,7 +51,10 @@ interface Entry {
   size: number;
   mode: number;
   modified_at: number;
+  path?: string;
 }
+type FileSystem = { name: string; path: string; total: number; used: number };
+type FileSystems = { platform: string; items: FileSystem[] };
 const imageTypes = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const textTypes = /\.(txt|log|md|markdown|json|jsonc|ya?ml|toml|xml|csv|ini|conf|config|env|properties|sh|bash|zsh|ps1|bat|cmd|sql|py|js|jsx|ts|tsx|css|scss|html?|go|rs|java|c|cc|cpp|h|hpp|rb|php|vue|svelte|dockerfile)$/i;
 const textNames = /^(Dockerfile|Makefile|CMakeLists\.txt|\.gitignore|\.gitattributes|\.env(?:\..+)?|LICENSE|README)$/i;
@@ -83,12 +90,20 @@ function size(bytes: number) {
 
 /** `/a/b` + `c` -> `/a/b/c`, and `/` + `c` -> `/c`. */
 export function join(dir: string, name: string) {
-  return `${dir === "/" ? "" : dir}/${name}`;
+  const normalized = normalizePath(dir);
+  return `${normalized === "/" ? "" : normalized.replace(/\/+$/, "")}/${name}`;
+}
+export function normalizePath(path: string) {
+  return /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\") ? path.replaceAll("\\", "/") : path;
 }
 /** `/a/b/c` -> `/a/b`; `/a` -> `/`; `/` -> `/`. */
 export function parent(dir: string) {
+  dir = normalizePath(dir);
   if (dir === "/") return "/";
+  if (/^[a-z]:\/*$/i.test(dir) || /^\/\/[^/]+\/[^/]+\/*$/.test(dir)) return "/";
+  dir = dir.replace(/\/+$/, "");
   const cut = dir.lastIndexOf("/");
+  if (cut === 2 && /^[a-z]:/i.test(dir)) return dir.slice(0, 3);
   return cut <= 0 ? "/" : dir.slice(0, cut);
 }
 
@@ -109,6 +124,14 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   const [pendingDelete, setPendingDelete] = useState<Entry>();
   const [creating, setCreating] = useState<"file" | "directory">();
   const [newName, setNewName] = useState("");
+  const [showHidden, setShowHidden] = useState(false);
+  const showHiddenRef = useRef(false);
+  const [fileSystems, setFileSystems] = useState<FileSystems>();
+  const fileSystemsRef = useRef<FileSystems | undefined>(undefined);
+  const [fileSystemsError, setFileSystemsError] = useState("");
+  const loadSequence = useRef(0);
+  const virtualRoot = fileSystems?.platform === "windows" && path === "/";
+  const entryPath = (entry: Entry) => entry.path ?? join(path, entry.name);
   useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview?.url]);
   const picker = useRef<HTMLInputElement>(null);
   const openTerminal = (directory: string) => {
@@ -121,19 +144,29 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
 
   const load = useCallback(
     async (target: string, remember = false): Promise<boolean> => {
+      target = normalizePath(target);
+      const sequence = ++loadSequence.current;
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`${endpoint}?path=${encodeURIComponent(target)}`, {
+        let body: { path?: string; items: Entry[] };
+        if (fileSystemsRef.current?.platform === "windows" && target === "/") {
+          body = { path: "/", items: fileSystemsRef.current.items.map(disk => ({ name: disk.path, path: disk.path, kind: "directory", size: disk.total, mode: 0, modified_at: 0 })) };
+        } else {
+        const response = await fetch(`${endpoint}?path=${encodeURIComponent(target)}&show_hidden=${showHiddenRef.current}`, {
           headers: { "X-Ferry-Request": "1" },
         });
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error ?? "读取目录失败。");
-        setEntries(body.items as Entry[]);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "读取目录失败。");
+        body = result;
+        }
+        if (sequence !== loadSequence.current) return false;
+        target = body.path ?? target;
+        setEntries(body.items.filter(entry => showHiddenRef.current || !entry.name.startsWith('.')));
         const changed = target !== currentPath.current;
         currentPath.current = target;
         setPath(target);
-        setDraft(target);
+        setDraft(fileSystemsRef.current?.platform === "windows" && target === "/" ? "" : target);
         if (remember) setTrail(current => current.paths[current.index] === target ? current : {
           paths: [...current.paths.slice(0, current.index + 1), target], index: current.index + 1,
         });
@@ -143,19 +176,31 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         }
         return true;
       } catch (cause) {
+        if (sequence !== loadSequence.current) return false;
         setError(errorText(cause));
         setEntries([]);
         return false;
       } finally {
-        setLoading(false);
+        if (sequence === loadSequence.current) setLoading(false);
       }
     },
     [endpoint],
   );
 
   useEffect(() => {
+    let cancelled = false;
     setTrail({ paths: [initialPath], index: 0 });
-    void load(initialPath);
+    fileSystemsRef.current = undefined;
+    setFileSystems(undefined);
+    setFileSystemsError("");
+    void api<FileSystems>(endpoint.replace(/^\/api/, "").replace(/\/files$/, "/file-systems"))
+      .then(value => {
+        if (!Array.isArray(value.items) || !value.items.every(disk => typeof disk.path === "string" && disk.path.length > 0)) throw new Error("磁盘分区接口返回了无效数据。");
+        if (!cancelled) { fileSystemsRef.current = value; setFileSystems(value); }
+      })
+      .catch(cause => { if (!cancelled) setFileSystemsError(`磁盘分区读取失败：${errorText(cause)}`); })
+      .finally(() => { if (!cancelled) void load(initialPath); });
+    return () => { cancelled = true; ++loadSequence.current; };
   }, [load, initialPath]);
   useEffect(() => {
     const restore = (event: PopStateEvent) => {
@@ -307,11 +352,11 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
           <Dialog.Title className="text-base font-semibold">新建{creating === "directory" ? "文件夹" : "文件"}</Dialog.Title>
           <Dialog.Description className="mt-1 truncate text-sm text-muted-foreground" title={path}>位置：{path}</Dialog.Description>
-          <form className="mt-4 space-y-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
-            <Input autoFocus aria-label="名称" value={newName} onChange={event => setNewName(event.target.value)} />
+          <AutoForm className="mt-4 space-y-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
+            <AutoField label="名称" required><Input autoFocus name="name" required aria-label="名称" value={newName} onChange={event => setNewName(event.target.value)} /></AutoField>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!busy} onClick={() => setCreating(undefined)}>取消</Button><Button type="submit" disabled={!!busy || !newName.trim()}>{busy ? "创建中…" : "创建"}</Button></div>
-          </form>
+          </AutoForm>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -324,7 +369,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         if (file) void upload(file);
       }}
     >
-      <form
+      <AutoForm
         className="flex flex-wrap gap-2"
         onSubmit={(event) => {
           event.preventDefault();
@@ -337,15 +382,25 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
                 disabled={path === "/"} aria-label="上级目录">
           <ArrowUp />
         </Button>
-        <Input aria-label="目录路径" value={draft} onChange={(event) => setDraft(event.target.value)} className="min-w-32 w-auto flex-1 font-mono" />
+        {!!fileSystems?.items.length && <AutoField label="磁盘分区" hideLabel className="min-w-36 max-w-64">
+          <select aria-label="磁盘分区" className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            value={virtualRoot ? "__computer__" : [...fileSystems.items].sort((a,b) => b.path.length-a.path.length).find(disk => path === disk.path || path.startsWith(disk.path.endsWith('/') ? disk.path : `${disk.path}/`))?.path ?? "__none__"}
+            onChange={event => void load(event.target.value === "__computer__" ? "/" : event.target.value, true)}>
+            <option value="__none__" disabled>选择磁盘分区</option>
+            {fileSystems.platform === "windows" && <option value="__computer__">此电脑 · 所有磁盘</option>}
+            {fileSystems.items.map(disk => <option key={disk.path} value={disk.path}>{disk.path}{disk.name && disk.name !== disk.path ? ` · ${disk.name}` : ''}</option>)}
+          </select>
+        </AutoField>}
+        <AutoField label="目录路径" hideLabel className="min-w-32 flex-1"><Input aria-label="目录路径" placeholder={virtualRoot ? "此电脑 · 请选择磁盘分区" : "完整目录路径"} value={draft} onChange={(event) => setDraft(event.target.value)} className="w-full font-mono" /></AutoField>
         <Button type="submit" variant="outline" size="icon" aria-label="转到目录" title="转到目录"><ArrowUp className="rotate-90" /></Button>
         <Button type="button" variant="outline" size="icon" onClick={() => void load(path)} aria-label="刷新">
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
-        {canTerminal && <Button type="button" variant="outline" size="icon" aria-label="在当前目录打开终端" title={`在 ${path} 打开终端`} onClick={() => openTerminal(path)}><SquareTerminal /></Button>}
-        <Button type="button" variant="outline" size="icon" aria-label="新建文件夹" title="新建文件夹" onClick={() => { setCreating("directory"); setNewName(""); setError(""); }}><FolderPlus /></Button>
-        <Button type="button" variant="outline" size="icon" aria-label="新建文件" title="新建文件" onClick={() => { setCreating("file"); setNewName(""); setError(""); }}><FilePlus2 /></Button>
-        <Button type="button" variant="outline" size="icon" aria-label="上传文件" title="上传文件" onClick={() => picker.current?.click()} disabled={!!busy}><Upload /></Button>
+        <Button type="button" variant={showHidden ? "secondary" : "outline"} size="icon" aria-label="显示隐藏文件" aria-pressed={showHidden} title={showHidden ? "隐藏文件：显示中" : "隐藏文件：已隐藏"} onClick={() => { const value = !showHidden; showHiddenRef.current = value; setShowHidden(value); void load(path); }}>{showHidden ? <Eye /> : <EyeOff />}</Button>
+        {canTerminal && <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label="在当前目录打开终端" title={`在 ${path} 打开终端`} onClick={() => openTerminal(path)}><SquareTerminal /></Button>}
+        <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label="新建文件夹" title="新建文件夹" onClick={() => { setCreating("directory"); setNewName(""); setError(""); }}><FolderPlus /></Button>
+        <Button type="button" variant="outline" size="icon" disabled={virtualRoot} aria-label="新建文件" title="新建文件" onClick={() => { setCreating("file"); setNewName(""); setError(""); }}><FilePlus2 /></Button>
+        <Button type="button" variant="outline" size="icon" aria-label="上传文件" title="上传文件" onClick={() => picker.current?.click()} disabled={!!busy || virtualRoot}><Upload /></Button>
         <input
           ref={picker}
           type="file"
@@ -356,9 +411,14 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
             event.target.value = "";
           }}
         />
-      </form>
+      </AutoForm>
+      <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="min-w-0 truncate font-mono" title={virtualRoot ? "此电脑" : path}>当前位置：{virtualRoot ? "此电脑" : path}</span>
+        {fileSystemsError && <span role="status" className="text-destructive">{fileSystemsError}</span>}
+      </div>
 
-      <div className={error || busy ? "min-h-5 text-sm" : "h-0"}>
+      {(error || busy) && <div className="min-h-5 text-sm">
         {error && <span className="text-destructive">{error}</span>}
         {!error && busy && (
           <span className="text-muted-foreground">
@@ -366,36 +426,22 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
             {busy}
           </span>
         )}
+      </div>}
       </div>
 
-      <div className="min-h-0 overflow-auto rounded-lg border border-border bg-card">
-        <table className="w-full min-w-[680px] table-fixed border-separate border-spacing-0 text-sm">
-          <colgroup><col /><col className="w-24" /><col className="w-20" /><col className="w-44" /><col className="w-32" /></colgroup>
-          <thead>
-            <tr>
-              {["名称", "大小", "权限", "修改时间", "操作"].map((label, index) => (
-                <th
-                  key={label}
-                  className={`sticky top-0 z-10 bg-muted px-3 py-2 font-medium text-muted-foreground shadow-[inset_0_-1px_0_var(--border)] ${
-                    index === 4 ? "text-right" : "text-left"
-                  }`}
-                >
-                  {label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.name} className="group">
-                <td className="min-w-0 border-b border-border px-3 py-1.5 text-left group-hover:bg-accent">
+      <AutoTable<Entry> fill minWidth={680} pagination={false} rowKey="name" sticky={{ header: true, right: 1 }}
+        state={{ rows: entries, total: entries.length, query: { page: 1, pageSize: Math.max(1, entries.length) }, loading }}
+        empty={error ? "" : "这个目录是空的。"} onRowClick={entry => { if (entry.kind === "directory") void load(entryPath(entry), true); else if (entry.kind === "file") void openPreview(entry); }}
+        rowClickable={entry => entry.kind === "directory" || entry.kind === "file"}
+        columns={[
+{ field: 'name', name: '名称', render: (_value, entry) => <>
                   {entry.kind === "directory" ? (
                     <button
                       type="button"
                       className="flex w-full min-w-0 items-center gap-2 text-left hover:underline"
-                      onClick={() => void load(join(path, entry.name), true)}
+                      onClick={() => void load(entryPath(entry), true)}
                     >
-                      <Folder className="size-4 shrink-0 text-muted-foreground" />
+                      {virtualRoot ? <HardDrive className="size-4 shrink-0 text-muted-foreground" /> : <Folder className="size-4 shrink-0 text-muted-foreground" />}
                       <span className="min-w-0 truncate" title={entry.name}>{entry.name}</span>
                     </button>
                   ) : (
@@ -404,18 +450,19 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
                       <span className="min-w-0 truncate" title={entry.name}>{entry.name}</span>
                     </button>
                   )}
-                </td>
-                <td className="border-b border-border px-3 py-1.5 text-left text-muted-foreground group-hover:bg-accent">
-                  {entry.kind === "directory" ? "—" : size(entry.size)}
-                </td>
-                <td className="border-b border-border px-3 py-1.5 text-left font-mono text-xs text-muted-foreground group-hover:bg-accent">
+                </> },
+{ field: 'size', name: '大小', width: "96px", render: (_value, entry) => <>
+                  {entry.kind === "directory" && !virtualRoot ? "—" : size(entry.size)}
+                </> },
+{ field: 'mode', name: '权限', width: "80px", render: (_value, entry) => <>
                   {(entry.mode & 0o777).toString(8).padStart(3, "0")}
-                </td>
-                <td className="border-b border-border px-3 py-1.5 text-left text-muted-foreground group-hover:bg-accent">
+                </> },
+{ field: 'modified_at', name: '修改时间', width: "176px", render: (_value, entry) => <>
                   {entry.modified_at ? new Date(entry.modified_at).toLocaleString("zh-CN") : "—"}
-                </td>
-                <td className="border-b border-border px-3 py-1.5 text-right whitespace-nowrap group-hover:bg-accent">
-                  {canTerminal && entry.kind === "directory" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={`在 ${entry.name} 打开终端`} title="在此目录打开终端" onClick={() => openTerminal(join(path, entry.name))}><SquareTerminal className="size-4" /></Button>}
+                </> }
+        ]} actionWidth={virtualRoot ? 60 : 144} actionsContent={entry => <>
+                  {canTerminal && entry.kind === "directory" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={`在 ${entry.name} 打开终端`} title={virtualRoot ? "在此盘符打开终端" : "在此目录打开终端"} onClick={() => openTerminal(entryPath(entry))}><SquareTerminal className="size-4" /></Button>}
+                  {!virtualRoot && <>
                   {entry.kind === "file" && <Button type="button" variant="ghost" size="icon" className="size-7" aria-label={`预览 ${entry.name}`} title="预览和编辑" disabled={!!previewing} onClick={() => void openPreview(entry)}>{previewing === entry.name ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}</Button>}
                   {entry.kind !== "directory" && (
                     // A real link so the browser streams the download itself.
@@ -438,19 +485,8 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
                   >
                     <Trash2 className="inline size-3.5" />
                   </button>
-                </td>
-              </tr>
-            ))}
-            {!loading && !entries.length && (
-              <tr>
-                <td colSpan={5} className="px-3 py-12 text-center text-muted-foreground">
-                  {error ? "" : "这个目录是空的。"}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </>}
+                </>} />
     </div>
     {terminalDirectory && !onOpenTerminal && <aside aria-label="目录终端" className="flex min-h-[360px] min-w-0 flex-col border-t pt-3 lg:min-h-0 lg:w-[min(42vw,40rem)] lg:shrink-0 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3">
       <div className="mb-2 flex items-center gap-2"><SquareTerminal className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate font-mono text-sm" title={terminalDirectory}>{terminalDirectory}</span><Button type="button" variant="ghost" size="icon" aria-label="关闭目录终端" onClick={() => setTerminalDirectory(undefined)}><X className="size-4" /></Button></div>

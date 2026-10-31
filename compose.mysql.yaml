@@ -1,0 +1,29 @@
+services:
+  ferry:
+    environment:
+      FERRY_DATABASE_URL: mysql://ferry:${DATABASE_PASSWORD:?Required}@mysql:3306/ferry
+    depends_on:
+      mysql: { condition: service_healthy }
+  mysql:
+    image: ${MYSQL_IMAGE:-mysql:8.4}
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      MYSQL_DATABASE: ferry
+      MYSQL_USER: ferry
+      MYSQL_PASSWORD: ${DATABASE_PASSWORD:?Required}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Required}
+    volumes: ["mysql-data:/var/lib/mysql"]
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1 -u ferry -D ferry -e "SELECT 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 15
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    stop_grace_period: 60s
+volumes:
+  mysql-data:

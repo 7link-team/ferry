@@ -1,5 +1,6 @@
+import { AutoForm, AutoField } from "./components/auto-form";
 import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2, X } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Bell, FolderOpen, FolderTree, History, Info, Loader2, LogOut, Moon, Palette, Pencil, Plus, SquareTerminal, Sun, Trash2, X } from "lucide-react";
 import { Dialog, Tabs } from "radix-ui";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog";
 import { ResourceForm } from "./components/ResourceForm";
 import { HostMonitor } from "./components/HostMonitor";
 import { ResourceTable } from "./components/ResourceTable";
-import { RepositoryMonitor } from "./components/RepositoryMonitor";
+import { RepositoryMonitor, RepositoryEventHistory } from "./components/RepositoryMonitor";
 import { Platform } from "./Platform";
 import { Dashboard } from "./components/Dashboard";
 import { Invitation } from "./components/Invitation";
@@ -539,7 +540,7 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
     <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">
       <Dialog.Title className="text-lg font-semibold">{editing?.group ? "编辑分组" : "新建分组"}</Dialog.Title>
       <Dialog.Description className="sr-only">设置分组名称和说明</Dialog.Description>
-      <form className="mt-4 space-y-4" onSubmit={async event => {
+      <AutoForm className="mt-4 space-y-4" onSubmit={async event => {
         event.preventDefault(); if (!editing || !name.trim()) return;
         setBusy(true); setError("");
         try {
@@ -550,12 +551,12 @@ function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect
         } catch (cause) { setError(errorText(cause)); }
         finally { setBusy(false); }
       }}>
-        <label className="block space-y-2 text-sm">名称<Input value={name} maxLength={60} required onChange={event => setName(event.target.value)} /></label>
-        {resource === "host-groups" && <label className="block space-y-2 text-sm">上级分组<select className="w-full rounded-md border border-input bg-background px-3 py-2" value={editing?.parentId ?? ""} onChange={event => setEditing(current => current ? { ...current, parentId: event.target.value } : current)}><option value="">顶级分组</option>{groups.filter(group => group.id !== editing?.group?.id).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>}
-        <label className="block space-y-2 text-sm">说明<Input value={description} onChange={event => setDescription(event.target.value)} /></label>
+        <AutoField label="名称" className="block space-y-2 text-sm"><Input value={name} maxLength={60} required onChange={event => setName(event.target.value)} /></AutoField>
+        {resource === "host-groups" && <AutoField label="上级分组" className="block space-y-2 text-sm"><select className="w-full rounded-md border border-input bg-background px-3 py-2" value={editing?.parentId ?? ""} onChange={event => setEditing(current => current ? { ...current, parentId: event.target.value } : current)}><option value="">顶级分组</option>{groups.filter(group => group.id !== editing?.group?.id).map(group => <option key={group.id} value={group.id}>{group.name}</option>)}</select></AutoField>}
+        <AutoField label="说明" className="block space-y-2 text-sm"><Input value={description} onChange={event => setDescription(event.target.value)} /></AutoField>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
         <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>取消</Button><Button type="submit" disabled={busy || !name.trim()}>{busy ? "保存中…" : "保存"}</Button></div>
-      </form>
+      </AutoForm>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
   </aside>;
 }
@@ -570,7 +571,7 @@ function RepositoryConnectionDetail({ workspace, connectionId, permissions, form
     endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/repositories`,
     pagination: "next" as const,
     rowKey: (row: { url: string; name: string; full_name: string; default_branch: string }) => row.url,
-    grouping: { label: "命名空间", key: (row: { full_name: string }) => row.full_name.includes("/") ? row.full_name.slice(0, row.full_name.lastIndexOf("/")) : "未分组" },
+    grouping: { label: "命名空间", key: (row: { full_name: string }) => row.full_name.includes("/") ? row.full_name.slice(0, row.full_name.lastIndexOf("/")) : "" },
     columns: [
       { key: "full_name", label: "仓库名称", render: (row: { name: string; full_name: string }) => row.full_name || row.name },
       { key: "url", label: "仓库地址" },
@@ -579,15 +580,16 @@ function RepositoryConnectionDetail({ workspace, connectionId, permissions, form
     toolbar: { create: false, import: false, export: false, refresh: [0] },
     empty: "此连接下暂无可见仓库，请检查仓库权限；普通 Git 连接请在拉取代码步骤填写仓库地址。",
   }), [workspace, connectionId]);
-  const activeTab = tab === "repositories" || tab === "monitoring" ? tab : "info";
+  const activeTab = tab === "repositories" || tab === "monitoring" || tab === "events" ? tab : "info";
   return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
-    <Tabs.List aria-label="仓库连接详情" className="flex gap-1 border-b">
-      {([["info", "基本信息", Info], ["repositories", "仓库列表", FolderTree], ["monitoring", "监控通知", Bell]] as const).map(([value, label, Icon]) =>
+    <Tabs.List aria-label="仓库连接详情" className="flex flex-wrap gap-1 border-b">
+      {([["info", "基本信息", Info], ["repositories", "仓库列表", FolderTree], ["monitoring", "监控通知", Bell], ["events", "事件记录", History]] as const).map(([value, label, Icon]) =>
         <Tabs.Trigger key={value} value={value} asChild><Button variant="ghost" size="sm" className={cn("rounded-none border-b-2", activeTab === value ? "border-primary text-primary" : "border-transparent")}><Icon className="size-4" />{label}</Button></Tabs.Trigger>)}
     </Tabs.List>
     <Tabs.Content value="info" className="min-h-0 flex-1 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></Tabs.Content>
     <Tabs.Content value="repositories" className="flex min-h-0 flex-1 flex-col overflow-auto"><ResourceTable config={repositories} workspace={workspace} permissions={permissions} /></Tabs.Content>
     <Tabs.Content value="monitoring" className="flex min-h-0 flex-1 flex-col overflow-auto"><RepositoryMonitor workspace={workspace} connectionId={connectionId} permissions={permissions} /></Tabs.Content>
+    <Tabs.Content value="events" className="flex min-h-0 flex-1 flex-col overflow-auto"><RepositoryEventHistory workspace={workspace} connectionId={connectionId} permissions={permissions} /></Tabs.Content>
   </Tabs.Root>;
 }
 
@@ -651,7 +653,7 @@ function HostDetail({
       <div role="tablist" aria-label="主机详情" className="flex gap-1">
         <Button type="button" role="tab" title="基本信息" aria-selected={tab === "info"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "info" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("info")}><Info className="size-4" />基本信息</Button>
         <Button type="button" role="tab" title="监控" aria-selected={tab === "monitor"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "monitor" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("monitor")}><Activity className="size-4" />监控</Button>
-        {permissions.has("alerts.read") && <Button type="button" role="tab" title="报警监控" aria-selected={tab === "alerts"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "alerts" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("alerts")}><Bell className="size-4" />报警监控</Button>}
+        {permissions.has("alerts.read") && <Button type="button" role="tab" title="报警" aria-selected={tab === "alerts"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "alerts" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("alerts")}><Bell className="size-4" />报警</Button>}
       </div>
       <div className="flex items-center gap-2">
       {permissions.has("hosts.terminal") && <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: "terminal" })} target="_blank" rel="noopener noreferrer" className="inline-flex size-8 items-center justify-center rounded border hover:bg-accent" aria-label="打开终端" title="打开终端"><SquareTerminal className="size-4" /></a>}
@@ -659,7 +661,7 @@ function HostDetail({
       {permissions.has("hosts.update") && <Button asChild variant="outline" size="sm"><a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "edit" }, {})}><Pencil className="size-4" />编辑</a></Button>}
       </div>
     </div>
-      <div role="tabpanel" aria-label={tab === "monitor" ? "监控" : tab === "alerts" ? "报警监控" : "基本信息"} className={cn("min-h-0 overflow-auto pt-5", tab === "alerts" && "flex flex-1 flex-col")}>
+      <div role="tabpanel" aria-label={tab === "monitor" ? "监控" : tab === "alerts" ? "报警" : "基本信息"} className={cn("min-h-0 overflow-auto pt-5", tab === "alerts" && "flex flex-1 flex-col")}>
         {tab === "monitor" ? <HostMonitor workspace={workspace} hostId={hostId} /> : tab === "alerts" && alerts && alertEvents ? <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="flex items-center gap-2">
             <div role="tablist" aria-label="主机报警记录" className="flex gap-1">

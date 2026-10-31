@@ -13,6 +13,27 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useTheme } from "../theme";
 import { TerminalMetrics } from "./HostTelemetry";
+import { api, ApiError } from "../api";
+
+export function terminalStartCommand(os: string, directory?: string, agentVersion?: string) {
+  if (directory && /[\x00-\x1f\x7f]/.test(directory)) throw new Error("目录路径包含控制字符。");
+  const windows = os.toLowerCase() === "windows" || !!directory && /^(?:[a-z]:[\\/]|\\\\)/i.test(directory);
+  if (!windows) return directory ? `cd '${directory.replaceAll("'", "'\\''")}'\r` : "";
+  const legacy = /^0\.1\.0-alpha\.(\d+)$/.exec(agentVersion ?? "");
+  if (!directory && (!legacy || Number(legacy[1]) >= 20)) return "";
+  // FOR substitutes the resolved path after CMD expands environment variables,
+  // so literal percent signs and shell metacharacters in filenames stay literal.
+  const resolvePath = directory
+    ? `[Console]::WriteLine('${directory.replaceAll("/", "\\").replaceAll("'", "''")}')`
+    : `$p=$env:USERPROFILE; if (!$p -or $p -match '(?i)\\\\(systemprofile|ServiceProfiles)(\\\\|$)') { $u=(Get-CimInstance Win32_ComputerSystem).UserName; $p=$null; if ($u) { $sid=([Security.Principal.NTAccount]$u).Translate([Security.Principal.SecurityIdentifier]).Value; $p=(Get-CimInstance Win32_UserProfile -Filter (\"SID='\"+$sid+\"'\")).LocalPath }; if (!$p -or !(Test-Path -LiteralPath $p -PathType Container)) { $p=$env:PUBLIC } }; if (!$p) { $p=$env:SystemDrive+'\\' }; [Console]::WriteLine($p)`;
+  const script = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); ${resolvePath}`;
+  const bytes = new Uint8Array(script.length * 2);
+  for (let index = 0; index < script.length; index++) {
+    const code = script.charCodeAt(index); bytes[index * 2] = code & 255; bytes[index * 2 + 1] = code >> 8;
+  }
+  const encoded = btoa(String.fromCharCode(...bytes));
+  return `@chcp 65001 >nul\rfor /f "delims=" %D in ('powershell.exe -NoProfile -NonInteractive -EncodedCommand "${encoded}"') do @pushd "%D"\r`;
+}
 
 type Status = "connecting" | "open" | "closed" | "error";
 
@@ -62,9 +83,23 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
     );
     socket.binaryType = "arraybuffer";
 
-    socket.onopen = () => {
-      setStatus("open");
-      if (directory && !/[\x00-\x1f\x7f]/.test(directory)) socket.send(new TextEncoder().encode(`cd '${directory.replaceAll("'", "'\\''")}'\r`));
+    const controller = new AbortController();
+    socket.onopen = async () => {
+      try {
+        const host = await api<{ os?: string; agent_version?: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`, { signal: controller.signal }).catch(cause => {
+          // Terminal permission remains sufficient even without node-detail access.
+          if (cause instanceof ApiError && cause.status === 403) return { os: "", agent_version: "" };
+          throw cause;
+        });
+        if (socket.readyState !== WebSocket.OPEN) return;
+        const command = terminalStartCommand(host.os ?? "", directory, host.agent_version);
+        if (command) socket.send(new TextEncoder().encode(command));
+        setStatus("open");
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setError(cause instanceof Error ? cause.message : "无法读取节点终端信息。");
+        setStatus("error"); socket.close();
+      }
     };
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
@@ -87,6 +122,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
     socket.onclose = () => setStatus((s) => (s === "error" ? s : "closed"));
 
     const input = term.onData((data) => {
+      // Cursor-position replies must reach ConPTY while metadata is loading.
       if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data));
     });
 
@@ -106,6 +142,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
     observer.observe(element);
 
     return () => {
+      controller.abort();
       observer.disconnect();
       input.dispose();
       socket.close();

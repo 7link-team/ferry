@@ -78,14 +78,14 @@ it("keeps connection details in basic information and paged repository tabs", as
     if (url === "/api/workspaces/2/code-connections/42") return { ok: true, status: 200, json: async () => ({ id: "42", name: "Team Codeup", provider: "codeup", credential_id: "11", organization: "org", version: 1 }) };
     if (url.startsWith("/api/workspaces/2/code-connections/42/repositories")) {
       const second = new URL(url, location.origin).searchParams.get("page") === "2";
-      return { ok: true, status: 200, json: async () => ({ items: [{ name: second ? "second" : "first", full_name: second ? "org/second" : "org/first", url: "https://git.example.invalid/repo.git", default_branch: "main" }], has_more: !second }) };
+      return { ok: true, status: 200, json: async () => ({ items: [{ name: second ? "second" : "first", full_name: second ? "org/second" : "org/first", url: `https://git.example.invalid/${second ? "second" : "first"}.git`, default_branch: "main" }], has_more: !second }) };
     }
     return original(url, options);
   }));
   history.replaceState({}, "", "/workspaces/2/code-connections/42");
   await act(async () => root.render(<App />));
   const tabs = host.querySelector('[role="tablist"][aria-label="仓库连接详情"]')!;
-  expect(tabs.textContent).toBe("基本信息仓库列表监控通知");
+  expect(tabs.textContent).toBe("基本信息仓库列表监控通知事件记录");
   expect(host.textContent).toContain("Team Codeup");
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/42/repositories"))).toBe(false);
   await act(async () => tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.focus());
@@ -93,11 +93,12 @@ it("keeps connection details in basic information and paged repository tabs", as
   expect(host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain("org/first");
   expect(host.textContent).not.toContain("共 0 条");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "分组")!.click());
-  const namespace = host.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')!;
+  const namespace = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "org")!;
   expect(namespace.textContent).toContain("org");
   await act(async () => namespace.click());
-  expect(host.querySelector('tr[hidden]')?.textContent).toContain("org/first");
-  await act(async () => namespace.click());
+  expect([...host.querySelectorAll('tbody tr')].map(row => row.textContent).join(' ')).toContain("first");
+  expect([...host.querySelectorAll('tbody tr')].map(row => row.textContent).join(' ')).toContain("second");
+  expect(location.search).toContain("folder=org");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "列表")!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!.click());
   expect(host.textContent).toContain("org/second");
@@ -118,9 +119,9 @@ it("opens monitoring settings with saved values and saves without navigating awa
   }));
   history.replaceState({}, "", "/workspaces/2/code-connections/42?tab=monitoring");
   await act(async () => root.render(<App />));
-  expect(host.textContent).toContain("事件记录");
+  expect(host.querySelector('[aria-label="仓库事件记录"]')).toBeNull();
   expect(host.textContent).toContain("已设置");
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "配置监控")!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('section[aria-label="订阅配置"] button[aria-label="修改订阅配置"]')!.click());
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("org/repo");
   expect(dialog.textContent).not.toContain("新增仓库");
@@ -157,7 +158,7 @@ it("has one repository entry and no separate authorization tabs", async () => {
   history.replaceState({}, "", "/workspaces/2/code-connections");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="构建"]')!;
-  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "授权认证"]);
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "凭据"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库连接");
   expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
   expect(host.textContent).not.toContain("平台授权");
@@ -186,7 +187,7 @@ it("does not expose repository creation to a credentials-only role", async () =>
   permissions = ["credentials.read"];
   history.replaceState({}, "", "/workspaces/2/credentials");
   await act(async () => root.render(<App />));
-  expect([...host.querySelectorAll('nav[aria-label="构建"] a')].map(a => a.textContent)).toEqual(["授权认证"]);
+  expect([...host.querySelectorAll('nav[aria-label="构建"] a')].map(a => a.textContent)).toEqual(["凭据"]);
 });
 it("gives pipeline creation a full-page editor with its own action bar", async () => {
   required = false;

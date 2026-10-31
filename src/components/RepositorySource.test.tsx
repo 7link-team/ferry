@@ -22,32 +22,32 @@ afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAl
 it("named platform connections select credential IDs without repository, branch or secret inputs",async()=>{
  await mount();
  expect(requests.some(url=>url.includes("/credentials?scope=build&"))).toBe(true);
- await select("授权认证","11");
+ await select("凭据","11");
  expect(patch).toHaveBeenLastCalledWith({credential_id:"11"});
  expect(validity).toHaveBeenLastCalledWith(false);
  expect(host.querySelector('input[type="password"]')).toBeNull();
  expect(host.textContent).not.toContain("选择平台仓库");
  expect(host.textContent).not.toContain("默认分支");
- expect(host.querySelector('[aria-label="授权认证"]')?.textContent).not.toContain("Deploy key");
+ expect(host.querySelector('[aria-label="凭据"]')?.textContent).not.toContain("Deploy key");
  expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/workspaces/ops/credentials/new?scope=build");
 });
 it("ordinary Git permits an optional URL and all existing Git credential kinds",async()=>{
  await mount({name:"Git connection",provider:"git",credential_id:"0"});
  expect(validity).toHaveBeenLastCalledWith(false);
  expect(host.querySelector<HTMLInputElement>('[aria-label="Git 仓库地址（可选）"]')?.required).toBe(false);
- expect(host.querySelector('[aria-label="授权认证"]')?.textContent).toContain("Deploy key");
- await select("授权认证","12");expect(patch).toHaveBeenLastCalledWith({credential_id:"12"});
+ expect(host.querySelector('[aria-label="凭据"]')?.textContent).toContain("Deploy key");
+ await select("凭据","12");expect(patch).toHaveBeenLastCalledWith({credential_id:"12"});
 });
 it("credential-list denial is visible and retains the saved credential without copying its secret",async()=>{
- vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:!url.includes("/credentials"),status:url.includes("/credentials")?403:200,json:async()=>url.includes("/credentials")?{error:"无权查看授权认证"}:{items:[]}})));
+ vi.stubGlobal("fetch",vi.fn(async(url:string)=>({ok:!url.includes("/credentials"),status:url.includes("/credentials")?403:200,json:async()=>url.includes("/credentials")?{error:"无权查看凭据"}:{items:[]}})));
  await mount({id:"saved",name:"Saved",provider:"github",credential_id:"88"});
- expect(host.querySelector('[role="alert"]')?.textContent).toContain("无权查看授权认证");
- expect(host.querySelector<HTMLSelectElement>('[aria-label="授权认证"]')?.value).toBe("88");
+ expect(host.querySelector('[role="alert"]')?.textContent).toContain("无权查看凭据");
+ expect(host.querySelector<HTMLSelectElement>('[aria-label="凭据"]')?.value).toBe("88");
  expect(patch).not.toHaveBeenCalled();expect(validity).toHaveBeenLastCalledWith(false);
 });
 it("empty credential results explain the next action and block incomplete platform connections",async()=>{
  vi.stubGlobal("fetch",vi.fn(async()=>({ok:true,status:200,json:async()=>({items:[]})})));
- await mount();expect(host.textContent).toContain("没有可用的授权认证");expect(host.textContent).toContain("新建授权认证");expect(validity).toHaveBeenLastCalledWith(true);
+ await mount();expect(host.textContent).toContain("没有可用的凭据");expect(host.textContent).toContain("新建凭据");expect(validity).toHaveBeenLastCalledWith(true);
 });
 it("read-only connections show configuration without fetching credentials or asking for a repository",async()=>{
  await mount({provider:"gitea",credential_id:"11",base_url:"https://git.example.invalid",api_url:"https://git.example.invalid/api/v1"},true);
@@ -71,9 +71,9 @@ it("OAuth validates the popup sender and navigates directly to the created conne
 it("credential loading is visible and resolves into the existing picker",async()=>{
  let resolveCredentials!: (value: unknown) => void;
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>url.includes("/credentials")?new Promise(resolve=>{resolveCredentials=resolve;}):{ok:true,status:200,json:async()=>({items:[]})}));
- await mount();expect(host.textContent).toContain("正在读取授权认证");expect(host.querySelector<HTMLSelectElement>('[aria-label="授权认证"]')?.disabled).toBe(true);
+ await mount();expect(host.textContent).toContain("正在读取凭据");expect(host.querySelector<HTMLSelectElement>('[aria-label="凭据"]')?.disabled).toBe(true);
  await act(async()=>resolveCredentials({ok:true,status:200,json:async()=>({items:credentials})}));
- expect(host.querySelector<HTMLSelectElement>('[aria-label="授权认证"]')?.disabled).toBe(false);expect(host.textContent).toContain("Team PAT");
+ expect(host.querySelector<HTMLSelectElement>('[aria-label="凭据"]')?.disabled).toBe(false);expect(host.textContent).toContain("Team PAT");
 });
 it("reauthorizing a saved OAuth connection sends its ID without clearing the existing binding",async()=>{
  const opened={closed:false,close:vi.fn(),location:{href:"about:blank"}};vi.spyOn(window,"open").mockReturnValue(opened as unknown as Window);
@@ -89,6 +89,6 @@ it("reauthorizing a saved OAuth connection sends its ID without clearing the exi
 });
 it("can reuse a credential beyond the first page",async()=>{
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);const second=url.includes('page=2');return {ok:true,status:200,json:async()=>url.includes('/credentials')?{items:second?[{id:'late',name:'Second page PAT',kind:'token'}]:credentials,total:4,page_size:3}:{items:[]}};}));
- await mount();await select('授权认证','late');expect(patch).toHaveBeenLastCalledWith({credential_id:'late'});
+ await mount();await select('凭据','late');expect(patch).toHaveBeenLastCalledWith({credential_id:'late'});
  expect(requests.some(url=>url.includes('page=2'))).toBe(true);
 });

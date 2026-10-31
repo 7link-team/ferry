@@ -208,12 +208,22 @@ enum Action {
         #[arg(long)]
         name: String,
     },
+    /// Windows current-user installation: the supervisor under its keeper.
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Supervise {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        name: String,
+    },
 }
 #[derive(Args)]
 struct Identity {
     #[arg(long, default_value = "runner-agent")]
     name: String,
-    /// Install for the current user (Linux/macOS), rather than the machine.
+    /// Install for the current user instead of the machine (Windows logon task,
+    /// systemd --user or LaunchAgent); no administrator rights are needed.
     #[arg(long)]
     user: bool,
 }
@@ -289,10 +299,24 @@ pub fn dispatch() -> anyhow::Result<bool> {
                     stopped,
                 ))?;
         }
+        #[cfg(windows)]
+        Action::Supervise { config, name } => {
+            validate_name(&name)?;
+            let settings = Settings::load(&config)?;
+            anyhow::ensure!(
+                settings.service_name == name && settings.user_service,
+                "服务名称与安装配置不一致"
+            );
+            windows_user::supervise(config, name)?;
+        }
         Action::Run { config, name } => {
             validate_name(&name)?;
             #[cfg(windows)]
-            windows::run(config, name)?;
+            if Settings::load(&config)?.user_service {
+                windows_user::run(config, name)?;
+            } else {
+                windows::run(config, name)?;
+            }
             #[cfg(not(windows))]
             {
                 let settings = Settings::load(&config)?;
@@ -371,7 +395,10 @@ impl Identity {
     fn default_state_dir(&self) -> anyhow::Result<PathBuf> {
         if self.user {
             #[cfg(windows)]
-            anyhow::bail!("Windows 服务需要管理员权限，不支持 --user");
+            return Ok(PathBuf::from(
+                std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA未设置")?,
+            )
+            .join(&self.name));
             #[cfg(not(windows))]
             {
                 let home = std::env::var_os("HOME").context("无法确定用户目录")?;
@@ -407,10 +434,7 @@ impl Identity {
             secure_directory(root)?;
         }
         #[cfg(windows)]
-        {
-            anyhow::ensure!(!self.user, "Windows 服务需要管理员权限，不支持 --user");
-            windows::secure_directory(root)?;
-        }
+        windows::secure_directory(root, self.user)?;
         let config = root.join("service.json");
         let mut rebound = false;
         if rebind && regular_file(&config)? {
@@ -635,6 +659,8 @@ impl Identity {
 
 #[cfg(windows)]
 mod windows;
+#[cfg(windows)]
+mod windows_user;
 
 #[cfg(test)]
 mod tests {

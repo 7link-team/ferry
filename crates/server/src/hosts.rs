@@ -447,6 +447,8 @@ fn host_json(row: &hosts::Model) -> Value {
         "port": row.port,
         "username": row.username,
         "connection": row.connection,
+        "os": row.os,
+        "agent_version": row.agent_version,
         "state": row.state,
         "group_id": Id::from(row.group_id),
         "credential_id": Id::from(row.credential_id),

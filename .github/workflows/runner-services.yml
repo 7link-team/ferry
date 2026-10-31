@@ -72,6 +72,11 @@ jobs:
       - name: Native system service lifecycle (Windows)
         if: runner.os == 'Windows'
         run: python scripts/test-runner-service.py
+      - name: Native current-user logon task lifecycle (Windows)
+        if: runner.os == 'Windows'
+        env:
+          RUNNER_TEST_USER_SERVICE: "1"
+        run: python scripts/test-runner-service.py
       - name: Bootstrap script rejection tests
         if: runner.os != 'Windows'
         run: python3 scripts/test-runner-install.py

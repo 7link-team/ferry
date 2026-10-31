@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { HostMonitor, isMonitor, networkRates, type MonitorSample } from "./HostMonitor";
+import { HostMonitor, isMonitor, isVirtualNetwork, networkRates, type MonitorSample } from "./HostMonitor";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -24,6 +24,33 @@ it("shows individual disks and network interfaces from the host monitor endpoint
   expect(host.textContent).toContain("/data");
   expect(host.textContent).toContain("eth0");
   expect(host.textContent).toContain("eth1");
+});
+
+it("classifies loopback, container, hypervisor, VPN and OS filter adapters as virtual", () => {
+  for (const name of ["lo", "lo0", "docker0", "veth12ab", "br-3f2a", "virbr0", "cni0", "flannel.1", "cali123", "tun0", "tap0", "wg0", "tailscale0", "zt5u4y", "utun3", "awdl0", "bridge0",
+    "Loopback Pseudo-Interface 1", "vEthernet (WSL)", "vEthernet (Default Switch)", "isatap.{6B2F}", "Teredo Tunneling Pseudo-Interface", "Npcap Loopback Adapter", "VMware Network Adapter VMnet8",
+    "VirtualBox Host-Only Network", "本地连接* 10", "Local Area Connection* 2", "WLAN-WFP Native MAC Layer LightWeight Filter-0000", "以太网-QoS Packet Scheduler-0000", "ZeroTier One [abc]", "OpenVPN Data Channel Offload"])
+    expect(isVirtualNetwork(name), name).toBe(true);
+  for (const name of ["eth0", "ens33", "enp0s31f6", "eno1", "wlan0", "wlp2s0", "en0", "bond0", "以太网", "以太网 2", "WLAN", "Ethernet", "Wi-Fi", "Local Area Connection"])
+    expect(isVirtualNetwork(name), name).toBe(false);
+});
+
+it("shows physical adapters by default, reveals virtual adapters on request, and never hides every adapter", async () => {
+  const body = (networks: { name: string }[]) => ({ cpu_percent: 1, load1: 0, memory_used: 1, memory_total: 2, disks: [], networks: networks.map(n => ({ ...n, received: 1, transmitted: 1 })) });
+  vi.stubGlobal("fetch", vi.fn(async () => response(body([{ name: "以太网" }, { name: "vEthernet (WSL)" }, { name: "docker0" }]))));
+  await act(async () => root.render(<HostMonitor workspace="ops" hostId="h1" />));
+  expect(host.textContent).toContain("以太网");
+  expect(host.textContent).not.toContain("vEthernet (WSL)");
+  expect(host.textContent).toContain("网卡 1 / 3");
+  const toggle = host.querySelector<HTMLButtonElement>('button[role="checkbox"]')!;
+  expect(document.getElementById(toggle.getAttribute("aria-labelledby")!)?.textContent).toContain("显示虚拟网卡（2）");
+  await act(async () => toggle.click());
+  expect(host.textContent).toContain("vEthernet (WSL)");
+  expect(host.textContent).toContain("docker0");
+  await act(async () => root.unmount()); root = createRoot(host);
+  vi.stubGlobal("fetch", vi.fn(async () => response(body([{ name: "vEthernet (External)" }]))));
+  await act(async () => root.render(<HostMonitor workspace="ops" hostId="h2" />));
+  expect(host.textContent).toContain("vEthernet (External)");
 });
 
 const metrics = (cpu_percent = 20) => ({ cpu_percent, load1: 0.4, memory_used: 1024, memory_total: 4096,

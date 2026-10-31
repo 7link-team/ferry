@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Bell, Settings2 } from "lucide-react";
+import { Bell, Pencil } from "lucide-react";
 import type { FormConfig, ListConfig } from "./dsl";
 import { ResourceForm } from "./ResourceForm";
 import { ResourceTable } from "./ResourceTable";
@@ -16,7 +16,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
   const form = useMemo<FormConfig<Record<string, unknown>>>(() => ({
     resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => "事件订阅", readOnly: () => true,
     pollMs: row => row.enabled && row.mode === "poll" ? 15000 : 0,
-    sections: [{ title: "订阅配置", fields: [
+    sections: [{ title: "订阅配置", fullWidth: true, fields: [
       { key: "mode", label: "监控类型", type: "select", options: [{ value: "push", label: "事件推送" }, { value: "poll", label: "主动轮询" }] },
       { key: "poll_interval_minutes", label: "轮询间隔（分钟）", type: "number", when: row => row.mode === "poll" },
       { key: "poll_status", label: "轮询状态", type: "text", when: row => row.mode === "poll" },
@@ -32,7 +32,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
       { key: "provider_changed", label: "连接平台已变更，需要重新保存监控配置", type: "switch", when: row => !!row.provider_changed },
     ] }],
     viewActions: [{
-      label: "配置监控", icon: <Settings2 className="size-4" />, permission: "repositories.update",
+      label: "修改订阅配置", section: "订阅配置", iconOnly: true, icon: <Pencil className="size-4" />, permission: "repositories.update",
       when: row => row.provider !== "git",
       description: "保存后生效。轮询复用当前连接凭据；首次检查仅建立基线，修改配置后重新建立基线。密钥和通知地址留空保留原值。",
       initialValues: row => ({ enabled: row.enabled, mode: row.mode ?? "push", poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.all_repositories, repositories: row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository.")) : [] }),
@@ -51,6 +51,19 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
       action: async (row, values) => { await patchResource(workspace, "code-connection-monitors", connectionId, { ...values, version: row.version }); },
     }],
   }), [workspace, connectionId]);
+  return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto">
+    <div className="rounded-lg border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
+      <p className="flex items-center gap-2 font-medium text-foreground"><Bell className="size-4" />监控仓库变化，通知到你的 Webhook</p>
+      <p>主动轮询：最短每分钟检查一次，无需公开回调地址或事件密钥。首次检查建立基线；失败时保留上次基线。两次检查之间发生又撤销的变化无法检测，仓库不可见也可能由权限变化引起。</p>
+      <p>在代码平台创建 JSON Webhook，填写本页接收地址和事件密钥，并勾选对应事件。新增、删除仓库需要组织级或系统级 Webhook；仅配置单仓库 Webhook 无法覆盖新仓库。</p>
+      <p>GitHub 使用 SHA256 签名；Gitea 使用 X-Gitea-Signature；GitLab 使用 Secret Token。Codeup 使用 X-Codeup-Token，Gitee 使用密码模式的 X-Gitee-Token。平台未提供的事件不会由本服务推断或补造。</p>
+    </div>
+    <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />
+
+  </div>;
+}
+
+export function RepositoryEventHistory({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
   const events = useMemo<ListConfig<Record<string, unknown>>>(() => ({
     resource: "repository-events", permissionResource: "repositories", endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/events`, rowKey: row => String(row.id), defaultRefresh: 15,
     filters: [{ key: "q", label: "仓库 / 分支 / 操作人", type: "text" }, { key: "event", label: "事件", type: "select", options: repositoryEventOptions }],
@@ -61,14 +74,5 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
       { key: "reference", label: "分支 / 标签" }, { key: "action", label: "动作" }, { key: "actor", label: "操作人" }, { key: "delivery", label: "通知结果" },
     ], toolbar: { create: false, import: false, export: false }, empty: "尚无匹配事件。事件推送需配置平台 Webhook；主动轮询首次检查仅建立基线。",
   }), [workspace, connectionId]);
-  return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto">
-    <div className="rounded-lg border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
-      <p className="flex items-center gap-2 font-medium text-foreground"><Bell className="size-4" />监控仓库变化，通知到你的 Webhook</p>
-      <p>主动轮询：最短每分钟检查一次，无需公开回调地址或事件密钥。首次检查建立基线；失败时保留上次基线。两次检查之间发生又撤销的变化无法检测，仓库不可见也可能由权限变化引起。</p>
-      <p>在代码平台创建 JSON Webhook，填写本页接收地址和事件密钥，并勾选对应事件。新增、删除仓库需要组织级或系统级 Webhook；仅配置单仓库 Webhook 无法覆盖新仓库。</p>
-      <p>GitHub 使用 SHA256 签名；Gitea 使用 X-Gitea-Signature；GitLab 使用 Secret Token。Codeup 使用 X-Codeup-Token，Gitee 使用密码模式的 X-Gitee-Token。平台未提供的事件不会由本服务推断或补造。</p>
-    </div>
-    <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />
-    <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label="仓库事件记录"><h3 className="text-base font-semibold">事件记录</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>
-  </div>;
+  return <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label="仓库事件记录"><h3 className="text-base font-semibold">事件记录</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>;
 }

@@ -1,3 +1,4 @@
+import { AutoForm, AutoField } from "./components/auto-form";
 /**
  * Register / sign in / create or join a workspace.
  *
@@ -74,7 +75,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
         {!setup && <div role="status"><p>正在检查平台初始化状态…</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>重新检查</Button></div>}
 
         {setup && step === "setup" && (
-          <form className="space-y-4" onSubmit={event => {
+          <AutoForm className="space-y-4" onSubmit={event => {
             event.preventDefault();
             const body = fields(event.currentTarget);
             void run(async () => {
@@ -102,23 +103,27 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             <h2 className="text-lg font-semibold">初始化平台超级管理员</h2>
             <p className="text-sm text-muted-foreground">首次使用需要设置一次超管账号，没有默认账号或密码。超管可管理平台及所有工作空间。</p>
             {setup.has_users && <p className="text-sm text-muted-foreground">已有账号可填写原邮箱和密码完成授权；原姓名和密码不会被修改。</p>}
-            {!desktopSetupToken && <div className="space-y-1 text-sm"><label htmlFor="setup-token">初始化凭据</label>
-              <Input id="setup-token" name="token" type="password" value={token} onChange={e => setToken(e.target.value)} required autoComplete="off" aria-describedby="setup-token-help" />
-              <p id="setup-token-help" className="text-xs text-muted-foreground">由部署者从服务数据目录的 setup-token 文件读取。</p>
-            </div>}
-            <label className="block space-y-1 text-sm">姓名<Input name="name" required={!setup.has_users} autoComplete="name" /></label>
-            <label className="block space-y-1 text-sm">邮箱<Input name="email" type="email" required autoComplete="username" /></label>
-            <div className="space-y-1 text-sm"><label htmlFor="setup-password">密码</label><Input id="setup-password" name="password" type="password" required minLength={8} autoComplete="new-password" aria-describedby="setup-password-help" /><p id="setup-password-help" className="text-xs text-muted-foreground">至少 8 个字符。已有账号请填写原密码。</p></div>
-            <label className="block space-y-1 text-sm">确认密码<Input name="confirm_password" type="password" required minLength={8} autoComplete="new-password" /></label>
+            {!desktopSetupToken && <AutoField label="初始化凭据" name="token" required help="由部署者从服务数据目录的 setup-token 文件读取。">
+              <Input id="setup-token" name="token" type="password" value={token} onChange={e => setToken(e.target.value)} required autoComplete="off" />
+            </AutoField>}
+            <AutoField label="姓名" className="block space-y-1 text-sm"><Input name="name" required={!setup.has_users} autoComplete="name" /></AutoField>
+            <AutoField label="邮箱" className="block space-y-1 text-sm"><Input name="email" type="email" required autoComplete="username" /></AutoField>
+            <AutoField label="密码" name="password" required help="至少 8 个字符。已有账号请填写原密码。"><Input id="setup-password" name="password" type="password" required minLength={8} autoComplete="new-password" /></AutoField>
+            <AutoField label="确认密码" className="block space-y-1 text-sm"><Input name="confirm_password" type="password" required minLength={8} autoComplete="new-password" /></AutoField>
             <Button type="submit" className="w-full" disabled={busy}>{busy && <Loader2 className="animate-spin" />}初始化并进入平台</Button>
             {signedIn ? <Button type="button" variant="link" className="w-full" disabled={busy} onClick={onReady}>稍后初始化，继续工作空间</Button>
               : setup.has_users && <Button type="button" variant="link" className="w-full" disabled={busy} onClick={() => { setStep("sign-in"); setError(""); }}>使用已有账号登录</Button>}
-          </form>
+          </AutoForm>
         )}
 
         {setup && step === "sign-in" && (
-          <form
+          <AutoForm
             className="space-y-3"
+            columns={1}
+            fields={{
+              email: { name: "邮箱", type: "email", required: true, config: { autoComplete: "username", placeholder: "邮箱" } },
+              password: { name: "密码", type: "password", required: true, config: { autoComplete: "current-password", placeholder: "密码" } },
+            }}
             onSubmit={(event) => {
               event.preventDefault();
               const body = fields(event.currentTarget);
@@ -128,14 +133,6 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               });
             }}
           >
-            <Input name="email" type="email" placeholder="邮箱" required autoComplete="username" />
-            <Input
-              name="password"
-              type="password"
-              placeholder="密码"
-              required
-              autoComplete="current-password"
-            />
             <Button type="submit" className="w-full" disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}登录
             </Button>
@@ -148,12 +145,18 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               还没有账号？注册
             </Button>}
             {setup.required && <Button type="button" variant="link" className="w-full" onClick={() => setStep("setup")}>初始化平台超级管理员</Button>}
-          </form>
+          </AutoForm>
         )}
 
         {step === "register" && (
-          <form
+          <AutoForm
             className="space-y-3"
+            columns={1}
+            fields={{
+              name: { name: "姓名", type: "text", required: true, config: { autoComplete: "name", placeholder: "姓名" } },
+              email: { name: "邮箱", type: "email", required: true, config: { autoComplete: "username", placeholder: "邮箱" } },
+              password: { name: "密码", type: "password", required: true, help: "至少 8 个字符。", config: { minLength: 8, autoComplete: "new-password", placeholder: "密码（至少 8 个字符）" } },
+            }}
             onSubmit={(event) => {
               event.preventDefault();
               const body = fields(event.currentTarget);
@@ -164,16 +167,6 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               });
             }}
           >
-            <Input name="name" placeholder="姓名" required autoComplete="name" />
-            <Input name="email" type="email" placeholder="邮箱" required autoComplete="username" />
-            <Input
-              name="password"
-              type="password"
-              placeholder="密码（至少 8 个字符）"
-              required
-              minLength={8}
-              autoComplete="new-password"
-            />
             <Button type="submit" className="w-full" disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}注册
             </Button>
@@ -185,12 +178,12 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             >
               已有账号？登录
             </Button>
-          </form>
+          </AutoForm>
         )}
 
         {step === "workspace" && (
           <div className="space-y-6">
-            <form
+            <AutoForm
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -206,19 +199,19 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               }}
             >
               <p className="text-sm font-medium">创建工作空间</p>
-              <Input name="name" placeholder="名称，例如 运维平台" required />
-              <Input
+              <AutoField label="名称" name="name" required><Input name="name" placeholder="名称，例如 运维平台" required /></AutoField>
+              <AutoField label="标识" name="slug" required help="小写字母、数字和中划线。"><Input
                 name="slug"
                 placeholder="标识，例如 ops（小写字母、数字、中划线）"
                 required
                 pattern="[a-z0-9][a-z0-9-]{0,38}[a-z0-9]"
-              />
+              /></AutoField>
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy && <Loader2 className="animate-spin" />}创建
               </Button>
-            </form>
+            </AutoForm>
 
-            <form
+            <AutoForm
               className="space-y-3 border-t border-border pt-5"
               onSubmit={(event) => {
                 event.preventDefault();
@@ -234,11 +227,11 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               }}
             >
               <p className="text-sm font-medium">加入工作空间</p>
-              <Input name="code" placeholder="邀请码" required className="uppercase" />
+              <AutoField label="邀请码" name="code" required><Input name="code" placeholder="邀请码" required className="uppercase" /></AutoField>
               <Button type="submit" variant="outline" className="w-full" disabled={busy}>
                 {busy && <Loader2 className="animate-spin" />}加入
               </Button>
-            </form>
+            </AutoForm>
           </div>
         )}
       </div>

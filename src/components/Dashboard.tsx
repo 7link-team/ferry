@@ -39,7 +39,7 @@ const labels: Record<string, string> = {
   hosts: "主机",
   "host-groups": "主机组",
   tags: "标签",
-  credentials: "授权认证",
+  credentials: "凭据",
   repositories: "仓库",
   pipelines: "流水线",
   deployments: "应用部署",

@@ -4,11 +4,15 @@ set -eu
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 server=
 name=runner-agent
+# --user installs a systemd --user unit / LaunchAgent for the invoking user
+# instead of a machine service: no sudo, that user's identity and PATH.
+user=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --server) [ "$#" -ge 2 ] || fail 'Missing --server value'; server=$2; shift 2 ;;
         --name) [ "$#" -ge 2 ] || fail 'Missing --name value'; name=$2; shift 2 ;;
-        *) fail 'Usage: runner-install.sh --server URL [--name SERVICE]' ;;
+        --user) user=--user; shift ;;
+        *) fail 'Usage: runner-install.sh --server URL [--name SERVICE] [--user]' ;;
     esac
 done
 case "$server" in http://?*|https://?*) ;; *) fail '--server must be an HTTP(S) URL' ;; esac
@@ -35,7 +39,7 @@ case "$name" in ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9._-]*) fail 'Invalid service name' 
 [ -n "${FERRY_TOKEN:-}" ] || fail 'Set FERRY_TOKEN to the enrolment token first'
 case "$FERRY_TOKEN" in *[!a-zA-Z0-9._~-]*) fail 'Invalid enrolment token' ;; esac
 # Reconstruct only validated options; sudo receives no token in its argv.
-if [ "$(id -u)" != 0 ]; then
+if [ -z "$user" ] && [ "$(id -u)" != 0 ]; then
     exec sudo --preserve-env=FERRY_TOKEN /bin/sh "$0" --server "$server" --name "$name"
 fi
 case "$(uname -s)/$(uname -m)" in
@@ -86,5 +90,5 @@ fi
 actual_hash=${actual_hash%% *}
 [ "$actual_hash" = "$expected_hash" ] || fail 'Artifact SHA256 mismatch; nothing installed'
 chmod 700 "$stage/runner"
-printf 'Installing Runner %s as %s…\n' "$version" "$name"
-"$stage/runner" service install --server "$server" --name "$name" --rebind
+printf 'Installing Runner %s as %s%s…\n' "$version" "$name" "${user:+ for the current user}"
+"$stage/runner" service install --server "$server" --name "$name" --rebind $user

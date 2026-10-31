@@ -1,4 +1,5 @@
 import { operationResource } from "../resource";
+import { AutoField } from "./auto-form";
 import { useEffect, useRef, useState } from "react";
 import { api, errorText } from "../api";
 import { base } from "../resource";
@@ -85,9 +86,9 @@ export function DeploymentDetail({ workspace, deploymentId, revisionId, permissi
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {app.state === "needs-review" && <section className="space-y-3 border-l-2 border-destructive pl-4">
       <h3 className="font-semibold">执行结果需要核实</h3><p>远端命令可能仍在运行。请核实进程、容器及目标产物，确认后才能再次部署。</p>
-      {permissions.has("deployments.apply") && <><label htmlFor="review-note" className="block text-sm">核实说明</label>
+      {permissions.has("deployments.apply") && <><AutoField label="核实说明">
         <textarea id="review-note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} className="w-full rounded border bg-background p-3" />
-        <Button disabled={busy || !note.trim()} onClick={() => { if (confirm("已核实远端执行情况，允许后续重新预览和部署？")) void action("acknowledge", { version: app.version, note }); }}>已核实，解除阻止</Button></>}
+        </AutoField><Button disabled={busy || !note.trim()} onClick={() => { if (confirm("已核实远端执行情况，允许后续重新预览和部署？")) void action("acknowledge", { version: app.version, note }); }}>已核实，解除阻止</Button></>}
     </section>}
     {preview && <section className="space-y-3"><h3 className="font-semibold">产物差异</h3><p className="text-sm text-muted-foreground">{preview.notice}</p>
       {!!preview.variables?.length && <section aria-label="变量引用" className="space-y-2 rounded border p-3">

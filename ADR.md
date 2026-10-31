@@ -1,5 +1,11 @@
 # Architecture Decision Records
 
+## Unified list and form migration (2026-10-31, implemented and verified)
+- Decision: user explicitly requested migrating all Ferry pages to the unified components in 7link-mall-prd/apps/7link-mall-web/ui/components/auto-table and auto-form. Port AutoTable contracts/state/hook/sticky helpers, and adapt the AutoForm configuration/renderer/field layout to Ferry's existing React/Radix controls. Keep the source repository read-only and retain Ferry's resource DSL as the API/permissions/business adapter.
+- Reason: one renderer for resource lists, file tables and import previews; one form/field framework for resource forms, authentication, dialogs and specialized editors. Extend configuration/composition for rich flows instead of retaining page-specific table/form implementations.
+- Tradeoffs: commerce-only widgets, use-intl/Next integration and unrelated rich-editor/map dependencies are not copied. Existing Monaco and asynchronous repository/Runner controls remain custom renderers inside the shared field frame. Retain URL state, secret semantics and delete confirmations.
+- Verification: architecture audit rejects raw page form/table JSX outside the shared engines. Component interaction tests and real browser layout/business regression are required before delivery; no backend contract change or release is implied.
+
 ## Password minimum (2026-10-31, confirmed and delivered alpha24)
 - User explicitly selected 8 characters instead of 10. Apply the same minimum to shared account validation, registration and platform setup/confirmation inputs. Existing password hashes and sign-in verification remain compatible. Delivered in alpha24 sourcea69b4c1 after135isolatedHTTP/158UI/156serverchecks and full21jobCI; publicartifacts/image verified, ordinarylocal4291 upgraded with identitiesandcredentials preserved.
 
@@ -249,3 +255,37 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Cluster behavior: shared SQL transaction and unique authenticated-body digest admit each payload once across replicas before one bounded outbound HTTP attempt. No automatic delivery retry or durable job queue is introduced. An interruption can leave a pending notification; this limitation is displayed and documented.
 - Secrets: encrypt complete settings using the existing connection/workspace-bound vault context; callback secrets and notification URLs are write-only. Deleting a connection removes its event settings and history.
 - Verification: isolated API acceptance 120 checks, real Chromium grouping/settings/responsive acceptance, server 151 passed/4 existing ignored, new Codeup old/new payload tests. Actual cloud accounts/webhooks remain unverified.
+
+## File browser and repository namespace navigation - 2026-10-31
+- User requires a default-off hidden-file switch on all platforms and switching among all mounted disk partitions. Reuse host monitor disk enumeration and existing host command channel for Windows hidden/system attributes; no incompatible Runner frame or forced service upgrade.
+- Repository grouping is a directory browser, not an expanded/collapsible flat list: direct child folders/repositories, parent/breadcrumb navigation and shareable folder query. Include every provider page in the directory index while list mode preserves upstream pagination. Implement through the shared table adapter.
+
+## Complete Compose quickstart - 2026-10-31
+- User requests one-command deployment including SQL, NATS and Redis. Provide common persistent/authenticated services with mutually exclusive PostgreSQL/MySQL override files; Python generates stable random credentials and validates/waits for Compose startup. Repeated startup must preserve master key and refuse accidental database switching.
+- Redis is optional infrastructure, not an application dependency until actually integrated. This Compose is explicitly single-host; HA requires external database HA, a multi-node JetStream cluster and distinct application instance volumes. Default image is the published immutable version tag rather than latest.
+
+## 2026-10-31 ? Terminal directory compatibility and workspace tool lifetime
+- Use remote node platform metadata (readonly OS/agent version), with drive-path inference for missing legacy metadata, to select directory startup syntax. Never use the browser OS to decide remote shell syntax.
+- Keep current Runner protocol/services unchanged for legacy support. CMD directory selection uses a literal encoded resolver and PUSHD; run UTF8 codepage selection on a separate line before FOR output decoding. Legacy service-profile home resolution changes cwd only, not user identity or PATH. Existing terminal permission remains sufficient; ConPTY cursor reports must flow during metadata loading.
+- Workspace terminal/files tabs mount on first use and retain their component/session until the pane/tab closes. Reuse Radix Tabs and the shared form/table contracts for subscription header actions and full-width cards.
+
+## Explicit Windows terminal runtime account ? 2026-10-31
+- User confirms node-level terminal runtime account configuration to access user-installed tools and login configuration; cwd-only changes do not change the LocalSystem identity.
+- Bind existing host-scoped password credentials through shared ResourceForm; secrets stay vault-encrypted and never appear in node JSON. Only newly opened Windows Runner terminals use the configured account. Files, monitoring, pipelines and existing sessions preserve their identity. SSH terminals retain SSH credentials.
+- Use LogonUserW, loaded profile and CreateEnvironmentBlock, ConPTY/CreateProcessAsUserW with target-user home; terminate descendant processes through a job on session close. Failed logon is an error, never a silent SYSTEM fallback.
+- Separate TerminalUserStart request and advertised capability prevent old Runner versions from silently ignoring configuration. Reuse existing opaque cluster session relay. No new middleware, service identity changes, or automatic interactive-user impersonation.
+- Status: UI/API/protocol/failure-path integration and regression tests passed; local server updated. Privileged native success validation remains pending after OS UAC cancellation. Installed Runner remains unchanged; capability not yet released.
+
+## Runner install scope selection (system / current user) — 2026-10-31
+- Decision: Runner installation offers 系统服务 or 当前用户 on Windows, Linux and macOS (UI connection command + install scripts). Linux/macOS reuse the existing `service install --user` (systemd --user / LaunchAgent). Windows current-user mode registers a per-user logon Task Scheduler task (no administrator, no stored password), state under %LOCALAPPDATA%, running only while the user is logged on.
+- Reason: lets terminals/commands use the user's own identity, PATH and tool logins (e.g. npm-global codex) without changing SYSTEM installs or storing Windows passwords.
+- Alternatives rejected: SYSTEM-wide codex install (runs AI tooling as SYSTEM, separate login); Windows service under a user account (needs admin, password, logon right); interactive-user token impersonation from SYSTEM.
+- Supersedes "Explicit Windows terminal runtime account" above: user chose to withdraw that uncommitted feature (not released). Full pre-withdrawal diff kept in ignored data/maintenance/pre-user-runner-full.diff plus windows_terminal.rs.bak/test-terminal-accounts.mjs.bak.
+- Constraints: existing SYSTEM installations and default behaviour unchanged; no hidden window flashes; self-update/rollback supervisor reused unchanged; old Runner releases must be refused explicitly for Windows user mode.
+- Status: CONFIRMED by user; implementation plan pending confirmation.
+- Addendum (user request, 2026-10-31): wherever the Runner install command is shown, also provide a one-click uninstall command for the same platform and install scope. It removes the native registration and the default installation directory (program, connection credentials, host key, logs); system scope requests administrator/sudo, current-user scope does not. The CLI `service uninstall` keeps its data-preserving behaviour.
+
+## Release alpha.25 scope additions — 2026-10-31
+- Node detail tab "报警监控" renamed "报警" (global sidebar entry unchanged).
+- Node monitor network charts show physical adapters by default, hiding loopback/container/hypervisor/VPN/OS-filter interfaces by a name heuristic, with a "显示虚拟网卡（n）" toggle; if every adapter looks virtual, all are shown. UI-only: the Runner still reports every interface; protocol unchanged. Reason: mainstream dashboards (Zabbix discovery filters, Grafana node_exporter device filters) exclude virtual interfaces by default.
+- User-visible "授权认证" renamed "凭据" everywhere (menus, permission labels, forms, server messages, docs). API path /credentials, data and permission keys unchanged. Reason: the items are login/access secrets; "凭据" matches existing "登录凭据" wording and common usage.

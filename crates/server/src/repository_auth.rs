@@ -349,7 +349,7 @@ fn codeup_has_more(response: &reqwest::Response, page: u32) -> Option<bool> {
 async fn repository_response(response: reqwest::Response, kind: &str) -> Result<Value> {
     if kind == "codeup" && !response.status().is_success() {
         let message = match response.status().as_u16() {
-            401 => "Codeup令牌无效或已过期，请更新授权认证。",
+            401 => "Codeup令牌无效或已过期，请更新凭据。",
             403 => "Codeup拒绝访问，请检查令牌的代码仓库、分支只读权限及账号的仓库权限。",
             404 => "Codeup资源不存在或不可见，请检查组织ID、仓库地址和API接入点。",
             429 => "Codeup请求过于频繁，请稍后重试。",

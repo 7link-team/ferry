@@ -43,6 +43,7 @@ export interface Host {
   tag_ids: string[];
   tags: { id: string; name: string; color: string }[];
   credential_id: string;
+  os?: string;
   jump_host_id: string;
   description: string;
   seen_at: number;
@@ -546,7 +547,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
         },
       ],
       toolbar: { import: false, export: false },
-      empty: "当前模块还没有授权认证，添加后可在本模块中选择使用。",
+      empty: "当前模块还没有凭据，添加后可在本模块中选择使用。",
     }),
 
     activity: list({

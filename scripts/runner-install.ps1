@@ -1,13 +1,16 @@
 param(
     [Parameter(Mandatory = $true)][string]$Server,
-    [string]$Name = 'runner-agent'
+    [string]$Name = 'runner-agent',
+    # Install for the current user as a logon task: no elevation, the user's own
+    # identity, profile and PATH; runs only while that user is logged on.
+    [switch]$User
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Write-Host "Preparing Runner installation from $Server..."
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+if (-not $User -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Open PowerShell as Administrator and run the installation command again.'
 }
 $serverUri = [Uri]$Server
@@ -21,13 +24,14 @@ if (-not $env:FERRY_TOKEN -or $env:FERRY_TOKEN -cnotmatch '^[a-zA-Z0-9._~-]+$') 
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') { throw 'Only Windows x64 is supported.' }
 
 # Never stage a privileged executable in a user-writable temporary directory.
+# A current-user installation stages in that user's own profile instead.
 $admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
 $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
 $trustedInstaller = ([Security.Principal.NTAccount]::new('NT SERVICE\TrustedInstaller')).Translate([Security.Principal.SecurityIdentifier]).Value
 $trusted = @($admins.Value, $system.Value, $identity.User.Value, $trustedInstaller)
 $replace = [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 $write = $replace -bor [Security.AccessControl.FileSystemRights]::Write
-$base = Get-Item -LiteralPath ([Environment]::GetFolderPath('ProgramFiles')) -Force
+$base = Get-Item -LiteralPath ([Environment]::GetFolderPath($(if ($User) { 'LocalApplicationData' } else { 'ProgramFiles' }))) -Force
 $item = $base
 while ($item) {
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not allowed in the installation staging path.' }
@@ -47,11 +51,12 @@ try {
     $null = New-Item -ItemType Directory -Path $stage
     $acl = [Security.AccessControl.DirectorySecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
-    $acl.SetOwner($admins)
-    foreach ($sid in @($admins, $system)) {
+    $acl.SetOwner($(if ($User) { $identity.User } else { $admins }))
+    foreach ($sid in $(if ($User) { @($identity.User, $system) } else { @($admins, $system) })) {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
     }
-    Set-Acl -LiteralPath $stage -AclObject $acl
+    # Set-Acl also writes the audit SACL, which an unprivileged user cannot.
+    if ($User) { (Get-Item -LiteralPath $stage -Force).SetAccessControl($acl) } else { Set-Acl -LiteralPath $stage -AclObject $acl }
     Add-Type -AssemblyName System.Net.Http
     $handler = [Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
@@ -158,11 +163,16 @@ try {
     if ($LASTEXITCODE -ne 0 -or $installHelp -notmatch '(?m)^\s+--rebind\b') {
         throw "Runner $($lines[0]) does not support connection rebinding. Update the Ferry server and copy a new connection command from the updated page. Nothing installed."
     }
-    Write-Host "Installing Runner $($lines[0]) as ${Name}..."
+    if ($User -and $installHelp -notmatch 'Windows logon task') {
+        throw "Runner $($lines[0]) does not support current-user installation on Windows. Update the Ferry server, or install as a system service. Nothing installed."
+    }
+    $scope = if ($User) { @('--user') } else { @() }
+    Write-Host "Installing Runner $($lines[0]) as ${Name}$(if ($User) { ' for the current user' })..."
     # The token remains in the inherited environment, never the process argv.
-    & $binary service install --server $Server --name $Name --rebind
+    & $binary service install --server $Server --name $Name --rebind @scope
     if ($LASTEXITCODE -ne 0) { throw "Native service installation failed (exit $LASTEXITCODE)." }
-    Write-Host "Runner service ${Name} installed. Check the host connection status in Ferry."
+    if ($User) { Write-Host "Runner ${Name} installed for $($identity.Name); it starts at logon and runs while you are logged on. Check the host connection status in Ferry." }
+    else { Write-Host "Runner service ${Name} installed. Check the host connection status in Ferry." }
 } finally {
     if ($client) { $client.Dispose() }
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }

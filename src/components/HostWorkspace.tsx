@@ -6,16 +6,18 @@ import { Button } from "./ui/button";
 import { HostFiles } from "./HostFiles";
 import { HostLatency } from "./HostLatency";
 import { HostTelemetry } from "./HostTelemetry";
+import { Tabs } from "radix-ui";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
 
 const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ default: module.HostTerminal })));
 
 type Kind = "terminal" | "files";
-type Pane = { id: string; kind: Kind; directory?: string };
+type Pane = { id: string; kind: Kind; opened: Kind[]; directory?: string };
 type Node = Pane | { id: string; axis: "horizontal" | "vertical"; children: [Node, Node] };
 type WorkspaceTab = { id: string; root: Node; activePane: string; label: string };
 let nextId = 0;
 const id = () => `pane-${++nextId}`;
-const pane = (kind: Kind, directory?: string): Pane => ({ id: id(), kind, ...(directory ? { directory } : {}) });
+const pane = (kind: Kind, directory?: string): Pane => ({ id: id(), kind, opened: [kind], ...(directory ? { directory } : {}) });
 const replace = (node: Node, target: string, update: (current: Pane) => Node): Node => {
   if (!("children" in node)) return node.id === target ? update(node) : node;
   return { ...node, children: node.children.map(child => replace(child, target, update)) as [Node, Node] };
@@ -85,20 +87,22 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
   };
 
   const renderPane = (node: Pane, tab: WorkspaceTab, canClose: boolean): React.ReactNode => {
-    return <section aria-label={node.kind === "terminal" ? "终端分屏" : "文件分屏"} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
+    return <Tabs.Root value={node.kind} onValueChange={value => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: value as Kind, opened: [...new Set([...old.opened, value as Kind])] })) }))} asChild><section aria-label={node.kind === "terminal" ? "终端分屏" : "文件分屏"} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
       <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
-        {canTerminal && <Button variant="ghost" size="icon" className="size-7" aria-label="切换为终端" title="终端" disabled={node.kind === "terminal"} onClick={() => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: "terminal" })) }))}><SquareTerminal className="size-4" /></Button>}
-        {canFiles && <Button variant="ghost" size="icon" className="size-7" aria-label="切换为文件" title="文件" disabled={node.kind === "files"} onClick={() => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ id: old.id, kind: "files" })) }))}><FolderOpen className="size-4" /></Button>}
-        <span className="min-w-0 flex-1 truncate text-sm" title={node.directory}>{node.directory || (node.kind === "terminal" ? "终端" : "文件")}</span>
+        <Tabs.List aria-label="分屏工具" className="inline-flex shrink-0 items-center gap-1">
+          {canTerminal && <Tabs.Trigger value="terminal" asChild><Button variant={node.kind === "terminal" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><SquareTerminal className="size-4" />终端</Button></Tabs.Trigger>}
+          {canFiles && <Tabs.Trigger value="files" asChild><Button variant={node.kind === "files" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><FolderOpen className="size-4" />文件</Button></Tabs.Trigger>}
+        </Tabs.List>
+        <div className="min-w-0 flex-1" />
         <Button variant="ghost" size="icon" className="size-7" aria-label="左右分屏" title="左右分屏" onClick={() => split(node.id, "horizontal", node.kind)}><Columns2 className="size-4" /></Button>
         <Button variant="ghost" size="icon" className="size-7" aria-label="上下分屏" title="上下分屏" onClick={() => split(node.id, "vertical", node.kind)}><Rows2 className="size-4" /></Button>
         {canClose && <Button variant="ghost" size="icon" className="size-7" aria-label="关闭分屏" title="关闭分屏" onClick={() => closePane(node.id)}><X className="size-4" /></Button>}
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto p-2">
-        {node.kind === "terminal" ? <Suspense fallback={<p role="status">正在加载终端…</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense> :
-          <HostFiles workspace={workspace} hostId={hostId} canTerminal={canTerminal} {...(node.directory ? { initialPath: node.directory } : {})} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} />}
+        {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<p role="status">正在加载终端…</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
+        {node.opened.includes("files") && <Tabs.Content value="files" forceMount className={node.kind === "files" ? "h-full min-h-0" : "hidden"}><HostFiles workspace={workspace} hostId={hostId} canTerminal={canTerminal} {...(node.directory ? { initialPath: node.directory } : {})} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} /></Tabs.Content>}
       </div>
-    </section>;
+    </section></Tabs.Root>;
   };
 
   if (!canTerminal && !canFiles) return <p role="alert" className="p-6">当前角色没有终端或文件权限。</p>;
@@ -116,7 +120,12 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
         <button type="button" role="tab" aria-selected={activeTab === tab.id} className="h-full px-3 text-sm" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
         <Button variant="ghost" size="icon" className="size-7" aria-label={`关闭${tab.label}`} onClick={() => closeTab(tab.id)}><X className="size-3.5" /></Button>
       </div>)}
-      <Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="新建标签" title="新建标签" onClick={() => addTab(canTerminal ? "terminal" : "files")}><Plus className="size-4" /></Button>
+      <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="新建标签" title="新建标签"><Plus className="size-4" /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {canTerminal && <DropdownMenuItem onSelect={() => addTab("terminal")}><SquareTerminal className="size-4" />新建终端</DropdownMenuItem>}
+          {canFiles && <DropdownMenuItem onSelect={() => addTab("files")}><FolderOpen className="size-4" />新建文件管理</DropdownMenuItem>}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
     {tabs.map(tab => <div key={tab.id} role="tabpanel" className={activeTab === tab.id ? "relative min-h-0 min-w-0 flex-1 overflow-hidden max-[480px]:flex max-[480px]:flex-col max-[480px]:overflow-y-auto" : "hidden"}>
       {/* Flat keyed siblings preserve live terminal sessions when the split tree changes. */}

@@ -1,3 +1,4 @@
+import { AutoField } from "./auto-form";
 import { useEffect, useId, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { CheckCircle2, Copy, HelpCircle, Loader2, RotateCcw, Terminal, X } from "lucide-react";
@@ -9,6 +10,8 @@ import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 
 type Platform = "linux" | "macos" | "windows";
+/** Where the agent runs: the machine service account, or the installing user's own login. */
+export type InstallScope = "system" | "user";
 type Token = { id: string; token: string; expires_at: number; server: string };
 type TokenStatus = { id: string; expires_at: number; used_at: number; host_id: string; state: "pending" | "expired" | "connected"; host_state: "online" | "offline" | "" };
 type Props = { workspace: string; hostId?: string; onConnected?: () => void; inline?: boolean; autoGenerate?: boolean };
@@ -26,10 +29,119 @@ export function runnerServerOrigin(value: string): string {
   return url.origin;
 }
 
-export function runnerInstallCommand(platform: Platform, server: string, token: string): string {
+const SCOPE_HELP: Record<InstallScope, Record<"windows" | "unix", string>> = {
+  system: {
+    windows: "以系统服务运行，开机自动启动；在 PowerShell 中执行命令后确认管理员授权。",
+    unix: "以系统服务运行，开机自动启动；安装时可能需要输入 sudo 密码。",
+  },
+  user: {
+    windows: "以执行命令的 Windows 账号运行，无需管理员；终端和命令使用该账号的用户目录、PATH 和已登录工具。仅在该账号登录 Windows 期间运行。",
+    unix: "以执行命令的账号运行，无需 sudo；终端和命令使用该账号的用户目录、PATH 和已登录工具。Linux 注销后停止运行，除非已启用 loginctl enable-linger；macOS 仅在该账号登录期间运行。",
+  },
+};
+
+function InstallScopeChoice({ platform, scope, onChange, wide = false }: { platform: Platform; scope: InstallScope; onChange: (scope: InstallScope) => void; wide?: boolean }) {
+  return <div className="space-y-2">
+    <Tabs value={scope} onValueChange={value => onChange(value as InstallScope)}>
+      <TabsList aria-label="安装方式" className={wide ? "w-full" : undefined}><TabsTrigger value="system">系统服务</TabsTrigger><TabsTrigger value="user">当前用户</TabsTrigger></TabsList>
+    </Tabs>
+    <p className="text-xs text-muted-foreground">{SCOPE_HELP[scope][platform === "windows" ? "windows" : "unix"]}</p>
+  </div>;
+}
+
+/**
+ * One-click removal matching the install command: the native registration and
+ * the default installation directory (program, connection credentials, host
+ * key and logs). The CLI `service uninstall` alone keeps that data.
+ */
+export function runnerUninstallCommand(platform: Platform, scope: InstallScope = "system"): string {
+  const name = "runner-agent";
+  if (platform !== "windows") {
+    const root = scope === "system" ? `/var/lib/${name}` : platform === "macos" ? `$HOME/Library/Application Support/${name}` : `$HOME/.local/state/${name}`;
+    const body = `d="${root}"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name ${name}${scope === "user" ? " --user" : ""} || exit 1; fi; rm -rf "$d" && echo "Runner uninstalled."`;
+    return scope === "system" ? `sudo sh -c '${body}'` : `(${body})`;
+  }
+  // The directly pasted user command must not `exit` the user's own shell.
+  const steps = (root: string, user: boolean) => `$root = Join-Path ${root} '${name}'
+  $binary = Join-Path $root 'runner-service.exe'
+  if (Test-Path -LiteralPath $binary) {
+    Write-Host 'Removing Runner registration...'
+    & $binary service uninstall --name ${name}${user ? " --user" : ""}
+    if ($LASTEXITCODE -ne 0) { throw "Runner uninstall failed (exit $LASTEXITCODE)." }
+  }${user ? "" : `
+  # SCM deletes the registration only after the running service has stopped.
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
+  while (Get-Service -Name '${name}' -ErrorAction SilentlyContinue) {
+    if ([DateTime]::UtcNow -gt $deadline) { throw 'Timed out waiting for the Runner service to stop.' }
+    Start-Sleep -Milliseconds 500
+  }`}
+  for ($attempt = 0; Test-Path -LiteralPath $root; $attempt++) {
+    try { Remove-Item -LiteralPath $root -Recurse -Force }
+    catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
+  }
+  Write-Host 'Runner uninstalled.'`;
+  if (scope === "user") return `& {
+  $ErrorActionPreference = 'Stop'
+  ${steps("$env:LOCALAPPDATA", true)}
+}`;
+  const payload = (pause: boolean) => `$ErrorActionPreference = 'Stop'
+try {
+  ${steps("$env:ProgramData", false)}
+} catch {
+  [Console]::Error.WriteLine($_.ToString())
+  ${pause ? "Read-Host 'Uninstall failed. Press Enter to close this window'\n  " : ""}exit 1
+}`;
+  const encode = (text: string) => btoa(String.fromCharCode(...new Uint8Array(new Uint16Array([...text].flatMap(c => { const code = c.codePointAt(0)!; return code > 0xffff ? [0xd800 + ((code - 0x10000) >> 10), 0xdc00 + ((code - 0x10000) & 0x3ff)] : [code]; })).buffer)));
+  return `& {
+  $ErrorActionPreference = 'Stop'
+  $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+  if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encode(payload(false))}
+    if ($LASTEXITCODE -ne 0) { throw '卸载失败，请查看上方错误。' }
+  } else {
+    $process = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${encode(payload(true))}')
+    if ($process.ExitCode -ne 0) { throw '卸载失败，请查看管理员窗口中的错误。' }
+  }
+}`;
+}
+
+function UninstallCommand({ platform, scope }: { platform: Platform; scope: InstallScope }) {
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+  const command = runnerUninstallCommand(platform, scope);
+  useEffect(() => setCopied(false), [command]);
+  return <div className="space-y-2">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="font-medium">一键卸载命令</p>
+      <Button type="button" size="sm" variant="outline" onClick={async () => { try { await navigator.clipboard.writeText(command); setCopied(true); setError(""); } catch { setError("无法访问剪贴板，请选中下方命令手动复制。"); } }}><Copy className="size-4"/>{copied ? "已复制" : "复制卸载命令"}</Button>
+    </div>
+    <textarea aria-label="卸载命令" readOnly value={command} spellCheck={false} className="min-h-24 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed focus-visible:outline-ring" onFocus={e => e.currentTarget.select()}/>
+    <p className="text-xs text-muted-foreground">{scope === "system" ? (platform === "windows" ? "需要确认管理员授权。" : "需要 sudo 密码。") : "无需管理员。"}在目标主机执行，移除按所选方式安装的 Runner，并删除其程序、连接凭据和日志；节点记录保留在 Ferry 中并显示离线。</p>
+    {error && <p role="alert" className="text-destructive">{error}</p>}
+  </div>;
+}
+
+export function runnerInstallCommand(platform: Platform, server: string, token: string, scope: InstallScope = "system"): string {
   const origin = runnerServerOrigin(server);
   const sh = (s: string) => `'${s.replaceAll("'", "'\"'\"'")}'`;
   const ps = (s: string) => `'${s.replaceAll("'", "''")}'`;
+  if (platform === "windows" && scope === "user") {
+    return `& {
+  $ErrorActionPreference = 'Stop'
+  $previousToken = $env:FERRY_TOKEN
+  $previousModulePath = $env:PSModulePath
+  try {
+    Write-Host 'Fetching Runner installation script...'
+    $bootstrap = Invoke-WebRequest -UseBasicParsing -Uri ${ps(`${origin}/api/runners/install.ps1`)} -MaximumRedirection 0 -ErrorAction Stop
+    $payload = '& { ' + $bootstrap.Content + [Environment]::NewLine + ${ps(`} -Server ${ps(origin)} -User`)}
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload))
+    $env:FERRY_TOKEN = ${ps(token)}
+    $env:PSModulePath = $null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded
+    if ($LASTEXITCODE -ne 0) { throw '安装失败，请查看上方错误。' }
+  } finally { $env:FERRY_TOKEN = $previousToken; $env:PSModulePath = $previousModulePath }
+}`;
+  }
   if (platform === "windows") {
     return `& {
   $ErrorActionPreference = 'Stop'
@@ -88,11 +200,12 @@ try {
   } finally { $env:FERRY_TOKEN = $previousToken; $env:PSModulePath = $previousModulePath }
 }`;
   }
-  return `(umask 077; dir=$(mktemp -d) || exit 1; trap 'rm -rf "$dir"' EXIT; export FERRY_TOKEN=${sh(token)}; curl -fsSL --proto-redir '=https' ${sh(`${origin}/api/runners/install.sh`)} -o "$dir/install.sh" && sh "$dir/install.sh" --server ${sh(origin)})`;
+  return `(umask 077; dir=$(mktemp -d) || exit 1; trap 'rm -rf "$dir"' EXIT; export FERRY_TOKEN=${sh(token)}; curl -fsSL --proto-redir '=https' ${sh(`${origin}/api/runners/install.sh`)} -o "$dir/install.sh" && sh "$dir/install.sh" --server ${sh(origin)}${scope === "user" ? " --user" : ""})`;
 }
 
 function ConnectionFlow({ workspace, hostId, onConnected, autoGenerate }: Props) {
   const [platform, setPlatform] = useState<Platform>("linux");
+  const [scope, setScope] = useState<InstallScope>("system");
   const [server, setServer] = useState(() => window.location.origin);
   const [token, setToken] = useState<Token>();
   const [status, setStatus] = useState<TokenStatus>();
@@ -114,7 +227,7 @@ function ConnectionFlow({ workspace, hostId, onConnected, autoGenerate }: Props)
   const expired = !!token && (status?.state === "expired" || (!used && remaining === 0));
   let serverError = "";
   try { runnerServerOrigin(server); } catch (cause) { serverError = errorText(cause); }
-  const command = token && !expired && !used && !serverError ? runnerInstallCommand(platform, server, token.token) : "";
+  const command = token && !expired && !used && !serverError ? runnerInstallCommand(platform, server, token.token, scope) : "";
 
   useEffect(() => () => createRequest.current?.abort(), []);
   useEffect(() => {
@@ -167,31 +280,34 @@ function ConnectionFlow({ workspace, hostId, onConnected, autoGenerate }: Props)
   };
 
   return <div className="space-y-5 text-sm">
-    <p className="text-muted-foreground">在目标主机运行安装命令，自动安装系统服务并连接。支持开机启动和异常恢复。</p>
+    <p className="text-muted-foreground">在目标主机运行安装命令，自动安装 Runner 并连接，异常退出后自动恢复。</p>
     {!connected && <>
       <div className="space-y-2">
         <p className="font-medium">1. 选择主机系统</p>
         <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}>
           <TabsList aria-label="主机操作系统" className="w-full"><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList>
         </Tabs>
-        <p className="text-xs text-muted-foreground">{platform === "windows" ? "支持 x64；在 PowerShell 中执行命令后确认管理员授权。" : "自动识别 x64 / ARM64；安装系统服务时可能需要输入 sudo 密码。"}</p>
+        <p className="text-xs text-muted-foreground">{platform === "windows" ? "支持 x64，在 PowerShell 中执行命令。" : "自动识别 x64 / ARM64。"}</p>
       </div>
       <div className="space-y-2">
-        <label className="font-medium" htmlFor={serverId}>2. 目标主机可访问的服务地址</label>
-        <Input id={serverId} value={server} onChange={e => { setServer(e.target.value); setCopied(false); }} aria-invalid={!!serverError} aria-describedby={`${serverId}-help`} placeholder="https://server.example.com" />
-        <p id={`${serverId}-help`} className={serverError ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>{serverError || "填写本服务的域名或 IP 和端口；远程主机不能使用本机 localhost 地址。"}</p>
+        <p className="font-medium">2. 选择安装方式</p>
+        <InstallScopeChoice wide platform={platform} scope={scope} onChange={value => { setScope(value); setCopied(false); }}/>
       </div>
+      <AutoField label="3. 目标主机可访问的服务地址" help="填写本服务的域名或 IP 和端口；远程主机不能使用本机 localhost 地址。" error={serverError || undefined}>
+        <Input id={serverId} value={server} onChange={e => { setServer(e.target.value); setCopied(false); }} aria-invalid={!!serverError} aria-describedby={`${serverId}-help`} placeholder="https://server.example.com" />
+      </AutoField>
     </>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {!token && <Button onClick={generate} disabled={busy || !!serverError}>{busy && <Loader2 className="motion-safe:animate-spin"/>}{busy ? "正在生成…" : "生成安装命令"}</Button>}
     {command && <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">3. 复制命令并在目标主机执行</p><Button size="sm" variant="outline" onClick={copy}><Copy/>{copied ? "已复制" : "复制命令"}</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">4. 复制命令并在目标主机执行</p><Button size="sm" variant="outline" onClick={copy}><Copy/>{copied ? "已复制" : "复制命令"}</Button></div>
       <textarea aria-label="安装命令" readOnly value={command} spellCheck={false} className="min-h-36 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed focus-visible:outline-ring" onFocus={e => e.currentTarget.select()}/>
       <p className="text-xs text-muted-foreground">一次性命令，剩余 {Math.floor(remaining / 60).toString().padStart(2, "0")}:{(remaining % 60).toString().padStart(2, "0")}。命令包含注册凭据，请勿分享。</p>
     </div>}
+    {command && <UninstallCommand platform={platform} scope={scope}/>}
     {token && <div role="status" className="rounded-md border bg-muted/30 p-4">
       <div className="flex items-center gap-2 font-medium">{connected ? <CheckCircle2 className="size-4"/> : !expired ? <Loader2 className="size-4 motion-safe:animate-spin"/> : null}{connected ? "主机已连接" : expired ? "命令已过期" : used ? "已注册，等待主机上线…" : "等待主机连接…"}</div>
-      <p className="mt-1 text-xs text-muted-foreground">{connected ? "系统服务已连接，可在主机详情查看状态。" : expired ? "请重新生成安装命令，旧命令不再可用。" : used ? "注册凭据已使用，正在确认在线状态。" : "执行安装命令后，此处会自动显示连接结果。"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{connected ? "Runner 已连接，可在主机详情查看状态。" : expired ? "请重新生成安装命令，旧命令不再可用。" : used ? "注册凭据已使用，正在确认在线状态。" : "执行安装命令后，此处会自动显示连接结果。"}</p>
       {connected && status?.host_id && <a className="mt-3 inline-block underline underline-offset-4" href={href({workspace, group:"host", item:"hosts", mode:"view", id:status.host_id}, {})}>查看主机详情</a>}
       {expired && <Button className="mt-3" variant="outline" onClick={generate} disabled={busy || !!serverError}>重新生成命令</Button>}
     </div>}
@@ -217,6 +333,7 @@ export function RunnerConnection(props: Props) {
 
 export function HostConnectionCommand({ workspace, hostId, compact = false }: { workspace: string; hostId: string; compact?: boolean }) {
   const [platform, setPlatform] = useState<Platform>("linux");
+  const [scope, setScope] = useState<InstallScope>("system");
   const [server, setServer] = useState(window.location.origin);
   const [token, setToken] = useState("");
   const [state, setState] = useState("");
@@ -241,7 +358,7 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
   }, [workspace, hostId]);
   let command = "";
   let serverError = "";
-  if (token) try { command = runnerInstallCommand(platform, server, token); }
+  if (token) try { command = runnerInstallCommand(platform, server, token, scope); }
     catch (cause) { serverError = errorText(cause); }
   const reset = async () => {
     setBusy(true); setError("");
@@ -254,11 +371,13 @@ export function HostConnectionCommand({ workspace, hostId, compact = false }: { 
   return <section className={compact ? "min-w-0 space-y-4 rounded-xl border bg-card p-5 text-sm" : "mt-5 space-y-3 border-t pt-5 text-sm"} aria-label="当前连接命令">
     <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">当前连接命令</h2><span className={state === "online" ? "text-primary" : "text-muted-foreground"}>{state === "online" ? "已连接" : state === "offline" ? "已断开连接" : "等待连接"}</span></div>
     <Tabs value={platform} onValueChange={value => { setPlatform(value as Platform); setCopied(false); }}><TabsList aria-label="主机操作系统"><TabsTrigger value="linux">Linux</TabsTrigger><TabsTrigger value="macos">macOS</TabsTrigger><TabsTrigger value="windows">Windows</TabsTrigger></TabsList></Tabs>
-    <label className="block space-y-1"><span>主机可访问的服务地址</span><Input value={server} onChange={event => { setServer(event.target.value); setCopied(false); }} aria-label="主机可访问的服务地址" /></label>
+    <InstallScopeChoice platform={platform} scope={scope} onChange={value => { setScope(value); setCopied(false); }}/>
+    <AutoField label={<span>主机可访问的服务地址</span>} className="block space-y-1"><Input value={server} onChange={event => { setServer(event.target.value); setCopied(false); }} aria-label="主机可访问的服务地址" /></AutoField>
     {serverError && <p role="alert" className="text-destructive">{serverError}</p>}
     {error && <p role="alert" className="text-destructive">{error}</p>}
     <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground">命令包含连接令牌，请妥善保管。</span><Button type="button" size="sm" variant="outline" disabled={!command} onClick={async () => { try { await navigator.clipboard.writeText(command); setCopied(true); } catch { setError("复制失败，请手动选中命令。"); } }}><Copy className="size-4" />{copied ? "已复制" : "复制命令"}</Button></div>
     <textarea aria-label="当前连接命令" readOnly spellCheck={false} value={command} className="min-h-36 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed" onFocus={event => event.currentTarget.select()} />
+    <UninstallCommand platform={platform} scope={scope}/>
     <div className="flex items-center justify-end gap-1"><span title="重置后会生成新命令和令牌，当前连接立即断开，旧命令及令牌失效。" aria-label="重置说明"><HelpCircle className="size-4 text-muted-foreground" /></span><Button type="button" variant="outline" size="sm" disabled={busy || !token} onClick={() => setConfirmReset(true)}><RotateCcw className="size-4" />重置连接</Button></div>
     {confirmReset && <DeleteConfirmDialog action="重置" target="当前 Agent 连接" description="将生成新的连接命令和令牌，当前连接会立即断开。旧命令和令牌将失效，需在目标主机运行新命令才能重新连接。" onClose={() => setConfirmReset(false)} onConfirm={reset} />}
   </section>;

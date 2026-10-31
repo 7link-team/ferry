@@ -169,7 +169,7 @@ try {
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('gitee');
   await p.getByLabel(/^连接名称/).fill('Gitee connection');
-  await p.getByLabel('授权认证',{exact:true}).selectOption(invalidCredential.id);
+  await p.getByLabel('凭据',{exact:true}).selectOption(invalidCredential.id);
   assert.equal(await p.locator('input[type="password"]').count(),0,'connection form never copies credential secrets');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
   await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
@@ -181,7 +181,7 @@ try {
 
   // The shared authorization form opens separately; the connection draft survives.
   const credentialPopupPromise=p.waitForEvent('popup');
-  await p.getByRole('link',{name:'新建授权认证',exact:true}).click();
+  await p.getByRole('link',{name:'新建凭据',exact:true}).click();
   const credentialPage=await credentialPopupPromise;credentialPage.on('pageerror',error=>errors.push(error.message));
   await credentialPage.getByLabel(/^名称/).fill('Reusable Gitee PAT');
   await credentialPage.getByRole('combobox',{name:/类型/}).click();await credentialPage.getByRole('option',{name:'访问令牌',exact:true}).click();
@@ -192,8 +192,8 @@ try {
   const personalCredential=credentialRows.items.find(row=>row.name==='Reusable Gitee PAT');assert(personalCredential);assert(!('secret' in personalCredential));assert(personalCredential.has_secret);
   await credentialPage.close();
   assert.equal(await p.getByLabel(/^连接名称/).inputValue(),'Gitee connection');assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
-  await p.getByRole('button',{name:'刷新授权认证',exact:true}).click();
-  await p.getByLabel('授权认证',{exact:true}).selectOption(personalCredential.id);
+  await p.getByRole('button',{name:'刷新凭据',exact:true}).click();
+  await p.getByLabel('凭据',{exact:true}).selectOption(personalCredential.id);
   await p.setViewportSize({width:390,height:844});
   assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'connection form fits mobile viewport');
   if(process.env.UI_SCREENSHOT) await p.screenshot({path:process.env.UI_SCREENSHOT,fullPage:true});
@@ -204,12 +204,12 @@ try {
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const giteeConnection=rows.items.find(row=>row.provider==='gitee'&&row.name==='Gitee connection');assert(giteeConnection);assert.equal(giteeConnection.credential_id,personalCredential.id);assert(!('default_branch' in giteeConnection));
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('授权认证',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
+  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('凭据',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('codeup');
   await p.getByLabel(/^连接名称/).fill('Codeup private checkout');
-  await p.getByLabel('授权认证',{exact:true}).selectOption(personalCredential.id);
+  await p.getByLabel('凭据',{exact:true}).selectOption(personalCredential.id);
   await p.getByLabel('Codeup 组织 ID',{exact:true}).fill('test-org');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
   await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
@@ -259,10 +259,10 @@ try {
   assert(hostCredential.id&&appCredential.id);
   await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('git');
-  assert.equal(await p.getByLabel('授权认证',{exact:true}).locator('option').filter({hasText:'Node SSH only'}).count(),0);
-  assert.equal(await p.getByLabel('授权认证',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);
+  assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Node SSH only'}).count(),0);
+  assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);
   await p.getByLabel('Git 仓库地址（可选）',{exact:true}).fill(providerOrigin+'/generic.git');
-  await p.getByLabel('授权认证',{exact:true}).selectOption(passwordCredential.id);
+  await p.getByLabel('凭据',{exact:true}).selectOption(passwordCredential.id);
   await p.getByLabel(/^连接名称/).fill('Generic with password');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);

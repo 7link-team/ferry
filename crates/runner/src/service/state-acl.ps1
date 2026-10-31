@@ -1,9 +1,14 @@
 $ErrorActionPreference = 'Stop'
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Service installation requires administrator privileges' }
+# A current-user installation keeps its state private to that user (plus
+# SYSTEM), as a 0700 directory does on Unix; it needs no elevation.
+$userScope = $env:RUNNER_SERVICE_SCOPE -eq 'user'
+if (-not $userScope -and -not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Service installation requires administrator privileges' }
 $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
 $admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+$owner = if ($userScope) { $identity.User } else { $admins }
+$grantees = if ($userScope) { @($identity.User, $system) } else { @($system, $admins) }
 $trustedInstaller = ([Security.Principal.NTAccount]::new('NT SERVICE\TrustedInstaller')).Translate([Security.Principal.SecurityIdentifier]).Value
 $trusted = @($system.Value, $admins.Value, $identity.User.Value, $trustedInstaller)
 $replaceRights = [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
@@ -35,8 +40,8 @@ if (-not $ancestor.PSIsContainer) { throw 'Service state ancestor is not a direc
 while ($ancestor) { Assert-Secure $ancestor $replaceRights; $ancestor = $ancestor.Parent }
 $creationAcl = [Security.AccessControl.DirectorySecurity]::new()
 $creationAcl.SetAccessRuleProtection($true, $false)
-$creationAcl.SetOwner($admins)
-foreach ($sid in @($system, $admins)) {
+$creationAcl.SetOwner($owner)
+foreach ($sid in $grantees) {
     $creationAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit', [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
 }
 foreach ($path in $missing) {
@@ -65,9 +70,11 @@ foreach ($item in @($root) + $children) {
         $inherit = [Security.AccessControl.InheritanceFlags]::None
     }
     $acl.SetAccessRuleProtection($true, $false)
-    $acl.SetOwner($admins)
-    foreach ($sid in @($system, $admins)) {
+    $acl.SetOwner($owner)
+    foreach ($sid in $grantees) {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
     }
-    Set-Acl -LiteralPath $item.FullName -AclObject $acl
+    # Set-Acl also rewrites the audit SACL, which needs SeSecurityPrivilege.
+    # An unprivileged user writes only the owner and DACL sections it changed.
+    if ($userScope) { $item.SetAccessControl($acl) } else { Set-Acl -LiteralPath $item.FullName -AclObject $acl }
 }

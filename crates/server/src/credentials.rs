@@ -1,4 +1,4 @@
-//! 授权认证 — module-owned credentials backed by one encrypted store.
+//! 凭据 — module-owned credentials backed by one encrypted store.
 //!
 //! The secret half never leaves the server. List and detail report only
 //! whether one is set; there is no endpoint that returns a stored secret, not
@@ -109,7 +109,7 @@ pub struct Body {
 
 fn check_scope(value: &str) -> Result<()> {
     if !["host", "build", "deploy"].contains(&value) {
-        return Err(ApiError::bad("请选择授权认证所属模块：主机、构建或应用。"));
+        return Err(ApiError::bad("请选择凭据所属模块：主机、构建或应用。"));
     }
     Ok(())
 }

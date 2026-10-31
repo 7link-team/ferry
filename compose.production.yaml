@@ -1,0 +1,74 @@
+# Combine with compose.postgres.yaml OR compose.mysql.yaml.
+name: ${COMPOSE_PROJECT_NAME:-ferry}
+
+x-service: &service
+  restart: unless-stopped
+  init: true
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  ferry:
+    <<: *service
+    image: ${FERRY_IMAGE:-ghcr.io/7link-team/ferry-server:v0.1.0-alpha.24}
+    ports: ["${FERRY_BIND_ADDRESS:-127.0.0.1}:${FERRY_PORT:-4290}:4290"]
+    environment:
+      FERRY_PUBLIC_URL: ${FERRY_PUBLIC_URL:?Run scripts/quickstart.py first}
+      FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:?Required}
+      FERRY_MASTER_KEY: ${FERRY_MASTER_KEY:?Required}
+      FERRY_SECURE_COOKIE: ${FERRY_SECURE_COOKIE:-false}
+      FERRY_NATS_URL: nats://ferry:${NATS_PASSWORD:?Required}@nats:4222
+      FERRY_NATS_REPLICAS: "1"
+      FERRY_CLUSTER_NAMESPACE: ${COMPOSE_PROJECT_NAME:-ferry}
+    depends_on:
+      nats: { condition: service_healthy }
+    volumes: ["ferry-data:/data"]
+    networks: [backend, egress]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:4290/api/status]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    stop_grace_period: 60s
+
+  nats:
+    <<: *service
+    image: ${NATS_IMAGE:-nats:2.11-alpine}
+    environment:
+      NATS_PASSWORD: ${NATS_PASSWORD:?Required}
+    command: ["--jetstream", "--store_dir", "/data", "--user", "ferry", "--pass", "${NATS_PASSWORD:?Required}", "--http_port", "8222"]
+    volumes: ["nats-data:/data"]
+    networks: [backend]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Reserved for integrations: Ferry currently uses SQL + NATS, not Redis.
+  redis:
+    <<: *service
+    profiles: [redis]
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Required}
+    command: [sh, -ec, 'exec redis-server --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"']
+    volumes: ["redis-data:/data"]
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  backend: { internal: true }
+  egress: {}
+
+volumes:
+  ferry-data:
+  nats-data:
+  redis-data:

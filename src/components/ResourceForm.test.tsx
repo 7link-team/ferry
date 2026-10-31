@@ -39,6 +39,13 @@ it("secret detail only fetches metadata; reveal is explicit, audited endpoint an
   await click("隐藏明文");
   expect(host.textContent).not.toContain("secret-value");
 });
+it("renders a header view action once, not again in untitled read-only sections", async () => {
+  history.replaceState({}, "", "/ops/deploy/alert-events/7");
+  stored = { id: "7", rule_name: "CPU high", state: "firing", message: "cpu > 90", trigger_delivery: "已投递", recovery_delivery: "" };
+  await act(async () => root.render(<ResourceForm config={formConfigs("ops", new Set(["alerts.read"]))["alert-events"]!} workspace="ops" permissions={new Set(["alerts.read"])} />));
+  expect(host.textContent).toContain("CPU high");
+  expect(host.querySelectorAll('a[aria-label="返回规则"]')).toHaveLength(1);
+});
 it("read permission never offers reveal", async () => {
   await mount(new Set(["variables.read"]));
   expect(host.textContent).not.toContain("查看明文");
@@ -55,6 +62,11 @@ it("keeps the selected host when creating an alert rule from its detail page", a
   const permissions = new Set(["alerts.create", "hosts.read"]);
   await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)["alert-rules"]!} workspace="ops" permissions={permissions} />));
   expect(host.textContent).toContain("Node 42");
+  await act(async () => {
+    const name = host.querySelector<HTMLInputElement>('input[name="name"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Node 42 offline");
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+  });
   await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   const request = requests.find(row => row.method === "POST" && row.url.endsWith("/alert-rules"));
   expect(JSON.parse(request!.body!)).toMatchObject({ target_kind: "host", target_ref: "42" });

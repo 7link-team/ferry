@@ -33,6 +33,55 @@ use std::{collections::HashMap, time::Duration};
 #[derive(Deserialize)]
 pub struct PathQuery {
     path: String,
+    #[serde(default)]
+    show_hidden: bool,
+}
+
+/// Discover mounted filesystems through the existing host channel.
+pub async fn file_systems(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, String)>,
+) -> Result<Json<Value>> {
+    scope.require("hosts.files")?;
+    let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
+    let metrics = open(&s, &scope.workspace_id, &id).await?.monitor().await?;
+    let mut disks = metrics.disks;
+    disks.sort_by(|a, b| a.mount.cmp(&b.mount));
+    disks.dedup_by(|a, b| a.mount == b.mount);
+    let windows = disks
+        .iter()
+        .any(|disk| disk.mount.as_bytes().get(1) == Some(&b':'));
+    let items: Vec<_> = disks
+        .into_iter()
+        .map(|disk| {
+            let mut path = if windows {
+                disk.mount.replace('\\', "/")
+            } else {
+                disk.mount
+            };
+            if windows && path.len() == 2 && path.ends_with(':') {
+                path.push('/');
+            }
+            json!({ "name": disk.name, "path": path, "total": disk.total, "used": disk.used })
+        })
+        .collect();
+    Ok(Json(
+        json!({ "platform": if windows { "windows" } else { "unix" }, "items": items, "total": items.len(), "page": 1, "page_size": items.len() }),
+    ))
+}
+
+fn windows_hidden_command(path: &str) -> String {
+    use base64::Engine;
+    let script = format!(
+        "$ErrorActionPreference='Stop'; [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); ConvertTo-Json -Compress -InputObject @(Get-ChildItem -Force -LiteralPath '{}' | Where-Object {{ ($_.Attributes -band 6) -ne 0 }} | ForEach-Object {{ $_.Name }})",
+        path.replace('\'', "''")
+    );
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    format!(
+        "powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
 /// Loads a host the caller may reach and opens a channel to it.
@@ -208,10 +257,34 @@ pub async fn list_dir(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
-    let entries = open(&s, &scope.workspace_id, &id)
-        .await?
-        .list_dir(path)
-        .await?;
+    let channel = open(&s, &scope.workspace_id, &id).await?;
+    let mut entries = channel.list_dir(path).await?;
+    if !query.show_hidden {
+        let host = hosts::Entity::find_by_id(i64::from(id))
+            .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        let windows = host.os.eq_ignore_ascii_case("windows")
+            || path.as_bytes().get(1) == Some(&b':')
+            || path.starts_with("\\\\");
+        let hidden: Vec<String> = if windows {
+            let result = channel
+                .exec(&windows_hidden_command(path), Duration::from_secs(15))
+                .await?;
+            if result.code != 0 {
+                return Err(ApiError(
+                    StatusCode::BAD_GATEWAY,
+                    "读取 Windows 隐藏文件属性失败，请重试。".into(),
+                ));
+            }
+            serde_json::from_str(result.stdout.trim_start_matches('\u{feff}').trim())
+                .map_err(|_| ApiError::bad("Windows 隐藏文件属性响应无效。"))?
+        } else {
+            Vec::new()
+        };
+        entries.retain(|entry| !entry.name.starts_with('.') && !hidden.contains(&entry.name));
+    }
     Ok(Json(json!({ "path": path, "items": entries })))
 }
 
@@ -308,7 +381,20 @@ pub async fn upload(
             .map_err(|error| ApiError(StatusCode::BAD_REQUEST, format!("上传中断：{error}"))),
     );
     let channel = open(&s, &scope.workspace_id, &id).await?;
-    let (parent, name) = path.rsplit_once('/').unwrap_or(("/", path));
+    let windows = path.as_bytes().get(1) == Some(&b':') || path.starts_with("\\\\");
+    let split = if windows {
+        path.rfind(['/', '\\'])
+    } else {
+        path.rfind('/')
+    };
+    let (parent, name) = split
+        .map(|cut| {
+            (
+                &path[..if windows && cut == 2 { 3 } else { cut }],
+                &path[cut + 1..],
+            )
+        })
+        .unwrap_or(("/", path));
     let parent = if parent.is_empty() { "/" } else { parent };
     let mode = channel
         .list_dir(parent)

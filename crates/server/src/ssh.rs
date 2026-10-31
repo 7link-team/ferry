@@ -69,7 +69,7 @@ impl Credential {
     pub async fn load(s: &AppState, workspace_id: &Id, credential_id: &Id) -> Result<Self> {
         if *credential_id == Id::from(0) {
             return Err(ApiError::bad(
-                "这台主机还没有选择登录凭据，请在「授权认证」里新建一条，再到主机上选用。",
+                "这台主机还没有选择登录凭据，请在「凭据」里新建一条，再到主机上选用。",
             ));
         }
         let (kind, _username, secret) =
