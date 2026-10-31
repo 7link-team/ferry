@@ -33,6 +33,8 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 it("shows initialization to an already authenticated legacy owner, who can defer without losing their route", async () => {
   await act(async () => root.render(<App />));
   expect(host.textContent).toContain("初始化平台超级管理员");
+  expect(host.querySelector<HTMLInputElement>('input[name="password"]')?.minLength).toBe(8);
+  expect(host.querySelector<HTMLInputElement>('input[name="confirm_password"]')?.minLength).toBe(8);
   const defer = [...host.querySelectorAll("button")].find(b => b.textContent === "稍后初始化，继续工作空间")!;
   expect(defer).toBeTruthy();
   await act(async () => defer.click());
@@ -44,6 +46,18 @@ it("does not ask existing users to initialize an already initialized platform", 
   await act(async () => root.render(<App />));
   expect(host.textContent).not.toContain("初始化平台超级管理员");
   expect(host.textContent).not.toContain("稍后初始化，继续工作空间");
+});
+it("offers the eight-character minimum on the registration form", async () => {
+  required = false;
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/me"
+    ? { ok: false, status: 401, json: async () => ({ error: "unauthorized" }) }
+    : original(url)));
+  await act(async () => root.render(<App />));
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "还没有账号？注册")!.click());
+  const password = host.querySelector<HTMLInputElement>('input[name="password"]')!;
+  expect(password.minLength).toBe(8);
+  expect(password.placeholder).toContain("至少 8");
 });
 it("shows alert rules and events for the current host", async () => {
   required = false;

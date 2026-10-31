@@ -108,8 +108,8 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             </div>}
             <label className="block space-y-1 text-sm">姓名<Input name="name" required={!setup.has_users} autoComplete="name" /></label>
             <label className="block space-y-1 text-sm">邮箱<Input name="email" type="email" required autoComplete="username" /></label>
-            <div className="space-y-1 text-sm"><label htmlFor="setup-password">密码</label><Input id="setup-password" name="password" type="password" required minLength={10} autoComplete="new-password" aria-describedby="setup-password-help" /><p id="setup-password-help" className="text-xs text-muted-foreground">至少 10 个字符。已有账号请填写原密码。</p></div>
-            <label className="block space-y-1 text-sm">确认密码<Input name="confirm_password" type="password" required minLength={10} autoComplete="new-password" /></label>
+            <div className="space-y-1 text-sm"><label htmlFor="setup-password">密码</label><Input id="setup-password" name="password" type="password" required minLength={8} autoComplete="new-password" aria-describedby="setup-password-help" /><p id="setup-password-help" className="text-xs text-muted-foreground">至少 8 个字符。已有账号请填写原密码。</p></div>
+            <label className="block space-y-1 text-sm">确认密码<Input name="confirm_password" type="password" required minLength={8} autoComplete="new-password" /></label>
             <Button type="submit" className="w-full" disabled={busy}>{busy && <Loader2 className="animate-spin" />}初始化并进入平台</Button>
             {signedIn ? <Button type="button" variant="link" className="w-full" disabled={busy} onClick={onReady}>稍后初始化，继续工作空间</Button>
               : setup.has_users && <Button type="button" variant="link" className="w-full" disabled={busy} onClick={() => { setStep("sign-in"); setError(""); }}>使用已有账号登录</Button>}
@@ -169,9 +169,9 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             <Input
               name="password"
               type="password"
-              placeholder="密码（至少 10 个字符）"
+              placeholder="密码（至少 8 个字符）"
               required
-              minLength={10}
+              minLength={8}
               autoComplete="new-password"
             />
             <Button type="submit" className="w-full" disabled={busy}>

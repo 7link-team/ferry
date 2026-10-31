@@ -174,8 +174,8 @@ pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<Str
     }
     // Length, not a composition rule: composition rules push people toward
     // "Password1!" and are worse than a longer passphrase.
-    if credentials.password.chars().count() < 10 {
-        return Err(ApiError::bad("密码至少 10 个字符。"));
+    if credentials.password.chars().count() < 8 {
+        return Err(ApiError::bad("密码至少 8 个字符。"));
     }
     if credentials.password.len() > 1024 {
         return Err(ApiError::bad("密码过长。"));

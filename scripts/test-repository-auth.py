@@ -168,10 +168,13 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
     proc = launch()
     try:
         admin, owner, guest, outsider = client(), client(), client(), client()
-        password = 'temporary-workspace-password'
+        password = 'fixture8'
+        request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':'1234567','token':(data/'setup-token').read_text(encoding='utf8').strip()}, expected=400)
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text(encoding='utf8').strip()})
+        request(owner, '/users', {'name':'Short','email':'short@example.invalid','password':'1234567'}, expected=400)
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})
+        check(True, 'initialization and registration reject seven-character passwords and accept eight-character passwords')
         workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
         workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
         root = f'/workspaces/{workspace_tenant}'

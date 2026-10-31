@@ -1,5 +1,8 @@
 # Architecture Decision Records
 
+## Password minimum (2026-10-31, confirmed)
+- User explicitly selected 8 characters instead of 10. Apply the same minimum to shared account validation, registration and platform setup/confirmation inputs. Existing password hashes and sign-in verification remain compatible. Include in alpha24 candidate and re-run acceptance before publication.
+
 ## Repository monitoring mode selection (2026-10-31, accepted release candidate)
 - Decision: user requested event push or active polling with minimum1minute. Keep legacy mode push by serde default. Poll through saved connection authorization, requiring no inbound Webhook secret; reuse notification history/delivery.
 - Necessary persistence: encrypted SQL snapshot and last/next poll/error state, renewable shared database lease plus configuration/version fencing; no memory-only polling baseline or per-process schedule that duplicates work in cluster deployments. First complete poll creates baseline; errors never produce deletion events or replace the baseline.

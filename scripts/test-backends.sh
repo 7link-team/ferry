@@ -84,7 +84,7 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
 
   c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"测试员"}' "$B/users" >/dev/null
   ck "duplicate email"  "已注册"        "$(c -X POST -d '{"email":"m@x.com","password":"correct-horse-battery","name":"x"}' "$B/users")"
-  ck "weak password"    "至少 10"       "$(c -X POST -d '{"email":"w@x.com","password":"short","name":"W"}' "$B/users")"
+  ck "weak password"    "至少 8"        "$(c -X POST -d '{"email":"w@x.com","password":"short","name":"W"}' "$B/users")"
   local workspace_body workspace_id
   workspace_body=$(c -X POST -d '{"name":"运维","slug":"ops"}' "$B/workspaces")
   ck "create workspace" '"slug":"ops"' "$workspace_body"
