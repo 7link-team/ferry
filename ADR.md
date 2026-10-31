@@ -1,5 +1,10 @@
 # Architecture Decision Records
 
+## alpha23 combined delivery and native installer verification (2026-10-31)
+- Decision/status: published v0.1.0-alpha.23 from d0ada482f70f70395c43725f70bd086d63d0c85e after successful exact-source full build and image; upgraded ordinary local4291 preserving identities and encrypted credentials. Latest accepted repository namespace List/Group switch ships in this release with monitoring notifications and previously approved cluster/monitoring work.
+- Evidence: Windows upgrade diagnostics identified MainWindowHandle closing the single-instance plugin's transparent WS_VISIBLE helper rather than the UI. Gate now enumerates owned visible enabled Tauri Window class, matching existing native acceptance; original deadlines and exit requirement retained. Existing installer rerun and final full native checks both pass. No additional speculative desktop behavior change.
+- Limits unchanged: monitoring history temporarily in service memory; provider Webhooks require manual platform setup; Codeup repository creation/deletion events unavailable. Verification and release identifiers are recorded in MEMORY.md.
+
 长期产品与架构决策。历史条目的状态对应记录时点；后续明确决策优先，当前交付状态见 [MEMORY.md](MEMORY.md)。
 ## T2 流水线定义
 - Decision：definition 在资源 API 和数据库中使用 JSON 字符串，纯函数校验后返回结构化 Definition。
