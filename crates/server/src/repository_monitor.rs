@@ -29,6 +29,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, time::Duration};
 use subtle::ConstantTimeEq;
 
+mod detail;
 mod polling;
 pub use polling::scheduler;
 
@@ -367,6 +368,8 @@ struct Event {
     reference: String,
     actor: String,
     action: String,
+    /// Structured detail: commits, merge request, tag, repository, notes.
+    detail: Value,
 }
 fn text(value: &Value, paths: &[&str]) -> String {
     paths
@@ -502,20 +505,38 @@ fn normalize(provider: &str, headers: &HeaderMap, payload: &Value) -> Option<Eve
         event: event.into(),
         repository,
         reference,
-        actor: text(
-            payload,
-            &[
-                "/sender/login",
-                "/user/username",
-                "/user_name",
-                "/pusher/name",
-            ],
-        ),
+        actor: detail::webhook_actor(payload),
         action,
+        detail: detail::webhook(event, payload),
     })
 }
 fn event_json(row: events::Model) -> Value {
-    json!({"id":Id::from(row.id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":row.action,"delivery":row.delivery,"created_at":row.created_at})
+    let detail = row
+        .detail
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .unwrap_or(Value::Null);
+    json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":row.action,"delivery":row.delivery,"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
+}
+/// One event with its detail flattened for the shared detail page.
+pub async fn event(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    let row = events::Entity::find_by_id(i64::from(id))
+        .filter(events::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    owned_connection(&s.db, &scope, Id::from(row.connection_id)).await?;
+    let mut value = event_json(row);
+    let view = detail::view(&value["detail"]);
+    if let Value::Object(map) = &mut value {
+        map.extend(view);
+    }
+    Ok(Json(value))
 }
 pub async fn history(
     State(s): State<AppState>,
@@ -650,6 +671,7 @@ async fn record(
         action: Set(event.action.clone()),
         delivery: Set(delivery.into()),
         created_at: Set(db::now()),
+        detail: Set((!event.detail.is_null()).then(|| event.detail.to_string())),
     })
     .exec_without_returning(tx)
     .await?;
@@ -669,7 +691,24 @@ async fn deliver(
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| ApiError::bad("通知客户端不可用。"))?;
-        let delivery=match client.post(&config.webhook).json(&json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":event})).send().await {Ok(response) if response.status().is_success()=>format!("已投递 HTTP {}",response.status().as_u16()),Ok(response)=>format!("投递失败 HTTP {}；不自动重试",response.status().as_u16()),Err(_)=>"投递失败或超时；不自动重试".into()};
+        let title = format!("仓库事件：{}", event.event);
+        let mut fields: Vec<(String, String)> = [
+            ("仓库", &event.repository),
+            ("引用", &event.reference),
+            ("操作人", &event.actor),
+            ("动作", &event.action),
+            ("平台", &connection.provider),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_owned(), value.clone()))
+        .collect();
+        fields.extend(detail::lines(&event.detail));
+        let notice = crate::webhook::Notice {
+            title: &title,
+            fields,
+            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":event}),
+        };
+        let delivery = crate::webhook::deliver(&client, &config.webhook, &notice).await;
         events::Entity::update_many()
             .col_expr(events::Column::Delivery, Expr::value(delivery))
             .filter(events::Column::Id.eq(event_id))

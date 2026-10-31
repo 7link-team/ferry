@@ -37,6 +37,13 @@ const SETTINGS: &[(&str, &str, i64, i64, i64)] = &[
         0,
         36500,
     ),
+    (
+        "repository_event_retention_days",
+        "仓库事件保留天数（0 为永久）",
+        0,
+        0,
+        36500,
+    ),
 ];
 const SPEC: Spec = Spec {
     search: &["key"],

@@ -97,6 +97,7 @@ impl MigratorTrait for Migrator {
             Box::new(CredentialScopes),
             Box::new(RepositoryMonitoring),
             Box::new(RepositoryPolling),
+            Box::new(RepositoryEventDetail),
         ]
     }
 }
@@ -1119,6 +1120,7 @@ mod schema_tests {
             compose_deployments,
             variables,
             pipeline_classification,
+            repository_event_detail,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -2905,6 +2907,40 @@ impl MigrationTrait for CredentialScopes {
             "Business data is not automatically removed".into(),
         ))
     }
+}
+
+struct RepositoryEventDetail;
+impl MigrationName for RepositoryEventDetail {
+    fn name(&self) -> &str {
+        "repository_event_detail_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryEventDetail {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in repository_event_detail(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+/// Structured event detail (commits, merge request, operator). Nullable: rows
+/// recorded before it existed have none, and MySQL text cannot carry a default.
+fn repository_event_detail(backend: DbBackend) -> Vec<SchemaStatement> {
+    vec![SchemaStatement::Column(
+        "repository_events",
+        "detail",
+        Table::alter()
+            .table(Alias::new("repository_events"))
+            .add_column(long_text("detail", backend).null())
+            .to_owned(),
+    )]
 }
 
 struct RepositoryPolling;

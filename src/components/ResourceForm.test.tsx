@@ -50,6 +50,35 @@ it("lists deployment modes from native through Docker, Compose and Swarm", () =>
   const field = formConfigs("ops").deployments!.sections.flatMap(section => section.fields).find(field => field.key === "mode")!;
   expect((field.options as { value: string }[]).map(option => option.value)).toEqual(["native", "docker", "compose", "stack"]);
 });
+it("shows a repository event's commits, links, times and explained unknown operator", async () => {
+  history.replaceState({}, "", "/ops/build/repository-events/8");
+  stored = {
+    id: "8", connection_id: "3", event: "push", repository: "team/app", reference: "main", actor: "", action: "轮询检测：分支提交发生变化",
+    created_at: Date.UTC(2026, 10, 1, 2, 0), delivery: "已投递企业微信", source: "polling", before: "b0", after: "a1", total_commits: 2,
+    compare_url: "https://code.example/compare", note: "操作人为最新提交的作者；轮询无法获知实际推送人。",
+    commits: [
+      { id: "a1b2c3d4e5", short_id: "a1b2c3d4", message: "feat: login\n\nadds SSO", author: "Ann", author_username: "ann", time: "2026-11-01T02:00:00Z", url: "https://code.example/c/a1" },
+      { id: "f0", short_id: "f0", message: "fix: typo", author: "Bo", url: "javascript:alert(1)" },
+    ],
+  };
+  const permissions = new Set(["repositories.read"]);
+  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)["repository-events"]!} workspace="ops" permissions={permissions} />));
+  expect(requests[0]!.url).toBe("/api/workspaces/ops/repository-events/8");
+  expect(formConfigs("ops", permissions)["repository-events"]!.heading(stored)).toBe("代码推送 · team/app");
+  expect(host.textContent).toContain("未知（见下方说明）");
+  expect(host.textContent).toContain(new Date(Number(stored.created_at)).toLocaleString());
+  const list = host.querySelector('ol[aria-label="提交列表"]')!;
+  expect(list.querySelectorAll("li")).toHaveLength(2);
+  expect(list.textContent).toContain("a1b2c3d4");
+  expect(list.textContent).toContain("Ann（ann）");
+  expect(list.textContent).toContain("feat: login\n\nadds SSO");
+  const links = [...list.querySelectorAll("a")].map(a => a.getAttribute("href"));
+  expect(links).toEqual(["https://code.example/c/a1"]);
+  expect(host.querySelector('a[href="https://code.example/compare"]')).not.toBeNull();
+  expect(host.textContent).toContain("轮询无法获知实际推送人");
+  expect(host.querySelector('section[aria-label="合并请求"]')).toBeNull();
+  expect(host.querySelector('a[aria-label="返回仓库连接"]')?.getAttribute("href")).toContain("tab=events");
+});
 it("read permission never offers reveal", async () => {
   await mount(new Set(["variables.read"]));
   expect(host.textContent).not.toContain("查看明文");

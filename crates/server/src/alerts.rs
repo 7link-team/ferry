@@ -427,21 +427,32 @@ async fn deliver(
         .vault
         .open_secret(&r.webhook, &aad(r.workspace_id.into(), r.id.into()))
     {
-        Ok(url) => match client
-            .post(url)
-            .json(&json!({"event":if recovered{"recovered"}else{"triggered"},"data":event(row)}))
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.status().is_success() {
-                    format!("已投递 HTTP {}", response.status().as_u16())
+        Ok(url) => {
+            let title = format!(
+                "{}：{}",
+                if recovered {
+                    "报警恢复"
                 } else {
-                    format!("投递失败 HTTP {}；不自动重试", response.status().as_u16())
-                }
-            }
-            Err(_) => "投递失败或超时；不自动重试".into(),
-        },
+                    "报警触发"
+                },
+                row.rule_name
+            );
+            let (state, kind, message) = (
+                row.state.clone(),
+                row.target_kind.clone(),
+                row.message.clone(),
+            );
+            let notice = crate::webhook::Notice {
+                title: &title,
+                fields: vec![
+                    ("状态".into(), state),
+                    ("对象类型".into(), kind),
+                    ("信息".into(), message),
+                ],
+                generic: json!({"event":if recovered{"recovered"}else{"triggered"},"data":event(row)}),
+            };
+            crate::webhook::deliver(client, &url, &notice).await
+        }
         Err(_) => "Webhook无法解密；未投递".into(),
     };
     events::Entity::update_many()

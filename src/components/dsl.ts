@@ -109,7 +109,9 @@ export type FieldType =
   | "secret"
   | "code"
   | "manifest"
-  | "multiselect";
+  | "multiselect"
+  /** Read-only list of records (e.g. commits) described by `record`. */
+  | "records";
 
 export interface FormField<T> {
   key: string;
@@ -136,6 +138,17 @@ export interface FormField<T> {
   reveal?: { permission: string; action: (row: Partial<T>) => Promise<string> };
   /** 2 makes the field span the whole two-column grid. */
   span?: 1 | 2;
+  /** Read-only text shown instead of the raw value, e.g. a formatted time. */
+  display?: (row: Partial<T>) => string;
+  /** Render an http(s) value as an external link on detail pages. */
+  link?: boolean;
+  /** How each item of a `records` field is shown. */
+  record?: {
+    title: (item: Record<string, unknown>) => string;
+    meta?: (item: Record<string, unknown>) => string;
+    body?: (item: Record<string, unknown>) => string;
+    href?: (item: Record<string, unknown>) => string;
+  };
 }
 
 export interface FormConfig<T> {

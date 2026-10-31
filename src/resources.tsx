@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { FolderOpen, SquareTerminal } from "lucide-react";
 import { createResource, deleteResource, listResource, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option, RowAction } from "./components/dsl";
+import { repositoryEventForm } from "./components/RepositoryMonitor";
 
 /* The registries are keyed by resource name, so their values have to share one
    type while each config stays checked against its own row type. These two
@@ -602,6 +603,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       {key:"description",label:"说明",type:"textarea",span:2},
       {key:"last_error",label:"检查异常",type:"text",immutable:true,when:d=>!!d.last_error,help:"检查执行身份的账号权限和目标是否仍然有效。"}
     ]}]}),
+    "repository-events": repositoryEventForm(),
     "alert-events": form<AlertEvent>({resource:"alert-events",heading:r=>r.rule_name,blank:{},readOnly:()=>true,pollMs:r=>r.state==="firing"||r.trigger_delivery==="投递中"||r.recovery_delivery==="投递中"?2000:0,viewActions:[{label:"返回规则",to:()=>({group:"deploy",item:"alerts",mode:"list"})}],sections:[{fields:[{key:"rule_name",label:"规则",type:"text"},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]},{key:"message",label:"触发信息",type:"textarea",span:2},{key:"trigger_delivery",label:"触发通知",type:"text"},{key:"recovery_delivery",label:"恢复通知",type:"text"}]}]}),
     "cron-jobs": form<CronJob>({resource:"cron-jobs",heading:r=>r.name,blank:{name:"",description:"",scope:"host",schedule:"0 * * * *",timezone:"",enabled:false,action:"",target_kind:"",target_ref:"",command:"",timeout_seconds:1800,max_retries:0,retry_delay_seconds:30},viewActions:[{label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})}],sections:[{fields:[
       {key:"name",label:"名称",type:"text",required:true},{key:"scope",label:"所属模块",type:"select",resetOnChange:["action","target_kind","target_ref","command"],options:[{value:"host",label:"主机"},{value:"build",label:"构建"},{value:"deploy",label:"部署"}],immutable:true},

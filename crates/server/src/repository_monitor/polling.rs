@@ -13,8 +13,8 @@ mod tests {
     use super::*;
     use sea_orm::IntoActiveModel;
 
-    #[tokio::test]
-    async fn shared_database_claim_and_fences_exclude_other_replicas_and_stale_results() {
+    /// An isolated database-backed state with workspace 1.
+    async fn test_state() -> (tempfile::TempDir, AppState) {
         let (dir, db) = crate::lock::tests::database().await;
         let s = std::sync::Arc::new(crate::state::State {
             ids: std::sync::Arc::new(
@@ -47,6 +47,63 @@ mod tests {
         .exec(&s.db)
         .await
         .unwrap();
+        (dir, s)
+    }
+
+    #[tokio::test]
+    async fn retention_removes_only_events_older_than_the_configured_days() {
+        let (_dir, s) = test_state().await;
+        let day = 86_400_000;
+        for (id, age) in [(10, 8 * day), (11, day)] {
+            events::Entity::insert(events::ActiveModel {
+                id: Set(id),
+                workspace_id: Set(1),
+                connection_id: Set(2),
+                delivery_key: Set(format!("key-{id}")),
+                event: Set("push".into()),
+                repository: Set("team/repo".into()),
+                reference: Set("main".into()),
+                actor: Set(String::new()),
+                action: Set(String::new()),
+                delivery: Set(String::new()),
+                created_at: Set(db::now() - age),
+                detail: Set(None),
+            })
+            .exec_without_returning(&s.db)
+            .await
+            .unwrap();
+        }
+        let remaining = || async {
+            events::Entity::find()
+                .all(&s.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|e| e.id)
+                .collect::<Vec<_>>()
+        };
+        // Without a positive retention nothing is removed.
+        prune(&s).await.unwrap();
+        assert_eq!(remaining().await, vec![10, 11]);
+        crate::entities::settings::Entity::insert(crate::entities::settings::ActiveModel {
+            id: Set(20),
+            workspace_id: Set(1),
+            key: Set("repository_event_retention_days".into()),
+            value: Set(7),
+            version: Set(1),
+            created_at: Set(0),
+            updated_at: Set(0),
+        })
+        .exec_without_returning(&s.db)
+        .await
+        .unwrap();
+        prune(&s).await.unwrap();
+        assert_eq!(remaining().await, vec![11]);
+    }
+
+    #[tokio::test]
+    async fn shared_database_claim_and_fences_exclude_other_replicas_and_stale_results() {
+        let (_dir, s) = test_state().await;
         connections::Entity::insert(
             connections::Model {
                 id: 2,
@@ -224,6 +281,118 @@ mod tests {
             "repository.deleted"
         );
     }
+
+    fn all_events() -> Config {
+        Config {
+            events: KINDS.iter().map(|e| e.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn diff_names_known_operators_marks_unknown_ones_and_keeps_detail_out_of_the_baseline() {
+        let before = BTreeMap::from([(
+            "team/repo".to_owned(),
+            Repository {
+                branches: BTreeMap::from([("main".into(), "a".into()), ("old".into(), "x".into())]),
+                tags: BTreeMap::from([("v1".into(), "t1".into())]),
+                requests: requests(vec![json!({"iid":1,"state":"opened","title":"Add login","description":"Secret plan","author":{"username":"ann"},"source_branch":"f","target_branch":"main"})]).unwrap(),
+                ..Default::default()
+            },
+        )]);
+        let after = BTreeMap::from([(
+            "team/repo".to_owned(),
+            Repository {
+                branches: BTreeMap::from([("main".into(), "a".into()), ("feature".into(), "c".into())]),
+                tags: BTreeMap::from([("v2".into(), "t2".into())]),
+                requests: requests(vec![json!({"iid":1,"state":"merged","title":"Add login","description":"Secret plan","author":{"username":"ann"},"merged_by":{"username":"lead"},"source_branch":"f","target_branch":"main","web_url":"https://x/mr/1"})]).unwrap(),
+                branch_detail: BTreeMap::from([("feature".into(), json!({"commit":{"id":"c","message":"init feature","author":"Bob","author_username":"bob"}}))]),
+                tag_detail: BTreeMap::from([("v2".into(), json!({"target":"t2","message":"release notes","tagger":"tom"}))]),
+                ..Default::default()
+            },
+        )]);
+        let events = changes(&before, &after, &all_events());
+        let find = |kind: &str| events.iter().find(|e| e.event == kind).unwrap();
+        let created = find("branch.created");
+        assert_eq!(created.actor, "bob");
+        assert_eq!(created.detail["commit"]["message"], "init feature");
+        assert_eq!(created.detail["source"], "polling");
+        assert!(created.detail["note"].as_str().unwrap().contains("推送人"));
+        let deleted = find("branch.deleted");
+        assert!(deleted.actor.is_empty());
+        assert_eq!(deleted.detail["before"], "x");
+        assert!(
+            deleted.detail["note"]
+                .as_str()
+                .unwrap()
+                .contains("事件推送")
+        );
+        let tag = find("tag.created");
+        assert_eq!(
+            (tag.actor.as_str(), tag.detail["message"].as_str()),
+            ("tom", Some("release notes"))
+        );
+        assert!(find("tag.deleted").detail["note"].is_string());
+        let merge = find("merge");
+        assert_eq!(merge.actor, "lead");
+        assert_eq!(merge.detail["request"]["description"], "Secret plan");
+        assert_eq!(merge.detail["request"]["url"], "https://x/mr/1");
+        let baseline = serde_json::to_string(&after).unwrap();
+        for private in ["Secret plan", "init feature", "release notes", "lead"] {
+            assert!(
+                !baseline.contains(private),
+                "{private} must not be persisted in the baseline"
+            );
+        }
+    }
+
+    fn push(before: &str) -> Event {
+        Event {
+            event: "push".into(),
+            repository: "team/repo".into(),
+            reference: "main".into(),
+            actor: String::new(),
+            action: String::new(),
+            detail: json!({"source":"polling","before":before,"after":"d"}),
+        }
+    }
+
+    #[test]
+    fn push_commits_stop_at_the_previous_revision_and_name_the_head_author() {
+        let commits = vec![
+            json!({"id":"d","message":"third","author":"Cy","author_username":"cy"}),
+            json!({"id":"c","message":"second","author":"Bo"}),
+            json!({"id":"b","message":"base"}),
+        ];
+        let mut event = push("b");
+        apply_commits(&mut event, commits.clone());
+        assert_eq!(event.detail["total_commits"], 2);
+        assert_eq!(event.detail["commits"][0]["id"], "d");
+        assert_eq!(event.detail["commits"].as_array().unwrap().len(), 2);
+        assert_eq!(event.actor, "cy");
+        // Rewritten history: report the newest commits and say why.
+        let mut forced = push("gone");
+        apply_commits(&mut forced, commits);
+        assert!(forced.detail.get("total_commits").is_none());
+        assert_eq!(forced.detail["commits"].as_array().unwrap().len(), 3);
+        assert!(forced.detail["note"].as_str().unwrap().contains("强制推送"));
+        let mut branch = Event {
+            event: "branch.created".into(),
+            detail: json!({}),
+            ..push("")
+        };
+        apply_commits(
+            &mut branch,
+            vec![json!({"id":"h","message":"head","author":"Dee"})],
+        );
+        assert_eq!(
+            (
+                branch.actor.as_str(),
+                branch.detail["commit"]["id"].as_str()
+            ),
+            ("Dee", Some("h"))
+        );
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -231,12 +400,46 @@ struct Repository {
     branches: BTreeMap<String, String>,
     tags: BTreeMap<String, String>,
     requests: BTreeMap<String, Request>,
+    // Listing detail of the current poll only, for event detail; never part of
+    // the persisted baseline.
+    #[serde(skip)]
+    info: Value,
+    #[serde(skip)]
+    branch_detail: BTreeMap<String, Value>,
+    #[serde(skip)]
+    tag_detail: BTreeMap<String, Value>,
 }
 #[derive(Serialize, Deserialize)]
 struct Request {
     fingerprint: String,
     merged: bool,
     reference: String,
+    #[serde(skip)]
+    detail: Value,
+}
+
+const NOTE_OPERATOR: &str =
+    "轮询只能发现变化结果，平台未提供执行该操作的账号；如需操作人请改用事件推送模式。";
+const NOTE_PUSH_AUTHOR: &str = "操作人为最新提交的作者；轮询无法获知实际推送人。";
+
+fn note(detail: &mut Value, text: &str) {
+    if let Value::Object(map) = detail {
+        let joined = match map.get("note").and_then(Value::as_str) {
+            Some(existing) if !existing.is_empty() => format!("{existing}；{text}"),
+            _ => text.to_owned(),
+        };
+        map.insert("note".into(), Value::from(joined));
+    }
+}
+
+/// Branch or tag listing detail keyed by name, for the current poll only.
+fn reference_details(rows: &[Value]) -> BTreeMap<String, Value> {
+    rows.iter()
+        .filter_map(|row| {
+            let name = text(row, &["/name", "/branchName"]);
+            (!name.is_empty()).then(|| (name, detail::reference(row)))
+        })
+        .collect()
 }
 
 fn invalid() -> ApiError {
@@ -304,7 +507,7 @@ fn requests(rows: Vec<Value>) -> Result<BTreeMap<String, Request>> {
             text(&row, &["/sourceBranch", "/source_branch", "/head/ref"]),
             text(&row, &["/targetBranch", "/target_branch", "/base/ref"])
         ));
-        // Hash change metadata; never persist private PR bodies or author emails.
+        // The baseline keeps only a hash; readable detail lives in the event record.
         let metadata = json!({"state":state,"merged":merged,"updated":text(&row,&["/updated_at","/updatedAt"]),"head":text(&row,&["/head/sha","/sha","/mergedRevision"]),"title":row["title"],"description":row["description"],"body":row["body"],"labels":row["labels"],"reviewers":row["reviewers"],"comments":row["totalCommentCount"],"reference":reference});
         let fingerprint = hex::encode(Sha256::digest(
             serde_json::to_vec(&metadata).map_err(|_| invalid())?,
@@ -316,6 +519,7 @@ fn requests(rows: Vec<Value>) -> Result<BTreeMap<String, Request>> {
                     fingerprint,
                     merged,
                     reference,
+                    detail: detail::request(&row),
                 },
             )
             .is_some()
@@ -329,7 +533,7 @@ async fn snapshot(
     s: &AppState,
     connection: &connections::Model,
     config: &Config,
-) -> Result<Snapshot> {
+) -> Result<(Snapshot, MonitorAccess)> {
     if connection.state != "connected" {
         return Err(ApiError::bad("仓库连接授权已失效，请重新授权。"));
     }
@@ -362,27 +566,36 @@ async fn snapshot(
             if result.contains_key(path) {
                 return Err(invalid());
             }
+            let (branches, branch_detail) = if branches {
+                let rows = resource(&access, path, "branches").await?;
+                let detail = reference_details(&rows);
+                (references(rows, true)?, detail)
+            } else {
+                Default::default()
+            };
+            let (tags, tag_detail) = if tags {
+                let rows = resource(&access, path, "tags").await?;
+                let detail = reference_details(&rows);
+                (references(rows, false)?, detail)
+            } else {
+                Default::default()
+            };
             let repository = Repository {
-                branches: if branches {
-                    references(resource(&access, path, "branches").await?, true)?
-                } else {
-                    BTreeMap::new()
-                },
-                tags: if tags {
-                    references(resource(&access, path, "tags").await?, false)?
-                } else {
-                    BTreeMap::new()
-                },
+                branches,
+                tags,
                 requests: if prs {
                     requests(resource(&access, path, "requests").await?)?
                 } else {
                     BTreeMap::new()
                 },
+                info: detail::repository(row),
+                branch_detail,
+                tag_detail,
             };
             result.insert(path.into(), repository);
         }
         if repositories["has_more"].as_bool() == Some(false) {
-            return Ok(result);
+            return Ok((result, access));
         }
     }
     Err(ApiError::bad("代码平台分页超出支持范围，保留上次基线。"))
@@ -390,66 +603,155 @@ async fn snapshot(
 
 fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
     let mut events = Vec::new();
-    let mut add = |kind: &str, repository: &str, reference: &str, action: &str| {
+    let mut add = |kind: &str,
+                   repository: &str,
+                   reference: &str,
+                   action: &str,
+                   actor: String,
+                   mut detail: Value| {
         if config
             .events
             .iter()
             .any(|e| e == kind || (kind == "merge" && e == "pull_request"))
         {
+            if let Value::Object(map) = &mut detail {
+                map.insert("source".into(), Value::from("polling"));
+            }
             events.push(Event {
                 event: kind.into(),
                 repository: bounded(repository),
                 reference: bounded(reference),
-                actor: String::new(),
+                actor: bounded(&actor),
                 action: action.into(),
+                detail,
             });
         }
     };
     for (path, current) in new {
         let Some(previous) = old.get(path) else {
+            let mut detail = json!({ "repository": current.info });
+            note(&mut detail, NOTE_OPERATOR);
             add(
                 "repository.created",
                 path,
                 "",
                 "轮询检测：仓库首次出现在当前凭据的可见列表中",
+                String::new(),
+                detail,
             );
             // Existing contents of a newly visible repository are a baseline.
             continue;
         };
         for (name, revision) in &current.branches {
             match previous.branches.get(name) {
-                None => add("branch.created", path, name, "轮询检测：新增分支"),
-                Some(before) if before != revision => {
-                    add("push", path, name, "轮询检测：分支提交发生变化")
+                None => {
+                    let mut detail = json!({ "after": revision });
+                    let mut actor = String::new();
+                    if let Some(commit) = current
+                        .branch_detail
+                        .get(name)
+                        .and_then(|d| d.get("commit"))
+                    {
+                        actor = detail::commit_author(commit);
+                        detail["commit"] = commit.clone();
+                        if !actor.is_empty() {
+                            note(&mut detail, NOTE_PUSH_AUTHOR);
+                        }
+                    }
+                    add(
+                        "branch.created",
+                        path,
+                        name,
+                        "轮询检测：新增分支",
+                        actor,
+                        detail,
+                    )
                 }
+                Some(before) if before != revision => add(
+                    "push",
+                    path,
+                    name,
+                    "轮询检测：分支提交发生变化",
+                    String::new(),
+                    json!({ "before": before, "after": revision }),
+                ),
                 _ => {}
             }
         }
-        for name in previous
+        for (name, revision) in previous
             .branches
-            .keys()
-            .filter(|name| !current.branches.contains_key(*name))
+            .iter()
+            .filter(|(name, _)| !current.branches.contains_key(*name))
         {
-            add("branch.deleted", path, name, "轮询检测：分支已移除");
+            let mut detail = json!({ "before": revision });
+            note(&mut detail, NOTE_OPERATOR);
+            add(
+                "branch.deleted",
+                path,
+                name,
+                "轮询检测：分支已移除",
+                String::new(),
+                detail,
+            );
         }
         for name in current
             .tags
             .keys()
             .filter(|name| !previous.tags.contains_key(*name))
         {
-            add("tag.created", path, name, "轮询检测：新增标签");
+            let mut detail = current
+                .tag_detail
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            let tagger = detail::field(&detail, &["/tagger"], 200);
+            let actor = if tagger.is_empty() {
+                note(&mut detail, NOTE_OPERATOR);
+                String::new()
+            } else {
+                tagger
+            };
+            add(
+                "tag.created",
+                path,
+                name,
+                "轮询检测：新增标签",
+                actor,
+                detail,
+            );
         }
-        for name in previous
+        for (name, target) in previous
             .tags
-            .keys()
-            .filter(|name| !current.tags.contains_key(*name))
+            .iter()
+            .filter(|(name, _)| !current.tags.contains_key(*name))
         {
-            add("tag.deleted", path, name, "轮询检测：标签已移除");
+            let mut detail = json!({ "target": target });
+            note(&mut detail, NOTE_OPERATOR);
+            add(
+                "tag.deleted",
+                path,
+                name,
+                "轮询检测：标签已移除",
+                String::new(),
+                detail,
+            );
         }
         for (identity, request) in &current.requests {
             let prior = previous.requests.get(identity);
             if prior.is_none_or(|p| p.fingerprint != request.fingerprint) {
                 let merged = request.merged && prior.is_none_or(|p| !p.merged);
+                let mut detail = json!({ "request": request.detail });
+                // Polling sees the author and the merger; other editors are unknown.
+                let actor = if merged {
+                    detail::field(&request.detail, &["/merged_by"], 200)
+                } else if prior.is_none() {
+                    detail::field(&request.detail, &["/author"], 200)
+                } else {
+                    String::new()
+                };
+                if actor.is_empty() {
+                    note(&mut detail, NOTE_OPERATOR);
+                }
                 add(
                     if merged { "merge" } else { "pull_request" },
                     path,
@@ -461,19 +763,88 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                     } else {
                         "轮询检测：合并请求发生变化"
                     },
+                    actor,
+                    detail,
                 );
             }
         }
     }
     for path in old.keys().filter(|path| !new.contains_key(*path)) {
+        let mut detail = json!({});
+        note(&mut detail, NOTE_OPERATOR);
         add(
             "repository.deleted",
             path,
             "",
             "轮询检测：仓库已不可见，可能已删除或访问权限发生变化",
+            String::new(),
+            detail,
         );
     }
     events
+}
+
+/// Fetch the commits behind pushes and new branches. Provider failures leave a
+/// note on the event; they never fail the poll, whose baseline must advance.
+async fn enrich(access: &MonitorAccess, events: &mut [Event]) {
+    for event in events
+        .iter_mut()
+        .filter(|e| {
+            e.event == "push" || (e.event == "branch.created" && e.detail.get("commit").is_none())
+        })
+        .take(20)
+    {
+        match access.commits(&event.repository, &event.reference).await {
+            Ok(rows) => apply_commits(event, rows.iter().map(detail::commit).collect()),
+            Err(error) => note(
+                &mut event.detail,
+                &format!("提交明细获取失败：{}", bounded(&error.1)),
+            ),
+        }
+    }
+}
+
+/// Attach a branch's newest-first commits: the head of a new branch, or the
+/// commits a push added since its previous revision.
+fn apply_commits(event: &mut Event, commits: Vec<Value>) {
+    if event.event == "branch.created" {
+        if let Some(head) = commits.first() {
+            event.actor = bounded(&detail::commit_author(head));
+            event.detail["commit"] = head.clone();
+            if !event.actor.is_empty() {
+                note(&mut event.detail, NOTE_PUSH_AUTHOR);
+            }
+        }
+        return;
+    }
+    let before = detail::field(&event.detail, &["/before"], 64);
+    let found = commits
+        .iter()
+        .position(|c| detail::field(c, &["/id"], 64) == before);
+    let pushed = &commits[..found.unwrap_or(commits.len())];
+    match found {
+        Some(count) => event.detail["total_commits"] = json!(count),
+        None => note(
+            &mut event.detail,
+            "最近的提交中未找到推送前的版本，可能是强制推送或一次推送了大量提交；以下为该分支最新的提交",
+        ),
+    }
+    if pushed.len() > detail::COMMITS {
+        event.detail["commits_truncated"] = Value::Bool(true);
+    }
+    event.detail["commits"] = Value::from(
+        pushed
+            .iter()
+            .take(detail::COMMITS)
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
+    if let Some(head) = pushed.first() {
+        event.actor = bounded(&detail::commit_author(head));
+        if !event.actor.is_empty() {
+            note(&mut event.detail, NOTE_PUSH_AUTHOR);
+        }
+    }
 }
 
 struct Claim {
@@ -559,7 +930,30 @@ async fn current(tx: &impl sea_orm::ConnectionTrait, claim: &Claim) -> Result<()
     Ok(())
 }
 async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
-    let mut observed = snapshot(s, &claim.connection, &claim.config).await;
+    let previous: Option<Snapshot> = if claim.state.snapshot.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::from_str(&s.vault.open_secret(
+                &claim.state.snapshot,
+                &poll_aad(claim.state.workspace_id, claim.state.id),
+            )?)
+            .map_err(|_| ApiError::bad("轮询基线无法读取。"))?,
+        )
+    };
+    // Diff and fetch commit detail before taking the workspace lock: provider
+    // I/O must not hold it. current() below still fences these candidates.
+    let (mut observed, candidates) = match snapshot(s, &claim.connection, &claim.config).await {
+        Ok((next, access)) => {
+            let mut events = previous
+                .as_ref()
+                .map(|previous| changes(previous, &next, &claim.config))
+                .unwrap_or_default();
+            enrich(&access, &mut events).await;
+            (Ok(next), events)
+        }
+        Err(error) => (Err(error), Vec::new()),
+    };
     let tx = crate::variables::transaction(s, claim.connection.workspace_id.into()).await?;
     current(&tx, claim).await?;
     // Resolve permissions again after network I/O. Permission failures may update
@@ -581,29 +975,13 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
     let mut deliveries = Vec::new();
     match observed {
         Ok(next) => {
-            let previous: Option<Snapshot> = if claim.state.snapshot.is_empty() {
-                None
-            } else {
-                Some(
-                    serde_json::from_str(&s.vault.open_secret(
-                        &claim.state.snapshot,
-                        &poll_aad(claim.state.workspace_id, claim.state.id),
-                    )?)
-                    .map_err(|_| ApiError::bad("轮询基线无法读取。"))?,
-                )
-            };
-            if let Some(previous) = previous {
-                for (index, event) in changes(&previous, &next, &claim.config)
-                    .into_iter()
-                    .enumerate()
+            for (index, event) in candidates.into_iter().enumerate() {
+                // Unique persisted sampling identity distinguishes A→B→A→B.
+                let key = format!("poll:{}:{index}", claim.owner);
+                if let Some(id) =
+                    record(s, &tx, &claim.connection, &claim.config, &event, &key).await?
                 {
-                    // Unique persisted sampling identity distinguishes A→B→A→B.
-                    let key = format!("poll:{}:{index}", claim.owner);
-                    if let Some(id) =
-                        record(s, &tx, &claim.connection, &claim.config, &event, &key).await?
-                    {
-                        deliveries.push((id, event));
-                    }
+                    deliveries.push((id, event));
                 }
             }
             let bytes = serde_json::to_string(&next).map_err(|_| invalid())?;
@@ -669,10 +1047,63 @@ async fn poll(s: &AppState, row: polls::Model, drain: &mut watch::Receiver<bool>
     lock::release(&s.db, &claim.name, &claim.owner).await?;
     result
 }
+/// Remove repository events older than each workspace's configured retention.
+async fn prune(s: &AppState) -> Result<()> {
+    use crate::entities::settings;
+    use sea_orm::QuerySelect;
+    const KEY: &str = "repository_event_retention_days";
+    for setting in settings::Entity::find()
+        .filter(settings::Column::Key.eq(KEY))
+        .filter(settings::Column::Value.gt(0))
+        .all(&s.db)
+        .await?
+    {
+        let workspace = Id::from(setting.workspace_id);
+        let tx = crate::variables::transaction(s, workspace).await?;
+        let days = crate::maintenance::setting(&tx, workspace, KEY).await?;
+        if days > 0 {
+            let rows = events::Entity::find()
+                .filter(events::Column::WorkspaceId.eq(workspace))
+                .filter(events::Column::CreatedAt.lt(db::now() - days * 86_400_000))
+                .limit(200)
+                .all(&tx)
+                .await?;
+            if !rows.is_empty() {
+                let removed = events::Entity::delete_many()
+                    .filter(events::Column::WorkspaceId.eq(workspace))
+                    .filter(events::Column::Id.is_in(rows.iter().map(|r| r.id)))
+                    .exec(&tx)
+                    .await?
+                    .rows_affected;
+                crate::hosts::activity_record(
+                    s,
+                    &tx,
+                    workspace,
+                    (Id::default(), "系统"),
+                    "retention-cleanup",
+                    "repository-events",
+                    Id::default(),
+                    json!({"removed":removed,"retention_days":days}),
+                )
+                .await?;
+            }
+        }
+        tx.commit().await?;
+    }
+    Ok(())
+}
+
 pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
+    let mut pruned_at = 0;
     loop {
         if *drain.borrow() {
             break;
+        }
+        if db::now() - pruned_at > 600_000 {
+            pruned_at = db::now();
+            if let Err(error) = prune(&s).await {
+                tracing::warn!(error=%error.1,"仓库事件保留期清理未完成");
+            }
         }
         match polls::Entity::find()
             .filter(polls::Column::NextPollAt.lte(db::now()))

@@ -1883,6 +1883,22 @@ impl MonitorAccess {
         resource: &str,
         page: u32,
     ) -> Result<MonitorPage> {
+        self.listing(path, resource, page, None).await
+    }
+    /// Newest commits of one branch (first page), for event detail.
+    pub(crate) async fn commits(&self, path: &str, reference: &str) -> Result<Vec<Value>> {
+        Ok(self
+            .listing(path, "commits", 1, Some(reference))
+            .await?
+            .rows)
+    }
+    async fn listing(
+        &self,
+        path: &str,
+        resource: &str,
+        page: u32,
+        reference: Option<&str>,
+    ) -> Result<MonitorPage> {
         let mut url = self.config.api.clone();
         let requests = resource == "requests";
         {
@@ -1928,6 +1944,16 @@ impl MonitorAccess {
                 },
                 "50",
             );
+            if let Some(reference) = reference {
+                query.append_pair(
+                    match self.provider.as_str() {
+                        "codeup" => "refName",
+                        "gitlab" => "ref_name",
+                        _ => "sha",
+                    },
+                    reference,
+                );
+            }
             if requests {
                 if self.provider == "codeup" {
                     query.append_pair("projectIds", path);

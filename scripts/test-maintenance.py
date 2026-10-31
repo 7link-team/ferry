@@ -65,7 +65,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         settings=request(owner,root+'/settings')['items']
-        check(len(settings)==3,'three typed settings seeded')
+        check(len(settings)==4,'four typed settings seeded')
+        event_retention=next(r for r in settings if r['key']=='repository_event_retention_days')
+        check((event_retention['value'],event_retention['default'],event_retention['min'],event_retention['max'])==(0,0,0,36500),'repository event retention defaults to permanent with a bounded range')
         prefs=request(guest,root+'/preferences')
         check(prefs['default_page_size']==20 and len(prefs['dictionaries']['host-state'])==3,'members receive presentation preferences')
         setting=next(r for r in settings if r['key']=='default_page_size'); sid=setting['id']

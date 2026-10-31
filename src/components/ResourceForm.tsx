@@ -529,21 +529,46 @@ function Field<T>({
     </fieldset></Wrapper>;
   }
 
-  if (asText)
+  if (field.type === "records") {
+    const items = Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : [];
+    const record = field.record;
+    const safe = (href: string | undefined) => (href && /^https?:\/\//i.test(href) ? href : undefined);
+    return <Wrapper field={field}>{label}
+      {items.length && record ? <ol className="space-y-2" aria-label={field.label}>{items.map((item, index) => {
+        const href = safe(record.href?.(item));
+        const body = record.body?.(item);
+        return <li key={index} className="rounded-md border bg-muted/20 p-3 text-sm">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="font-mono font-medium">{record.title(item) || "—"}</span>
+            {record.meta && <span className="text-xs text-muted-foreground">{record.meta(item)}</span>}
+            {href && <a className="text-xs text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">打开</a>}
+          </div>
+          {body && <p className="mt-2 whitespace-pre-wrap break-words">{body}</p>}
+        </li>;
+      })}</ol> : <p className="text-sm">—</p>}
+    </Wrapper>;
+  }
+
+  if (asText) {
+    const shown = field.display ? field.display(draft as Partial<T>) : text;
+    const href = field.link && /^https?:\/\//i.test(shown) ? shown : undefined;
     return (
       <Wrapper field={field}>
         {label}
         <p className={cn("min-h-5 text-sm break-words", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
-          {field.type === "switch" ? (
+          {href ? (
+            <a className="text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">{href}</a>
+          ) : field.type === "switch" ? (
             value ? "是" : "否"
           ) : field.type === "select" ? (
             (options.find((option) => option.value === text)?.label ?? (text || "—"))
           ) : (
-            text || "—"
+            shown || "—"
           )}
         </p>
       </Wrapper>
     );
+  }
 
   return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
     <div className="flex min-w-0 items-start gap-2">

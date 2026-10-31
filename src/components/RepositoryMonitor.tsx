@@ -12,6 +12,69 @@ export const repositoryEventOptions = [
   ["tag.created", "新增标签"], ["tag.deleted", "删除标签"],
 ].map(([value, label]) => ({ value: value!, label: label! }));
 
+const time = (value: unknown) => {
+  if (typeof value === "number" && value > 0) return new Date(value).toLocaleString();
+  const parsed = typeof value === "string" && value ? Date.parse(value) : NaN;
+  return Number.isNaN(parsed) ? String(value ?? "") : new Date(parsed).toLocaleString();
+};
+const has = (key: string) => (row: Record<string, unknown>) => row[key] !== undefined && row[key] !== null && row[key] !== "";
+const commitRecord = {
+  title: (item: Record<string, unknown>) => String(item.short_id ?? item.id ?? ""),
+  meta: (item: Record<string, unknown>) => [item.author_username && item.author_username !== item.author ? `${item.author}（${item.author_username}）` : item.author, item.time ? time(item.time) : ""].filter(Boolean).join(" · "),
+  body: (item: Record<string, unknown>) => String(item.message ?? ""),
+  href: (item: Record<string, unknown>) => String(item.url ?? ""),
+};
+
+/** Read-only detail page of one repository event (shared form engine). */
+export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
+  const text = (key: string, label: string, extra: Partial<FormConfig<Record<string, unknown>>["sections"][number]["fields"][number]> = {}) =>
+    ({ key, label, type: "text" as const, when: has(key), ...extra });
+  return {
+    resource: "repository-events", permissionResource: "repositories", width: "full", blank: {}, readOnly: () => true,
+    heading: row => `${repositoryEventOptions.find(option => option.value === row.event)?.label ?? String(row.event ?? "仓库事件")} · ${String(row.repository ?? "")}`,
+    viewActions: [{ label: "返回仓库连接", to: row => ({ group: "build", item: "repositories", mode: "view", id: String(row.connection_id) }), query: () => ({ tab: "events" }) }],
+    sections: [
+      { title: "基本信息", fields: [
+        { key: "event", label: "事件", type: "select", options: repositoryEventOptions },
+        text("repository", "仓库"), text("reference", "分支 / 标签"),
+        text("actor", "操作人", { display: row => String(row.actor || "未知（见下方说明）"), when: () => true }),
+        text("action", "动作"),
+        text("created_at", "记录时间", { display: row => time(row.created_at) }),
+        { key: "source", label: "来源", type: "select", options: [{ value: "webhook", label: "事件推送" }, { value: "polling", label: "主动轮询" }], when: has("source") },
+        text("delivery", "通知结果"),
+      ] },
+      { title: "提交", fullWidth: true, fields: [
+        text("total_commits", "提交数"), text("before", "推送前版本"), text("after", "推送后版本"),
+        { key: "forced", label: "强制推送", type: "switch", when: has("forced") },
+        text("compare_url", "对比", { link: true, span: 2 }),
+        { key: "commits", label: "提交列表", type: "records", record: commitRecord, span: 2, when: has("commits") },
+        text("commits_truncated", "说明", { span: 2 }),
+        { key: "head_commit", label: "最新提交", type: "records", record: commitRecord, span: 2, when: has("head_commit") },
+      ] },
+      { title: "合并请求", fullWidth: true, fields: [
+        text("request_number", "编号"), text("request_title", "标题"), text("request_state", "状态"), text("request_branches", "分支"),
+        text("request_author", "作者"), text("request_merged_by", "合并人"), text("request_reviewers", "评审人"), text("request_merge_commit", "合并提交"),
+        text("request_created_at", "创建时间", { display: row => time(row.request_created_at) }),
+        text("request_updated_at", "更新时间", { display: row => time(row.request_updated_at) }),
+        text("request_merged_at", "合并时间", { display: row => time(row.request_merged_at) }),
+        text("request_closed_at", "关闭时间", { display: row => time(row.request_closed_at) }),
+        text("request_url", "链接", { link: true, span: 2 }),
+        { key: "request_description", label: "说明", type: "textarea", span: 2, when: has("request_description") },
+      ] },
+      { title: "标签", fields: [
+        text("tag_target", "指向提交"), text("tagger", "创建人"),
+        { key: "tag_message", label: "标签说明", type: "textarea", span: 2, when: has("tag_message") },
+      ] },
+      { title: "仓库信息", fields: [
+        text("repository_visibility", "可见性"), text("repository_default_branch", "默认分支"),
+        text("repository_url", "地址", { link: true, span: 2 }),
+        { key: "repository_description", label: "描述", type: "textarea", span: 2, when: has("repository_description") },
+      ] },
+      { title: "说明", fullWidth: true, fields: [{ key: "note", label: "说明", type: "textarea", span: 2, when: has("note") }] },
+    ],
+  };
+}
+
 export function RepositoryMonitor({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
   const form = useMemo<FormConfig<Record<string, unknown>>>(() => ({
     resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => "事件订阅", readOnly: () => true,
@@ -71,8 +134,9 @@ export function RepositoryEventHistory({ workspace, connectionId, permissions }:
       { key: "created_at", label: "记录时间", sortable: true, render: row => new Date(Number(row.created_at)).toLocaleString() },
       { key: "repository", label: "仓库", sortable: true },
       { key: "event", label: "事件", render: row => repositoryEventOptions.find(option => option.value === row.event)?.label ?? String(row.event) },
-      { key: "reference", label: "分支 / 标签" }, { key: "action", label: "动作" }, { key: "actor", label: "操作人" }, { key: "delivery", label: "通知结果" },
-    ], toolbar: { create: false, import: false, export: false }, empty: "尚无匹配事件。事件推送需配置平台 Webhook；主动轮询首次检查仅建立基线。",
+      { key: "reference", label: "分支 / 标签" }, { key: "summary", label: "摘要" }, { key: "actor", label: "操作人" }, { key: "action", label: "动作" }, { key: "delivery", label: "通知结果" },
+    ], actions: [{ label: "查看", to: row => ({ group: "build", item: "repository-events", mode: "view", id: String(row.id) }) }],
+    toolbar: { create: false, import: false, export: false }, empty: "尚无匹配事件。事件推送需配置平台 Webhook；主动轮询首次检查仅建立基线。",
   }), [workspace, connectionId]);
   return <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label="仓库事件记录"><h3 className="text-base font-semibold">事件记录</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>;
 }

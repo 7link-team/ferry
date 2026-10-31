@@ -39,6 +39,7 @@ mod templates;
 mod transfers;
 mod variables;
 mod vault;
+mod webhook;
 mod worker;
 mod workspace;
 mod workspace_admin;
@@ -282,6 +283,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/code-connections/{id}/events",
             get(repository_monitor::history),
+        )
+        .route(
+            "/{workspace}/repository-events/{id}",
+            get(repository_monitor::event),
         )
         .route(
             "/{workspace}/code-connections/{id}/branches",

@@ -55,6 +55,9 @@ class Receiver(BaseHTTPRequestHandler):
                     assert unquote(parsed.path[len(prefix)+1:-len('/branches')]) == 'test-org/team/repository'
                     value = poll_fixture['branches']
                 elif parsed.path.endswith('/tags'): value = poll_fixture['tags']
+                elif parsed.path.endswith('/commits'):
+                    # Codeup ListCommits: newest first for the requested branch.
+                    value = poll_fixture.get('commits', {}).get(query.get('refName', [''])[0], [])
                 else: raise AssertionError(parsed.path)
                 more = parsed.path.endswith('/branches') and len(value)>1 and page==1
                 if parsed.path.endswith('/branches') and len(value)>1: value=value[:1] if page==1 else value[1:]
@@ -289,10 +292,15 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         selected_path = 'test-org/team/\u4e2d\u6587 + 100%20'
         request(owner,codeup_monitor,dict(settings,version=0,repositories=selected_path,events=['push']),method='PATCH')
         before_notifications = len(notifications)
-        raw = json.dumps({'object_kind':'push','repository':{'homepage':api_base+'/'+quote(selected_path,safe='/+')+'.git'},'ref':'refs/heads/main','before':'abc','after':'def'}).encode()
+        # Codeup push payload shape: pusher, commits with author e-mail, total count.
+        raw = json.dumps({'object_kind':'push','repository':{'homepage':api_base+'/'+quote(selected_path,safe='/+')+'.git'},'ref':'refs/heads/main','before':'abc','after':'def','user_name':'Pusher','user_email':'pusher@example.invalid','total_commits_count':1,'commits':[{'id':'def','message':'feat: webhook detail\n\nbody','timestamp':'2026-11-01T03:00:00+08:00','url':api_base+'/c/def','author':{'name':'Writer','email':'writer@example.invalid'}}]}).encode()
         req = urllib.request.Request(base+'/repository-events/'+codeup['id'],data=raw,headers={'Content-Type':'application/json','X-Codeup-Token':secret,'Codeup-Event':'push'})
         with urllib.request.urlopen(req,timeout=20) as response: assert response.code==204
         check(len(notifications)==before_notifications+1 and notifications[-1]['data']['repository']==selected_path,'Codeup selected callback repository matches Unicode, spaces, plus and single-decoded percent path')
+        delivered=notifications[-1]['data']
+        check(delivered['actor']=='Pusher' and delivered['detail']['source']=='webhook' and delivered['detail']['commits'][0]['message']=='feat: webhook detail\n\nbody' and delivered['detail']['commits'][0]['author']=='Writer' and delivered['detail']['total_commits']==1,'event push records the pusher and commit detail and forwards it to generic webhooks')
+        recorded=request(owner,codeup_root+'/events')['items'][0]
+        check(recorded['actor']=='Pusher' and recorded['summary']=='feat: webhook detail' and 'example.invalid' not in json.dumps(recorded),'event push history shows pusher and commit summary without e-mail addresses')
         request(owner,codeup_monitor,dict(settings,version=1,repositories='org/bad\tpath',events=['push']),method='PATCH',expected=400)
         # Real scheduler integration. Advance only the private SQLite fixture's due
         # timestamp; the product interval remains >=60s and is asserted below.
@@ -326,21 +334,37 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             check(baseline[2]-baseline[1]>=60000 and request(owner,events_path)['total']==initial_count,'first poll establishes baseline without historical events and schedules at least one minute later')
             time.sleep(2.2)
             check(poll_state()[1]==baseline[1],'scheduler does not query before configured interval')
-            poll_fixture['branches']=[{'name':'main','commit':{'id':'b'}},{'name':'feature','commit':{'id':'f'}}]
-            poll_fixture['tags']=[{'name':'v1','commit':{'id':'b'}}]
-            poll_fixture['requests']=[{'localId':1,'state':'UNDER_REVIEW','sourceBranch':'feature','targetBranch':'main','updatedAt':'1'}]
+            poll_fixture['branches']=[{'name':'main','commit':{'id':'b'}},{'name':'feature','commit':{'id':'f','shortId':'f1','message':'feat: start feature','authorName':'Fay','authorEmail':'fay@example.invalid','committedDate':'2026-11-01T01:00:00Z'}}]
+            poll_fixture['tags']=[{'name':'v1','message':'Release v1\n\nnotes','commit':{'id':'b'}}]
+            poll_fixture['requests']=[{'localId':1,'state':'UNDER_REVIEW','title':'Add login','description':'Implements SSO\nwith tests','author':{'name':'Ann','username':'ann'},'reviewers':[{'name':'Rev','username':'rev'}],'sourceBranch':'feature','targetBranch':'main','updatedAt':'1','detailUrl':api_base+'/mr/1'}]
+            poll_fixture['commits']={'main':[{'id':'b','shortId':'b1','message':'fix: second\n\nbody','authorName':'Bob','authorEmail':'bob@example.invalid','committedDate':'2026-11-01T02:00:00Z','webUrl':api_base+'/c/b'},{'id':'a','message':'base'}]}
             due();changed=await_poll(baseline[1])
             rows=request(owner,events_path)['items']
             detected={row['event'] for row in rows if str(row['action']).startswith('\u8f6e\u8be2')}
             check({'push','branch.created','tag.created','pull_request'}<=detected,'Codeup polling detects branch head, new branch, tag and official changeRequests changes')
+            # Newest polling event of each kind (earlier webhook events share the history).
+            by_event={row['event']:row for row in reversed(rows) if str(row['action']).startswith('轮询')}
+            pushed=by_event['push']
+            check(pushed['actor']=='Bob' and pushed['summary']=='fix: second' and pushed['detail']['total_commits']==1 and [c['id'] for c in pushed['detail']['commits']]==['b'] and pushed['detail']['commits'][0]['message']=='fix: second\n\nbody','polling push records the commit range, message and author since the previous revision')
+            check('bob@example.invalid' not in json.dumps(rows) and 'fay@example.invalid' not in json.dumps(rows),'event detail never stores author e-mail addresses')
+            check(by_event['branch.created']['actor']=='Fay' and by_event['branch.created']['detail']['commit']['message']=='feat: start feature','new branch records its head commit and author from the listing')
+            check(by_event['tag.created']['detail']['message']=='Release v1\n\nnotes','new tag records its annotation')
+            requested=by_event['pull_request']
+            check(requested['actor']=='ann' and requested['detail']['request']['title']=='Add login' and requested['detail']['request']['description']=='Implements SSO\nwith tests' and requested['detail']['request']['reviewers']==['rev'] and requested['summary']=='#1 Add login','merge request records title, description, author and reviewers')
+            view=request(owner,root+'/repository-events/'+pushed['id'])
+            check(view['commits'][0]['short_id']=='b1' and view['total_commits']==1 and view['source']=='polling' and '推送人' in view['note'],'single event detail flattens commits and explains the inferred operator')
+            request(outsider,f'/workspaces/{workspace_other}/repository-events/'+pushed['id'],expected=404)
             count=request(owner,events_path)['total']
             codeup_fixture['mode']=500;due();failed=await_poll(changed[1])
             check(failed[0]==changed[0] and failed[3] and request(owner,events_path)['total']==count,'failed provider query preserves baseline and never fabricates removals')
             codeup_fixture['mode']='normal';poll_fixture['branches']=[{'name':'main','commit':{'id':'b'}}];poll_fixture['tags']=[]
             poll_fixture['requests'][0].update(state='MERGED',updatedAt='2',mergedRevision='b')
             due();await_poll(failed[1])
-            detected={row['event'] for row in request(owner,events_path)['items'] if str(row['action']).startswith('\u8f6e\u8be2')}
+            later=request(owner,events_path)['items']
+            detected={row['event'] for row in later if str(row['action']).startswith('\u8f6e\u8be2')}
             check({'branch.deleted','tag.deleted','merge'}<=detected,'polling recovers from failure and detects removals and merge exactly from prior successful baseline')
+            removed=next(row for row in later if row['event']=='branch.deleted')
+            check(removed['actor']=='' and '事件推送' in removed['detail']['note'] and removed['detail']['before']=='f','removals state that polling cannot know the operator instead of inventing one')
             count=request(owner,events_path)['total'];previous=poll_state()[1];due();await_poll(previous)
             check(request(owner,events_path)['total']==count,'unchanged complete snapshot creates no duplicate notifications')
             persisted=poll_state()

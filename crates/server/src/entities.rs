@@ -876,6 +876,8 @@ pub mod repository_events {
         pub action: String,
         pub delivery: String,
         pub created_at: i64,
+        /// Structured detail JSON; absent for events recorded before it existed.
+        pub detail: Option<String>,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
