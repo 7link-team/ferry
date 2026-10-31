@@ -108,6 +108,11 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     before[path]['tags'] = []
                     assert after['jump_host_id'] == before[path].get('jump_host_id', '0')
                     before[path].setdefault('jump_host_id', '0')
+                    # Read-only platform metadata is now exposed; a runner that
+                    # never enrolled has reported neither value.
+                    for key in ('os', 'agent_version'):
+                        assert after[key] == before[path].get(key, ''), (key, after[key])
+                        before[path].setdefault(key, '')
                 if '/pipelines/' in path:
                     defaults={'definition_format':'legacy','executor_bindings':[],'checkout_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
                     for key,value in defaults.items():

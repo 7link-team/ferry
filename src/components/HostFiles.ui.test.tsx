@@ -24,6 +24,26 @@ it("opens current and selected directories in a closable terminal panel", async 
   expect(host.querySelector('[aria-label="目录终端"]')).toBeNull();
 });
 
+it("keeps a directory the user opened while partitions were still loading", async () => {
+  let partitions!: () => void;
+  vi.stubGlobal("fetch", vi.fn((url: string) => url.endsWith("/file-systems")
+    ? new Promise(done => { partitions = () => done({ ok: true, json: async () => ({ platform: "unix", items: [{ path: "/", name: "root", total: 1, used: 0 }] }) }); })
+    : Promise.resolve({ ok: true, json: async () => ({ path: new URL(url, "http://x").searchParams.get("path"), items: [{ name: url.includes("srv") ? "app.log" : "etc", kind: "file", size: 1, mode: 420, modified_at: 0 }] }) })));
+  await act(async () => root.render(<HostFiles workspace="ops" hostId="1" />));
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="目录路径"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "/srv");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => input.form!.requestSubmit());
+  expect(host.textContent).toContain("app.log");
+  // The late partition response must not reset the view to the initial directory.
+  await act(async () => partitions());
+  expect(input.value).toBe("/srv");
+  expect(host.textContent).toContain("app.log");
+  expect(host.textContent).not.toContain("etc");
+});
+
 it("hides terminal actions without terminal permission", async () => {
   await act(async () => root.render(<HostFiles workspace="ops" hostId="1" />));
   expect(host.querySelector('button[aria-label="在当前目录打开终端"]')).toBeNull();

@@ -193,13 +193,16 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
     fileSystemsRef.current = undefined;
     setFileSystems(undefined);
     setFileSystemsError("");
+    // Partition discovery can take seconds; never let its completion replace a
+    // directory the user has already opened in the meantime.
+    const started = loadSequence.current;
     void api<FileSystems>(endpoint.replace(/^\/api/, "").replace(/\/files$/, "/file-systems"))
       .then(value => {
         if (!Array.isArray(value.items) || !value.items.every(disk => typeof disk.path === "string" && disk.path.length > 0)) throw new Error("磁盘分区接口返回了无效数据。");
         if (!cancelled) { fileSystemsRef.current = value; setFileSystems(value); }
       })
       .catch(cause => { if (!cancelled) setFileSystemsError(`磁盘分区读取失败：${errorText(cause)}`); })
-      .finally(() => { if (!cancelled) void load(initialPath); });
+      .finally(() => { if (!cancelled && loadSequence.current === started) void load(initialPath); });
     return () => { cancelled = true; ++loadSequence.current; };
   }, [load, initialPath]);
   useEffect(() => {

@@ -90,24 +90,28 @@ it("generates one-click uninstall commands for each platform and install scope",
 });
 
 it.skipIf(process.platform === "win32")("runs the current-user Unix uninstall against a fixture Runner and parses the sudo command", () => {
+  // The generated commands travel as data in the environment, exactly as pasted:
+  // interpolating them into this script would let its own shell expand them.
   const script = `
 set -eu
-export HOME=$(mktemp -d)
+export HOME="$(mktemp -d)"
 trap 'rm -rf "$HOME"' EXIT
-sh -n -c ${JSON.stringify(runnerUninstallCommand("linux", "system").replace(/^sudo /, ""))}
+sh -n -c "$SYSTEM_COMMAND"
+sh -n -c "$MACOS_USER_COMMAND"
 root="$HOME/.local/state/runner-agent"
 mkdir -p "$root/versions"
 printf '#!/bin/sh\\nprintf "%%s " "$@" > "$HOME/args"\\nexit "\${FIXTURE_FAIL:-0}"\\n' > "$root/runner-service"
 chmod 700 "$root/runner-service"
-if FIXTURE_FAIL=3 sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}; then echo 'failure must be reported'; exit 1; fi
+if FIXTURE_FAIL=3 sh -c "$USER_COMMAND"; then echo 'failure must be reported'; exit 1; fi
 [ -x "$root/runner-service" ] || { echo 'failed deregistration must keep files'; exit 1; }
-sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}
+sh -c "$USER_COMMAND"
 [ "$(cat "$HOME/args")" = "service uninstall --name runner-agent --user " ] || { echo "wrong arguments: $(cat "$HOME/args")"; exit 1; }
 [ ! -e "$root" ] || { echo 'installation directory must be removed'; exit 1; }
-sh -c ${JSON.stringify(runnerUninstallCommand("linux", "user"))}
+sh -c "$USER_COMMAND"
 echo 'unix uninstall verified'
 `;
-  expect(execFileSync("sh", ["-c", script], { encoding: "utf8" })).toContain("unix uninstall verified");
+  const env = { ...process.env, SYSTEM_COMMAND: runnerUninstallCommand("linux", "system").replace(/^sudo /, ""), USER_COMMAND: runnerUninstallCommand("linux", "user"), MACOS_USER_COMMAND: runnerUninstallCommand("macos", "user") };
+  expect(execFileSync("sh", ["-c", script], { encoding: "utf8", env })).toContain("unix uninstall verified");
 });
 
 it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs the current-user uninstall against a fixture Runner", () => {
