@@ -1,17 +1,29 @@
 import { beforeEach, afterEach, test, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-let invoke, events;
+let invoke, releaseInvoke, events;
 beforeEach(async () => {
   vi.resetModules();
   document.body.innerHTML = readFileSync('desktop/ui/index.html', 'utf8');
   invoke = vi.fn();
+  releaseInvoke = vi.fn().mockResolvedValue('https://github.com/example/project/releases');
   events = {};
-  vi.stubGlobal('__TAURI__', { core: { invoke }, app: { getVersion: async () => '0.1.0-alpha.2' }, event: { listen: async (name, fn) => { events[name] = fn; return () => {}; } } });
+  vi.stubGlobal('__TAURI__', { core: { invoke: (command, ...args) => command === 'release_page' || command === 'open_release_page' ? releaseInvoke(command, ...args) : invoke(command, ...args) }, app: { getVersion: async () => '0.1.0-alpha.2' }, event: { listen: async (name, fn) => { events[name] = fn; return () => {}; } } });
   vi.stubGlobal('confirm', vi.fn(() => true));
   await import('./ui/launcher.js');
   invoke.mockClear();
 });
 afterEach(() => { vi.unstubAllGlobals(); });
+test('release link uses configured URL and native browser command', async () => {
+  const link = document.getElementById('release-page');
+  expect(releaseInvoke).toHaveBeenCalledWith('release_page');
+  expect(link.hidden).toBe(false);
+  expect(link.href).toBe('https://github.com/example/project/releases');
+  link.click();
+  expect(releaseInvoke).toHaveBeenLastCalledWith('open_release_page');
+  releaseInvoke.mockRejectedValueOnce('Browser unavailable');
+  link.click();
+  await vi.waitFor(() => expect(document.getElementById('update-status').textContent).toBe('Browser unavailable'));
+});
 const click = async (id) => { document.getElementById(id).click(); await vi.waitFor(() => expect(document.getElementById('check-update').disabled).toBe(false)); };
 test('discovers and installs update without a second confirmation', async () => {
   invoke.mockResolvedValueOnce({ current_version:'0.1.0-alpha.2', version:'0.1.0-alpha.3', notes:'Fixes' });

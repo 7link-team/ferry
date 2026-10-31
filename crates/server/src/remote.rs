@@ -365,18 +365,27 @@ pub async fn test_connection(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.read")?;
     let channel = open(&s, &scope.workspace_id, &id).await?;
+    let owner = match &s.cluster {
+        Some(cluster) => cluster.owner(&id.to_string()).await?,
+        None => None,
+    };
     let output = channel
         .exec("echo ferry-ok", Duration::from_secs(15))
         .await?;
     let ok = output.code == 0 && output.stdout.contains("ferry-ok");
     if ok {
-        hosts::Entity::update_many()
+        let mut update = hosts::Entity::update_many()
             .col_expr(hosts::Column::State, Expr::value("online"))
             .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
             .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(hosts::Column::Id.eq(id))
-            .exec(&s.db)
-            .await?;
+            .filter(hosts::Column::Id.eq(id));
+        if let Some(owner) = owner {
+            update = update.filter(crate::cluster::fence_condition(
+                &id.to_string(),
+                &owner.fence,
+            ));
+        }
+        update.exec(&s.db).await?;
     }
     Ok(Json(
         json!({ "ok": ok, "code": output.code, "stderr": output.stderr }),

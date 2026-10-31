@@ -5,6 +5,7 @@ mod artifacts;
 mod assets;
 mod auth;
 mod channel;
+mod cluster;
 mod credentials;
 mod cron_jobs;
 mod db;
@@ -12,6 +13,7 @@ mod deployment_modes;
 mod deployments;
 mod entities;
 mod error;
+mod host_monitor;
 mod hosts;
 mod lock;
 mod maintenance;
@@ -62,6 +64,13 @@ struct Config {
     data_dir: PathBuf,
     #[arg(long, env = "FERRY_DATABASE_URL", hide_env_values = true)]
     database_url: Option<String>,
+    /// Optional shared NATS JetStream cluster transport.
+    #[arg(long, env = "FERRY_NATS_URL", hide_env_values = true)]
+    nats_url: Option<String>,
+    #[arg(long, env = "FERRY_CLUSTER_NAMESPACE", default_value = "ferry")]
+    cluster_namespace: String,
+    #[arg(long, env = "FERRY_NATS_REPLICAS", default_value_t = 1)]
+    nats_replicas: usize,
     #[arg(long, env = "FERRY_BIND", default_value = "127.0.0.1:4290")]
     bind: SocketAddr,
     /// Docker/web deployment: no desktop launcher owns this process.
@@ -136,7 +145,31 @@ async fn main() -> anyhow::Result<()> {
         heartbeat_worker.run(&heartbeat_db, heartbeat_rx).await;
     });
 
+    let cluster = match cfg.nats_url.as_deref().filter(|url| !url.is_empty()) {
+        Some(url) => {
+            anyhow::ensure!(
+                cfg.database_url.is_some(),
+                "cluster mode requires a shared database URL"
+            );
+            anyhow::ensure!(
+                std::env::var("FERRY_MASTER_KEY").is_ok_and(|key| !key.is_empty()),
+                "cluster mode requires a shared FERRY_MASTER_KEY"
+            );
+            Some(
+                cluster::Cluster::connect(
+                    url,
+                    &cfg.cluster_namespace,
+                    cfg.nats_replicas,
+                    db.clone(),
+                )
+                .await?,
+            )
+        }
+        None => None,
+    };
     let s: state::AppState = Arc::new(state::State {
+        host_monitor: Default::default(),
+        cluster,
         db,
         data_dir: cfg.data_dir.clone(),
         instance_id,
@@ -163,6 +196,11 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
 
     let (drain, drain_rx) = tokio::sync::watch::channel(false);
+    let (cluster_stop, cluster_rx) = tokio::sync::watch::channel(false);
+    let cluster_task = s
+        .cluster
+        .as_ref()
+        .map(|cluster| tokio::spawn(cluster.clone().serve(s.clone(), cluster_rx)));
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
     let pipeline_task = tokio::spawn(pipeline_runs::scheduler(
         s.clone(),
@@ -178,7 +216,31 @@ async fn main() -> anyhow::Result<()> {
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
-    let ssh_heartbeat_task = tokio::spawn(hosts::ssh_heartbeat(s.clone(), drain_rx.clone()));
+    let host_monitor_task = tokio::spawn(host_monitor::collect(s.clone(), drain_rx.clone()));
+    let recovery_state = s.clone();
+    let mut recovery_stop = drain_rx.clone();
+    let recovery_task = tokio::spawn(async move {
+        if recovery_state.cluster.is_none() {
+            return;
+        }
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = recovery_stop.changed() => break,
+                _ = tick.tick() => {
+                    tokio::select! {
+                        _ = recovery_stop.changed() => break,
+                        result = runner::recover_updates(&recovery_state) => {
+                            if let Err(error) = result {
+                                tracing::warn!(error=%error.1,"Cannot recover orphaned Runner updates");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
     let alerts_task = tokio::spawn(alerts::scheduler(s.clone(), drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
@@ -491,7 +553,7 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/nodes/{id}/connection-tests",
             post(remote::test_connection),
         )
-        .route("/{workspace}/nodes/{id}/metrics", get(hosts::monitor_host))
+        .route("/{workspace}/nodes/{id}/metrics", get(host_monitor::read))
         .route(
             "/{workspace}/nodes/{id}/terminal-sessions",
             get(remote::terminal),
@@ -650,10 +712,16 @@ async fn main() -> anyhow::Result<()> {
     };
     let _ = drain.send(true);
     alerts_task.await?;
-    ssh_heartbeat_task.await?;
+    host_monitor_task.await?;
+    recovery_task.await?;
     cron_task.await?;
     deployment_task.await?;
     pipeline_task.await?;
+    let _ = cluster_stop.send(true);
+    if let Some(task) = cluster_task {
+        task.await?
+            .map_err(|error| anyhow::anyhow!("{}", error.1))?;
+    }
     let _ = http_stop.send(());
     let served = match early_result {
         Some(result) => result?,

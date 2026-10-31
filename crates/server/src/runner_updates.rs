@@ -9,7 +9,16 @@ use std::{
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 
 static HOSTS: LazyLock<Mutex<HashMap<String, Weak<RwLock<()>>>>> = LazyLock::new(Default::default);
-pub(crate) type Lease = Arc<OwnedRwLockReadGuard<()>>;
+pub(crate) type Lease = Arc<Guard>;
+pub(crate) struct Guard {
+    _local: OwnedRwLockReadGuard<()>,
+    distributed: Option<crate::cluster::Reservation>,
+}
+impl Guard {
+    pub fn valid(&self) -> bool {
+        self.distributed.as_ref().is_none_or(|lease| lease.valid())
+    }
+}
 tokio::task_local! { static RESERVED: HashMap<String, Lease>; }
 
 fn host_lock(host: &str) -> Arc<RwLock<()>> {
@@ -23,11 +32,33 @@ fn host_lock(host: &str) -> Arc<RwLock<()>> {
     lock
 }
 
+#[cfg(test)]
 pub(crate) async fn lease(host: &str) -> Lease {
+    lease_with(None, host)
+        .await
+        .expect("standalone reservation")
+}
+
+pub(crate) async fn lease_with(
+    cluster: Option<&Arc<crate::cluster::Cluster>>,
+    host: &str,
+) -> crate::error::Result<Lease> {
     if let Ok(Some(existing)) = RESERVED.try_with(|hosts| hosts.get(host).cloned()) {
-        return existing;
+        return if existing.valid() {
+            Ok(existing)
+        } else {
+            Err(crate::cluster::unavailable())
+        };
     }
-    Arc::new(host_lock(host).read_owned().await)
+    let local = host_lock(host).read_owned().await;
+    let distributed = match cluster {
+        Some(cluster) => Some(cluster.reserve(host, false).await?),
+        None => None,
+    };
+    Ok(Arc::new(Guard {
+        _local: local,
+        distributed,
+    }))
 }
 
 pub(crate) async fn exclusive(host: &str) -> OwnedRwLockWriteGuard<()> {
@@ -42,15 +73,25 @@ impl Reservations {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn reserve(mut hosts: Vec<String>) -> Reservations {
+    reserve_with(None, std::mem::take(&mut hosts))
+        .await
+        .expect("standalone reservations")
+}
+
+pub(crate) async fn reserve_with(
+    cluster: Option<&Arc<crate::cluster::Cluster>>,
+    mut hosts: Vec<String>,
+) -> crate::error::Result<Reservations> {
     hosts.sort();
     hosts.dedup();
     let mut guards = RESERVED.try_with(Clone::clone).unwrap_or_default();
     // A common acquisition order prevents two multi-host runs deadlocking.
     for host in &hosts {
-        guards.insert(host.clone(), lease(host).await);
+        guards.insert(host.clone(), lease_with(cluster, host).await?);
     }
-    Reservations(guards)
+    Ok(Reservations(guards))
 }
 
 #[cfg(test)]

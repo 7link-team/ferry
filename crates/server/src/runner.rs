@@ -18,6 +18,7 @@
 //! tied to its workspace, so enrolling cannot produce a host anywhere else,
 //! and a key only matches the hash on its own host's row.
 
+use crate::cluster::Socket;
 use crate::snowflake::Id;
 
 use crate::{
@@ -33,7 +34,7 @@ use axum::{
     Json,
     extract::{
         Path, State,
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode, header},
     response::Response,
@@ -68,7 +69,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const TOKEN_MINUTES: i64 = 30;
 const TOKEN_MINUTES_RANGE: std::ops::RangeInclusive<i64> = 5..=1440;
 /// Upload chunks are re-cut to this, so one oversized body chunk cannot exceed
-/// the WebSocket frame limit at the other end.
+/// the Socket frame limit at the other end.
 const CHUNK: usize = 256 * 1024;
 
 // --------------------------------------------------------------- 在线登记
@@ -76,6 +77,9 @@ const CHUNK: usize = 256 * 1024;
 /// A live control connection. Dropping the last handle closes the sender,
 /// which is how an evicted connection's own loop learns it was replaced.
 struct Live {
+    owner: Option<crate::cluster::Owner>,
+    owner_revision: std::sync::atomic::AtomicU64,
+    key_hash: String,
     control: mpsc::Sender<wire::Control>,
     disconnect: watch::Sender<bool>,
     managed: bool,
@@ -90,7 +94,7 @@ struct Live {
 /// second runner claiming someone else's session id.
 struct Pending {
     host_id: String,
-    socket: oneshot::Sender<std::result::Result<WebSocket, String>>,
+    socket: oneshot::Sender<std::result::Result<Socket, String>>,
 }
 
 // ponytail: process-global, so this is one server process's view of its own
@@ -170,7 +174,7 @@ fn timed_out() -> ApiError {
 
 // -------------------------------------------------------------- 帧读写
 
-async fn send_frame<T: Serialize>(socket: &mut WebSocket, frame: &T) -> Result<()> {
+async fn send_frame<T: Serialize>(socket: &mut Socket, frame: &T) -> Result<()> {
     let text = serde_json::to_string(frame).map_err(|_| garbled())?;
     socket
         .send(Message::Text(text.into()))
@@ -180,7 +184,7 @@ async fn send_frame<T: Serialize>(socket: &mut WebSocket, frame: &T) -> Result<(
 
 /// Reads frames until a JSON text frame arrives. Binary frames are payload and
 /// never control, so they are skipped rather than treated as an error.
-async fn next_frame<T: serde::de::DeserializeOwned>(socket: &mut WebSocket) -> Result<T> {
+async fn next_frame<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Result<T> {
     while let Some(message) = socket.recv().await {
         match message.map_err(remote_failed)? {
             Message::Text(text) => return serde_json::from_str(&text).map_err(|_| garbled()),
@@ -191,14 +195,14 @@ async fn next_frame<T: serde::de::DeserializeOwned>(socket: &mut WebSocket) -> R
     Err(garbled())
 }
 
-async fn handshake<T: serde::de::DeserializeOwned>(socket: &mut WebSocket) -> Result<T> {
+async fn handshake<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Result<T> {
     tokio::time::timeout(HANDSHAKE_TIMEOUT, next_frame(socket))
         .await
         .map_err(|_| timed_out())?
 }
 
 /// Says no in a way the other end can log, instead of just closing the socket.
-async fn reject(socket: &mut WebSocket, reason: &str) {
+async fn reject(socket: &mut Socket, reason: &str) {
     tracing::warn!(%reason, "拒绝 runner 连接");
     let _ = send_frame(
         socket,
@@ -300,6 +304,10 @@ pub async fn reset_connection_command(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let host = command_host(&s, &scope, id).await?;
+    let previous_owner = match &s.cluster {
+        Some(cluster) => cluster.owner(&id.to_string()).await?,
+        None => None,
+    };
     let token = secret();
     let sealed = s.vault.seal(&token, &command_aad(scope.workspace_id, id))?;
     hosts::Entity::update_many()
@@ -321,6 +329,11 @@ pub async fn reset_connection_command(
         .filter(runner_tokens::Column::UsedAt.eq(0_i64))
         .exec(&s.db)
         .await?;
+    if let Some(cluster) = &s.cluster {
+        cluster
+            .revoke(&s, &id.to_string(), previous_owner.as_ref())
+            .await?;
+    }
     if let Some(registration) = live().remove(&id.to_string()) {
         let _ = registration.disconnect.send(true);
     }
@@ -624,10 +637,10 @@ async fn verify_key(s: &AppState, host_id: &str, key: &str) -> Result<()> {
 /// not behind the session cookie: a runner is not a browser, and it proves
 /// itself with the `Hello` frame instead.
 pub async fn connect(State(s): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
-    upgrade.on_upgrade(move |socket| control(s, socket))
+    upgrade.on_upgrade(move |socket| control(s, socket.into()))
 }
 
-async fn control(s: AppState, mut socket: WebSocket) {
+async fn control(s: AppState, mut socket: Socket) {
     let hello: wire::Hello = match handshake(&mut socket).await {
         Ok(hello) => hello,
         Err(error) => return reject(&mut socket, &error.1).await,
@@ -666,24 +679,72 @@ async fn control(s: AppState, mut socket: WebSocket) {
         Ok(id) => id,
         Err(_) => return reject(&mut socket, "代理主机 ID 无效。").await,
     };
-    if send_frame(
-        &mut socket,
-        &wire::Control::Welcome {
-            host_id: host_id.clone(),
-            key,
-            heartbeat_seconds: HEARTBEAT_SECONDS,
-            metrics_seconds: METRICS_SECONDS,
-        },
-    )
-    .await
-    .is_err()
+    let row = match hosts::Entity::find_by_id(i64::from(row_id))
+        .one(&s.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        _ => return reject(&mut socket, "Host unavailable").await,
+    };
+    // Deliver the newly issued key before attempting a transient cluster lease.
+    // A closed socket is retryable by existing Runners; Rejected is permanent.
+    let enrolling = key.is_some();
+    if enrolling
+        && send_frame(
+            &mut socket,
+            &wire::Control::Welcome {
+                host_id: host_id.clone(),
+                key: key.clone(),
+                heartbeat_seconds: HEARTBEAT_SECONDS,
+                metrics_seconds: METRICS_SECONDS,
+            },
+        )
+        .await
+        .is_err()
     {
         return;
     }
-
+    let (owner, owner_revision) = if let Some(cluster) = &s.cluster {
+        match cluster
+            .acquire_owner(&s, &host_id, row.workspace_id.into(), secret())
+            .await
+        {
+            Ok((owner, revision)) => (Some(owner), revision),
+            Err(error) => {
+                tracing::warn!(%host_id, reason=%error.1, "Cluster ownership temporarily unavailable");
+                let _ = socket.send(Message::Close(None)).await;
+                return;
+            }
+        }
+    } else {
+        (None, 0)
+    };
+    if !enrolling
+        && send_frame(
+            &mut socket,
+            &wire::Control::Welcome {
+                host_id: host_id.clone(),
+                key: None,
+                heartbeat_seconds: HEARTBEAT_SECONDS,
+                metrics_seconds: METRICS_SECONDS,
+            },
+        )
+        .await
+        .is_err()
+    {
+        if let (Some(cluster), Some(owner)) = (&s.cluster, &owner) {
+            cluster.release(&host_id, owner_revision).await;
+            let _ =
+                crate::lock::release(&s.db, &format!("runner-owner:{host_id}"), &owner.fence).await;
+        }
+        return;
+    }
     let (control, inbox) = mpsc::channel(16);
     let (disconnect, disconnect_rx) = watch::channel(false);
     let registration = Arc::new(Live {
+        owner,
+        owner_revision: std::sync::atomic::AtomicU64::new(owner_revision),
+        key_hash: row.runner_key_hash,
         control,
         disconnect,
         managed: hello.managed_updates,
@@ -695,7 +756,9 @@ async fn control(s: AppState, mut socket: WebSocket) {
     });
     // A replaced connection's own loop ends when its sender is dropped here,
     // so a half-dead socket cannot keep a host looking online.
-    live().insert(host_id.clone(), registration.clone());
+    if let Some(old) = live().insert(host_id.clone(), registration.clone()) {
+        let _ = old.disconnect.send(true);
+    }
     // Enrolment already wrote the facts; a reconnect refreshes them.
     if matches!(hello.auth, wire::Auth::Key { .. }) {
         let mut update = hosts::Entity::update_many()
@@ -710,7 +773,11 @@ async fn control(s: AppState, mut socket: WebSocket) {
         if let Some(address) = reported_address(&hello.ip_address) {
             update = update.col_expr(hosts::Column::Address, Expr::value(address));
         }
+        if let Some(owner) = &registration.owner {
+            update = update.filter(crate::cluster::fence_condition(&host_id, &owner.fence));
+        }
         let _ = update
+            .filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash))
             .filter(hosts::Column::Id.eq(row_id))
             .exec(&s.db)
             .await;
@@ -740,11 +807,26 @@ async fn control(s: AppState, mut socket: WebSocket) {
         ours
     };
     if still_ours {
-        let _ = hosts::Entity::update_many()
+        let mut update = hosts::Entity::update_many()
             .col_expr(hosts::Column::State, Expr::value("offline"))
             .filter(hosts::Column::Id.eq(row_id))
-            .exec(&s.db)
-            .await;
+            .filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash));
+        if let Some(owner) = &registration.owner {
+            update = update.filter(crate::cluster::fence_condition(&host_id, &owner.fence));
+        }
+        let _ = update.exec(&s.db).await;
+        if let (Some(cluster), Some(owner)) = (&s.cluster, &registration.owner) {
+            cluster
+                .release(
+                    &host_id,
+                    registration
+                        .owner_revision
+                        .load(std::sync::atomic::Ordering::Acquire),
+                )
+                .await;
+            let _ =
+                crate::lock::release(&s.db, &format!("runner-owner:{host_id}"), &owner.fence).await;
+        }
         tracing::info!(%host_id, "runner 控制连接已断开");
     }
 }
@@ -773,7 +855,7 @@ fn metrics_json(
 async fn pump_control(
     s: &AppState,
     host_id: &str,
-    mut socket: WebSocket,
+    mut socket: Socket,
     mut inbox: mpsc::Receiver<wire::Control>,
     mut disconnect: watch::Receiver<bool>,
     registration: Arc<Live>,
@@ -790,8 +872,29 @@ async fn pump_control(
         .flatten()
         .map(|h| Id::from(h.workspace_id));
     let mut unanswered = 0;
+    let mut renew = tokio::time::interval(Duration::from_secs(5));
+    let mut revoked = if let Some(cluster) = &s.cluster {
+        match cluster.subscribe_revoke(host_id).await {
+            Ok(value) => Some(value),
+            Err(_) => return,
+        }
+    } else {
+        None
+    };
     loop {
         tokio::select! {
+            _ = async { match &mut revoked {Some(revoked)=>{loop {let notice=revoked.next().await;if notice.is_none_or(|notice|registration.owner.as_ref().is_some_and(|owner|notice.payload.as_ref()==owner.fence.as_bytes())) {break;}}},None=>std::future::pending().await} } => break,
+            _ = renew.tick(), if s.cluster.is_some() => {
+                if !matches!(hosts::Entity::find_by_id(i64::from(row_id)).filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash)).one(&s.db).await,Ok(Some(_))) {break;}
+                let cluster=s.cluster.as_ref().unwrap();
+                let mut owner=registration.owner.as_ref().unwrap().clone();
+                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone()});
+                let revision=registration.owner_revision.load(std::sync::atomic::Ordering::Acquire);
+                match cluster.renew_owner(s,host_id,&owner,revision).await {
+                    Ok(revision)=>registration.owner_revision.store(revision,std::sync::atomic::Ordering::Release),
+                    Err(_)=>break,
+                }
+            },
             _ = disconnect.changed() => {
                 tracing::info!(%host_id, "runner 控制连接收到重置通知");
                 break;
@@ -833,12 +936,14 @@ async fn pump_control(
                             // No version bump: a heartbeat is not an edit, and
                             // bumping it would invalidate an operator's open form
                             // every thirty seconds.
-                            let _ = hosts::Entity::update_many()
+                            let mut update = hosts::Entity::update_many()
                                 .col_expr(hosts::Column::State, Expr::value("online"))
                                 .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
                                 .col_expr(hosts::Column::Metrics, Expr::value(metrics_json(load1, cpu_percent, memory_used, memory_total, disk_used, disk_total)))
                                 .filter(hosts::Column::Id.eq(row_id))
-                                .exec(&s.db).await;
+                                .filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash));
+                            if let Some(owner)=&registration.owner {update=update.filter(crate::cluster::fence_condition(host_id,&owner.fence));}
+                            let _=update.exec(&s.db).await;
                         }
                         Ok(wire::Report::SessionFailed { session, error }) => {
                             if let Some(waiting) = claim_pending(&session, host_id) {
@@ -884,10 +989,10 @@ pub async fn session(
     Path(session): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    upgrade.on_upgrade(move |socket| hand_over(s, session, socket))
+    upgrade.on_upgrade(move |socket| hand_over(s, session, socket.into()))
 }
 
-async fn hand_over(s: AppState, session: String, mut socket: WebSocket) {
+async fn hand_over(s: AppState, session: String, mut socket: Socket) {
     let hello: wire::SessionHello = match handshake(&mut socket).await {
         Ok(hello) => hello,
         Err(error) => return reject(&mut socket, &error.1).await,
@@ -897,6 +1002,17 @@ async fn hand_over(s: AppState, session: String, mut socket: WebSocket) {
     }
     if let Err(error) = verify_key(&s, &hello.host_id, &hello.key).await {
         return reject(&mut socket, &error.1).await;
+    }
+    if let Some(cluster) = &s.cluster {
+        let route = match cluster.claim_session(&session, &hello.host_id).await {
+            Ok(route) => route,
+            Err(error) => return reject(&mut socket, &error.1).await,
+        };
+        match cluster.socket(&session, true, &route).await {
+            Ok(forwarded) => crate::cluster::bridge(socket, forwarded).await,
+            Err(error) => reject(&mut socket, &error.1).await,
+        }
+        return;
     }
     // The session id is only ever sent to one runner, and this is the check
     // that makes that binding enforced rather than merely true.
@@ -913,24 +1029,63 @@ async fn hand_over(s: AppState, session: String, mut socket: WebSocket) {
 
 pub struct RunnerChannel {
     _lease: crate::runner_updates::Lease,
+    cluster: Option<Arc<crate::cluster::Cluster>>,
     host_id: String,
     /// Only for error messages: an operator reads names, not ids.
     name: String,
 }
 
+pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionKind) -> Result<()> {
+    let registration = live()
+        .get(host)
+        .cloned()
+        .ok_or_else(crate::cluster::unavailable)?;
+    if !registration
+        .ready
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(crate::cluster::unavailable());
+    }
+    if kind == wire::SessionKind::Monitor && !registration.supports_monitor {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "当前 Agent 尚不支持详细监控，请升级后重试。".into(),
+        ));
+    }
+    registration
+        .control
+        .send(wire::Control::OpenSession {
+            session: session.into(),
+            kind,
+        })
+        .await
+        .map_err(|_| crate::cluster::unavailable())
+}
+
 /// The factory arm for `connection = 'runner'`. Fails fast when the agent is
 /// not connected, so the operator gets a readable HTTP error instead of a
 /// socket that opens and immediately closes.
-pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
-    let lease = crate::runner_updates::lease(&host.id.to_string()).await;
-    if !live()
-        .get(&host.id.to_string())
-        .is_some_and(|r| r.ready.load(std::sync::atomic::Ordering::Acquire))
+pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
+    let lease = crate::runner_updates::lease_with(s.cluster.as_ref(), &host.id.to_string()).await?;
+    if s.cluster.is_none()
+        && !live()
+            .get(&host.id.to_string())
+            .is_some_and(|r| r.ready.load(std::sync::atomic::Ordering::Acquire))
     {
         return Err(offline(&host.name));
     }
+    if let Some(cluster) = &s.cluster {
+        let owner = cluster
+            .owner(&host.id.to_string())
+            .await?
+            .ok_or_else(|| offline(&host.name))?;
+        if owner.workspace != host.workspace_id {
+            return Err(ApiError::missing());
+        }
+    }
     Ok(Box::new(RunnerChannel {
         _lease: lease,
+        cluster: s.cluster.clone(),
         host_id: host.id.to_string(),
         name: host.name.clone(),
     }))
@@ -938,7 +1093,37 @@ pub async fn open(_s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
 
 impl RunnerChannel {
     /// Asks the runner to dial a dedicated connection and waits for it.
-    async fn session(&self, kind: wire::SessionKind) -> Result<WebSocket> {
+    async fn session(&self, kind: wire::SessionKind) -> Result<Socket> {
+        if !self._lease.valid() {
+            return Err(crate::cluster::unavailable());
+        }
+        if let Some(cluster) = &self.cluster {
+            let owner = cluster
+                .owner(&self.host_id)
+                .await?
+                .ok_or_else(|| offline(&self.name))?;
+            let id = secret();
+            let route = crate::cluster::SessionRoute {
+                host: self.host_id.clone(),
+                owner: owner.clone(),
+            };
+            let mut socket = cluster.socket(&id, false, &route).await?;
+            socket.hold(self._lease.clone());
+            cluster.new_session(&id, &route).await?;
+            let _: Value = cluster
+                .rpc(
+                    &owner.node,
+                    &crate::cluster::Request::Open {
+                        host: self.host_id.clone(),
+                        fence: owner.fence,
+                        session: id.clone(),
+                        kind,
+                    },
+                )
+                .await?;
+            cluster.wait_session(&id).await?;
+            return Ok(socket);
+        }
         let registration = live()
             .get(&self.host_id)
             .cloned()
@@ -990,7 +1175,7 @@ impl RunnerChannel {
         kind: wire::SessionKind,
         request: wire::Session,
         within: Duration,
-    ) -> Result<(wire::Session, WebSocket)> {
+    ) -> Result<(wire::Session, Socket)> {
         let mut socket = self.session(kind).await?;
         send_frame(&mut socket, &request).await?;
         let answer = tokio::time::timeout(within, next_frame(&mut socket))
@@ -1341,7 +1526,7 @@ impl Pty for RunnerPty {
 }
 
 async fn pump_pty(
-    mut socket: WebSocket,
+    mut socket: Socket,
     output: mpsc::Sender<Result<Bytes>>,
     mut input: mpsc::Receiver<Keystrokes>,
 ) {
@@ -1432,6 +1617,9 @@ mod tests {
         live().insert(
             host_id.into(),
             Arc::new(Live {
+                owner: None,
+                owner_revision: std::sync::atomic::AtomicU64::new(0),
+                key_hash: String::new(),
                 control,
                 disconnect,
                 managed: false,
@@ -1444,6 +1632,7 @@ mod tests {
         );
         let channel = RunnerChannel {
             _lease: crate::runner_updates::lease(host_id).await,
+            cluster: None,
             host_id: host_id.into(),
             name: "旧版主机".into(),
         };
@@ -1755,6 +1944,8 @@ mod tests {
         scratch.db.execute_unprepared("CREATE TRIGGER fail_audit BEFORE INSERT ON activity BEGIN SELECT RAISE(FAIL, 'audit unavailable'); END").await.unwrap();
         scratch.db.execute_unprepared("CREATE TRIGGER fail_update_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%failed%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
         let s = Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
             db: scratch.db.clone(),
             data_dir: dir.path().into(),
@@ -1769,6 +1960,9 @@ mod tests {
         live().insert(
             id.to_string(),
             Arc::new(Live {
+                owner: None,
+                owner_revision: std::sync::atomic::AtomicU64::new(0),
+                key_hash: String::new(),
                 control,
                 disconnect,
                 managed: true,
@@ -1876,6 +2070,8 @@ mod tests {
         .await
         .unwrap();
         let s = Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
             db: scratch.db.clone(),
             data_dir: dir.path().into(),
@@ -1886,6 +2082,7 @@ mod tests {
             vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
         });
         let job = UpdateJob {
+            owner: None,
             request: "recovery".into(),
             version: "2.0.0".into(),
             state: "updating".into(),
@@ -1904,6 +2101,9 @@ mod tests {
         let (control, _receiver) = mpsc::channel(1);
         let (disconnect, _) = watch::channel(false);
         let peer = Arc::new(Live {
+            owner: None,
+            owner_revision: std::sync::atomic::AtomicU64::new(0),
+            key_hash: String::new(),
             control,
             disconnect,
             managed: true,
@@ -1961,6 +2161,113 @@ mod tests {
         assert_eq!(reported_name(&"x".repeat(200)).chars().count(), 60);
     }
 
+    #[tokio::test]
+    #[ignore = "requires NATS_TEST_URL pointing at an isolated JetStream server"]
+    async fn cluster_update_recovery_fences_stale_workers_without_blocking_collection() {
+        let scratch = scratch_db().await;
+        let dir = tempfile::tempdir().unwrap();
+        let url = std::env::var("NATS_TEST_URL").unwrap();
+        let prefix = format!("updates_{}", uuid::Uuid::new_v4().simple());
+        let a = crate::cluster::Cluster::connect(&url, &prefix, 1, scratch.db.clone())
+            .await
+            .unwrap();
+        let b = crate::cluster::Cluster::connect(&url, &prefix, 1, scratch.db.clone())
+            .await
+            .unwrap();
+        let state = |cluster: Arc<crate::cluster::Cluster>| {
+            Arc::new(crate::state::State {
+                host_monitor: Default::default(),
+                cluster: Some(cluster),
+                ids: Arc::new(
+                    crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+                ),
+                db: scratch.db.clone(),
+                data_dir: dir.path().into(),
+                instance_id: secret(),
+                server_mode: false,
+                secure_cookie: false,
+                bind: "127.0.0.1:0".parse().unwrap(),
+                vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+            })
+        };
+        let sa = state(a.clone());
+        let sb = state(b.clone());
+        let id = Id::from(9119);
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(id.into()),
+            workspace_id: Set(1),
+            name: Set("recovery".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set("1.0.0".into()),
+            metrics: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            ..Default::default()
+        })
+        .exec(&scratch.db)
+        .await
+        .unwrap();
+        let mut old = UpdateJob {
+            owner: Some(a.node.clone()),
+            request: secret(),
+            version: "2.0.0".into(),
+            state: "updating".into(),
+            message: String::new(),
+        };
+        persist_update(&sa, id, &old).await.unwrap();
+        assert_eq!(
+            persist_update(&sb, id, &old).await.unwrap_err().0,
+            StatusCode::CONFLICT
+        );
+        orphan_update(&sa, id, &mut old).await;
+        let row = hosts::Entity::find_by_id(i64::from(id))
+            .one(&scratch.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let orphan: UpdateJob = serde_json::from_str(row.agent_update.as_deref().unwrap()).unwrap();
+        assert!(orphan.owner.is_none());
+        assert_eq!(orphan.state, "unknown");
+        assert!(!transition_update(&sa, id, &mut old, "failed", "stale worker").await);
+        let (_, revision) = b
+            .acquire_owner(&sb, &id.to_string(), 1.into(), secret())
+            .await
+            .unwrap();
+        let reader = b.reserve(&id.to_string(), true).await.unwrap();
+        tokio::time::timeout(Duration::from_millis(500), recover_updates(&sb))
+            .await
+            .expect("recovery must not await the execution lock on the collection task")
+            .unwrap();
+        let recovered = hosts::Entity::find_by_id(i64::from(id))
+            .one(&scratch.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let recovered: UpdateJob =
+            serde_json::from_str(recovered.agent_update.as_deref().unwrap()).unwrap();
+        assert_eq!(recovered.owner.as_deref(), Some(b.node.as_str()));
+        assert_eq!(recovered.state, "unknown");
+        assert_eq!(
+            persist_update(&sa, id, &old).await.unwrap_err().0,
+            StatusCode::CONFLICT
+        );
+        drop(reader);
+        b.release(&id.to_string(), revision).await;
+        UPDATES.lock().unwrap().remove(&id.to_string());
+    }
+
     #[test]
     fn runner_address_accepts_only_usable_ips() {
         assert_eq!(
@@ -1981,10 +2288,12 @@ struct UpdateJob {
     version: String,
     state: String,
     message: String,
+    #[serde(default)]
+    owner: Option<String>,
 }
 static UPDATES: LazyLock<Mutex<HashMap<String, UpdateJob>>> = LazyLock::new(Default::default);
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UpdateBody {
     version: String,
     manifest: String,
@@ -2008,6 +2317,13 @@ pub async fn update_status(
     scope.require("hosts.read")?;
     let host = update_host(&s, &scope, id).await?;
     let registration = live().get(&id.to_string()).cloned();
+    let info = match &s.cluster {
+        Some(cluster) => cluster
+            .owner(&id.to_string())
+            .await?
+            .and_then(|owner| owner.info),
+        None => None,
+    };
     let status = host
         .agent_update
         .as_deref()
@@ -2015,7 +2331,7 @@ pub async fn update_status(
         .transpose()
         .map_err(|_| ApiError::bad("代理升级状态无法读取"))?;
     Ok(Json(
-        json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire)),"update":status}),
+        json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
     ))
 }
 
@@ -2026,13 +2342,44 @@ pub async fn start_update(
     Json(body): Json<UpdateBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("hosts.update")?;
-    update_host(&s, &scope, id).await?;
+    let host = update_host(&s, &scope, id).await?;
+    if host
+        .agent_update
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<UpdateJob>(value).ok())
+        .is_some_and(|job| matches!(job.state.as_str(), "draining" | "updating" | "unknown"))
+    {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "已有代理升级进行中。".into(),
+        ));
+    }
     if body.version.len() > 128
         || body.manifest.len() > 65536
         || body.signature.len() > 8192
         || body.version.is_empty()
     {
         return Err(ApiError::bad("升级清单或版本无效。"));
+    }
+    if let Some(cluster) = &s.cluster {
+        let owner = cluster
+            .owner(&id.to_string())
+            .await?
+            .ok_or_else(crate::cluster::unavailable)?;
+        if owner.node != cluster.node {
+            let value: Value = cluster
+                .rpc(
+                    &owner.node,
+                    &crate::cluster::Request::Update {
+                        workspace: scope.workspace_id,
+                        actor: scope.user.id,
+                        host: id,
+                        body,
+                    },
+                )
+                .await?;
+            return Ok((StatusCode::ACCEPTED, Json(value)));
+        }
     }
     let registration = live()
         .get(&id.to_string())
@@ -2047,6 +2394,7 @@ pub async fn start_update(
         return Err(ApiError::bad("代理已是该版本。"));
     }
     let job = UpdateJob {
+        owner: s.cluster.as_ref().map(|cluster| cluster.node.clone()),
         request: secret(),
         version: body.version.clone(),
         state: "draining".into(),
@@ -2103,7 +2451,28 @@ pub async fn start_update(
         tokio::spawn(async move {
             let host = id.to_string();
             let _exclusive = crate::runner_updates::exclusive(&host).await;
+            let distributed = match &s.cluster {
+                Some(cluster) => match cluster.reserve(&host, true).await {
+                    Ok(lease) => Some(lease),
+                    Err(_) => {
+                        transition_update(
+                            &s,
+                            id,
+                            &mut job.clone(),
+                            "failed",
+                            "Cluster reservation unavailable",
+                        )
+                        .await;
+                        return;
+                    }
+                },
+                None => None,
+            };
             let mut job = job;
+            if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
+                orphan_update(&s, id, &mut job).await;
+                return;
+            }
             let peer = live().get(&host).cloned();
             let Some(peer) = peer else {
                 transition_update(&s, id, &mut job, "failed", "等待任务结束期间代理离线").await;
@@ -2113,7 +2482,14 @@ pub async fn start_update(
                 transition_update(&s, id, &mut job, "failed", "重连后的代理不支持托管升级").await;
                 return;
             }
-            transition_update(&s, id, &mut job, "updating", "正在验证更新并切换版本").await;
+            if !transition_update(&s, id, &mut job, "updating", "正在验证更新并切换版本").await
+            {
+                return;
+            }
+            if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
+                orphan_update(&s, id, &mut job).await;
+                return;
+            }
             if peer
                 .control
                 .send(wire::Control::Update {
@@ -2130,6 +2506,10 @@ pub async fn start_update(
             }
             let started = std::time::Instant::now();
             loop {
+                if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
+                    orphan_update(&s, id, &mut job).await;
+                    return;
+                }
                 let failure = peer
                     .update_error
                     .lock()
@@ -2139,6 +2519,26 @@ pub async fn start_update(
                     if request == job.request {
                         transition_update(&s, id, &mut job, "failed", &message).await;
                         return;
+                    }
+                }
+                if let Some(cluster) = &s.cluster {
+                    let current = cluster.owner(&host).await.ok().flatten();
+                    if let Some(info) = current.and_then(|current| current.info) {
+                        if info.ready
+                            && (info.version == body.version
+                                || info.failed_version.as_deref() == Some(body.version.as_str()))
+                        {
+                            let (state, message) = if info.version == body.version {
+                                ("succeeded", "Runner update confirmed by connection owner")
+                            } else {
+                                (
+                                    "rolled_back",
+                                    "Runner rollback confirmed by connection owner",
+                                )
+                            };
+                            transition_update(&s, id, &mut job, state, message).await;
+                            return;
+                        }
                     }
                 }
                 let current = live().get(&host).cloned();
@@ -2193,23 +2593,111 @@ pub async fn start_update(
 
 async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
     let value = serde_json::to_string(job).map_err(|_| ApiError::bad("升级状态编码失败"))?;
-    hosts::Entity::update_many()
+    let mut update = hosts::Entity::update_many()
         .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
-        .filter(hosts::Column::Id.eq(id))
-        .exec(&s.db)
-        .await?;
+        .filter(hosts::Column::Id.eq(id));
+    if let Some(cluster) = &s.cluster {
+        let row = hosts::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if let Some(previous) = row.agent_update {
+            let old: UpdateJob = serde_json::from_str(&previous)
+                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            if matches!(old.state.as_str(), "draining" | "updating" | "unknown")
+                && (old.request != job.request
+                    || old.owner.as_deref() != Some(cluster.node.as_str()))
+            {
+                return Err(ApiError(
+                    StatusCode::CONFLICT,
+                    "Update ownership changed".into(),
+                ));
+            }
+            update = update.filter(hosts::Column::AgentUpdate.eq(previous));
+        } else {
+            update = update.filter(hosts::Column::AgentUpdate.is_null());
+        }
+    }
+    if update.exec(&s.db).await?.rows_affected != 1 {
+        return Err(ApiError(
+            StatusCode::CONFLICT,
+            "Update ownership changed".into(),
+        ));
+    }
     Ok(())
+}
+
+async fn orphan_update(s: &AppState, id: Id, job: &mut UpdateJob) {
+    job.state = "unknown".into();
+    job.message = "集群升级锁已失效，等待连接所属服务核实代理状态".into();
+    // Keep admission closed, but permit the current connection owner to recover.
+    loop {
+        let result: Result<()> = async {
+            let row = hosts::Entity::find_by_id(i64::from(id))
+                .one(&s.db)
+                .await?
+                .ok_or_else(ApiError::missing)?;
+            let previous = row.agent_update.ok_or_else(ApiError::missing)?;
+            let old: UpdateJob = serde_json::from_str(&previous)
+                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            if old.request != job.request || old.owner != job.owner {
+                return Err(ApiError(
+                    StatusCode::CONFLICT,
+                    "Update ownership changed".into(),
+                ));
+            }
+            let mut orphan = job.clone();
+            orphan.owner = None;
+            let value = serde_json::to_string(&orphan)
+                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            if hosts::Entity::update_many()
+                .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
+                .filter(hosts::Column::Id.eq(id))
+                .filter(hosts::Column::AgentUpdate.eq(previous))
+                .exec(&s.db)
+                .await?
+                .rows_affected
+                != 1
+            {
+                return Err(ApiError(
+                    StatusCode::CONFLICT,
+                    "Update ownership changed".into(),
+                ));
+            }
+            Ok(())
+        }
+        .await;
+        match result {
+            Ok(()) => return,
+            Err(error) if error.0 == StatusCode::CONFLICT || error.0 == StatusCode::NOT_FOUND => {
+                return;
+            }
+            Err(error) => {
+                tracing::error!(host=%id,error=%error.1,"Cannot release orphaned update ownership")
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 // The caller retains its exclusive reservation throughout persistence retries.
 // A failed state write must never release a host with an uncertain update.
-async fn transition_update(s: &AppState, id: Id, job: &mut UpdateJob, state: &str, message: &str) {
+async fn transition_update(
+    s: &AppState,
+    id: Id,
+    job: &mut UpdateJob,
+    state: &str,
+    message: &str,
+) -> bool {
     job.state = state.into();
     job.message = message.into();
     loop {
         match persist_update(s, id, job).await {
             Ok(()) => break,
             Err(error) => {
+                if error.0 == StatusCode::CONFLICT || error.0 == StatusCode::NOT_FOUND {
+                    return false;
+                }
                 tracing::error!(host=%id,error=%error.1,"无法保存代理升级状态，继续保留主机升级锁")
             }
         }
@@ -2219,6 +2707,7 @@ async fn transition_update(s: &AppState, id: Id, job: &mut UpdateJob, state: &st
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(id.to_string(), job.clone());
+    true
 }
 
 /// Restore exclusion before the schedulers or HTTP listener can admit new work.
@@ -2231,6 +2720,38 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
         let mut job: UpdateJob = serde_json::from_str(row.agent_update.as_deref().unwrap())
             .map_err(|_| ApiError::bad("持久化的代理升级状态无法读取"))?;
         let id = Id::from(row.id);
+        if !matches!(job.state.as_str(), "draining" | "updating" | "unknown") {
+            continue;
+        }
+        if let Some(cluster) = &s.cluster {
+            if let Some(owner) = &job.owner {
+                if cluster.node_alive(owner).await? {
+                    continue;
+                }
+            }
+            if !cluster
+                .owner(&id.to_string())
+                .await?
+                .is_some_and(|owner| owner.node == cluster.node)
+            {
+                continue;
+            }
+            // Only the current connection owner recovers an orphaned update.
+            job.owner = Some(cluster.node.clone());
+            let value =
+                serde_json::to_string(&job).map_err(|_| ApiError::bad("Invalid update state"))?;
+            if hosts::Entity::update_many()
+                .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
+                .filter(hosts::Column::Id.eq(id))
+                .filter(hosts::Column::AgentUpdate.eq(row.agent_update.clone().unwrap()))
+                .exec(&s.db)
+                .await?
+                .rows_affected
+                != 1
+            {
+                continue;
+            }
+        }
         if job.state == "draining" {
             job.state = "failed".into();
             job.message = "服务重启中断了等待，尚未发送升级请求".into();
@@ -2243,11 +2764,34 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
         if !matches!(job.state.as_str(), "updating" | "unknown") {
             continue;
         }
-        let exclusion = crate::runner_updates::exclusive(&id.to_string()).await;
+        // Standalone startup must restore the local exclusion before listeners
+        // start. Cluster admission also consults the persisted active state.
+        let exclusion = if s.cluster.is_none() {
+            Some(crate::runner_updates::exclusive(&id.to_string()).await)
+        } else {
+            None
+        };
         let s = s.clone();
         tokio::spawn(async move {
-            let _exclusion = exclusion;
+            let _exclusion = match exclusion {
+                Some(exclusion) => exclusion,
+                None => crate::runner_updates::exclusive(&id.to_string()).await,
+            };
+            let distributed = match &s.cluster {
+                Some(cluster) => match cluster.reserve(&id.to_string(), true).await {
+                    Ok(lease) => Some(lease),
+                    Err(_) => {
+                        orphan_update(&s, id, &mut job).await;
+                        return;
+                    }
+                },
+                None => None,
+            };
             loop {
+                if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
+                    orphan_update(&s, id, &mut job).await;
+                    return;
+                }
                 let peer = live().get(&id.to_string()).cloned();
                 if let Some(peer) = peer {
                     if peer.managed && peer.ready.load(std::sync::atomic::Ordering::Acquire) {

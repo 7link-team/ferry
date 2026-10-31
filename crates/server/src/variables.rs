@@ -588,6 +588,8 @@ mod tests {
             .unwrap();
         }
         let state = Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, Instant::now()).unwrap()),
             db,
             data_dir: dir.path().into(),

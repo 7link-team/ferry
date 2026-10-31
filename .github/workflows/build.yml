@@ -285,6 +285,22 @@ jobs:
       - name: Alert rules and event browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-alerts-ui.mjs
+      - name: Cluster fencing and three-instance Runner acceptance
+        if: matrix.harness == 'build-ui'
+        run: |
+          go install github.com/nats-io/nats-server/v2@v2.15.2
+          export NATS_SERVER_BINARY="$(go env GOPATH)/bin/nats-server"
+          export NATS_TEST_URL=nats://127.0.0.1:14229
+          "$NATS_SERVER_BINARY" -js -a 127.0.0.1 -p 14229 -sd "$RUNNER_TEMP/nats-unit" > "$RUNNER_TEMP/nats-unit.log" 2>&1 &
+          broker=$!
+          trap 'kill "$broker" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 50); do
+            if (echo > /dev/tcp/127.0.0.1/14229) 2>/dev/null; then break; fi
+            sleep 0.1
+          done
+          cargo test --locked -p ferry-server cluster::tests -- --include-ignored
+          cargo test --locked -p ferry-server cluster_update_recovery -- --include-ignored
+          node scripts/test-cluster.mjs
       - name: Marketplace and browser repository authorization
         if: matrix.harness == 'build-ui'
         run: |

@@ -48,7 +48,7 @@ pub async fn execute(
     // Only acquisition is cancellable here. Once execution starts, its existing
     // cancellation path owns remote process termination and credential cleanup.
     let reservations = {
-        let pending = crate::runner_updates::reserve(hosts);
+        let pending = crate::runner_updates::reserve_with(s.cluster.as_ref(), hosts);
         tokio::pin!(pending);
         let mut poll = tokio::time::interval(Duration::from_millis(200));
         loop {
@@ -60,7 +60,7 @@ pub async fn execute(
                 _ = stop.changed() => {
                     return history::finish(s, run.id, "cancelled").await;
                 }
-                guards = &mut pending => break guards,
+                guards = &mut pending => break guards?,
                 _ = poll.tick() => {}
             }
         }
@@ -139,10 +139,10 @@ async fn execute_reserved(
                 }
                 job_state(s, run.id, &job.key, "running", None).await?;
                 let result = if has_approval {
-                    let reserve = crate::runner_updates::reserve(vec![job.host_id.to_string()]);
+                    let reserve = crate::runner_updates::reserve_with(s.cluster.as_ref(),vec![job.host_id.to_string()]);
                     tokio::pin!(reserve);
                     tokio::select! {
-                        guards = &mut reserve => guards.run(execute_job(
+                        guards = &mut reserve => guards?.run(execute_job(
                             s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
                         )).await,
                         _ = stop.changed() => Ok(Outcome {
@@ -1270,6 +1270,8 @@ mod tests {
             db.execute(&statement).await.unwrap();
         }
         let s = std::sync::Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
             ),
@@ -1406,6 +1408,8 @@ mod tests {
             db.execute(&statement).await.unwrap();
         }
         let s = std::sync::Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
             ),

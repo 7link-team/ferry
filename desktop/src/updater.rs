@@ -62,6 +62,67 @@ fn launcher(label: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+fn channel(app: &tauri::AppHandle) -> Result<Channel, String> {
+    let channel: Channel = serde_json::from_value(
+        app.config()
+            .plugins
+            .0
+            .get("release")
+            .cloned()
+            .ok_or("未配置更新来源。")?,
+    )
+    .map_err(|_| "更新来源配置无效。")?;
+    let parts: Vec<_> = channel.repository.split('/').collect();
+    if parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || *part == "."
+                || *part == ".."
+                || !part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+        })
+    {
+        return Err("更新仓库配置无效。".into());
+    }
+    Ok(channel)
+}
+
+#[tauri::command]
+pub fn release_page(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<String, String> {
+    launcher(window.label())?;
+    Ok(format!(
+        "https://github.com/{}/releases",
+        channel(&app)?.repository
+    ))
+}
+
+#[tauri::command]
+pub fn open_release_page(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<(), String> {
+    let url = release_page(app, window)?;
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("rundll32.exe");
+        command
+            .creation_flags(0x08000000)
+            .arg("url.dll,FileProtocolHandler");
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+    command
+        .arg(url)
+        .spawn()
+        .map_err(|_| "无法打开浏览器，请复制发布页地址。".to_string())?;
+    Ok(())
+}
 fn select_release<'a>(
     releases: &'a [Release],
     current: &Version,
@@ -90,26 +151,7 @@ pub async fn check_update(
     let _busy = state.begin()?;
     *state.pending.lock().await = None;
     let current = app.package_info().version.clone();
-    let channel: Channel = serde_json::from_value(
-        app.config()
-            .plugins
-            .0
-            .get("release")
-            .cloned()
-            .ok_or("未配置更新来源。")?,
-    )
-    .map_err(|_| "更新来源配置无效。")?;
-    let parts: Vec<_> = channel.repository.split('/').collect();
-    if parts.len() != 2
-        || parts.iter().any(|s| {
-            s.is_empty()
-                || !s
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-        })
-    {
-        return Err("更新仓库配置无效。".into());
-    }
+    let channel = channel(&app)?;
     let releases: Vec<Release> = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()

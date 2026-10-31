@@ -90,6 +90,8 @@ pub fn run() {
             server::connection_settings,
             server::open_workspace,
             updater::check_update,
+            updater::release_page,
+            updater::open_release_page,
             updater::install_update,
         ])
         .on_window_event(|window, event| {

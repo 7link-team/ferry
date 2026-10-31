@@ -110,6 +110,35 @@ docker compose up -d --build               # 或本地构建
 的 `targets: "all"` 指的是当前桌面平台的全部安装包格式；Android/iOS 需要另外执行
 `tauri android init` / `tauri ios init`，本项目不执行，也不保留移动端图标与配置。
 
+## 多实例节点通信
+
+设置 `FERRY_NATS_URL` 启用 NATS JetStream 集群通信；不设置时保持单实例运行。
+所有服务副本必须连接同一业务数据库，使用相同的 `FERRY_MASTER_KEY` 和
+`FERRY_CLUSTER_NAMESPACE`（默认 `ferry`），每个副本使用独立数据目录和实例身份。
+生产环境使用共享 PostgreSQL / MySQL；不要跨机器共享 SQLite 文件。
+
+```sh
+FERRY_DATABASE_URL='postgres://…' \
+FERRY_MASTER_KEY='<相同的64位十六进制主密钥>' \
+FERRY_NATS_URL='nats://user:password@nats:4222' \
+FERRY_CLUSTER_NAMESPACE=ferry \
+FERRY_NATS_REPLICAS=3 \
+ferry-server --data-dir /var/lib/ferry/replica-a
+```
+
+NATS 必须开启 JetStream，并为配置的副本数提供足够的节点。
+`FERRY_NATS_REPLICAS` 支持 `1`（默认）、`3`、`5`；已有 KV 桶的配置必须匹配。
+NATS 使用私网访问控制、认证和部署所需的 TLS；具备该命名空间发布权限的服务属于可信边界。
+负载均衡器需要支持 WebSocket，无需将浏览器或 Runner 固定到某个服务副本。
+节点连接归属使用 30 秒租约，每 5 秒续约；SQL 状态写入同时校验归属令牌。
+终端、命令、文件会话可跨副本转发，凭据重置和升级排他锁也在副本间生效。
+连接所属服务或消息服务故障会关闭现有会话，Runner 重连后可重新打开；不会重放命令或键盘输入。
+
+监控由当前所属服务每 5 秒采集，查询读取缓存；仅权限和资源存在性检查访问业务数据库。
+最近一小时的真实采样暂存所属服务内存，支持 5 分钟 / 15 分钟 / 1 小时查询，
+重启或归属切换后重新积累，不补造历史数据。跨副本读取会转发到采集所属服务。
+本轮不提供 Redis / TSDB 长期历史持久化。
+
 ## Compose 部署与桌面更新
 
 在“部署 → 应用”创建应用，选择单台主机并填写绝对工作目录与 Application manifest。

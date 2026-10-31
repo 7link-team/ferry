@@ -2,6 +2,14 @@ const { core, app, event } = window.__TAURI__;
 const byId = (id) => document.getElementById(id);
 const check = byId("check-update"), install = byId("install-update");
 const status = byId("update-status"), progress = byId("update-progress"), notes = byId("update-notes");
+core.invoke("release_page").then((url) => {
+  const link = byId("release-page"); link.href = url; link.hidden = false;
+  link.addEventListener("click", async (event) => {
+    event.preventDefault();
+    try { await core.invoke("open_release_page"); }
+    catch (error) { status.textContent = String(error); }
+  });
+}).catch((error) => { status.textContent = String(error); });
 app.getVersion().then((version) => { byId("version").textContent = `当前版本 ${version}`; })
   .catch(() => { byId("version").textContent = "无法读取当前版本。"; });
 async function openWorkspace() {

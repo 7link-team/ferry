@@ -18,7 +18,6 @@ use axum::{
     http::StatusCode,
 };
 use ferry_protocol::HostMonitor;
-use futures::StreamExt;
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
     sea_query::{Expr, ExprTrait},
@@ -26,7 +25,6 @@ use sea_orm::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 // ---------------------------------------------------------------- 主机组
 
@@ -357,7 +355,7 @@ const HOST_SPEC: Spec = Spec {
 pub const CONNECTIONS: [&str; 2] = ["runner", "ssh"];
 pub const STATES: [&str; 3] = ["online", "offline", "unknown"];
 
-fn monitor_summary(m: &HostMonitor) -> String {
+pub(crate) fn monitor_summary(m: &HostMonitor) -> String {
     let root = m
         .disks
         .iter()
@@ -372,61 +370,6 @@ fn monitor_summary(m: &HostMonitor) -> String {
         "disk_total": root.map_or(0, |disk| disk.total),
     })
     .to_string()
-}
-
-async fn sample_host(s: &AppState, workspace: Id, id: Id) -> Result<HostMonitor> {
-    let channel = crate::remote::open(s, &workspace, &id).await?;
-    let monitor = channel.monitor().await?;
-    hosts::Entity::update_many()
-        .col_expr(hosts::Column::State, Expr::value("online"))
-        .col_expr(hosts::Column::SeenAt, Expr::value(db::now()))
-        .col_expr(
-            hosts::Column::Metrics,
-            Expr::value(monitor_summary(&monitor)),
-        )
-        .filter(hosts::Column::WorkspaceId.eq(workspace))
-        .filter(hosts::Column::Id.eq(id))
-        .exec(&s.db)
-        .await?;
-    Ok(monitor)
-}
-
-pub async fn monitor_host(
-    State(s): State<AppState>,
-    scope: Scope,
-    Path((_, id)): Path<(String, Id)>,
-) -> Result<Json<HostMonitor>> {
-    scope.require("hosts.read")?;
-    Ok(Json(sample_host(&s, scope.workspace_id, id).await?))
-}
-
-pub async fn ssh_heartbeat(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>) {
-    let mut tick = tokio::time::interval(Duration::from_secs(30));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    loop {
-        tokio::select! {
-            _ = drain.changed() => break,
-            _ = tick.tick() => {
-                let rows = match hosts::Entity::find().filter(hosts::Column::Connection.eq("ssh")).all(&s.db).await {
-                    Ok(rows) => rows,
-                    Err(error) => { tracing::warn!(%error, "读取 SSH 探测主机失败"); continue; }
-                };
-                futures::stream::iter(rows).for_each_concurrent(8, |row| {
-                    let s = s.clone();
-                    async move {
-                        if let Err(error) = sample_host(&s, Id::from(row.workspace_id), Id::from(row.id)).await {
-                            tracing::debug!(host_id=row.id, %error, "SSH 主机探测失败");
-                            let _ = hosts::Entity::update_many()
-                                .col_expr(hosts::Column::State, Expr::value("offline"))
-                                .filter(hosts::Column::Id.eq(row.id))
-                                .filter(hosts::Column::WorkspaceId.eq(row.workspace_id))
-                                .exec(&s.db).await;
-                        }
-                    }
-                }).await;
-            }
-        }
-    }
 }
 
 #[cfg(test)]

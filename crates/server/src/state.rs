@@ -12,6 +12,8 @@ pub struct State {
     pub secure_cookie: bool,
     pub bind: std::net::SocketAddr,
     pub vault: crate::vault::Vault,
+    pub cluster: Option<Arc<crate::cluster::Cluster>>,
+    pub host_monitor: crate::host_monitor::Store,
 }
 pub type AppState = Arc<State>;
 
