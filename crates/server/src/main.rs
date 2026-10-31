@@ -27,6 +27,7 @@ mod platform;
 mod remote;
 mod repositories;
 mod repository_auth;
+mod repository_monitor;
 mod resource;
 mod runner;
 mod runner_install;
@@ -271,6 +272,14 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/{workspace}/code-connections/{id}/repositories",
             get(repository_auth::connection_repositories),
+        )
+        .route(
+            "/{workspace}/code-connection-monitors/{id}",
+            get(repository_monitor::get).patch(repository_monitor::update),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}/events",
+            get(repository_monitor::history),
         )
         .route(
             "/{workspace}/code-connections/{id}/branches",
@@ -662,6 +671,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/sessions", post(auth::login).delete(auth::logout))
         .route("/api/me", get(auth::me))
         .route("/api/repository-providers/callback",get(repository_auth::complete))
+        .route("/api/repository-events/{id}",post(repository_monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
         .route("/api/workspaces", post(workspace::create))
         .route("/api/workspace-memberships", post(workspace::join))
         .nest("/api/workspaces", workspace_api)
@@ -822,7 +832,14 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     );
     // A cross-site form can issue a POST but cannot add a custom header, and
     // cannot read the response. Cheaper and harder to get wrong than tokens.
+    let provider_event = req.method() == axum::http::Method::POST
+        && req
+            .uri()
+            .path()
+            .strip_prefix("/api/repository-events/")
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
     if mutating
+        && !provider_event
         && req
             .headers()
             .get("x-ferry-request")

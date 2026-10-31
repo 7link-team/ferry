@@ -304,7 +304,10 @@ async fn open_workspace_inner(
             .map_err(|e| e.to_string())?;
     let handle = app.clone();
     workspace.on_window_event(move |event| {
-        if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+        // Restore only after the workspace is gone. Showing the launcher during
+        // CloseRequested lets a second close hide it while the workspace still
+        // exists, leaving the app alive without a visible window.
+        if matches!(event, tauri::WindowEvent::Destroyed) {
             if let Some(launcher) = handle.get_webview_window("launcher") {
                 let _ = launcher.show();
                 let _ = launcher.set_focus();

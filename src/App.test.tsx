@@ -71,19 +71,50 @@ it("keeps connection details in basic information and paged repository tabs", as
   history.replaceState({}, "", "/workspaces/2/code-connections/42");
   await act(async () => root.render(<App />));
   const tabs = host.querySelector('[role="tablist"][aria-label="仓库连接详情"]')!;
-  expect(tabs.textContent).toBe("基本信息仓库列表");
+  expect(tabs.textContent).toBe("基本信息仓库列表监控通知");
   expect(host.textContent).toContain("Team Codeup");
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/42/repositories"))).toBe(false);
   await act(async () => tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')[1]!.focus());
   expect(location.search).toContain("tab=repositories");
   expect(host.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain("org/first");
   expect(host.textContent).not.toContain("共 0 条");
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "分组")!.click());
+  const namespace = host.querySelector<HTMLButtonElement>('button[aria-expanded="true"]')!;
+  expect(namespace.textContent).toContain("org");
+  await act(async () => namespace.click());
+  expect(host.querySelector('tr[hidden]')?.textContent).toContain("org/first");
+  await act(async () => namespace.click());
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "列表")!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!.click());
   expect(host.textContent).toContain("org/second");
   expect(host.querySelector<HTMLButtonElement>('button[aria-label="下一页"]')!.disabled).toBe(true);
   await act(async () => tabs.querySelectorAll<HTMLButtonElement>('[role="tab"]')[0]!.focus());
   expect(location.pathname).toBe("/workspaces/2/code-connections/42");
   expect(host.textContent).toContain("Team Codeup");
+});
+
+it("opens monitoring settings with saved values and saves without navigating away", async () => {
+  required = false;
+  permissions = ["repositories.read", "repositories.update"];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url === "/api/workspaces/2/code-connections/42") return { ok: true, status: 200, json: async () => ({ id: "42", name: "Team Codeup", provider: "codeup", version: 1 }) };
+    if (url === "/api/workspaces/2/code-connection-monitors/42") return { ok: true, status: 200, json: async () => ({ id: "42", provider: "codeup", enabled: true, all_repositories: false, repositories: "org/repo", events: ["push"], version: 3, has_secret: true, callback_path: "/api/repository-events/42" }) };
+    return original(url, options);
+  }));
+  history.replaceState({}, "", "/workspaces/2/code-connections/42?tab=monitoring");
+  await act(async () => root.render(<App />));
+  expect(host.textContent).toContain("事件记录");
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "配置监控")!.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("org/repo");
+  expect(dialog.textContent).not.toContain("新增仓库");
+  expect(dialog.textContent).not.toContain("删除仓库");
+  await act(async () => dialog.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const request = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/workspaces/2/code-connection-monitors/42" && init?.method === "PATCH");
+  expect(JSON.parse(request?.[1]?.body as string)).toMatchObject({ enabled: true, all_repositories: false, repositories: "org/repo", events: ["push"], version: 3 });
+  expect(location.pathname).toBe("/workspaces/2/code-connections/42");
+  expect(location.search).toContain("tab=monitoring");
 });
 
 it("scopes credential menus, lists and create payloads to the current module", async () => {

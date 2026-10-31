@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import shlex
 import subprocess
 import tempfile
@@ -15,10 +16,13 @@ import urllib.request
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import base64,hashlib,uuid
+import base64,hashlib,uuid,hmac
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse,parse_qs,urlencode,quote,unquote
 codes={};refreshes=[];fail_refresh=False
 codeup_fixture = {'mode': 'normal'}
+notifications=[]
+notification_status=204
 class Receiver(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed=urlparse(self.path);query=parse_qs(parsed.query)
@@ -74,6 +78,9 @@ class Receiver(BaseHTTPRequestHandler):
             value={'content':base64.b64encode(json.dumps(content).encode()).decode(),'encoding':'base64'}
         payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload)
     def do_POST(self):
+        if self.path == '/notifications':
+            notifications.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+            self.send_response(notification_status);self.end_headers();return
         form=parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
         provider=form['client_id'][0].split('-')[0]
         assert form['client_secret']==['fixture-client-secret']
@@ -204,7 +211,55 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(owner,root+'/code-connections',dict(connection_body,credential_id=invalid),expected=400)
         check(request(owner,root+'/code-connections')['total']==2,'invalid authorization does not leave a connected resource')
         request(owner,root+'/credentials/'+invalid,method='DELETE',expected=204)
+        monitor=root+'/code-connection-monitors/'+linked['id']
+        monitor_events=root+'/code-connections/'+linked['id']+'/events'
+        secret='monitor-fixture-private-secret'
+        initial=request(owner,monitor)
+        check(initial['version']==0 and not initial['enabled'],'monitor starts disabled without pretending platform subscription exists')
+        request(guest,monitor,expected=404)
+        request(outsider,f'/workspaces/{workspace_other}/code-connection-monitors/'+linked['id'],expected=404)
+        settings={'version':0,'enabled':True,'all_repositories':False,'repositories':'owner/repository','events':['push','pull_request','repository.created','repository.deleted','branch.deleted'],'secret':secret,'webhook':api_base+'/notifications'}
+        saved=request(owner,monitor,settings,method='PATCH')
+        check(saved['has_secret'] and saved['has_webhook'] and secret not in json.dumps(saved),'monitor saves write-only encrypted callback credentials')
+        request(owner,monitor,settings,method='PATCH',expected=409)
+        def callback(payload, expected=204, valid=True, identity=None):
+            raw=json.dumps(payload,separators=(',',':')).encode()
+            signature=hmac.new(secret.encode(),raw,hashlib.sha256).hexdigest() if valid else '0'*64
+            req=urllib.request.Request(base+'/repository-events/'+linked['id'],data=raw,headers={'Content-Type':'application/json','X-GitHub-Event':identity or 'push','X-Hub-Signature-256':'sha256='+signature,'X-GitHub-Delivery':uuid.uuid4().hex})
+            try:response=urllib.request.urlopen(req,timeout=20)
+            except urllib.error.HTTPError as error:response=error
+            assert response.code==expected,(response.code,response.read())
+            response.close()
+        pushed={'repository':{'full_name':'owner/repository'},'ref':'refs/heads/main','before':'a'*40,'after':'b'*40,'sender':{'login':'author'}}
+        callback(pushed,403,False)
+        check(request(owner,monitor_events)['total']==0 and not notifications,'invalid provider signature never records or sends notification')
+        callback(dict(pushed,repository={'full_name':'other/repository'}))
+        check(not notifications,'selected repository scope ignores unrelated repository events')
+        with ThreadPoolExecutor(max_workers=6) as executor:list(executor.map(lambda _:callback(pushed),range(6)))
+        check(len(notifications)==1 and request(owner,monitor_events)['total']==1,'concurrent duplicate payloads with altered delivery IDs notify once')
+        check(notifications[0]['event']=='push' and notifications[0]['connection_id']==linked['id'],'outbound notification includes event and string connection identity')
+        callback({'repository':{'full_name':'owner/repository'},'action':'closed','pull_request':{'merged':True,'head':{'ref':'feature/test'}},'sender':{'login':'author'}},identity='pull_request')
+        check(notifications[-1]['event']=='merge','PR subscription includes actual merged PR lifecycle')
+        callback(dict(pushed,after='0'*40))
+        check(notifications[-1]['event']=='branch.deleted','zero commit deletion is not reported as ordinary push')
+        for action in ['created','deleted']:
+            callback({'repository':{'full_name':'owner/repository'},'action':action,'sender':{'login':'author'}},identity='repository')
+            check(notifications[-1]['event']=='repository.'+action,'organization repository '+action+' event is normalized')
+        notification_status=503
+        callback(dict(pushed,after='c'*40))
+        callback(dict(pushed,after='c'*40))
+        check(request(owner,monitor_events)['items'][0]['delivery'].startswith('\u6295\u9012\u5931\u8d25 HTTP 503'),'failed notification result recorded without retry')
+        notification_status=204
+        disabled=request(owner,monitor,dict(settings,version=saved['version'],enabled=False,secret='',webhook=''),method='PATCH')
+        callback(dict(pushed,after='d'*40),404)
+        check(disabled['has_secret'] and disabled['has_webhook'],'disabling preserves encrypted configuration while rejecting callbacks')
+        request(owner,monitor,dict(settings,version=disabled['version'],secret='short'),method='PATCH',expected=400)
+        if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn:
+                sealed=conn.execute('SELECT config FROM repository_monitors WHERE id=?',(linked['id'],)).fetchone()[0]
+                check(sealed.startswith('v1.') and secret not in sealed and api_base not in sealed,'entire monitor configuration encrypted at rest')
         plain=request(owner,root+'/code-connections',{'name':'Plain Git','provider':'git','credential_id':wrong,'url':api_base+'/owner/repository.git'},expected=201)
+        request(owner,root+'/code-connection-monitors/'+plain['id'],dict(settings,version=0),method='PATCH',expected=400)
         check(plain['url']==api_base+'/owner/repository.git' and 'default_branch' not in plain,'plain Git connection stores URL without branch')
         request(owner,root+'/code-connections/'+plain['id'],method='DELETE',expected=204)
         for row in [linked,linked2]:request(owner,root+'/code-connections/'+row['id'],method='DELETE',expected=204)

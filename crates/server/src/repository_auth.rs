@@ -1396,7 +1396,7 @@ fn connection_json(row: &connections::Model) -> Value {
     value
 }
 
-async fn owned_connection(
+pub(crate) async fn owned_connection(
     conn: &impl sea_orm::ConnectionTrait,
     scope: &Scope,
     id: Id,
@@ -1766,6 +1766,13 @@ pub async fn delete_connection(
             return Err(ApiError::conflict("已有仓库使用该网页授权，请先解除引用。"));
         }
     }
+    crate::entities::repository_monitors::Entity::delete_by_id(row.id)
+        .exec(&tx)
+        .await?;
+    crate::entities::repository_events::Entity::delete_many()
+        .filter(crate::entities::repository_events::Column::ConnectionId.eq(row.id))
+        .exec(&tx)
+        .await?;
     connections::Entity::delete_by_id(row.id).exec(&tx).await?;
     crate::hosts::activity_in(
         &s,

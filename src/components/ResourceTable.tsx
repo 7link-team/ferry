@@ -18,7 +18,7 @@
  *   - The footer sits outside the scroll container. As a sticky child it
  *     jitters inside iOS Safari's rubber-band scroll.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ResourceActionDialog } from "./ResourceForm";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { RowAction } from "./dsl";
@@ -31,6 +31,8 @@ import {
   Ellipsis,
   Eye,
   FolderOpen,
+  FolderTree,
+  List,
   History,
   LayoutTemplate,
   Loader2,
@@ -145,6 +147,9 @@ export function ResourceTable<T>({
   const [page, setPage] = useQueryValue("page", 1);
   const [pageSize, setPageSize] = useQueryValue("page_size", config.defaultPageSize ?? 20);
   const [sort, setSort] = useQueryValue("sort", "");
+  const [tableView, setTableView] = useQueryValue("table_view", "list");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const grouped = !!config.grouping && tableView === "groups";
 
   // Two layers: `draft` is what the inputs show, the URL is what has been
   // searched. Typing must not refetch on every keystroke, and the URL must
@@ -219,7 +224,7 @@ export function ResourceTable<T>({
 
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
-  const rows = data?.items ?? [];
+  const rows = grouped ? [...(data?.items ?? [])].sort((a, b) => config.grouping!.key(a).localeCompare(config.grouping!.key(b))) : data?.items ?? [];
   const scrollRef = useScrollSync(!loading && rows.length > 0);
 
   const search = () => {
@@ -355,6 +360,9 @@ export function ResourceTable<T>({
           </div>
 
           <span className="flex-1" />
+          {config.grouping && <div role="group" aria-label="列表显示模式" title={`按${config.grouping.label}分组`} className="inline-flex rounded-md border p-0.5">
+            {([["list", "列表", List], ["groups", "分组", FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => setTableView(value)}><Icon className="size-4" />{label}</Button>)}
+          </div>}
 
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
             canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
@@ -435,11 +443,15 @@ export function ResourceTable<T>({
                 ))
               : rows.map((row, index) => {
                   const key = config.rowKey(row);
+                  const group = grouped ? config.grouping!.key(row) : "";
+                  const startsGroup = grouped && (!index || config.grouping!.key(rows[index - 1]!) !== group);
                   const view = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row)));
                   const canOpen = !!view || visibleActions.some(action => action.label === "编辑" && action.to && (!action.when || action.when(row)));
                   const open = () => { if (view?.to) navigate({ ...route, ...view.to(row) }, view.query?.(row) ?? {}); else if (canOpen) navigate({ ...route, id: key, mode: "view" }, {}); };
                   return (
-                    <tr key={key} className={cn("group", canOpen && "cursor-pointer focus-visible:outline-2 focus-visible:outline-primary")} tabIndex={canOpen ? 0 : undefined}
+                    <Fragment key={key}>
+                    {startsGroup && <tr><td colSpan={columnCount} className="border-b bg-muted/50 px-3 py-2"><button type="button" className="flex w-full items-center gap-2 rounded text-left font-medium transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-primary" aria-expanded={!collapsed.has(group)} onClick={() => setCollapsed(current => { const next = new Set(current); if (next.has(group)) next.delete(group); else next.add(group); return next; })}><ChevronRight className={cn("size-4 transition-transform", !collapsed.has(group) && "rotate-90")} /><FolderTree className="size-4" />{group}<span className="text-xs font-normal text-muted-foreground">{rows.filter(item => config.grouping!.key(item) === group).length} 项 · 当前页</span></button></td></tr>}
+                    <tr hidden={grouped && collapsed.has(group)} className={cn("group", canOpen && "cursor-pointer focus-visible:outline-2 focus-visible:outline-primary")} tabIndex={canOpen ? 0 : undefined}
                       onClick={event => { if (!(event.target as Element).closest("a,button,input,select,textarea,[role=button],[role=checkbox]")) open(); }}
                       onKeyDown={event => { if (canOpen && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } }}>
                       <td className="sticky left-0 z-20 bg-card px-3 py-2 text-muted-foreground shadow-[inset_-1px_0_0_var(--border)] group-hover:bg-accent">
@@ -527,6 +539,7 @@ export function ResourceTable<T>({
                         </td>
                       )}
                     </tr>
+                    </Fragment>
                   );
                 })}
             {!loading && !rows.length && (

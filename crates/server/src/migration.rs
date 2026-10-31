@@ -95,6 +95,7 @@ impl MigratorTrait for Migrator {
             Box::new(HostJump),
             Box::new(PipelineGroupOrder),
             Box::new(CredentialScopes),
+            Box::new(RepositoryMonitoring),
         ]
     }
 }
@@ -2905,6 +2906,86 @@ impl MigrationTrait for CredentialScopes {
     }
 }
 
+struct RepositoryMonitoring;
+impl MigrationName for RepositoryMonitoring {
+    fn name(&self) -> &str {
+        "repository_monitoring_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryMonitoring {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        let mut monitors = create_table("repository_monitors", backend);
+        for name in ["id", "workspace_id", "version", "created_at", "updated_at"] {
+            let mut column = ColumnDef::new(Alias::new(name));
+            column.big_integer().not_null();
+            if name == "id" {
+                column.primary_key();
+            }
+            monitors.col(&mut column);
+        }
+        monitors.col(long_text("config", backend).not_null());
+        m.create_table(monitors.to_owned()).await?;
+        let mut events = create_table("repository_events", backend);
+        for name in ["id", "workspace_id", "connection_id", "created_at"] {
+            let mut column = ColumnDef::new(Alias::new(name));
+            column.big_integer().not_null();
+            if name == "id" {
+                column.primary_key();
+            }
+            events.col(&mut column);
+        }
+        for name in [
+            "delivery_key",
+            "event",
+            "repository",
+            "reference",
+            "actor",
+            "action",
+            "delivery",
+        ] {
+            events.col(ColumnDef::new(Alias::new(name)).string_len(512).not_null());
+        }
+        m.create_table(events.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_events",
+                "repository_event_delivery",
+                Index::create()
+                    .name("repository_event_delivery")
+                    .table(Alias::new("repository_events"))
+                    .col(Alias::new("connection_id"))
+                    .col(Alias::new("delivery_key"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_events",
+                "repository_event_history",
+                Index::create()
+                    .name("repository_event_history")
+                    .table(Alias::new("repository_events"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("connection_id"))
+                    .col(Alias::new("created_at"))
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod credential_scope_tests {
     use super::*;
@@ -2919,9 +3000,11 @@ mod credential_scope_tests {
         ))
         .await
         .unwrap();
-        Migrator::up(&db, Some(Migrator::migrations().len() as u32 - 1))
-            .await
+        let before_scopes = Migrator::migrations()
+            .iter()
+            .position(|migration| migration.name() == CredentialScopes.name())
             .unwrap();
+        Migrator::up(&db, Some(before_scopes as u32)).await.unwrap();
         db.execute_unprepared("INSERT INTO credentials (id,workspace_id,name,kind,username,description,secret,created_at,updated_at,version) VALUES (1,10,'SSH','password','root','','sealed-host',1,2,3),(2,10,'Git','token','','','sealed-git',1,2,4),(3,20,'Other tenant','token','','','sealed-other',1,2,5)").await.unwrap();
         db.execute_unprepared("INSERT INTO hosts (id,workspace_id,name,address,connection,credential_id,created_at,updated_at) VALUES (4,10,'Node','127.0.0.1','ssh',1,1,2),(5,10,'Invalid tenant binding','127.0.0.2','ssh',3,1,2)").await.unwrap();
         db.execute_unprepared("INSERT INTO credentials (id,workspace_id,name,kind,username,description,secret,created_at,updated_at,version) VALUES (6,10,'Application','token','','','sealed-app',1,2,6)").await.unwrap();

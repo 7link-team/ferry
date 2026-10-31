@@ -48,6 +48,8 @@ export interface RowAction<T> {
   action?: (row: T, values?: Record<string, unknown>) => Promise<void>;
   /** Shared action form, for operations needing explicit input before execution. */
   parameters?: (row: T) => FormField<Record<string, unknown>>[];
+  initialValues?: (row: T) => Record<string, unknown>;
+  description?: string;
   destructive?: boolean;
   when?: (row: T) => boolean;
   /** Keep unavailable actions discoverable and explain why. */
@@ -73,6 +75,8 @@ export interface ListConfig<T> {
   pagination?: "next";
   defaultRefresh?: number;
   rowKey: (row: T) => string;
+  /** Optional grouping of the currently loaded page, preserving remote pagination. */
+  grouping?: { label: string; key: (row: T) => string };
   filters?: Filter[];
   columns: Column<T>[];
   actions?: RowAction<T>[];

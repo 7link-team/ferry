@@ -626,7 +626,7 @@ const Wrapper = <T,>({
 export function ResourceActionDialog<T>({ action, row, workspace, permissions, onClose, onDone }: {
  action: RowAction<T>; row: T; workspace: string; permissions: Set<string>; onClose: () => void; onDone: () => void;
 }) {
- const [values,setValues]=useState<Record<string,unknown>>({});
+ const [values,setValues]=useState<Record<string,unknown>>(() => action.initialValues?.(row) ?? {});
  const [blocked,setBlocked]=useState<Record<string,boolean>>({});
  const [busy,setBusy]=useState(false),[error,setError]=useState("");
  const report=useCallback((key:string,value:boolean)=>setBlocked(current=>current[key]===value?current:{...current,[key]:value}),[]);
@@ -636,7 +636,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
   <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
   <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
    <Dialog.Title className="text-lg font-semibold">{action.label}</Dialog.Title>
-   <Dialog.Description className="mt-2 text-sm text-muted-foreground">确认以下执行参数后开始操作。</Dialog.Description>
+   <Dialog.Description className="mt-2 text-sm text-muted-foreground">{action.description ?? "确认以下执行参数后开始操作。"}</Dialog.Description>
    <form className="mt-4 space-y-4" onSubmit={async event=>{
     event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}

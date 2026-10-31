@@ -20,6 +20,7 @@ import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog";
 import { ResourceForm } from "./components/ResourceForm";
 import { HostMonitor } from "./components/HostMonitor";
 import { ResourceTable } from "./components/ResourceTable";
+import { RepositoryMonitor } from "./components/RepositoryMonitor";
 import { Platform } from "./Platform";
 import { Dashboard } from "./components/Dashboard";
 import { Invitation } from "./components/Invitation";
@@ -569,6 +570,7 @@ function RepositoryConnectionDetail({ workspace, connectionId, permissions, form
     endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/repositories`,
     pagination: "next" as const,
     rowKey: (row: { url: string; name: string; full_name: string; default_branch: string }) => row.url,
+    grouping: { label: "命名空间", key: (row: { full_name: string }) => row.full_name.includes("/") ? row.full_name.slice(0, row.full_name.lastIndexOf("/")) : "未分组" },
     columns: [
       { key: "full_name", label: "仓库名称", render: (row: { name: string; full_name: string }) => row.full_name || row.name },
       { key: "url", label: "仓库地址" },
@@ -577,14 +579,15 @@ function RepositoryConnectionDetail({ workspace, connectionId, permissions, form
     toolbar: { create: false, import: false, export: false, refresh: [0] },
     empty: "此连接下暂无可见仓库，请检查仓库权限；普通 Git 连接请在拉取代码步骤填写仓库地址。",
   }), [workspace, connectionId]);
-  const activeTab = tab === "repositories" ? "repositories" : "info";
+  const activeTab = tab === "repositories" || tab === "monitoring" ? tab : "info";
   return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
     <Tabs.List aria-label="仓库连接详情" className="flex gap-1 border-b">
-      {([["info", "基本信息", Info], ["repositories", "仓库列表", FolderTree]] as const).map(([value, label, Icon]) =>
+      {([["info", "基本信息", Info], ["repositories", "仓库列表", FolderTree], ["monitoring", "监控通知", Bell]] as const).map(([value, label, Icon]) =>
         <Tabs.Trigger key={value} value={value} asChild><Button variant="ghost" size="sm" className={cn("rounded-none border-b-2", activeTab === value ? "border-primary text-primary" : "border-transparent")}><Icon className="size-4" />{label}</Button></Tabs.Trigger>)}
     </Tabs.List>
     <Tabs.Content value="info" className="min-h-0 flex-1 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></Tabs.Content>
     <Tabs.Content value="repositories" className="flex min-h-0 flex-1 flex-col overflow-auto"><ResourceTable config={repositories} workspace={workspace} permissions={permissions} /></Tabs.Content>
+    <Tabs.Content value="monitoring" className="flex min-h-0 flex-1 flex-col overflow-auto"><RepositoryMonitor workspace={workspace} connectionId={connectionId} permissions={permissions} /></Tabs.Content>
   </Tabs.Root>;
 }
 
