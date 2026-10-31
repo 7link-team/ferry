@@ -66,10 +66,49 @@ foreach ($scope in @(@{ Mode = 'CurrentUser'; Hive = 'HKCU'; OtherHive = 'HKLM';
             $closeDeadline = (Get-Date).AddSeconds(30)
             while (-not $restarted.HasExited -and (Get-Date) -lt $closeDeadline) {
                 $restarted.Refresh()
-                if ($restarted.MainWindowHandle -ne 0) { [void]$restarted.CloseMainWindow() }
+                if ($restarted.MainWindowHandle -ne 0) {
+                    $windowHandle = $restarted.MainWindowHandle
+                    $windowTitle = $restarted.MainWindowTitle
+                    $closed = $restarted.CloseMainWindow()
+                    Write-Output "Close restarted window: PID=$($restarted.Id) HWND=$windowHandle title=$windowTitle accepted=$closed responding=$($restarted.Responding)"
+                }
                 if ($restarted.WaitForExit(500)) { break }
             }
-            if (-not $restarted.HasExited) { throw 'Restarted app did not exit normally' }
+            if (-not $restarted.HasExited) {
+                Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class InstallerWindowDiagnostics {
+    public delegate bool Callback(IntPtr hwnd, IntPtr state);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(Callback callback, IntPtr state);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int length);
+    [DllImport("user32.dll", SetLastError=true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    public static string CloseProbe(IntPtr hwnd) {
+        bool accepted = PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        return accepted + ":" + Marshal.GetLastWin32Error();
+    }
+}
+'@
+                Write-Host "Final close probe accepted:Win32Error=$([InstallerWindowDiagnostics]::CloseProbe($restarted.MainWindowHandle))"
+                [InstallerWindowDiagnostics]::EnumWindows({ param($handle, $state)
+                    $windowProcess = [uint32]0
+                    [void][InstallerWindowDiagnostics]::GetWindowThreadProcessId($handle, [ref]$windowProcess)
+                    if ($windowProcess -eq $restarted.Id) {
+                        $title = [Text.StringBuilder]::new(512)
+                        $class = [Text.StringBuilder]::new(256)
+                        [void][InstallerWindowDiagnostics]::GetWindowText($handle, $title, $title.Capacity)
+                        [void][InstallerWindowDiagnostics]::GetClassName($handle, $class, $class.Capacity)
+                        Write-Host "Remaining window: HWND=$handle class=$class title=$title visible=$([InstallerWindowDiagnostics]::IsWindowVisible($handle)) enabled=$([InstallerWindowDiagnostics]::IsWindowEnabled($handle))"
+                    }
+                    return $true
+                }, [IntPtr]::Zero) | Out-Null
+                throw 'Restarted app did not exit normally'
+            }
         }
         $updated = Check-Scope $scope
         if ($updated.InstallLocation -ne $entry.InstallLocation) { throw 'Update changed installation directory' }

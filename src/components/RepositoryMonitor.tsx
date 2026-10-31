@@ -22,8 +22,8 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
       { key: "events", label: "订阅事件", type: "multiselect", options: repositoryEventOptions, span: 2 },
       { key: "capability_note", label: "平台支持范围", type: "text", span: 2 },
       { key: "callback_path", label: "平台事件接收地址", type: "text", span: 2, help: `在代码平台填写可公开访问的服务地址加此路径。当前地址：${location.origin}。127.0.0.1 无法被云平台访问。` },
-      { key: "secret", label: "事件密钥", type: "password", stored: "has_secret" },
-      { key: "webhook", label: "通知 Webhook", type: "password", stored: "has_webhook" },
+      { key: "secret", label: "事件密钥", type: "secret", stored: "has_secret" },
+      { key: "webhook", label: "通知 Webhook", type: "secret", stored: "has_webhook" },
       { key: "provider_changed", label: "连接平台已变更，需要重新保存监控配置", type: "switch", when: row => !!row.provider_changed },
     ] }],
     viewActions: [{

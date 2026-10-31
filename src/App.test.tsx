@@ -105,6 +105,7 @@ it("opens monitoring settings with saved values and saves without navigating awa
   history.replaceState({}, "", "/workspaces/2/code-connections/42?tab=monitoring");
   await act(async () => root.render(<App />));
   expect(host.textContent).toContain("事件记录");
+  expect(host.textContent).toContain("已设置");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "配置监控")!.click());
   const dialog = document.querySelector('[role="dialog"]')!;
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("org/repo");
