@@ -540,7 +540,20 @@ pub async fn receive(
     {
         return Err(ApiError::conflict("监控配置已变更，请重新发送事件。"));
     }
-    let inserted = events::Entity::insert(events::ActiveModel {
+    // The shared workspace transaction serializes admission across replicas.
+    // Check under that lock instead of relying on dialect-specific conflict
+    // affected-row counts (MySQL's no-op update has different semantics).
+    if events::Entity::find()
+        .filter(events::Column::ConnectionId.eq(connection.id))
+        .filter(events::Column::DeliveryKey.eq(&delivery_key))
+        .one(&tx)
+        .await?
+        .is_some()
+    {
+        tx.commit().await?;
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    events::Entity::insert(events::ActiveModel {
         id: Set(event_id.into()),
         workspace_id: Set(connection.workspace_id),
         connection_id: Set(connection.id),
@@ -553,17 +566,9 @@ pub async fn receive(
         delivery: Set(delivery.into()),
         created_at: Set(db::now()),
     })
-    .on_conflict(
-        OnConflict::columns([events::Column::ConnectionId, events::Column::DeliveryKey])
-            .do_nothing()
-            .to_owned(),
-    )
     .exec_without_returning(&tx)
     .await?;
     tx.commit().await?;
-    if inserted == 0 {
-        return Ok(StatusCode::NO_CONTENT);
-    }
     if !config.webhook.is_empty() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
