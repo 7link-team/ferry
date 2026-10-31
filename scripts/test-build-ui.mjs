@@ -194,7 +194,9 @@ try {
   ]);
   await until(async () => (await page.getByRole('button', { name: '在当前目录打开终端' }).getAttribute('title')) === `在 ${directory} 打开终端`);
   await page.getByRole('button', { name: '在当前目录打开终端' }).click();
-  const directoryPanel = page.locator('section').filter({ has: page.locator('.xterm-screen') });
+  // The workspace opens the directory terminal as a new split; the original
+  // pane is now showing files and keeps its own terminal tab hidden.
+  const directoryPanel = page.getByRole('region', { name: '终端分屏', exact: true });
   await directoryPanel.getByText('已连接', { exact: true }).waitFor();
   await directoryPanel.locator('.xterm-screen').click();
   await page.keyboard.type('pwd');
