@@ -448,6 +448,22 @@ pub(super) fn webhook_actor(payload: &Value) -> String {
     )
 }
 
+/// Readable event name, matching the event options of the interface.
+pub(super) fn label(event: &str) -> &str {
+    match event {
+        "repository.created" => "新增仓库",
+        "repository.deleted" => "删除仓库",
+        "branch.created" => "新增分支",
+        "branch.deleted" => "删除分支",
+        "push" => "代码推送",
+        "pull_request" => "PR / 合并请求变更",
+        "merge" => "合并完成",
+        "tag.created" => "新增标签",
+        "tag.deleted" => "删除标签",
+        other => other,
+    }
+}
+
 /// Readable notification lines for an event detail.
 pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
     let mut lines = Vec::new();
@@ -528,8 +544,19 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
             .to_owned(),
         );
     }
-    add("标签说明", message(detail, &["/tag_message"], 500));
-    add("对比", field(detail, &["/compare_url"], 1000));
+    add(
+        "标签说明",
+        message(detail, &["/tag_message", "/message"], 500),
+    );
+    // One link to open the change: the comparison, else the newest commit.
+    add(
+        "链接",
+        field(
+            detail,
+            &["/compare_url", "/commits/0/url", "/commit/url"],
+            1000,
+        ),
+    );
     add("说明", field(detail, &["/note"], 300));
     lines
 }
@@ -747,6 +774,14 @@ notes"})),
         assert!(summary.contains(&("提交数".into(), "7".into())));
         assert!(summary.contains(&("提交".into(), "a1 one — Ann".into())));
         assert!(summary.contains(&("提交".into(), "a2 two".into())));
+        assert!(summary.contains(&("链接".into(), "https://x/c".into())));
+        let polled =
+            lines(&json!({"commits":[{"short_id":"b1","message":"m","url":"https://code/c/b1"}]}));
+        assert!(polled.contains(&("链接".into(), "https://code/c/b1".into())));
+        assert_eq!(
+            (label("push"), label("tag.deleted"), label("custom")),
+            ("代码推送", "删除标签", "custom")
+        );
         let request = lines(
             &json!({"request":{"number":"5","title":"Fix","source":"f","target":"main","author":"u","merged_by":"m","url":"https://x/5"}}),
         );

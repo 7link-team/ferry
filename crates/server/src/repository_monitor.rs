@@ -691,10 +691,10 @@ async fn deliver(
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| ApiError::bad("通知客户端不可用。"))?;
-        let title = format!("仓库事件：{}", event.event);
+        let title = format!("{}：{}", detail::label(&event.event), event.repository);
         let mut fields: Vec<(String, String)> = [
             ("仓库", &event.repository),
-            ("引用", &event.reference),
+            ("分支 / 标签", &event.reference),
             ("操作人", &event.actor),
             ("动作", &event.action),
             ("平台", &connection.provider),
