@@ -58,7 +58,7 @@ export function runnerUninstallCommand(platform: Platform, scope: InstallScope =
   const name = "runner-agent";
   if (platform !== "windows") {
     const root = scope === "system" ? `/var/lib/${name}` : platform === "macos" ? `$HOME/Library/Application Support/${name}` : `$HOME/.local/state/${name}`;
-    const body = `d="${root}"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name ${name}${scope === "user" ? " --user" : ""} || exit 1; fi; rm -rf "$d" && echo "Runner uninstalled."`;
+    const body = `d="${root}"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name ${name}${scope === "user" ? " --user" : ""} || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "Runner 已卸载：注册和安装目录均已删除。"`;
     return scope === "system" ? `sudo sh -c '${body}'` : `(${body})`;
   }
   // The directly pasted user command must not `exit` the user's own shell.
@@ -78,11 +78,17 @@ export function runnerUninstallCommand(platform: Platform, scope: InstallScope =
   for ($attempt = 0; Test-Path -LiteralPath $root; $attempt++) {
     try { Remove-Item -LiteralPath $root -Recurse -Force }
     catch { if ($attempt -ge 20) { throw }; Start-Sleep -Milliseconds 500 }
-  }
-  Write-Host 'Runner uninstalled.'`;
+  }`;
+  // Report the observable result in the window the user pasted into, whichever
+  // process did the work, so success is never silent.
+  const verify = (root: string, user: boolean) => `${user ? "" : `if (Get-Service -Name '${name}' -ErrorAction SilentlyContinue) { throw '卸载未完成：Runner 系统服务仍然存在。' }
+  `}if (Test-Path -LiteralPath (Join-Path ${root} '${name}')) { throw '卸载未完成：Runner 安装目录仍然存在。' }
+  Write-Host 'Runner 已卸载：${user ? "计划任务" : "系统服务"}注册和安装目录均已删除。' -ForegroundColor Green`;
   if (scope === "user") return `& {
   $ErrorActionPreference = 'Stop'
+  Write-Host '正在卸载当前用户的 Runner...'
   ${steps("$env:LOCALAPPDATA", true)}
+  ${verify("$env:LOCALAPPDATA", true)}
 }`;
   const payload = (pause: boolean) => `$ErrorActionPreference = 'Stop'
 try {
@@ -99,9 +105,12 @@ try {
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encode(payload(false))}
     if ($LASTEXITCODE -ne 0) { throw '卸载失败，请查看上方错误。' }
   } else {
-    $process = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${encode(payload(true))}')
+    Write-Host '正在请求管理员权限以卸载 Runner 系统服务，请在弹出的窗口中确认...'
+    try { $process = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', '${encode(payload(true))}') }
+    catch { throw '未获得管理员授权，Runner 未卸载。' }
     if ($process.ExitCode -ne 0) { throw '卸载失败，请查看管理员窗口中的错误。' }
   }
+  ${verify("$env:ProgramData", false)}
 }`;
 }
 
@@ -116,7 +125,7 @@ function UninstallCommand({ platform, scope }: { platform: Platform; scope: Inst
       <Button type="button" size="sm" variant="outline" onClick={async () => { try { await navigator.clipboard.writeText(command); setCopied(true); setError(""); } catch { setError("无法访问剪贴板，请选中下方命令手动复制。"); } }}><Copy className="size-4"/>{copied ? "已复制" : "复制卸载命令"}</Button>
     </div>
     <textarea aria-label="卸载命令" readOnly value={command} spellCheck={false} className="min-h-24 w-full resize-y rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed focus-visible:outline-ring" onFocus={e => e.currentTarget.select()}/>
-    <p className="text-xs text-muted-foreground">{scope === "system" ? (platform === "windows" ? "需要确认管理员授权。" : "需要 sudo 密码。") : "无需管理员。"}在目标主机执行，移除按所选方式安装的 Runner，并删除其程序、连接凭据和日志；节点记录保留在 Ferry 中并显示离线。</p>
+    <p className="text-xs text-muted-foreground">{scope === "system" ? (platform === "windows" ? "需要确认管理员授权。" : "需要 sudo 密码。") : "无需管理员。"}请在目标主机本地的{platform === "windows" ? " PowerShell " : "终端"}中执行，不要在 Ferry 网页终端中执行（它运行在要卸载的 Runner 上）。将移除按所选方式安装的 Runner，并删除其程序、连接凭据和日志，完成后会显示"Runner 已卸载"；节点记录保留在 Ferry 中并显示离线。</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
   </div>;
 }

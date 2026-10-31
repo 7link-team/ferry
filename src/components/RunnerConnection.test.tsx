@@ -65,7 +65,10 @@ it("generates current-user commands without elevation, keeping system commands u
 });
 
 it("generates one-click uninstall commands for each platform and install scope", () => {
-  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && echo "Runner uninstalled."'`);
+  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "Runner 已卸载：注册和安装目录均已删除。"'`);
+  // Success is reported in the window the command was pasted into, never silently.
+  for (const platform of ["linux", "macos", "windows"] as const) for (const scope of ["system", "user"] as const)
+    expect(runnerUninstallCommand(platform, scope), `${platform}/${scope}`).toContain("Runner 已卸载");
   expect(runnerUninstallCommand("macos", "system")).toBe(runnerUninstallCommand("linux", "system"));
   const linuxUser = runnerUninstallCommand("linux", "user");
   expect(linuxUser).toContain('d="$HOME/.local/state/runner-agent"');
@@ -142,7 +145,8 @@ try {
   Copy-Item $fixture (Join-Path $root 'runner-service.exe')
   Set-Content (Join-Path $root 'service.json') '{}'
   $env:FIXTURE_FAIL = '0'
-  & { ${user} } | Out-Null
+  $reported = & { ${user} } 6>&1 | Out-String
+  if ($reported -notlike '*Runner 已卸载*') { throw "Success must be reported: $reported" }
   if ((Get-Content $env:FIXTURE_ARGS) -ne 'service uninstall --name runner-agent --user') { throw 'Wrong uninstall arguments' }
   if (Test-Path -LiteralPath $root) { throw 'Installation directory must be removed' }
   # Not installed: succeeds without invoking anything.
