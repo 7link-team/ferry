@@ -46,6 +46,10 @@ it("renders a header view action once, not again in untitled read-only sections"
   expect(host.textContent).toContain("CPU high");
   expect(host.querySelectorAll('a[aria-label="返回规则"]')).toHaveLength(1);
 });
+it("lists deployment modes from native through Docker, Compose and Swarm", () => {
+  const field = formConfigs("ops").deployments!.sections.flatMap(section => section.fields).find(field => field.key === "mode")!;
+  expect((field.options as { value: string }[]).map(option => option.value)).toEqual(["native", "docker", "compose", "stack"]);
+});
 it("read permission never offers reveal", async () => {
   await mount(new Set(["variables.read"]));
   expect(host.textContent).not.toContain("查看明文");

@@ -660,7 +660,7 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       blank: { name: "", mode: "compose", target_kind: "host", target_ref: "", workdir: "/opt/deployments", description: "", manifest: "apiVersion: ferry/v1\nkind: Application\nmetadata:\n  name: web\nservices:\n  - name: web\n    image: nginx:alpine\n    ports:\n      - container: 80\n        published: 8080\n" },
       sections: [{ fields: [
         { key: "name", label: "名称", type: "text", required: true },
-        { key: "mode", label: "部署模式", type: "select", options: [{ value: "compose", label: "Docker Compose" }, { value: "docker", label: "Docker" }, { value: "native", label: "Native（systemd）" }, { value: "stack", label: "Docker Swarm" }], immutable: true },
+        { key: "mode", label: "部署模式", type: "select", options: [{ value: "native", label: "Native（systemd）" }, { value: "docker", label: "Docker" }, { value: "compose", label: "Docker Compose" }, { value: "stack", label: "Docker Swarm" }], immutable: true },
         { key: "target_kind", label: "目标类型", type: "select", options: [{ value: "host", label: "单主机" }, { value: "host-group", label: "主机组（逐台执行）" }], immutable: true },
         { key: "target_ref", label: "目标主机", type: "select", options: namedOptions(workspace, "hosts"), required: true, immutable: true, when: (d) => d.target_kind === "host" },
         { key: "target_ref", label: "目标主机组", type: "select", options: namedOptions(workspace, "host-groups"), required: true, immutable: true, when: (d) => d.target_kind === "host-group", help: "部署全部直接成员，按主机 ID 排序；失败停止，已成功主机不自动回滚。" },

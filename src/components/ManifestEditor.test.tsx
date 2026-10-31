@@ -171,6 +171,18 @@ it("adds native artifact services and read-only mode cannot mutate config", asyn
     ),
   ).toBe(true);
 });
+it("switches a service's run source immediately without a browser confirmation", async () => {
+  const confirm = vi.fn(() => { throw new Error("native confirm must not be used"); });
+  vi.stubGlobal("confirm", confirm);
+  await act(async () => root.render(<Harness mode="native" />));
+  expect(host.textContent).toContain("Native 模式需要选择流水线构建产物。");
+  await fill(host.querySelector('select[aria-label="运行来源"]')!, "artifact");
+  expect(confirm).not.toHaveBeenCalled();
+  expect(parse(latest).services[0].artifact).toEqual({ source: "pipeline", pipeline: "", path: "" });
+  expect(parse(latest).services[0].image).toBeUndefined();
+  expect(host.querySelector('select[aria-label="运行来源"]')!.closest("[data-auto-field]")?.parentElement?.textContent).not.toContain("Native 模式需要选择流水线构建产物。");
+  expect(input("流水线 ID")).toBeDefined();
+});
 it("refuses duplicate keys, aliases and malformed collections without discarding original source", () => {
   expect(() => readManifest(fixture + "\nservices: []")).toThrow();
   expect(() =>

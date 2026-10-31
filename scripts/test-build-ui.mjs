@@ -181,7 +181,7 @@ try {
   assert(assets.some((url) => /\/assets\/xterm-.*\.js/.test(url)), 'terminal did not load xterm chunk');
   assert.deepEqual(errors, []);
   pass('xterm excluded from initial pages, lazy terminal loads and connects to real runner');
-  await page.getByRole('button', { name: '切换为文件', exact: true }).click();
+  await page.getByRole('tab', { name: '文件', exact: true }).click();
   const directory = '/tmp';
   // Initial directory loading normalizes the path input when it finishes.
   // Wait for that load before entering a different directory.

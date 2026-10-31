@@ -415,12 +415,8 @@ export function ManifestEditor({
                       value={artifact ? "artifact" : "image"}
                       disabled={readOnly}
                       onChange={(e) => {
-                        if (
-                          !confirm(
-                            "切换运行来源将替换当前镜像或构建产物配置，是否继续？",
-                          )
-                        )
-                          return;
+                        // Switching is an ordinary draft edit: it takes effect
+                        // only when saved and can be undone by switching back.
                         change([
                           {
                             path: p("image"),
