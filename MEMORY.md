@@ -1,3 +1,9 @@
+## Actions on Windows hosts (2026-11-01, DONE locally -> commit, then release alpha.32)
+- Implemented per ADR "GitHub Actions pipelines on Windows hosts". Codex U1 (worker) reviewed + independently re-verified (19 PASS/2 SKIP, linux/darwin vet) and merged into main tree (main tree had 112 CRLF working copies with LF index — pre-existing; only rewrote the 4 files patched).
+- Real e2e on this machine: scripts/test-actions-windows.py 9 PASS (after fixing whoami shadowed by Git's Unix whoami -> full System32 paths).
+- Also fixed CI failures of bb2ae88: test-transfers derived-column exclusion (+repository_name,target_name; local 89 PASS) and test-manifest-ui race (wait for build picker to settle; 5/5 local PASS).
+- Next: commit, bump 0.1.0-alpha.32, push, dispatcher; watch runner-services Windows steps; then tell user to `--upgrade` (server) and let the runner self-update.
+
 ## Names instead of IDs (2026-11-01, committed, not released)
 - names.rs + list/detail wiring; frontend named() helper; filters to selects; manifest editor ReferencePicker/RunPicker (workspace prop from ResourceForm). ADR "Referenced records are shown by name".
 - Verified: live API data/maintenance/names-smoke.py 5 PASS; live browser data/maintenance/names-ui.mjs PASS x3 (screenshots); scripts/test-manifest-ui.mjs PASS (picker chosen by clicking, Radix select); vitest 191 PASS; cargo test server 167 PASS. CI-only assertions added to test-pipelines.py (run list/detail/artifacts) and test-deployments.py (revisions/deployments).

@@ -133,6 +133,13 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 
 终端、命令和流水线都以 Runner 的运行身份执行。两种方式都会在异常退出后自动恢复，并支持签名自动升级。Windows 当前用户方式的状态保存在 `%LOCALAPPDATA%\runner-agent`，仅该账号和 SYSTEM 可访问，运行时不显示任何窗口；该账号注销后节点显示离线，下次登录时自动重连。需要 Runner 0.1.0-alpha.25 或更新版本，旧版本会被安装脚本拒绝，不会安装。
 
+GitHub Actions 格式的流水线也可以在 Windows 主机上执行（`runs-on: self-hosted`，直接在主机上运行）：
+- 需要 Git for Windows 和 Runner 0.1.0-alpha.32 或更新版本，旧版本 Runner 会提示升级；
+- `run` 步骤默认使用 PowerShell（有 PowerShell 7 时用 `pwsh`，否则用系统自带的 Windows PowerShell），也可以写 `shell: cmd`，或在装有 Git Bash 时写 `shell: bash`；
+- 执行时不显示任何窗口；
+- 容器镜像任务只能在 Linux 主机上执行；
+- Windows 上取消任务会强制结束进程，任务的收尾步骤可能来不及执行。
+
 更换安装方式时，先在主机上用原安装目录中的 `runner-service service uninstall` 移除原注册（当前用户方式需加 `--user`，系统服务需管理员权限），再在 Ferry 中“重置连接”，然后用新方式运行连接命令。
 
 ## 多实例节点通信

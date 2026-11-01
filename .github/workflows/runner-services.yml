@@ -14,6 +14,10 @@ on:
       - "scripts/test-runner-install.py"
       - "scripts/test-runner-bootstrap.py"
       - "crates/server/src/actions_run.rs"
+      - "crates/server/src/windows_shell.rs"
+      - "workers/actions/**"
+      - "scripts/build-actions-workers.sh"
+      - "scripts/test-actions-windows.py"
       - "Cargo.lock"
       - "scripts/test-runner-service.py"
       - "scripts/test-runner-update.py"
@@ -91,10 +95,21 @@ jobs:
         if: runner.os == 'Windows'
         run: python scripts/test-runner-bootstrap.py
       - uses: actions/setup-go@v5
-        if: runner.os == 'Linux'
+        if: runner.os != 'macOS'
         with:
           go-version-file: workers/actions/go.mod
           cache-dependency-path: workers/actions/go.sum
+      - name: Actions worker tests (Windows host mode)
+        if: runner.os == 'Windows'
+        working-directory: workers/actions
+        shell: bash
+        run: bash go.sh test ./...
+      - name: Actions pipelines on a Windows host
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ACTIONS_WORKER_TARGETS=windows/amd64 bash scripts/build-actions-workers.sh target/debug/actions-workers
+          python scripts/test-actions-windows.py
       - name: Build Actions worker for whole-task upgrade acceptance
         if: runner.os == 'Linux'
         run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh

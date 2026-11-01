@@ -134,11 +134,18 @@ async fn create_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
 pub(crate) fn shell_command(command: &str) -> tokio::process::Command {
     #[cfg(windows)]
     let mut process = {
+        use std::os::windows::process::CommandExt;
         let mut process = tokio::process::Command::new("cmd");
-        process.arg("/C").arg(command);
+        // The command reaches cmd.exe exactly as written: `arg` would escape
+        // inner quotes MSVC-style (\"), which cmd does not understand, so any
+        // quoted path with spaces failed. /S makes cmd strip only the outer
+        // pair of quotes added here.
+        process
+            .arg("/S")
+            .arg("/C")
+            .raw_arg(format!("\"{command}\""));
         // CREATE_NO_WINDOW: a scheduled job must not flash a console over
         // whatever the person at that desktop is doing.
-        use std::os::windows::process::CommandExt;
         process.creation_flags(0x0800_0000);
         process
     };
@@ -638,6 +645,20 @@ mod tests {
                 assert_eq!(home, expected);
             }
         }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn quoted_paths_with_spaces_and_quoted_arguments_reach_cmd_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().join("dir with space");
+        std::fs::create_dir(&folder).unwrap();
+        let script = folder.join("say.cmd");
+        std::fs::write(&script, "@echo [%~1]\r\n").unwrap();
+        let command = format!("\"{}\" \"hello world\"", script.display());
+        let output = shell_command(&command).output().await.unwrap();
+        assert_eq!(output.status.code(), Some(0), "{}", capped(&output.stderr));
+        assert_eq!(capped(&output.stdout).trim(), "[hello world]");
     }
 
     #[tokio::test]

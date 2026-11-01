@@ -46,6 +46,9 @@ func generate() error {
 	if err := os.CopyFS(moduleDir, os.DirFS(module.Dir)); err != nil {
 		return err
 	}
+	if err := patchWindowsHost(moduleDir); err != nil {
+		return err
+	}
 	source := filepath.Join(moduleDir, "pkg", "container", "host_environment.go")
 	data, err := os.ReadFile(source)
 	if err != nil {

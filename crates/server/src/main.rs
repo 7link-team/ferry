@@ -41,6 +41,7 @@ mod transfers;
 mod variables;
 mod vault;
 mod webhook;
+mod windows_shell;
 mod worker;
 mod workspace;
 mod workspace_admin;

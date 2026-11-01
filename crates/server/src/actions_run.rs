@@ -404,9 +404,10 @@ async fn execute_job(
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    if host.os == "windows" {
+    let windows = host.os == "windows";
+    if windows && job.image != "host" {
         return Err(ApiError::bad(
-            "当前 Actions worker 需要 Linux 或 macOS 执行器。",
+            "Windows 主机只能直接在主机上执行任务（runs-on: self-hosted），不支持容器镜像。",
         ));
     }
     let host = crate::remote::Host {
@@ -421,16 +422,24 @@ async fn execute_job(
         host_key: host.host_key,
     };
     let ch = crate::channel_open(s, &host).await?;
-    let private = format!("/tmp/actions-{}", uuid::Uuid::new_v4());
-    let made = ch
-        .exec(
-            &format!("umask 077; mkdir {}", quote(&private)),
-            Duration::from_secs(15),
-        )
-        .await?;
-    if made.code != 0 {
-        return Err(ApiError::bad("无法创建 Actions 工作目录。"));
-    }
+    // Windows hosts run the same POSIX job scripts through Git for Windows' sh.
+    let (ch, private): (Box<dyn HostChannel>, String) = if windows {
+        let shell = crate::windows_shell::GitShell::open(ch).await?;
+        let private = shell.private_dir("ferry-actions").await?;
+        (Box::new(shell), private)
+    } else {
+        let private = format!("/tmp/actions-{}", uuid::Uuid::new_v4());
+        let made = ch
+            .exec(
+                &format!("umask 077; mkdir {}", quote(&private)),
+                Duration::from_secs(15),
+            )
+            .await?;
+        if made.code != 0 {
+            return Err(ApiError::bad("无法创建 Actions 工作目录。"));
+        }
+        (ch, private)
+    };
     let result = execute_private(
         s,
         run,
@@ -476,12 +485,15 @@ async fn execute_private(
     let os = match lines.first().copied() {
         Some("Linux") => "linux",
         Some("Darwin") => "darwin",
+        // Git for Windows' sh reports MINGW64_NT-10.0-… / MSYS_NT-….
+        Some(name) if name.starts_with("MINGW") || name.starts_with("MSYS") => "windows",
         _ => {
             return Err(ApiError::bad(
-                "当前 Actions worker 需要 Linux 或 macOS 执行器。",
+                "Actions worker 需要 Linux、macOS 或 Windows 执行器。",
             ));
         }
     };
+    let exe = if os == "windows" { ".exe" } else { "" };
     let arch = match lines.get(1).copied() {
         Some("x86_64") => "amd64",
         Some("aarch64" | "arm64") => "arm64",
@@ -494,7 +506,7 @@ async fn execute_private(
                 .unwrap_or_default()
                 .with_file_name("actions-workers")
         });
-    let binary = tokio::fs::read(directory.join(format!("actions-worker-{os}-{arch}")))
+    let binary = tokio::fs::read(directory.join(format!("actions-worker-{os}-{arch}{exe}")))
         .await
         .map_err(|_| ApiError::bad("缺少对应平台 Actions worker，请完成安装。"))?;
     let chunks: Vec<_> = binary
@@ -502,7 +514,7 @@ async fn execute_private(
         .map(|chunk| Ok(bytes::Bytes::copy_from_slice(chunk)))
         .collect();
     ch.write_file(
-        &format!("{private}/worker"),
+        &format!("{private}/worker{exe}"),
         0o700,
         Box::pin(futures::stream::iter(chunks)),
     )
@@ -643,7 +655,7 @@ async fn execute_private(
     .await?;
     let command = format!(
         "exec {} --request {}",
-        quote(&format!("{private}/worker")),
+        quote(&format!("{private}/worker{exe}")),
         quote(&format!("{private}/request"))
     );
     let (code, outcome, cancelled) = stream_events(

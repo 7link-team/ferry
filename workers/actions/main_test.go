@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -37,11 +37,18 @@ jobs:
 	}
 }
 
+func platformScript(unix, windows string) string {
+	if runtime.GOOS == "windows" {
+		return windows
+	}
+	return unix
+}
+
 func repository(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture"}, {"remote", "add", "origin", "https://github.com/example/project.git"}} {
-		c := exec.Command("git", append([]string{"-C", root}, args...)...)
+		c := testCommandContext(context.Background(), "git", append([]string{"-C", root}, args...)...)
 		if out, err := c.CombinedOutput(); err != nil {
 			t.Fatalf("git: %v %s", err, out)
 		}
@@ -66,9 +73,11 @@ jobs:
     steps:
       - id: build
         run: |
-          test '${{ needs.prepare.outputs.value }}' = ready
+` + platformScript(`          test '${{ needs.prepare.outputs.value }}' = ready
           echo artifact=compiled >> "$GITHUB_OUTPUT"
-          echo LIVE_PROOF
+          echo LIVE_PROOF`, `          if ('${{ needs.prepare.outputs.value }}' -ne 'ready') { exit 1 }
+          'artifact=compiled' >> $env:GITHUB_OUTPUT
+          echo LIVE_PROOF`) + `
 `
 	var logs bytes.Buffer
 	result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: root, Needs: map[string]JobResult{"prepare": {State: "success", Outputs: map[string]string{"value": "ready"}}}, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
@@ -86,7 +95,7 @@ jobs:
 func TestCancellationStopsActualWorkerCommand(t *testing.T) {
 	root := repository(t)
 	marker := filepath.Join(root, "must-not-exist")
-	workflow := "name: cancel\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: sleep 2; touch '" + marker + "'\n"
+	workflow := "name: cancel\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: " + platformScript("sleep 2; touch '"+marker+"'", "Start-Sleep -Seconds 2; New-Item -ItemType File -Path '"+marker+"'") + "\n"
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var logs bytes.Buffer
@@ -102,7 +111,7 @@ func TestCancellationStopsActualWorkerCommand(t *testing.T) {
 func TestTimeoutStopsRunningCommand(t *testing.T) {
 	root := repository(t)
 	marker := filepath.Join(root, "late-write")
-	workflow := "name: timeout\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: sleep 3; touch '" + marker + "'\n"
+	workflow := "name: timeout\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: " + platformScript("sleep 3; touch '"+marker+"'", "Start-Sleep -Seconds 3; New-Item -ItemType File -Path '"+marker+"'") + "\n"
 	var logs bytes.Buffer
 	started := time.Now()
 	result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: root, TimeoutSeconds: 1, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
@@ -132,8 +141,9 @@ jobs:
         env:
           TOKEN: ${{ secrets.TOKEN }}
         run: |
-          echo "$TOKEN"
-          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"
+` + platformScript(`          echo "$TOKEN"
+          echo "value=$TOKEN" >> "$GITHUB_OUTPUT"`, `          echo "$env:TOKEN"
+          "value=$env:TOKEN" >> $env:GITHUB_OUTPUT`) + `
 `
 	var logs bytes.Buffer
 	secret := "secret-probe-531b9d"
@@ -186,7 +196,7 @@ jobs:
 
 func TestCommandWithoutRepositoryAndWithoutGitHead(t *testing.T) {
 	root := t.TempDir()
-	if out, err := exec.Command("git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
+	if out, err := testCommandContext(context.Background(), "git", "-C", root, "init", "-q").CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	var logs bytes.Buffer
@@ -272,7 +282,7 @@ func TestMatrixFailFastStopsLaterBranch(t *testing.T) {
 		t.Run(strings.TrimSpace(failFast), func(t *testing.T) {
 			root := repository(t)
 			marker := filepath.Join(root, "later-branch")
-			workflow := "name: matrix\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    strategy:\n" + failFast + "      matrix:\n        value: [bad, good]\n    steps:\n      - id: command\n        run: |\n          if [ '${{ matrix.value }}' = bad ]; then exit 7; fi\n          touch '" + marker + "'\n"
+			workflow := "name: matrix\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    strategy:\n" + failFast + "      matrix:\n        value: [bad, good]\n    steps:\n      - id: command\n        run: |\n" + platformScript("          if [ '${{ matrix.value }}' = bad ]; then exit 7; fi\n          touch '"+marker+"'\n", "          if ('${{ matrix.value }}' -eq 'bad') { exit 7 }\n          New-Item -ItemType File -Path '"+marker+"'\n")
 			var logs bytes.Buffer
 			result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: root, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
 			if err == nil || result.State != "failure" || result.Steps["command"] != "failure" {
@@ -302,10 +312,13 @@ jobs:
     steps:
       - id: generate
         run: |
-          value="generated-sensitive-$((900 + 23))"
+` + platformScript(`          value="generated-sensitive-$((900 + 23))"
           echo "::add-mask::$value"
           echo "hidden=$value" >> "$GITHUB_OUTPUT"
-          echo 'public=visible' >> "$GITHUB_OUTPUT"
+          echo 'public=visible' >> "$GITHUB_OUTPUT"`, `          $value="generated-sensitive-$(900 + 23)"
+          echo "::add-mask::$value"
+          "hidden=$value" >> $env:GITHUB_OUTPUT
+          'public=visible' >> $env:GITHUB_OUTPUT`) + `
 `
 	var logs bytes.Buffer
 	result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: root, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
@@ -341,7 +354,7 @@ func TestConcurrentArtifactWorkers(t *testing.T) {
 	completed := make(chan completion, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			output, err := exec.CommandContext(ctx, executable, "-test.run=^TestArtifactActionsUploadAndDownloadAcrossJobs$", "-test.count=1").CombinedOutput()
+			output, err := testCommandContext(ctx, executable, "-test.run=^TestArtifactActionsUploadAndDownloadAcrossJobs$", "-test.count=1").CombinedOutput()
 			completed <- completion{output, err}
 		}()
 	}
@@ -365,9 +378,10 @@ func TestMultilineSecretLinesNeverReachLogsOrOutputs(t *testing.T) {
         env:
           TOKEN: ${{ secrets.TOKEN }}
         run: |
-          printf '%s\n' "$TOKEN"
+` + platformScript(`          printf '%s\n' "$TOKEN"
           printf 'value=%s\n' "${TOKEN%%
-          *}" >> "$GITHUB_OUTPUT"
+          *}" >> "$GITHUB_OUTPUT"`, `          echo "$env:TOKEN"
+          "value=$(($env:TOKEN -split [char]10)[0])" >> $env:GITHUB_OUTPUT`) + `
 `
 	var logs bytes.Buffer
 	secret := "synthetic-first-line-123\nsynthetic-second-line-456"
