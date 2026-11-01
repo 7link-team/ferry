@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api, type Identity } from "./api";
@@ -9,7 +10,10 @@ import { href, navigate, useRoute } from "./router";
 import { nav } from "./nav";
 import { accountRoute } from "./Account";
 
-type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean };
+type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean; relation?: string; my_role?: string };
+/** Whether the user created the workspace, joined it, or only reaches it as a platform administrator. */
+export const myRole = (relation: string | undefined, role: string | undefined) =>
+  relation === "owner" ? "拥有者（我创建的）" : relation === "member" ? `${role}（已加入）` : "未加入（平台超级管理员）";
 const labels: Record<string, string> = { users: "平台用户", workspaces: "工作空间", settings: "平台设置" };
 const permissions = new Set(["users.update", "workspaces.create", "workspaces.update", "settings.update"]);
 const edit = { label: "编辑", to: (r: Row) => ({ id: r.id, mode: "edit" as const }) };
@@ -26,8 +30,9 @@ const lists: Record<string, ListConfig<Row>> = {
   workspaces: {
     resource: "workspaces", endpoint: "/platform/workspaces", rowKey: r => r.id,
     filters: [{ key: "q", label: "名称或标识", type: "text" }],
-    columns: [{ key: "name", label: "名称", sortable: true }, { key: "slug", label: "标识", sortable: true }],
-    actions: [edit, { label: "进入工作空间", to: r => ({ workspace: r.id, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" }) }],
+    columns: [{ key: "name", label: "名称", sortable: true }, { key: "slug", label: "标识", sortable: true },
+      { key: "my_role", label: "我的角色", render: r => myRole(r.relation, r.my_role) }],
+    actions: [edit, { label: "进入工作空间", icon: <LogIn className="size-4" />, to: r => ({ workspace: r.id, group: nav[0]!.key, item: nav[0]!.items[0]!.key, mode: "list" }) }],
     toolbar: { create: { label: "创建工作空间" }, import: false, export: false }, empty: "还没有工作空间，创建后即可配置主机和部署。",
   },
 };

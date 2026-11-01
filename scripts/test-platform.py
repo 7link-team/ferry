@@ -138,6 +138,17 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(request(admin, '/platform/workspaces/'+ws['id'])['name'] == 'Renamed', 'workspace rename protects stale writes')
         check(request(owner, f'/workspaces/{workspace_tenant}/nodes')['total'] == 0,
               'workspace rename keeps existing ID-based resource URLs valid')
+        # Each workspace says whether the user created it, joined it, or only administers it.
+        listed = {w['slug']: (w['relation'], w['my_role']) for w in request(admin, '/platform/workspaces')['items']}
+        check(listed == {'platform': ('owner', '拥有者'), 'tenant': ('none', '')}, 'platform list marks the workspace the admin created and the one not joined')
+        mine = {w['slug']: (w['relation'], w['role_name']) for w in request(admin, '/me')['workspaces']}
+        check(mine == {'platform': ('owner', '拥有者'), 'tenant': ('none', '平台超级管理员')}, 'admin identity keeps real roles instead of a blanket administrator role')
+        check([(w['slug'], w['relation']) for w in request(owner, '/me')['workspaces']] == [('tenant', 'owner')], 'a member identity marks the workspace they created')
+        invitation = request(owner, f'/workspaces/{workspace_tenant}/members/invitation')['code']
+        request(admin, '/workspace-memberships', {'code': invitation})
+        relation, role = {w['slug']: (w['relation'], w['my_role']) for w in request(admin, '/platform/workspaces')['items']}['tenant']
+        check(relation == 'member' and role not in ('', '拥有者'), 'after joining, the workspace shows the joined role')
+        check({w['slug']: w['relation'] for w in request(admin, '/me')['workspaces']}['tenant'] == 'member', 'identity shows the joined workspace as a membership')
         for active, superadmin in [(False, True), (True, False)]:
             request(admin, '/platform/users/'+admin_id, {'version':1, 'active':active, 'is_superadmin':superadmin}, 'PATCH', 409)
         check(request(admin, '/me')['user']['is_superadmin'], 'last active admin cannot be disabled or demoted')

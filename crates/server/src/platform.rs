@@ -3,7 +3,7 @@
 use crate::{
     auth::{self, Account},
     db,
-    entities::{platform_state, sessions, users, workspaces},
+    entities::{platform_state, sessions, users, workspace_members, workspace_roles, workspaces},
     error::{ApiError, Result},
     resource::{self, ListQuery, Spec},
     snowflake::Id,
@@ -16,8 +16,8 @@ use axum::{
 };
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter,
-    QuerySelect, Set, TransactionTrait,
+    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
+    QueryFilter, QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -363,6 +363,7 @@ struct PublicWorkspace {
     id: i64,
     name: String,
     slug: String,
+    owner_id: i64,
     updated_at: i64,
     created_at: i64,
 }
@@ -376,9 +377,62 @@ fn public_workspaces() -> sea_orm::Select<workspaces::Entity> {
         workspaces::Column::Id,
         workspaces::Column::Name,
         workspaces::Column::Slug,
+        workspaces::Column::OwnerId,
         workspaces::Column::UpdatedAt,
         workspaces::Column::CreatedAt,
     ])
+}
+/// The administrator's own place in each workspace: "owner" (created it; the
+/// owner never changes), "member" with the role name, or "none" when they only
+/// reach it as a platform administrator.
+async fn relations(
+    db: &impl ConnectionTrait,
+    user: Id,
+    rows: Vec<PublicWorkspace>,
+) -> Result<Vec<Value>> {
+    #[derive(FromQueryResult)]
+    struct Membership {
+        workspace_id: i64,
+        role_name: String,
+    }
+    let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
+    let roles: HashMap<i64, String> = workspace_members::Entity::find()
+        .select_only()
+        .column(workspace_members::Column::WorkspaceId)
+        .column_as(workspace_roles::Column::Name, "role_name")
+        .join(
+            JoinType::InnerJoin,
+            workspace_members::Entity::belongs_to(workspace_roles::Entity)
+                .from(workspace_members::Column::RoleId)
+                .to(workspace_roles::Column::Id)
+                .into(),
+        )
+        .filter(workspace_members::Column::UserId.eq(i64::from(user)))
+        .filter(workspace_members::Column::State.eq("active"))
+        .filter(workspace_members::Column::WorkspaceId.is_in(ids))
+        .into_model::<Membership>()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| (row.workspace_id, row.role_name))
+        .collect();
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let relation = if row.owner_id == i64::from(user) {
+                "owner"
+            } else if roles.contains_key(&row.id) {
+                "member"
+            } else {
+                "none"
+            };
+            let role = roles.get(&row.id).cloned().unwrap_or_default();
+            let mut value = row.json();
+            value["relation"] = json!(relation);
+            value["my_role"] = json!(role);
+            value
+        })
+        .collect())
 }
 pub async fn list_workspaces(
     State(s): State<AppState>,
@@ -394,8 +448,9 @@ pub async fn list_workspaces(
         &q,
     )
     .await?;
+    let items = relations(&s.db, admin.0.user.id, rows).await?;
     Ok(Json(
-        json!({"items": rows.into_iter().map(PublicWorkspace::json).collect::<Vec<_>>(), "total": total, "page": q.page, "page_size": q.page_size}),
+        json!({"items": items, "total": total, "page": q.page, "page_size": q.page_size}),
     ))
 }
 pub async fn get_workspace(

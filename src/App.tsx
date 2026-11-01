@@ -22,7 +22,7 @@ import { ResourceForm } from "./components/ResourceForm";
 import { HostMonitor } from "./components/HostMonitor";
 import { ResourceTable } from "./components/ResourceTable";
 import { RepositoryMonitor, RepositoryEventHistory } from "./components/RepositoryMonitor";
-import { Platform } from "./Platform";
+import { Platform, myRole } from "./Platform";
 import { Account, accountRoute } from "./Account";
 import { Dashboard } from "./components/Dashboard";
 import { Invitation } from "./components/Invitation";
@@ -251,8 +251,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                   navigate({ workspace: w.id, group: route.group, item: route.item, mode: "list" }, {})
                 }
               >
-                {w.name}
-                {w.id === current.id && " ✓"}
+                <span className="flex-1">{w.name}{w.id === current.id && " ✓"}</span>
+                <span className="text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
               </DropdownMenuItem>
             ))}
             <DropdownMenuItem onClick={() => setJoining(true)}>创建/加入工作空间</DropdownMenuItem>

@@ -307,6 +307,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         id: i64,
         slug: String,
         name: String,
+        owner_id: i64,
         role_name: String,
         permissions: String,
     }
@@ -316,6 +317,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
             workspaces::Column::Id,
             workspaces::Column::Slug,
             workspaces::Column::Name,
+            workspaces::Column::OwnerId,
         ])
         .column_as(workspace_roles::Column::Name, "role_name")
         .column(workspace_roles::Column::Permissions)
@@ -347,14 +349,23 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
                 "slug": row.slug,
                 "name": row.name,
                 "role_name": row.role_name,
+                "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else { "member" },
                 "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])),
             })
         })
         .collect();
     if account.user.is_superadmin {
+        // Every workspace with full permissions, but the role still says
+        // whether the administrator is the owner, a member, or neither.
+        let roles: std::collections::HashMap<i64, String> = rows
+            .iter()
+            .map(|row| (row.id, row.role_name.clone()))
+            .collect();
         workspaces = workspaces::Entity::find().order_by_asc(workspaces::Column::Name).all(&s.db).await?
             .into_iter().map(|row| json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name,
-                "role_name": "平台超级管理员", "permissions": crate::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
+                "role_name": roles.get(&row.id).cloned().unwrap_or_else(|| "平台超级管理员".into()),
+                "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else if roles.contains_key(&row.id) { "member" } else { "none" },
+                "permissions": crate::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
     }
     Ok(Json(json!({
         "user": {"id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},

@@ -40,6 +40,8 @@ export interface Workspace {
   slug: string;
   name: string;
   role_name: string;
+  /** owner: created it; member: joined with role_name; none: a platform administrator who has not joined. */
+  relation?: "owner" | "member" | "none";
   permissions: string[];
 }
 

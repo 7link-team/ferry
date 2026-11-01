@@ -67,6 +67,7 @@ try {
   await page.getByLabel('标识', { exact: false }).fill('first');
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByRole('cell', { name: 'First workspace', exact: true }).waitFor();
+  await page.getByRole('row').filter({ hasText: 'First workspace' }).getByRole('cell', { name: '拥有者（我创建的）', exact: true }).waitFor();
   await page.screenshot({ path: '/tmp/platform-workspaces.png', fullPage: true });
   // Shared table actions are links rendered in each row's actions menu.
   const row = page.getByRole('row').filter({ hasText: 'First workspace' });
@@ -130,6 +131,7 @@ try {
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), 'Renamed Admin', 'cancel discards unsaved edits');
   await page.goto(`${origin}${entryPath}`);
   await page.getByRole('button', { name: /Renamed Admin/ }).click();
+  assert.match(await page.getByRole('menuitem').filter({ hasText: 'First workspace' }).textContent(), /拥有者（我创建的）/, 'workspace menu shows the role in each workspace');
   await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
   await page.getByLabel('登录邮箱', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, '/account', 'workspace account menu opens the profile');
@@ -146,7 +148,7 @@ try {
   assert(!requests.some(url => url.includes(token)), 'no HTTP URL contains setup token');
   assert(!(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).includes(token), 'setup proof never stored');
   assert.deepEqual(errors, []);
-  console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, own profile (name, email with current password, menus, direct URL), no secret persistence, no browser errors');
+  console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, own profile (name, email with current password, menus, direct URL), my role per workspace, no secret persistence, no browser errors');
 } finally {
   if (browser) await browser.close();
   if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }
