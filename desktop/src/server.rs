@@ -360,20 +360,54 @@ mod tests {
         std::fs::remove_dir_all(data).unwrap();
     }
 
+    /// Start the bundled server on a fresh loopback port. A `:0` port comes
+    /// from the ephemeral range, so a parallel test probing `127.0.0.1:0` (see
+    /// `missing_sidecar_is_actionable`) or an outbound connection can take it
+    /// between our release and the server's bind. Only such collisions are
+    /// retried; any other failure is reported unchanged.
+    async fn start_on_free_port(runtime: &Runtime, executable: &Path, data: &Path) -> String {
+        let taken = || {
+            std::fs::read_to_string(data.join("server.log"))
+                .map(|log| {
+                    let log = log.to_ascii_lowercase();
+                    log.contains("address already in use")
+                        || log.contains("os error 48")
+                        || log.contains("os error 98")
+                        || log.contains("os error 10048")
+                })
+                .unwrap_or(false)
+        };
+        let mut last = String::new();
+        for _ in 0..20 {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let bind = listener.local_addr().unwrap().to_string();
+            drop(listener);
+            match spawn_server(executable, data, &bind, None) {
+                Ok(child) => *runtime.child.lock().unwrap() = Some(child),
+                Err(error) if error.contains("不可用") => {
+                    last = error;
+                    continue;
+                }
+                Err(error) => panic!("{error}"),
+            }
+            match wait_ready(runtime, data, &format!("http://{bind}")).await {
+                Ok(()) => return bind,
+                Err(error) if error.contains("启动失败") && taken() => last = error,
+                Err(error) => panic!("{error}"),
+            }
+        }
+        panic!("no usable loopback port after 20 attempts: {last}");
+    }
+
     // Run against the real built server, including migrations and restart persistence.
     #[tokio::test]
     #[ignore = "requires DESKTOP_TEST_SERVER pointing to a built server"]
     async fn bundled_service_lifecycle() {
         let executable = std::env::var_os("DESKTOP_TEST_SERVER").expect("DESKTOP_TEST_SERVER");
         let data = std::env::temp_dir().join(format!("desktop-lifecycle-{}", std::process::id()));
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let bind = listener.local_addr().unwrap().to_string();
-        drop(listener);
-        let target = format!("http://{bind}");
         let runtime = Runtime::default();
-        *runtime.child.lock().unwrap() =
-            Some(spawn_server(Path::new(&executable), &data, &bind, None).unwrap());
-        wait_ready(&runtime, &data, &target).await.unwrap();
+        let bind = start_on_free_port(&runtime, Path::new(&executable), &data).await;
+        let target = format!("http://{bind}");
         let identity = std::fs::read_to_string(data.join("instance-id")).unwrap();
         assert!(data.join("ferry.sqlite").exists());
         assert!(data.join("master.key").exists());
@@ -394,9 +428,9 @@ mod tests {
         );
         runtime.drain().await.unwrap();
         assert!(std::net::TcpStream::connect(&bind).is_err());
-        *runtime.child.lock().unwrap() =
-            Some(spawn_server(Path::new(&executable), &data, &bind, None).unwrap());
-        wait_ready(&runtime, &data, &target).await.unwrap();
+        // Restart from the same data directory; identity and setup must persist.
+        let bind = start_on_free_port(&runtime, Path::new(&executable), &data).await;
+        let target = format!("http://{bind}");
         assert_eq!(
             identity,
             std::fs::read_to_string(data.join("instance-id")).unwrap()
