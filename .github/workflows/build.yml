@@ -43,6 +43,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # /bin/sh is dash here, so this also rejects bash-only syntax.
+      - name: Compose quickstart script
+        run: sh scripts/test-quickstart.sh
       - name: Test Actions worker
         working-directory: workers/actions
         run: bash go.sh test -race ./...

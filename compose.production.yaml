@@ -12,10 +12,10 @@ x-service: &service
 services:
   ferry:
     <<: *service
-    image: ${FERRY_IMAGE:-ghcr.io/7link-team/ferry-server:v0.1.0-alpha.24}
+    image: ${FERRY_IMAGE:?Run scripts/quickstart.sh first}
     ports: ["${FERRY_BIND_ADDRESS:-127.0.0.1}:${FERRY_PORT:-4290}:4290"]
     environment:
-      FERRY_PUBLIC_URL: ${FERRY_PUBLIC_URL:?Run scripts/quickstart.py first}
+      FERRY_PUBLIC_URL: ${FERRY_PUBLIC_URL:?Run scripts/quickstart.sh first}
       FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:?Required}
       FERRY_MASTER_KEY: ${FERRY_MASTER_KEY:?Required}
       FERRY_SECURE_COOKIE: ${FERRY_SECURE_COOKIE:-false}

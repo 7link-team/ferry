@@ -1,46 +1,46 @@
 # Docker Compose 快速部署
 
-需要 Docker Engine/Desktop、Compose v2.20+、Python 3.9+。在仓库根目录执行：
+需要 Docker Engine/Desktop 与 Compose v2.20+，以及 `curl`（或 `wget`）。无需克隆仓库，一条命令完成：
 
 ```sh
-python scripts/quickstart.py
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
 ```
 
-默认启动 Ferry、PostgreSQL、带认证及磁盘持久化的 NATS JetStream、Redis；等待服务健康后输出首次初始化令牌。打开 http://localhost:4290 完成平台初始化。Windows 也执行相同命令，Python 启动器也可使用 `py -3`。
+也可以写成 `bash <(curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh)`。脚本在当前目录创建部署目录 `ferry/`，下载最新已发布版本的 Compose 文件，镜像固定为同一版本，生成随机密钥，启动 Ferry、PostgreSQL、带认证及磁盘持久化的 NATS JetStream、Redis，等待服务健康后输出首次初始化令牌。打开 http://localhost:4290 完成平台初始化。Windows 请在 WSL 或 Git Bash 中执行。
 
-改用 MySQL，在**首次启动时**执行：
+传参使用 `sh -s --`。改用 MySQL，在**首次启动时**执行：
 
 ```sh
-python scripts/quickstart.py --database mysql
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --database mysql
 ```
 
-数据库二选一，不会同时启动两套业务数据库。已生成配置后，重复启动复用原密钥和地址；切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。默认镜像固定为已发布的 `v0.1.0-alpha.24`，不会隐式跟随 `latest`；该镜像不包含尚未发布的本地修改。
+数据库二选一，不会同时启动两套业务数据库。已生成配置后，在同一位置重复执行会复用原密钥、地址和版本，不再联网；切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。`--version v0.1.0-alpha.27` 可指定版本，`--dir 路径` 可指定部署目录。版本固定为一个已发布版本，不会隐式跟随 `latest`。
 
 ## 公网、局域网与 HTTPS
 
 默认仅绑定本机回环地址。局域网示例（换成服务器实际 IP）：
 
 ```sh
-python scripts/quickstart.py --public-url http://192.168.0.10:4290 --bind 0.0.0.0
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --public-url http://192.168.0.10:4290 --bind 0.0.0.0
 ```
 
 公网示例（由现有 HTTPS 反向代理转发到本机 4290）：
 
 ```sh
-python scripts/quickstart.py --public-url https://ops.example.com
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --public-url https://ops.example.com
 ```
 
-HTTPS 地址会开启安全 Cookie；代理必须保留 Host、支持 WebSocket Upgrade，并设置足够的终端会话空闲超时。主机上的 Runner 必须能访问所填公共地址。已有部署要改地址、端口、镜像版本，请编辑 `.env.production` 后重新执行启动命令；重新传入参数不会覆盖该文件。
+HTTPS 地址会开启安全 Cookie；代理必须保留 Host、支持 WebSocket Upgrade，并设置足够的终端会话空闲超时。主机上的 Runner 必须能访问所填公共地址。已有部署要改地址、端口、镜像版本，请编辑部署目录中的 `.env.production` 后重新执行启动命令；重新传入参数不会覆盖该文件。
 
 ## 配置与维护
 
-`--init-only` 只生成配置；`--without-redis` 不启动 Redis。随机生成的数据库密码、NATS/Redis 密码及主密钥保存在忽略提交的 `.env.production`，重复运行不会重置。Unix 新建文件权限为 0600；Windows 请将部署目录 ACL 限制为运维账号和管理员。
+`--init-only` 只生成配置；`--without-redis` 不启动 Redis。随机生成的数据库密码、NATS/Redis 密码及主密钥保存在部署目录的 `.env.production`，重复运行不会重置。新建文件权限为 0600。
 
 PostgreSQL 与 MySQL 的应用账号均不使用数据库管理员身份。数据库、Redis、NATS 客户端端口及管理端口不发布到宿主机；仅应用入口发布。日志滚动限制大小，数据使用命名卷，应用有健康检查、依赖就绪等待、优雅退出时间及重启策略。
 
 Redis **当前未被 Ferry 使用**，是随全套方案提供的可选基础服务。现有连接、终端和文件跨实例路由实际使用 SQL + NATS。没有设置虚假的 Redis 应用配置。
 
-以下维护命令以 PostgreSQL 为例，MySQL 替换第二个文件名：
+以下维护命令在部署目录中执行，以 PostgreSQL 为例，MySQL 替换第二个文件名：
 
 ```sh
 docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis ps
@@ -48,7 +48,7 @@ docker compose --env-file .env.production -f compose.production.yaml -f compose.
 docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis down
 ```
 
-`down` 保留数据卷；**不要给已有部署随意加 `-v`**。升级时先备份 SQL 数据库、`.env.production`、应用卷和 JetStream 卷，再将 `FERRY_IMAGE` 改为已验证版本，执行 `pull`、`up -d --wait`。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。镜像变量支持替换为内部镜像及固定 digest。
+`down` 保留数据卷；**不要给已有部署随意加 `-v`**。升级时先备份 SQL 数据库、`.env.production`、应用卷和 JetStream 卷，再将 `FERRY_IMAGE` 改为已验证版本，执行 `pull`、`up -d --wait`；若新版本的发布说明提到 Compose 文件变化，同时用该版本标签下的文件替换部署目录中的同名文件。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。镜像变量支持替换为内部镜像及固定 digest。
 
 ## 生产边界
 

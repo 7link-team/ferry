@@ -304,3 +304,8 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Polling fetches branch commits (one page of 50) outside the workspace lock; failures add a note and never fail the poll.
 - Retention (user suggestion): workspace setting `repository_event_retention_days` (0 = permanent, default 0, preserving the existing "history kept unless an administrator sets retention" policy); pruned every 10 minutes in batches with an audit record.
 - Status: released in v0.1.0-alpha.27 (fe24f95).
+
+## Compose quickstart as a one-command shell script — 2026-11-01
+- Decision (user: should be `curl … | sh`, not Python): replace scripts/quickstart.py with POSIX `scripts/quickstart.sh`, run as `curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh [-s -- options]` without cloning or Python. It creates/reuses a deployment directory (`./ferry`, `--dir`), downloads the Compose files of one release tag, pins `FERRY_IMAGE` to that same release, and keeps the previous semantics (random reusable secrets, database switch refused, health wait, setup token, `--init-only`, `--without-redis`).
+- Version: latest published release from the releases Atom feed (includes pre-releases, not subject to the anonymous API rate limit, which was exhausted during verification), GitHub API as fallback, `--version` to pin. Fixes the stale alpha.24 pin; compose.production.yaml no longer defaults FERRY_IMAGE.
+- Windows runs it in WSL or Git Bash. Tested by scripts/test-quickstart.sh with stub curl/docker (CI runs it under dash).

@@ -112,7 +112,13 @@ docker compose up -d --build               # 或本地构建
 
 ## 全套 Compose 快速启动
 
-在仓库根目录运行 `python scripts/quickstart.py`，启动 Ferry + PostgreSQL + NATS JetStream + Redis；使用 `--database mysql` 可改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。
+无需克隆仓库：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
+```
+
+启动最新发布版本的 Ferry + PostgreSQL + NATS JetStream + Redis；传入参数用 `sh -s --`，例如 `… | sh -s -- --database mysql` 改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。
 
 部署地址、HTTPS、备份、升级、Redis 当前用途及单机/高可用边界见 [Compose 快速部署](docs/compose-quickstart.md)。
 
