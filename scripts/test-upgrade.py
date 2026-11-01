@@ -95,6 +95,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         added=set(migrated['permissions'])-set(original['permissions'])
                         assert added<=allowed and set(original['permissions'])<=set(migrated['permissions'])
                         original['permissions']=migrated['permissions']
+                        # Additive: whether the user created the workspace; this user created it.
+                        assert migrated['relation'] == 'owner', migrated['relation']
+                        original['relation']='owner'
                 if path == '/workspaces/upgrade/pipeline-runs/'+run:
                     # New archive metadata is additive; old runs have no archived files.
                     assert after.get('artifacts') == []
