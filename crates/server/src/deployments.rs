@@ -145,8 +145,20 @@ pub async fn list(
     let q = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) =
         resource::list(&s.db, &SPEC, apps::Entity::find(), &scope.workspace_id, &q).await?;
+    let mut items: Vec<Value> = rows.iter().map(app_json).collect();
+    crate::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut items,
+        &[crate::names::target(
+            "target_ref",
+            "target_name",
+            "target_kind",
+        )],
+    )
+    .await?;
     Ok(Json(
-        json!({"items":rows.iter().map(app_json).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
+        json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn get(
@@ -202,8 +214,27 @@ pub async fn revision_list(
         &q,
     )
     .await?;
+    let mut items: Vec<Value> = rows.iter().map(revision_json).collect();
+    crate::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut items,
+        &[
+            crate::names::of(
+                "deployment_id",
+                "deployment_name",
+                crate::names::Kind::Deployment,
+            ),
+            crate::names::of(
+                "triggered_by",
+                "triggered_by_name",
+                crate::names::Kind::User,
+            ),
+        ],
+    )
+    .await?;
     Ok(Json(
-        json!({"items":rows.iter().map(revision_json).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
+        json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn revisions_for_deployment(

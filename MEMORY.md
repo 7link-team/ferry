@@ -1,3 +1,8 @@
+## Names instead of IDs (2026-11-01, committed, not released)
+- names.rs + list/detail wiring; frontend named() helper; filters to selects; manifest editor ReferencePicker/RunPicker (workspace prop from ResourceForm). ADR "Referenced records are shown by name".
+- Verified: live API data/maintenance/names-smoke.py 5 PASS; live browser data/maintenance/names-ui.mjs PASS x3 (screenshots); scripts/test-manifest-ui.mjs PASS (picker chosen by clicking, Radix select); vitest 191 PASS; cargo test server 167 PASS. CI-only assertions added to test-pipelines.py (run list/detail/artifacts) and test-deployments.py (revisions/deployments).
+- Open questions to user: snapshot pipeline/host/user names on runs (environment_name already snapshotted); Actions worker on Windows hosts (user hit "当前 Actions worker 需要 Linux 或 macOS 执行器"); release alpha.32.
+
 ## Local 4291 instance upgraded to alpha.31 (2026-11-01)
 - data/maintenance/start-alpha31-local.ps1 (from start-alpha27b-local.ps1; old exe alpha27b -> new target/debug/ferry-server-alpha31.exe, PID 63396). Verified independently after the run: /api/status 0.1.0-alpha.31 same instance 46a21cc9…, alpha20-state verify PASS, alpha22-credential verify PASS, embedded UI current; backup data/backups/pre-alpha31-20261101-212422.
 - Gotcha: a server started by Start-Process inherits the calling command's stdout pipe, so the Claude Code task stays "running" (user noticed). The script's own process exits; TaskStop on that task is safe (server survived, parent already gone). Next time run the script without piping its output, then TaskStop if it lingers.

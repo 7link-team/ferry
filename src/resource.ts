@@ -13,6 +13,10 @@ export interface Envelope<T> {
   page_size: number;
 }
 
+/** A referenced record shown by name: the API sends `*_name` next to each ID. */
+export const named = (name: string | undefined, id: string | undefined) =>
+  name || (id && id !== "0" ? `已删除（ID ${id}）` : "—");
+
 export const resourceName = (resource: string) =>
   resource === "hosts" ? "nodes" : resource === "host-groups" ? "node-groups" : resource;
 

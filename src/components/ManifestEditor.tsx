@@ -6,6 +6,7 @@ import { Trash2 } from "lucide-react";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
+import { listResource } from "../resource";
 
 type Path = (string | number)[];
 type Row = Record<string, unknown>;
@@ -80,19 +81,67 @@ export function readManifest(source: string) {
   return { doc, value };
 }
 
+type Choice = { value: string; label: string };
+
+/** A pipeline or build run chosen by name, keeping a stored ID that no longer resolves. */
+function ReferencePicker({ label, value, empty, required, hint, readOnly, load, onChange }: {
+  label: string; value: string; empty: string; required?: boolean; hint?: string; readOnly: boolean;
+  load: () => Promise<Choice[]>; onChange: (value: string) => void;
+}) {
+  const [choices, setChoices] = useState<Choice[]>();
+  useEffect(() => {
+    let live = true;
+    setChoices(undefined);
+    load().then(rows => { if (live) setChoices(rows); }, () => { if (live) setChoices([]); });
+    return () => { live = false; };
+  }, [load]);
+  const known = choices ?? [];
+  const options = [{ value: "", label: choices ? empty : "载入中…" }, ...known,
+    ...(value && !known.some(choice => choice.value === value) ? [{ value, label: choices ? `已删除或不可用（ID ${value}）` : value }] : [])];
+  return <AutoField label={label} required={required} help={hint}>
+    <FieldControl name={label} field={{ name: label, type: "select", config: { options } }} value={value} required={required} disabled={readOnly || !choices} onChange={next => onChange(String(next))} />
+  </AutoField>;
+}
+
+function RunPicker({ workspace, pipeline, value, readOnly, onChange }: { workspace: string; pipeline: string; value: string; readOnly: boolean; onChange: (value: string) => void }) {
+  const load = useCallback(() => runChoices(workspace, pipeline), [workspace, pipeline]);
+  return <ReferencePicker label="固定构建" value={value} empty="最新成功构建" readOnly={readOnly} load={load} onChange={onChange}
+    hint="留空使用可用的最新成功构建；也可固定为某次成功的执行。" />;
+}
+
+async function pipelineChoices(workspace: string): Promise<Choice[]> {
+  const choices: Choice[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await listResource<{ id: string; name: string }>(workspace, "pipelines", { page, page_size: 200 });
+    choices.push(...result.items.map(row => ({ value: row.id, label: row.name })));
+    if (!result.items.length || page * result.page_size >= result.total) return choices;
+  }
+}
+
+async function runChoices(workspace: string, pipeline: string): Promise<Choice[]> {
+  if (!pipeline) return [];
+  const result = await listResource<{ id: string; number: number; finished_at: number }>(workspace, "pipeline-runs",
+    { pipeline_id: pipeline, state: "succeeded", sort: "-number", page_size: 50 });
+  return result.items.map(run => ({ value: run.id, label: `#${run.number} · ${new Date(run.finished_at).toLocaleString("zh-CN")}` }));
+}
+
 export function ManifestEditor({
   value,
   mode,
   readOnly,
   onChange,
   onValidityChange,
+  workspace,
 }: {
   value: string;
   mode: string;
   readOnly: boolean;
   onChange: (value: string) => void;
   onValidityChange: (blocked: boolean) => void;
+  /** When known, artifact sources choose the pipeline and build run by name. */
+  workspace?: string;
 }) {
+  const loadPipelines = useCallback(() => workspace ? pipelineChoices(workspace) : Promise.resolve([]), [workspace]);
   const [sourceMode, setSourceMode] = useState(false);
   const [notice, setNotice] = useState("");
   const [pendingRemoval, setPendingRemoval] = useState<{ path: Path; index: number; action: string; target: string }>();
@@ -451,13 +500,21 @@ export function ManifestEditor({
                 )}
                 {artifact && (
                   <div className={grid}>
-                    {text("流水线 ID", p("artifact", "pipeline"), {
+                    {workspace ? (
+                      <ReferencePicker label="流水线" required readOnly={readOnly} empty="请选择流水线"
+                        value={String(get(p("artifact", "pipeline")) ?? "")} load={loadPipelines}
+                        // A pinned run belongs to the previous pipeline.
+                        onChange={next => change([{ path: p("artifact", "pipeline"), value: next || undefined }, { path: p("artifact", "run"), value: undefined }])} />
+                    ) : text("流水线 ID", p("artifact", "pipeline"), {
                       required: true,
                     })}
                     {text("产物相对路径", p("artifact", "path"), {
                       required: true,
                     })}
-                    {text("固定构建执行 ID", p("artifact", "run"), {
+                    {workspace ? (
+                      <RunPicker workspace={workspace} pipeline={String(get(p("artifact", "pipeline")) ?? "")} readOnly={readOnly}
+                        value={String(get(p("artifact", "run")) ?? "")} onChange={next => set(p("artifact", "run"), next || undefined)} />
+                    ) : text("固定构建执行 ID", p("artifact", "run"), {
                       hint: "留空使用可用的最新成功构建。",
                     })}
                   </div>

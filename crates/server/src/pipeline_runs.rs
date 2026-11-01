@@ -60,6 +60,15 @@ const SPEC: Spec = Spec {
     sortable: &["number", "created_at", "state"],
     default_sort: "-number",
 };
+const RUN_NAMES: [crate::names::Ref; 3] = [
+    crate::names::of("pipeline_id", "pipeline_name", crate::names::Kind::Pipeline),
+    crate::names::of(
+        "triggered_by",
+        "triggered_by_name",
+        crate::names::Kind::User,
+    ),
+    crate::names::of("host_id", "host_name", crate::names::Kind::Host),
+];
 fn run_json(r: &runs::Model) -> Value {
     json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"host_id":Id::from(r.host_id),
         "environment_id":Id::from(r.environment_id),"environment_name":r.environment_name,
@@ -85,9 +94,10 @@ pub async fn list(
     let q = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) =
         resource::list(&s.db, &SPEC, runs::Entity::find(), &scope.workspace_id, &q).await?;
+    let mut items: Vec<Value> = rows.iter().map(run_json).collect();
+    crate::names::attach(&s.db, scope.workspace_id, &mut items, &RUN_NAMES).await?;
     Ok(Json(
-        json!({"items":rows.iter().map(run_json).collect::<Vec<_>>(),"total":total,
-        "page":q.page,"page_size":q.page_size}),
+        json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn get(
@@ -103,6 +113,13 @@ pub async fn get(
         .all(&s.db)
         .await?;
     let mut v = run_json(&r);
+    crate::names::attach(
+        &s.db,
+        scope.workspace_id,
+        std::slice::from_mut(&mut v),
+        &RUN_NAMES,
+    )
+    .await?;
     if r.variable_snapshot.is_some() {
         v["variables"] = json!(open_variables(&s, &r)?.sources);
     }

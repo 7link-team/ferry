@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { api, errorText } from "../api";
-import { base } from "../resource";
+import { base, named } from "../resource";
 import { href } from "../router";
 import { duration, isActive, mergeLogs, stateBadge, type LogPage, type PipelineRun, type RunLog } from "../pipeline";
 
@@ -137,7 +137,7 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             {[
-              ["流水线 ID", run.pipeline_id], ["执行环境", run.environment_name || "未指定"], ...(run.host_id !== "0" ? [["目标主机 ID", run.host_id]] : []), ["触发人 ID", run.triggered_by],
+              ["流水线", named(run.pipeline_name, run.pipeline_id)], ["执行环境", run.environment_name || "未指定"], ...(run.host_id !== "0" ? [["目标主机", named(run.host_name, run.host_id)]] : []), ["触发人", named(run.triggered_by_name, run.triggered_by)],
               ["耗时", duration(run.started_at, run.finished_at)], ["Commit", run.commit || "—"],
             ].map(([label, value]) => <div key={label} className="min-w-0">
               <dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd>

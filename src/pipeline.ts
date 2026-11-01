@@ -3,10 +3,13 @@ export interface PipelineRun {
   id: string;
   number: number;
   pipeline_id: string;
+  pipeline_name?: string;
   host_id: string;
+  host_name?: string;
   environment_id?: string;
   environment_name?: string;
   triggered_by: string;
+  triggered_by_name?: string;
   state: string;
   commit: string;
   started_at: number;

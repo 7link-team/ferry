@@ -124,6 +124,12 @@ def main():
         result = action(id, 'rollback' if revision else 'apply', dict(version=p['version'], expected_hash=p['expected_hash'], preview_token=p['preview_token'], **({'target_hashes':p['target_hashes']} if 'target_hashes' in p else {}), **({'revision_id':revision} if revision else {})), status=202)['id']
         saved = api(f'/workspaces/{workspace_ops}/deployment-revisions/'+result)
         check('executed snapshot exactly matches preview', saved['artifact']==p['desired'])
+        current = app(id)
+        listed = next(r for r in api(f'/workspaces/{workspace_ops}/deployment-revisions?deployment_id={id}&page_size=200')['items'] if r['id']==result)
+        check('revision list names the application and the trigger user next to their IDs', listed['deployment_name']==current['name'] and listed['triggered_by_name']=='deploy')
+        deployed = next(r for r in api(f'/workspaces/{workspace_ops}/deployments?page_size=200')['items'] if r['id']==id)
+        target = api(f'/workspaces/{workspace_ops}/'+('nodes' if current['target_kind']=='host' else 'node-groups')+'/'+current['target_ref'])
+        check('deployment list names its target host or host group', deployed['target_ref']==current['target_ref'] and deployed['target_name']==target['name'])
         return result
     def done(id):
         def poll():

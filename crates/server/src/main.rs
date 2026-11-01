@@ -20,6 +20,7 @@ mod maintenance;
 mod manifest;
 mod marketplace;
 mod migration;
+mod names;
 mod pipeline_contexts;
 mod pipeline_runs;
 mod pipelines;

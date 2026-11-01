@@ -92,8 +92,19 @@ pub async fn list(
         &q,
     )
     .await?;
+    let mut items: Vec<Value> = rows.iter().map(public).collect();
+    crate::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut items,
+        &[
+            crate::names::of("pipeline_id", "pipeline_name", crate::names::Kind::Pipeline),
+            crate::names::of("run_id", "run_number", crate::names::Kind::RunNumber),
+        ],
+    )
+    .await?;
     Ok(Json(
-        json!({"items":rows.iter().map(public).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
+        json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn download(

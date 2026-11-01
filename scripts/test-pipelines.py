@@ -441,6 +441,11 @@ jobs:
             artifacts = row['artifacts']
             check(kind+' successful build archives declared output with content hash', len(artifacts)==1 and artifacts[0]['path']=='payload.txt' and len(artifacts[0]['sha256'])==64)
             artifact=artifacts[0]
+            check(kind+' run detail names its pipeline, target host and trigger user',
+                  row['pipeline_name'] == api(f'/workspaces/{workspace_ops}/pipelines/'+row['pipeline_id'])['name'] and row['triggered_by_name'] == 'test'
+                  and (row['host_id'] == '0' or row['host_name'] == api(f'/workspaces/{workspace_ops}/nodes/'+row['host_id'])['name']))
+            listed=api(f'/workspaces/{workspace_ops}/pipeline-artifacts?run_id='+row['id'])['items']
+            check(kind+' artifact list names the pipeline and run number', [(a['pipeline_name'], a['run_number']) for a in listed] == [(row['pipeline_name'], row['number'])])
             with opener.open(base+f'/workspaces/{workspace_ops}/pipeline-artifacts/'+artifact['id']+'/content') as response:
                 archived=response.read()
             import hashlib
@@ -529,6 +534,9 @@ jobs:
         history = api(f'/workspaces/{workspace_ops}/pipeline-runs?state=succeeded&sort=-number&page_size=2')
         check('history shared list envelope/filter/order', len(history['items']) == 2 and history['page_size'] == 2
               and history['items'][0]['number'] > history['items'][1]['number'])
+        check('run list names the pipeline and the trigger user next to their IDs',
+              all(item['pipeline_name'] == api(f'/workspaces/{workspace_ops}/pipelines/'+item['pipeline_id'])['name']
+                  and item['triggered_by_name'] == 'test' for item in history['items']))
         sample_stop.set(); sampler.join(10)
         check('7 process sampler executed on both real hosts', not sample_errors and
               all(len(v) >= 10 for v in samples.values()), f"samples={ {k: len(v) for k,v in samples.items()} }")

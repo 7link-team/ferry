@@ -222,10 +222,24 @@ pub async fn list(
     }
     let query = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) = resource::list(&s.db, &SPEC, select, &scope.workspace_id, &query).await?;
-    let items = crate::pipeline_contexts::decorate(
+    let mut items = crate::pipeline_contexts::decorate(
         &s.db,
         scope.workspace_id,
         rows.iter().map(to_json).collect(),
+    )
+    .await?;
+    crate::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut items,
+        &[
+            crate::names::of(
+                "repository_id",
+                "repository_name",
+                crate::names::Kind::Repository,
+            ),
+            crate::names::target("target_ref", "target_name", "target_kind"),
+        ],
     )
     .await?;
     Ok(Json(json!({

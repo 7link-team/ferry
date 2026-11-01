@@ -13,7 +13,7 @@ import { deploymentState, type Deployment, type Revision } from "./deployment";
 import { navigate } from "./router";
 import { Badge } from "@/components/ui/badge";
 import { FolderOpen, SquareTerminal } from "lucide-react";
-import { createResource, deleteResource, listResource, runAction, runItemAction } from "./resource";
+import { createResource, deleteResource, listResource, named, runAction, runItemAction } from "./resource";
 import type { FormConfig, ListConfig, Option, RowAction } from "./components/dsl";
 import { repositoryEventForm, repositoryEventList } from "./components/RepositoryMonitor";
 
@@ -245,17 +245,17 @@ const cronLinks=(workspace:string)=>[
 export function listConfigs(workspace: string, permissions?: Set<string>, onChanged?: () => void, hostStates: Option[] = STATES): Record<string, ListConfig<AnyRow>> {
   return {
     "marketplace-sources": list<MarketSource>({resource:"marketplace-sources",rowKey:r=>r.id,filters:[{key:"q",label:"名称",type:"text"}],columns:[{key:"name",label:"名称",sortable:true},{key:"provider",label:"平台"},{key:"state",label:"同步状态",render:r=>({idle:"空闲",syncing:"同步中",failed:"失败"}[r.state]??r.state)},{key:"synced_at",label:"上次成功",render:r=>cronDate(r.synced_at)},{key:"last_error",label:"同步错误"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"marketplace-sources.update",to:r=>({id:r.id,mode:"edit"})},{label:"立即同步",permission:"marketplace-sources.sync",action:async r=>{await runItemAction(workspace,"marketplace-sources",r.id,"sync",{});}},{label:"目录",to:()=>({group:"deploy",item:"marketplace",mode:"list"}),query:r=>({source_id:r.id})},{label:"删除",permission:"marketplace-sources.delete",destructive:true,action:r=>deleteResource(workspace,"marketplace-sources",r.id)}],toolbar:{import:false,export:false}}),
-    marketplace: list<MarketEntry>({resource:"marketplace",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"},{key:"source_id",label:"来源 ID",type:"text"}],columns:[{key:"name",label:"应用模板",sortable:true},{key:"description",label:"说明"},{key:"entry_key",label:"目录标识"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},marketInstall(workspace)],toolbar:{create:false,import:false,export:false}}),
+    marketplace: list<MarketEntry>({resource:"marketplace",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"},!permissions||permissions.has("marketplace-sources.read")?{key:"source_id",label:"来源",type:"select",options:namedOptions(workspace,"marketplace-sources")}:{key:"source_id",label:"来源 ID",type:"text"}],columns:[{key:"name",label:"应用模板",sortable:true},{key:"description",label:"说明"},{key:"entry_key",label:"目录标识"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},marketInstall(workspace)],toolbar:{create:false,import:false,export:false}}),
     "alert-rules": list<AlertRule>({resource:"alert-rules",permissionResource:"alerts",rowKey:r=>r.id,filters:[{key:"q",label:"名称",type:"text"},{key:"target_kind",label:"目标类型",type:"select",options:alertTargets}],columns:[{key:"name",label:"名称",sortable:true},{key:"metric",label:"指标",render:r=>alertMetrics.find(m=>m.value===r.metric)?.label??r.metric},{key:"threshold",label:"阈值"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"has_webhook",label:"Webhook",render:r=>r.has_webhook?"已配置":"未配置"},{key:"last_error",label:"检查异常"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"alerts.update",to:r=>({id:r.id,mode:"edit"})},{...alertEventLink,query:(r:AlertRule)=>({rule_id:r.id})},{label:"删除",permission:"alerts.delete",destructive:true,action:r=>deleteResource(workspace,"alert-rules",r.id)}],toolbar:{create:true,import:false,export:false}}),
     "repository-events": repositoryEventList(workspace),
-    "alert-events": list<AlertEvent>({resource:"alert-events",rowKey:r=>r.id,filters:[{key:"rule_id",label:"规则 ID",type:"text"},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]}],columns:[{key:"rule_name",label:"规则"},{key:"state",label:"状态",render:r=>r.state==="firing"?"未恢复":"已恢复"},{key:"triggered_at",label:"触发时间",sortable:true,render:r=>cronDate(r.triggered_at)},{key:"recovered_at",label:"恢复时间",render:r=>cronDate(r.recovered_at)},{key:"trigger_delivery",label:"触发通知"},{key:"recovery_delivery",label:"恢复通知"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})}],toolbar:{create:false,import:false,export:false}}),
+    "alert-events": list<AlertEvent>({resource:"alert-events",rowKey:r=>r.id,filters:[{key:"rule_id",label:"规则",type:"select",options:namedOptions(workspace,"alert-rules")},{key:"state",label:"状态",type:"select",options:[{value:"firing",label:"未恢复"},{value:"recovered",label:"已恢复"}]}],columns:[{key:"rule_name",label:"规则"},{key:"state",label:"状态",render:r=>r.state==="firing"?"未恢复":"已恢复"},{key:"triggered_at",label:"触发时间",sortable:true,render:r=>cronDate(r.triggered_at)},{key:"recovered_at",label:"恢复时间",render:r=>cronDate(r.recovered_at)},{key:"trigger_delivery",label:"触发通知"},{key:"recovery_delivery",label:"恢复通知"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})}],toolbar:{create:false,import:false,export:false}}),
     "cron-jobs": list<CronJob>({resource:"cron-jobs",rowKey:r=>r.id,filters:[{key:"q",label:"名称 / 说明",type:"text"}],columns:[{key:"name",label:"名称",sortable:true},{key:"schedule",label:"Cron 表达式"},{key:"timezone",label:"时区"},{key:"enabled",label:"启用",render:r=>r.enabled?"是":"否"},{key:"next_run_at",label:"下次执行",sortable:true,render:r=>cronDate(r.next_run_at)},{key:"run_as_name",label:"执行身份"}],actions:[
       {label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"cron-jobs.update",to:r=>({id:r.id,mode:"edit"})},
       {label:"立即执行",permission:"cron-jobs.run",action:async r=>{const result=await runItemAction<{id:string}>(workspace,"cron-jobs",r.id,"run-now",{});navigate({group:r.scope,item:"cron-runs",id:result.id,mode:"view"},{});}},
       {label:"执行历史",to:r=>({group:r.scope,item:"cron-runs",mode:"list"}),query:r=>({job_id:r.id})},
       {label:"删除",permission:"cron-jobs.delete",destructive:true,action:r=>deleteResource(workspace,"cron-jobs",r.id)}
     ],toolbar:{import:false,export:false}}),
-    "cron-runs": list<CronRun>({resource:"cron-runs",rowKey:r=>r.id,filters:[{key:"job_id",label:"任务 ID",type:"text"},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))}],columns:[{key:"job_name",label:"任务"},{key:"state",label:"状态",render:r=>cronState(r.state)},{key:"scheduled_at",label:"计划时间",sortable:true,render:r=>cronDate(r.scheduled_at)},{key:"attempt",label:"尝试次数"},{key:"trigger_kind",label:"触发方式",render:r=>r.trigger_kind==="manual"?"手动":"计划"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},...cronLinks(workspace)],toolbar:{create:false,import:false,export:false}}),
+    "cron-runs": list<CronRun>({resource:"cron-runs",rowKey:r=>r.id,filters:[{key:"job_id",label:"任务",type:"select",options:namedOptions(workspace,"cron-jobs")},{key:"state",label:"状态",type:"select",options:["queued","running","succeeded","failed","skipped","needs-review"].map(value=>({value,label:cronState(value)}))}],columns:[{key:"job_name",label:"任务"},{key:"state",label:"状态",render:r=>cronState(r.state)},{key:"scheduled_at",label:"计划时间",sortable:true,render:r=>cronDate(r.scheduled_at)},{key:"attempt",label:"尝试次数"},{key:"trigger_kind",label:"触发方式",render:r=>r.trigger_kind==="manual"?"手动":"计划"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},...cronLinks(workspace)],toolbar:{create:false,import:false,export:false}}),
     settings: list<Setting>({resource:"settings",rowKey:r=>r.id,filters:[{key:"q",label:"配置键",type:"text"}],columns:[{key:"name",label:"配置项"},{key:"key",label:"键",sortable:true},{key:"value",label:"当前值"},{key:"default",label:"默认值"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"settings.update",to:r=>({id:r.id,mode:"edit"})}],toolbar:{create:false,import:false,export:false}}),
     dictionaries: list<Dictionary>({resource:"dictionaries",rowKey:r=>r.id,filters:[{key:"q",label:"标识 / 名称",type:"text"}],columns:[{key:"key",label:"标识",sortable:true},{key:"name",label:"名称",sortable:true},{key:"description",label:"说明"},{key:"builtin",label:"类型",render:r=>r.builtin?"系统字典":"自定义"}],actions:[{label:"查看",to:r=>({id:r.id,mode:"view"})},{label:"编辑",permission:"dictionaries.update",to:r=>({id:r.id,mode:"edit"})},{label:"复制",permission:"dictionaries.create",to:()=>({mode:"new"}),query:r=>({copy:r.id})},{label:"删除",permission:"dictionaries.delete",when:r=>!r.builtin,destructive:true,action:r=>deleteResource(workspace,"dictionaries",r.id)}],toolbar:{import:false,export:false}}),
     "config-templates": { ...templateList(workspace, "config-templates", "deployments", "deploy", "apps"), actions: templateList(workspace, "config-templates", "deployments", "deploy", "apps").actions?.filter(a => a.label !== "使用模板") ?? [] },
@@ -285,7 +285,7 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     deployments: list({
       resource: "deployments", rowKey: (r: Deployment) => r.id,
       filters: [{ key: "q", label: "名称", type: "text" }],
-      columns: [{ key: "name", label: "名称", sortable: true }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "target_ref", label: "目标主机 ID" }, { key: "description", label: "备注" }],
+      columns: [{ key: "name", label: "名称", sortable: true }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "target_name", label: "目标", render: (r) => `${label(TARGETS, r.target_kind)} · ${named((r as AnyRow).target_name as string, r.target_ref)}` }, { key: "description", label: "备注" }],
       actions: [
         { label: "查看", permission: "deployments.read", to: (r) => ({ id: r.id, mode: "view" }) },
         { label: "编辑", permission: "deployments.update", to: (r) => ({ id: r.id, mode: "edit" }) },
@@ -294,8 +294,8 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     }),
     "deployment-revisions": list({
       resource: "deployment-revisions", rowKey: (r: Revision) => r.id,
-      filters: [{ key: "deployment_id", label: "应用 ID", type: "text" }],
-      columns: [{ key: "number", label: "Revision", sortable: true }, { key: "deployment_id", label: "应用 ID" }, { key: "action", label: "操作", render: (r) => r.action === "rollback" ? "回滚" : "部署" }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "started_at", label: "开始时间", render: (r) => r.started_at ? new Date(r.started_at).toLocaleString() : "—" }],
+      filters: [{ key: "deployment_id", label: "应用", type: "select", options: namedOptions(workspace, "deployments") }],
+      columns: [{ key: "number", label: "Revision", sortable: true }, { key: "deployment_name", label: "应用", render: (r) => named((r as AnyRow).deployment_name as string, r.deployment_id) }, { key: "action", label: "操作", render: (r) => r.action === "rollback" ? "回滚" : "部署" }, { key: "state", label: "状态", render: (r) => deploymentState(r.state) }, { key: "started_at", label: "开始时间", render: (r) => r.started_at ? new Date(r.started_at).toLocaleString() : "—" }],
       actions: [{ label: "查看", permission: "deployments.read", to: (r) => ({ id: r.id, mode: "view" }) }],
       toolbar: { create: false, import: false, export: false },
     }),
@@ -322,9 +322,9 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
         { key: "name", label: "名称" },
         {key:"group_name",label:"分组"},{key:"application_name",label:"应用"},
         {key:"tags",label:"标签",render:row=><span className="flex flex-wrap gap-1">{row.tags?.map(tag=><Badge key={tag.id} variant="secondary">{tag.name}</Badge>)}</span>},
-        { key: "repository_id", label: "仓库 ID" },
+        { key: "repository_name", label: "仓库", render: (r: AnyRow) => named(r.repository_name as string, r.repository_id as string) },
         { key: "target_kind", label: "目标类型", render: (r) => label(TARGETS, r.target_kind) },
-        { key: "target_ref", label: "目标 ID" }, { key: "description", label: "备注" },
+        { key: "target_name", label: "目标", render: (r: AnyRow) => named(r.target_name as string, r.target_ref as string) }, { key: "description", label: "备注" },
       ],
       actions: [
         { label: "查看", permission: "pipelines.read", to: (r) => ({ id: r.id, mode: "view" }) },
@@ -336,9 +336,9 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
     }),
     "pipeline-artifacts": list({
       resource: "pipeline-artifacts", permissionResource: "pipelines", rowKey: (r: { id: string }) => r.id,
-      filters: [{ key: "q", label: "文件路径", type: "text" }, { key: "run_id", label: "执行 ID", type: "text" }, { key: "pipeline_id", label: "流水线 ID", type: "text" }],
+      filters: [{ key: "q", label: "文件路径", type: "text" }, { key: "run_id", label: "执行 ID", type: "text" }, { key: "pipeline_id", label: "流水线", type: "select", options: namedOptions(workspace, "pipelines") }],
       columns: [
-        { key: "path", label: "文件路径" }, { key: "run_id", label: "执行 ID" },
+        { key: "path", label: "文件路径" }, { key: "run_id", label: "执行", render: (r: AnyRow) => r.run_number ? `${named(r.pipeline_name as string, r.pipeline_id as string)} #${r.run_number}` : named("", r.run_id as string) },
         { key: "size", label: "大小（字节）", sortable: true }, { key: "sha256", label: "SHA-256" },
         { key: "download", label: "下载", render: (r: { id: string; path: string }) => <a className="text-primary underline" href={`/api/workspaces/${encodeURIComponent(workspace)}/pipeline-artifacts/${r.id}/content`} download>下载 {r.path}</a> },
       ],
@@ -351,12 +351,12 @@ export function listConfigs(workspace: string, permissions?: Set<string>, onChan
         ["queued", "running", "cancelling", "succeeded", "failed", "cancelled"].map((value) => ({ value, label: stateBadge(value).label })) }],
       columns: [
         { key: "number", label: "执行序号", sortable: true, render: (r) => `#${r.number}` },
-        { key: "pipeline_id", label: "流水线 ID" },
+        { key: "pipeline_name", label: "流水线", render: (r) => named(r.pipeline_name, r.pipeline_id) },
         { key: "state", label: "状态", render: (r) => {
           const { label, ...props } = stateBadge(r.state);
           return <Badge {...props}>{label}</Badge>;
         } },
-        { key: "triggered_by", label: "触发人 ID" },
+        { key: "triggered_by_name", label: "触发人", render: (r) => named(r.triggered_by_name, r.triggered_by) },
         { key: "duration", label: "耗时", render: (r) => duration(r.started_at, r.finished_at) },
         { key: "started_at", label: "开始时间", render: (r) => r.started_at ? new Date(r.started_at).toLocaleString("zh-CN") : "—" },
       ],

@@ -151,7 +151,10 @@ try {
     await p.getByRole('option',{name:'Manifest host',exact:true}).click();
     if(mode==='native') {
       await service(1).getByLabel('运行来源',{exact:true}).selectOption('artifact');
-      await service(1).getByLabel('流水线 ID',{exact:true}).fill(pipeline.id);
+      // The artifact source names its pipeline; the manifest still stores the ID.
+      await service(1).getByLabel('流水线',{exact:true}).click();
+      await p.getByRole('option',{name:'Artifact pipeline',exact:true}).click();
+      assert.match(await service(1).getByLabel('固定构建',{exact:true}).innerText(),/最新成功构建/,'no pinned build by default');
       await service(1).getByLabel('产物相对路径',{exact:true}).fill('bin/server');
       await service(1).getByRole('button',{name:'删除端口 1',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除端口',exact:true}).click();
