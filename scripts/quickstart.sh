@@ -2,9 +2,12 @@
 # One-command single-host Docker Compose deployment:
 #   curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
 #   curl -fsSL .../quickstart.sh | sh -s -- --database mysql --public-url https://ops.example.com
+#   curl -fsSL .../quickstart.sh | sh -s -- --upgrade
 # Creates (or reuses) a deployment directory with the released Compose files of
 # one version and random credentials, then starts the stack and prints the
 # first-time setup token. Re-running reuses every secret and address.
+# --upgrade backs up the database and configuration, then moves an existing
+# deployment to a newer release while keeping every secret and address.
 set -eu
 
 # Everything runs from main, invoked on the last line: when piped from curl, a
@@ -19,6 +22,8 @@ bind=127.0.0.1
 port=4290
 redis=1
 init_only=
+upgrade=
+configured=
 directory=ferry
 
 fail() { printf 'Quickstart failed: %s\n' "$*" >&2; exit 1; }
@@ -33,6 +38,8 @@ Usage: quickstart.sh [options]
   --port PORT           Published port (default: 4290)
   --without-redis       Do not start the optional Redis service
   --init-only           Create configuration without running Docker
+  --upgrade             Back up, then upgrade an existing deployment to the latest
+                        release (or --version); secrets and addresses are kept
 USAGE
 }
 
@@ -41,12 +48,13 @@ while [ "$#" -gt 0 ]; do
     case "$1" in
         --dir) value "$@"; directory=$2; shift 2 ;;
         --version) value "$@"; version=$2; shift 2 ;;
-        --database) value "$@"; database=$2; shift 2 ;;
-        --public-url) value "$@"; public_url=$2; shift 2 ;;
-        --bind) value "$@"; bind=$2; shift 2 ;;
-        --port) value "$@"; port=$2; shift 2 ;;
-        --without-redis) redis=; shift ;;
-        --init-only) init_only=1; shift ;;
+        --database) value "$@"; database=$2; configured=$1; shift 2 ;;
+        --public-url) value "$@"; public_url=$2; configured=$1; shift 2 ;;
+        --bind) value "$@"; bind=$2; configured=$1; shift 2 ;;
+        --port) value "$@"; port=$2; configured=$1; shift 2 ;;
+        --without-redis) redis=; configured=$1; shift ;;
+        --init-only) init_only=1; configured=$1; shift ;;
+        --upgrade) upgrade=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; fail "unknown option: $1" ;;
     esac
@@ -75,12 +83,131 @@ fetch() { # URL DESTINATION
     fi
 }
 random() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
+resolve_latest() {
+    printf 'Resolving the latest Ferry release...\n'
+    # The releases feed lists pre-releases newest first and is not subject
+    # to the anonymous API rate limit; the API is only a fallback.
+    if fetch "https://github.com/$repository/releases.atom" .releases 2>/dev/null; then
+        # One XML tag per line, so the first (newest) release wins.
+        version=$(tr '<' '\n' < .releases | sed -n 's#.*/releases/tag/\(v[^"]*\)".*#\1#p' | head -n 1)
+    fi
+    if [ -z "$version" ] && fetch "https://api.github.com/repos/$repository/releases?per_page=1" .releases 2>/dev/null; then
+        version=$(sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' .releases | head -n 1)
+    fi
+    rm -f .releases
+    case "$version" in v[0-9]*) ;; *) fail "could not determine the latest release; pass --version" ;; esac
+}
+download() { # DIRECTORY FILE...: each file of $version into DIRECTORY, or fail
+    target=$1; shift
+    for file in "$@"; do
+        printf 'Downloading %s (%s)...\n' "$file" "$version"
+        fetch "https://raw.githubusercontent.com/$repository/$version/$file" "$target/$file.download" \
+            || { rm -f "$target/$file.download"; fail "cannot download $file for $version"; }
+        mv "$target/$file.download" "$target/$file"
+    done
+}
+# Succeeds when release $1 is newer than $2 by semantic versioning, so
+# v1.0.0-alpha.10 > v1.0.0-alpha.9 and v1.0.0 > v1.0.0-rc.1.
+newer() {
+    awk -v a="${1#v}" -v b="${2#v}" '
+    function ids(x, y,   xs, ys, nx, ny, i, p, q, pn, qn) {
+        nx = split(x, xs, "."); ny = split(y, ys, ".")
+        for (i = 1; i <= nx || i <= ny; i++) {
+            if (i > nx) return -1
+            if (i > ny) return 1
+            p = xs[i]; q = ys[i]; pn = p ~ /^[0-9]+$/; qn = q ~ /^[0-9]+$/
+            if (pn && qn) { if (p + 0 != q + 0) return p + 0 < q + 0 ? -1 : 1 }
+            else if (pn != qn) return pn ? -1 : 1
+            else if (p != q) return p < q ? -1 : 1
+        }
+        return 0
+    }
+    function release(x, y,   i, cx, cy, px, py, c) {
+        sub(/\+.*/, "", x); sub(/\+.*/, "", y)
+        i = index(x, "-"); cx = i ? substr(x, 1, i - 1) : x; px = i ? substr(x, i + 1) : ""
+        i = index(y, "-"); cy = i ? substr(y, 1, i - 1) : y; py = i ? substr(y, i + 1) : ""
+        c = ids(cx, cy)
+        if (c != 0 || px == py) return c
+        if (px == "") return 1
+        if (py == "") return -1
+        return ids(px, py)
+    }
+    BEGIN { exit !(release(a, b) > 0) }'
+}
+require_docker() {
+    command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
+        || fail "Docker with Compose v2 is required. Configuration is ready in $(pwd); install Docker and rerun this command."
+}
 
 umask 077
-mkdir -p "$directory/scripts"
-cd "$directory"
 env_file=.env.production
 files="compose.production.yaml compose.postgres.yaml compose.mysql.yaml scripts/postgres-init.sh"
+
+if [ -n "$upgrade" ]; then
+    [ -z "$configured" ] || fail "--upgrade keeps the existing configuration and only accepts --dir and --version (got $configured)"
+    [ -f "$directory/$env_file" ] || fail "no deployment in $directory; run without --upgrade to create one"
+    cd "$directory"
+    current_image=$(sed -n 's/^FERRY_IMAGE=//p' "$env_file" | head -n 1)
+    current=${current_image##*:}
+    image=${current_image%:*}
+    database=$(sed -n 's/^FERRY_DATABASE_ENGINE=//p' "$env_file" | head -n 1)
+    case "$current_image" in *@*|*[!A-Za-z0-9._/:+-]*) fail "FERRY_IMAGE ($current_image) is not a release tag; set it to $image_repository:vX.Y.Z or upgrade manually" ;; esac
+    case "$current" in v[0-9]*) ;; *) fail "cannot read the deployed release from FERRY_IMAGE ($current_image)" ;; esac
+    case "$database" in postgres|mysql) ;; *) fail "FERRY_DATABASE_ENGINE in $env_file must be postgres or mysql" ;; esac
+    [ -n "$version" ] || resolve_latest
+    if [ "$version" = "$current" ]; then
+        printf 'Already on %s; nothing to upgrade.\n' "$current"
+        exit 0
+    fi
+    newer "$version" "$current" \
+        || fail "$version is older than the deployed $current; downgrades are refused because database migrations only move forward"
+    require_docker
+    set -- docker compose --env-file "$env_file" -f compose.production.yaml -f "compose.$database.yaml"
+    # Keep Redis as deployed: enabled when its container exists.
+    if [ -n "$("$@" --profile redis ps -a -q redis 2>/dev/null)" ]; then set -- "$@" --profile redis; fi
+
+    backup=backups/$(date -u +%Y%m%dT%H%M%SZ)-$current-to-$version
+    mkdir -p "$backup/scripts"
+    printf 'Backing up the %s database to %s/%s/database.sql...\n' "$database" "$(pwd)" "$backup"
+    if [ "$database" = postgres ]; then
+        dump() { "$@" exec -T postgres pg_dump -U postgres -d ferry --clean --if-exists; }
+        load='exec -T postgres psql -U postgres -d ferry -v ON_ERROR_STOP=1'
+    else
+        dump() { "$@" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --routines --triggers --databases ferry'; }
+        load="exec -T mysql sh -c 'MYSQL_PWD=\"\$MYSQL_ROOT_PASSWORD\" exec mysql -uroot'"
+    fi
+    if ! dump "$@" > "$backup/database.sql" || [ ! -s "$backup/database.sql" ]; then
+        fail "database backup failed, nothing was changed; the $database service must be running ($* up -d)"
+    fi
+    for file in "$env_file" $files; do cp -p "$file" "$backup/$file"; done
+    restore() { for file in "$env_file" $files; do cp -p "$backup/$file" "$file"; done; }
+
+    # Stage the whole release before touching the deployment.
+    rm -rf .upgrade
+    mkdir -p .upgrade/scripts
+    download .upgrade $files
+    sed "s#^FERRY_IMAGE=.*#FERRY_IMAGE=$image:$version#" "$env_file" > ".upgrade/$env_file"
+    for file in $files "$env_file"; do mv ".upgrade/$file" "$file"; done
+    rm -rf .upgrade
+    chmod 755 scripts/postgres-init.sh
+
+    "$@" config --quiet \
+        || { restore; fail "the $version configuration is invalid for this deployment; previous files restored, services untouched"; }
+    "$@" pull \
+        || { restore; fail "cannot pull the $version images; previous files restored, services untouched"; }
+    if ! "$@" up -d --wait --wait-timeout 300; then
+        printf 'Quickstart failed: %s did not become healthy; inspect it with: %s logs ferry\n' "$version" "$*" >&2
+        printf 'To return to %s, run in %s:\n' "$current" "$(pwd)" >&2
+        printf '  cp -p %s/%s %s/compose.*.yaml . && cp -p %s/scripts/postgres-init.sh scripts/\n' "$backup" "$env_file" "$backup" "$backup" >&2
+        printf '  %s stop ferry\n  %s %s < %s/database.sql\n  %s up -d --wait\n' "$*" "$*" "$load" "$backup" "$*" >&2
+        exit 1
+    fi
+    printf 'Upgraded from %s to %s. Backup kept in %s/%s.\n' "$current" "$version" "$(pwd)" "$backup"
+    exit 0
+fi
+
+mkdir -p "$directory/scripts"
+cd "$directory"
 
 if [ -f "$env_file" ]; then
     grep -qx "FERRY_DATABASE_ENGINE=$database" "$env_file" \
@@ -93,28 +220,8 @@ if [ -n "$missing" ] || [ ! -f "$env_file" ]; then
     if [ -z "$version" ] && [ -f "$env_file" ]; then
         version=$(sed -n 's/^FERRY_IMAGE=.*:\(v[^:@]*\)$/\1/p' "$env_file" | head -n 1)
     fi
-    if [ -z "$version" ]; then
-        printf 'Resolving the latest Ferry release...\n'
-        # The releases feed lists pre-releases newest first and is not subject
-        # to the anonymous API rate limit; the API is only a fallback.
-        if fetch "https://github.com/$repository/releases.atom" .releases 2>/dev/null; then
-            # One XML tag per line, so the first (newest) release wins.
-            version=$(tr '<' '\n' < .releases | sed -n 's#.*/releases/tag/\(v[^"]*\)".*#\1#p' | head -n 1)
-        fi
-        if [ -z "$version" ] && fetch "https://api.github.com/repos/$repository/releases?per_page=1" .releases 2>/dev/null; then
-            version=$(sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' .releases | head -n 1)
-        fi
-        rm -f .releases
-        case "$version" in v[0-9]*) ;; *) fail "could not determine the latest release; pass --version" ;; esac
-    fi
-    for file in $files; do
-        if [ ! -f "$file" ]; then
-            printf 'Downloading %s (%s)...\n' "$file" "$version"
-            fetch "https://raw.githubusercontent.com/$repository/$version/$file" "$file.download" \
-                || { rm -f "$file.download"; fail "cannot download $file for $version"; }
-            mv "$file.download" "$file"
-        fi
-    done
+    [ -n "$version" ] || resolve_latest
+    for file in $files; do [ -f "$file" ] || download . "$file"; done
     chmod 755 scripts/postgres-init.sh
 fi
 
@@ -148,8 +255,7 @@ else
 fi
 
 [ -z "$init_only" ] || exit 0
-command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 \
-    || fail "Docker with Compose v2 is required. Configuration is ready in $(pwd); install Docker and rerun this command."
+require_docker
 set -- docker compose --env-file "$env_file" -f compose.production.yaml -f "compose.$database.yaml"
 [ -z "$redis" ] || set -- "$@" --profile redis
 "$@" config --quiet

@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --public-url https://ops.example.com
 ```
 
-HTTPS 地址会开启安全 Cookie；代理必须保留 Host、支持 WebSocket Upgrade，并设置足够的终端会话空闲超时。主机上的 Runner 必须能访问所填公共地址。已有部署要改地址、端口、镜像版本，请编辑部署目录中的 `.env.production` 后重新执行启动命令；重新传入参数不会覆盖该文件。
+HTTPS 地址会开启安全 Cookie；代理必须保留 Host、支持 WebSocket Upgrade，并设置足够的终端会话空闲超时。主机上的 Runner 必须能访问所填公共地址。已有部署要改地址或端口，请编辑部署目录中的 `.env.production` 后重新执行启动命令；重新传入参数不会覆盖该文件。升级版本见下文「一键升级」。
 
 ## 配置与维护
 
@@ -48,7 +48,40 @@ docker compose --env-file .env.production -f compose.production.yaml -f compose.
 docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis down
 ```
 
-`down` 保留数据卷；**不要给已有部署随意加 `-v`**。升级时先备份 SQL 数据库、`.env.production`、应用卷和 JetStream 卷，再将 `FERRY_IMAGE` 改为已验证版本，执行 `pull`、`up -d --wait`；若新版本的发布说明提到 Compose 文件变化，同时用该版本标签下的文件替换部署目录中的同名文件。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。镜像变量支持替换为内部镜像及固定 digest。
+`down` 保留数据卷；**不要给已有部署随意加 `-v`**。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。
+
+## 一键升级
+
+在部署目录的**上一级目录**执行（与安装时相同的位置，或用 `--dir` 指定部署目录）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --upgrade
+# 升级到指定版本
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --upgrade --version v0.1.0-alpha.29
+```
+
+升级步骤：
+
+1. 读取当前版本。目标版本与当前版本相同时，不做任何操作。
+2. 拒绝降级（包括降到当前版本的预发布版本），因为数据库迁移只能向前执行。
+3. 数据库服务需处于运行状态。用 `pg_dump` 或 `mysqldump` 导出数据库；导出失败时立即停止，不做任何改动。
+4. 将数据库导出文件、`.env.production` 和全部 Compose 文件备份到部署目录下的 `backups/<时间>-<旧版本>-to-<新版本>/`，该目录仅当前用户可读。
+5. 下载新版本标签下的全部 Compose 文件。全部下载完成后才替换旧文件。
+6. `.env.production` 中只修改 `FERRY_IMAGE` 的版本号；镜像仓库地址、密钥、地址和端口保持不变。
+7. 校验配置并拉取镜像。任一步骤失败时还原原有文件，正在运行的服务不受影响。
+8. 重启服务并等待恢复健康。原部署启用了 Redis 时继续启用。
+
+如果新版本启动后不健康，脚本会输出该版本的日志查看命令，以及具体的回滚命令：用备份覆盖文件、导入数据库导出文件、重新启动。
+
+`--upgrade` 只接受 `--dir` 和 `--version`。
+
+备份不包括应用数据卷和 JetStream 卷，需按日常备份策略另行备份。
+
+`FERRY_IMAGE` 使用 digest 固定或非版本标签时，脚本拒绝升级。这种情况需要手动升级：
+
+1. 将 `FERRY_IMAGE` 改为目标镜像。
+2. 若新版本发布说明提到 Compose 文件变化，用该版本标签下的文件替换部署目录中的同名文件。
+3. 执行 `pull` 和 `up -d --wait`。
 
 ## 生产边界
 

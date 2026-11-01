@@ -23,7 +23,12 @@ EOF
 cat > "$work/bin/docker" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "$work/docker.log"
-case "\$*" in *exec*) echo setup-token-123 ;; esac
+case "\$*" in *" \${DOCKER_FAIL:-none}"*) exit 1 ;; esac
+case "\$*" in
+    *pg_dump*|*mysqldump*) [ -n "\${DUMP_DOWN:-}" ] || echo '-- dump' ;;
+    *" ps -a -q redis") [ -z "\${REDIS_UP:-}" ] || echo redis-container ;;
+    *exec*) echo setup-token-123 ;;
+esac
 EOF
 chmod +x "$work/bin/curl" "$work/bin/docker"
 PATH="$work/bin:$PATH"
@@ -67,6 +72,46 @@ check '[ ! -s "$work/docker.log" ]' '--init-only never runs Docker'
 : > "$work/curl.log"
 (export ATOM_DOWN=1; run --dir fallback --init-only >/dev/null)
 check 'grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.6" "$work/fallback/.env.production"' 'falls back to the release API when the feed is unavailable'
+
+# --upgrade on the Postgres deployment created first (v9.9.9).
+image_line() { grep '^FERRY_IMAGE=' "$1"; }
+without_image() { grep -v '^FERRY_IMAGE=' "$1"; }
+if run --dir absent --upgrade >/dev/null 2>&1; then echo 'FAIL upgrade without a deployment accepted'; exit 1; fi
+check '[ ! -e "$work/absent" ]' 'upgrade refuses a directory without a deployment and creates nothing'
+if run --upgrade --port 1234 >/dev/null 2>&1; then echo 'FAIL upgrade accepted a configuration option'; exit 1; fi
+: > "$work/docker.log"
+output=$(run --upgrade)
+check 'printf "%s" "$output" | grep -q "Already on v9.9.9" && [ ! -s "$work/docker.log" ] && [ "$before" = "$(cat "$env")" ]' 'upgrade to the latest release already deployed changes nothing'
+for older in v9.9.1 v9.9.9-rc.1; do
+    if run --upgrade --version "$older" >/dev/null 2>&1; then echo "FAIL downgrade to $older accepted"; exit 1; fi
+done
+check '[ "$before" = "$(cat "$env")" ] && [ ! -e "$work/ferry/backups" ]' 'refuses downgrades, including to a pre-release of the deployed version'
+(export DUMP_DOWN=1; run --upgrade --version v9.10.0 >/dev/null 2>&1) && { echo 'FAIL upgrade without a database backup'; exit 1; }
+check '[ "$before" = "$(cat "$env")" ] && ! grep -q " pull" "$work/docker.log"' 'a failed database backup stops the upgrade before anything changes'
+rm -rf "$work/ferry/backups"
+: > "$work/docker.log"; : > "$work/curl.log"
+output=$(run --upgrade --version v9.10.0)
+check 'image_line "$env" | grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.10.0" && [ "$(printf "%s\n" "$before" | grep -v ^FERRY_IMAGE=)" = "$(without_image "$env")" ]' 'upgrade moves FERRY_IMAGE to the new release and keeps every secret and address'
+backup=$(ls -d "$work"/ferry/backups/*-v9.9.9-to-v9.10.0)
+check '[ "$(cat "$backup/database.sql")" = "-- dump" ] && [ "$before" = "$(cat "$backup/.env.production")" ] && [ -f "$backup/compose.production.yaml" ] && [ -f "$backup/scripts/postgres-init.sh" ]' 'backs up the database dump, the env file and the Compose files of the old release'
+check 'grep -q "exec -T postgres pg_dump -U postgres -d ferry" "$work/docker.log" && [ "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | tr "\n" " ")" = "$(grep -n -E "pg_dump| pull$|up -d --wait" "$work/docker.log" | cut -d: -f1 | sort -n | tr "\n" " ")" ] && grep -q "raw.githubusercontent.com/7link-team/ferry/v9.10.0/compose.production.yaml" "$work/curl.log"' 'dumps the database, then downloads the new release files, pulls and waits for health'
+check '! grep -q -- "--profile redis config" "$work/docker.log" && [ ! -e "$work/ferry/.upgrade" ] && printf "%s" "$output" | grep -q "Upgraded from v9.9.9 to v9.10.0"' 'keeps Redis off when it was not deployed and leaves no staging files'
+upgraded=$(cat "$env")
+if (export DOCKER_FAIL=pull; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL failed pull reported success'; exit 1; fi
+check '[ "$upgraded" = "$(cat "$env")" ]' 'a failed image pull restores the previous files'
+: > "$work/docker.log"
+(export REDIS_UP=1; run --upgrade --version v10.0.0 >/dev/null)
+check 'grep -q -- "--profile redis pull" "$work/docker.log"' 'keeps Redis on when its container exists'
+if (export DOCKER_FAIL='up -d'; run --upgrade --version v10.0.1 > /dev/null 2> "$work/err"); then echo 'FAIL unhealthy upgrade reported success'; exit 1; fi
+check 'grep -q "did not become healthy" "$work/err" && grep -q "psql -U postgres -d ferry" "$work/err" && grep -q "v10.0.0-to-v10.0.1/database.sql" "$work/err"' 'an unhealthy release prints the rollback commands with its backup'
+: > "$work/docker.log"
+run --dir mysql --upgrade --version v9.10.0 >/dev/null
+check 'grep -q "exec -T mysql sh -c MYSQL_PWD=.* mysqldump" "$work/docker.log" && grep -q "compose.mysql.yaml pull" "$work/docker.log" && grep -qx "FERRY_DATABASE_ENGINE=mysql" "$work/mysql/.env.production"' 'a MySQL deployment is backed up with mysqldump and upgraded in place'
+(cd "$work" && sh -s -- --dir mysql --upgrade --version v1.0.0 < "$repo/scripts/quickstart.sh" >/dev/null 2>&1) && { echo 'FAIL piped downgrade accepted'; exit 1; }
+run --dir semver --version v1.0.0-alpha.9 --init-only >/dev/null
+run --dir semver --upgrade --version v1.0.0-alpha.10 >/dev/null
+run --dir semver --upgrade --version v1.0.0 >/dev/null
+check 'image_line "$work/semver/.env.production" | grep -q ":v1.0.0$"' 'orders pre-releases numerically (alpha.9 < alpha.10 < 1.0.0)'
 (cd "$work" && sh -s -- --dir piped --version v9.9.7 --init-only < "$repo/scripts/quickstart.sh" >/dev/null)
 check 'grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.7" "$work/piped/.env.production"' 'works when piped to sh with arguments (curl ... | sh -s -- ...)'
 half=$(($(wc -l < "$repo/scripts/quickstart.sh") / 2))

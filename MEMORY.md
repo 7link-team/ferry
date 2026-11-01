@@ -1,3 +1,11 @@
+## Compose quickstart --upgrade (2026-11-01, committed locally, NOT pushed)
+- scripts/quickstart.sh --upgrade + 12 new stub checks (30 PASS under Git sh); docs/compose-quickstart.md 「一键升级」, README line. ADR "Compose quickstart one-command upgrade".
+- Must NOT push to main until alpha.28 publishes: dispatcher refuses publication if main moves. After alpha.28 verified: push via SSH (script is served from main, so it is live immediately); ship notes in alpha.29.
+
+## alpha.28 in flight (2026-11-01)
+- Fixes: test-runner-connection-ui waits for reloaded command (d1eeabb, CI e2e-build-ui PASS); desktop bundled_service_lifecycle port collision ROOT CAUSE confirmed from macOS log ("127.0.0.1:49269 ... os error 48" at first start; parallel missing_sidecar_is_actionable probes 127.0.0.1:0 and macOS allocates sequentially) -> start_on_free_port retries only collisions (b248a32). Desktop tests cannot run locally on Windows (STATUS_ENTRYPOINT_NOT_FOUND: Tauri test exe lacks manifest) -> CI verifies. Stuck failed run 41259557386 (apt hang) cancelled via temp workflow.
+- Bump cadec43 pushed (SSH). Dispatcher feat/alpha28-release-dispatch 19bdae0 (worktree $TEMP/ferry-alpha28-dispatch), notes data/maintenance/alpha28-release-notes.txt. On success: verify 0.1.0-alpha.28 cadec430ca706be9c6a43d793d7e1296c14b9f7c, delete branch/worktree, docs [skip ci].
+
 ## Compose quickstart shell script (2026-11-01)
 - scripts/quickstart.py + test-quickstart.py replaced by POSIX scripts/quickstart.sh + scripts/test-quickstart.sh (18 PASS under Git sh incl. pipe mode, Atom feed + API fallback); CI build.yml checks step runs it under dash. Real GitHub init-only run resolved v0.1.0-alpha.27 via Atom (API rate limit exhausted) and downloaded all files; official compose v2.39.4 config PASS for postgres/mysql ± redis. compose.production.yaml FERRY_IMAGE now required. Docs/README updated. ADR "Compose quickstart as a one-command shell script".
 
