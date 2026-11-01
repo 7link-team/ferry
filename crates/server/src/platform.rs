@@ -199,7 +199,7 @@ pub async fn initialize(
     ))
 }
 
-async fn audit(
+pub(crate) async fn audit(
     s: &AppState,
     conn: &impl ConnectionTrait,
     actor: &auth::User,

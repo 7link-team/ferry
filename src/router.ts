@@ -28,6 +28,8 @@ export function parse(pathname = location.pathname, search = location.search): R
   if (segments[0] === "platform") {
     return parse('/_platform/' + segments.slice(1).join('/'), search);
   }
+  // The signed-in user's own profile: a single record, always edited in place.
+  if (segments[0] === "account") return { workspace: "_account", group: "account", item: "profile", id: "1", mode: "edit" };
   if (segments[0] === "workspaces") {
     const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
     const scope = new URLSearchParams(search).get("scope");
@@ -80,6 +82,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const item = nav.find(group => group.key === r.group)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
+  if (r.workspace === "_account") return "/account";
   const base = r.workspace === "_platform" ? `/platform/${r.item}` :
     `/workspaces/${encodeURIComponent(r.workspace)}/${resourceName(item?.resource ?? r.item)}`;
   const search = params.toString();

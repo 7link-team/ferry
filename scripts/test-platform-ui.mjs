@@ -98,6 +98,46 @@ try {
   await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/platform/settings/1') && r.request().method() === 'GET'), page.getByRole('button', { name: '保存', exact: true }).click()]);
   assert.equal((await (await context.request.get(`${origin}/api/setup`)).json()).registration_enabled, false);
   await page.screenshot({ path: '/tmp/platform-settings.png', fullPage: true });
+  // Own profile: reachable from platform management and from the workspace account menu.
+  await page.getByRole('button', { name: '个人资料', exact: true }).click();
+  await page.getByRole('heading', { name: '个人资料', exact: true }).first().waitFor();
+  assert.equal(new URL(page.url()).pathname, '/account');
+  const nameField = page.getByLabel('姓名', { exact: true }), emailField = page.getByLabel('登录邮箱', { exact: true });
+  const newPassword = page.getByLabel('新密码', { exact: true }), currentPassword = page.getByLabel('当前密码', { exact: true });
+  await nameField.waitFor();
+  assert.equal(await nameField.inputValue(), 'Platform Admin');
+  assert.equal(await emailField.inputValue(), 'admin@example.invalid');
+  assert.deepEqual([await newPassword.getAttribute('type'), await currentPassword.getAttribute('type'), await newPassword.inputValue()], ['password', 'password', '']);
+  await nameField.fill('Renamed Admin');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('个人资料已保存。').waitFor();
+  assert.equal((await (await context.request.get(`${origin}/api/me`)).json()).user.name, 'Renamed Admin', 'name saved without a password');
+  await emailField.waitFor();
+  await emailField.fill('renamed@example.invalid');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('当前密码不正确。修改邮箱或密码需要填写当前密码。').waitFor();
+  await currentPassword.fill('temporary-admin-password');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.getByText('个人资料已保存。').last().waitFor();
+  await page.waitForFunction(() => document.querySelector('input[type="password"]')?.value === '');
+  assert.equal((await (await context.request.get(`${origin}/api/me`)).json()).user.email, 'renamed@example.invalid', 'email changed with the current password; this session stays signed in');
+  assert.equal(await emailField.inputValue(), 'renamed@example.invalid');
+  assert.deepEqual([await newPassword.inputValue(), await currentPassword.inputValue()], ['', ''], 'saved form reloads without the typed passwords');
+  await page.screenshot({ path: '/tmp/profile.png', fullPage: true });
+  await page.getByLabel('姓名', { exact: true }).fill('Discarded');
+  await page.getByRole('button', { name: '取消', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('input[name="name"]')?.value === 'Renamed Admin');
+  assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), 'Renamed Admin', 'cancel discards unsaved edits');
+  await page.goto(`${origin}${entryPath}`);
+  await page.getByRole('button', { name: /Renamed Admin/ }).click();
+  await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
+  await page.getByLabel('登录邮箱', { exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, '/account', 'workspace account menu opens the profile');
+  await page.reload();
+  await page.getByLabel('登录邮箱', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('登录邮箱', { exact: true }).inputValue(), 'renamed@example.invalid', '/account opens directly');
+  await page.getByRole('button', { name: '返回', exact: true }).click();
+  await page.waitForURL(url => url.pathname !== '/account');
   const fresh = await browser.newContext();
   const visitor = await fresh.newPage();
   await visitor.goto(origin);
@@ -106,7 +146,7 @@ try {
   assert(!requests.some(url => url.includes(token)), 'no HTTP URL contains setup token');
   assert(!(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).includes(token), 'setup proof never stored');
   assert.deepEqual(errors, []);
-  console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, no secret persistence, no browser errors');
+  console.log('PASS: web/manual proof, native fragment, password confirmation, setup/session, platform lists, workspace creation/entry, registration setting, own profile (name, email with current password, menus, direct URL), no secret persistence, no browser errors');
 } finally {
   if (browser) await browser.close();
   if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }

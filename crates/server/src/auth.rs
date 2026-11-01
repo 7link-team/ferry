@@ -167,19 +167,30 @@ pub(crate) fn verify(password: &str, stored: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<String> {
-    let email = credentials.email.trim().to_lowercase();
+/// The stored form of a login email: trimmed and lower-cased.
+fn email(raw: &str) -> Result<String> {
+    let email = raw.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {
         return Err(ApiError::bad("请填写有效的邮箱地址。"));
     }
+    Ok(email)
+}
+
+fn password(password: &str) -> Result<()> {
     // Length, not a composition rule: composition rules push people toward
     // "Password1!" and are worse than a longer passphrase.
-    if credentials.password.chars().count() < 8 {
+    if password.chars().count() < 8 {
         return Err(ApiError::bad("密码至少 8 个字符。"));
     }
-    if credentials.password.len() > 1024 {
+    if password.len() > 1024 {
         return Err(ApiError::bad("密码过长。"));
     }
+    Ok(())
+}
+
+pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<String> {
+    let email = email(&credentials.email)?;
+    password(&credentials.password)?;
     if require_name && credentials.name.trim().is_empty() {
         return Err(ApiError::bad("请填写姓名。"));
     }
@@ -349,4 +360,123 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         "user": {"id": account.user.id, "email": account.user.email, "name": account.user.name, "is_superadmin": account.user.is_superadmin},
         "workspaces": workspaces,
     })))
+}
+
+/// The signed-in user's own account, as a single-record form (`/api/profile/1`,
+/// like the platform settings). Password inputs are write-only and always empty.
+pub async fn profile(State(s): State<AppState>, account: Account) -> Result<Json<Value>> {
+    let row = users::Entity::find_by_id(i64::from(account.user.id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(json!({
+        "id": "1", "name": row.name, "email": row.email, "version": row.version,
+        "new_password": "", "current_password": "",
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct ProfileUpdate {
+    version: i64,
+    name: String,
+    email: String,
+    #[serde(default)]
+    new_password: String,
+    #[serde(default)]
+    current_password: String,
+}
+
+/// Name, login email and password of the signed-in user. Changing the email or
+/// the password needs the current password and signs out every other session;
+/// nobody else can change them, so an administrator cannot take an account over.
+pub async fn update_profile(
+    State(s): State<AppState>,
+    account: Account,
+    Json(body): Json<ProfileUpdate>,
+) -> Result<Json<Value>> {
+    use sea_orm::TransactionTrait;
+    let name = body.name.trim().to_owned();
+    if name.is_empty() {
+        return Err(ApiError::bad("请填写姓名。"));
+    }
+    let new_email = email(&body.email)?;
+    if !body.new_password.is_empty() {
+        password(&body.new_password)?;
+    }
+    let tx = s.db.begin().await?;
+    // Serialises email changes with registration, like the uniqueness check there.
+    crate::platform::lock(&tx).await?;
+    let row = users::Entity::find_by_id(i64::from(account.user.id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    if row.version != body.version {
+        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+    }
+    let email_changed = new_email != row.email;
+    let password_changed = !body.new_password.is_empty();
+    if (email_changed || password_changed) && !verify(&body.current_password, &row.password_hash) {
+        return Err(ApiError::bad(
+            "当前密码不正确。修改邮箱或密码需要填写当前密码。",
+        ));
+    }
+    if email_changed
+        && users::Entity::find()
+            .filter(users::Column::Email.eq(new_email.clone()))
+            .one(&tx)
+            .await?
+            .is_some()
+    {
+        return Err(ApiError::conflict("该邮箱已被其他账号使用。"));
+    }
+    let mut update = users::Entity::update_many()
+        .col_expr(users::Column::Name, Expr::value(name.clone()))
+        .col_expr(users::Column::Email, Expr::value(new_email.clone()))
+        .col_expr(users::Column::Version, Expr::value(row.version + 1))
+        .col_expr(users::Column::UpdatedAt, Expr::value(db::now()));
+    if password_changed {
+        update = update.col_expr(
+            users::Column::PasswordHash,
+            Expr::value(hash(&body.new_password)?),
+        );
+    }
+    update
+        .filter(users::Column::Id.eq(row.id))
+        .exec(&tx)
+        .await?;
+    if email_changed || password_changed {
+        sessions::Entity::delete_many()
+            .filter(sessions::Column::UserId.eq(row.id))
+            .filter(sessions::Column::Id.ne(i64::from(account.session_id)))
+            .exec(&tx)
+            .await?;
+    }
+    let mut changed = Vec::new();
+    if name != row.name {
+        changed.push("name");
+    }
+    if email_changed {
+        changed.push("email");
+    }
+    if password_changed {
+        changed.push("password");
+    }
+    // Never the password; the email trail is what an account takeover would hide.
+    let details = if email_changed {
+        json!({"changed": changed, "email": {"from": row.email, "to": new_email}})
+    } else {
+        json!({"changed": changed})
+    };
+    crate::platform::audit(
+        &s,
+        &tx,
+        &account.user,
+        "update-profile",
+        "users",
+        account.user.id,
+        details,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Json(json!({"id": "1", "version": row.version + 1})))
 }

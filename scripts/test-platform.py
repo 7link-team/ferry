@@ -94,6 +94,41 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check('password' not in json.dumps(users) and 'token' not in json.dumps(users), 'global user projection excludes credentials')
         request(admin, '/platform/users?sort=password_hash', expected=400)
         request(admin, '/platform/users?workspace_id=1', expected=400)
+        # Self-service profile: the name freely; email and password only with the current password.
+        profile = request(owner, '/profile/1')
+        check(profile['email'] == 'owner@example.invalid' and profile['name'] == 'Owner' and profile['new_password'] == ''
+              and 'hash' not in json.dumps(profile), 'profile shows own name and email, never a password')
+        request(anonymous, '/profile/1', expected=401)
+        owner_elsewhere = client()
+        request(owner_elsewhere, '/sessions', {'email':'owner@example.invalid','password':password})
+        request(owner, '/profile/1', {**profile, 'name':'Owner Renamed'}, 'PATCH')
+        check(request(owner, '/me')['user']['name'] == 'Owner Renamed' and request(owner_elsewhere, '/me')['user']['name'] == 'Owner Renamed',
+              'renaming needs no password and keeps other sessions')
+        request(owner, '/profile/1', {**profile, 'name':'Stale'}, 'PATCH', 409)
+        current = request(owner, '/profile/1')
+        for body, status in [({'email':'new-owner@example.invalid'}, 400),
+                             ({'email':'new-owner@example.invalid','current_password':'wrong-password'}, 400),
+                             ({'new_password':password+'-x','current_password':'wrong-password'}, 400),
+                             ({'email':'Outsider@Example.invalid','current_password':password}, 409),
+                             ({'email':'not-an-email','current_password':password}, 400),
+                             ({'name':'  '}, 400),
+                             ({'new_password':'short','current_password':password}, 400)]:
+            request(owner, '/profile/1', {**current, **body}, 'PATCH', status)
+        check(request(owner, '/profile/1') == current, 'refuses a missing or wrong current password, a taken or invalid email, an empty name and a short password')
+        new_password = password + '-new'
+        request(owner, '/profile/1', {**current, 'email':' New-Owner@Example.invalid ', 'new_password':new_password, 'current_password':password}, 'PATCH')
+        check(request(owner, '/me')['user']['email'] == 'new-owner@example.invalid', 'email is normalized and the editing session stays signed in')
+        request(owner_elsewhere, '/me', expected=401)
+        check(True, 'changing email or password signs out every other session')
+        for email, secret in [('owner@example.invalid', password), ('owner@example.invalid', new_password), ('new-owner@example.invalid', password)]:
+            request(client(), '/sessions', {'email':email,'password':secret}, expected=401)
+        again = client()
+        request(again, '/sessions', {'email':'new-owner@example.invalid','password':new_password})
+        check(request(again, '/me')['user']['id'] == owner_id, 'only the new email with the new password signs in')
+        check(request(admin, '/platform/users/'+owner_id)['email'] == 'new-owner@example.invalid', 'administrators see the changed email')
+        back = request(owner, '/profile/1')
+        request(owner, '/profile/1', {**back, 'name':'Owner', 'email':'owner@example.invalid', 'new_password':password, 'current_password':new_password}, 'PATCH')
+        check(request(owner, '/me')['user']['email'] == 'owner@example.invalid', 'the original email and password can be restored')
         created = request(admin, '/platform/workspaces', {'name':'New workspace','slug':'platform'})
         workspace_platform = created['id']
         check(created['slug'] == 'platform', 'legacy-valid platform workspace slug remains available')
@@ -132,7 +167,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         survivor = owner if results[0][0] == 200 else admin
         check(sum(r['is_superadmin'] and r['active'] for r in request(survivor, '/platform/users')['items']) == 1, 'exactly one active admin remains')
         logs = (data / 'server.log').read_text()
-        check(token not in logs and password not in logs, 'logs contain no initialization token or password')
+        check(token not in logs and password not in logs and new_password not in logs, 'logs contain no initialization token or password')
         print(f'PASS: {checks} platform acceptance checks')
     finally:
         if proc.poll() is None: proc.terminate(); proc.wait(timeout=20)

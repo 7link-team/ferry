@@ -685,6 +685,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/users", post(auth::register))
         .route("/api/sessions", post(auth::login).delete(auth::logout))
         .route("/api/me", get(auth::me))
+        .route(
+            "/api/profile/1",
+            get(auth::profile).patch(auth::update_profile),
+        )
         .route("/api/repository-providers/callback",get(repository_auth::complete))
         .route("/api/repository-events/{id}",post(repository_monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
         .route("/api/workspaces", post(workspace::create))

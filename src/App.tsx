@@ -23,6 +23,7 @@ import { HostMonitor } from "./components/HostMonitor";
 import { ResourceTable } from "./components/ResourceTable";
 import { RepositoryMonitor, RepositoryEventHistory } from "./components/RepositoryMonitor";
 import { Platform } from "./Platform";
+import { Account, accountRoute } from "./Account";
 import { Dashboard } from "./components/Dashboard";
 import { Invitation } from "./components/Invitation";
 import { Entry } from "./Entry";
@@ -102,6 +103,7 @@ export function App() {
   if (!identity?.workspaces) return <Entry onReady={reload} error={error} />;
   if (setupRequired && !deferredSetup)
     return <Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} />;
+  if (route.workspace === "_account") return <Account identity={identity} reload={reload} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
     return <Platform identity={identity} reload={reload} />;
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
@@ -254,6 +256,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               </DropdownMenuItem>
             ))}
             <DropdownMenuItem onClick={() => setJoining(true)}>创建/加入工作空间</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>个人资料</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
             >

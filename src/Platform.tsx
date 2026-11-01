@@ -7,6 +7,7 @@ import { ResourceTable } from "./components/ResourceTable";
 import type { FormConfig, ListConfig } from "./components/dsl";
 import { href, navigate, useRoute } from "./router";
 import { nav } from "./nav";
+import { accountRoute } from "./Account";
 
 type Row = Record<string, unknown> & { id: string; name: string; email: string; slug: string; active: boolean; is_superadmin: boolean };
 const labels: Record<string, string> = { users: "平台用户", workspaces: "工作空间", settings: "平台设置" };
@@ -74,6 +75,7 @@ export function Platform({ identity, reload }: { identity: Identity; reload: () 
           onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : "list", ...(key === "settings" ? { id: "1" } : {}) }, {}); }}>{label}</a>)}
       </nav>
       <span className="flex-1" /><span className="text-sm text-muted-foreground">{identity.user.name}</span>
+      <Button variant="ghost" onClick={() => navigate(accountRoute, {})}>个人资料</Button>
       <Button variant="ghost" onClick={() => { void api("/sessions", { method: "DELETE" }).then(reload); }}>退出登录</Button>
     </header>
     <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
