@@ -1,3 +1,7 @@
+## Local 4291 instance upgraded to alpha.31 (2026-11-01)
+- data/maintenance/start-alpha31-local.ps1 (from start-alpha27b-local.ps1; old exe alpha27b -> new target/debug/ferry-server-alpha31.exe, PID 63396). Verified independently after the run: /api/status 0.1.0-alpha.31 same instance 46a21cc9…, alpha20-state verify PASS, alpha22-credential verify PASS, embedded UI current; backup data/backups/pre-alpha31-20261101-212422.
+- Gotcha: a server started by Start-Process inherits the calling command's stdout pipe, so the Claude Code task stays "running" (user noticed). The script's own process exits; TaskStop on that task is safe (server survived, parent already gone). Next time run the script without piping its output, then TaskStop if it lingers.
+
 ## Quickstart second-deployment guard (2026-11-01)
 - Incident: user ran `--domain` from /root (not /opt) -> new /root/ferry with new secrets took over project "ferry" containers/volumes -> postgres "password authentication failed for user ferry". Data intact (volumes shared, new Ferry never connected). Recovery told to user: `cd /opt && … --upgrade`, then `rm -rf /root/ferry` (never `down -v` there).
 - Fix: quickstart refuses to CREATE a deployment when project-ferry containers belong to another working_dir or leftover volumes exist; existing deployments (rerun/--upgrade) can still take containers back. test-quickstart 46 PASS. Local disk: removed target/debug/incremental + 25 old server copies + temp leftovers, freed 107.9 GB (D: 135.5 GB free); kept running alpha27b/alpha17-bootstrap and deps (22.7 GB).
