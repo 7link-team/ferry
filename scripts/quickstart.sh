@@ -7,6 +7,9 @@
 # first-time setup token. Re-running reuses every secret and address.
 set -eu
 
+# Everything runs from main, invoked on the last line: when piped from curl, a
+# truncated download defines nothing runnable instead of executing part of it.
+main() {
 repository=${FERRY_REPOSITORY:-7link-team/ferry}
 image_repository=${FERRY_IMAGE_REPOSITORY:-ghcr.io/7link-team/ferry-server}
 version=
@@ -154,3 +157,6 @@ set -- docker compose --env-file "$env_file" -f compose.production.yaml -f "comp
 printf 'Stack is healthy. Open the FERRY_PUBLIC_URL from %s/%s.\n' "$(pwd)" "$env_file"
 printf 'First-time setup token (only present before initialization):\n'
 "$@" exec -T ferry sh -c 'if [ -f /data/setup-token ]; then cat /data/setup-token; else echo "Already initialized."; fi'
+}
+
+main "$@"

@@ -69,4 +69,7 @@ check '[ ! -s "$work/docker.log" ]' '--init-only never runs Docker'
 check 'grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.6" "$work/fallback/.env.production"' 'falls back to the release API when the feed is unavailable'
 (cd "$work" && sh -s -- --dir piped --version v9.9.7 --init-only < "$repo/scripts/quickstart.sh" >/dev/null)
 check 'grep -qx "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.7" "$work/piped/.env.production"' 'works when piped to sh with arguments (curl ... | sh -s -- ...)'
+half=$(($(wc -l < "$repo/scripts/quickstart.sh") / 2))
+(cd "$work" && head -n "$half" "$repo/scripts/quickstart.sh" | sh -s -- --dir truncated --version v9.9.7 --init-only >/dev/null 2>&1) || true
+check '[ ! -e "$work/truncated" ]' 'a truncated download executes nothing'
 echo 'quickstart verified'
