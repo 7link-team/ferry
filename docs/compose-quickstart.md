@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --database mysql
 ```
 
-数据库二选一，不会同时启动两套业务数据库。已生成配置后，在同一位置重复执行会复用原密钥和版本，不再联网；重新传入的访问参数（`--domain`、`--allow-host`、`--bind`、`--port`）会替换原有设置，密钥不变。切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。`--version v0.1.0-alpha.29` 可指定版本，`--dir 路径` 可指定部署目录。版本固定为一个已发布版本，不会隐式跟随 `latest`。
+数据库二选一，不会同时启动两套业务数据库。已生成配置后，在同一位置重复执行会复用原密钥和版本，不再联网；重新传入的访问参数（`--domain`、`--allow-host`、`--bind`、`--port`）会替换原有设置，密钥不变。切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。所有部署共用 Compose 项目名 `ferry`：如果本机已有其他目录的 Ferry 部署（容器或数据卷），脚本会拒绝新建第二套部署，并提示原部署所在的目录。请回到那里执行，否则新密钥会接管原有容器而无法连接原有数据库。`--version v0.1.0-alpha.29` 可指定版本，`--dir 路径` 可指定部署目录。版本固定为一个已发布版本，不会隐式跟随 `latest`。
 
 ## 域名与 HTTPS（自动证书）
 

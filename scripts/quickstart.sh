@@ -345,6 +345,21 @@ if [ -f "$env_file" ]; then
 fi
 [ -n "$database" ] || database=postgres
 
+# Every deployment uses the Compose project "ferry": a second directory would
+# take over the first one's containers and data volumes with new credentials.
+# Only creating a deployment is refused; an existing one may always take its
+# containers back (rerun or --upgrade in its own directory).
+if [ ! -f "$env_file" ] && command -v docker >/dev/null 2>&1; then
+    here=$(pwd -P)
+    owner=$(docker ps -a --filter label=com.docker.compose.project=ferry --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null \
+        | grep -vxF "$here" | head -n 1 || true)
+    [ -z "$owner" ] || fail "a Ferry deployment already runs from $owner; rerun this command in $(dirname "$owner") (or pass --dir $owner) instead of creating a second deployment in $here"
+    if [ -z "$(docker ps -a -q --filter label=com.docker.compose.project=ferry 2>/dev/null)" ] \
+        && [ -n "$(docker volume ls -q --filter label=com.docker.compose.project=ferry 2>/dev/null)" ]; then
+        fail "data volumes of an earlier Ferry deployment exist (docker volume ls --filter label=com.docker.compose.project=ferry); run this command in the directory holding that deployment's .env.production, or remove those volumes deliberately"
+    fi
+fi
+
 missing=
 for file in $files; do [ -f "$file" ] || missing=1; done
 if [ -n "$missing" ] || [ ! -f "$env_file" ]; then

@@ -27,6 +27,9 @@ case "\$*" in *" \${DOCKER_FAIL:-none}"*) exit 1 ;; esac
 case "\$*" in
     *pg_dump*|*mysqldump*) [ -n "\${DUMP_DOWN:-}" ] || echo '-- dump' ;;
     *" ps -a -q redis") [ -z "\${REDIS_UP:-}" ] || echo redis-container ;;
+    "ps -a --filter label=com.docker.compose.project=ferry --format"*) [ -z "\${OTHER_DEPLOYMENT:-}" ] || echo "\$OTHER_DEPLOYMENT" ;;
+    "ps -a -q --filter label=com.docker.compose.project=ferry") [ -z "\${OTHER_DEPLOYMENT:-}" ] || echo container-id ;;
+    "volume ls -q --filter label=com.docker.compose.project=ferry") [ -z "\${LEFTOVER_VOLUMES:-}\${OTHER_DEPLOYMENT:-}" ] || echo ferry_postgres-data ;;
     *exec*) echo setup-token-123 ;;
 esac
 EOF
@@ -48,7 +51,7 @@ check 'grep -q "/releases.atom$" "$work/curl.log" && ! grep -q "api.github.com" 
 check 'has "$env" "FERRY_ALLOWED_HOSTS=localhost,127.0.0.1" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'records local-only access, the port and Redis; no public URL setting'
 secrets=$(secrets_of "$env" | cut -d= -f2)
 check '[ "$(printf "%s\n" "$secrets" | grep -cE "^[0-9a-f]{64}$")" = 6 ] && [ "$(printf "%s\n" "$secrets" | sort -u | wc -l | tr -d " ")" = 6 ]' 'generates six distinct 256-bit hex secrets'
-check 'sed -n 1p "$work/docker.log" | grep -q "compose version" && grep -q "compose.postgres.yaml --profile redis config --quiet" "$work/docker.log" && grep -q "up -d --wait --wait-timeout 300" "$work/docker.log" && ! grep -q -- "--profile https" "$work/docker.log"' 'validates the configuration before starting and waits for health'
+check 'grep -q "compose version" "$work/docker.log" && grep -q "compose.postgres.yaml --profile redis config --quiet" "$work/docker.log" && grep -q "up -d --wait --wait-timeout 300" "$work/docker.log" && ! grep -q -- "--profile https" "$work/docker.log"' 'validates the configuration before starting and waits for health'
 check 'printf "%s" "$output" | grep -q setup-token-123 && printf "%s" "$output" | grep -q "http://localhost:4399"' 'prints the address and the first-time setup token'
 before=$(cat "$env")
 : > "$work/curl.log"
@@ -88,12 +91,21 @@ check 'grep -q "compose.https.yaml rm -s -f caddy" "$work/docker.log" && [ ! -e 
 : > "$work/docker.log"
 run --dir mysql --database mysql --allow-host fd00::10 --bind 0.0.0.0 --init-only >/dev/null
 check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql" && has "$work/mysql/.env.production" "FERRY_ALLOWED_HOSTS=fd00::10,localhost,127.0.0.1" && has "$work/mysql/.env.production" "FERRY_BIND_ADDRESS=0.0.0.0"' 'MySQL, an IPv6 host and LAN bind are recorded'
-check '[ ! -s "$work/docker.log" ]' '--init-only never runs Docker'
+check '! grep -qE "compose .*(config|up|pull|exec|rm|restart)" "$work/docker.log"' '--init-only only queries Docker and never starts or changes anything'
 run --dir mysql --allow-host 10.0.0.2 --init-only >/dev/null
 check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql"' 'reruns of a MySQL deployment need no --database'
 : > "$work/curl.log"
 (export ATOM_DOWN=1; run --dir fallback --init-only >/dev/null)
 check 'has "$work/fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.6"' 'falls back to the release API when the feed is unavailable'
+
+# A second directory must not take over another deployment's containers and volumes.
+(export OTHER_DEPLOYMENT=/opt/ferry; run --dir second >/dev/null 2>"$work/err") && { echo 'FAIL second deployment accepted'; exit 1; }
+check '[ ! -e "$work/second/.env.production" ] && grep -q "already runs from /opt/ferry; rerun this command in /opt" "$work/err"' 'refuses to create a second deployment over the containers of another directory, naming it'
+(export LEFTOVER_VOLUMES=1; run --dir third >/dev/null 2>"$work/err") && { echo 'FAIL deployment over leftover volumes accepted'; exit 1; }
+check '[ ! -e "$work/third/.env.production" ] && grep -q "data volumes of an earlier Ferry deployment exist" "$work/err"' 'refuses to create a deployment over the data volumes of an earlier one'
+before_rerun=$(cat "$env")
+(export OTHER_DEPLOYMENT=/root/ferry; run >/dev/null)
+check '[ "$before_rerun" = "$(cat "$env")" ]' 'an existing deployment can still take its containers back from another directory'
 
 # A deployment made by an earlier release (up to v0.1.0-alpha.29): its Compose
 # file requires FERRY_PUBLIC_URL; no FERRY_REDIS or FERRY_DOMAINS yet.
