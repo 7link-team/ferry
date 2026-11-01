@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PipelineRunDetail } from "./PipelineRunDetail";
+import { stateBadge } from "../pipeline";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -106,12 +107,16 @@ it("服务端错误完整显示且可恢复", async () => {
   await mount(); expect(host.querySelector('[role="alert"]')?.textContent).toBe("具体错误句子。");
   await tick(); expect(host.querySelector('[role="alert"]')).toBeNull();
 });
-it("Actions cancellation describes remote cleanup and displays each job's executor", async () => {
+it("Actions cancellation describes remote cleanup and lists each job with its state", async () => {
+  // Elapsed times are rendered from the clock; pin it so no assertion depends on today's date.
+  vi.setSystemTime(10_000);
   fetchMock.mockImplementation(async (url: string) => ({ok:true,status:200,json:async()=>url.includes('/logs?')?{items:[],next_seq:0}:{...detail(),definition_format:'github-actions',jobs:[{key:'compile',host_id:'81',state:'running',started_at:1,finished_at:0}]}}));
   await mount(new Set(['pipelines.run']));
   expect(host.textContent).toContain('取消执行');
-  expect(host.textContent).toContain('compile');
-  expect(host.textContent).toContain('81');
+  expect(host.textContent).toContain('远端任务及临时资源清理');
+  // The job list shows each job's name and state; its executor host is no longer listed (alpha.14).
+  const job = [...host.querySelectorAll("button")].find(button => button.textContent?.startsWith('compile'));
+  expect(job?.textContent).toBe('compile' + stateBadge('running').label);
   expect(host.textContent).not.toContain('命令可能继续执行');
 });
 it("keeps executable steps out of a manual gate's job view", async () => {
