@@ -75,6 +75,8 @@ try {
   await exactButton('复制命令').click();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), await current.inputValue());
   await page.reload();
+  // The command fills in after the credential request resolves, not on render.
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label="当前连接命令"]')?.value.includes('fixture-current-token'));
   assert.match(await current.inputValue(), /fixture-current-token/);
   await exactButton('重置连接').click();
   assert.equal(resets, 0);
