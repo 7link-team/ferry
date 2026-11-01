@@ -1,8 +1,8 @@
-## Actions on Windows hosts (2026-11-01, DONE locally -> commit, then release alpha.32)
-- Implemented per ADR "GitHub Actions pipelines on Windows hosts". Codex U1 (worker) reviewed + independently re-verified (19 PASS/2 SKIP, linux/darwin vet) and merged into main tree (main tree had 112 CRLF working copies with LF index — pre-existing; only rewrote the 4 files patched).
-- Real e2e on this machine: scripts/test-actions-windows.py 9 PASS (after fixing whoami shadowed by Git's Unix whoami -> full System32 paths).
-- Also fixed CI failures of bb2ae88: test-transfers derived-column exclusion (+repository_name,target_name; local 89 PASS) and test-manifest-ui race (wait for build picker to settle; 5/5 local PASS).
-- Next: commit, bump 0.1.0-alpha.32, push, dispatcher; watch runner-services Windows steps; then tell user to `--upgrade` (server) and let the runner self-update.
+## alpha.32 DELIVERED (2026-11-02)
+- Contents: Actions on Windows hosts (ADR "GitHub Actions pipelines on Windows hosts"), runner cmd quoting fix, worker masking fixes (Unicode/UTF-16), names instead of IDs, run name snapshots, two CI test fixes.
+- Release build 41320850752 all jobs Success incl. runner-services Windows job 124892999085: "Actions worker tests (Windows host mode)" + "Actions pipelines on a Windows host" success (skipped on Linux/macOS as intended). verify-release PASS (d9d3d40), image amd64+arm64 sha256:96829cb0…, feed latest v0.1.0-alpha.32. Dispatcher branch/worktree deleted.
+- Not verified directly: windows .exe workers inside the Linux server image (Dockerfile uses the build script defaults, which now include windows/*).
+- Pending on user: server `--upgrade` in /opt; local Windows runner self-updates to alpha.32, then retry their Windows Actions pipeline. Local 4291 instance still alpha.31.
 
 ## Names instead of IDs (2026-11-01, committed, not released)
 - names.rs + list/detail wiring; frontend named() helper; filters to selects; manifest editor ReferencePicker/RunPicker (workspace prop from ResourceForm). ADR "Referenced records are shown by name".
