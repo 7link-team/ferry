@@ -1,10 +1,7 @@
-## Workspace role display + enter icon (2026-11-01, committed locally, NOT pushed while alpha.30 publishes)
-- Platform list column 我的角色 + switcher role (relation owner/member/none from /platform/workspaces and /me); LogIn icon for 进入工作空间. test-platform.py 36 PASS, test-platform-ui PASS, vitest 191 PASS. Ship in alpha.31 after alpha.30.
-
-## alpha.30 in flight (2026-11-01)
-- User approved: update stale PipelineRunDetail test (done: clock pinned, asserts job name+state; vitest 191 PASS) and release alpha.30.
-- Pushed main: 609be25 (profile), test fix, 18e4efb bump 0.1.0-alpha.30. Dispatcher feat/alpha30-release-dispatch a68927d (worktree $TEMP/ferry-alpha30-dispatch), notes data/maintenance/alpha30-release-notes.txt.
-- On success: verify-release/verify-image 0.1.0-alpha.30 18e4efb2bf9226e20e3f4226fd495380753eaf5e, delete branch/worktree, docs [skip ci]; tell user `--upgrade` in /opt (HTTPS profile kept: compose.https.yaml regenerated).
+## alpha.31 DELIVERED (2026-11-01)
+- alpha.30 (18e4efb: self-service profile, stale PipelineRunDetail test fix; image sha256:8b78a529…) and alpha.31 (e8de704: workspace relation/role display + LogIn enter icon; image sha256:293860ba…) published and verified (verify-release PASS, verify-image amd64+arm64 PASS); releases feed latest = v0.1.0-alpha.31. All dispatcher branches/worktrees deleted.
+- alpha.31 needed: test-upgrade.py fix for the new /me relation field (e8de704, reproduced locally with alpha.1 old server), and a re-run of build 41299093606's failed Windows desktop smoke job (one-off spawnSync powershell ETIMEDOUT at test-desktop-windows.mjs:109; passed on re-run with identical code). Retry method: dispatcher guard allows one dispatched build per sha -> use reRunWorkflowFailedJobs on the inspected run.
+- Pending on user: `curl … quickstart.sh | sh -s -- --upgrade` in /opt (gets profile + role display + icon; HTTPS ferry.chaos.plus kept).
 
 ## Self-service profile (2026-11-01, DONE locally -> push)
 - User asked why email can't be changed: no feature existed (UserUpdate only active/superadmin; forms immutable). User chose self-service profile. ADR "Self-service profile".
