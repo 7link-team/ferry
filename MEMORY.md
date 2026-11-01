@@ -1,3 +1,8 @@
+## Compose HTTPS domains (2026-11-01, TESTING done, push to main, no release)
+- User: no FERRY_PUBLIC_URL, multi-domain, commands follow the domain, "不用发版，脚本推上去就可以". Final design = script-generated compose.https.yaml + caddy/Caddyfile (NOT in release compose files) -> works for existing alpha.29 deployments. ADR "Compose HTTPS domains through a script-generated Caddy proxy".
+- Verified: test-quickstart.sh 43 PASS (incl. Caddy restart on domain change, empty-download guard after a real curl success-without-file); docker compose v2.39.4 config PASS on published alpha.29 files (plain + https, FERRY_PUBLIC_URL compat) and new files; data/maintenance/https-e2e.py real Caddy 2.10 + ferry-server, 7 PASS. Not verified: real Let's Encrypt issuance (needs public 80/443) -> user's server with sslip.io.
+- Pushed to main (no release). Next: user runs `--domain <ip-dashed>.sslip.io` on /opt.
+
 ## alpha.29 DELIVERED (2026-11-01)
 - alpha.28 published+verified (cadec43, image sha256:88e0516f…); alpha.29 published+verified (17eea0a, build 41276596054 + dispatcher 41276337390 Success, verify-release PASS (first attempt transient error, rerun PASS), image amd64+arm64 sha256:32e35354…). Releases feed resolves v0.1.0-alpha.29; main quickstart.sh has --upgrade. Both dispatcher branches/worktrees deleted.
 - Contents: NATS URL credentials fix (ad885ac) + quickstart --upgrade (9e70065).

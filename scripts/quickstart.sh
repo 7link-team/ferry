@@ -1,11 +1,12 @@
 #!/bin/sh
 # One-command single-host Docker Compose deployment:
 #   curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
-#   curl -fsSL .../quickstart.sh | sh -s -- --database mysql --public-url https://ops.example.com
+#   curl -fsSL .../quickstart.sh | sh -s -- --domain ops.example.com --domain ops.example.org
 #   curl -fsSL .../quickstart.sh | sh -s -- --upgrade
 # Creates (or reuses) a deployment directory with the released Compose files of
 # one version and random credentials, then starts the stack and prints the
-# first-time setup token. Re-running reuses every secret and address.
+# first-time setup token. Re-running reuses every secret; access options given
+# again (--domain, --allow-host, --bind, --port) replace the recorded ones.
 # --upgrade backs up the database and configuration, then moves an existing
 # deployment to a newer release while keeping every secret and address.
 set -eu
@@ -13,14 +14,17 @@ set -eu
 # Everything runs from main, invoked on the last line: when piped from curl, a
 # truncated download defines nothing runnable instead of executing part of it.
 main() {
+# Option values are split on spaces below, never glob-expanded.
+set -f
 repository=${FERRY_REPOSITORY:-7link-team/ferry}
 image_repository=${FERRY_IMAGE_REPOSITORY:-ghcr.io/7link-team/ferry-server}
 version=
-database=postgres
-public_url=
-bind=127.0.0.1
-port=4290
-redis=1
+database=
+domains=
+hosts=
+bind=
+port=
+redis=
 init_only=
 upgrade=
 configured=
@@ -33,26 +37,34 @@ Usage: quickstart.sh [options]
   --dir DIR             Deployment directory (default: ./ferry)
   --version vX.Y.Z      Release to deploy (default: latest published release)
   --database NAME       postgres (default) or mysql; fixed at first start
-  --public-url URL      Externally reachable HTTP(S) origin (default: http://localhost:PORT)
-  --bind ADDRESS        Published listener address (default: 127.0.0.1; 0.0.0.0 for LAN)
-  --port PORT           Published port (default: 4290)
+  --domain NAME         Serve HTTPS on NAME with an automatic, auto-renewed certificate;
+                        repeat for several domains (needs DNS to this host and ports 80/443)
+  --allow-host NAME     Allow plain-HTTP access by NAME or IP, e.g. a LAN address with
+                        --bind 0.0.0.0; repeatable; cannot be combined with --domain
+  --bind ADDRESS        Published Ferry listener address (default: 127.0.0.1)
+  --port PORT           Published Ferry port (default: 4290)
   --without-redis       Do not start the optional Redis service
   --init-only           Create configuration without running Docker
   --upgrade             Back up, then upgrade an existing deployment to the latest
                         release (or --version); secrets and addresses are kept
+On an existing deployment, --domain/--allow-host replace the access names and
+--bind/--port replace the listener; secrets are never changed.
 USAGE
 }
 
 value() { [ "$#" -ge 2 ] && [ -n "$2" ] || fail "missing value for $1"; }
+# Names are collected into space-separated lists, so allow only name characters.
+name() { value "$@"; case "$2" in *[!A-Za-z0-9.:-]*) fail "$1 must be a bare host name (got $2)" ;; esac; }
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --dir) value "$@"; directory=$2; shift 2 ;;
         --version) value "$@"; version=$2; shift 2 ;;
         --database) value "$@"; database=$2; configured=$1; shift 2 ;;
-        --public-url) value "$@"; public_url=$2; configured=$1; shift 2 ;;
+        --domain) name "$@"; domains="$domains $(printf '%s' "$2" | tr 'A-Z' 'a-z')"; configured=$1; shift 2 ;;
+        --allow-host) name "$@"; hosts="$hosts $(printf '%s' "$2" | tr 'A-Z' 'a-z')"; configured=$1; shift 2 ;;
         --bind) value "$@"; bind=$2; configured=$1; shift 2 ;;
         --port) value "$@"; port=$2; configured=$1; shift 2 ;;
-        --without-redis) redis=; configured=$1; shift ;;
+        --without-redis) redis=false; configured=$1; shift ;;
         --init-only) init_only=1; configured=$1; shift ;;
         --upgrade) upgrade=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -60,15 +72,24 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-case "$database" in postgres|mysql) ;; *) fail "--database must be postgres or mysql" ;; esac
-case "$port" in ''|*[!0-9]*) fail "--port must be a number" ;; esac
-[ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "--port must be between 1 and 65535"
-[ -n "$public_url" ] || public_url="http://localhost:$port"
-public_url=${public_url%/}
-# An HTTP(S) origin only: host or [IPv6], optional port; no credentials, path, query or fragment.
-printf '%s\n' "$public_url" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$' \
-    || fail "--public-url must be an HTTP(S) origin without credentials, path, query or fragment"
-printf '%s\n' "$bind" | grep -Eq '^[0-9A-Fa-f:.]+$' || fail "--bind must be an IP address"
+case "$database" in ''|postgres|mysql) ;; *) fail "--database must be postgres or mysql" ;; esac
+if [ -n "$port" ]; then
+    case "$port" in *[!0-9]*) fail "--port must be a number" ;; esac
+    [ "${#port}" -le 5 ] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "--port must be between 1 and 65535"
+fi
+[ -z "$bind" ] || printf '%s\n' "$bind" | grep -Eq '^[0-9A-Fa-f:.]+$' || fail "--bind must be an IP address"
+label='[a-z0-9]([a-z0-9-]*[a-z0-9])?'
+for name in $domains; do
+    # A DNS name with a letter-led top-level label: certificates are issued for names, not IPs.
+    printf '%s\n' "$name" | grep -Eq "^($label\.)+[a-z]([a-z0-9-]*[a-z0-9])?\$" \
+        || fail "--domain must be a domain name such as ops.example.com (got $name)"
+done
+for name in $hosts; do
+    printf '%s\n' "$name" | grep -Eq "^($label\.)*$label\$|^[0-9a-f]*:[0-9a-f:.]*\$" \
+        || fail "--allow-host must be a host name or IP address without scheme or port (got $name)"
+done
+[ -z "$domains" ] || [ -z "$hosts" ] \
+    || fail "--domain and --allow-host cannot be combined: HTTPS sign-in cookies are not sent over plain HTTP"
 case "$version" in ''|v[0-9]*) ;; *) fail "--version must look like v0.1.0" ;; esac
 case "$version" in *[!A-Za-z0-9.+-]*) fail "--version contains unsupported characters" ;; esac
 case "$repository$image_repository" in *[!A-Za-z0-9._/:-]*) fail "unsupported repository name" ;; esac
@@ -101,9 +122,12 @@ download() { # DIRECTORY FILE...: each file of $version into DIRECTORY, or fail
     target=$1; shift
     for file in "$@"; do
         printf 'Downloading %s (%s)...\n' "$file" "$version"
-        fetch "https://raw.githubusercontent.com/$repository/$version/$file" "$target/$file.download" \
+        # Callers use `|| download`, where set -e is off: check every step.
+        # curl can report success without writing a file for an empty reply.
+        { fetch "https://raw.githubusercontent.com/$repository/$version/$file" "$target/$file.download" \
+            && [ -s "$target/$file.download" ] \
+            && mv "$target/$file.download" "$target/$file"; } \
             || { rm -f "$target/$file.download"; fail "cannot download $file for $version"; }
-        mv "$target/$file.download" "$target/$file"
     done
 }
 # Succeeds when release $1 is newer than $2 by semantic versioning, so
@@ -143,14 +167,112 @@ umask 077
 env_file=.env.production
 files="compose.production.yaml compose.postgres.yaml compose.mysql.yaml scripts/postgres-init.sh"
 
+env_get() { sed -n "s/^$1=//p" "$env_file" | head -n 1; }
+env_set() { # KEY VALUE: replace or append one line, keeping everything else
+    if grep -q "^$1=" "$env_file"; then
+        awk -v key="$1" -v value="$2" 'index($0, key "=") == 1 { print key "=" value; next } { print }' "$env_file" > "$env_file.new"
+    else
+        { cat "$env_file"; printf '%s=%s\n' "$1" "$2"; } > "$env_file.new"
+    fi
+    mv "$env_file.new" "$env_file"
+}
+# Sets $compose for this deployment: its database, and the Redis and HTTPS
+# services exactly as configured.
+compose_for() {
+    compose="docker compose --env-file $env_file -f compose.production.yaml -f compose.$(env_get FERRY_DATABASE_ENGINE).yaml"
+    use_redis=$(env_get FERRY_REDIS)
+    if [ -z "$use_redis" ]; then
+        # Deployments created before FERRY_REDIS: keep Redis when its container exists.
+        use_redis=false
+        [ -z "$($compose --profile redis ps -a -q redis 2>/dev/null)" ] || use_redis=true
+    fi
+    [ "$use_redis" != true ] || compose="$compose --profile redis"
+    [ ! -f compose.https.yaml ] || compose="$compose -f compose.https.yaml"
+}
+addresses() {
+    names=$(env_get FERRY_DOMAINS | tr -d ',')
+    if [ -n "$names" ]; then
+        for name in $names; do printf '  https://%s\n' "$name"; done
+    else
+        for name in $(env_get FERRY_ALLOWED_HOSTS | tr ',' ' '); do
+            case "$name" in localhost|127.0.0.1) ;; *:*) printf '  http://[%s]:%s\n' "$name" "$(env_get FERRY_PORT)" ;; *) printf '  http://%s:%s\n' "$name" "$(env_get FERRY_PORT)" ;; esac
+        done
+        printf '  http://localhost:%s (from this machine)\n' "$(env_get FERRY_PORT)"
+    fi
+}
+# The HTTPS proxy is generated here instead of shipped with a release: it does
+# not depend on the Ferry version, so every deployment can use it right away.
+https_files() {
+    sites=$(env_get FERRY_DOMAINS)
+    if [ -z "$sites" ]; then
+        if [ -f compose.https.yaml ] && [ -z "$init_only" ] && command -v docker >/dev/null 2>&1; then
+            compose_for
+            $compose rm -s -f caddy >/dev/null 2>&1 \
+                || printf 'Warning: could not stop the HTTPS proxy; run: %s rm -s -f caddy\n' "$compose" >&2
+        fi
+        rm -f compose.https.yaml caddy/Caddyfile
+        return 0
+    fi
+    mkdir -p caddy
+    {
+        printf '# Generated by scripts/quickstart.sh from FERRY_DOMAINS; rerun it with --domain instead of editing.\n'
+        printf '# Caddy obtains and renews a certificate per domain and redirects HTTP to HTTPS.\n'
+        printf '%s {\n\treverse_proxy ferry:4290\n}\n' "$sites"
+    } > caddy/Caddyfile.new
+    # Caddy reads its configuration at start only: a changed site list on a
+    # running proxy needs a restart (written in place to keep the bind mount).
+    if [ -f caddy/Caddyfile ] && ! cmp -s caddy/Caddyfile.new caddy/Caddyfile; then sites_changed=1; fi
+    cat caddy/Caddyfile.new > caddy/Caddyfile
+    rm -f caddy/Caddyfile.new
+    cat > compose.https.yaml.new <<'YAML'
+# Generated by scripts/quickstart.sh for FERRY_DOMAINS; rerun it instead of editing.
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.10-alpine}
+    restart: unless-stopped
+    init: true
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [egress]
+    depends_on:
+      ferry: { condition: service_healthy }
+volumes:
+  caddy-data:
+  caddy-config:
+YAML
+    mv compose.https.yaml.new compose.https.yaml
+}
+# Ferry never reads FERRY_PUBLIC_URL; Compose files of earlier releases still
+# require it to be set, so keep it only for those.
+public_url_compat() {
+    if grep -q 'FERRY_PUBLIC_URL' compose.production.yaml; then
+        first=$(env_get FERRY_DOMAINS | cut -d, -f1)
+        if [ -n "$first" ]; then env_set FERRY_PUBLIC_URL "https://$first"
+        else env_set FERRY_PUBLIC_URL "http://localhost:$(env_get FERRY_PORT)"; fi
+    elif grep -q '^FERRY_PUBLIC_URL=' "$env_file"; then
+        grep -v '^FERRY_PUBLIC_URL=' "$env_file" > "$env_file.new"; mv "$env_file.new" "$env_file"
+    fi
+}
+setup_token() {
+    printf 'First-time setup token (only present before initialization):\n'
+    $compose exec -T ferry sh -c 'if [ -f /data/setup-token ]; then cat /data/setup-token; else echo "Already initialized."; fi'
+}
+
 if [ -n "$upgrade" ]; then
     [ -z "$configured" ] || fail "--upgrade keeps the existing configuration and only accepts --dir and --version (got $configured)"
     [ -f "$directory/$env_file" ] || fail "no deployment in $directory; run without --upgrade to create one"
     cd "$directory"
-    current_image=$(sed -n 's/^FERRY_IMAGE=//p' "$env_file" | head -n 1)
+    current_image=$(env_get FERRY_IMAGE)
     current=${current_image##*:}
     image=${current_image%:*}
-    database=$(sed -n 's/^FERRY_DATABASE_ENGINE=//p' "$env_file" | head -n 1)
+    database=$(env_get FERRY_DATABASE_ENGINE)
     case "$current_image" in *@*|*[!A-Za-z0-9._/:+-]*) fail "FERRY_IMAGE ($current_image) is not a release tag; set it to $image_repository:vX.Y.Z or upgrade manually" ;; esac
     case "$current" in v[0-9]*) ;; *) fail "cannot read the deployed release from FERRY_IMAGE ($current_image)" ;; esac
     case "$database" in postgres|mysql) ;; *) fail "FERRY_DATABASE_ENGINE in $env_file must be postgres or mysql" ;; esac
@@ -162,47 +284,53 @@ if [ -n "$upgrade" ]; then
     newer "$version" "$current" \
         || fail "$version is older than the deployed $current; downgrades are refused because database migrations only move forward"
     require_docker
-    set -- docker compose --env-file "$env_file" -f compose.production.yaml -f "compose.$database.yaml"
-    # Keep Redis as deployed: enabled when its container exists.
-    if [ -n "$("$@" --profile redis ps -a -q redis 2>/dev/null)" ]; then set -- "$@" --profile redis; fi
+    compose_for
+    release="$files"
 
     backup=backups/$(date -u +%Y%m%dT%H%M%SZ)-$current-to-$version
     mkdir -p "$backup/scripts"
     printf 'Backing up the %s database to %s/%s/database.sql...\n' "$database" "$(pwd)" "$backup"
     if [ "$database" = postgres ]; then
-        dump() { "$@" exec -T postgres pg_dump -U postgres -d ferry --clean --if-exists; }
+        dump() { $compose exec -T postgres pg_dump -U postgres -d ferry --clean --if-exists; }
         load='exec -T postgres psql -U postgres -d ferry -v ON_ERROR_STOP=1'
     else
-        dump() { "$@" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --routines --triggers --databases ferry'; }
+        dump() { $compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --routines --triggers --databases ferry'; }
         load="exec -T mysql sh -c 'MYSQL_PWD=\"\$MYSQL_ROOT_PASSWORD\" exec mysql -uroot'"
     fi
-    if ! dump "$@" > "$backup/database.sql" || [ ! -s "$backup/database.sql" ]; then
-        fail "database backup failed, nothing was changed; the $database service must be running ($* up -d)"
+    if ! dump > "$backup/database.sql" || [ ! -s "$backup/database.sql" ]; then
+        fail "database backup failed, nothing was changed; the $database service must be running ($compose up -d)"
     fi
-    for file in "$env_file" $files; do cp -p "$file" "$backup/$file"; done
-    restore() { for file in "$env_file" $files; do cp -p "$backup/$file" "$file"; done; }
+    saved=
+    for file in "$env_file" $release; do
+        if [ -f "$file" ]; then cp -p "$file" "$backup/$file"; saved="$saved $file"; fi
+    done
+    restore() { for file in $saved; do cp -p "$backup/$file" "$file"; done; }
 
     # Stage the whole release before touching the deployment.
     rm -rf .upgrade
     mkdir -p .upgrade/scripts
-    download .upgrade $files
+    download .upgrade $release
     sed "s#^FERRY_IMAGE=.*#FERRY_IMAGE=$image:$version#" "$env_file" > ".upgrade/$env_file"
-    for file in $files "$env_file"; do mv ".upgrade/$file" "$file"; done
+    for file in $release "$env_file"; do mv ".upgrade/$file" "$file"; done
     rm -rf .upgrade
     chmod 755 scripts/postgres-init.sh
+    public_url_compat
+    https_files
 
-    "$@" config --quiet \
+    $compose config --quiet \
         || { restore; fail "the $version configuration is invalid for this deployment; previous files restored, services untouched"; }
-    "$@" pull \
+    $compose pull \
         || { restore; fail "cannot pull the $version images; previous files restored, services untouched"; }
-    if ! "$@" up -d --wait --wait-timeout 300; then
-        printf 'Quickstart failed: %s did not become healthy; inspect it with: %s logs ferry\n' "$version" "$*" >&2
+    if ! $compose up -d --wait --wait-timeout 300; then
+        printf 'Quickstart failed: %s did not become healthy; inspect it with: %s logs ferry\n' "$version" "$compose" >&2
         printf 'To return to %s, run in %s:\n' "$current" "$(pwd)" >&2
         printf '  cp -p %s/%s %s/compose.*.yaml . && cp -p %s/scripts/postgres-init.sh scripts/\n' "$backup" "$env_file" "$backup" "$backup" >&2
-        printf '  %s stop ferry\n  %s %s < %s/database.sql\n  %s up -d --wait\n' "$*" "$*" "$load" "$backup" "$*" >&2
+        printf '  %s stop ferry\n  %s %s < %s/database.sql\n  %s up -d --wait\n' "$compose" "$compose" "$load" "$backup" "$compose" >&2
         exit 1
     fi
-    printf 'Upgraded from %s to %s. Backup kept in %s/%s.\n' "$current" "$version" "$(pwd)" "$backup"
+    printf 'Upgraded from %s to %s. Backup kept in %s/%s.\nOpen Ferry at:\n' "$current" "$version" "$(pwd)" "$backup"
+    addresses
+    setup_token
     exit 0
 fi
 
@@ -210,9 +338,12 @@ mkdir -p "$directory/scripts"
 cd "$directory"
 
 if [ -f "$env_file" ]; then
-    grep -qx "FERRY_DATABASE_ENGINE=$database" "$env_file" \
-        || fail "this deployment uses another database; switching requires a separate directory and a data migration"
+    deployed=$(env_get FERRY_DATABASE_ENGINE)
+    [ -z "$database" ] || [ "$database" = "$deployed" ] \
+        || fail "this deployment uses $deployed; switching databases requires a separate directory and a data migration"
+    database=$deployed
 fi
+[ -n "$database" ] || database=postgres
 
 missing=
 for file in $files; do [ -f "$file" ] || missing=1; done
@@ -226,43 +357,56 @@ if [ -n "$missing" ] || [ ! -f "$env_file" ]; then
 fi
 
 if [ ! -f "$env_file" ]; then
-    host=${public_url#*://}
-    case "$host" in
-        \[*) host=${host%%]*}; host=${host#?} ;; # [IPv6]:port -> IPv6
-        *:*) host=${host%:*} ;;
-    esac
-    secure=false
-    case "$public_url" in https://*) secure=true ;; esac
     # Hex secrets are safe inside SQL and NATS URLs without encoding.
     {
         printf '# Keep this file and the data volumes together. Never regenerate the master key.\n'
         printf 'FERRY_DATABASE_ENGINE=%s\n' "$database"
         printf 'COMPOSE_PROJECT_NAME=ferry\n'
         printf 'FERRY_IMAGE=%s:%s\n' "$image_repository" "$version"
-        printf 'FERRY_PUBLIC_URL=%s\n' "$public_url"
-        printf 'FERRY_ALLOWED_HOSTS=%s,localhost,127.0.0.1\n' "$host"
-        printf 'FERRY_SECURE_COOKIE=%s\n' "$secure"
-        printf 'FERRY_BIND_ADDRESS=%s\n' "$bind"
-        printf 'FERRY_PORT=%s\n' "$port"
+        printf 'FERRY_DOMAINS=\n'
+        printf 'FERRY_ALLOWED_HOSTS=localhost,127.0.0.1\n'
+        printf 'FERRY_SECURE_COOKIE=false\n'
+        printf 'FERRY_BIND_ADDRESS=127.0.0.1\n'
+        printf 'FERRY_PORT=4290\n'
+        printf 'FERRY_REDIS=%s\n' "${redis:-true}"
         for key in FERRY_MASTER_KEY DATABASE_PASSWORD POSTGRES_ROOT_PASSWORD MYSQL_ROOT_PASSWORD NATS_PASSWORD REDIS_PASSWORD; do
             printf '%s=%s\n' "$key" "$(random)"
         done
     } > "$env_file.new"
     mv "$env_file.new" "$env_file"
     printf 'Created %s/%s with random credentials. Back up this file securely.\n' "$(pwd)" "$env_file"
+elif [ -n "$domains$hosts$bind$port$redis" ]; then
+    printf 'Updating access settings in %s/%s; secrets are unchanged.\n' "$(pwd)" "$env_file"
 else
-    printf 'Reusing %s/%s unchanged; edit it to change addresses or the image version.\n' "$(pwd)" "$env_file"
+    printf 'Reusing %s/%s unchanged.\n' "$(pwd)" "$env_file"
 fi
+
+# Requested access settings replace the recorded ones; secrets never change.
+if [ -n "$domains$hosts" ]; then
+    names=$(printf '%s\n' $domains $hosts | awk '!seen[$0]++' | tr '\n' ',')
+    env_set FERRY_DOMAINS "$(printf '%s\n' $domains | awk '!seen[$0]++' | sed 's/$/, /' | tr -d '\n' | sed 's/, $//')"
+    env_set FERRY_ALLOWED_HOSTS "${names}localhost,127.0.0.1"
+    if [ -n "$domains" ]; then env_set FERRY_SECURE_COOKIE true; else env_set FERRY_SECURE_COOKIE false; fi
+fi
+[ -z "$bind" ] || env_set FERRY_BIND_ADDRESS "$bind"
+[ -z "$port" ] || env_set FERRY_PORT "$port"
+[ -z "$redis" ] || env_set FERRY_REDIS "$redis"
+public_url_compat
+https_files
 
 [ -z "$init_only" ] || exit 0
 require_docker
-set -- docker compose --env-file "$env_file" -f compose.production.yaml -f "compose.$database.yaml"
-[ -z "$redis" ] || set -- "$@" --profile redis
-"$@" config --quiet
-"$@" up -d --wait --wait-timeout 300
-printf 'Stack is healthy. Open the FERRY_PUBLIC_URL from %s/%s.\n' "$(pwd)" "$env_file"
-printf 'First-time setup token (only present before initialization):\n'
-"$@" exec -T ferry sh -c 'if [ -f /data/setup-token ]; then cat /data/setup-token; else echo "Already initialized."; fi'
+compose_for
+$compose config --quiet
+$compose up -d --wait --wait-timeout 300
+[ -z "${sites_changed:-}" ] || $compose restart caddy
+printf 'Stack is healthy. Open Ferry at:\n'
+addresses
+if [ -n "$(env_get FERRY_DOMAINS)" ]; then
+    printf 'Certificates are issued on first visit and renewed automatically. Each domain must resolve to this\n'
+    printf 'server and ports 80 and 443 must be reachable; on errors run: %s logs caddy\n' "$compose"
+fi
+setup_token
 }
 
 main "$@"

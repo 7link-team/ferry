@@ -14,23 +14,46 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --database mysql
 ```
 
-数据库二选一，不会同时启动两套业务数据库。已生成配置后，在同一位置重复执行会复用原密钥、地址和版本，不再联网；切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。`--version v0.1.0-alpha.27` 可指定版本，`--dir 路径` 可指定部署目录。版本固定为一个已发布版本，不会隐式跟随 `latest`。
+数据库二选一，不会同时启动两套业务数据库。已生成配置后，在同一位置重复执行会复用原密钥和版本，不再联网；重新传入的访问参数（`--domain`、`--allow-host`、`--bind`、`--port`）会替换原有设置，密钥不变。切换数据库会拒绝执行，需要独立部署目录及显式数据迁移。`--version v0.1.0-alpha.29` 可指定版本，`--dir 路径` 可指定部署目录。版本固定为一个已发布版本，不会隐式跟随 `latest`。
 
-## 公网、局域网与 HTTPS
+## 域名与 HTTPS（自动证书）
 
-默认仅绑定本机回环地址。局域网示例（换成服务器实际 IP）：
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --public-url http://192.168.0.10:4290 --bind 0.0.0.0
-```
-
-公网示例（由现有 HTTPS 反向代理转发到本机 4290）：
+为一个或多个域名开启 HTTPS：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --public-url https://ops.example.com
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --domain ops.example.com
+# 多个域名，重复 --domain
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --domain ops.example.com --domain ops.example.org
 ```
 
-HTTPS 地址会开启安全 Cookie；代理必须保留 Host、支持 WebSocket Upgrade，并设置足够的终端会话空闲超时。主机上的 Runner 必须能访问所填公共地址。已有部署要改地址或端口，请编辑部署目录中的 `.env.production` 后重新执行启动命令；重新传入参数不会覆盖该文件。升级版本见下文「一键升级」。
+- **证书**：脚本在部署目录生成 `compose.https.yaml` 和 `caddy/Caddyfile`，启动 Caddy 作为 HTTPS 入口。Caddy 为每个域名自动申请 Let's Encrypt 证书，到期前自动续期，并把 HTTP 自动跳转到 HTTPS。证书保存在 `caddy-data` 数据卷中，重启不会重新申请。
+- **前提**：
+  - 每个域名都已解析（A/AAAA 记录）到这台服务器；
+  - 云安全组或防火墙放行 80 和 443 端口；
+  - 本机没有其他程序占用 80 和 443 端口。
+
+  证书验证不需要手动配置 DNS。
+- **访问**：Ferry 本身仍只监听 `127.0.0.1:4290`，外部只能通过 HTTPS 访问。
+- **按访问域名生成命令**：从哪个域名打开 Ferry，Runner 安装命令和节点连接命令就显示哪个域名。
+- **不在列表内的域名**：Ferry 拒绝访问。
+- **已有部署加域名、换域名**：直接用新的完整域名列表重新执行上述命令。不需要先升级，也适用于更早版本的部署。
+- **还没有域名时**：可以用 [sslip.io](https://sslip.io) 测试。它把 IP 写进域名即可解析，例如服务器 IP 为 `203.0.113.10` 时，使用 `--domain 203-0-113-10.sslip.io`。sslip.io 是第三方公共服务，正式使用请换成自己的域名。
+- **排查证书问题**：查看 Caddy 日志，`docker compose ... -f compose.https.yaml logs caddy`。
+
+## 局域网 HTTP
+
+不使用 HTTPS 时，Ferry 默认只允许本机访问。允许局域网通过 IP 访问（换成服务器实际 IP）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --allow-host 192.168.0.10 --bind 0.0.0.0
+```
+
+`--allow-host` 可重复使用，但不能与 `--domain` 同时使用：开启 HTTPS 后登录 Cookie 只通过 HTTPS 发送。从 HTTPS 切换到 `--allow-host` 时，脚本会停止并移除 Caddy。
+
+如果改用自己的反向代理，代理需要满足：
+- 保留 Host 头；
+- 支持 WebSocket Upgrade；
+- 设置足够长的终端会话空闲超时。
 
 ## 配置与维护
 

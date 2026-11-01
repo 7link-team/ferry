@@ -118,7 +118,7 @@ docker compose up -d --build               # 或本地构建
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
 ```
 
-启动最新发布版本的 Ferry + PostgreSQL + NATS JetStream + Redis；传入参数用 `sh -s --`，例如 `… | sh -s -- --database mysql` 改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。已有部署用 `… | sh -s -- --upgrade` 一键升级到最新版本：先备份数据库和配置，拒绝降级，失败时还原文件。
+启动最新发布版本的 Ferry + PostgreSQL + NATS JetStream + Redis；传入参数用 `sh -s --`，例如 `… | sh -s -- --database mysql` 改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。已有部署用 `… | sh -s -- --upgrade` 一键升级到最新版本：先备份数据库和配置，拒绝降级，失败时还原文件。`… | sh -s -- --domain ops.example.com`（可重复）通过 Caddy 开启 HTTPS，自动申请并续期证书；从哪个域名访问，安装命令就显示哪个域名。
 
 部署地址、HTTPS、备份、升级、Redis 当前用途及单机/高可用边界见 [Compose 快速部署](docs/compose-quickstart.md)。
 
