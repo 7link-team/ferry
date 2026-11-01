@@ -303,4 +303,4 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Operators: webhook mode uses the platform's pusher/merger/deleter. Polling cannot know who acted: pushes/new branches show the newest commit's author, new PRs the author, merges the merger — each labelled as inferred; deletions and other unknown operators stay empty with an explicit note recommending event push.
 - Polling fetches branch commits (one page of 50) outside the workspace lock; failures add a note and never fail the poll.
 - Retention (user suggestion): workspace setting `repository_event_retention_days` (0 = permanent, default 0, preserving the existing "history kept unless an administrator sets retention" policy); pruned every 10 minutes in batches with an audit record.
-- Status: implemented locally, to ship in alpha.27.
+- Status: released in v0.1.0-alpha.27 (fe24f95).
