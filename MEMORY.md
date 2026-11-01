@@ -5,7 +5,7 @@
 ## alpha.31 DELIVERED (2026-11-01)
 - alpha.30 (18e4efb: self-service profile, stale PipelineRunDetail test fix; image sha256:8b78a529…) and alpha.31 (e8de704: workspace relation/role display + LogIn enter icon; image sha256:293860ba…) published and verified (verify-release PASS, verify-image amd64+arm64 PASS); releases feed latest = v0.1.0-alpha.31. All dispatcher branches/worktrees deleted.
 - alpha.31 needed: test-upgrade.py fix for the new /me relation field (e8de704, reproduced locally with alpha.1 old server), and a re-run of build 41299093606's failed Windows desktop smoke job (one-off spawnSync powershell ETIMEDOUT at test-desktop-windows.mjs:109; passed on re-run with identical code). Retry method: dispatcher guard allows one dispatched build per sha -> use reRunWorkflowFailedJobs on the inspected run.
-- Pending on user: `curl … quickstart.sh | sh -s -- --upgrade` in /opt (gets profile + role display + icon; HTTPS ferry.chaos.plus kept).
+- User's server /opt upgraded to alpha.31 (verified externally: /api/status 0.1.0-alpha.31, same instance_id 4017abc3…, /api/profile/1 401 unauthenticated, /account 200, HTTP 308, LE cert to 2027-01-30). /root/ferry mistaken deployment: user told to rm -rf after confirming login.
 
 ## Self-service profile (2026-11-01, DONE locally -> push)
 - User asked why email can't be changed: no feature existed (UserUpdate only active/superadmin; forms immutable). User chose self-service profile. ADR "Self-service profile".
