@@ -296,10 +296,16 @@ jobs:
           export NATS_TEST_URL=nats://127.0.0.1:14229
           "$NATS_SERVER_BINARY" -js -a 127.0.0.1 -p 14229 -sd "$RUNNER_TEMP/nats-unit" > "$RUNNER_TEMP/nats-unit.log" 2>&1 &
           broker=$!
-          trap 'kill "$broker" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 50); do
-            if (echo > /dev/tcp/127.0.0.1/14229) 2>/dev/null; then break; fi
-            sleep 0.1
+          # Password-protected like the Compose deployment.
+          export NATS_TEST_AUTH_URL=nats://ferry:0123abcd@127.0.0.1:14230
+          "$NATS_SERVER_BINARY" -js -a 127.0.0.1 -p 14230 -sd "$RUNNER_TEMP/nats-auth" --user ferry --pass 0123abcd > "$RUNNER_TEMP/nats-auth.log" 2>&1 &
+          auth_broker=$!
+          trap 'kill "$broker" "$auth_broker" 2>/dev/null || true' EXIT
+          for port in 14229 14230; do
+            for attempt in $(seq 1 50); do
+              if (echo > /dev/tcp/127.0.0.1/$port) 2>/dev/null; then break; fi
+              sleep 0.1
+            done
           done
           cargo test --locked -p ferry-server cluster::tests -- --include-ignored
           cargo test --locked -p ferry-server cluster_update_recovery -- --include-ignored

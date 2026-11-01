@@ -388,11 +388,29 @@ impl Cluster {
             [1, 3, 5].contains(&replicas),
             "NATS replicas must be 1, 3 or 5"
         );
-        let client = async_nats::ConnectOptions::new()
+        // async-nats ignores credentials embedded in the URL, so pass them
+        // explicitly: user:password, or a lone user as a token.
+        let addr: async_nats::ServerAddr = url
+            .parse()
+            .map_err(|_| anyhow::anyhow!("cluster NATS URL is invalid"))?;
+        let decode = |part: &str| {
+            percent_encoding::percent_decode_str(part)
+                .decode_utf8_lossy()
+                .into_owned()
+        };
+        let options = match (addr.username(), addr.password()) {
+            (Some(user), Some(password)) => {
+                async_nats::ConnectOptions::with_user_and_password(decode(user), decode(password))
+            }
+            (Some(token), None) => async_nats::ConnectOptions::with_token(decode(token)),
+            _ => async_nats::ConnectOptions::new(),
+        };
+        // The error kind never contains the URL or its credentials.
+        let client = options
             .request_timeout(Some(IO_TIMEOUT))
-            .connect(url)
+            .connect(addr)
             .await
-            .map_err(|_| anyhow::anyhow!("cannot connect to cluster NATS"))?;
+            .map_err(|e| anyhow::anyhow!("cannot connect to cluster NATS: {}", e.kind()))?;
         let js = jetstream::new(client.clone());
         let mut stores = Vec::new();
         for suffix in ["owners", "sessions", "coordination"] {
@@ -1040,6 +1058,30 @@ mod tests {
         assert!(append_packet(&mut Vec::new(), &expired).is_err());
         assert!(encode(Message::Binary(vec![0; MAX_MESSAGE].into())).is_err());
         assert!(decode(&[0, 255]).is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires NATS_TEST_AUTH_URL: nats://USER:PASSWORD@... of a JetStream server with that user"]
+    async fn connects_with_credentials_in_the_url() {
+        let url = std::env::var("NATS_TEST_AUTH_URL").expect("authenticated NATS URL");
+        let (_dir, db) = crate::lock::tests::database().await;
+        let prefix = format!("test_{}", uuid::Uuid::new_v4().simple());
+        Cluster::connect(&url, &prefix, 1, db.clone())
+            .await
+            .expect("credentials from the URL are sent");
+        let addr: async_nats::ServerAddr = url.parse().unwrap();
+        let password = addr.password().expect("URL has a password");
+        let wrong = url.replacen(&format!(":{password}@"), ":wrong@", 1);
+        let error = Cluster::connect(&wrong, &prefix, 1, db)
+            .await
+            .err()
+            .expect("a wrong password is rejected")
+            .to_string();
+        assert!(error.contains("authorization violation"), "{error}");
+        assert!(
+            !error.contains("wrong"),
+            "the error never echoes the URL: {error}"
+        );
     }
 
     #[tokio::test]

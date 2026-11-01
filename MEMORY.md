@@ -1,3 +1,8 @@
+## Compose NATS auth bug (2026-11-01, committed locally, NOT pushed)
+- User's real Compose run (alpha.27): ferry container restarts with "cannot connect to cluster NATS". ROOT CAUSE: async-nats 0.51 ignores user:password in the URL (connector uses only options.auth); Compose NATS requires --user/--pass; all cluster tests used an unauthenticated broker. Affects alpha.27 AND in-flight alpha.28 Compose deployments.
+- Fix cluster.rs Cluster::connect: parse ServerAddr, percent-decode, with_user_and_password / with_token; error now includes kind (never the URL). New ignored test connects_with_credentials_in_the_url (NATS_TEST_AUTH_URL); CI build.yml starts a second password broker on 14230. Local: reproduced FAIL, then PASS; cluster::tests 3 PASS, cluster_update_recovery PASS; real binary vs password NATS -> /api/status 200, wrong password -> "authorization violation".
+- Plan: after alpha.28 publishes, push both local commits and release alpha.29 (fix + --upgrade); user upgrades with quickstart --upgrade.
+
 ## Compose quickstart --upgrade (2026-11-01, committed locally, NOT pushed)
 - scripts/quickstart.sh --upgrade + 12 new stub checks (30 PASS under Git sh); docs/compose-quickstart.md 「一键升级」, README line. ADR "Compose quickstart one-command upgrade".
 - Must NOT push to main until alpha.28 publishes: dispatcher refuses publication if main moves. After alpha.28 verified: push via SSH (script is served from main, so it is live immediately); ship notes in alpha.29.
