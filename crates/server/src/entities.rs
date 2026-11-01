@@ -367,6 +367,10 @@ pub mod pipeline_runs {
         pub environment_id: i64,
         pub environment_name: String,
         pub host_id: i64,
+        /// Names when the run started; "" for runs recorded before snapshots.
+        pub pipeline_name: String,
+        pub host_name: String,
+        pub triggered_by_name: String,
         pub number: i64,
         pub state: String,
         pub trigger_kind: String,

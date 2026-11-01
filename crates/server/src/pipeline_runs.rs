@@ -75,6 +75,7 @@ fn run_json(r: &runs::Model) -> Value {
         "number":r.number,"state":r.state,"trigger_kind":r.trigger_kind,
         "definition_format":if crate::actions::snapshot(&r.definition).is_some(){"github-actions"}else{"legacy"},
         "triggered_by":Id::from(r.triggered_by),"branch":r.branch,"commit":r.commit,
+        "pipeline_name":r.pipeline_name,"host_name":r.host_name,"triggered_by_name":r.triggered_by_name,
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
 async fn scoped(s: &AppState, scope: &Scope, id: &str) -> Result<runs::Model> {
@@ -358,16 +359,27 @@ pub async fn trigger(
             )?,
         )
     };
+    let host_id = actions
+        .as_ref()
+        .and_then(|snapshot| snapshot.jobs.first())
+        .map(|job| job.host_id)
+        .or_else(|| host.as_ref().map(|row| row.id))
+        .ok_or_else(|| ApiError::bad("流水线缺少执行主机。"))?;
+    // Names as they are now, so history keeps them after a rename or delete.
+    let host_name = crate::entities::hosts::Entity::find_by_id(host_id)
+        .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&tx)
+        .await?
+        .map(|row| row.name)
+        .unwrap_or_default();
     let run = runs::Model {
         id: run_id,
         workspace_id: i64::from(scope.workspace_id),
         pipeline_id: p.id,
-        host_id: actions
-            .as_ref()
-            .and_then(|snapshot| snapshot.jobs.first())
-            .map(|job| job.host_id)
-            .or_else(|| host.as_ref().map(|row| row.id))
-            .ok_or_else(|| ApiError::bad("流水线缺少执行主机。"))?,
+        pipeline_name: p.name.clone(),
+        host_id,
+        host_name,
+        triggered_by_name: scope.user.name.clone(),
         environment_id: environment.as_ref().map(|e| e.id).unwrap_or(0),
         environment_name: environment
             .as_ref()
@@ -1049,6 +1061,9 @@ mod tests {
             pipeline_id: 1,
             environment_id: 0,
             environment_name: String::new(),
+            pipeline_name: String::new(),
+            host_name: String::new(),
+            triggered_by_name: String::new(),
             host_id: 1,
             number: 12,
             state: "queued".into(),

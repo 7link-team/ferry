@@ -98,6 +98,7 @@ impl MigratorTrait for Migrator {
             Box::new(RepositoryMonitoring),
             Box::new(RepositoryPolling),
             Box::new(RepositoryEventDetail),
+            Box::new(PipelineRunNames),
         ]
     }
 }
@@ -2907,6 +2908,50 @@ impl MigrationTrait for CredentialScopes {
             "Business data is not automatically removed".into(),
         ))
     }
+}
+
+struct PipelineRunNames;
+impl MigrationName for PipelineRunNames {
+    fn name(&self) -> &str {
+        "pipeline_run_names_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineRunNames {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in pipeline_run_names() {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+/// Names as they were when the run started, like `environment_name`. Runs
+/// recorded before these columns existed keep "" and are named live.
+fn pipeline_run_names() -> Vec<SchemaStatement> {
+    ["pipeline_name", "host_name", "triggered_by_name"]
+        .into_iter()
+        .map(|column| {
+            SchemaStatement::Column(
+                "pipeline_runs",
+                column,
+                Table::alter()
+                    .table(Alias::new("pipeline_runs"))
+                    .add_column(
+                        ColumnDef::new(Alias::new(column))
+                            .string_len(255)
+                            .not_null()
+                            .default(""),
+                    )
+                    .to_owned(),
+            )
+        })
+        .collect()
 }
 
 struct RepositoryEventDetail;

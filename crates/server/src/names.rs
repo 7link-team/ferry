@@ -3,6 +3,7 @@
 //! name and keep the ID for links. Each referenced kind costs one query per
 //! response and is scoped to the workspace (users are global; only their
 //! display name is exposed). A reference that no longer resolves gets "".
+//! A name the response already carries (a snapshot) is kept.
 
 use crate::{
     entities::{deployments, host_groups, hosts, pipeline_runs, pipelines, repositories, users},
@@ -80,9 +81,11 @@ pub async fn attach(
     values: &mut [Value],
     refs: &[Ref],
 ) -> Result<()> {
+    let missing =
+        |row: &Value, reference: &Ref| row[reference.name].as_str().is_none_or(str::is_empty);
     let mut wanted: HashMap<Kind, HashSet<i64>> = HashMap::new();
     for row in values.iter() {
-        for reference in refs {
+        for reference in refs.iter().filter(|reference| missing(row, reference)) {
             if let (Some(kind), Some(id)) = (kind_of(row, &reference.of), id_of(row, reference.id))
             {
                 wanted.entry(kind).or_default().insert(id);
@@ -97,6 +100,9 @@ pub async fn attach(
     }
     for row in values.iter_mut() {
         for reference in refs {
+            if !missing(row, reference) {
+                continue;
+            }
             let name = kind_of(row, &reference.of)
                 .zip(id_of(row, reference.id))
                 .and_then(|key| names.get(&key).cloned())

@@ -125,6 +125,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy'}.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
+                    # Runs recorded before name snapshots are named live from their IDs.
+                    assert after['pipeline_name'] and after['triggered_by_name'] and isinstance(after['host_name'], str), after
+                    for key in ('pipeline_name','host_name','triggered_by_name'):
+                        before[path][key]=after[key]
                 assert after==before[path], f'Upgrade changed existing resource: {path}; fields: {[key for key in set(after)|set(before[path]) if after.get(key)!=before[path].get(key)]}'
             roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
             for role in roles_before:
