@@ -262,7 +262,7 @@ public_url_compat() {
 }
 setup_token() {
     printf 'First-time setup token (only present before initialization):\n'
-    $compose exec -T ferry sh -c 'if [ -f /data/setup-token ]; then cat /data/setup-token; else echo "Already initialized."; fi'
+    $compose exec -T ferry sh -c 'if [ -f /data/setup-token ]; then cat /data/setup-token; echo; else echo "Already initialized."; fi'
 }
 
 if [ -n "$upgrade" ]; then
@@ -403,7 +403,7 @@ $compose up -d --wait --wait-timeout 300
 printf 'Stack is healthy. Open Ferry at:\n'
 addresses
 if [ -n "$(env_get FERRY_DOMAINS)" ]; then
-    printf 'Certificates are issued on first visit and renewed automatically. Each domain must resolve to this\n'
+    printf 'Caddy requests the certificates now and renews them automatically. Each domain must resolve to this\n'
     printf 'server and ports 80 and 443 must be reachable; on errors run: %s logs caddy\n' "$compose"
 fi
 setup_token
