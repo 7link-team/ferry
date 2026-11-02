@@ -83,7 +83,10 @@ pub struct Body {
 impl Body {
     fn stored_definition(&self) -> Result<String> {
         match self.definition_format.as_str() {
-            "" | "legacy" => Ok(self.definition.clone()),
+            "" | "legacy" => {
+                validate_definition(&self.definition)?;
+                convert_legacy(&self.definition, &self.target_kind, &self.target_ref)
+            }
             crate::actions::ENGINE => serde_json::to_string(&crate::actions::Document {
                 engine: crate::actions::ENGINE.into(),
                 workflow: self.definition.clone(),
@@ -122,14 +125,17 @@ async fn check(
     )
     .await?;
     let stored = body.stored_definition()?;
-    let definition = validate_definition(&stored)?;
+    validate_definition(&stored)?;
     if let Some(document) = crate::actions::document(&stored) {
         crate::actions::check_bindings(s, conn, scope, &document).await?;
-    }
-    if definition.steps.iter().any(|step| step.checkout)
-        && Id::reference(&body.repository_id)? == Id::from(0)
-    {
-        return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+        if document
+            .checkout_bindings
+            .iter()
+            .any(crate::actions::CheckoutBinding::pipeline_repository)
+            && Id::reference(&body.repository_id)? == Id::from(0)
+        {
+            return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+        }
     }
     let node_only = crate::actions::document(&stored).is_some()
         && Id::reference(&body.target_ref)? == Id::from(0);
@@ -504,6 +510,215 @@ pub async fn remove(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Compatibility boundary for old exports and scripts. The stored representation
+/// is always an Actions document; values are serialized rather than interpolated
+/// into YAML so shell text and creation-template parameters remain intact.
+pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -> Result<String> {
+    if crate::actions::document(input).is_some() {
+        return Ok(input.to_owned());
+    }
+    if !input.contains(".Values.") {
+        validate_definition(input)?;
+    }
+    let legacy: Value =
+        serde_json::from_str(input).map_err(|_| ApiError::bad("流水线定义必须是合法的 JSON。"))?;
+    let object = legacy
+        .as_object()
+        .ok_or_else(|| ApiError::bad("流水线定义必须是 JSON 对象。"))?;
+    if object
+        .keys()
+        .any(|key| !["workdir", "env", "steps", "artifacts"].contains(&key.as_str()))
+    {
+        return Err(ApiError::bad("流水线定义包含未知字段。"));
+    }
+    let workdir = legacy
+        .get("workdir")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::bad("流水线 workdir 必须是绝对路径字符串。"))?;
+    if !workdir.contains(".Values.") {
+        crate::channel::check_path(workdir)
+            .map_err(|e| ApiError::bad(format!("流水线工作目录无效：{e}")))?;
+    }
+    let normalized_workdir;
+    let workdir = if workdir.starts_with("\\\\") || workdir.as_bytes().get(1) == Some(&b':') {
+        normalized_workdir = workdir.replace('\\', "/");
+        normalized_workdir.as_str()
+    } else {
+        workdir
+    };
+    let source_steps = legacy
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| !steps.is_empty())
+        .ok_or_else(|| ApiError::bad("流水线 steps 必须是非空数组。"))?;
+    let mut steps = vec![json!({"id":"prepare_workspace", "name":"Prepare workspace",
+        "run":"[ -d \"$FERRY_LEGACY_WORKDIR\" ] || mkdir -p -- \"$FERRY_LEGACY_WORKDIR\"", "shell":"sh",
+        "working-directory":"${{ github.workspace }}",
+        "env":{"FERRY_LEGACY_WORKDIR":legacy_expressions(workdir)}})];
+    let mut checkouts = Vec::new();
+    for (index, source) in source_steps.iter().enumerate() {
+        if source.as_object().is_none_or(|step| {
+            step.keys()
+                .any(|key| !["name", "run", "checkout", "timeout_seconds"].contains(&key.as_str()))
+        }) {
+            return Err(ApiError::bad("流水线步骤包含未知字段。"));
+        }
+        let name = source
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad("流水线步骤需要名称。"))?;
+        let mut step = json!({"name": legacy_expressions(name)});
+        if source
+            .get("checkout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            let id = format!("checkout_{}", index + 1);
+            step["id"] = json!(id);
+            step["uses"] = json!("actions/checkout@v4");
+            checkouts.push(crate::actions::CheckoutBinding {
+                job_id: "build".into(),
+                step_id: id,
+                connection_id: String::new(),
+                repository_url: String::new(),
+                git_ref: String::new(),
+                path: legacy_expressions(workdir),
+            });
+        } else {
+            let command = source
+                .get("run")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ApiError::bad("流水线步骤需要命令。"))?;
+            step["run"] = json!(legacy_expressions(command));
+            step["id"] = json!(format!("legacy_{}", index + 1));
+        }
+        if let Some(timeout) = source.get("timeout_seconds") {
+            step["timeout-minutes"] = if let Some(seconds) = timeout.as_u64() {
+                json!(std::cmp::max(seconds.div_ceil(60), 1))
+            } else if let Some(token) = timeout
+                .as_str()
+                .and_then(|text| text.trim().strip_prefix("{{"))
+                .and_then(|text| text.strip_suffix("}}"))
+            {
+                json!(format!("{{{{ ceilMinutes {} }}}}", token.trim()))
+            } else {
+                return Err(ApiError::bad("无效的步骤超时。"));
+            };
+        } else {
+            step["timeout-minutes"] = json!(30);
+        }
+        steps.push(step);
+    }
+    let mut env = serde_json::Map::new();
+    for entry in legacy
+        .get("env")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if entry.as_object().is_none_or(|env| {
+            env.keys()
+                .any(|key| !["name", "value", "valueFrom"].contains(&key.as_str()))
+        }) {
+            return Err(ApiError::bad("流水线环境变量包含未知字段。"));
+        }
+        let name = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ApiError::bad("流水线环境变量需要名称。"))?;
+        let value = if let Some(reference) = entry.get("valueFrom").and_then(Value::as_str) {
+            if let Some(name) = reference.strip_prefix("variable/") {
+                // Explicit secrets references use the same scoped variable lookup
+                // for both ordinary and encrypted values, including env overrides.
+                format!("${{{{ secrets['{}'] }}}}", name.replace('\'', "''"))
+            } else if reference.contains(".Values.") {
+                reference.to_owned()
+            } else {
+                return Err(ApiError::bad("无效的流水线变量引用。"));
+            }
+        } else {
+            legacy_expressions(
+                entry
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ApiError::bad("流水线环境变量需要值。"))?,
+            )
+        };
+        env.insert(name.into(), json!(value));
+    }
+    for path in legacy
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let path = path
+            .as_str()
+            .ok_or_else(|| ApiError::bad("产物路径必须是字符串。"))?;
+        steps.push(json!({"name":format!("Archive {path}"), "if":"success()",
+        "uses":"actions/upload-artifact@v4", "with": {
+            "name":crate::artifacts::legacy_artifact_name(path),
+            "path":format!("{}/{}", legacy_expressions(workdir).trim_end_matches('/'), path),
+            "if-no-files-found":"error", "include-hidden-files":true
+        }}));
+    }
+    let timeout_minutes: u64 = source_steps
+        .iter()
+        .map(|step| {
+            step["timeout_seconds"]
+                .as_u64()
+                .unwrap_or(1800)
+                .div_ceil(60)
+        })
+        .sum::<u64>()
+        + 30;
+    let workflow = json!({"jobs":{"build":{"runs-on":"self-hosted", "env":env,
+        "timeout-minutes":timeout_minutes,
+        "defaults":{"run":{"working-directory":legacy_expressions(workdir), "shell":"sh {0}"}},
+        "steps":steps}}});
+    let document = crate::actions::Document {
+        engine: crate::actions::ENGINE.into(),
+        workflow: serde_yaml_ng::to_string(&workflow)
+            .map_err(|_| ApiError::bad("无法转换流水线。"))?,
+        executor_bindings: vec![crate::actions::Binding {
+            job_id: "build".into(),
+            target_kind: target_kind.into(),
+            target_ref: target_ref.into(),
+            image: "host".into(),
+        }],
+        checkout_bindings: checkouts,
+        graph_layout: Value::Null,
+    };
+    serde_json::to_string(&document).map_err(|_| ApiError::bad("无法转换流水线。"))
+}
+
+fn legacy_expressions(value: &str) -> String {
+    // One scan: inserted expressions must never be interpreted as input tokens.
+    let mut output = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find("{{") {
+        output.push_str(&rest[..start]);
+        let token = &rest[start..];
+        let replacement = [
+            ("{{run}}", "${{ github.run_number }}"),
+            ("{{branch}}", "${{ github.ref_name }}"),
+            ("{{commit}}", "${{ github.sha }}"),
+            ("{{repo_url}}", "${{ env.FERRY_REPOSITORY_URL }}"),
+        ]
+        .into_iter()
+        .find(|(old, _)| token.starts_with(old));
+        if let Some((old, new)) = replacement {
+            output.push_str(new);
+            rest = &token[old.len()..];
+        } else {
+            output.push_str("{{");
+            rest = &token[2..];
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
 #[derive(Debug, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Definition {
@@ -690,6 +905,75 @@ pub fn variable_names(definition: &Definition) -> std::collections::BTreeSet<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_conversion_is_deterministic_complete_and_idempotent() {
+        let legacy = json!({"workdir":"/opt/build/{{run}}", "env":[
+            {"name":"TOKEN","valueFrom":"variable/token-with-dash"},
+            {"name":"LITERAL","value":"{{branch}} {{commit}} {{repo_url}}"}],
+            "steps":[{"name":"Source {{branch}}","checkout":true},
+                {"name":"Build {{run}}","run":"printf '%s' '{{commit}}'", "timeout_seconds":61}],
+            "artifacts":["bin/app", ".hidden"]})
+        .to_string();
+        let converted = convert_legacy(&legacy, "host-group", "42").unwrap();
+        assert_eq!(
+            convert_legacy(&legacy, "host-group", "42").unwrap(),
+            converted
+        );
+        assert_eq!(convert_legacy(&converted, "host", "99").unwrap(), converted);
+        let doc = crate::actions::document(&converted).unwrap();
+        let (jobs, _) = crate::actions::parse(&doc).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(doc.executor_bindings[0].target_kind, "host-group");
+        assert_eq!(doc.executor_bindings[0].target_ref, "42");
+        assert_eq!(doc.executor_bindings[0].image, "host");
+        let value: Value = serde_yaml_ng::from_str(&doc.workflow).unwrap();
+        let job = &value["jobs"]["build"];
+        assert_eq!(
+            job["defaults"]["run"]["working-directory"],
+            "/opt/build/${{ github.run_number }}"
+        );
+        assert_eq!(job["env"]["TOKEN"], "${{ secrets['token-with-dash'] }}");
+        assert_eq!(
+            job["env"]["LITERAL"],
+            "${{ github.ref_name }} ${{ github.sha }} ${{ env.FERRY_REPOSITORY_URL }}"
+        );
+        assert!(doc.checkout_bindings[0].pipeline_repository());
+        assert_eq!(
+            doc.checkout_bindings[0].path,
+            "/opt/build/${{ github.run_number }}"
+        );
+        let steps = job["steps"].as_array().unwrap();
+        assert_eq!(steps[2]["run"], "printf '%s' '${{ github.sha }}'");
+        assert_eq!(steps[1]["timeout-minutes"], 30);
+        assert_eq!(steps[2]["timeout-minutes"], 2);
+        assert_eq!(
+            steps[3]["with"]["name"],
+            crate::artifacts::legacy_artifact_name("bin/app")
+        );
+        assert_eq!(steps[3]["if"], "success()");
+        assert_eq!(steps[4]["with"]["include-hidden-files"], true);
+    }
+
+    #[test]
+    fn legacy_timeout_conversion_rounds_up_and_keeps_windows_absolute_path() {
+        for (seconds, minutes) in [(1, 1), (60, 1), (61, 2), (86400, 1440)] {
+            let legacy = json!({"workdir":"C:/build", "steps":[{"name":"test", "run":"true", "timeout_seconds":seconds}]});
+            let doc = crate::actions::document(
+                &convert_legacy(&legacy.to_string(), "host", "1").unwrap(),
+            )
+            .unwrap();
+            let value: Value = serde_yaml_ng::from_str(&doc.workflow).unwrap();
+            assert_eq!(
+                value["jobs"]["build"]["steps"][1]["timeout-minutes"],
+                minutes
+            );
+            assert_eq!(
+                value["jobs"]["build"]["defaults"]["run"]["working-directory"],
+                "C:/build"
+            );
+        }
+    }
 
     fn valid() -> Value {
         json!({"workdir":"/tmp/{{run}}","env":[{"name":"LOG_LEVEL","value":"info"}],

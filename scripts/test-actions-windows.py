@@ -28,6 +28,7 @@ checks = 0
 def check(label, condition, detail=''):
     global checks
     if not condition:
+        print('SERVER LOG', (work / 'server.log').read_text(encoding='utf-8', errors='replace')[-4000:], flush=True)
         raise SystemExit(f'FAIL {label} {detail}')
     checks += 1
     print('PASS', label, flush=True)
@@ -117,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
         first = run(pipeline('Windows host pipeline', jobs))
         row, output = finished(first), None
         output = text(first)
-        check('a run-step workflow succeeds on the Windows host', row['state'] == 'succeeded', f"{row['state']} {output[-2000:]}")
+        check('a run-step workflow succeeds on the Windows host', row['state'] == 'succeeded', f"{row['state']} {output}")
         check('run steps use PowerShell by default and shell: cmd works', 'PWSH_OK' in output and 'CMD_OK' in output, output[-2000:])
         check('job outputs pass between jobs through GITHUB_OUTPUT', 'GOT hello-from-windows' in output, output[-2000:])
         check('the secret is masked in logs and run data', secret not in output and secret not in json.dumps(row) and 'secret:***' in output, output[-1500:])
@@ -126,6 +127,87 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
         rejected = run(pipeline('Container on Windows', {'box': {'runs-on': 'container', 'steps': [{'run': 'echo no'}]}}, image='alpine:3.20'))
         row = finished(rejected)
         check('container jobs are refused on a Windows host with a clear reason', row['state'] == 'failed' and '不支持容器镜像' in text(rejected), text(rejected)[-800:])
+
+        legacy_definition = {
+            'workdir': str(work / 'persistent-legacy').replace('\\', '/'),
+            'env': [
+                {'name': 'LEGACY_RUN', 'value': 'context-{{run}}'},
+                {'name': 'TOKEN', 'valueFrom': 'variable/TOKEN'},
+            ],
+            'steps': [{'name': 'Legacy shell {{run}}', 'timeout_seconds': 61,
+                       'run': 'printf "LEGACY_RUN=%s\\n" "$LEGACY_RUN"; '
+                              'printf "LEGACY_TOKEN=%s\\n" "$TOKEN"; '
+                              'if [ -f marker ]; then echo PERSISTED; else echo FIRST; fi; '
+                              'printf marker > marker; false; echo LEGACY_SHELL_OK'}],
+        }
+        # Model the existing user-selected checkout directory retained during
+        # conversion; mkdir also avoids sandbox-denied ancestor traversal in sh.
+        Path(legacy_definition['workdir']).mkdir()
+        legacy = api(root + '/pipelines', {
+            'name': 'Converted legacy Windows', 'target_kind': 'host', 'target_ref': host,
+            'definition': json.dumps(legacy_definition),
+        }, status=201)['id']
+        stored = api(f'{root}/pipelines/{legacy}')
+        check('legacy API writes return the Actions editor format', stored['definition_format'] == 'github-actions')
+        legacy_first = run(legacy)
+        first_row = finished(legacy_first)
+        first_output = text(legacy_first)
+        check('converted legacy shell and runtime environment work on Windows',
+              first_row['state'] == 'succeeded' and 'LEGACY_SHELL_OK' in first_output
+              and f"LEGACY_RUN=context-{first_row['number']}" in first_output,
+              f"{first_row} {first_output}")
+        check('converted legacy variable references stay masked',
+              secret not in first_output and 'LEGACY_TOKEN=***' in first_output, first_output[-1000:])
+        legacy_second = run(legacy)
+        second_row = finished(legacy_second)
+        second_output = text(legacy_second)
+        check('converted legacy workdirs persist across Windows runs',
+              second_row['state'] == 'succeeded' and 'FIRST' in first_output and 'PERSISTED' in second_output,
+              f"{second_row['state']} {second_output[-2000:]}")
+
+        exits = api(root + '/pipelines', {
+            'name': 'Converted legacy exact exit', 'target_kind': 'host', 'target_ref': host,
+            'definition': json.dumps({'workdir': legacy_definition['workdir'],
+                                      'steps': [{'name': 'Exit seven', 'run': 'echo EXACT_EXIT; exit 7'}]}),
+        }, status=201)['id']
+        exit_run = run(exits)
+        exit_row = finished(exit_run)
+        check('converted legacy steps retain their exact exit codes',
+              exit_row['state'] == 'failed'
+              and any(step['exit_code'] == 7 and 'Exit seven' in step['name'] for step in exit_row['steps']),
+              f"{exit_row['state']} {exit_row['steps']} {text(exit_run)[-1500:]}")
+
+        repository_secret = 'git-secret-' + os.urandom(6).hex()
+        repository_username = 'git-user-' + os.urandom(6).hex()
+        credential = api(root + '/credentials', {
+            'name': 'Legacy git credentials', 'kind': 'password', 'scope': 'build',
+            'username': repository_username, 'secret': repository_secret,
+        }, status=201)['id']
+        repository_url = 'https://example.invalid/team/repo.git'
+        repository = api(root + '/repositories', {
+            'name': 'Legacy credential repository', 'url': repository_url,
+            'default_branch': 'main', 'credential_id': credential,
+        }, status=201)['id']
+        credential_pipeline = api(root + '/pipelines', {
+            'name': 'Legacy authenticated git without checkout', 'target_kind': 'host',
+            'target_ref': host, 'repository_id': repository,
+            'definition': json.dumps({'workdir': legacy_definition['workdir'], 'steps': [{
+                'name': 'Read git credential',
+                'run': 'printf "protocol=https\\nhost=example.invalid\\n\\n" | git credential fill; '
+                       'echo REPOSITORY={{repo_url}}',
+            }]}),
+        }, status=201)['id']
+        credential_run = run(credential_pipeline)
+        credential_row = finished(credential_run)
+        credential_output = text(credential_run)
+        check('legacy git credentials work without an implicit repository checkout',
+              credential_row['state'] == 'succeeded'
+              and 'username=[REDACTED]' in credential_output and 'password=[REDACTED]' in credential_output,
+              f"{credential_row['state']} {credential_output}")
+        check('repository credentials remain masked and the repository URL stays credential-free',
+              repository_username not in credential_output and repository_secret not in credential_output
+              and f'REPOSITORY={repository_url}' in credential_output,
+              credential_output)
 
         long = run(pipeline('Cancelled on Windows', {'hold': {'runs-on': 'self-hosted', 'steps': [{'run': 'Write-Output HOLDING; Start-Sleep -Seconds 300'}]}}))
         eventually(lambda: 'HOLDING' in text(long), 120, 'long step to start')

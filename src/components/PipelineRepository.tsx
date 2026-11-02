@@ -1,6 +1,6 @@
 import { AutoField } from "./auto-form";
 import { useEffect, useId, useState } from "react";
-import { editActionStep, ensureActionCheckout, parseActions } from "../actions-workflow";
+import { editActionStep, parseActions } from "../actions-workflow";
 import { api, errorText } from "../api";
 import { href } from "../router";
 import { Button } from "./ui/button";
@@ -13,8 +13,7 @@ type Binding = {job_id:string;step_id:string;connection_id:string;repository_url
 type Props = { workspace:string;draft:Record<string,unknown>;options?:Option[];jobId?:string;stepIndex?:number;readOnly:boolean;onChange:(patch:Record<string,unknown>)=>void;onValidityChange:(blocked:boolean)=>void };
 const selectClass="w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm";
 
-export function PipelineRepository(props:Props) {
-  if(props.jobId===undefined || props.stepIndex===undefined) return <LegacyRepository {...props}/>;
+export function PipelineRepository(props:Props & {jobId:string;stepIndex:number}) {
   return <CheckoutRepository {...props} jobId={props.jobId} stepIndex={props.stepIndex}/>;
 }
 function CheckoutRepository({workspace,draft,jobId,stepIndex,readOnly,onChange,onValidityChange}:Props & {jobId:string;stepIndex:number}) {
@@ -122,9 +121,4 @@ export function MarketplaceRepository({workspace,draft,options=[],readOnly,onCha
     <AutoField label={<span className="text-sm">仓库来源</span>} className="block space-y-2"><select aria-label="仓库来源" className={selectClass} value={mode} onChange={event=>onChange(event.target.value==='legacy'?{repository_id:options[0]?.value??'',repository_selection:null}:{repository_id:'',repository_selection:{connection_id:'',name:'',url:'',default_branch:''}})}><option value="connection">代码连接</option>{options.length>0&&<option value="legacy">已有仓库</option>}</select></AutoField>
     {mode==='connection'?<ConnectionRepositoryFields workspace={workspace} data={data} connectionId={selection?.connection_id??''} repositoryUrl={selection?.url??''} repositoryLabel="连接仓库" onChange={value=>onChange({repository_id:'',repository_selection:value})}/>:<AutoField label={<span className="text-sm">外部仓库</span>} className="block space-y-2"><select aria-label="外部仓库" className={selectClass} value={legacyId} onChange={event=>onChange({repository_id:event.target.value,repository_selection:null})}>{!options.some(row=>row.value===legacyId)&&<option value={legacyId}>{legacyId}</option>}{options.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</select></AutoField>}
   </section>;
-}
-function LegacyRepository({draft,options=[],readOnly,onChange}:Props){
- const [error,setError]=useState('');
- return <div className="space-y-3"><AutoField label={<span>仓库</span>} className="block space-y-2"><select aria-label="仓库" className={selectClass} disabled={readOnly} value={String(draft.repository_id??'')} onChange={event=>onChange({repository_id:event.target.value,repository_selection:null})}><option value="">不选择（仅执行命令）</option>{options.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</select></AutoField>
- {!readOnly&&!!draft.repository_id&&<Button type="button" variant="outline" onClick={()=>{try{if(draft.definition_format==='github-actions')onChange({definition:ensureActionCheckout(String(draft.definition))});else{const definition=JSON.parse(String(draft.definition));if(!definition.steps.some((step:{checkout?:boolean})=>step.checkout))definition.steps.unshift({name:'拉取代码',checkout:true,timeout_seconds:1800});onChange({definition:JSON.stringify(definition,null,2)});}setError('');}catch{setError('请先修正流水线定义。');}}}>添加拉取代码步骤</Button>}{error&&<p role="alert">{error}</p>}</div>;
 }

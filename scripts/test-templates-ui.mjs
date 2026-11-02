@@ -1,5 +1,6 @@
 /** Real Chromium acceptance for template management and generated resources. */
 import assert from 'node:assert/strict';
+import { parseDocument } from 'yaml';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,10 +35,17 @@ try {
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext();
+  const owner = await browser.newContext({ permissions: ['clipboard-read','clipboard-write'] });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
+  const readWorkflow = async () => {
+    await p.getByRole('tab',{name:'YAML',exact:true}).click();
+    await p.locator('.monaco-editor .view-lines').click();
+    await p.keyboard.press('ControlOrMeta+A');
+    await p.keyboard.press('ControlOrMeta+C');
+    return parseDocument(await p.evaluate(() => navigator.clipboard.readText())).toJS();
+  };
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
@@ -46,7 +54,7 @@ try {
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
   for (const [group,resource,target,field,label] of [
     ['deploy','app-templates','apps','manifest','应用配置源码（YAML / JSON）'],
-    ['build','pipeline-templates','pipelines','definition','定义（JSON）'],
+    ['build','pipeline-templates','pipelines','definition','GitHub Actions YAML'],
   ]) {
     const app=field==='manifest';
     const name=`UI ${resource}`;
@@ -93,19 +101,20 @@ try {
       await dialog.getByLabel('超时',{exact:false}).fill('30');
       await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
       await dialog.waitFor({state:'hidden'});
-      const generated=JSON.parse(await p.getByLabel(label,{exact:false}).inputValue());
-      assert.equal(generated.steps[0].run,'echo build false');
-      assert.equal(generated.steps[0].timeout_seconds,30);
+      const generated=await readWorkflow();
+      const step=generated.jobs.build.steps.find(step=>step.name==='test');
+      assert.equal(step.run,'echo build false');
+      assert.equal(step['timeout-minutes'],1);
+      assert.equal(generated.jobs.build.defaults.run['working-directory'],'/tmp/build/${{ github.run_number }}');
       assert(!JSON.stringify(generated).includes('secret-not-in-template'));
       await p.getByRole('textbox',{name:'流水线名称',exact:true}).fill('Generated '+resource);
-      await p.getByRole('button',{name:'流水线设置',exact:true}).click();
-      await p.getByLabel('目标主机',{exact:false}).click();
-      await p.getByRole('option',{name:'Template host',exact:true}).click();
+      await p.getByRole('alert').getByRole('button',{name:'build',exact:true}).click();
+      await p.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
       await p.getByRole('button',{name:'保存',exact:true}).click();
       await p.getByRole('cell',{name:'Generated '+resource,exact:true}).waitFor();
       const objects=await get(root+'/pipelines');
       assert.equal(objects.total,1);
-      assert.equal(objects.items[0].target_ref,host.id);
+      assert(objects.items[0].executor_bindings.some(binding=>binding.job_id==='build' && binding.target_ref===host.id));
       await p.goto(`${origin}/workspaces/${workspace_tenant}/pipelines/new`);
       await p.getByRole('button',{name:'从模板导入',exact:true}).click();
       await p.getByRole('dialog').getByRole('option',{name,exact:true}).click();
@@ -128,7 +137,10 @@ try {
     if(app) await p.getByRole('button',{name:'源码编辑',exact:true}).click();
     const generated=JSON.parse(await p.getByLabel(label,{exact:false}).inputValue());
     if(app) assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
-    else { assert.equal(generated.steps[0].run,'echo build false'); assert.equal(generated.steps[0].timeout_seconds,30); }
+    else {
+      const step=parseDocument(generated.workflow).toJS().jobs.build.steps.find(step=>step.name==='test');
+      assert.equal(step.run,'echo build false'); assert.equal(step['timeout-minutes'],1);
+    }
     assert(!JSON.stringify(generated).includes('secret-not-in-template'));
     await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:false}).fill(app?'nginx:latest':'echo revised');
     // The field invalidates local generation first; its effect reports the

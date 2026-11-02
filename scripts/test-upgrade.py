@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Start the previous binary, create real data, then migrate with the new binary.
 Pass OLD_SERVER NEW_SERVER. Optional FERRY_TEST_DATABASE_URL must name an empty test DB.
+For the successful POSIX run comparison set OLD_RUNNER_BINARY and RUNNER_BINARY;
+the new server must have its Actions worker available. alpha.1 requires POSIX sh.
 """
 import http.cookiejar
+from contextlib import closing
 import json
 import os
 from pathlib import Path
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -33,6 +37,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
         env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
     client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     upgraded = False
+    runner = None
+    old_runner = os.environ.get("OLD_RUNNER_BINARY")
+    new_runner = os.environ.get("RUNNER_BINARY", str(Path(new).with_name("ferry-runner" + (".exe" if os.name == "nt" else ""))))
     def api(path, body=None):
         # Exercise each binary's own contract while comparing unchanged stored IDs/data.
         if upgraded:
@@ -52,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             time.sleep(.2)
         raise AssertionError('server or run did not become ready')
     def launch(binary, log):
-        process = subprocess.Popen([binary], env=env, stdout=log, stderr=log)
+        process = subprocess.Popen([binary], env=env, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         try: wait(lambda: api('/status')['ok'])
         except BaseException:
             process.terminate(); process.wait(); raise
@@ -67,16 +74,55 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             host=create('hosts', {'name':'saved-host','connection':'runner'})
             credential=create('credentials', {'name':'saved-credential','kind':'password','username':'saved-user','secret':'saved-secret'})
             repository=create('repositories', {'name':'saved-repository','url':'https://example.invalid/repo.git','credential_id':credential})
+            original_definition=json.dumps({'workdir':'/tmp/upgrade','steps':[{'name':'step','run':'true'}]})
             pipeline=create('pipelines', {'name':'saved-pipeline','repository_id':repository,'target_kind':'host','target_ref':host,
-                'definition':json.dumps({'workdir':'/tmp/upgrade','steps':[{'name':'step','run':'true'}]})})
+                'definition':original_definition})
             run=api('/workspaces/upgrade/pipelines/'+pipeline+'/actions/run', {})['id']
             wait(lambda:api('/workspaces/upgrade/pipeline-runs/'+run)['state'] not in ('queued','running'))
+            # alpha.1 executes POSIX sh scripts. Its own runner is needed to
+            # test a successful pre-upgrade execution, rather than an offline failure.
+            executable_pipeline = None
+            if old_runner and os.name != 'nt':
+                execute_host=create('hosts', {'name':'executable-host','connection':'runner'})
+                token=api('/workspaces/upgrade/runner-tokens', {'host_id':execute_host})['token']
+                runner=subprocess.Popen([old_runner,'--server',origin[:-4],'--token',token,'--state-dir',str(Path(directory)/'runner')],stdout=log,stderr=log)
+                wait(lambda:api('/workspaces/upgrade/hosts/'+execute_host)['state']=='online')
+                executable_pipeline=create('pipelines', {'name':'executable-legacy','target_kind':'host','target_ref':execute_host,
+                    'definition':json.dumps({'workdir':str(Path(directory)/'build-{{run}}'),'steps':[{'name':'result','run':'printf UPGRADE_SAME_RESULT'}]})})
+                executed=api('/workspaces/upgrade/pipelines/'+executable_pipeline+'/actions/run', {})['id']
+                wait(lambda:api('/workspaces/upgrade/pipeline-runs/'+executed)['state'] not in ('queued','running'))
+                assert api('/workspaces/upgrade/pipeline-runs/'+executed)['state']=='succeeded'
+                old_output=api('/workspaces/upgrade/pipeline-runs/'+executed+'/logs?after=0')['items']
+                assert 'UPGRADE_SAME_RESULT' in ''.join(row['chunk'] for row in old_output)
+                runner.terminate();runner.wait(timeout=20);runner=None
+            else:
+                print('SKIP: successful alpha.1 run comparison requires OLD_RUNNER_BINARY and a POSIX host; conversion/history checks still run')
             paths=['/me']+['/workspaces/upgrade/'+resource+'/'+id for resource,id in [('hosts',host),('credentials',credential),('repositories',repository),('pipelines',pipeline),('pipeline-runs',run)]]
             before={path:api(path) for path in paths}
             roles_before = api('/workspaces/upgrade/roles')['items']
             process.terminate(); process.wait(timeout=20)
             upgraded = True
             process=launch(new,log)
+            if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+                databases=list(Path(directory).glob('*.sqlite'))
+                assert len(databases)==1, databases
+                with closing(sqlite3.connect(databases[0])) as database:
+                    saved=database.execute('SELECT definition, legacy_definition_backup FROM pipelines WHERE id=?',(int(pipeline),)).fetchone()
+                original_backup=before['/workspaces/upgrade/pipelines/'+pipeline]['definition']
+                assert saved[1]==original_backup, 'migration must preserve the original legacy JSON'
+                assert json.loads(saved[0])['engine']=='github-actions'
+            if executable_pipeline:
+                token=api('/workspaces/upgrade/runner-tokens', {'host_id':host})['token']
+                runner=subprocess.Popen([new_runner,'--server',origin[:-4],'--token',token,'--state-dir',str(Path(directory)/'new-runner')],stdout=log,stderr=log)
+                wait(lambda:api('/workspaces/upgrade/hosts/'+host)['state']=='online')
+                converted=api('/workspaces/upgrade/pipelines/'+executable_pipeline)
+                assert converted['definition_format']=='github-actions'
+                executed=api('/workspaces/upgrade/pipelines/'+executable_pipeline+'/runs', {})['id']
+                wait(lambda:api('/workspaces/upgrade/pipeline-runs/'+executed)['state'] not in ('queued','running'))
+                assert api('/workspaces/upgrade/pipeline-runs/'+executed)['state']=='succeeded'
+                output=api('/workspaces/upgrade/pipeline-runs/'+executed+'/logs?after=0')['items']
+                assert 'UPGRADE_SAME_RESULT' in ''.join(row['chunk'] for row in output)
+                print('PASS: legacy pipeline executes the same command result before and after Actions migration')
             for path in paths:
                 after = api(path)
                 if '/credentials/' in path:
@@ -117,12 +163,18 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         assert after[key] == before[path].get(key, ''), (key, after[key])
                         before[path].setdefault(key, '')
                 if '/pipelines/' in path:
-                    defaults={'definition_format':'legacy','executor_bindings':[],'checkout_bindings':[],'graph_layout':{},'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
+                    assert after['definition_format']=='github-actions'
+                    assert "run: 'true'" in after['definition'] or 'run: true' in after['definition']
+                    assert after['executor_bindings']==[{'job_id':'build','target_kind':'host','target_ref':host,'image':'host'}]
+                    assert after['checkout_bindings']==[]
+                    for key in ('definition','definition_format','executor_bindings','checkout_bindings','graph_layout'):
+                        before[path][key]=after[key]
+                    defaults={'group_id':'0','application_id':'0','tag_ids':[],'environment_ids':[],'tags':[],'environments':[],'group_name':'','application_name':''}
                     for key,value in defaults.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                 if '/pipeline-runs/' in path:
-                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy'}.items():
+                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy','inputs':{}}.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                     # Runs recorded before name snapshots are named live from their IDs.
@@ -130,6 +182,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     for key in ('pipeline_name','host_name','triggered_by_name'):
                         before[path][key]=after[key]
                 assert after==before[path], f'Upgrade changed existing resource: {path}; fields: {[key for key in set(after)|set(before[path]) if after.get(key)!=before[path].get(key)]}'
+            print('PASS: legacy pipeline converts to Actions with its host binding; original JSON backup and historical run remain intact')
             roles_after = {r['id']:r for r in api('/workspaces/upgrade/roles')['items']}
             for role in roles_before:
                 migrated = roles_after[role['id']]
@@ -167,6 +220,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 template=create(resource, {'name':'After migration','content':json.dumps(content),'parameters':'[]'})
                 rendered=api('/workspaces/upgrade/'+resource+'/'+template+'/actions/render', {'version':1})
                 assert rendered['template_version']==1
+                if resource=='pipeline-templates':
+                    assert json.loads(rendered['definition'])['engine']=='github-actions'
+                    assert json.loads(api('/workspaces/upgrade/'+resource+'/'+template)['content'])['engine']=='github-actions'
             print('PASS: both template schemas can create and render after upgrade')
             assert api('/workspaces/upgrade/preferences')['default_page_size']==20
             assert api('/workspaces/upgrade/settings')['total']==5
@@ -189,6 +245,16 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 assert identity['user']['is_superadmin'] and identity['user']['name'] == 'upgrade'
                 assert not (Path(directory)/'setup-token').exists()
                 print('PASS: legacy owner not auto-promoted; operator token plus existing password required; old name/password preserved')
+            converted_pipeline=api('/workspaces/upgrade/pipelines/'+pipeline)
+            process.terminate();process.wait(timeout=20)
+            process=launch(new,log)
+            assert api('/workspaces/upgrade/pipelines/'+pipeline)==converted_pipeline
+            if not os.environ.get('FERRY_TEST_DATABASE_URL'):
+                with closing(sqlite3.connect(databases[0])) as database:
+                    backup=database.execute('SELECT legacy_definition_backup FROM pipelines WHERE id=?',(int(pipeline),)).fetchone()[0]
+                assert backup==original_backup
+            print('PASS: reopening the upgraded database leaves conversion and original backup unchanged')
             print('PASS: prior account/session, host, credential metadata, repository, pipeline and run survive; new deployment schema works')
         finally:
+            if runner is not None and runner.poll() is None: runner.terminate();runner.wait(timeout=20)
             if process.poll() is None: process.terminate(); process.wait(timeout=20)

@@ -101,7 +101,77 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineRunNames),
             Box::new(PipelineRunInputs),
             Box::new(EnvironmentApproval),
+            Box::new(LegacyPipelineRemoval),
         ]
+    }
+}
+
+struct LegacyPipelineRemoval;
+impl MigrationName for LegacyPipelineRemoval {
+    fn name(&self) -> &str {
+        "legacy_pipeline_removal_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for LegacyPipelineRemoval {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        use sea_orm::ConnectionTrait;
+        let backend = m.get_database_backend();
+        let conn = m.get_connection();
+        for (table, field) in [
+            ("pipelines", "definition"),
+            ("pipeline_templates", "content"),
+        ] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    table,
+                    "legacy_definition_backup",
+                    Table::alter()
+                        .table(Alias::new(table))
+                        .add_column(long_text("legacy_definition_backup", backend))
+                        .to_owned(),
+                ),
+            )
+            .await?;
+            let mut select = Query::select();
+            select
+                .from(Alias::new(table))
+                .columns([Alias::new("id"), Alias::new(field)]);
+            if table == "pipelines" {
+                select.columns([Alias::new("target_kind"), Alias::new("target_ref")]);
+            }
+            for row in conn.query_all_raw(backend.build(&select)).await? {
+                let id: i64 = row.try_get("", "id")?;
+                let original: String = row.try_get("", field)?;
+                if crate::actions::document(&original).is_some() {
+                    continue;
+                }
+                let converted = if table == "pipelines" {
+                    let kind: String = row.try_get("", "target_kind")?;
+                    let target: i64 = row.try_get("", "target_ref")?;
+                    crate::pipelines::convert_legacy(&original, &kind, &target.to_string())
+                } else {
+                    crate::templates::convert_legacy_content(&original)
+                }
+                .map_err(|error| DbErr::Custom(format!("Cannot convert {table} {id}: {error}")))?;
+                // Definition and backup change atomically. Reapplying after a DDL
+                // interruption sees Actions and leaves the original backup intact.
+                let update = Query::update()
+                    .table(Alias::new(table))
+                    .values([
+                        (Alias::new(field), converted.into()),
+                        (Alias::new("legacy_definition_backup"), original.into()),
+                    ])
+                    .and_where(Expr::col(Alias::new("id")).eq(id))
+                    .to_owned();
+                conn.execute_raw(backend.build(&update)).await?;
+            }
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("Legacy backups must be retained".into()))
     }
 }
 
@@ -3227,6 +3297,88 @@ impl MigrationTrait for RepositoryMonitoring {
 mod credential_scope_tests {
     use super::*;
     use sea_orm::{ConnectionTrait, Database, EntityTrait, QueryOrder};
+
+    #[tokio::test]
+    async fn legacy_pipeline_upgrade_keeps_backups_and_history_and_is_idempotent() {
+        use sea_orm::{ActiveModelTrait, Set};
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let before = Migrator::migrations()
+            .iter()
+            .position(|migration| migration.name() == LegacyPipelineRemoval.name())
+            .unwrap();
+        Migrator::up(&db, Some(before as u32)).await.unwrap();
+        let original = serde_json::json!({"workdir":"/tmp/build", "steps":[
+            {"name":"source","checkout":true}, {"name":"build","run":"echo {{run}}"}]})
+        .to_string();
+        crate::entities::pipelines::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(10),
+            name: Set("legacy".into()),
+            definition: Set(original.clone()),
+            repository_id: Set(0),
+            target_kind: Set("host".into()),
+            target_ref: Set(42),
+            description: Set(String::new()),
+            created_at: Set(1),
+            updated_at: Set(2),
+            version: Set(3),
+            group_id: Set(0),
+            application_id: Set(0),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        crate::entities::pipeline_templates::ActiveModel {
+            id: Set(2),
+            workspace_id: Set(10),
+            name: Set("legacy template".into()),
+            content: Set(original.clone()),
+            parameters: Set("[]".into()),
+            description: Set(String::new()),
+            created_at: Set(1),
+            updated_at: Set(2),
+            version: Set(3),
+        }
+        .insert(&db)
+        .await
+        .unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        // Exercise the migration itself twice, including a retry after columns exist.
+        LegacyPipelineRemoval
+            .up(&SchemaManager::new(&db))
+            .await
+            .unwrap();
+        for (table, field) in [
+            ("pipelines", "definition"),
+            ("pipeline_templates", "content"),
+        ] {
+            let query = Query::select()
+                .from(Alias::new(table))
+                .columns([
+                    Alias::new(field),
+                    Alias::new("legacy_definition_backup"),
+                    Alias::new("version"),
+                ])
+                .to_owned();
+            let row = db
+                .query_one_raw(db.get_database_backend().build(&query))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                row.try_get::<String>("", "legacy_definition_backup")
+                    .unwrap(),
+                original
+            );
+            assert_eq!(row.try_get::<i64>("", "version").unwrap(), 3);
+            let document =
+                crate::actions::document(&row.try_get::<String>("", field).unwrap()).unwrap();
+            assert!(document.workflow.contains("github.run_number"));
+            if table == "pipelines" {
+                assert_eq!(document.executor_bindings[0].target_ref, "42");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn upgrade_preserves_legacy_credentials_and_host_bindings() {

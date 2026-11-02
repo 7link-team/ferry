@@ -1,14 +1,12 @@
-//! Linear execution through HostChannel only. Cancellation stops waiting, not
-//! necessarily the remote process; cleanup is awaited even after cancellation.
+//! Pipeline run history, immutable snapshots and Actions scheduling.
 use crate::{
-    channel::{HostChannel, Output},
-    credentials, db,
+    channel::HostChannel,
+    db,
     entities::{
         host_groups, hosts, pipeline_run_logs as logs, pipeline_run_steps as steps,
         pipeline_runs as runs, pipelines, repositories, workspaces,
     },
     error::{ApiError, Result},
-    pipelines::Definition,
     resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
@@ -449,70 +447,33 @@ pub(crate) async fn trigger_as(
     let mut snapshot = VariableSnapshot::default();
     let environment_id = Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0));
     // Actions: GitHub semantics (dynamic indexing delivers every authorized
-    // value; undefined names are ""). Legacy definitions keep strict names.
+    // value; undefined names are "").
     let workflow_document = crate::actions::document(&p.definition);
     let references = workflow_document
         .as_ref()
         .map(crate::actions::references)
         .transpose()?;
-    let variable_rows = if let Some(references) = &references {
-        let contexts = crate::variables::snapshot_for_actions(
-            &s,
-            &tx,
-            scope.workspace_id,
-            id,
-            environment_id,
-            references,
-        )
-        .await?;
-        // Server-side redaction masks every delivered secret.
-        for (name, value) in &contexts.secrets {
-            snapshot
-                .values
-                .insert(format!("secrets:{name}"), value.clone());
-        }
-        snapshot.sources = contexts.sources;
-        snapshot.secrets = Some(contexts.secrets);
-        snapshot.vars = Some(contexts.vars);
-        Default::default()
-    } else {
-        crate::variables::resolve_for_environment(
-            &tx,
-            scope.workspace_id,
-            "build",
-            id,
-            environment_id,
-            &crate::pipelines::variable_names(&definition),
-        )
-        .await?
-    };
-    for (name, row) in variable_rows {
-        if actions.is_some()
-            && row.kind == "secret"
-            && definition
-                .env
-                .iter()
-                .any(|entry| entry.name == format!("vars:{name}"))
-        {
-            return Err(ApiError::bad(
-                "密钥变量必须通过 secrets 引用，不能通过 vars 公开。",
-            ));
-        }
-        let value = s.vault.open_secret(
-            &row.value,
-            &crate::vault::aad(
-                &row.workspace_id.to_string(),
-                "variables",
-                &row.id.to_string(),
-            ),
-        )?;
-        for environment in &definition.env {
-            if environment.value_from.as_deref() == Some(&format!("variable/{name}")) {
-                snapshot.sources.push(json!({"environment":environment.name,"name":name,"scope":row.scope,"scope_ref":Id::from(row.scope_ref),"version":row.version,"secret":row.kind=="secret"}));
-            }
-        }
-        snapshot.values.insert(name, value);
+    let actions_references = references
+        .as_ref()
+        .ok_or_else(|| ApiError::bad("流水线必须是 Actions 定义。"))?;
+    let contexts = crate::variables::snapshot_for_actions(
+        &s,
+        &tx,
+        scope.workspace_id,
+        id,
+        environment_id,
+        actions_references,
+    )
+    .await?;
+    // Server-side redaction masks every delivered secret.
+    for (name, value) in &contexts.secrets {
+        snapshot
+            .values
+            .insert(format!("secrets:{name}"), value.clone());
     }
+    snapshot.sources = contexts.sources;
+    snapshot.secrets = Some(contexts.secrets);
+    snapshot.vars = Some(contexts.vars);
     // Contexts GitHub allows in workflow-level expressions (environment names,
     // concurrency groups): github, inputs and vars.
     let (server_url, repository) = crate::actions_run::repository_parts(&repo_url);
@@ -742,7 +703,7 @@ pub(crate) async fn trigger_as(
             id: Set(i64::from(s.next_id()?)),
             run_id: Set(run_id),
             step_index: Set(index as i64),
-            name: Set(expand(&step.name, &run)),
+            name: Set(crate::actions_run::runtime_path(&step.name, &run)),
             state: Set("queued".into()),
             exit_code: Set(None),
             started_at: Set(0),
@@ -1107,29 +1068,6 @@ async fn dispatch(
 pub(crate) fn quote(v: &str) -> String {
     format!("'{}'", v.replace('\'', "'\\''"))
 }
-fn expand(v: &str, r: &runs::Model) -> String {
-    // Single pass: replacement values are never interpreted as more templates.
-    let mut out = String::new();
-    let mut rest = v;
-    while let Some(pos) = rest.find("{{") {
-        out.push_str(&rest[..pos]);
-        let tail = &rest[pos + 2..];
-        let Some(end) = tail.find("}}") else {
-            out.push_str(&rest[pos..]);
-            return out;
-        };
-        out.push_str(&match &tail[..end] {
-            "run" => r.number.to_string(),
-            "branch" => r.branch.clone(),
-            "repo_url" => r.repo_url.clone(),
-            "commit" => r.commit.clone(),
-            _ => format!("{{{{{}}}}}", &tail[..end]),
-        });
-        rest = &tail[end + 2..];
-    }
-    out.push_str(rest);
-    out
-}
 pub(crate) async fn upload(
     ch: &dyn HostChannel,
     path: &str,
@@ -1182,76 +1120,11 @@ async fn execute(
     if let Some(snapshot) = crate::actions::snapshot(&r.definition) {
         return crate::actions_run::execute(s, r, snapshot, stop).await;
     }
-    let host = hosts::Entity::find_by_id(r.host_id)
-        .filter(hosts::Column::WorkspaceId.eq(r.workspace_id))
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    let host = crate::remote::Host {
-        id: Id::from(host.id),
-        workspace_id: Id::from(host.workspace_id),
-        credential_id: Id::from(host.credential_id),
-        name: host.name,
-        address: host.address,
-        port: host.port as u16,
-        username: host.username,
-        connection: host.connection,
-        host_key: host.host_key,
-    };
-    let ch = crate::channel_open(s, &host).await?;
-    let def = crate::pipelines::validate_definition(&r.definition)?;
-    let variables = open_variables(s, r)?.values;
-    let credential = if r.credential_id != 0 {
-        crate::repository_auth::validate_target(
-            s,
-            &s.db,
-            r.workspace_id.into(),
-            r.credential_id.into(),
-            &r.repo_url,
-            false,
-        )
-        .await?;
-        Some(credentials::unseal(s, &Id::from(r.workspace_id), &Id::from(r.credential_id)).await?)
-    } else {
-        None
-    };
-    let private = format!("/tmp/pipeline-credentials-{}", uuid::Uuid::new_v4());
-    // mkdir is exclusive and 0700 before any secret is transferred. Secret
-    // bytes only travel via write_file, NEVER via exec, env assignments or argv.
-    let made = ch
-        .exec(
-            &format!("umask 077; mkdir {}", quote(&private)),
-            Duration::from_secs(15),
-        )
-        .await?;
-    if made.code != 0 {
-        return Err(ApiError::bad("无法建立临时凭据目录。"));
-    }
-    let result = execute_private(
-        s,
-        r,
-        &def,
-        ch.as_ref(),
-        &private,
-        credential.as_ref(),
-        &variables,
-        stop,
-    )
-    .await;
-    // This is outside the cancellable future. HostChannel cannot promise the
-    // remote command stopped; deleting credentials still revokes future reads.
-    let cleaned = ch
-        .exec(
-            &format!("rm -rf -- {}", quote(&private)),
-            Duration::from_secs(15),
-        )
-        .await?;
-    if cleaned.code != 0 {
-        return Err(ApiError::bad("临时凭据清理失败。"));
-    }
-    let state = result?;
-    finish(s, r.id, state).await
+    Err(ApiError::bad(
+        "历史流水线运行不能重新执行，请创建新的运行。",
+    ))
 }
+
 pub(crate) fn checkout_script(r: &runs::Model) -> Result<String> {
     if r.repo_url.is_empty() {
         return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
@@ -1325,120 +1198,6 @@ pub(crate) async fn credential_environment(
     Ok(env)
 }
 
-async fn execute_private(
-    s: &AppState,
-    r: &runs::Model,
-    def: &Definition,
-    ch: &dyn HostChannel,
-    private: &str,
-    credential: Option<&(String, String, String)>,
-    variables: &BTreeMap<String, String>,
-    stop: &mut tokio::sync::watch::Receiver<bool>,
-) -> Result<&'static str> {
-    let mut env = String::new();
-    for e in &def.env {
-        let value = match (&e.value, &e.value_from) {
-            (Some(value), None) => expand(value, r),
-            (None, Some(reference)) => variables
-                .get(reference.strip_prefix("variable/").unwrap_or(""))
-                .cloned()
-                .ok_or_else(|| ApiError::bad("流水线变量快照缺失。"))?,
-            _ => return Err(ApiError::bad("流水线环境变量配置无效。")),
-        };
-        env.push_str(&format!("export {}={}\n", e.name, quote(&value)));
-    }
-    env.push_str(&credential_environment(ch, private, credential).await?);
-    let mut seq = 0;
-    for (index, step) in def.steps.iter().enumerate() {
-        if !active(s, r.id).await? || *stop.borrow() {
-            return Ok("cancelled");
-        }
-        let index = index as i64;
-        let claimed = steps::Entity::update_many()
-            .col_expr(steps::Column::State, Expr::value("running"))
-            .col_expr(steps::Column::StartedAt, Expr::value(db::now()))
-            .filter(steps::Column::RunId.eq(r.id))
-            .filter(steps::Column::StepIndex.eq(index))
-            .filter(steps::Column::State.eq("queued"))
-            .exec(&s.db)
-            .await?
-            .rows_affected;
-        if claimed == 0 {
-            return Ok("cancelled");
-        }
-        // Upload the entire script too: env values never need to appear in ps.
-        let wd = quote(&expand(&def.workdir, r));
-        let script = format!(
-            "{env}mkdir -p -- {wd} && cd -- {wd} || exit 1\n{}\n",
-            if step.checkout {
-                checkout_script(r)?
-            } else {
-                expand(&step.run, r)
-            }
-        );
-        upload(ch, &format!("{private}/step"), script, 0o600).await?;
-        let command = format!("sh {}", quote(&format!("{private}/step")));
-        let seconds = step.timeout_seconds.unwrap_or(1800);
-        let execution = ch.exec(&command, Duration::from_secs(seconds + 5));
-        tokio::pin!(execution);
-        let deadline = tokio::time::sleep(Duration::from_secs(seconds));
-        tokio::pin!(deadline);
-        let (state, output) = loop {
-            tokio::select! {
-                out=&mut execution=>break match out {
-                    Ok(o)=>(if o.code==0 {"succeeded"}else{"failed"},Some(o)),
-                    Err(e) if e.0==StatusCode::GATEWAY_TIMEOUT=>("timed_out",None),
-                    Err(_)=>("failed",None),
-                },
-                _=&mut deadline=>break ("timed_out",None),
-                _=stop.changed()=>break ("cancelled",None),
-                _=tokio::time::sleep(Duration::from_millis(100))=>{
-                    if !active(s,r.id).await? {break ("cancelled",None)}
-                }
-            }
-        };
-        let code = output.as_ref().map(|o| o.code);
-        let output = output.unwrap_or(Output {
-            code: -1,
-            stdout: String::new(),
-            stderr: format!("{state}\n"),
-        });
-        for (stream, text) in [("stdout", output.stdout), ("stderr", output.stderr)] {
-            let text = redact(text, credential, variables);
-            append(s, r.id, index, &mut seq, stream, &text).await?;
-        }
-        steps::Entity::update_many()
-            .col_expr(steps::Column::State, Expr::value(state))
-            .col_expr(steps::Column::ExitCode, Expr::value(code))
-            .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
-            .filter(steps::Column::RunId.eq(r.id))
-            .filter(steps::Column::StepIndex.eq(index))
-            .filter(steps::Column::State.eq("running"))
-            .exec(&s.db)
-            .await?;
-        if state != "succeeded" {
-            return Ok(if state == "cancelled" {
-                "cancelled"
-            } else {
-                "failed"
-            });
-        }
-    }
-    if !active(s, r.id).await? || *stop.borrow() {
-        return Ok("cancelled");
-    }
-    crate::artifacts::collect(
-        s,
-        r,
-        ch,
-        &expand(&def.workdir, r),
-        &def.artifacts,
-        &BTreeMap::new(),
-        stop,
-    )
-    .await?;
-    Ok("succeeded")
-}
 pub(crate) fn redact(
     mut text: String,
     credential: Option<&(String, String, String)>,
@@ -1584,7 +1343,10 @@ mod tests {
             finished_at: 0,
         };
         assert_eq!(
-            expand("{{run}} {{branch}} {{repo_url}} {{commit}}", &r),
+            crate::actions_run::runtime_path(
+                "${{ github.run_number }} ${{ github.ref_name }} ${{ env.FERRY_REPOSITORY_URL }} ${{ github.sha }}",
+                &r
+            ),
             "12 main https://example.invalid/{{run}} abc123"
         );
     }

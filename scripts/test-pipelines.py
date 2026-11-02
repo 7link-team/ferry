@@ -3,6 +3,9 @@
 import concurrent.futures
 import http.cookiejar
 import json
+import io
+import re
+import zipfile
 import os
 from pathlib import Path
 import shutil
@@ -81,7 +84,7 @@ def main():
     def launch(args, log, env=None):
         output = open(work / log, 'wb')
         files.append(output)
-        p = subprocess.Popen(args, stdout=output, stderr=output, env=env, stdin=subprocess.PIPE if "--desktop-control" in args else None)
+        p = subprocess.Popen(args, stdout=output, stderr=output, env=env, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0, stdin=subprocess.PIPE if "--desktop-control" in args else None)
         processes.append(p)
         return p
 
@@ -90,23 +93,34 @@ def main():
         return api(f'/workspaces/{workspace_ids[ws]}/{resource}', body, status=201)['id']
 
     def pipeline(host, steps, ws='ops', repo=None, target_kind='host', artifacts=None):
-        definition = {'workdir': root_dir + '/{{run}}',
-                      'env': [{'name': 'BUILD_VALUE', 'value': 'env-{{branch}}-{{run}}'}], 'steps': steps}
-        if artifacts is not None: definition['artifacts'] = artifacts
-        first_command=definition['steps'][0]['run']
-        definition['steps']=[dict(step) for step in steps]
-        definition['steps'][0]['run']='{{ .Values.command }}'
-        template=create('pipeline-templates',{'name':'live-template','content':json.dumps(definition),'parameters':json.dumps([{'name':'command','type':'string'}])},ws)
-        generated=api(f'/workspaces/{workspace_ids[ws]}/pipeline-templates/{template}/renderings',{'version':1,'values':{'command':first_command}})['definition']
-        return create('pipelines', {'name': 'live-' + uuid.uuid4().hex[:8], 'target_kind': target_kind,
-            'target_ref': host, 'repository_id': repo if repo is not None else repo_id,
-            'definition': generated}, ws)
+        workdir=root_dir+'/${{ github.run_number }}'
+        replacements={'{{run}}':'${{ github.run_number }}','{{branch}}':'${{ github.ref_name }}',
+                      '{{commit}}':'${{ github.sha }}','{{repo_url}}':'${{ env.FERRY_REPOSITORY_URL }}'}
+        def expression(value):
+            for token, replacement in replacements.items(): value=value.replace(token,replacement)
+            return value
+        action_steps=[{'name':'Prepare fixture directory','run':'mkdir -p "'+workdir+'"','shell':'sh'}]
+        for step in steps:
+            converted={'name':expression(step['name']),'run':expression(step['run']),'shell':'sh','working-directory':workdir}
+            if 'timeout_seconds' in step: converted['timeout-minutes']=max(1,(step['timeout_seconds']+59)//60)
+            action_steps.append(converted)
+        for index,path in enumerate(artifacts or []):
+            action_steps.append({'name':'Publish fixture '+str(index),'uses':'actions/upload-artifact@v4','if':'success()',
+                'with':{'name':'fixture-'+str(index),'path':workdir+'/'+path,'if-no-files-found':'error'}})
+        workflow={'jobs':{'build':{'runs-on':'self-hosted','env':{'BUILD_VALUE':'env-${{ github.ref_name }}-${{ github.run_number }}'},'steps':action_steps}}}
+        return create('pipelines', {'name':'live-'+uuid.uuid4().hex[:8], 'target_kind':target_kind,
+            'target_ref':host,'repository_id':repo if repo is not None else repo_id,
+            'definition_format':'github-actions','definition':json.dumps(workflow),
+            'executor_bindings':[{'job_id':'build','target_kind':target_kind,'target_ref':host,'image':'host'}]}, ws)
 
     def trigger(pid, ws='ops', values=None):
         return api(f'/workspaces/{workspace_ids[ws]}/pipelines/{pid}/runs', body=values, method='POST', status=201)
 
     def detail(rid, ws='ops'):
-        return api(f'/workspaces/{workspace_ids[ws]}/pipeline-runs/{rid}')
+        row=api(f'/workspaces/{workspace_ids[ws]}/pipeline-runs/{rid}')
+        row['action_steps']=row['steps']
+        row['steps']=[step for step in row['steps'] if step['name'] not in ('Prepare fixture directory','Prepare workspace') and not step['name'].startswith('Publish fixture ') and not step['name'].startswith('Archive ')]
+        return row
 
     def done(rid, seconds=30):
         def poll():
@@ -379,7 +393,7 @@ jobs:
             build=pipeline(host,[{'name':'variables','run':f'test "$(printf %s "$TOKEN" | python3 -c \'import sys,hashlib;print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())\' )" = {digest}; result=$?; printf "%s" "$TOKEN"; printf "%s" "$TOKEN" >&2; exit $result'}])
             object_var=create('variables',{'name':'build-token','scope':'build','scope_ref':build,'kind':'secret','value':value})
             definition=json.loads(api(f'/workspaces/{workspace_ops}/pipelines/'+build)['definition'])
-            definition['env']=[{'name':'TOKEN','valueFrom':'variable/build-token'}]
+            definition['jobs']['build']['env']['TOKEN']="${{ secrets['build-token'] }}"
             row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
             marker=root_dir+'/variables-'+kind
@@ -407,11 +421,12 @@ jobs:
                 with sqlite3.connect(dbfiles[0]) as db:
                     saved=db.execute('SELECT definition, variable_snapshot FROM pipeline_runs WHERE id=?',(int(rid),)).fetchone()
                 check(kind+' history keeps encrypted variable snapshot',bool(saved[1]) and value not in ''.join(saved))
-            definition['env']=[{'name':'TOKEN','valueFrom':'variable/missing-token'}]
+            definition['jobs']['build']['env']['TOKEN']="${{ secrets['missing-token'] }}"
+            definition['jobs']['build']['steps']=[{'name':'undefined variable','run':'test -z "$TOKEN"','shell':'sh'}]
             row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
-            api(f'/workspaces/{workspace_ops}/pipelines/'+build+'/runs',{},status=400)
-            check(kind+' undefined build variable refuses enqueue',True)
+            undefined=trigger(build)['id'];all_runs.append(undefined)
+            check(kind+' undefined Actions secret resolves to empty string',done(undefined)['state']=='succeeded')
             api(f'/workspaces/{workspace_ops}/variables/'+object_var,method='DELETE',status=204)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,method='DELETE',status=204)
         api(f'/workspaces/{workspace_ops}/variables/'+build_var,method='DELETE',status=204)
@@ -435,11 +450,11 @@ jobs:
             check(f'{kind} complete ordered stdout/stderr and incremental cursor',
                   all(t in text for t in ['CLONE_OK', 'BUILD_OK', 'BUILD_STDERR'])
                   and [i['seq'] for i in entries] == list(range(1, len(entries) + 1))
-                  and [i['step_index'] for i in entries] == sorted(i['step_index'] for i in entries),
+                  and [i['step_index'] for i in entries if i['step_index']>=0] == sorted(i['step_index'] for i in entries if i['step_index']>=0),
                   f"seq={[i['seq'] for i in entries]}")
             check(f'{kind} workdir and env applied', local_or_ssh(kind, f'cat {root_dir}/{run["number"]}/payload.txt').strip() == 'local-private-repository')
             artifacts = row['artifacts']
-            check(kind+' successful build archives declared output with content hash', len(artifacts)==1 and artifacts[0]['path']=='payload.txt' and len(artifacts[0]['sha256'])==64)
+            check(kind+' successful build archives declared output with content hash', len(artifacts)==1 and artifacts[0]['path'].endswith('.zip') and len(artifacts[0]['sha256'])==64)
             artifact=artifacts[0]
             check(kind+' run detail names its pipeline, target host and trigger user',
                   row['pipeline_name'] == api(f'/workspaces/{workspace_ops}/pipelines/'+row['pipeline_id'])['name'] and row['triggered_by_name'] == 'test'
@@ -449,7 +464,7 @@ jobs:
             with opener.open(base+f'/workspaces/{workspace_ops}/pipeline-artifacts/'+artifact['id']+'/content') as response:
                 archived=response.read()
             import hashlib
-            check(kind+' artifact download matches original bytes and sha256', archived.strip()==b'local-private-repository' and hashlib.sha256(archived).hexdigest()==artifact['sha256'] and len(archived)==artifact['size'])
+            check(kind+' artifact download matches original bytes and sha256', zipfile.ZipFile(io.BytesIO(archived)).read('payload.txt').strip()==b'local-private-repository' and hashlib.sha256(archived).hexdigest()==artifact['sha256'] and len(archived)==artifact['size'])
             local_or_ssh(kind, f"printf changed > {root_dir}/{run['number']}/payload.txt")
             with opener.open(base+f'/workspaces/{workspace_ops}/pipeline-artifacts/'+artifact['id']+'/content') as response:
                 check(kind+' archived output is independent of mutable build directory', response.read()==archived)
@@ -466,7 +481,12 @@ jobs:
             # the test itself never injects it into any command's argv.
             leak_steps = [{'name': 'redaction', 'run': 'd=$(dirname "${GIT_CONFIG_VALUE_1:-$GIT_ASKPASS}"); cat "$d/password"; cat "$d/password" >&2; stat -c %a "$d/password" 2>/dev/null || stat -f %Lp "$d/password"; sleep 1; exit 7'},
                           {'name': 'must skip', 'run': 'echo SHOULD_NOT_RUN; touch forbidden'}]
-            rid = trigger(pipeline(host, leak_steps))['id']; all_runs.append(rid)
+            # Converted legacy steps retain their exact exit status, unlike a
+            # native Actions workflow whose result contract has no exit code.
+            legacy_failure=create('pipelines', {'name':'Legacy failure '+kind,'target_kind':'host','target_ref':host,
+                'repository_id':repo_id,'definition':json.dumps({'workdir':root_dir+'/{{run}}','steps':leak_steps})})
+            check(kind+' legacy failure fixture converts on write',api(f'/workspaces/{workspace_ops}/pipelines/'+legacy_failure)['definition_format']=='github-actions')
+            rid = trigger(legacy_failure)['id']; all_runs.append(rid)
             row = done(rid); text = ''.join(i['chunk'] for i in logs(rid))
             check(f'4 {kind} failure stops next step', row['state'] == 'failed' and
                   [s['state'] for s in row['steps']] == ['failed', 'skipped'] and row['steps'][0]['exit_code'] == 7
@@ -475,9 +495,11 @@ jobs:
             check(f'4 {kind} skipped command has no side effect', local_or_ssh(kind, f'if [ -e {root_dir}/{row["number"]}/forbidden ]; then echo present; else echo absent; fi').strip() == 'absent')
             check(f'7 {kind} failed stdout/stderr redacted and credential mode 600',
                   secret not in text and text.count('[REDACTED]') >= 2 and '600' in text)
-            rid = trigger(pipeline(host, [{'name': 'timeout', 'run': 'sleep 4', 'timeout_seconds': 1},
+            rid = trigger(pipeline(host, [{'name': 'timeout', 'run': 'sleep 90', 'timeout_seconds': 1},
                                           {'name': 'skip', 'run': 'echo SHOULD_NOT_RUN'}]))['id']; all_runs.append(rid)
-            row = done(rid)
+            started=time.monotonic()
+            row = done(rid,seconds=85)
+            check(f'5 {kind} second timeout rounds up to one Actions minute',time.monotonic()-started>=55)
             check(f'5 {kind} timeout distinct from ordinary failure', row['state'] == 'failed' and
                   [s['state'] for s in row['steps']] == ['timed_out', 'skipped'] and row['steps'][0]['exit_code'] is None,
                   f"state={row['state']}, step={row['steps'][0]['state']}, exit={row['steps'][0]['exit_code']}")
@@ -517,7 +539,7 @@ jobs:
         rid = trigger(pipeline(runner, [{'name': 'large log', 'run': "python3 -c 'print(\"界\" * 300000)'"}] * 4))['id']
         all_runs.append(rid); done(rid); entries = logs(rid)
         check('large UTF-8 logs chunked and paginated without loss', len(entries) > 200 and
-              ''.join(i['chunk'] for i in entries) == ('界' * 300000 + '\n') * 4, f'chunks={len(entries)}')
+              ''.join(line+'\n' for line in re.findall(r'(?m)^\[build\] (界+)\n', ''.join(i['chunk'] for i in entries))) == ('界' * 300000 + '\n') * 4, f'chunks={len(entries)}')
         other_host = create('hosts', {'name': 'other-host', 'connection': 'runner'}, 'other')
         other_repo = create('repositories', {'name': 'other-repo', 'url': repo_url}, 'other')
         definition = json.dumps({'workdir': '/tmp/test', 'steps': [{'name': 'test', 'run': 'true'}]})
@@ -543,7 +565,7 @@ jobs:
         for kind, data in samples.items():
             joined = '\n'.join(data)
             check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined and all(value not in joined for value in variable_secrets)
-                  and '/step' in joined, f'samples={len(data)}, observed step argv={"/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
+                  and ('/workflow/' in joined or '/step' in joined), f'samples={len(data)}, observed step argv={"/workflow/" in joined or "/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
         activity = json.dumps(api(f'/workspaces/{workspace_ops}/activity?page_size=200'))
         all_text = ''.join(i['chunk'] for rid in all_runs for i in logs(rid))
         check('7 all stored logs and activity omit credential plaintext',

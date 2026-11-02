@@ -193,14 +193,14 @@ const templateList = (workspace: string, resource: string, target: string, group
 });
 const templateForm = (resource: string, application: boolean) => form<Template>({
   resource, heading: r => r.name,
-  blank: { name: "", description: "", content: resource === "config-templates" ? "port={{ .Values.port }}\n" : application ? JSON.stringify({apiVersion:"ferry/v1",kind:"Application",metadata:{name:"web"},services:[{name:"web",image:"{{ .Values.image }}"}]},null,2) : JSON.stringify({workdir:"/tmp/build/{{run}}",steps:[{name:"构建",run:"{{ .Values.command }}"}]},null,2),
+  blank: { name: "", description: "", content: resource === "config-templates" ? "port={{ .Values.port }}\n" : application ? JSON.stringify({apiVersion:"ferry/v1",kind:"Application",metadata:{name:"web"},services:[{name:"web",image:"{{ .Values.image }}"}]},null,2) : JSON.stringify({engine:"github-actions",workflow:DEFAULT_ACTIONS.replace("echo hello", "{{ .Values.command }}"),executor_bindings:[],checkout_bindings:[],graph_layout:{}},null,2),
     parameters: resource === "config-templates" ? JSON.stringify([{name:"port",type:"integer",default:8080,min:1,max:65535}],null,2) : JSON.stringify([{name: application ? "image" : "command",label: application ? "镜像" : "构建命令",type:"string",default:application ? "nginx:alpine" : "echo build",min_length:1}],null,2) },
   copy: r => ({ name: `${r.name}（副本）`, description: r.description, content: r.content, parameters: r.parameters }),
   sections: [{ fields: [
     { key: "name", label: "名称", type: "text", required: true },
     { key: "description", label: "说明", type: "textarea" },
     { key: "parameters", label: "参数定义（JSON 数组）", type: "code", span: 2, required: true, help: '每项包含 name、type（string/integer/boolean），可选 label、default、enum（字符串）、min/max（整数）、min_length/max_length。无 default 时必填。' },
-    { key: "content", label: resource === "config-templates" ? "应用配置文件内容" : application ? "应用模板（YAML / JSON）" : "流水线模板（JSON / YAML）", type: "code", span: 2, required: true, help: resource === "config-templates" ? '例如 nginx.conf、application.yml 或 .toml 的内容，使用 {{ .Values.参数名 }} 替换参数。应用服务的 files 中填写 path（目标文件路径）、fromTemplate（此配置名称）和 values（参数）。秘密参数只填写变量名；回滚恢复当时的文件内容。' : application ? '使用 "{{ .Values.image }}" 等占位符；secret: true 参数填写变量名，只能作为 valueFrom 的完整值。保存校验模板语法，生成时校验完整配置。' : '使用 "{{ .Values.command }}" 等创建参数；保留 {{run}}、{{branch}}、{{repo_url}}、{{commit}} 运行时变量。secret 参数填写变量名，只能作为 env 中 valueFrom 的完整值。' },
+    { key: "content", label: resource === "config-templates" ? "应用配置文件内容" : application ? "应用模板（YAML / JSON）" : "流水线模板（JSON / YAML）", type: "code", span: 2, required: true, help: resource === "config-templates" ? '例如 nginx.conf、application.yml 或 .toml 的内容，使用 {{ .Values.参数名 }} 替换参数。应用服务的 files 中填写 path（目标文件路径）、fromTemplate（此配置名称）和 values（参数）。秘密参数只填写变量名；回滚恢复当时的文件内容。' : application ? '使用 "{{ .Values.image }}" 等占位符；secret: true 参数填写变量名，只能作为 valueFrom 的完整值。保存校验模板语法，生成时校验完整配置。' : '使用 "{{ .Values.command }}" 等创建参数；保留 GitHub Actions ${{ ... }} 运行时表达式。secret 参数填写变量名，作为 Actions env 的完整值生成 secrets 引用。' },
   ] }],
 });
 const templateGenerator = (workspace: string, resource: string, field: string): NonNullable<FormConfig<AnyRow>["generator"]> => ({
@@ -225,11 +225,11 @@ const templateGenerator = (workspace: string, resource: string, field: string): 
     const result = await api<Record<string,string>>(`/workspaces/${workspace}/${resource}/${id}/renderings`, { method: "POST", body: JSON.stringify({ version, values: typed }) });
     if (resource === "pipeline-templates") {
       const rendered = JSON.parse(result[field] ?? "{}") as Record<string, unknown>;
-      if (rendered.engine === "github-actions" && typeof rendered.workflow === "string") {
+      if ((rendered.engine === "github-actions" || rendered.engine === "actions") && typeof rendered.workflow === "string") {
         parseActions(rendered.workflow);
         return { definition: rendered.workflow, definition_format: "github-actions", executor_bindings: rendered.executor_bindings ?? [], checkout_bindings: rendered.checkout_bindings ?? [], graph_layout: rendered.graph_layout ?? {} };
       }
-      return { definition: result[field], definition_format: "legacy", executor_bindings: [], checkout_bindings: [], graph_layout: {} };
+      throw new Error("模板未返回有效的 Actions 工作流。");
     }
     return { [field]: result[field] };
   },
@@ -709,16 +709,8 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
         { key: "name", label: "名称", type: "text", required: true },
         {key:"group_id",when:()=>!permissions||permissions.has("pipeline-groups.read"),label:"分组",type:"select",options:namedOptions(workspace,"pipeline-groups")},
         {key:"tag_ids",when:()=>!permissions||permissions.has("tags.read"),label:"标签",type:"multiselect",options:tagOptions(workspace),span:2,createOption:{label:"新建标签",permission:"tags.create",fields:[{key:"name",label:"名称",type:"text",required:true}],create:async values=>{const row=await createResource<{id:string}>(workspace,"tags",values);return {value:row.id,label:String(values.name)};}}},
-        { key: "repository_id", label: "仓库", type: "pipeline-repository", when:d=>d.definition_format!=="github-actions", options: namedOptions(workspace, "repositories"), span: 2 },
-        { key: "target_kind", label: "目标类型", type: "select", options: TARGETS, when:d=>d.definition_format!=="github-actions", resetOnChange: ["target_ref"] },
-        { key: "target_ref", label: "目标主机", type: "select", required: true,
-          options: namedOptions(workspace, "hosts"), when: (d) => d.definition_format!=="github-actions" && d.target_kind === "host" },
-        { key: "target_ref", label: "目标主机组", type: "select", required: true,
-          options: namedOptions(workspace, "host-groups"), when: (d) => d.definition_format!=="github-actions" && d.target_kind === "host-group" },
-        { key: "definition", label: "Actions 工作流", type: "actions-editor", required: true, span: 2, when: d => d.definition_format === "github-actions",
+        { key: "definition", label: "Actions 工作流", type: "actions-editor", required: true, span: 2,
           options: async () => (await Promise.all(["hosts", "host-groups"].filter(resource=>!permissions||permissions.has(`${resource}.read`)).map(async (resource) => (await namedOptions(workspace, resource)()).map(option => ({ value: `${resource === "hosts" ? "host" : "host-group"}:${option.value}`, label: `${resource === "hosts" ? "主机" : "主机组"} · ${option.label}` }))))).flat() },
-        { key: "definition", label: "定义（JSON）", type: "code", required: true, span: 2, when: d => d.definition_format !== "github-actions",
-          help: "逐步执行；env 支持 value 或 valueFrom: variable/变量名（二选一）。变量按全局→构建→当前流水线覆盖，触发时加密保存快照，日志脱敏。" },
       ] }],
     }),
     "host-groups": form({

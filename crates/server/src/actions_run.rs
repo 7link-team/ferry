@@ -121,9 +121,24 @@ pub async fn execute(
 async fn execute_reserved(
     s: &AppState,
     run: &runs::Model,
-    snapshot: Snapshot,
+    mut snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    for checkout in &mut snapshot.checkouts {
+        if checkout.binding.pipeline_repository() {
+            if run.repo_url.is_empty() {
+                return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+            }
+            checkout.binding.repository_url = run.repo_url.clone();
+            checkout.binding.git_ref = if run.commit.is_empty() {
+                run.branch.clone()
+            } else {
+                run.commit.clone()
+            };
+            checkout.credential_id = run.credential_id;
+        }
+        checkout.binding.path = runtime_path(&checkout.binding.path, run);
+    }
     let opened = history::open_variables(s, run)?;
     let delivered = Delivered::new(&opened, &snapshot)?;
     let job_cancel_in_progress = opened.job_cancel_in_progress.clone();
@@ -658,6 +673,115 @@ pub(crate) fn repository_parts(url: &str) -> (String, String) {
     (String::new(), String::new())
 }
 
+fn repository_url_without_credentials(input: &str) -> String {
+    if let Some((scheme, rest)) = input.split_once("://") {
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        if scheme == "ssh" {
+            let authority = authority
+                .rsplit_once('@')
+                .map(|(user, _)| format!("{}@{host}", user.split(':').next().unwrap_or(user)))
+                .unwrap_or_else(|| host.to_owned());
+            return format!("ssh://{authority}/{path}");
+        }
+        format!("{scheme}://{host}/{path}")
+    } else if let Some((authority, path)) = input.split_once(':') {
+        if !authority.contains('/') {
+            return format!("{authority}:{path}");
+        }
+        input.into()
+    } else {
+        input.into()
+    }
+}
+
+pub(crate) fn runtime_path(input: &str, run: &runs::Model) -> String {
+    let repository = repository_url_without_credentials(&run.repo_url);
+    let number = run.number.to_string();
+    let tokens = [
+        ("${{ github.run_number }}", number.as_str()),
+        ("${{ github.ref_name }}", run.branch.as_str()),
+        ("${{ github.sha }}", run.commit.as_str()),
+        ("${{ env.FERRY_REPOSITORY_URL }}", repository.as_str()),
+    ];
+    let mut rest = input;
+    let mut output = String::new();
+    while let Some(start) = rest.find("${{") {
+        output.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        if let Some((token, value)) = tokens.iter().find(|(token, _)| tail.starts_with(token)) {
+            output.push_str(value);
+            rest = &tail[token.len()..];
+        } else {
+            output.push_str("${{");
+            rest = &tail[3..];
+        }
+    }
+    output.push_str(rest);
+    output
+}
+
+fn workflow_timeout(workflow: &str, job: &str) -> u64 {
+    serde_json::from_str::<Value>(workflow)
+        .ok()
+        .and_then(|workflow| workflow["jobs"][job]["timeout-minutes"].as_u64())
+        .and_then(|minutes| minutes.checked_mul(60))
+        .map(|seconds| seconds.saturating_add(60).max(WORKER_SECONDS))
+        .unwrap_or(WORKER_SECONDS)
+}
+
+const LEGACY_SHELL: &str =
+    "sh \"$1\"\ncode=$?\nprintf '%s' \"$code\" > \"$__FERRY_EXIT_FILE\"\nexit \"$code\"\n";
+
+fn converted_legacy_job(workflow: &Value, job: &str) -> bool {
+    let raw = &workflow["jobs"][job];
+    raw["defaults"]["run"]["shell"] == "sh {0}"
+        && raw["steps"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| step["id"] == "prepare_workspace"))
+}
+
+fn legacy_exit_files(workflow: &mut Value, job: &Job, workdir: &str) -> Vec<(String, i64)> {
+    if !converted_legacy_job(workflow, &job.key) {
+        return Vec::new();
+    }
+    let raw = &mut workflow["jobs"][&job.key];
+    let Some(steps) = raw["steps"].as_array_mut() else {
+        return Vec::new();
+    };
+    let mut files = Vec::new();
+    for step in steps {
+        let Some(id) = step["id"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        if !(id.starts_with("legacy_") || id.starts_with("checkout_")) || step.get("run").is_none()
+        {
+            continue;
+        }
+        let Some(index) = job
+            .steps
+            .iter()
+            .find(|item| item.key == id)
+            .map(|item| item.index)
+        else {
+            continue;
+        };
+        let file = format!(".ferry-step-exit-{id}");
+        let env = step
+            .as_object_mut()
+            .unwrap()
+            .entry("env")
+            .or_insert_with(|| json!({}));
+        env["__FERRY_EXIT_FILE"] = json!(format!("{workdir}/{file}"));
+        // Preserve the final command's status via the existing host file transport.
+        step["shell"] = json!(format!("sh \"{workdir}/.ferry-legacy-shell\" {{0}}"));
+        files.push((file, index));
+    }
+    files
+}
+
 fn state(value: &str) -> &str {
     match value {
         "success" => "succeeded",
@@ -977,6 +1101,8 @@ async fn execute_private(
     // Planning only evaluates the strategy; it needs no sources.
     let checkout = if leg.plan
         || run.repo_url.is_empty()
+        || serde_yaml_ng::from_str::<Value>(&snapshot.document.workflow)
+            .is_ok_and(|workflow| converted_legacy_job(&workflow, &job.key))
         || snapshot
             .checkouts
             .iter()
@@ -1107,6 +1233,94 @@ async fn execute_private(
         ch.write_file(&path, 0o600, Box::pin(stream)).await?;
     }
     let workflow = checkout_workflow(snapshot, job, variables, &mut secrets)?;
+    let mut workflow: Value =
+        serde_yaml_ng::from_str(&workflow).map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    let exit_files = legacy_exit_files(&mut workflow, job, &workdir);
+    if !exit_files.is_empty() {
+        upload(
+            ch,
+            &format!("{workdir}/.ferry-legacy-shell"),
+            LEGACY_SHELL.into(),
+            0o600,
+        )
+        .await?;
+        for step in workflow["jobs"][&job.key]["steps"]
+            .as_array_mut()
+            .into_iter()
+            .flatten()
+        {
+            if let Some(name) = step["name"].as_str() {
+                step["name"] = json!(runtime_path(name, run));
+            }
+        }
+    }
+    let container = job.image != "host" || workflow["jobs"][&job.key].get("container").is_some();
+    let job_env = workflow["jobs"][&job.key]
+        .as_object_mut()
+        .ok_or_else(|| ApiError::bad("Actions 任务不存在。"))?
+        .entry("env")
+        .or_insert_with(|| json!({}));
+    if !run.repo_url.is_empty() {
+        job_env["FERRY_REPOSITORY_URL"] = json!(repository_url_without_credentials(&run.repo_url));
+    }
+    // The same private helper files used by checkout remain alive for the job.
+    // Values contain paths only; credentials never enter command arguments.
+    job_env["GIT_TERMINAL_PROMPT"] = json!("0");
+    if let Some((kind, user, secret)) = credential {
+        if container {
+            // A container cannot read the host's private helper files. Use the
+            // same Git helper protocol with values delivered as masked secrets.
+            for (key, value) in [
+                (
+                    "__FERRY_GIT_USER",
+                    if user.is_empty() { "git" } else { user },
+                ),
+                ("__FERRY_GIT_SECRET", secret.as_str()),
+            ] {
+                secrets.insert(key.into(), value.into());
+                job_env[key] = json!(format!("${{{{ secrets.{key} }}}}"));
+            }
+            if kind == "ssh-key" {
+                job_env["GIT_SSH_COMMAND"] = json!(format!(
+                    "sh -c {} sh",
+                    quote(
+                        "set -eu; umask 077; key=$(mktemp); trap 'rm -f -- \"$key\"' EXIT HUP INT TERM; printf '%s' \"$__FERRY_GIT_SECRET\" > \"$key\"; ssh -o BatchMode=yes -o IdentitiesOnly=yes -i \"$key\" \"$@\""
+                    )
+                ));
+            } else {
+                job_env["GIT_CONFIG_COUNT"] = json!("3");
+                job_env["GIT_CONFIG_KEY_0"] = json!("credential.helper");
+                job_env["GIT_CONFIG_VALUE_0"] = json!("");
+                job_env["GIT_CONFIG_KEY_1"] = json!("credential.helper");
+                job_env["GIT_CONFIG_VALUE_1"] = json!(
+                    "!f() { cat >/dev/null; [ \"$1\" = get ] || exit 0; printf 'username=%s\\npassword=%s\\n\\n' \"$__FERRY_GIT_USER\" \"$__FERRY_GIT_SECRET\"; }; f"
+                );
+                job_env["GIT_CONFIG_KEY_2"] = json!("core.askPass");
+                job_env["GIT_CONFIG_VALUE_2"] = json!("");
+            }
+        } else if kind == "ssh-key" {
+            job_env["GIT_SSH_COMMAND"] = json!(format!(
+                "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i {}",
+                quote(&format!("{private}/key"))
+            ));
+        } else {
+            for (key, value) in [
+                ("GIT_CONFIG_COUNT", "3".to_owned()),
+                ("GIT_CONFIG_KEY_0", "credential.helper".into()),
+                ("GIT_CONFIG_VALUE_0", "".into()),
+                ("GIT_CONFIG_KEY_1", "credential.helper".into()),
+                ("GIT_CONFIG_VALUE_1", format!("{private}/credential-helper")),
+                ("GIT_CONFIG_KEY_2", "core.askPass".into()),
+                ("GIT_CONFIG_VALUE_2", "".into()),
+                ("GIT_ASKPASS", "".into()),
+                ("SSH_ASKPASS", "".into()),
+            ] {
+                job_env[key] = json!(value);
+            }
+        }
+    }
+    let workflow =
+        serde_json::to_string(&workflow).map_err(|_| ApiError::bad("无法准备任务环境。"))?;
     let context = github_context(run);
     upload(
         ch,
@@ -1115,12 +1329,13 @@ async fn execute_private(
         0o600,
     )
     .await?;
+    let timeout_seconds = workflow_timeout(&workflow, &job.key);
     let request = json!({"workflow":workflow,"job":job.key,"workdir":workdir,
         "event_name":context.event_name,"event_path":format!("{private}/event.json"),
         "actor":context.actor,"run_number":run.number,"run_attempt":1,"ref":context.git_ref,
         "sha":run.commit,"repository":context.repository,"server_url":context.server_url,
         "inputs":context.inputs,"needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,
-        "run_cancelled":run_cancelled,"timeout_seconds":WORKER_SECONDS,
+        "run_cancelled":run_cancelled,"timeout_seconds":timeout_seconds,
         "run_id":run.id.to_string(),"artifact_dir":artifact_dir,
         "mode":if leg.plan { "plan" } else { "" },"matrix":leg.matrix});
     upload(
@@ -1146,7 +1361,7 @@ async fn execute_private(
         ch,
         &command,
         // The worker's cancellation cleanup grace (35 s) plus the runner's.
-        WORKER_SECONDS + 75,
+        timeout_seconds + 75,
         true,
         !run_cancelled,
     )
@@ -1171,6 +1386,28 @@ async fn execute_private(
     }
     if code != 0 && result.state == "success" {
         return Err(ApiError::bad("Actions worker 异常退出。"));
+    }
+    for (file, index) in exit_files {
+        // Skipped, cancelled or timed-out steps may not have produced a file.
+        if let Ok((_, mut stream)) = ch.read_file(&format!("{workdir}/{file}")).await {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                bytes.extend_from_slice(&chunk?);
+                if bytes.len() > 16 {
+                    return Err(ApiError::bad("流水线步骤退出状态无效。"));
+                }
+            }
+            let code = std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|code| code.parse::<u8>().ok())
+                .ok_or_else(|| ApiError::bad("流水线步骤退出状态无效。"))?;
+            steps::Entity::update_many()
+                .col_expr(steps::Column::ExitCode, Expr::value(i32::from(code)))
+                .filter(steps::Column::RunId.eq(run.id))
+                .filter(steps::Column::StepIndex.eq(index))
+                .exec(&s.db)
+                .await?;
+        }
     }
     let paths: Vec<_> = result
         .artifacts
@@ -1205,7 +1442,26 @@ async fn execute_private(
             retention.contains_key(path) || !existing.iter().any(|artifact| artifact.path == *path)
         })
         .collect();
-    crate::artifacts::collect(s, run, ch, private, &fresh, &retention, stop).await?;
+    let workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow)
+        .map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    let source_workdir = workflow["jobs"][&job.key]["defaults"]["run"]["working-directory"]
+        .as_str()
+        .map(|path| runtime_path(path, run))
+        .unwrap_or_default();
+    let logical_paths: Vec<String> = workflow["jobs"][&job.key]["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|step| {
+            let path = step["name"].as_str()?.strip_prefix("Archive ")?;
+            (step["uses"] == "actions/upload-artifact@v4"
+                && step["with"]["name"] == crate::artifacts::legacy_artifact_name(path))
+            .then(|| path.to_owned())
+        })
+        .collect();
+    let modes = crate::artifacts::legacy_modes(ch, &source_workdir, &fresh, &logical_paths).await?;
+    crate::artifacts::collect_with_modes(s, run, ch, private, &fresh, &retention, stop, &modes)
+        .await?;
     Ok(result)
 }
 
@@ -1517,6 +1773,9 @@ fn checkout_node_script(binding: &crate::actions::CheckoutBinding) -> String {
         r#"set -eu
 workspace=$(pwd -P)
 relative={path}
+case "$relative" in
+    /*|[A-Za-z]:/*) [ -d "$relative" ] || mkdir -p -- "$relative"; cd -- "$relative"; relative='' ;;
+esac
 original_ifs=$IFS
 IFS=/
 set -f
@@ -1756,6 +2015,89 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn repository_placeholder_keeps_ssh_login_and_removes_passwords() {
+        for (input, expected) in [
+            (
+                "https://user:password@example.test/team/repo.git",
+                "https://example.test/team/repo.git",
+            ),
+            (
+                "git@example.test:team/repo.git",
+                "git@example.test:team/repo.git",
+            ),
+            (
+                "ssh://git:password@example.test/team/repo.git",
+                "ssh://git@example.test/team/repo.git",
+            ),
+        ] {
+            assert_eq!(repository_url_without_credentials(input), expected);
+        }
+    }
+
+    #[test]
+    fn converted_commands_preserve_final_shell_status_and_record_exact_exit_code() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".ferry-legacy-shell"), LEGACY_SHELL).unwrap();
+        let input = json!({"workdir":"/tmp/build", "steps":[
+            {"name":"last command wins", "run":"false; printf retained"},
+            {"name":"failure", "run":"exit 7"}]})
+        .to_string();
+        let doc = crate::actions::document(
+            &crate::pipelines::convert_legacy(&input, "host", "1").unwrap(),
+        )
+        .unwrap();
+        let (jobs, _) = crate::actions::parse(&doc).unwrap();
+        let mut workflow: Value = serde_yaml_ng::from_str(&doc.workflow).unwrap();
+        let files = legacy_exit_files(
+            &mut workflow,
+            &jobs[0],
+            &dir.path().to_string_lossy().replace('\\', "/"),
+        );
+        assert_eq!(files.len(), 2);
+        for (position, expected) in [(1, 0), (2, 7)] {
+            let step = &workflow["jobs"]["build"]["steps"][position];
+            let script = dir.path().join(format!("step{position}.sh"));
+            std::fs::write(&script, step["run"].as_str().unwrap()).unwrap();
+            let exit_file = dir.path().join(&files[position - 1].0);
+            assert_eq!(
+                step["env"]["__FERRY_EXIT_FILE"],
+                exit_file.to_string_lossy().replace('\\', "/")
+            );
+            let shell = step["shell"]
+                .as_str()
+                .unwrap()
+                .replace("{0}", &quote(&script.to_string_lossy()));
+            let mut command = Command::new("sh");
+            command.args(["-c", &shell]).env(
+                "__FERRY_EXIT_FILE",
+                step["env"]["__FERRY_EXIT_FILE"].as_str().unwrap(),
+            );
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(expected),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                std::fs::read_to_string(exit_file).unwrap(),
+                expected.to_string()
+            );
+            if expected == 0 {
+                assert_eq!(output.stdout, b"retained");
+            }
+        }
+        let mut native = json!({"jobs":{"build":{"steps":[{"id":"legacy_1", "run":"exit 7"}]}}});
+        assert!(legacy_exit_files(&mut native, &jobs[0], "/tmp").is_empty());
+    }
     use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel, Schema};
 
     fn test_job(key: &str, needs: &[&str]) -> Job {

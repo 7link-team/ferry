@@ -43,7 +43,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     anonymous = client()
     log = open(data / 'server.log', 'wb')
     def launch():
-        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log)
+        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         for _ in range(150):
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
             try:
@@ -74,7 +75,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             path=root+'/'+resource
             tid=request(owner,path,body,expected=201)['id']; url=path+'/'+tid
             row=request(owner,url)
-            check(row['version']==1 and json.loads(row['content'])==content,resource+' create/read')
+            stored=json.loads(row['content'])
+            check(row['version']==1 and (stored==content if app else stored['engine']=='github-actions'),resource+' create/read (legacy pipelines converted)')
+            if not app:
+                check('{{ ceilMinutes .Values.timeout }}' in stored['workflow'],'stored template keeps seconds parameter conversion')
             listing=request(owner,path+'?q=searchable&page_size=1')
             check(listing['total']==1 and len(listing['items'])==1,resource+' search/pagination')
             request(guest,path,body,expected=403)
@@ -91,13 +95,13 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 obj={'name':'Generated app','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/deployments','manifest':rendered}
                 target='deployments'
             else:
-                check(result['steps'][0]['run']==values['command'] and result['workdir'].endswith('{{run}}'),'escaped input and runtime placeholder retained')
+                check(result['engine']=='github-actions' and values['command'] in result['workflow'] and '/tmp/build/${{ github.run_number }}' in result['workflow'] and 'timeout-minutes: 1' in result['workflow'],'escaped input, runtime placeholder and ceil timeout converted')
                 obj={'name':'Generated pipeline','target_kind':'host','target_ref':host,'definition':rendered}
                 target='pipelines'
             oid=request(owner,root+'/'+target,obj,expected=201)['id']
             saved=request(owner,root+'/'+target+'/'+oid)[field]
-            persisted=json.loads(saved)
-            check(persisted['services'][0]['image']==result['services'][0]['image'] if app else persisted==result,resource+' generated configuration creates real resource')
+            persisted=json.loads(saved) if app else saved
+            check(persisted['services'][0]['image']==result['services'][0]['image'] if app else persisted==result['workflow'],resource+' generated configuration creates real resource')
             for invalid in [{},dict(values,unknown='x'),dict(values,**({'port':'80'} if app else {'timeout':'30'})),dict(values,**({'tag':'bad'} if app else {'command':''})),dict(values,**({'port':0} if app else {'timeout':0}))]:
                 request(owner,url+'/renderings',{'version':1,'values':invalid},expected=400)
             check(True,resource+' missing/unknown/type/range validation')

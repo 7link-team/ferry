@@ -461,8 +461,8 @@ pub(crate) async fn native_resolve(
         let reference: manifest::BuildArtifact =
             serde_json::from_value(service["artifact"].clone())
                 .map_err(|_| ApiError::bad("构建产物引用无效。"))?;
-        let row = crate::artifacts::resolve(&s.db, app.workspace_id.into(), &reference).await?;
-        service["artifact"] = json!({"artifact_id":row.id.to_string(),"run_id":row.run_id.to_string(),"pipeline_id":row.pipeline_id.to_string(),"path":row.path,"sha256":row.sha256,"size":row.size,"mode":row.mode});
+        service["artifact"] =
+            crate::artifacts::resolve(s, &s.db, app.workspace_id.into(), &reference).await?;
     }
     serde_json::to_string_pretty(&doc).map_err(|_| ApiError::bad("无法保存native产物。"))
 }
@@ -617,14 +617,6 @@ pub(crate) async fn native_execute(
         let mut uploaded = BTreeSet::new();
         for service in artifact["services"].as_object().unwrap().values() {
             let reference = &service["artifact"];
-            let run = reference["run_id"]
-                .as_str()
-                .and_then(|s| s.parse::<i64>().ok())
-                .ok_or_else(|| ApiError::bad("历史构建ID无效。"))?;
-            let id = reference["artifact_id"]
-                .as_str()
-                .and_then(|s| s.parse::<i64>().ok())
-                .ok_or_else(|| ApiError::bad("历史产物ID无效。"))?;
             let hash = reference["sha256"]
                 .as_str()
                 .filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()))
@@ -632,10 +624,7 @@ pub(crate) async fn native_execute(
             if !uploaded.insert(hash.to_owned()) {
                 continue;
             }
-            let local = crate::artifacts::directory(s, run).join(id.to_string());
-            let file = tokio::fs::File::open(local)
-                .await
-                .map_err(|_| ApiError::bad("历史构建产物文件缺失。"))?;
+            let file = crate::artifacts::deployment_file(s, reference).await?;
             let stream = futures::stream::try_unfold(file, |mut file| async move {
                 let mut buffer = vec![0u8; 65536];
                 let n = file

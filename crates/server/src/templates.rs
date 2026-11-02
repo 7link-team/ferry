@@ -24,6 +24,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 enum Kind {
     App,
     Pipeline,
+    Actions,
     Config,
 }
 #[derive(Clone, Deserialize, Serialize)]
@@ -161,8 +162,91 @@ fn expand(
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
-                if key.contains("{{") {
+                if key.contains("{{") && kind != Kind::Actions {
                     return Err(ApiError::bad("模板参数只能用于值，不能用于字段名。"));
+                }
+                if kind == Kind::Actions {
+                    let mut offset = 0;
+                    while let Some(relative) = key[offset..].find("{{") {
+                        let start = offset + relative;
+                        if start == 0 || key.as_bytes()[start - 1] != b'$' {
+                            return Err(ApiError::bad("模板参数只能用于值，不能用于字段名。"));
+                        }
+                        offset = crate::actions::expression_end(key, start + 2)? + 2;
+                    }
+                }
+                if kind == Kind::Pipeline
+                    && map.get("engine").and_then(Value::as_str) == Some(crate::actions::ENGINE)
+                    && key == "workflow"
+                {
+                    let workflow: Value =
+                        serde_yaml_ng::from_str(value.as_str().ok_or_else(|| {
+                            ApiError::bad("Actions 模板的 workflow 必须是 YAML 字符串。")
+                        })?)
+                        .map_err(|_| ApiError::bad("Actions 模板的 workflow 必须是有效 YAML。"))?;
+                    let mut workflow = expand(
+                        &workflow,
+                        definitions,
+                        values,
+                        Kind::Actions,
+                        "",
+                        used,
+                        depth + 1,
+                    )?;
+                    if values.is_some() {
+                        for job in workflow
+                            .get_mut("jobs")
+                            .and_then(Value::as_object_mut)
+                            .into_iter()
+                            .flat_map(|jobs| jobs.values_mut())
+                        {
+                            for step in job
+                                .get_mut("steps")
+                                .and_then(Value::as_array_mut)
+                                .into_iter()
+                                .flatten()
+                            {
+                                if step.get("uses").and_then(Value::as_str)
+                                    == Some("actions/upload-artifact@v4")
+                                    && step
+                                        .pointer("/with/name")
+                                        .and_then(Value::as_str)
+                                        .is_some_and(|name| name.starts_with("legacy-"))
+                                    && let Some(path) = step
+                                        .get("name")
+                                        .and_then(Value::as_str)
+                                        .and_then(|name| name.strip_prefix("Archive "))
+                                {
+                                    let name = crate::artifacts::legacy_artifact_name(path);
+                                    step["with"]["name"] = json!(name);
+                                }
+                            }
+                            if job.pointer("/steps/0/id").and_then(Value::as_str)
+                                == Some("prepare_workspace")
+                                && job.pointer("/defaults/run/shell").and_then(Value::as_str)
+                                    == Some("sh {0}")
+                            {
+                                let timeout = job["steps"]
+                                    .as_array()
+                                    .unwrap()
+                                    .iter()
+                                    .skip(1)
+                                    .filter_map(|step| {
+                                        step.get("timeout-minutes").and_then(Value::as_u64)
+                                    })
+                                    .fold(30_u64, u64::saturating_add);
+                                job["timeout-minutes"] = json!(timeout);
+                            }
+                        }
+                    }
+                    out.insert(
+                        key.clone(),
+                        json!(
+                            serde_yaml_ng::to_string(&workflow)
+                                .map_err(|_| ApiError::bad("无法生成 Actions 模板。"))?
+                        ),
+                    );
+                    continue;
                 }
                 out.insert(
                     key.clone(),
@@ -199,7 +283,10 @@ fn expand(
             let mut offset = 0;
             while let Some(relative) = text[offset..].find("{{") {
                 let start = offset + relative;
-                if kind == Kind::Pipeline && start > 0 && text.as_bytes()[start - 1] == b'$' {
+                if matches!(kind, Kind::Pipeline | Kind::Actions)
+                    && start > 0
+                    && text.as_bytes()[start - 1] == b'$'
+                {
                     let end = crate::actions::expression_end(text, start + 2)?;
                     output.push_str(&text[offset..end + 2]);
                     offset = end + 2;
@@ -211,28 +298,61 @@ fn expand(
                     .ok_or_else(|| ApiError::bad("模板占位符未闭合。"))?;
                 let token = text[start + 2..end].trim();
                 output.push_str(&text[offset..start]);
-                if let Some(name) = token.strip_prefix(".Values.") {
+                let (parameter, ceil_minutes) = if kind == Kind::Actions {
+                    match token.strip_prefix("ceilMinutes ") {
+                        Some(parameter) => (parameter, true),
+                        None => (token, false),
+                    }
+                } else {
+                    (token, false)
+                };
+                if let Some(name) = parameter.strip_prefix(".Values.") {
                     let p = definitions
                         .get(name)
                         .ok_or_else(|| ApiError::bad(format!("模板引用了未声明的参数 {name}。")))?;
                     used.insert(name.to_owned());
                     let whole = start == 0 && end + 2 == text.len();
-                    if p.secret
-                        && kind != Kind::Config
+                    if ceil_minutes
                         && (!whole
-                            || field
-                                != if kind == Kind::Pipeline {
-                                    "/env/*/valueFrom"
-                                } else {
-                                    "/services/*/env/*/valueFrom"
-                                })
+                            || p.kind != "integer"
+                            || !matches!(
+                                field.split('/').collect::<Vec<_>>().as_slice(),
+                                ["", "jobs", _, "steps", "*", "timeout-minutes"]
+                            ))
                     {
                         return Err(ApiError::bad(
-                            "secret参数只能作为valueFrom的完整值，不能拼入命令或普通环境值。",
+                            "ceilMinutes 仅用于步骤 timeout-minutes 的完整整数参数。",
+                        ));
+                    }
+                    let actions_env = kind == Kind::Actions && actions_env_field(field);
+                    let secret_field = match kind {
+                        Kind::App => field == "/services/*/env/*/valueFrom",
+                        Kind::Pipeline => field == "/env/*/valueFrom",
+                        Kind::Actions => actions_env,
+                        Kind::Config => true,
+                    };
+                    if p.secret && kind != Kind::Config && (!whole || !secret_field) {
+                        return Err(ApiError::bad(
+                            "secret参数只能作为valueFrom或Actions env的完整值，不能拼入命令或普通环境值。",
                         ));
                     }
                     if let Some(values) = values {
                         let replacement = &values[name];
+                        if ceil_minutes {
+                            let seconds = replacement
+                                .as_i64()
+                                .filter(|value| (1..=86400).contains(value))
+                                .ok_or_else(|| {
+                                    ApiError::bad("旧版步骤超时参数必须为1到86400秒。")
+                                })?;
+                            return Ok(json!((seconds + 59) / 60));
+                        }
+                        if p.secret && actions_env {
+                            return Ok(json!(format!(
+                                "${{{{ secrets['{}'] }}}}",
+                                replacement.as_str().unwrap()
+                            )));
+                        }
                         if p.secret && kind == Kind::Config {
                             output.push_str(&format!(
                                 "\0variable/{}\0",
@@ -259,7 +379,7 @@ fn expand(
                     } else {
                         output.push_str(&text[start..end + 2]);
                     }
-                } else if kind == Kind::Pipeline
+                } else if matches!(kind, Kind::Pipeline | Kind::Actions)
                     && ["run", "branch", "repo_url", "commit"].contains(&token)
                     && token == &text[start + 2..end]
                 {
@@ -276,6 +396,13 @@ fn expand(
         }
         _ => Ok(value.clone()),
     }
+}
+fn actions_env_field(field: &str) -> bool {
+    let parts: Vec<_> = field.split('/').collect();
+    matches!(
+        parts.as_slice(),
+        ["", "env", _] | ["", "jobs", _, "env", _] | ["", "jobs", _, "steps", "*", "env", _]
+    )
 }
 fn validate_template(
     content: &str,
@@ -304,6 +431,13 @@ fn render_content(
     supplied: &BTreeMap<String, Value>,
     kind: Kind,
 ) -> Result<String> {
+    let converted;
+    let content = if kind == Kind::Pipeline {
+        converted = convert_legacy_content(content)?;
+        converted.as_str()
+    } else {
+        content
+    };
     let (doc, definitions) = validate_template(content, parameters, kind)?;
     if supplied.keys().any(|k| !definitions.contains_key(k)) {
         return Err(ApiError::bad("提交了模板未声明的参数。"));
@@ -315,7 +449,22 @@ fn render_content(
             .or(p.default.as_ref())
             .ok_or_else(|| ApiError::bad(format!("请填写参数 {name}。")))?;
         value_check(p, value)?;
-        values.insert(name.clone(), value.clone());
+        let value = if kind == Kind::Pipeline && !p.secret {
+            if let Some(value) = value.as_str() {
+                json!(
+                    value
+                        .replace("{{run}}", "${{ github.run_number }}")
+                        .replace("{{branch}}", "${{ github.ref_name }}")
+                        .replace("{{commit}}", "${{ github.sha }}")
+                        .replace("{{repo_url}}", "${{ env.FERRY_REPOSITORY_URL }}")
+                )
+            } else {
+                value.clone()
+            }
+        } else {
+            value.clone()
+        };
+        values.insert(name.clone(), value);
     }
     let out = expand(
         &doc,
@@ -341,8 +490,18 @@ fn render_content(
             crate::pipelines::validate_definition(&text)?;
         }
         Kind::Config => unreachable!(),
+        Kind::Actions => unreachable!(),
     }
     Ok(text)
+}
+/// Normalize creation templates without expanding their creation-time parameters.
+/// Backup storage is handled by the migration; renders and old imports use the same converter.
+pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
+    let doc = document(content)?;
+    if doc.get("engine").and_then(Value::as_str) == Some(crate::actions::ENGINE) {
+        return Ok(content.to_owned());
+    }
+    crate::pipelines::convert_legacy(&doc.to_string(), "", "")
 }
 #[derive(Deserialize)]
 pub struct Body {
@@ -429,14 +588,20 @@ macro_rules! template_api {
                 tx.commit().await?; Ok(result)
             }
             pub(crate) async fn create_in(s:&AppState,tx:&sea_orm::DatabaseTransaction,scope:&Scope,body:Body) -> Result<(StatusCode,Json<Value>)> {
-                scope.require(concat!($resource,".create"))?; validate_body(&body,$kind)?;
+                scope.require(concat!($resource,".create"))?;
+                let mut body=body;
+                if $kind==Kind::Pipeline {body.content=convert_legacy_content(&body.content)?;}
+                validate_body(&body,$kind)?;
                 let id=s.next_id()?; let now=db::now();
                 rows::Entity::insert(rows::ActiveModel {id:Set(id.into()),workspace_id:Set(scope.workspace_id.into()),name:Set(body.name.trim().to_owned()),description:Set(body.description),content:Set(body.content),parameters:Set(body.parameters),version:Set(1),created_at:Set(now),updated_at:Set(now)}).exec(tx).await?;
                 crate::hosts::activity_in(&s,tx,&scope,"create",$resource,&id,json!({"name":body.name})).await?;
                 Ok((StatusCode::CREATED,Json(json!({"id":id,"version":1}))))
             }
             pub async fn update(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<Body>) -> Result<Json<Value>> {
-                scope.require(concat!($resource,".update"))?; validate_body(&body,$kind)?;
+                scope.require(concat!($resource,".update"))?;
+                let mut body=body;
+                if $kind==Kind::Pipeline {body.content=convert_legacy_content(&body.content)?;}
+                validate_body(&body,$kind)?;
                 let tx=if $kind==Kind::Config {crate::variables::transaction(&s,scope.workspace_id).await?} else {s.db.begin().await?};
                 if $kind==Kind::Config {let old=scoped(&tx,&scope,id).await?; if old.name!=body.name.trim() {config_unreferenced(&tx,scope.workspace_id,id,&old.name).await?;} }
                 let n=rows::Entity::update_many().col_expr(rows::Column::Name,Expr::value(body.name.trim().to_owned()))
@@ -526,10 +691,10 @@ jobs:
         let rendered =
             render_content(&content, parameters, &BTreeMap::new(), Kind::Pipeline).unwrap();
         let document = crate::actions::document(&rendered).unwrap();
-        assert_eq!(
-            document.workflow,
-            workflow.replace("{{ .Values.message }}", "hello")
-        );
+        let expected: Value =
+            serde_yaml_ng::from_str(&workflow.replace("{{ .Values.message }}", "hello")).unwrap();
+        let actual: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        assert_eq!(actual, expected);
         assert!(document.workflow.contains("{{ .Values.not_a_parameter }}"));
         assert_eq!(
             crate::actions::references(&document).unwrap().secrets.names,
@@ -545,6 +710,145 @@ jobs:
         assert!(validate_template(&unknown, "[]", Kind::Pipeline).is_err());
     }
 
+    #[test]
+    fn actions_secret_parameters_render_scoped_references_in_environment_values() {
+        let workflow = r#"env:
+  GLOBAL_TOKEN: '{{ .Values.token }}'
+jobs:
+  build:
+    runs-on: self-hosted
+    env:
+      JOB_TOKEN: '{{ .Values.token }}'
+      EXISTING: ${{ secrets.EXISTING }}
+    steps:
+      - run: echo ok
+        env:
+          STEP_TOKEN: '{{ .Values.token }}'
+"#;
+        let content = json!({"engine":crate::actions::ENGINE,"workflow":workflow}).to_string();
+        let parameters = r#"[{"name":"token","type":"string","secret":true}]"#;
+        let values = BTreeMap::from([("token".into(), json!("db-token"))]);
+        let rendered = render_content(&content, parameters, &values, Kind::Pipeline).unwrap();
+        let document = crate::actions::document(&rendered).unwrap();
+        let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        for value in [
+            &workflow["env"]["GLOBAL_TOKEN"],
+            &workflow["jobs"]["build"]["env"]["JOB_TOKEN"],
+            &workflow["jobs"]["build"]["steps"][0]["env"]["STEP_TOKEN"],
+        ] {
+            assert_eq!(value, "${{ secrets['db-token'] }}");
+        }
+        assert_eq!(
+            workflow["jobs"]["build"]["env"]["EXISTING"],
+            "${{ secrets.EXISTING }}"
+        );
+        let references = crate::actions::references(&document).unwrap();
+        assert_eq!(
+            references.secrets.names,
+            BTreeSet::from(["db-token".into(), "EXISTING".into()])
+        );
+        for workflow in [
+            "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: '{{ .Values.token }}'\n",
+            "env:\n  TOKEN: 'prefix {{ .Values.token }}'\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo ok\n",
+        ] {
+            let content = json!({"engine":crate::actions::ENGINE,"workflow":workflow}).to_string();
+            assert!(validate_template(&content, parameters, Kind::Pipeline).is_err());
+        }
+        assert!(
+            render_content(
+                &content,
+                parameters,
+                &BTreeMap::from([("token".into(), json!("bad' }} injected"))]),
+                Kind::Pipeline
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn converted_artifact_parameter_names_follow_the_rendered_logical_path() {
+        let legacy = json!({"workdir":"/tmp/build", "steps":[{"name":"build","run":"true"}],
+            "artifacts":["{{ .Values.artifact }}"]})
+        .to_string();
+        let content = convert_legacy_content(&legacy).unwrap();
+        let rendered = render_content(
+            &content,
+            r#"[{"name":"artifact","type":"string"}]"#,
+            &BTreeMap::from([("artifact".into(), json!("bin/app"))]),
+            Kind::Pipeline,
+        )
+        .unwrap();
+        let document = crate::actions::document(&rendered).unwrap();
+        let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        let upload = workflow["jobs"]["build"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["uses"] == "actions/upload-artifact@v4")
+            .unwrap();
+        assert_eq!(upload["name"], "Archive bin/app");
+        assert_eq!(
+            upload["with"]["name"],
+            crate::artifacts::legacy_artifact_name("bin/app")
+        );
+        assert_eq!(upload["with"]["path"], "/tmp/build/bin/app");
+    }
+    #[test]
+    fn converted_timeout_parameters_keep_seconds_in_other_fields() {
+        let content = json!({
+            "workdir":"/tmp/build",
+            "steps":[{"name":"build","run":"echo {{ .Values.timeout }}",
+                "timeout_seconds":"{{ .Values.timeout }}"}]
+        })
+        .to_string();
+        let parameters = r#"[{"name":"timeout","type":"integer","default":61}]"#;
+        let converted = convert_legacy_content(&content).unwrap();
+        assert_eq!(convert_legacy_content(&converted).unwrap(), converted);
+        assert!(converted.contains("ceilMinutes .Values.timeout"));
+        for (seconds, minutes) in [(1, 1), (60, 1), (61, 2), (86400, 1440)] {
+            let rendered = render_content(
+                &converted,
+                parameters,
+                &BTreeMap::from([("timeout".into(), json!(seconds))]),
+                Kind::Pipeline,
+            )
+            .unwrap();
+            let document = crate::actions::document(&rendered).unwrap();
+            let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+            let step = workflow["jobs"]["build"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["name"] == "build")
+                .unwrap();
+            assert_eq!(step["timeout-minutes"], minutes);
+            assert_eq!(step["run"], format!("echo {seconds}"));
+            assert_eq!(workflow["jobs"]["build"]["timeout-minutes"], minutes + 30);
+        }
+        for seconds in [0, -1, 86401] {
+            assert!(
+                render_content(
+                    &converted,
+                    parameters,
+                    &BTreeMap::from([("timeout".into(), json!(seconds))]),
+                    Kind::Pipeline
+                )
+                .is_err()
+            );
+        }
+        let rendered =
+            render_content(&converted, parameters, &BTreeMap::new(), Kind::Pipeline).unwrap();
+        let document = crate::actions::document(&rendered).unwrap();
+        let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        assert_eq!(
+            workflow["jobs"]["build"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["name"] == "build")
+                .unwrap()["timeout-minutes"],
+            2
+        );
+    }
     #[test]
     fn typed_expansion_defaults_and_json_escaping() {
         let defs=json!([{"name":"image.tag","type":"string","default":"alpine","enum":["alpine","latest"]},{"name":"port","type":"integer","default":8080,"min":1,"max":65535}]).to_string();
@@ -594,9 +898,32 @@ jobs:
             Kind::Pipeline,
         )
         .unwrap();
-        let value: Value = serde_json::from_str(&rendered).unwrap();
-        assert_eq!(value["steps"][0]["run"], command);
-        assert_eq!(value["workdir"], "/tmp/build/{{run}}");
+        let document = crate::actions::document(&rendered).unwrap();
+        let value: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        let setup = &value["jobs"]["build"]["steps"][0];
+        assert_eq!(setup["id"], "prepare_workspace");
+        assert_eq!(setup["working-directory"], "${{ github.workspace }}");
+        assert_eq!(
+            setup["env"]["FERRY_LEGACY_WORKDIR"],
+            "/tmp/build/${{ github.run_number }}"
+        );
+        assert_eq!(
+            setup["run"],
+            "[ -d \"$FERRY_LEGACY_WORKDIR\" ] || mkdir -p -- \"$FERRY_LEGACY_WORKDIR\""
+        );
+        assert_eq!(
+            value["jobs"]["build"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["name"] == "step")
+                .unwrap()["run"],
+            command.replace("{{branch}}", "${{ github.ref_name }}")
+        );
+        assert_eq!(
+            value["jobs"]["build"]["defaults"]["run"]["working-directory"],
+            "/tmp/build/${{ github.run_number }}"
+        );
     }
     #[test]
     fn declarations_missing_values_and_unsupported_expressions_are_refused() {
@@ -667,8 +994,12 @@ jobs:
         let pipeline = json!({"workdir":"/tmp/{{run}}","env":[{"name":"TOKEN","valueFrom":"{{ .Values.token }}"}],"steps":[{"name":"build","run":"true"}]});
         let rendered =
             render_content(&pipeline.to_string(), defs, &values, Kind::Pipeline).unwrap();
-        let value: Value = serde_json::from_str(&rendered).unwrap();
-        assert_eq!(value["env"][0]["valueFrom"], "variable/db-token");
+        let document = crate::actions::document(&rendered).unwrap();
+        let value: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
+        assert_eq!(
+            value["jobs"]["build"]["env"]["TOKEN"],
+            "${{ secrets['db-token'] }}"
+        );
     }
     #[test]
     fn config_secrets_are_references_and_literals_cannot_forge_markers() {

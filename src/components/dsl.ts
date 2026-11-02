@@ -96,7 +96,6 @@ export interface ListConfig<T> {
 
 export type FieldType =
   | "repository-source"
-  | "pipeline-repository"
   | "marketplace-repository"
   | "actions-editor"
   | "cron"
