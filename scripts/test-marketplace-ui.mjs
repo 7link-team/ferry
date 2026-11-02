@@ -26,16 +26,16 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
-  const headers = { 'X-Ferry-Request': '1' };
+  const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
   const post = async (ctx, path, data) => {
     const response = await ctx.request.post(`${origin}/api${path}`, { headers, data });
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext();
+  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -59,7 +59,7 @@ try {
     const legacy=await post(owner,root+'/repositories',{name:'Browser repository',url:fixtureOrigin+'/owner/repository.git'});
     const credential=await post(owner,root+'/credentials',{name:'Marketplace PAT',kind:'token',username:'market-user',secret:'market-browser-token',description:''});
     const connection=await post(owner,root+'/code-connections',{name:'Marketplace connection',provider:'github',credential_id:credential.id,base_url:fixtureOrigin,api_url:fixtureOrigin,description:''});
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/marketplace-sources`);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByRole('textbox',{name:/^名称/}).fill('Legacy browser source');
     await p.getByLabel('仓库来源',{exact:true}).selectOption('legacy');
@@ -69,7 +69,7 @@ try {
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/marketplace-sources`);
     const originalSources=await(await owner.request.get(`${origin}/api${root}/marketplace-sources`)).json();const legacySource=originalSources.items.find(row=>row.name==='Legacy browser source');assert(legacySource);assert.equal(legacySource.repository_id,legacy.id);
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/marketplace-sources/${legacySource.id}/edit`);assert.equal(await p.getByLabel('外部仓库',{exact:true}).inputValue(),legacy.id);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources/${legacySource.id}/edit`);assert.equal(await p.getByLabel('外部仓库',{exact:true}).inputValue(),legacy.id);
     await p.getByRole('button',{name:'保存',exact:true}).click();await p.waitForURL(`**/workspaces/${workspace_tenant}/marketplace-sources`);
     const retained=await(await owner.request.get(`${origin}/api${root}/marketplace-sources/${legacySource.id}`)).json();assert.equal(retained.repository_id,legacy.id);assert.equal(new URL(retained.api_base).href,new URL(fixtureOrigin).href);assert.equal(retained.project,'owner/repository');
     await p.getByRole('button',{name:'创建',exact:true}).click();await p.getByRole('textbox',{name:/^名称/}).fill('Browser source');
@@ -85,7 +85,7 @@ try {
     await p.waitForURL(`**/workspaces/${workspace_tenant}/app-templates/*`);
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
     assert.equal(templates.total,1);assert.equal(templates.items[0].name,'Browser app');
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/marketplace-sources`);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources`);
     await p.getByRole('row').filter({has:p.getByRole('cell',{name:'Browser source',exact:true})}).getByRole('button',{name:'删除',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});

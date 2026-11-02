@@ -1,4 +1,5 @@
 {
+  "runner.transportFailed": "The agent WebSocket connection failed. Check the server and agent transport logs.",
   "runner.offline": "The agent on host \"{name}\" is disconnected. Check that ferry-runner is running.",
   "runner.remoteFailed": "Host agent operation failed: {detail}",
   "runner.garbled": "The host agent returned an unrecognized response. Check that its version matches the server.",

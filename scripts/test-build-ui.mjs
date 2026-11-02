@@ -67,11 +67,11 @@ try {
     try { return (await fetch(`${origin}/api/status`)).ok; } catch { return false; }
   });
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 900 } });
   const api = async (path, body) => {
     const response = await context.request.fetch(`${origin}/api${path}`, {
       method: body === undefined ? 'GET' : 'POST', data: body,
-      headers: { 'X-Ferry-Request': '1' },
+      headers: { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' },
     });
     assert(response.ok(), `${path}: ${response.status()} ${await response.text()}`);
     return response.json();
@@ -88,7 +88,7 @@ try {
   page = await context.newPage();
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const assets = []; context.on('request', (request) => assets.push(request.url()));
-  await page.goto(`${origin}/workspaces/${workspace_ops}/code-connections`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/code-connections`);
   await page.getByRole('button', { name: '创建连接', exact: true }).waitFor();
   let releasePreferences;
   const preferencesGate = new Promise(resolve => { releasePreferences = resolve; });
@@ -127,7 +127,7 @@ try {
   // A pipeline saved by an earlier release (legacy JSON) is converted on write
   // and edited in the Actions editor like any other pipeline.
   const legacy=await api(`/workspaces/${workspace_ops}/pipelines`,{name:'Legacy seed',target_kind:'host',target_ref:host.id,repository_id:repository.id,definition:JSON.stringify(definition)});
-  await page.goto(`${origin}/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
   await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
   assert.equal(await page.getByLabel('定义（JSON）', { exact: false }).count(), 0, 'the legacy JSON editor is gone');
   await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -165,7 +165,7 @@ try {
   assert.deepEqual(errors, []);
   pass('execution history, no trigger action in history, no browser exceptions');
   assert(!assets.some((url) => /\/assets\/xterm-.*\.js/.test(url)), 'xterm loaded before terminal selection');
-  await page.goto(`${origin}/workspaces/${workspace_ops}/nodes/${host.id}`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/nodes/${host.id}`);
   const terminalPage = context.waitForEvent('page');
   await page.getByRole('link', { name: '打开终端', exact: true }).click();
   page = await terminalPage;

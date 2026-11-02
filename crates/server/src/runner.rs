@@ -158,6 +158,15 @@ fn remote_failed(error: impl std::fmt::Display) -> ApiError {
     )
 }
 
+fn connection_failed(error: ApiError) -> ApiError {
+    let message = crate::i18n::Message::new("runner.remoteFailed");
+    let message = match error.2 {
+        Some(identity) => message.with_message("detail", identity),
+        None => message.with("detail", error.1),
+    };
+    ApiError::localized(StatusCode::BAD_GATEWAY, message)
+}
+
 fn garbled() -> ApiError {
     ApiError::localized(
         StatusCode::BAD_GATEWAY,
@@ -210,14 +219,14 @@ async fn send_frame<T: Serialize>(socket: &mut Socket, frame: &T) -> Result<()> 
     socket
         .send(Message::Text(text.into()))
         .await
-        .map_err(|error| remote_failed(error))
+        .map_err(connection_failed)
 }
 
 /// Reads frames until a JSON text frame arrives. Binary frames are payload and
 /// never control, so they are skipped rather than treated as an error.
 async fn next_frame<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Result<T> {
     while let Some(message) = socket.recv().await {
-        match message.map_err(remote_failed)? {
+        match message.map_err(connection_failed)? {
             Message::Text(text) => return serde_json::from_str(&text).map_err(|_| garbled()),
             Message::Close(_) => break,
             _ => {}
@@ -1081,14 +1090,15 @@ pub struct RunnerChannel {
 }
 
 pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionKind) -> Result<()> {
-    let registration = live()
-        .get(host)
-        .cloned()
-        .ok_or_else(crate::cluster::unavailable)?;
+    let registration = live().get(host).cloned().ok_or_else(|| {
+        crate::cluster::diagnostic("websocket", "open", "registration_missing");
+        crate::cluster::unavailable()
+    })?;
     if !registration
         .ready
         .load(std::sync::atomic::Ordering::Acquire)
     {
+        crate::cluster::diagnostic("websocket", "open", "agent_not_ready");
         return Err(crate::cluster::unavailable());
     }
     if kind == wire::SessionKind::Monitor && !registration.supports_monitor {
@@ -1138,23 +1148,35 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
 
 impl RunnerChannel {
     /// Asks the runner to dial a dedicated connection and waits for it.
+    #[tracing::instrument(skip(self), fields(host_id = %self.host_id))]
     async fn session(&self, kind: wire::SessionKind) -> Result<Socket> {
         if !self._lease.valid() {
+            crate::cluster::diagnostic("reservation", "open", "lease_invalid");
             return Err(crate::cluster::unavailable());
         }
         if let Some(cluster) = &self.cluster {
             let owner = cluster
                 .owner(&self.host_id)
-                .await?
-                .ok_or_else(|| offline(&self.name))?;
+                .await
+                .inspect_err(|_| {
+                    crate::cluster::diagnostic("nats", "open", "ownership_lookup_failed");
+                })?
+                .ok_or_else(|| {
+                    crate::cluster::diagnostic("nats", "open", "owner_missing");
+                    offline(&self.name)
+                })?;
             let id = secret();
             let route = crate::cluster::SessionRoute {
                 host: self.host_id.clone(),
                 owner: owner.clone(),
             };
-            let mut socket = cluster.socket(&id, false, &route).await?;
+            let mut socket = cluster.socket(&id, false, &route).await.inspect_err(|_| {
+                crate::cluster::diagnostic("nats", "open", "stream_setup_failed");
+            })?;
             socket.hold(self._lease.clone());
-            cluster.new_session(&id, &route).await?;
+            cluster.new_session(&id, &route).await.inspect_err(|_| {
+                crate::cluster::diagnostic("nats", "open", "route_registration_failed");
+            })?;
             let _: Value = cluster
                 .rpc(
                     &owner.node,
@@ -1165,8 +1187,13 @@ impl RunnerChannel {
                         kind,
                     },
                 )
-                .await?;
-            cluster.wait_session(&id).await?;
+                .await
+                .inspect_err(|_| {
+                    crate::cluster::diagnostic("nats", "open", "owner_rpc_failed");
+                })?;
+            cluster.wait_session(&id).await.inspect_err(|_| {
+                crate::cluster::diagnostic("nats", "wait", "session_not_ready");
+            })?;
             return Ok(socket);
         }
         let registration = live()
@@ -1196,17 +1223,20 @@ impl RunnerChannel {
             })
             .await;
         if asked.is_err() {
+            crate::cluster::diagnostic("websocket", "open", "control_channel_closed");
             pending().remove(&id);
             return Err(offline(&self.name));
         }
         match tokio::time::timeout(DIAL_TIMEOUT, dialled).await {
             Ok(Ok(Ok(socket))) => Ok(socket),
             Ok(Ok(Err(error))) => {
+                crate::cluster::diagnostic("websocket", "wait", "session_rejected");
                 pending().remove(&id);
                 Err(error)
             }
             // Dropped sender or timeout: either way nothing will arrive.
             Ok(Err(_)) | Err(_) => {
+                crate::cluster::diagnostic("websocket", "wait", "session_not_ready");
                 pending().remove(&id);
                 Err(offline(&self.name))
             }
@@ -1611,6 +1641,32 @@ async fn pump_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_errors_preserve_local_and_cluster_classification_in_six_languages() {
+        for key in ["runner.transportFailed", "runner.clusterUnavailable"] {
+            let identity = crate::i18n::Message::new(key);
+            let error = connection_failed(ApiError::localized(
+                StatusCode::BAD_GATEWAY,
+                identity.clone(),
+            ));
+            for locale in crate::i18n::Locale::ALL {
+                assert_eq!(
+                    error.render(locale),
+                    crate::i18n::render(
+                        locale,
+                        &crate::i18n::Message::new("runner.remoteFailed")
+                            .with_message("detail", identity.clone())
+                    )
+                );
+            }
+        }
+        let raw = "literal provider {runner.transportFailed}";
+        let error = connection_failed(ApiError(StatusCode::BAD_GATEWAY, raw.into(), None));
+        for locale in crate::i18n::Locale::ALL {
+            assert!(error.render(locale).contains(raw));
+        }
+    }
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
     #[test]

@@ -26,16 +26,16 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
-  const headers = { 'X-Ferry-Request': '1' };
+  const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
   const post = async (ctx, path, data) => {
     const response = await ctx.request.post(`${origin}/api${path}`, { headers, data });
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext({ permissions: ['clipboard-read','clipboard-write'] });
+  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, permissions: ['clipboard-read','clipboard-write'] });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -58,7 +58,7 @@ try {
   ]) {
     const app=field==='manifest';
     const name=`UI ${resource}`;
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/${resource}`);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByLabel('名称',{exact:false}).fill(name);
     if (app) {
@@ -96,7 +96,7 @@ try {
       assert(edited.ok());
       await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
       await dialog.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
-      await dialog.getByRole('button',{name:'重新载入模板',exact:true}).click();
+      await dialog.getByRole('button',{name:'重新加载模版',exact:true}).click();
       await dialog.getByText(/版本 2/).waitFor();
       await dialog.getByLabel('超时',{exact:false}).fill('30');
       await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
@@ -115,7 +115,7 @@ try {
       const objects=await get(root+'/pipelines');
       assert.equal(objects.total,1);
       assert(objects.items[0].executor_bindings.some(binding=>binding.job_id==='build' && binding.target_ref===host.id));
-      await p.goto(`${origin}/workspaces/${workspace_tenant}/pipelines/new`);
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/pipelines/new`);
       await p.getByRole('button',{name:'从模板导入',exact:true}).click();
       await p.getByRole('dialog').getByRole('option',{name,exact:true}).click();
       await p.getByRole('dialog').getByText(/版本 2/).waitFor();
@@ -153,7 +153,7 @@ try {
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
     assert(await create.isDisabled(),'stale version blocks creation');
-    await p.getByRole('button',{name:'重新载入模板',exact:true}).click();
+    await p.getByRole('button',{name:'重新加载模版',exact:true}).click();
     await p.getByText(/版本 2/).waitFor();
     if(app) await p.getByLabel('令牌（密钥变量名）',{exact:false}).fill('token');
     else {
@@ -173,14 +173,14 @@ try {
     const objects=await get(root+'/'+(app?'deployments':'pipelines'));
     assert.equal(objects.total,1);
     assert.equal(objects.items[0].target_ref,host.id);
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/${target === 'apps' ? 'deployments' : target}/new`);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${target === 'apps' ? 'deployments' : target}/new`);
     await p.getByRole('region',{name:'从模板生成'}).getByRole('combobox').click();
     await p.getByRole('option',{name,exact:true}).click();
     await p.getByText(/版本 2/).waitFor();
     assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
     console.log(`PASS ${resource}: UI create/copy/edit/delete, template selection, parameters, generate, conflict/reload, real resource creation`);
   }
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/config-templates`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('名称',{exact:false}).fill('Runtime file');
   await p.getByLabel('应用配置文件内容',{exact:false}).fill('port={{ .Values.port }}\n');

@@ -162,6 +162,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     for key in ('os', 'agent_version'):
                         assert after[key] == before[path].get(key, ''), (key, after[key])
                         before[path].setdefault(key, '')
+                    # Existing hosts inherit the confirmed global update policy.
+                    assert after['runner_auto_update'] == before[path].get('runner_auto_update', 'inherit')
+                    before[path].setdefault('runner_auto_update', 'inherit')
                 if '/pipelines/' in path:
                     assert after['definition_format']=='github-actions'
                     assert "run: 'true'" in after['definition'] or 'run: true' in after['definition']

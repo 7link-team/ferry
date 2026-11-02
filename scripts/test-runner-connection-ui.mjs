@@ -9,7 +9,7 @@ const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -41,7 +41,7 @@ try {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
   const exactButton = name => page.getByRole('button', { name, exact: true });
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/new`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/new`);
   const command = page.getByRole('textbox', { name: '安装命令' });
   await command.waitFor({ timeout: 10000 });
   assert.match(await command.inputValue(), /fixture-secret-1/);
@@ -53,10 +53,10 @@ try {
   assert.match(await command.inputValue(), /install.sh/);
   console.log('PASS new Runner host shows a ready-to-copy Linux/Windows command without saving');
 
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
   assert.equal(await exactButton('连接主机').count(), 0);
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1`);
   const current = page.getByRole('textbox', { name: '当前连接命令' });
   await current.waitFor();
   assert.match(await current.inputValue(), /fixture-current-token/);
@@ -92,13 +92,13 @@ try {
   console.log('PASS SSH detail has no Agent command');
 
   permissions = ['hosts.read']; connection = 'runner';
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1?tab=connect`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1?tab=connect`);
   assert.equal(await page.getByRole('textbox', { name: '当前连接命令' }).count(), 0);
   assert.equal(await exactButton('重置连接').count(), 0);
   permissions = ['hosts.read', 'hosts.create', 'hosts.enroll'];
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/new`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/new`);
   await command.waitFor();
   await page.getByRole('tab', { name: 'SSH', exact: true }).click();
   assert.equal(await page.getByRole('tab', { name: '代理 Runner' }).count(), 1);
@@ -110,7 +110,7 @@ try {
   console.log('PASS new host switches Runner to SSH and back with the tabs retained');
 
   permissions = ['pipelines.read', 'pipelines.create', 'pipeline-groups.read'];
-  await page.goto(`${origin}/workspaces/109124796398174208/pipelines/new`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/pipelines/new`);
   await page.getByRole('tab', { name: 'YAML', exact: true }).click();
   await page.locator('.monaco-editor').waitFor({ timeout: 20000 });
   assert.equal(await page.getByRole('textbox', { name: 'GitHub Actions YAML' }).count(), 1);

@@ -29,13 +29,13 @@ try {
   }
   assert.ok(ready, 'test server ready');
   browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 900 } });
   const api = async (path, data, method = data === undefined ? 'GET' : 'POST') => {
-    const response = await context.request.fetch(`${origin}/api${path}`, { method, data, headers: { 'X-Ferry-Request': '1' } });
+    const response = await context.request.fetch(`${origin}/api${path}`, { method, data, headers: { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' } });
     assert.ok(response.ok(), `${path}: ${response.status()}`);
     return response.status() === 204 ? undefined : response.json();
   };
-  execFileSync('python3', ['scripts/test-setup.py', `${origin}/api`, directory], { windowsHide: true });
+  execFileSync(process.env.PYTHON_BINARY || 'python3', ['scripts/test-setup.py', `${origin}/api`, directory], { windowsHide: true });
   await api('/users', { email: 'variables@example.invalid', name: 'Variable acceptance', password: 'temporary-variable-password' });
   const workspace_ops = (await api('/workspaces', { name: 'Variables', slug: 'ops' })).id;
   const page = await context.newPage();
@@ -45,7 +45,7 @@ try {
   const secret = "  ui-secret\n$literal 'quoted' \\tail  ";
   let globalId;
   for (const [group, scope] of [['ops', 'global'], ['deploy', 'deploy'], ['build', 'build']]) {
-    await page.goto(`${origin}/workspaces/${workspace_ops}/variables/new?scope=${scope}`);
+    await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables/new?scope=${scope}`);
     await page.getByLabel('名称', { exact: false }).fill('shared-url');
     await page.getByLabel('密钥值', { exact: true }).fill(secret);
     await page.getByRole('button', { name: '创建', exact: true }).click();
@@ -59,7 +59,7 @@ try {
     if (scope === 'global') globalId = result.items[0].id;
   }
   assert.equal(reveals.length, 0);
-  await page.goto(`${origin}/workspaces/${workspace_ops}/variables/${globalId}`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables/${globalId}`);
   await page.getByRole('button', { name: '查看明文（记录审计）', exact: true }).click();
   await page.getByLabel('变量明文').waitFor();
   assert.equal(await page.getByLabel('变量明文').textContent(), secret);
@@ -67,14 +67,14 @@ try {
   assert.equal(await page.getByLabel('变量明文').count(), 0);
   await page.getByRole('button', { name: '查看明文（记录审计）', exact: true }).click();
   await page.getByLabel('变量明文').waitFor();
-  await page.goto(`${origin}/workspaces/${workspace_ops}/variables`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables`);
   await page.getByRole('cell', { name: 'shared-url', exact: true }).waitFor();
   assert.ok(!(await page.locator('body').textContent()).includes('ui-secret'));
-  await page.goto(`${origin}/workspaces/${workspace_ops}/variables/${globalId}/edit`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables/${globalId}/edit`);
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('cell', { name: 'shared-url', exact: true }).waitFor();
   assert.equal((await api(`/workspaces/${workspace_ops}/variables/${globalId}/disclosures`, {})).value, secret);
-  await page.goto(`${origin}/workspaces/${workspace_ops}/variables/${globalId}/edit`);
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables/${globalId}/edit`);
   await page.getByRole('checkbox', { name: /替换密钥值/ }).check();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('cell', { name: 'shared-url', exact: true }).waitFor();

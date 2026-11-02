@@ -33,7 +33,7 @@ try {
   await vite.listen();
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
   const errors = [];
@@ -42,7 +42,7 @@ try {
   async function post(path, data) {
     // Seed through the backend directly; cookies remain shared with the UI on
     // 127.0.0.1. Layout assertions still exercise the real frontend/API proxy.
-    const response = await fetch(`${backend}/api${path}`, { method: 'POST', headers: { 'X-Ferry-Request': '1', 'Content-Type': 'application/json', Cookie: seedCookie }, body: JSON.stringify(data), signal: AbortSignal.timeout(30000) });
+    const response = await fetch(`${backend}/api${path}`, { method: 'POST', headers: { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN', 'Content-Type': 'application/json', Cookie: seedCookie }, body: JSON.stringify(data), signal: AbortSignal.timeout(30000) });
     const cookies = response.headers.getSetCookie();
     if (cookies.length) {
       seedCookie = cookies.map(cookie => cookie.split(';')[0]).join('; ');

@@ -130,7 +130,7 @@ try {
     assert.equal(error, '', `launcher startup error: ${error}`);
     return pages().find(page => page.url().startsWith('http://127.0.0.1:4290'));
   });
-  await workspace.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
+  await workspace.getByRole('heading', { name: 'Initialize the platform administrator', exact: true }).waitFor();
   assert.equal(await workspace.locator('input[name="token"]').count(), 0, 'owned sidecar supplies operator proof automatically');
   assert.equal(await workspace.locator('input[type="password"]').count(), 2, 'setup requires password confirmation');
   assert.equal(new URL(workspace.url()).hash, '', 'setup token removed from browser URL');
@@ -173,7 +173,7 @@ try {
     });
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     const resumed = await until('automatic workspace resume', () => pages().find(page => page.url().startsWith('http://127.0.0.1:4290')));
-    await resumed.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
+    await resumed.getByRole('heading', { name: 'Initialize the platform administrator', exact: true }).waitFor();
     assert.equal(await resumed.locator('input[name="token"]').count(), 0, 'resumed sidecar supplies setup proof');
     assert.equal((await (await fetch('http://127.0.0.1:4290/api/status')).json()).instance_id, status.instance_id);
     const resumedWindows = await until('only resumed workspace visible', () => {

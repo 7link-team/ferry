@@ -443,14 +443,19 @@ jobs:
 
         # Keep each credential process observable long enough for ps sampling.
         # The old ASKPASS path includes the username in Git's password-prompt argv.
+        # Git's ! prefix marks a shell helper. Decode its quoted executable path
+        # before wrapping the file; the configuration value itself is not a path.
+        helper_path = '''helper=$(python3 -c 'import os, shlex; value=os.environ.get("GIT_CONFIG_VALUE_1") or os.environ["GIT_ASKPASS"]; print(shlex.split(value[1:])[0] if value.startswith("!") else value)')'''
         success_steps = [
-            {'name': 'clone', 'run': 'set -e; helper="${GIT_CONFIG_VALUE_1:-$GIT_ASKPASS}"; mv "$helper" "$helper.real"; printf \'#!/bin/sh\\nsleep 0.5\\nexec "%s.real" "$@"\\n\' "$helper" > "$helper"; chmod 700 "$helper"; git clone --depth 1 -b {{branch}} {{repo_url}} .; echo CLONE_OK; sleep 1'},
+            {'name': 'clone', 'run': 'set -e; ' + helper_path + '; mv "$helper" "$helper.real"; printf \'#!/bin/sh\\nsleep 0.5\\nexec "%s.real" "$@"\\n\' "$helper" > "$helper"; chmod 700 "$helper"; git clone --depth 1 -b {{branch}} {{repo_url}} .; echo CLONE_OK; sleep 1'},
             {'name': 'build {{run}}', 'run': 'set -e; test "$BUILD_VALUE" = "env-main-{{run}}" && cat payload.txt && test "$(git rev-parse HEAD)" = "{{commit}}" && git rev-parse HEAD && printf "BUILD_OK\\n"; printf "BUILD_STDERR\\n" >&2'}]
         for kind, host in [('runner', runner), ('ssh', ssh)]:
             print('== ' + kind, flush=True)
             pid = pipeline(host, success_steps, artifacts=["payload.txt"])
             run = trigger(pid, values={'branch': 'main', 'commit': commit}); rid = run['id']; all_runs.append(rid)
             row = done(rid); entries = logs(rid); text = ''.join(i['chunk'] for i in entries)
+            if row['state'] != 'succeeded':
+                print(text, flush=True)
             successful.append(text)
             check(f'{2 if kind == "runner" else 3} {kind} two steps succeed',
                   row['state'] == 'succeeded' and [s['state'] for s in row['steps']] == ['succeeded'] * 2,
@@ -488,7 +493,7 @@ jobs:
 
             # Deliberately echo the password on both streams from FILE contents;
             # the test itself never injects it into any command's argv.
-            leak_steps = [{'name': 'redaction', 'run': 'd=$(dirname "${GIT_CONFIG_VALUE_1:-$GIT_ASKPASS}"); cat "$d/password"; cat "$d/password" >&2; stat -c %a "$d/password" 2>/dev/null || stat -f %Lp "$d/password"; sleep 1; exit 7'},
+            leak_steps = [{'name': 'redaction', 'run': helper_path + '; d=$(dirname "$helper"); cat "$d/password"; cat "$d/password" >&2; stat -c %a "$d/password" 2>/dev/null || stat -f %Lp "$d/password"; sleep 1; exit 7'},
                           {'name': 'must skip', 'run': 'echo SHOULD_NOT_RUN; touch forbidden'}]
             # Converted legacy steps retain their exact exit status, unlike a
             # native Actions workflow whose result contract has no exit code.

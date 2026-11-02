@@ -92,16 +92,16 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
-  const headers = { 'X-Ferry-Request': '1' };
+  const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
   const post = async (ctx, path, data) => {
     const response = await ctx.request.post(`${origin}/api${path}`, { headers, data });
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, permissions: ['clipboard-read', 'clipboard-write'] });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -131,10 +131,10 @@ try {
   assert.equal(await platform.getByLabel('GitHub 应用密钥',{exact:true}).count(),0,'stored app secret is not returned');
   assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-providers/callback');
 
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections`);
   assert.equal(await p.getByRole('navigation',{name:'仓库页面',exact:true}).count(),0,'no separate repository authorization tabs');
   assert.equal(await p.getByRole('link',{name:'平台授权',exact:true}).count(),0);
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('github');
   await p.getByLabel(/^连接名称/).fill('Preserved draft');
   await p.getByLabel(/^备注/).fill('Keep this during OAuth');
@@ -145,18 +145,18 @@ try {
   const popupPromise=p.waitForEvent('popup');
   await p.getByRole('button',{name:'打开网页授权',exact:true}).click();
   const popup=await popupPromise;
-  await p.waitForURL(url=>/^\/workspaces\/\d+\/code-connections\/[^/]+$/.test(url.pathname)&&!url.pathname.endsWith('/new'));
+  await p.waitForURL(url=>/^\/zh-CN\/workspaces\/\d+\/code-connections\/[^/]+$/.test(url.pathname)&&!url.pathname.endsWith('/new'));
   if(!popup.isClosed())await popup.waitForEvent('close');
   assert(popup.isClosed(),'OAuth callback closes only its popup');
   let rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   assert.equal(rows.items.length,1,'OAuth must create only one named connection without a second form submit');
   const oauthConnection=rows.items[0];
   assert.equal(oauthConnection.name,'Preserved draft');assert.equal(oauthConnection.description,'Keep this during OAuth');assert.equal(oauthConnection.provider,'github');assert.notEqual(oauthConnection.credential_id,'0');
-  assert.equal(new URL(p.url()).pathname,`/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}`);
+  assert.equal(new URL(p.url()).pathname,`/zh-CN/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}`);
   const firstCredential=oauthConnection.credential_id;
 
   // Reauthorization updates this named connection, preserving its ID and credential references.
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}/edit`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}/edit`);
   await p.getByLabel(/^连接名称/).fill('Reauthorized connection');
   await p.getByLabel(/^备注/).fill('Saved during reauthorization');
   const reauthPopupPromise=p.waitForEvent('popup');
@@ -170,7 +170,7 @@ try {
   assert.equal(rows.items[0].name,'Reauthorized connection');assert.equal(rows.items[0].description,'Saved during reauthorization');
 
   const invalidCredential=await post(owner,root+'/credentials',{name:'Invalid platform PAT',kind:'token',username:'browser-authorized-user',secret:'invalid-token',description:''});
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('gitee');
   await p.getByLabel(/^连接名称/).fill('Gitee connection');
   await p.getByLabel('凭据',{exact:true}).selectOption(invalidCredential.id);
@@ -208,9 +208,9 @@ try {
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const giteeConnection=rows.items.find(row=>row.provider==='gitee'&&row.name==='Gitee connection');assert(giteeConnection);assert.equal(giteeConnection.credential_id,personalCredential.id);assert(!('default_branch' in giteeConnection));
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('凭据',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('凭据',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('codeup');
   await p.getByLabel(/^连接名称/).fill('Codeup private checkout');
   await p.getByLabel('凭据',{exact:true}).selectOption(personalCredential.id);
@@ -224,7 +224,7 @@ try {
   const codeupConnection=rows.items.find(row=>row.provider==='codeup');assert(codeupConnection);
 
   await p.setViewportSize({width:1280,height:900});
-  const connectionPath=`${origin}/workspaces/${workspace_tenant}/code-connections/${codeupConnection.id}`;
+  const connectionPath=`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${codeupConnection.id}`;
   await p.goto(connectionPath);
   const detailTabs=p.getByRole('tablist',{name:'仓库连接详情',exact:true});
   await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).waitFor();
@@ -261,7 +261,7 @@ try {
   assert.equal(await p.getByRole('option',{name:/Reusable Git password/}).count(),0);
   await p.keyboard.press('Escape');
   assert(hostCredential.id&&appCredential.id);
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/code-connections/new`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await p.getByLabel('代码平台',{exact:true}).selectOption('git');
   assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Node SSH only'}).count(),0);
   assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);

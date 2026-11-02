@@ -12,7 +12,7 @@ const longAddress = 'node-' + 'long-hostname-'.repeat(16) + '.example.invalid';
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const page = await browser.newPage();
+  const page = await browser.newPage({ locale: 'zh-CN' });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', async route => {
@@ -37,7 +37,7 @@ try {
   });
   if (process.env.DETAIL_SCREENSHOT_DIR) await mkdir(process.env.DETAIL_SCREENSHOT_DIR, { recursive: true });
   for (const [resource, id] of [['nodes', 'n1'], ['tags', 't1'], ['credentials', 'c1'], ['members', 'm1']]) {
-    await page.goto(`${origin}/workspaces/${workspace}/${resource}/${id}`);
+    await page.goto(`${origin}/zh-CN/workspaces/${workspace}/${resource}/${id}`);
     await page.locator('.detail-section').first().waitFor({ timeout: 10000 }).catch(async error => {
       console.error(resource, await page.locator('body').innerText(), errors);
       throw error;

@@ -1,4 +1,5 @@
 {
+  "runner.transportFailed": "エージェントの WebSocket 接続で通信に失敗しました。サーバーとエージェントの通信ログを確認してください。",
   "runner.offline": "ホスト「{name}」のエージェントが未接続です。ferry-runner の実行を確認してください。",
   "runner.remoteFailed": "ホストエージェントの処理に失敗しました：{detail}",
   "runner.garbled": "ホストエージェントの応答を認識できません。サーバーとのバージョン一致を確認してください。",

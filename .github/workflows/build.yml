@@ -354,6 +354,7 @@ jobs:
           node scripts/test-contribution-ui.mjs
           node scripts/test-theme-ui.mjs
           node scripts/test-typed-values-ui.mjs
+          YAML_EDITOR_UI_URL=http://127.0.0.1:5193 node scripts/test-yaml-editor-performance.mjs
           REFERENCE_UI_URL=http://127.0.0.1:5193 node scripts/test-reference-display-ui.mjs
           EXECUTION_UI_URL=http://127.0.0.1:5193 node scripts/test-execution-locale-ui.mjs
           node scripts/test-locale-ui.mjs

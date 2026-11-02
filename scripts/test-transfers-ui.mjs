@@ -26,16 +26,16 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
-  const headers = { 'X-Ferry-Request': '1' };
+  const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
   const post = async (ctx, path, data) => {
     const response = await ctx.request.post(`${origin}/api${path}`, { headers, data });
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext();
+  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -43,7 +43,7 @@ try {
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/tags`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/tags`);
   await p.getByRole('button',{name:'导入',exact:true}).click();
   const dialog=p.getByRole('dialog');
   await dialog.getByRole('heading',{name:'导入数据'}).waitFor();
@@ -82,7 +82,7 @@ try {
   assert.equal(csv.suggestedFilename(),'tags.csv');
   assert((await readFile(await csv.path(),'utf8')).includes('UI imported'));
   console.log('PASS export menu downloads real CSV with imported data');
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/credentials`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/credentials`);
   await p.getByRole('button',{name:'导入',exact:true}).click();
   await file.setInputFiles({name:'secret.csv',mimeType:'text/csv',buffer:Buffer.from('name,kind,secret\nPrivate token,token,never-visible-secret\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
@@ -92,7 +92,7 @@ try {
   await dialog.waitFor({state:'hidden'});
   assert.equal((await get(root+'/credentials')).total,1);
   const hostBody=await post(owner,root+'/nodes',{name:'Tagged in browser',connection:'runner'});
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`);
   await p.getByRole('row').filter({hasText:'Tagged in browser'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByRole('checkbox',{name:'UI imported',exact:true}).check();
   const updatingHost=p.waitForResponse(r=>r.url().endsWith('/nodes/'+hostBody.id)&&r.request().method()==='PATCH');
@@ -116,7 +116,7 @@ try {
   for (const group of nav) for (const item of group.items) {
     const resource = ({hosts:'nodes', 'host-groups':'node-groups'})[item.resource] || item.resource;
     const loaded=p.waitForResponse(r=>new URL(r.url()).pathname===`/api${root}/${resource}` && r.request().method()==='GET');
-    await p.goto(`${origin}/workspaces/${workspace_tenant}/${resource}${item.params ? '?'+new URLSearchParams(item.params) : ''}`);
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}${item.params ? '?'+new URLSearchParams(item.params) : ''}`);
     const response=await loaded;
     assert(response.ok(),`${item.resource}: ${await response.text()}`);
     await p.locator('main').waitFor();

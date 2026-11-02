@@ -1,4 +1,5 @@
 {
+  "runner.transportFailed": "代理 WebSocket 連線傳輸失敗，請查看伺服器端與代理的傳輸日誌。",
   "runner.offline": "主機「{name}」的代理未連線，請確認 ferry-runner 正在執行。",
   "runner.remoteFailed": "主機代理執行失敗：{detail}",
   "runner.garbled": "主機代理傳回無法辨識的回應，請確認代理與服務版本一致。",

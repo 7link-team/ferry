@@ -25,7 +25,7 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   const errors = [], requests = [];
   page.on('pageerror', e => errors.push(e.message));
@@ -47,7 +47,7 @@ try {
   await page.getByRole('button', { name: '初始化并进入平台' }).click();
   await page.getByText('两次输入的密码不一致。').waitFor();
   await page.getByLabel('确认密码', { exact: true }).fill('temporary-admin-password');
-  const concurrent = await browser.newContext();
+  const concurrent = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   const concurrentPage = await concurrent.newPage();
   await concurrentPage.goto(`${origin}/#setup=${encodeURIComponent(token)}`);
   await concurrentPage.getByRole('heading', { name: '初始化平台超级管理员' }).waitFor();
@@ -61,7 +61,7 @@ try {
   await concurrentPage.getByText('平台已初始化，请登录。').waitFor();
   await concurrentPage.getByRole('button', { name: '登录', exact: true }).waitFor();
   assert.equal(await concurrentPage.getByRole('button', { name: '初始化并进入平台' }).count(), 0, 'concurrent setup loser can immediately sign in');
-  assert.equal(new URL(page.url()).pathname, '/platform/workspaces');
+  assert.equal(new URL(page.url()).pathname, '/zh-CN/platform/workspaces');
   await page.getByRole('button', { name: '创建工作空间', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('First workspace');
   await page.getByLabel('标识', { exact: false }).fill('first');
@@ -74,7 +74,7 @@ try {
   const enter = row.getByRole('link', { name: '进入工作空间', exact: true });
   if (!(await enter.isVisible())) await row.getByRole('button').last().click();
   const entryPath = new URL(await enter.getAttribute('href'), origin).pathname;
-  assert.match(entryPath, /^\/workspaces\/\d+\//, 'workspace entry uses its Snowflake ID');
+  assert.match(entryPath, /^\/zh-CN\/workspaces\/\d+\//, 'workspace entry uses its Snowflake ID');
   await page.getByRole('link', { name: '进入工作空间', exact: true }).click();
   await page.getByRole('button', { name: '平台管理', exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, entryPath, 'new workspace can be entered without stale identity redirect');
@@ -84,14 +84,15 @@ try {
   await page.getByRole('checkbox').nth(1).click();
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByText('必须保留至少一个启用的平台超级管理员。').waitFor();
-  const ordinary = await browser.newContext();
-  const registered = await ordinary.request.post(`${origin}/api/users`, { headers: { 'X-Ferry-Request': '1' }, data: { name: 'Ordinary', email: 'ordinary@example.invalid', password: 'temporary-ordinary-password' } });
+  const ordinary = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
+  const registered = await ordinary.request.post(`${origin}/api/users`, { headers: { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' }, data: { name: 'Ordinary', email: 'ordinary@example.invalid', password: 'temporary-ordinary-password' } });
   assert(registered.ok());
   const ordinaryPage = await ordinary.newPage();
   await ordinaryPage.goto(`${origin}/_platform/users`);
   await ordinaryPage.getByText('当前账号没有平台管理权限。').waitFor();
   assert.equal(await ordinaryPage.getByRole('cell').count(), 0, 'ordinary account cannot view platform table');
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
+  await page.getByRole('button', { name: '账号注册', exact: true }).click();
   const toggle = page.getByRole('checkbox', { name: '允许注册新账号', exact: true });
   await toggle.waitFor();
   assert.equal(await toggle.getAttribute('aria-checked'), 'true');
@@ -102,7 +103,7 @@ try {
   // Own profile: reachable from platform management and from the workspace account menu.
   await page.getByRole('button', { name: '个人资料', exact: true }).click();
   await page.getByRole('heading', { name: '个人资料', exact: true }).first().waitFor();
-  assert.equal(new URL(page.url()).pathname, '/account');
+  assert.equal(new URL(page.url()).pathname, '/zh-CN/account');
   const nameField = page.getByLabel('姓名', { exact: true }), emailField = page.getByLabel('登录邮箱', { exact: true });
   const newPassword = page.getByLabel('新密码', { exact: true }), currentPassword = page.getByLabel('当前密码', { exact: true });
   await nameField.waitFor();
@@ -134,13 +135,13 @@ try {
   assert.match(await page.getByRole('menuitem').filter({ hasText: 'First workspace' }).textContent(), /拥有者（我创建的）/, 'workspace menu shows the role in each workspace');
   await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
   await page.getByLabel('登录邮箱', { exact: true }).waitFor();
-  assert.equal(new URL(page.url()).pathname, '/account', 'workspace account menu opens the profile');
+  assert.equal(new URL(page.url()).pathname, '/zh-CN/account', 'workspace account menu opens the profile');
   await page.reload();
   await page.getByLabel('登录邮箱', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('登录邮箱', { exact: true }).inputValue(), 'renamed@example.invalid', '/account opens directly');
   await page.getByRole('button', { name: '返回', exact: true }).click();
-  await page.waitForURL(url => url.pathname !== '/account');
-  const fresh = await browser.newContext();
+  await page.waitForURL(url => url.pathname !== '/zh-CN/account');
+  const fresh = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   const visitor = await fresh.newPage();
   await visitor.goto(origin);
   await visitor.getByRole('button', { name: '登录', exact: true }).waitFor();

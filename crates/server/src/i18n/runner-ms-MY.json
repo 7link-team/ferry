@@ -1,4 +1,5 @@
 {
+  "runner.transportFailed": "Penghantaran melalui sambungan WebSocket ejen gagal. Semak log penghantaran pelayan dan ejen.",
   "runner.offline": "Ejen hos \"{name}\" terputus. Pastikan ferry-runner sedang berjalan.",
   "runner.remoteFailed": "Operasi ejen hos gagal: {detail}",
   "runner.garbled": "Respons ejen hos tidak dikenali. Pastikan versinya sepadan dengan pelayan.",

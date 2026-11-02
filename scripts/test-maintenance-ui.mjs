@@ -25,7 +25,7 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
   const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
@@ -34,7 +34,7 @@ try {
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext({ locale: 'zh-CN' });
+  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -42,15 +42,15 @@ try {
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
   await post(owner,root+'/nodes',{name:'Dictionary host',connection:'runner'});
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/settings`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/settings`);
   await p.getByRole('row').filter({hasText:'default_page_size'}).getByRole('link',{name:'编辑',exact:true}).click();
   await p.getByRole('spinbutton',{name:'值',exact:true}).fill('37');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'37',exact:true}).waitFor();
   const request=p.waitForRequest(r=>r.url().includes(`/api/workspaces/${workspace_tenant}/nodes?`) && new URL(r.url()).searchParams.get('page_size')==='37');
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`); await request;
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`); await request;
   assert.equal(new URL(p.url()).searchParams.get('page_size'),null,'default page size is not a stale URL override');
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/dictionaries`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('row').filter({hasText:'host-state'}).getByRole('link',{name:'编辑',exact:true}).click();
   const keys=await p.locator('input[aria-label$=" 值"]').evaluateAll(inputs=>inputs.map(input=>input.value));
   const unknown=keys.indexOf('unknown');
@@ -58,9 +58,9 @@ try {
   await p.getByLabel(`选项 ${unknown+1} 显示名称`,{exact:true}).fill('等待接入');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'host-state',exact:true}).waitFor();
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/nodes`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`);
   await p.getByRole('cell',{name:'等待接入',exact:true}).waitFor();
-  await p.goto(`${origin}/workspaces/${workspace_tenant}/dictionaries`);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('标识',{exact:false}).fill('custom');
   await p.getByRole('textbox',{name:/^名称/}).fill('UI dictionary');

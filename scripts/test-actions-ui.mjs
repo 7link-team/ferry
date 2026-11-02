@@ -18,8 +18,8 @@ async function eventually(fn) { for(let i=0;i<300;i++){const result=await fn();i
 try {
  await eventually(async()=>{assert.equal(server.exitCode,null);try{return(await fetch(origin+'/api/status')).ok}catch{return false}});
  browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROME_PATH?{executablePath:process.env.PLAYWRIGHT_CHROME_PATH}:{})});
- const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
- const post=async(path,data)=>{const response=await context.request.post(origin+'/api'+path,{headers:{'X-Ferry-Request':'1'},data});assert(response.ok(),await response.text());return response.json()};
+ const context=await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' },viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
+ const post=async(path,data)=>{const response=await context.request.post(origin+'/api'+path,{headers:{'X-Ferry-Request':'1','Accept-Language':'zh-CN'},data});assert(response.ok(),await response.text());return response.json()};
  await post('/setup',{email:'admin@example.invalid',name:'Admin',password:'temporary-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
  const workspace_actions = (await post('/workspaces',{name:'Actions',slug:'actions'})).id;
  const root=`/workspaces/${workspace_actions}`;
@@ -148,14 +148,14 @@ jobs:
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  assert.equal(await readonlyNode.evaluate(node=>node.style.transform),readonlyPosition,'readonly node moved');
  // Existing custom editors must retain edit access without new classification grants.
- const restricted=await browser.newContext();
- const signup=await restricted.request.post(origin+'/api/users',{headers:{'X-Ferry-Request':'1'},data:{email:'editor@example.invalid',name:'Editor',password:'temporary-editor-password'}});assert(signup.ok(),await signup.text());
+ const restricted=await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
+ const signup=await restricted.request.post(origin+'/api/users',{headers:{'X-Ferry-Request':'1','Accept-Language':'zh-CN'},data:{email:'editor@example.invalid',name:'Editor',password:'temporary-editor-password'}});assert(signup.ok(),await signup.text());
  const invitation=await(await context.request.get(origin+'/api'+root+'/members/invitation')).json();
- const joined=await restricted.request.post(origin+'/api/workspace-memberships',{headers:{'X-Ferry-Request':'1'},data:{code:invitation.code}});assert(joined.ok(),await joined.text());
+ const joined=await restricted.request.post(origin+'/api/workspace-memberships',{headers:{'X-Ferry-Request':'1','Accept-Language':'zh-CN'},data:{code:invitation.code}});assert(joined.ok(),await joined.text());
  const role=await post(root+'/roles',{name:'Existing pipeline editor',permissions:['pipelines.read','pipelines.update','hosts.read','repositories.read']});
  const members=await(await context.request.get(origin+'/api'+root+'/members')).json();
  const member=members.items.find(row=>row.email==='editor@example.invalid');assert(member);
- const assigned=await context.request.patch(origin+'/api'+root+'/members/'+member.id,{headers:{'X-Ferry-Request':'1'},data:{role_id:role.id,version:member.version}});assert(assigned.ok(),await assigned.text());
+ const assigned=await context.request.patch(origin+'/api'+root+'/members/'+member.id,{headers:{'X-Ferry-Request':'1','Accept-Language':'zh-CN'},data:{role_id:role.id,version:member.version}});assert(assigned.ok(),await assigned.text());
  const editor=await restricted.newPage();editor.on('pageerror',error=>errors.push(error.stack??error.message));
  await editor.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await editor.getByLabel('流水线名称').fill('Restricted edit saved');

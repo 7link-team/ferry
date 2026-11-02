@@ -105,6 +105,18 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
         def text(run_id):
             return ''.join(item['chunk'] for item in api(f'{root}/pipeline-runs/{run_id}/logs?after=0')['items'])
 
+        echo = run(pipeline('Minimal Windows echo', {
+            'build': {'name': 'Task 1', 'runs-on': 'self-hosted', 'timeout-minutes': 30,
+                      'steps': [{'name': 'Step 1', 'run': 'echo hello'}]},
+        }))
+        echo_result = finished(echo)
+        echo_output = text(echo)
+        check('the minimal echo hello workflow succeeds on Windows',
+              echo_result['state'] == 'succeeded' and 'hello' in echo_output,
+              f"{echo_result['state']} {echo_output}")
+        if os.environ.get('FERRY_TEST_ACTIONS_ECHO_ONLY') == '1':
+            raise SystemExit(0)
+
         jobs = {
             'produce': {'runs-on': 'self-hosted', 'outputs': {'value': '${{ steps.out.outputs.value }}'}, 'steps': [
                 {'id': 'out', 'run': '"value=hello-from-windows" >> $env:GITHUB_OUTPUT; Write-Output "PWSH_OK $($PSVersionTable.PSVersion.Major)"'},

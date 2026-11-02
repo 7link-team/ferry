@@ -26,6 +26,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
+use tracing::Instrument;
 
 const TTL: Duration = Duration::from_secs(30);
 const IO_TIMEOUT: Duration = Duration::from_secs(15);
@@ -39,7 +40,29 @@ pub fn unavailable() -> ApiError {
     )
 }
 fn failed(_: impl std::fmt::Display) -> ApiError {
+    diagnostic("nats", "coordination", "operation_failed");
     unavailable()
+}
+
+/// Intentionally accept only static classifications: transport errors can carry
+/// URLs, payloads and bearer session identifiers in their Display/Debug output.
+pub(crate) fn diagnostic(transport: &'static str, phase: &'static str, reason: &'static str) {
+    tracing::warn!(
+        transport,
+        phase,
+        reason,
+        "Runner transport operation failed"
+    );
+}
+
+fn local_failed(phase: Option<&'static str>, _: axum::Error) -> ApiError {
+    if let Some(phase) = phase {
+        diagnostic("websocket", phase, "websocket_error");
+    }
+    ApiError::localized(
+        StatusCode::BAD_GATEWAY,
+        crate::i18n::Message::new("runner.transportFailed"),
+    )
 }
 
 #[derive(Clone)]
@@ -311,6 +334,7 @@ impl Cluster {
                         .await,
                     Ok(true)
                 ) {
+                    diagnostic("nats", "lease_renew", "reservation_lost");
                     task_valid.store(false, Ordering::Release);
                     break;
                 }
@@ -382,6 +406,7 @@ impl Cluster {
             .exec(&s.db)
             .await?;
         if renewed.rows_affected != 1 {
+            diagnostic("nats", "ownership_renew", "lease_expired_or_owner_changed");
             return Err(unavailable());
         }
         self.renew(host, owner, revision).await
@@ -543,6 +568,7 @@ impl Cluster {
 
     pub async fn rpc<T: DeserializeOwned>(&self, node: &str, request: &Request) -> Result<T> {
         if self.client.connection_state() != async_nats::connection::State::Connected {
+            diagnostic("nats", "rpc", "broker_disconnected");
             return Err(unavailable());
         }
         let inbox = self.client.new_inbox();
@@ -568,16 +594,21 @@ impl Cluster {
                     .status
                     .is_some_and(|status| status.is_server_error())
                 {
+                    diagnostic("nats", "rpc", "broker_error_response");
                     return Err(unavailable());
                 }
                 if append_packet(&mut bytes, &response.payload)? {
                     return Ok(bytes);
                 }
             }
+            diagnostic("nats", "rpc", "response_subscription_closed");
             Err(unavailable())
         })
         .await
-        .map_err(failed)??;
+        .map_err(|_| {
+            diagnostic("nats", "rpc", "response_timeout");
+            unavailable()
+        })??;
         let reply: Reply = serde_json::from_slice(&bytes).map_err(failed)?;
         serde_json::from_value(reply.into_value()?).map_err(failed)
     }
@@ -642,6 +673,7 @@ impl Cluster {
             } => {
                 let owner = self.owner(&host).await?.ok_or_else(unavailable)?;
                 if owner.node != self.node || owner.fence != fence {
+                    diagnostic("nats", "open", "ownership_changed");
                     return Err(unavailable());
                 }
                 crate::runner::cluster_open(&host, &session, kind).await?;
@@ -711,6 +743,7 @@ impl Cluster {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
+                diagnostic("nats", "wait", "session_not_ready");
                 return Err(unavailable());
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -731,6 +764,7 @@ impl Cluster {
         }
         let owner = self.owner(host).await?.ok_or_else(unavailable)?;
         if owner.fence != route.owner.fence || owner.node != route.owner.node {
+            diagnostic("nats", "claim", "ownership_changed");
             return Err(unavailable());
         }
         self.sessions
@@ -811,6 +845,8 @@ impl Cluster {
         let host = route.host.clone();
         let fence = route.owner.fence.clone();
         let writer_error = incoming_tx.clone();
+        let diagnostic_span =
+            tracing::info_span!("runner_stream", host_id = %route.host, node_id = %self.node);
         let writer = tokio::spawn(async move {
             let mut pulse = tokio::time::interval(Duration::from_secs(5));
             pulse.tick().await;
@@ -823,20 +859,33 @@ impl Cluster {
                     },
                     _ = pulse.tick() => {
                         if !writer_active.load(Ordering::Acquire) {continue;}
-                        if writer_lease.lock().unwrap_or_else(|error|error.into_inner()).as_ref().is_some_and(|lease|!lease.valid()) {break;}
-                        if !this.owner(&host).await.ok().flatten().is_some_and(|owner| owner.fence == fence) { break; }
+                        if writer_lease.lock().unwrap_or_else(|error|error.into_inner()).as_ref().is_some_and(|lease|!lease.valid()) {
+                            diagnostic("nats", "stream_heartbeat", "lease_invalid");
+                            break;
+                        }
+                        match this.owner(&host).await {
+                            Ok(Some(owner)) if owner.fence == fence => {},
+                            Ok(_) => {diagnostic("nats", "stream_heartbeat", "ownership_changed"); break;},
+                            Err(_) => {diagnostic("nats", "stream_heartbeat", "ownership_lookup_failed"); break;},
+                        }
                         (Bytes::from_static(&[5]), None)
                     }
                 };
+                let closing = bytes.first() == Some(&2);
                 let result = async {
                     if this.client.connection_state() != async_nats::connection::State::Connected {
+                        if !closing { diagnostic("nats", "stream_send", "broker_disconnected"); }
                         return Err(unavailable());
                     }
                     if bytes.as_ref() == [5] {
                         this.client
                             .request(outgoing.clone(), bytes)
                             .await
-                            .map_err(failed)?;
+                            .map_err(|error| {
+                                tracing::warn!(transport = "nats", phase = "stream_heartbeat", error_kind = %error.kind(), "Runner transport request failed");
+                                diagnostic("nats", "stream_heartbeat", "request_failed");
+                                unavailable()
+                            })?;
                         return Ok(());
                     }
                     let chunks = bytes.chunks(MAX_FRAME);
@@ -846,8 +895,14 @@ impl Cluster {
                             .client
                             .request(outgoing.clone(), packet(chunk, index + 1 == count))
                             .await
-                            .map_err(failed)?;
+                            .map_err(|error| {
+                                if !closing {
+                                    tracing::warn!(transport = "nats", phase = "stream_send", error_kind = %error.kind(), "Runner transport request failed");
+                                }
+                                unavailable()
+                            })?;
                         if reply.payload.as_ref() != b"ok" {
+                            if !closing { diagnostic("nats", "stream_send", "invalid_acknowledgement"); }
                             return Err(unavailable());
                         }
                     }
@@ -866,7 +921,7 @@ impl Cluster {
                 }
             }
             let _ = writer_error.send(Err(unavailable())).await;
-        });
+        }.instrument(diagnostic_span.clone()));
         let this = self.clone();
         let mut stopped = stop.subscribe();
         let revoked_fence = route.owner.fence.clone();
@@ -875,17 +930,36 @@ impl Cluster {
             loop {
                 tokio::select! {
                     _ = stopped.changed() => break,
-                    notice = revoked.next() => {if notice.is_none_or(|notice|notice.payload.as_ref()==revoked_fence.as_bytes()) {break;}},
+                    notice = revoked.next() => {if notice.is_none_or(|notice|notice.payload.as_ref()==revoked_fence.as_bytes()) {
+                        diagnostic("nats", "stream_recv", "revocation_or_subscription_closed");
+                        break;
+                    }},
                     message = subscriber.next() => {
-                        let Some(message) = message else {break;};
+                        let Some(message) = message else {
+                            diagnostic("nats", "stream_recv", "subscription_closed");
+                            break;
+                        };
                         active.store(true,Ordering::Release);
                         if message.payload.as_ref() != [5] {
                             match append_packet(&mut assembled,&message.payload) {
                                 Ok(true)=>{
                                     let frame=decode(&assembled);assembled.clear();
-                                    if !matches!(tokio::time::timeout(IO_TIMEOUT,incoming_tx.send(frame)).await,Ok(Ok(()))) {break;}
+                                    match tokio::time::timeout(IO_TIMEOUT,incoming_tx.send(frame)).await {
+                                        Ok(Ok(())) => {},
+                                        Ok(Err(_)) => {
+                                            tracing::debug!(transport="nats", phase="stream_recv", "Runner stream consumer closed");
+                                            break;
+                                        },
+                                        Err(_) => {
+                                            diagnostic("nats", "stream_recv", "consumer_timeout");
+                                            break;
+                                        },
+                                    }
                                 },
-                                Ok(false)=>{},Err(_)=>break,
+                                Ok(false)=>{},Err(_)=>{
+                                    diagnostic("nats", "stream_recv", "invalid_or_expired_packet");
+                                    break;
+                                },
                             }
                         }
                         if let Some(reply) = message.reply { if this.client.publish(reply, Bytes::from_static(b"ok")).await.is_err() {break;} }
@@ -893,7 +967,7 @@ impl Cluster {
                 }
             }
             let _ = incoming_tx.send(Err(unavailable())).await;
-        });
+        }.instrument(diagnostic_span));
         Ok(Socket::Forwarded(Forwarded {
             send,
             receive,
@@ -957,17 +1031,38 @@ impl Socket {
     }
     pub async fn send(&mut self, message: Message) -> Result<()> {
         match self {
-            Self::Local(socket) => socket.send(message).await.map_err(failed),
+            Self::Local(socket) => {
+                // The peer may already have closed after returning its result.
+                let phase = (!matches!(message, Message::Close(_))).then_some("stream_send");
+                socket
+                    .send(message)
+                    .await
+                    .map_err(|error| local_failed(phase, error))
+            }
             Self::Forwarded(socket) => {
+                let closing = matches!(message, Message::Close(_));
                 let (tx, rx) = oneshot::channel();
-                socket.send.send((message, tx)).await.map_err(failed)?;
-                rx.await.map_err(failed)?
+                socket.send.send((message, tx)).await.map_err(|_| {
+                    if !closing {
+                        diagnostic("nats", "stream_send", "writer_closed");
+                    }
+                    unavailable()
+                })?;
+                rx.await.map_err(|_| {
+                    if !closing {
+                        diagnostic("nats", "stream_send", "writer_acknowledgement_dropped");
+                    }
+                    unavailable()
+                })?
             }
         }
     }
     pub async fn recv(&mut self) -> Option<Result<Message>> {
         match self {
-            Self::Local(socket) => socket.recv().await.map(|value| value.map_err(failed)),
+            Self::Local(socket) => socket
+                .recv()
+                .await
+                .map(|value| value.map_err(|error| local_failed(Some("stream_recv"), error))),
             Self::Forwarded(socket) => socket.receive.recv().await,
         }
     }
@@ -1046,6 +1141,92 @@ fn append_packet(output: &mut Vec<u8>, bytes: &[u8]) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct Capture(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tracing::instrument::WithSubscriber;
+
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        async {
+            let (tx, mut rx) = mpsc::channel(1);
+            let app = axum::Router::new().route("/socket", axum::routing::get(
+                move |upgrade: axum::extract::WebSocketUpgrade| {
+                    let tx = tx.clone();
+                    async move { upgrade.on_upgrade(move |socket| async move {
+                        let _ = tx.send(Socket::from(socket)).await;
+                    }) }
+                }
+            ));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+            client.write_all(format!("GET /socket?token=private-session-token HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").as_bytes()).await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") { headers.push(client.read_u8().await.unwrap()); }
+            assert!(headers.starts_with(b"HTTP/1.1 101"));
+            let mut socket = rx.recv().await.unwrap();
+            // A real peer disconnects without a WebSocket close handshake.
+            drop(client);
+            let error = tokio::time::timeout(Duration::from_secs(2), socket.recv())
+                .await.unwrap().unwrap().unwrap_err();
+            assert_eq!(error.0, StatusCode::BAD_GATEWAY);
+            assert_eq!(error.2.as_ref().unwrap().key, "runner.transportFailed");
+            for locale in crate::i18n::Locale::ALL {
+                let text = error.render(locale);
+                assert!(text.contains("WebSocket"));
+                assert_ne!(text, unavailable().render(locale));
+                assert!(!text.contains("runner.transportFailed"));
+            }
+            // The send path uses the same classification after an actual socket
+            // has entered its closed state; the payload must never be logged.
+            let error = socket.send(Message::Text("private-command-content".into())).await.unwrap_err();
+            assert_eq!(error.2.unwrap().key, "runner.transportFailed");
+            let before_close = capture.0.lock().unwrap().len();
+            let _ = socket.send(Message::Close(None)).await;
+            assert_eq!(capture.0.lock().unwrap().len(), before_close, "normal local close must not warn");
+            let error = local_failed(Some("stream_recv"), axum::Error::new(std::io::Error::other(
+                "nats://private-user:private-password@host/private-session-token private-command-content"
+            )));
+            assert!(!error.1.contains("private"));
+            server.abort();
+        }.with_subscriber(subscriber).await;
+        let log = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        for required in ["websocket", "stream_send", "stream_recv"] {
+            assert!(
+                log.contains(required),
+                "missing diagnostic {required}: {log}"
+            );
+        }
+        for private in [
+            "private-session-token",
+            "private-command-content",
+            "private-password",
+            "private-user",
+            "nats://",
+        ] {
+            assert!(!log.contains(private), "private data in diagnostic");
+        }
+    }
 
     #[test]
     fn rpc_error_identity_survives_wire_and_legacy_replies_stay_raw() {
@@ -1132,6 +1313,15 @@ mod tests {
     #[ignore = "requires NATS_TEST_URL pointing at an isolated JetStream server"]
     async fn broker_fences_old_owners_and_coordinates_reader_writer_reservations() {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+        let capture = Capture::default();
+        let writer = capture.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _logs = tracing::subscriber::set_default(subscriber);
         let url = std::env::var("NATS_TEST_URL").expect("isolated NATS URL");
         let (dir, db) = crate::lock::tests::database().await;
         let prefix = format!("test_{}", uuid::Uuid::new_v4().simple());
@@ -1260,11 +1450,67 @@ mod tests {
         assert!(
             matches!(left.recv().await,Some(Ok(Message::Binary(bytes)))if bytes.as_ref()==b"reply")
         );
+        capture.0.lock().unwrap().clear();
+        // Both an acknowledged Close and a Close after the peer has already
+        // completed its operation are normal teardown, not transport warnings.
+        let mut closing = a.socket("normal-close", false, &route).await.unwrap();
+        let mut peer = b.socket("normal-close", true, &route).await.unwrap();
+        closing.send(Message::Close(None)).await.unwrap();
+        assert!(matches!(peer.recv().await, Some(Ok(Message::Close(_)))));
+        drop(closing);
+        drop(peer);
+        let mut closing = a.socket("peer-completed", false, &route).await.unwrap();
+        let peer = b.socket("peer-completed", true, &route).await.unwrap();
+        drop(peer);
+        tokio::task::yield_now().await;
+        b.client.flush().await.unwrap();
+        let _ = closing.send(Message::Close(None)).await;
+        drop(closing);
+        tokio::task::yield_now().await;
+        let mut closing = a.socket("writer-completed", false, &route).await.unwrap();
+        if let Socket::Forwarded(socket) = &closing {
+            socket.tasks[0].abort();
+        }
+        tokio::task::yield_now().await;
+        assert!(closing.send(Message::Close(None)).await.is_err());
+        drop(closing);
+        // A writer that ends after consuming Close drops its acknowledgement.
+        // Exercise that separate outer send branch with a real broker request.
+        let mut closing = a.socket("writer-ack-dropped", false, &route).await.unwrap();
+        let Socket::Forwarded(socket) = &closing else {
+            unreachable!()
+        };
+        let writer = socket.tasks[0].abort_handle();
+        let mut peer = b
+            .client
+            .subscribe(format!("{prefix}.stream.writer-ack-dropped.1"))
+            .await
+            .unwrap();
+        b.client.flush().await.unwrap();
+        let (result, ()) = tokio::join!(closing.send(Message::Close(None)), async {
+            tokio::time::timeout(Duration::from_secs(2), peer.next())
+                .await
+                .unwrap()
+                .unwrap();
+            writer.abort();
+        });
+        assert!(result.is_err());
+        drop(closing);
+        assert!(
+            !String::from_utf8_lossy(&capture.0.lock().unwrap()).contains("WARN"),
+            "normal teardown must not warn"
+        );
         b.revoke(&sb, "7", Some(&new)).await.unwrap();
-        assert!(matches!(
-            tokio::time::timeout(Duration::from_secs(2), left.recv()).await,
-            Ok(Some(Err(_))) | Ok(None)
-        ));
+        let error = tokio::time::timeout(Duration::from_secs(2), left.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.2.unwrap().key, "runner.clusterUnavailable");
+        let log = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("stream_recv") && log.contains("revocation_or_subscription_closed"));
+        assert!(log.contains("host_id=7") && log.contains("node_id="));
+        assert!(!log.contains("duplex") && !log.contains(&data));
         b.release("7", new_revision).await;
     }
 }

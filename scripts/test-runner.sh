@@ -163,7 +163,9 @@ start_server
 echo "== server up on $PORT (pid $SERVER_PID)"
 
 JAR="$WORK/cookies"
-c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -b "$JAR" -c "$JAR" "$@"; }
+# Operator API assertions below explicitly exercise Chinese responses. Native
+# runner CLI and WebSocket probes send no language preference and expect English.
+c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -H "Accept-Language: zh-CN" -b "$JAR" -c "$JAR" "$@"; }
 
 python3 scripts/test-setup.py "$B" "$DATA" || die "platform setup failed"
 
@@ -194,7 +196,7 @@ run_once() { # run_once <state-dir> <token> ; prints the runner's own output
   wait $pid 2>/dev/null
   kill $guard 2>/dev/null
 }
-ck "garbage token refused" "注册令牌无效" "$(run_once "$WORK/s-garbage" "not-a-real-token")"
+ck "garbage token refused" "The registration token is invalid, expired, or used" "$(run_once "$WORK/s-garbage" "not-a-real-token")"
 
 EXPIRED=$(mint "$WORKSPACE_OPS" "$HOST_A")
 python3 -I -c "
@@ -203,11 +205,11 @@ db=sqlite3.connect(sys.argv[1]); db.execute('PRAGMA journal_mode=WAL')
 db.execute('UPDATE runner_tokens SET expires_at=1 WHERE token_hash=('
            'SELECT token_hash FROM runner_tokens WHERE used_at=0 ORDER BY created_at DESC LIMIT 1)')
 db.commit()" "$DATA/ferry.sqlite" || die "could not expire a token"
-ck "expired token refused" "注册令牌无效" "$(run_once "$WORK/s-expired" "$EXPIRED")"
+ck "expired token refused" "The registration token is invalid, expired, or used" "$(run_once "$WORK/s-expired" "$EXPIRED")"
 
 VERSION_REPLY=$(python3 -I scripts/ws-probe.py frame "ws://127.0.0.1:$PORT/api/runners/connect" \
   '{"version":99,"auth":{"type":"enroll","token":"x"},"hostname":"h","os":"linux","arch":"x86_64","agent_version":"0.0.0"}')
-ck "version mismatch refused loudly" "协议版本不匹配" "$VERSION_REPLY"
+ck "version mismatch refused loudly" "Protocol version mismatch: the server requires 1, but the runner uses 99" "$VERSION_REPLY"
 
 # ------------------------------------------------------- 2. the real runner enrols
 
@@ -223,7 +225,7 @@ ck "host goes online" "online" "$(c "$B/workspaces/$WORKSPACE_OPS/nodes/$HOST_A"
 ck "the key was stored" '"host_id"' "$(cat "$STATE/runner.json" 2>/dev/null)"
 ck "and only for its owner" "^600$" \
   "$(python3 -I -c "import os,sys;print(oct(os.stat(sys.argv[1]).st_mode)[-3:])" "$STATE/runner.json")"
-ck "re-using the same token fails" "已被使用\|注册令牌无效" "$(run_once "$WORK/s-replay" "$TOKEN")"
+ck "re-using the same token fails" "The registration token is invalid, expired, or used" "$(run_once "$WORK/s-replay" "$TOKEN")"
 
 # ------------------------------------------------------- 3. exec, pty, listing
 
@@ -333,7 +335,7 @@ ck "A's host is invisible from B" "不存在" \
 KEY=$(python3 -I -c "import json,sys;print(json.load(open(sys.argv[1]))['key'])" "$STATE/runner.json")
 FORGED=$(python3 -I scripts/ws-probe.py frame "ws://127.0.0.1:$PORT/api/runners/connect" \
   "{\"version\":1,\"auth\":{\"type\":\"key\",\"host_id\":\"$HOST_B\",\"key\":\"$KEY\"},\"hostname\":\"h\",\"os\":\"linux\",\"arch\":\"x86_64\",\"agent_version\":\"0.1.0\"}")
-ck  "A's key cannot claim B's host" "代理凭据无效" "$FORGED"
+ck  "A's key cannot claim B's host" "Agent credentials are invalid" "$FORGED"
 ckn "and no welcome was issued"     "welcome"      "$FORGED"
 
 # Only an unknown session id. Claiming a session that genuinely belongs to a
@@ -345,7 +347,7 @@ ckn "and no welcome was issued"     "welcome"      "$FORGED"
 # why this one is labelled for what it actually proves.
 STOLEN=$(python3 -I scripts/ws-probe.py frame "ws://127.0.0.1:$PORT/api/runners/sessions/deadbeef" \
   "{\"version\":1,\"host_id\":\"$HOST_A\",\"key\":\"$KEY\"}")
-ck "an unknown session id is refused" "该会话不存在" "$STOLEN"
+ck "an unknown session id is refused" "The session does not exist, has expired, or belongs to another host" "$STOLEN"
 
 # ------------------------------------------------- 6. reconnect on its own
 

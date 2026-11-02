@@ -8,7 +8,7 @@ const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1280, height: 800 } });
   const errors = [];
   let saved = '';
   let createdEntry;
@@ -52,7 +52,7 @@ try {
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: `fixture missing ${path}` }) });
   });
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
   await page.getByRole('heading', { name: 'build-01' }).waitFor();
   await page.setViewportSize({ width: 900, height: 800 });
   const longLabel = page.locator('table tbody span[title]').filter({ hasText: longName }).first();
@@ -102,7 +102,7 @@ try {
   assert.equal(mobilePanes.length, 3);
   for (let index = 1; index < mobilePanes.length; index++) assert(mobilePanes[index].top >= mobilePanes[index - 1].bottom - 1, 'mobile panes do not overlap');
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'ferry-host-workspace-mobile.png'), fullPage: true });
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   const terminalLink = page.getByRole('link', { name: '打开终端' });
   await terminalLink.waitFor();
   const actions = await page.locator('table tbody tr').first().locator('td').last().locator('a,button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
@@ -111,7 +111,7 @@ try {
   await page.getByRole('dialog').getByText('确认删除“build-01”？').waitFor();
   await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
   assert.equal(await terminalLink.getAttribute('target'), '_blank');
-  assert.equal(new URL(await terminalLink.getAttribute('href'), origin).pathname, '/workspaces/109124796398174208/nodes/h1/workspace');
+  assert.equal(new URL(await terminalLink.getAttribute('href'), origin).pathname, '/zh-CN/workspaces/109124796398174208/nodes/h1/workspace');
   await page.getByRole('button', { name: '上移分组 Beta' }).click();
   assert.equal(reordered, true);
   await page.waitForFunction(() => {
@@ -149,7 +149,7 @@ try {
   const completed = page.waitForResponse(response => response.url().endsWith('/h1/connection-tests'));
   finishProbe(); await completed;
   console.log('PASS pending node probe leaves other nodes and navigation interactive');
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/edit`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1/edit`);
   const form = page.locator('main form');
   await form.waitFor();
   const bounds = await form.boundingBox();
@@ -157,7 +157,7 @@ try {
   assert(Math.abs(bounds.x - (1920 - bounds.x - bounds.width)) < 200, 'host form is centered on wide screens');
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'host form fits the mobile viewport');
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
   await page.getByLabel('磁盘分区', { exact: true }).selectOption('/mnt/data');
   await page.waitForFunction(() => document.querySelector('input[aria-label="目录路径"]').value === '/mnt/data');
   await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
@@ -165,8 +165,8 @@ try {
   await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
   await page.getByRole('button', { name: '预览 .env', exact: true }).waitFor({ state: 'detached' });
   windowsFiles = true;
-  await page.goto(`${origin}/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
-  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1/workspace?tool=files`);
+  await page.getByText('当前位置： 此电脑', { exact: true }).waitFor();
   assert.equal(await page.locator('table tbody tr').count(), 3, 'all Windows drives appear');
   assert.equal(await page.getByRole('button', { name: '新建文件', exact: true }).isDisabled(), true, 'computer root is not a writable directory');
   const driveRow = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'D:/', exact: true }) });
@@ -178,7 +178,7 @@ try {
   await page.getByRole('button', { name: '显示隐藏文件', exact: true }).click();
   await page.getByRole('button', { name: '预览 pagefile.sys', exact: true }).waitFor();
   await page.getByRole('button', { name: '上级目录', exact: true }).click();
-  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  await page.getByText('当前位置： 此电脑', { exact: true }).waitFor();
   await page.locator('table').getByRole('button', { name: 'E:/', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('input[aria-label="目录路径"]').value === 'E:/');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -187,7 +187,7 @@ try {
   await page.getByRole('button', { name: '新建标签', exact: true }).click();
   await page.getByRole('menuitem', { name: '新建文件管理', exact: true }).click();
   assert.equal(await page.getByRole('tablist', { name: '主机工作标签' }).getByRole('tab').count(), 2);
-  await page.getByText('当前位置：此电脑', { exact: true }).waitFor();
+  await page.getByText('当前位置： 此电脑', { exact: true }).waitFor();
   await page.getByRole('tab', { name: '文件 1', exact: true }).click();
   assert.equal(await page.getByRole('textbox', { name: '目录路径', exact: true }).inputValue(), 'E:/');
   console.log('PASS Unix partitions/hidden toggle and Windows computer root/all drives/cross-drive navigation/hidden system files');
