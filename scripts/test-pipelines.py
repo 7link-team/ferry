@@ -119,7 +119,9 @@ def main():
     def detail(rid, ws='ops'):
         row=api(f'/workspaces/{workspace_ids[ws]}/pipeline-runs/{rid}')
         row['action_steps']=row['steps']
-        row['steps']=[step for step in row['steps'] if step['name'] not in ('Prepare fixture directory','Prepare workspace') and not step['name'].startswith('Publish fixture ') and not step['name'].startswith('Archive ')]
+        # Step rows are named "<job> / <step>"; drop the fixture's own setup and archive steps.
+        bare=lambda step: step['name'].split(' / ',1)[-1]
+        row['steps']=[step for step in row['steps'] if bare(step) not in ('Prepare fixture directory','Prepare workspace') and not bare(step).startswith('Publish fixture ') and not bare(step).startswith('Archive ')]
         return row
 
     def done(rid, seconds=30):
@@ -408,7 +410,9 @@ jobs:
             done(blocked)
             result=done(rid); output=''.join(v['chunk'] for v in logs(rid))
             check(kind+' managed variables prefer pipeline scope and preserve literal bytes',result['state']=='succeeded')
-            check(kind+' managed variables redact stdout/stderr before storage',value not in output and value.split('\n')[0] not in output and '[REDACTED]' in output)
+            # Secrets delivered to the worker are masked there as "***" (GitHub's
+            # mask); anything else is redacted by the server as "[REDACTED]".
+            check(kind+' managed variables redact stdout/stderr before storage',value not in output and value.split('\n')[0] not in output and ('[REDACTED]' in output or '***' in output))
             check(kind+' variable provenance records scope and original version',result['variables'][0]['scope_ref']==build and result['variables'][0]['version']==1)
             check(kind+' run API never exposes encrypted or plaintext variable snapshots','variable_snapshot' not in json.dumps(result) and value not in json.dumps(result))
             api(f'/workspaces/{workspace_ops}/variables/'+object_var,method='DELETE',status=409)
