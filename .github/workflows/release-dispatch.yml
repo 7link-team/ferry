@@ -14,11 +14,11 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='cfec1608bbf512ed40e630a83e4f453e9423807d';
+            const sha='b50b9933502385542ecb4e4ebeafd9eb51914ea5';
             const tag='v0.1.0-alpha.35';
             const repo=context.repo;
             // Stop the superseded orchestrator; let completed desktop builds save reusable caches.
-            for (const run_id of [41487989319]) {
+            for (const run_id of [41492828565]) {
               const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
               if(data.status!=='completed') {
                 try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
