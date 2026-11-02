@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix='runner-update-') as directory:
     env = dict(os.environ, RUNNER_UPDATE_PUBLIC_KEY=(root/'test.key.pub').read_text().strip(), RUNNER_UPDATE_TEST_DIR=str(root))
     # Native CI only: this fixture-key binary is never uploaded as a release asset.
     subprocess.run(['cargo', 'build', '--locked', '-p', 'ferry-runner'], env=env, check=True)
-    runner = str(Path('target/debug/ferry-runner' + ('.exe' if os.name == 'nt' else '')).resolve())
+    runner = str((Path(os.environ.get('CARGO_TARGET_DIR', 'target')) / 'debug' / ('ferry-runner' + ('.exe' if os.name == 'nt' else ''))).resolve())
     command = [runner, 'service', 'verify-update', '--manifest', str(root/'valid.json'),
                '--signature', str(root/'valid.json.sig'), '--artifact', str(root/'payload.bin'), '--version', '9.9.9']
     subprocess.run(command, env=dict(os.environ, RUNNER_UPDATE_PUBLIC_KEY=(root/'other.key.pub').read_text().strip()), check=True)
@@ -50,4 +50,4 @@ with tempfile.TemporaryDirectory(prefix='runner-update-') as directory:
         "try {verifySignature(Buffer.from('tampered'),readFileSync(p+'/valid.json.sig','utf8'),readFileSync(p+'/test.key.pub','utf8')); process.exit(1)} catch {}", str(root)], check=True)
     subprocess.run(['cargo', 'test' , '--locked', '-p', 'ferry-runner', 'signed_runner_update', '--', '--ignored'],
                    env=env, check=True)
-    subprocess.run(['cargo', 'test', '--locked', '-p', 'ferry-server', 'runner_install::tests', '--', '--ignored'], env=env, check=True)
+    subprocess.run(['cargo', 'test', '--locked', '-p', 'ferry-server', 'hosts::runner::install::tests', '--', '--ignored'], env=env, check=True)

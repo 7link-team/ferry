@@ -186,7 +186,7 @@ try {
   }
   checks.push('1280x800 and 390x844 viewport, document overflow, shared edit form bounds and screenshots');
 
-  const insightCatalog = JSON.parse(await readFile(new URL('../src/locales/insight-domain.json', import.meta.url), 'utf8'));
+  const insightCatalog = JSON.parse(await readFile(new URL('../src/shared/i18n/locales/insight-domain.json', import.meta.url), 'utf8'));
   const localeOrder = ['en-US', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY'];
   const insightLabel = (key, locale) => locale === 'zh-CN' ? key : insightCatalog[key][localeOrder.indexOf(locale)];
   await page.setViewportSize({ width: 1366, height: 900 });

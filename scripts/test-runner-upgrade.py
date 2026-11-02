@@ -110,7 +110,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         config = json.loads((source/'desktop/tauri.conf.json').read_text(encoding='utf-8'))
         config['plugins']['updater']['pubkey'] = (root/'key.pub').read_text(encoding='utf-8').strip()
         (source/'desktop/tauri.conf.json').write_text(json.dumps(config), encoding='utf-8')
-        catalog_source = source/'crates/server/src/runner_install.rs'
+        catalog_source = source/'crates/server/src/hosts/runner/install.rs'
         text = catalog_source.read_text(encoding='utf-8')
         production_url = 'format!("https://github.com/{repository}/releases/download/v{version}/runner-update.json")'
         assert production_url in text, 'fixture must replace the exact release URL, never weaken signature verification'

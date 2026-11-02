@@ -1,6 +1,7 @@
 //! A shared scheduler for host, build and deployment tasks.
 use crate::error::{Json, Path, Query};
 use crate::{
+    accounts::workspace::Scope,
     db,
     entities::{
         cron_jobs as jobs, cron_runs as runs, deployment_revisions, deployments, host_groups,
@@ -8,10 +9,9 @@ use crate::{
     },
     error::{ApiError, Result},
     i18n::{self, Message, StoredText},
-    resource::{self, ListQuery, Spec},
+    resources::resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
-    workspace::Scope,
 };
 use axum::{extract::State, http::StatusCode};
 use chrono::{DateTime, Utc};
@@ -162,7 +162,7 @@ async fn validate(
         }
         ("build", "pipeline", "pipeline") => {
             scope.require("pipelines.run")?;
-            crate::pipeline_contexts::selected(
+            crate::pipelines::contexts::selected(
                 conn,
                 scope.workspace_id,
                 id,
@@ -418,7 +418,8 @@ pub async fn delete(
     scope.require("cron-jobs.delete")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     scoped(&tx, &scope, id).await?;
-    crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "cron-job", &[id]).await?;
+    crate::notifications::alerts::ensure_unreferenced(&tx, scope.workspace_id, "cron-job", &[id])
+        .await?;
     if busy(&tx, scope.workspace_id, id).await? {
         return Err(ApiError::localized(
             axum::http::StatusCode::CONFLICT,
@@ -884,7 +885,7 @@ async fn once(
                 Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
             fresh.require("hosts.terminal")?;
             fresh.require("cron-jobs.run")?;
-            let channel = match crate::remote::open(s, &scope.workspace_id, &id).await {
+            let channel = match crate::hosts::remote::open(s, &scope.workspace_id, &id).await {
                 Ok(channel) => channel,
                 Err(_) => {
                     output.push_message(
@@ -947,7 +948,7 @@ async fn once(
         };
     }
     let (id, kind) = if b.scope == "build" {
-        let (_, Json(value)) = crate::pipeline_runs::trigger_as(
+        let (_, Json(value)) = crate::pipelines::runs::trigger_as(
             s.clone(),
             scope,
             b.target_ref.clone(),
@@ -1418,7 +1419,7 @@ mod tests {
         );
         let scope = Scope {
             workspace_id: 1.into(),
-            user: crate::auth::User {
+            user: crate::accounts::auth::User {
                 id: 1.into(),
                 email: "test@example.invalid".into(),
                 name: user_text.into(),

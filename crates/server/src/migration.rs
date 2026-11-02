@@ -151,7 +151,7 @@ impl MigrationTrait for LegacyPipelineRemoval {
             for row in conn.query_all_raw(backend.build(&select)).await? {
                 let id: i64 = row.try_get("", "id")?;
                 let original: String = row.try_get("", field)?;
-                if crate::actions::document(&original).is_some() {
+                if crate::pipelines::actions::document(&original).is_some() {
                     continue;
                 }
                 let converted = if table == "pipelines" {
@@ -3492,7 +3492,8 @@ mod credential_scope_tests {
             );
             assert_eq!(row.try_get::<i64>("", "version").unwrap(), 3);
             let document =
-                crate::actions::document(&row.try_get::<String>("", field).unwrap()).unwrap();
+                crate::pipelines::actions::document(&row.try_get::<String>("", field).unwrap())
+                    .unwrap();
             assert!(document.workflow.contains("github.run_number"));
             if table == "pipelines" {
                 assert_eq!(document.executor_bindings[0].target_ref, "42");

@@ -7,14 +7,11 @@ on:
     paths:
       - "crates/runner/**"
       - "crates/protocol/**"
-      - "crates/server/src/runner.rs"
-      - "crates/server/src/runner_updates.rs"
-      - "crates/server/src/runner_install.rs"
+      - "crates/server/src/hosts/**"
       - "scripts/runner-install.*"
       - "scripts/test-runner-install.py"
       - "scripts/test-runner-bootstrap.py"
-      - "crates/server/src/actions_run.rs"
-      - "crates/server/src/windows_shell.rs"
+      - "crates/server/src/pipelines/**"
       - "workers/actions/**"
       - "scripts/build-actions-workers.sh"
       - "scripts/test-actions-windows.py"
@@ -53,7 +50,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Generated install commands (including native Windows PowerShell)
-        run: npx vitest run src/components/RunnerConnection.test.tsx
+        run: npx vitest run src/features/hosts/RunnerConnection.test.tsx
       - run: node --test .github/scripts/check-runner-manifest.mjs
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -65,11 +62,19 @@ jobs:
         run: cargo test --locked -p ferry-runner
       - name: Signed runner update verification
         run: python scripts/test-runner-update.py
-      - name: Whole-task upgrade reservation tests
+      - name: Runner and Actions regression tests
+        shell: python
         run: |
-          cargo test --locked -p ferry-server runner::tests
-          cargo test --locked -p ferry-server runner_updates::tests
-          cargo test --locked -p ferry-server actions_run::tests
+          import subprocess
+          for selection in ("hosts::runner::", "pipelines::actions_run::"):
+              command = ["cargo", "test", "--locked", "-p", "ferry-server", selection]
+              listing = subprocess.run(command + ["--", "--list"], check=True,
+                                       stdout=subprocess.PIPE, text=True, encoding="utf-8")
+              count = sum(line.endswith(": test") for line in listing.stdout.splitlines())
+              if not count:
+                  raise SystemExit(f"No tests selected by {selection}")
+              print(f"Selected {count} tests for {selection}", flush=True)
+              subprocess.run(command, check=True)
       - name: Native system service lifecycle (Unix)
         if: runner.os != 'Windows'
         run: sudo env RUNNER_TEST_SYSTEM_SERVICE=1 python3 scripts/test-runner-service.py

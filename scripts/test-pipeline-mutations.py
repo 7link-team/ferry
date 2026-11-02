@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Run two real-host mutation tests, always restore source, then verify restoration.
-Run alone: this temporarily edits pipeline_runs.rs and rebuilds the binary.
+Run alone: this temporarily edits pipelines/runs.rs and rebuilds the binary.
 """
 from pathlib import Path
 import subprocess
 import tempfile
 
-source = Path('crates/server/src/pipeline_runs.rs')
+source = Path('crates/server/src/pipelines/runs.rs')
 original = source.read_text()
 output = Path(tempfile.mkdtemp(prefix='pipeline-mutations-'))
 

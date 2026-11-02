@@ -30,7 +30,7 @@ try {
     { value: 'eyeCare', label: '护眼模式' }, { value: 'pinkKawaii', label: '粉色可爱' },
     { value: 'neoBrutalism', label: '新粗野主义' }, { value: 'custom', label: '自定义' },
   ];
-  const source = readFileSync(new URL('../src/themes.css', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../src/shared/theme/themes.css', import.meta.url), 'utf8');
   const choose = async name => { await themeButton.click(); await page.getByRole('menuitem', { name, exact: false }).click(); };
   for (const palette of palettes) {
     await choose(palette.label);
@@ -73,7 +73,7 @@ try {
   await dialog.evaluate(node => { node.scrollTop = 0; });
   mkdirSync('data/maintenance', { recursive: true });
   await page.screenshot({ path: 'data/maintenance/theme-mobile.png', fullPage: true });
-  const translations = JSON.parse(readFileSync(new URL('../src/locales/theme.json', import.meta.url), 'utf8'));
+  const translations = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/theme.json', import.meta.url), 'utf8'));
   await page.setViewportSize({ width: 1366, height: 900 });
   for (const [locale, catalog] of Object.entries(translations)) {
     await page.goto(`${url}/${locale}/workspaces/2/nodes`);

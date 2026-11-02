@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercises crates/server/src/ssh.rs against a real sshd in Docker.
+# Exercises crates/server/src/hosts/ssh.rs against a real sshd in Docker.
 #
 # The SSH channel is almost entirely I/O against another program, so unit tests
 # can only cover the fingerprint comparison and the output cap. Everything that
@@ -93,7 +93,7 @@ live_tests() { # live_tests <filter> <minimum-tests>
   fi
   if [ "$ran" -lt "$2" ]; then
     echo "FAILED: expected at least $2 test(s) for filter '$1' but $ran ran."
-    echo '        Is `mod ssh;` declared in crates/server/src/main.rs?'
+    echo '        Is `mod ssh;` declared in crates/server/src/hosts/mod.rs?'
     return 1
   fi
   echo "   ($ran test(s) ran)"
@@ -103,13 +103,13 @@ echo "== phase 1: full suite against a fresh sshd"
 start_sshd || exit 1
 FIRST_KEY=$(host_fingerprint)
 echo "   host key: $FIRST_KEY"
-FERRY_TEST_SSH_EXPECT_KEY="$FIRST_KEY" live_tests ssh:: 11 || exit 1
+FERRY_TEST_SSH_EXPECT_KEY="$FIRST_KEY" live_tests hosts::ssh:: 11 || exit 1
 
 echo "== phase 2: the same address, a different host key"
 start_sshd || exit 1
 SECOND_KEY=$(host_fingerprint)
 echo "   host key: $SECOND_KEY"
 [ "$FIRST_KEY" != "$SECOND_KEY" ] || { echo "both containers share a host key; nothing was tested"; exit 1; }
-FERRY_TEST_SSH_PRIOR_KEY="$FIRST_KEY" live_tests ssh::tests::live_a_changed_host_key_is_refused 1 || exit 1
+FERRY_TEST_SSH_PRIOR_KEY="$FIRST_KEY" live_tests hosts::ssh::tests::live_a_changed_host_key_is_refused 1 || exit 1
 
 echo "All SSH checks passed."

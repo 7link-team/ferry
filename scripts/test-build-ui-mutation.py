@@ -3,11 +3,11 @@
 from pathlib import Path
 import subprocess
 
-source = Path('src/components/PipelineRunDetail.tsx')
+source = Path('src/features/pipelines/PipelineRunDetail.tsx')
 original = source.read_bytes()
 needle = b'finished = !isActive(next.state) && page.items.length < 200;'
 assert original.count(needle) == 1
-command = ['npm', 'test', '--', 'src/components/PipelineRunDetail.test.tsx']
+command = ['npm', 'test', '--', 'src/features/pipelines/PipelineRunDetail.test.tsx']
 
 def run(label):
     result = subprocess.run(command, check=False)

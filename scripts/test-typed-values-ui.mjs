@@ -140,7 +140,7 @@ try {
   await page.getByLabel('选项 1 值', { exact: true }).fill('raw-value');
   await page.getByLabel('选项 1 显示名称', { exact: true }).fill('User-owned label');
   await page.getByRole('button', { name: '添加选项', exact: true }).click();
-  const typed = JSON.parse(readFileSync(new URL('../src/locales/typed-domain.json', import.meta.url), 'utf8'));
+  const typed = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/typed-domain.json', import.meta.url), 'utf8'));
   const locales = ['en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY'];
   for (const [index, locale] of locales.entries()) {
     await page.locator('select').filter({ has: page.locator('option[value="en-US"]') }).selectOption(locale);

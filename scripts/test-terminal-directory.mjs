@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import ts from 'typescript';
 
-const source = await readFile('src/components/HostTerminal.tsx', 'utf8');
+const source = await readFile('src/features/hosts/HostTerminal.tsx', 'utf8');
 const code = source.slice(source.indexOf('export function terminalStartCommand'), source.indexOf('type Status'));
 const compiled = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const { terminalStartCommand } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'));

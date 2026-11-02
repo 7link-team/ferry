@@ -1,9 +1,9 @@
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { Toaster } from "@/components/ui/sonner";
-import { initTheme } from "./theme";
-import { initLocale } from "./locale";
-import "./i18n";
+import { App } from "./app/App";
+import "./shared/i18n/i18n";
+import { initLocale } from "./shared/i18n/locale";
+import { initTheme } from "./shared/theme/theme";
+import { Toaster } from "./shared/ui/sonner";
 import "./style.css";
 
 // Before React mounts, so the first paint is already the chosen theme and

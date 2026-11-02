@@ -24,22 +24,35 @@ GitHub／GitLab／Gitee 提供网页授权入口（需部署者配置 OAuth 应�
 
 | 位置 | 内容 |
 |---|---|
+| `src/app` | 启动、身份与路由、页面组合、资源界面与配置注册 |
+| `src/features` | 洞察、仓库、流水线、主机、部署、系统维护等业务组件与配置 |
+| `src/shared` | 公共 UI、表单和表格、API、类型契约、语言、主题与编辑器运行时 |
 | `crates/server` | 业务服务：HTTP API、内嵌 Web 界面、数据库与迁移 |
-| `crates/runner` | 主机代理：一条命令注册主机，持有反向控制连接 |
-| `crates/protocol` | server 与 runner 的线上协议，双方共用 |
-| `src` | React + TypeScript 界面，构建产物由服务内嵌 |
+| `crates/runner` | 主机代理：注册、连接与任务运行；平台服务和进程监督各自独立 |
+| `crates/protocol` | server 与 runner 共用的线上协议 |
+| `crates/desktop-updater` | 桌面升级事务与进程间通信 |
 | `desktop` | Tauri 2 外壳：托盘、连接设置，服务作为 sidecar |
 | `docs` | 产品与技术方案 |
 
-资源界面复用两个共享组件：`src/components/ResourceTable.tsx`（列表）和
-`ResourceForm.tsx`（表单，详情是它的只读模式）。一个资源页就是
-`src/resources.tsx` 里的一份配置，**不手写表格**；配置契约在
-`src/components/dsl.ts`。服务端对应的一份实现是 `crates/server/src/resource.rs`，
-过滤、排序、分页和列名白名单都只在那里。
+前端依赖方向为 `app → features → shared`。页面组合负责路由和资源界面装配，业务模块
+通过明确的参数与回调接入；共享层提供公共能力及纯类型契约。测试与对应实现放在一起，
+应用组合和架构检查放在 `app`。
 
-主题是 shadcn/ui + Tailwind v4 的语义令牌，两套配色：默认（shadcn zinc）和
-`erp`（沿用 easy-erp 的配色）。加一套配色＝在 `src/style.css` 加两个值块、在
-`src/theme.ts` 加一行，组件不动。
+资源界面继续复用 `src/app/resources/ResourceTable.tsx`（列表）和
+`ResourceForm.tsx`（表单，详情是它的只读模式）。业务配置由各 feature 维护，
+`src/app/resources.tsx` 汇总注册，纯配置契约位于 `src/shared/resources/types.ts`。
+通用表单与表格分别位于 `shared/forms/auto-form`、`shared/tables/auto-table`。
+服务端资源分页、筛选、排序和列名白名单复用 `crates/server/src/resources/resource.rs`。
+
+服务端按 `accounts`、`hosts`、`pipelines`、`repositories`、`deployments`、
+`maintenance`、`notifications`、`resources` 组织业务。数据库、迁移、凭据加密、集群等
+基础模块保留在 crate 根目录。主机 Runner 的注册、传输与升级位于 `hosts/runner`；
+流水线执行编排位于 `pipelines/actions_run`；仓库授权位于 `repositories/auth`。
+Cargo crate 边界保持独立，入口负责启动和组装。
+
+主题使用 shadcn/ui + Tailwind v4 语义令牌，提供现代简约、商务渐变、护眼、粉色可爱、
+新粗野主义和自定义配色，支持明暗模式及跟随系统。主题状态和校验位于
+`src/shared/theme`，配色令牌集中在 `themes.css`；组件复用统一语义令牌。
 
 ## 开发
 
@@ -89,7 +102,7 @@ SQLite、MySQL、PostgreSQL 都支持,用 `FERRY_DATABASE_URL` 选择:
 | `mysql://…` | MySQL 8+ |
 | `postgres://…` | PostgreSQL |
 
-三者的差异只在 `crates/server/src/dialect.rs`:业务代码一律写 SQLite 风味、
+三者的差异只在 `crates/server/src/db.rs`:业务代码一律写 SQLite 风味、
 `?` 占位符的 SQL。新增查询请保持可移植,不要在方言层加按查询的特例。
 
 Docker 部署：

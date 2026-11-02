@@ -108,13 +108,13 @@ pub enum Request {
     Monitor {
         workspace: Id,
         host: Id,
-        query: crate::host_monitor::MonitorQuery,
+        query: crate::hosts::monitor::MonitorQuery,
     },
     Update {
         workspace: Id,
         actor: Id,
         host: Id,
-        body: crate::runner::UpdateBody,
+        body: crate::hosts::runner::UpdateBody,
     },
 }
 
@@ -676,7 +676,7 @@ impl Cluster {
                     diagnostic("nats", "open", "ownership_changed");
                     return Err(unavailable());
                 }
-                crate::runner::cluster_open(&host, &session, kind).await?;
+                crate::hosts::runner::cluster_open(&host, &session, kind).await?;
                 Ok(Value::Null)
             }
             Request::Monitor {
@@ -707,8 +707,9 @@ impl Cluster {
                 host,
                 body,
             } => {
-                let scope = crate::workspace::Scope::for_actor(s, workspace, actor).await?;
-                let (_, crate::error::Json(value)) = crate::runner::start_update(
+                let scope =
+                    crate::accounts::workspace::Scope::for_actor(s, workspace, actor).await?;
+                let (_, crate::error::Json(value)) = crate::hosts::runner::start_update(
                     axum::extract::State(s.clone()),
                     scope,
                     crate::error::Path((workspace.to_string(), host)),
@@ -839,7 +840,9 @@ impl Cluster {
         let (stop, mut stopped) = tokio::sync::watch::channel(false);
         let active = Arc::new(AtomicBool::new(false));
         let writer_active = active.clone();
-        let lease = Arc::new(std::sync::Mutex::new(None::<crate::runner_updates::Lease>));
+        let lease = Arc::new(std::sync::Mutex::new(
+            None::<crate::hosts::runner::reservations::Lease>,
+        ));
         let writer_lease = lease.clone();
         let this = self.clone();
         let host = route.host.clone();
@@ -1006,7 +1009,7 @@ pub struct Forwarded {
     receive: mpsc::Receiver<Result<Message>>,
     _stop: tokio::sync::watch::Sender<bool>,
     tasks: Vec<tokio::task::JoinHandle<()>>,
-    lease: Arc<std::sync::Mutex<Option<crate::runner_updates::Lease>>>,
+    lease: Arc<std::sync::Mutex<Option<crate::hosts::runner::reservations::Lease>>>,
 }
 impl Drop for Forwarded {
     fn drop(&mut self) {
@@ -1021,7 +1024,7 @@ impl From<WebSocket> for Socket {
     }
 }
 impl Socket {
-    pub(crate) fn hold(&mut self, lease: crate::runner_updates::Lease) {
+    pub(crate) fn hold(&mut self, lease: crate::hosts::runner::reservations::Lease) {
         if let Self::Forwarded(socket) = self {
             *socket
                 .lease

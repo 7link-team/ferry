@@ -1,14 +1,14 @@
 //! Shared scoped variables. Stored values use the same vault as credentials.
 use crate::error::{Json, Path, Query};
 use crate::{
+    accounts::workspace::Scope,
     db,
     entities::{deployments, pipelines, variables},
     error::{ApiError, Result},
-    resource::{self, ListQuery, Spec},
+    resources::resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
     vault,
-    workspace::Scope,
 };
 use axum::{
     extract::State,
@@ -93,7 +93,7 @@ async fn summary(db: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<Sum
 /// temporary lock into an empty index can deadlock concurrent MySQL requests.
 pub async fn transaction(s: &AppState, workspace: Id) -> Result<DatabaseTransaction> {
     let tx = s.db.begin().await?;
-    crate::workspace_admin::lock_workspace(&tx, workspace).await?;
+    crate::accounts::workspace_admin::lock_workspace(&tx, workspace).await?;
     Ok(tx)
 }
 
@@ -514,7 +514,7 @@ pub(crate) async fn snapshot_for_actions(
     workspace: Id,
     pipeline: Id,
     environment: Id,
-    references: &crate::actions::References,
+    references: &crate::pipelines::actions::References,
 ) -> Result<ActionsSnapshot> {
     let names = references
         .secrets
@@ -616,7 +616,7 @@ pub async fn remove(
             let definition = crate::pipelines::validate_definition(&build.definition)?;
             if crate::pipelines::variable_names(&definition).contains(&row.name) {
                 let mut environments =
-                    crate::pipeline_contexts::ids(&tx, build.id.into(), "environment").await?;
+                    crate::pipelines::contexts::ids(&tx, build.id.into(), "environment").await?;
                 if environments.is_empty() {
                     environments.push(Id::from(0));
                 }
@@ -732,7 +732,7 @@ mod tests {
     fn scope(workspace: i64, permissions: &[&str]) -> Scope {
         Scope {
             workspace_id: workspace.into(),
-            user: crate::auth::User {
+            user: crate::accounts::auth::User {
                 id: 1.into(),
                 email: "test@example.invalid".into(),
                 name: "Test".into(),
@@ -807,12 +807,12 @@ mod tests {
             .exec(&s.db)
             .await
             .unwrap();
-        let references = crate::actions::References {
-            secrets: crate::actions::ContextReferences {
+        let references = crate::pipelines::actions::References {
+            secrets: crate::pipelines::actions::ContextReferences {
                 names: BTreeSet::from(["MISSING".into()]),
                 deliver_all: true,
             },
-            vars: crate::actions::ContextReferences {
+            vars: crate::pipelines::actions::ContextReferences {
                 names: BTreeSet::from(["MISSING_VAR".into()]),
                 deliver_all: true,
             },
@@ -857,7 +857,7 @@ mod tests {
         assert_eq!(snapshot.secrets.len(), 1);
         assert_eq!(snapshot.secrets["MISSING"], "");
         assert!(snapshot.sources.is_empty());
-        let mut static_refs = crate::actions::References::default();
+        let mut static_refs = crate::pipelines::actions::References::default();
         static_refs.secrets.names = BTreeSet::from(["TOKEN".into(), "UNKNOWN".into()]);
         let snapshot = snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &static_refs)
             .await
@@ -883,10 +883,10 @@ mod tests {
     #[tokio::test]
     async fn reusable_jobs_resolve_on_their_executor_bindings() {
         let (_dir, s) = fixture().await;
-        let document = crate::actions::Document {
-            engine: crate::actions::ENGINE.into(),
+        let document = crate::pipelines::actions::Document {
+            engine: crate::pipelines::actions::ENGINE.into(),
             workflow: "jobs: {call: {uses: './.github/workflows/build.yml'}}".into(),
-            executor_bindings: vec![crate::actions::Binding {
+            executor_bindings: vec![crate::pipelines::actions::Binding {
                 job_id: "call".into(),
                 image: "ubuntu".into(),
                 ..Default::default()
@@ -894,15 +894,16 @@ mod tests {
             checkout_bindings: vec![],
             graph_layout: json!({}),
         };
-        let snapshot = crate::actions::resolve(&s, &s.db, &scope(1, ALL), document.clone(), 42)
-            .await
-            .unwrap();
+        let snapshot =
+            crate::pipelines::actions::resolve(&s, &s.db, &scope(1, ALL), document.clone(), 42)
+                .await
+                .unwrap();
         assert_eq!(snapshot.jobs[0].host_id, 42);
         assert_eq!(snapshot.jobs[0].image, "ubuntu");
         assert!(snapshot.jobs[0].reusable());
         assert!(snapshot.jobs[0].steps.is_empty());
         assert!(
-            crate::actions::resolve(&s, &s.db, &scope(1, ALL), document, 0)
+            crate::pipelines::actions::resolve(&s, &s.db, &scope(1, ALL), document, 0)
                 .await
                 .is_err()
         );

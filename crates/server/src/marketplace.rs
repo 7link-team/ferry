@@ -443,12 +443,12 @@ mod tests {
 
 use crate::error::{Json, Path, Query};
 use crate::{
+    accounts::workspace::Scope,
     db,
     entities::{marketplace_entries as entries, marketplace_sources as sources, repositories},
-    resource::{self, ListQuery, Spec},
+    resources::resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
-    workspace::Scope,
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
@@ -494,7 +494,7 @@ async fn bind_source_repository(
     body: &mut Body,
 ) -> Result<()> {
     if let Some(selection) = body.repository_selection.take() {
-        let (provider, credential) = crate::repository_auth::resolve_connection(
+        let (provider, credential) = crate::repositories::auth::resolve_connection(
             s,
             tx,
             scope,
@@ -874,7 +874,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             .ok_or_else(ApiError::missing)?;
         validate_origin(&config, &repository.url)?;
         let token = if repository.credential_id != 0 {
-            crate::repository_auth::validate_target(
+            crate::repositories::auth::validate_target(
                 s,
                 &s.db,
                 scope.workspace_id,

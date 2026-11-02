@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
-const catalog = JSON.parse(readFileSync(new URL('../src/locales/execution-domain.json', import.meta.url), 'utf8'));
+const catalog = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/execution-domain.json', import.meta.url), 'utf8'));
 const server = process.env.EXECUTION_UI_URL ? null : await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.EXECUTION_UI_URL || server.resolvedUrls.local[0].replace(/\/$/, '');
 const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';

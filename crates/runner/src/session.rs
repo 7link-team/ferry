@@ -5,7 +5,7 @@
 //! says what to do, bytes flow in whichever direction it implies, and the
 //! connection closes when it is done.
 
-use crate::Socket;
+use crate::transport::Socket;
 use anyhow::Context;
 use ferry_protocol as wire;
 use futures_util::{SinkExt, StreamExt};
@@ -25,16 +25,16 @@ pub async fn run(
     hello: wire::SessionHello,
     kind: wire::SessionKind,
 ) -> anyhow::Result<()> {
-    let mut socket = crate::dial(url).await?;
-    crate::send(&mut socket, &hello).await?;
-    let request: wire::Session = crate::next_frame(&mut socket).await?;
+    let mut socket = crate::transport::dial(url).await?;
+    crate::transport::send(&mut socket, &hello).await?;
+    let request: wire::Session = crate::transport::next_frame(&mut socket).await?;
     tracing::info!(?kind, "会话连接已建立");
 
     let outcome = dispatch(&mut socket, request).await;
     if let Err(error) = &outcome {
         // The operator sees this sentence in the browser, so say it rather
         // than closing the socket and leaving them to guess.
-        let _ = crate::send(
+        let _ = crate::transport::send(
             &mut socket,
             &wire::Session::Failed {
                 error: format!("{error}"),
@@ -105,7 +105,7 @@ async fn monitor(socket: &mut Socket) -> anyhow::Result<()> {
         }
     })
     .await?;
-    crate::send(socket, &wire::Session::MonitorResult { metrics }).await
+    crate::transport::send(socket, &wire::Session::MonitorResult { metrics }).await
 }
 
 async fn create_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
@@ -115,14 +115,14 @@ async fn create_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
         .open(path)
         .await
         .with_context(|| format!("无法创建文件 {path}，请检查名称是否重复及目录权限。"))?;
-    crate::send(socket, &wire::Session::Done).await
+    crate::transport::send(socket, &wire::Session::Done).await
 }
 
 async fn create_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
     tokio::fs::create_dir(path)
         .await
         .with_context(|| format!("无法创建文件夹 {path}，请检查名称是否重复及目录权限。"))?;
-    crate::send(socket, &wire::Session::Done).await
+    crate::transport::send(socket, &wire::Session::Done).await
 }
 
 // ponytail: no path validation here. The server already rejects relative and
@@ -174,7 +174,7 @@ async fn exec(socket: &mut Socket, command: &str, timeout_seconds: u64) -> anyho
         .await
         .map_err(|_| anyhow::anyhow!("命令执行超过 {} 秒，已终止。", within.as_secs()))?
         .context("无法启动命令")?;
-    crate::send(
+    crate::transport::send(
         socket,
         &wire::Session::ExecDone {
             // A command killed by a signal has no exit code; -1 says "did not
@@ -198,7 +198,7 @@ async fn exec_stream(socket: &mut Socket, command: &str, seconds: u64) -> anyhow
             result = &mut execution, if exit.is_none() => { exit = Some(result?); }
             chunk = chunks.recv() => match chunk {
                 Some((stream, data)) => {
-                    let sent = tokio::time::timeout(std::time::Duration::from_secs(10), crate::send(socket, &wire::Session::ExecOutput {stream, data})).await;
+                    let sent = tokio::time::timeout(std::time::Duration::from_secs(10), crate::transport::send(socket, &wire::Session::ExecOutput {stream, data})).await;
                     if !matches!(sent, Ok(Ok(()))) {
                         let _ = stop.send(true);
                         if exit.is_none() { let _ = execution.await; }
@@ -207,7 +207,7 @@ async fn exec_stream(socket: &mut Socket, command: &str, seconds: u64) -> anyhow
                 }
                 None => {
                     let code = match exit {Some(code) => code, None => execution.await?};
-                    return crate::send(socket, &wire::Session::ExecExit {code}).await;
+                    return crate::transport::send(socket, &wire::Session::ExecExit {code}).await;
                 }
             },
             message = socket.next() => match message {
@@ -252,7 +252,7 @@ async fn read_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("无法读取 {path}"))?;
     anyhow::ensure!(!meta.is_dir(), "{path} 是目录，不能直接下载。");
-    crate::send(
+    crate::transport::send(
         socket,
         &wire::Session::FileMeta {
             size: meta.len(),
@@ -278,7 +278,7 @@ async fn read_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
             .await
             .context("发送文件内容时中断")?;
     }
-    crate::send(socket, &wire::Session::Eof).await
+    crate::transport::send(socket, &wire::Session::Eof).await
 }
 
 async fn write_file(socket: &mut Socket, path: &str, mode: u32) -> anyhow::Result<()> {
@@ -319,7 +319,7 @@ async fn write_file(socket: &mut Socket, path: &str, mode: u32) -> anyhow::Resul
     // before the answer goes back.
     file.flush().await?;
     file.sync_all().await?;
-    crate::send(socket, &wire::Session::Done).await
+    crate::transport::send(socket, &wire::Session::Done).await
 }
 
 async fn list_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
@@ -358,7 +358,7 @@ async fn list_dir(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
             .cmp(&(b.kind != "directory"))
             .then_with(|| a.name.cmp(&b.name))
     });
-    crate::send(socket, &wire::Session::DirEntries { entries }).await
+    crate::transport::send(socket, &wire::Session::DirEntries { entries }).await
 }
 
 async fn delete_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
@@ -376,7 +376,7 @@ async fn delete_file(socket: &mut Socket, path: &str) -> anyhow::Result<()> {
             .await
             .with_context(|| format!("无法删除 {path}"))?;
     }
-    crate::send(socket, &wire::Session::Done).await
+    crate::transport::send(socket, &wire::Session::Done).await
 }
 
 // ------------------------------------------------------------------ 终端
@@ -551,7 +551,7 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
     // listening: when the browser closed first, the socket is already closing
     // and a frame sent into it is a protocol error, not news.
     if shell_exited {
-        let _ = crate::send(socket, &wire::Session::Eof).await;
+        let _ = crate::transport::send(socket, &wire::Session::Eof).await;
     }
     // A terminal that ended is not a failure, however it ended.
     Ok(())
@@ -570,13 +570,13 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-            let frame = crate::next_frame(&mut socket).await.unwrap();
+            let frame = crate::transport::next_frame(&mut socket).await.unwrap();
             dispatch(&mut socket, frame).await.unwrap();
         });
         let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
             .await
             .unwrap();
-        crate::send(
+        crate::transport::send(
             &mut client,
             &wire::Session::ExecStreamStart {
                 command: "printf ready; sleep 120".into(),
@@ -585,20 +585,26 @@ mod tests {
         )
         .await
         .unwrap();
-        let frame = tokio::time::timeout(Duration::from_secs(2), crate::next_frame(&mut client))
-            .await
-            .unwrap()
-            .unwrap();
+        let frame = tokio::time::timeout(
+            Duration::from_secs(2),
+            crate::transport::next_frame(&mut client),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(
             matches!(frame, wire::Session::ExecOutput {stream, data} if stream == "stdout" && data == b"ready")
         );
-        crate::send(&mut client, &wire::Session::ExecCancel)
+        crate::transport::send(&mut client, &wire::Session::ExecCancel)
             .await
             .unwrap();
-        let frame = tokio::time::timeout(Duration::from_secs(12), crate::next_frame(&mut client))
-            .await
-            .unwrap()
-            .unwrap();
+        let frame = tokio::time::timeout(
+            Duration::from_secs(12),
+            crate::transport::next_frame(&mut client),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(matches!(frame, wire::Session::ExecExit {code} if code != 0));
         server.await.unwrap();
     }

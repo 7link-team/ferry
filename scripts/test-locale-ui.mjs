@@ -1,8 +1,8 @@
 /** Real browser checks for locale URLs, request headers, drafts and header controls. */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-const common = JSON.parse(readFileSync(new URL('../src/locales/common-domain.json', import.meta.url), 'utf8'));
-const resources = JSON.parse(readFileSync(new URL('../src/locales/resource-domain.json', import.meta.url), 'utf8'));
+const common = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/common-domain.json', import.meta.url), 'utf8'));
+const resources = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/resource-domain.json', import.meta.url), 'utf8'));
 import { preview } from 'vite';
 import { chromium } from 'playwright';
 

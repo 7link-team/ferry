@@ -1235,46 +1235,68 @@ mod tests {
     #[test]
     fn account_and_workspace_keys_are_available_in_every_catalog() {
         for source in [
-            include_str!("auth.rs"),
-            include_str!("resource.rs"),
-            include_str!("workspace.rs"),
-            include_str!("workspace_admin.rs"),
-            include_str!("repository_auth.rs"),
-            include_str!("repository_analysis.rs"),
-            include_str!("repository_analysis/insights.rs"),
-            include_str!("repository_analysis/insight_identity.rs"),
-            include_str!("repository_analysis/identity.rs"),
-            include_str!("repository_analysis/sync.rs"),
-            include_str!("repository_analysis/query.rs"),
-            include_str!("repository_analysis/sync/pipeline.rs"),
-            include_str!("repository_analysis/sync/provider.rs"),
-            include_str!("repository_monitor.rs"),
-            include_str!("repository_monitor/detail.rs"),
-            include_str!("repository_monitor/polling.rs"),
-            include_str!("repository_monitor/git.rs"),
-            include_str!("webhook.rs"),
+            include_str!("accounts/auth.rs"),
+            include_str!("resources/resource.rs"),
+            include_str!("accounts/workspace.rs"),
+            include_str!("accounts/workspace_admin.rs"),
+            include_str!("repositories/auth.rs"),
+            include_str!("repositories/analysis.rs"),
+            include_str!("repositories/analysis/insights.rs"),
+            include_str!("repositories/analysis/insight_identity.rs"),
+            include_str!("repositories/analysis/identity.rs"),
+            include_str!("repositories/analysis/sync.rs"),
+            include_str!("repositories/analysis/query.rs"),
+            include_str!("repositories/analysis/sync/pipeline.rs"),
+            include_str!("repositories/analysis/sync/provider.rs"),
+            include_str!("repositories/monitor.rs"),
+            include_str!("repositories/monitor/detail.rs"),
+            include_str!("repositories/monitor/polling.rs"),
+            include_str!("repositories/monitor/git.rs"),
+            include_str!("notifications/webhook.rs"),
             include_str!("credentials.rs"),
-            include_str!("repositories.rs"),
+            include_str!("repositories/mod.rs"),
             include_str!("variables.rs"),
-            include_str!("channel.rs"),
-            include_str!("transfers.rs"),
-            include_str!("ssh.rs"),
-            include_str!("pipeline_contexts.rs"),
-            include_str!("windows_shell.rs"),
-            include_str!("host_monitor.rs"),
-            include_str!("concurrency.rs"),
-            include_str!("platform.rs"),
-            include_str!("hosts.rs"),
-            include_str!("alerts.rs"),
-            include_str!("maintenance_values.rs"),
-            include_str!("value_files.rs"),
-            include_str!("maintenance.rs"),
-            include_str!("pipelines.rs"),
-            include_str!("artifacts.rs"),
+            include_str!("hosts/channel.rs"),
+            include_str!("resources/transfers.rs"),
+            include_str!("hosts/ssh.rs"),
+            include_str!("pipelines/contexts.rs"),
+            include_str!("hosts/windows_shell.rs"),
+            include_str!("hosts/monitor.rs"),
+            include_str!("pipelines/concurrency.rs"),
+            include_str!("accounts/platform.rs"),
+            include_str!("hosts/mod.rs"),
+            include_str!("notifications/alerts.rs"),
+            include_str!("maintenance/values.rs"),
+            include_str!("maintenance/files.rs"),
+            include_str!("maintenance/mod.rs"),
+            include_str!("pipelines/mod.rs"),
+            include_str!("pipelines/artifacts.rs"),
             include_str!("cron_jobs.rs"),
             include_str!("marketplace.rs"),
             include_str!("templates.rs"),
-            include_str!("actions.rs"),
+            include_str!("pipelines/actions.rs"),
+            include_str!("pipelines/actions_run.rs"),
+            include_str!("pipelines/actions_run/context.rs"),
+            include_str!("pipelines/actions_run/scheduler.rs"),
+            include_str!("pipelines/actions_run/job.rs"),
+            include_str!("pipelines/actions_run/checkout.rs"),
+            include_str!("pipelines/actions_run/events.rs"),
+            include_str!("repositories/auth/provider.rs"),
+            include_str!("repositories/auth/oauth.rs"),
+            include_str!("repositories/auth/connection.rs"),
+            include_str!("hosts/runner/mod.rs"),
+            include_str!("hosts/runner/install.rs"),
+            include_str!("hosts/runner/reservations.rs"),
+            include_str!("hosts/runner/enrollment.rs"),
+            include_str!("hosts/runner/transport/mod.rs"),
+            include_str!("hosts/runner/transport/control.rs"),
+            include_str!("hosts/runner/transport/channel.rs"),
+            include_str!("hosts/runner/transport/pty.rs"),
+            include_str!("hosts/runner/updates/mod.rs"),
+            include_str!("hosts/runner/updates/policy.rs"),
+            include_str!("hosts/runner/updates/jobs.rs"),
+            include_str!("hosts/runner/updates/persistence.rs"),
+            include_str!("hosts/runner/updates/recovery.rs"),
         ] {
             for part in source.split("Message::new(\"").skip(1) {
                 let key = part.split('"').next().unwrap();
@@ -1286,7 +1308,7 @@ mod tests {
                 }
             }
         }
-        for (_, group, action) in crate::workspace::PERMISSIONS {
+        for (_, group, action) in crate::accounts::workspace::PERMISSIONS {
             for catalog in CATALOGS.iter() {
                 assert!(
                     catalog.contains_key(*group),
@@ -1331,7 +1353,7 @@ mod tests {
             id: Set(user_id.into()),
             email: Set("owner@example.test".into()),
             name: Set("用户原文".into()),
-            password_hash: Set(crate::auth::hash("valid-password").unwrap()),
+            password_hash: Set(crate::accounts::auth::hash("valid-password").unwrap()),
             active: Set(1),
             is_superadmin: Set(0),
             version: Set(1),
@@ -1341,7 +1363,7 @@ mod tests {
         .exec(&s.db)
         .await
         .unwrap();
-        let workspace = crate::workspace::create_in(
+        let workspace = crate::accounts::workspace::create_in(
             &s,
             user_id,
             serde_json::from_value(
@@ -1353,25 +1375,25 @@ mod tests {
         .await
         .unwrap();
         let workspace_id = workspace["id"].as_str().unwrap();
-        let token = crate::auth::start_session(&s, &user_id, &s.db)
+        let token = crate::accounts::auth::start_session(&s, &user_id, &s.db)
             .await
             .unwrap();
         let app = Router::new()
-            .route("/api/users", post(crate::auth::register))
-            .route("/api/sessions", post(crate::auth::login))
-            .route("/api/me", get(crate::auth::me))
-            .route("/api/workspaces", post(crate::workspace::create))
+            .route("/api/users", post(crate::accounts::auth::register))
+            .route("/api/sessions", post(crate::accounts::auth::login))
+            .route("/api/me", get(crate::accounts::auth::me))
+            .route("/api/workspaces", post(crate::accounts::workspace::create))
             .route(
                 "/api/permissions",
-                get(crate::workspace::permission_catalogue),
+                get(crate::accounts::workspace::permission_catalogue),
             )
             .route(
                 "/api/workspaces/{workspace}/roles",
-                get(crate::workspace_admin::roles),
+                get(crate::accounts::workspace_admin::roles),
             )
             .route(
                 "/api/workspaces/{workspace}/members",
-                get(crate::workspace_admin::members),
+                get(crate::accounts::workspace_admin::members),
             )
             .layer(middleware::from_fn(super::middleware))
             .with_state(s.clone());
@@ -1403,9 +1425,10 @@ mod tests {
             ),
         ] {
             let request = |method, path: &str| {
-                let mut request = client
-                    .request(method, format!("{url}{path}"))
-                    .header(header::COOKIE, format!("{}={token}", crate::auth::COOKIE));
+                let mut request = client.request(method, format!("{url}{path}")).header(
+                    header::COOKIE,
+                    format!("{}={token}", crate::accounts::auth::COOKIE),
+                );
                 if let Some(locale) = locale {
                     request = request.header(header::ACCEPT_LANGUAGE, locale);
                 }
@@ -1527,7 +1550,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stored_owner.builtin, 1);
-        assert_eq!(crate::workspace::role_name("拥有者", false), "拥有者");
+        assert_eq!(
+            crate::accounts::workspace::role_name("拥有者", false),
+            "拥有者"
+        );
         server.abort();
         let _ = server.await;
         s.db.clone().close().await.unwrap();

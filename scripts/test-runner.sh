@@ -111,13 +111,13 @@ cargo test --workspace >"$WORK/test.log" 2>&1
 TEST_EXIT=$?
 # A suite that matched nothing exits 0 and reports "0 passed", so the count is
 # checked as well as the status: a gate that can pass vacuously is not a gate.
-RUNNER_TESTS=$(grep -c '^test runner::tests::' "$WORK/test.log")
+RUNNER_TESTS=$(grep -c '^test hosts::runner::' "$WORK/test.log")
 SESSION_TESTS=$(grep -c '^test session::tests::' "$WORK/test.log")
 if [ "$TEST_EXIT" -ne 0 ]; then
   grep -E '^(test .* FAILED|failures:|test result: FAILED)' "$WORK/test.log" | head -20
   bad "cargo test --workspace exited $TEST_EXIT"
 elif [ "$RUNNER_TESTS" -lt 1 ] || [ "$SESSION_TESTS" -lt 1 ]; then
-  bad "cargo test ran no runner tests (runner::tests=$RUNNER_TESTS session::tests=$SESSION_TESTS) — the module is probably not declared"
+  bad "cargo test ran no runner tests (hosts::runner=$RUNNER_TESTS session::tests=$SESSION_TESTS) — the module is probably not declared"
 else
   ok "cargo test --workspace (exit 0, $RUNNER_TESTS runner + $SESSION_TESTS session tests ran)"
 fi
@@ -357,7 +357,7 @@ ckn "and no welcome was issued"     "welcome"      "$FORGED"
 # Only an unknown session id. Claiming a session that genuinely belongs to a
 # different runner needs the server-issued id, which this harness never sees,
 # so that property is pinned by the unit test instead:
-#   runner::tests::a_session_can_only_be_claimed_by_the_runner_it_was_asked_of
+#   hosts::runner::transport::tests::a_session_can_only_be_claimed_by_the_runner_it_was_asked_of
 # Verified by mutation: removing the `entry.host_id == host_id` guard in
 # claim_pending fails that unit test and leaves this check passing, which is
 # why this one is labelled for what it actually proves.

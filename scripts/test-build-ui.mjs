@@ -176,7 +176,8 @@ try {
   assert.deepEqual(errors, []);
   pass('xterm excluded from initial pages, lazy terminal loads and connects to real runner');
   await page.getByRole('tab', { name: '文件', exact: true }).click();
-  const directory = '/tmp';
+  const directory = process.platform === 'win32' ? join(work, 'terminal directory').replaceAll('\\', '/') : '/tmp';
+  if (process.platform === 'win32') await mkdir(directory);
   // Initial directory loading normalizes the path input when it finishes.
   // Wait for that load before entering a different directory.
   await page.getByLabel('目录路径').waitFor();
@@ -193,9 +194,9 @@ try {
   const directoryPanel = page.getByRole('region', { name: '终端分屏', exact: true });
   await directoryPanel.getByText('已连接', { exact: true }).waitFor();
   await directoryPanel.locator('.xterm-screen').click();
-  await page.keyboard.type('pwd');
+  await page.keyboard.type(process.platform === 'win32' ? 'cd' : 'pwd');
   await page.keyboard.press('Enter');
-  await until(async () => (await directoryPanel.locator('.xterm-screen').innerText()).includes(directory));
+  await until(async () => (await directoryPanel.locator('.xterm-screen').innerText()).replaceAll('\\', '/').replaceAll('\n', '').replaceAll('\r', '').includes(directory));
   pass('file directory terminal opens a real shell in the selected directory');
   assert(passed >= 5, `expected at least 5 acceptance groups, got ${passed}`);
   console.log(`${passed} passed, 0 failed, 0 skipped`);

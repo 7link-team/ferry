@@ -54,7 +54,7 @@ impl Settings {
 
     fn validate(&self) -> anyhow::Result<()> {
         validate_name(&self.service_name)?;
-        crate::ws_url(&self.server, "/api/runners/connect")?;
+        crate::transport::ws_url(&self.server, "/api/runners/connect")?;
         anyhow::ensure!(
             !self.server.chars().any(char::is_control),
             "服务地址不能包含控制字符"
@@ -64,7 +64,7 @@ impl Settings {
             self.token
                 .as_ref()
                 .is_some_and(|token| !token.trim().is_empty())
-                || crate::Enrolment::load(&self.state_dir).is_some(),
+                || crate::enrollment::Enrolment::load(&self.state_dir).is_some(),
             "首次安装需要注册令牌"
         );
         Ok(())
@@ -124,7 +124,7 @@ impl Settings {
         }
         // Explicit --rebind carries a fresh enrolment token. Never send the old
         // server's key to the new server; enrol into the host selected by that token.
-        match std::fs::remove_file(crate::Enrolment::path(&self.state_dir)) {
+        match std::fs::remove_file(crate::enrollment::Enrolment::path(&self.state_dir)) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
@@ -287,8 +287,8 @@ pub fn dispatch() -> anyhow::Result<bool> {
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(crate::run_with_shutdown(
-                    crate::Config {
+                .block_on(crate::runtime::run_with_shutdown(
+                    crate::cli::Config {
                         server: settings.server,
                         token: settings.token,
                         state_dir: settings.state_dir,

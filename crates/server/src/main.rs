@@ -1,54 +1,28 @@
-mod actions;
-mod actions_run;
-mod alerts;
-mod artifacts;
+mod accounts;
 mod assets;
-mod auth;
-mod channel;
 mod cluster;
-mod concurrency;
 mod credentials;
 mod cron_jobs;
 mod db;
-mod deployment_modes;
 mod deployments;
 mod entities;
 mod error;
-mod host_monitor;
 mod hosts;
 mod i18n;
 mod lock;
 mod maintenance;
-mod manifest;
 mod marketplace;
 mod migration;
-mod names;
-mod pipeline_contexts;
-mod pipeline_runs;
+mod notifications;
 mod pipelines;
-mod platform;
-mod remote;
 mod repositories;
-mod repository_analysis;
-mod repository_auth;
-mod repository_monitor;
-mod resource;
-mod runner;
-mod runner_install;
-mod runner_updates;
+mod resources;
 mod snowflake;
-mod ssh;
 mod state;
 mod templates;
-mod transfers;
-mod value_files;
 mod variables;
 mod vault;
-mod webhook;
-mod windows_shell;
 mod worker;
-mod workspace;
-mod workspace_admin;
 
 use axum::{
     Router,
@@ -195,21 +169,21 @@ async fn main() -> anyhow::Result<()> {
         ids: worker.generator.clone(),
     });
 
-    runner::recover_updates(&s)
+    hosts::runner::recover_updates(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
-    platform::prepare(&s).await?;
+    accounts::platform::prepare(&s).await?;
     maintenance::prepare(&s).await?;
-    workspace::prepare_permissions(&s)
+    accounts::workspace::prepare_permissions(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
-    repository_auth::recover(&s)
+    repositories::auth::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
-    repository_analysis::recover(&s)
+    repositories::analysis::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
-    repository_analysis::insights::recover(&s)
+    repositories::analysis::insights::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
     marketplace::recover(&s)
@@ -223,7 +197,7 @@ async fn main() -> anyhow::Result<()> {
         .as_ref()
         .map(|cluster| tokio::spawn(cluster.clone().serve(s.clone(), cluster_rx)));
     let (pipeline_stop, pipeline_rx) = tokio::sync::watch::channel(false);
-    let pipeline_task = tokio::spawn(pipeline_runs::scheduler(
+    let pipeline_task = tokio::spawn(pipelines::runs::scheduler(
         s.clone(),
         pipeline_rx,
         drain_rx.clone(),
@@ -237,15 +211,17 @@ async fn main() -> anyhow::Result<()> {
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
-    let runner_auto_update_task =
-        tokio::spawn(runner::automatic_updates(s.clone(), drain_rx.clone()));
-    let host_monitor_task = tokio::spawn(host_monitor::collect(s.clone(), drain_rx.clone()));
-    let repository_monitor_task = tokio::spawn(repository_monitor::scheduler(
+    let runner_auto_update_task = tokio::spawn(hosts::runner::automatic_updates(
+        s.clone(),
+        drain_rx.clone(),
+    ));
+    let host_monitor_task = tokio::spawn(hosts::monitor::collect(s.clone(), drain_rx.clone()));
+    let repository_monitor_task = tokio::spawn(repositories::monitor::scheduler(
         s.clone(),
         cfg.repository_analysis_concurrency,
         drain_rx.clone(),
     ));
-    let repository_analysis_task = tokio::spawn(repository_analysis::scheduler(
+    let repository_analysis_task = tokio::spawn(repositories::analysis::scheduler(
         s.clone(),
         cfg.repository_analysis_concurrency,
         drain_rx.clone(),
@@ -264,7 +240,7 @@ async fn main() -> anyhow::Result<()> {
                 _ = tick.tick() => {
                     tokio::select! {
                         _ = recovery_stop.changed() => break,
-                        result = runner::recover_updates(&recovery_state) => {
+                        result = hosts::runner::recover_updates(&recovery_state) => {
                             if let Err(error) = result {
                                 tracing::warn!(error=%error.1,"Cannot recover orphaned Runner updates");
                             }
@@ -274,7 +250,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-    let alerts_task = tokio::spawn(alerts::scheduler(s.clone(), drain_rx));
+    let alerts_task = tokio::spawn(notifications::alerts::scheduler(s.clone(), drain_rx));
 
     let mut hosts = cfg.allowed_hosts;
     hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
@@ -285,87 +261,88 @@ async fn main() -> anyhow::Result<()> {
     let workspace_api = Router::new()
         .route(
             "/{workspace}/code-insights",
-            get(repository_analysis::insights::list).post(repository_analysis::insights::create),
+            get(repositories::analysis::insights::list)
+                .post(repositories::analysis::insights::create),
         )
         .route(
             "/{workspace}/code-insights/{id}",
-            get(repository_analysis::insights::get)
-                .patch(repository_analysis::insights::update)
-                .delete(repository_analysis::insights::delete),
+            get(repositories::analysis::insights::get)
+                .patch(repositories::analysis::insights::update)
+                .delete(repositories::analysis::insights::delete),
         )
         .route(
             "/{workspace}/code-insights/{id}/sync",
-            post(repository_analysis::insights::retry),
+            post(repositories::analysis::insights::retry),
         )
         .route(
             "/{workspace}/code-insights/{id}/reports/{kind}",
-            get(repository_analysis::insight_report),
+            get(repositories::analysis::insight_report),
         )
         .route(
             "/{workspace}/code-connections/{id}/analysis",
-            get(repository_analysis::get).patch(repository_analysis::update),
+            get(repositories::analysis::get).patch(repositories::analysis::update),
         )
         .route(
             "/{workspace}/code-connection-analyses/{id}",
-            get(repository_analysis::flat_get),
+            get(repositories::analysis::flat_get),
         )
         .route(
             "/{workspace}/code-connections/{id}/analysis-runs",
-            post(repository_analysis::retry),
+            post(repositories::analysis::retry),
         )
         .route(
             "/{workspace}/code-contributions/{kind}",
-            get(repository_analysis::report),
+            get(repositories::analysis::report),
         )
         .route(
             "/{workspace}/repository-providers/{provider}/connections",
-            post(repository_auth::connect_token),
+            post(repositories::auth::connect_token),
         )
         .route(
             "/{workspace}/repository-providers/{provider}/repositories",
-            get(repository_auth::browse_repositories),
+            get(repositories::auth::browse_repositories),
         )
         .route(
             "/{workspace}/code-connections",
-            get(repository_auth::list_connections).post(repository_auth::create_connection),
+            get(repositories::auth::list_connections).post(repositories::auth::create_connection),
         )
         .route(
             "/{workspace}/code-connections/{id}",
-            get(repository_auth::get_connection)
-                .patch(repository_auth::update_connection)
-                .delete(repository_auth::delete_connection),
+            get(repositories::auth::get_connection)
+                .patch(repositories::auth::update_connection)
+                .delete(repositories::auth::delete_connection),
         )
         .route(
             "/{workspace}/code-connections/{id}/repositories",
-            get(repository_auth::connection_repositories),
+            get(repositories::auth::connection_repositories),
         )
         .route(
             "/{workspace}/code-connection-monitors/{id}",
-            get(repository_monitor::get).patch(repository_monitor::update),
+            get(repositories::monitor::get).patch(repositories::monitor::update),
         )
         .route(
             "/{workspace}/code-connections/{id}/events",
-            get(repository_monitor::history),
+            get(repositories::monitor::history),
         )
         .route(
             "/{workspace}/repository-events",
-            get(repository_monitor::workspace_history),
+            get(repositories::monitor::workspace_history),
         )
         .route(
             "/{workspace}/repository-events/{id}",
-            get(repository_monitor::event),
+            get(repositories::monitor::event),
         )
         .route(
             "/{workspace}/code-connections/{id}/branches",
-            get(repository_auth::connection_branches),
+            get(repositories::auth::connection_branches),
         )
         .route(
             "/{workspace}/repository-providers",
-            get(repository_auth::list),
+            get(repositories::auth::list),
         )
         .route(
             "/{workspace}/repository-providers/{provider}/authorizations",
-            post(repository_auth::start),
+            post(repositories::auth::start),
         )
         .route(
             "/{workspace}/marketplace-sources",
@@ -389,16 +366,22 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/{workspace}/alert-rules",
-            get(alerts::list).post(alerts::create),
+            get(notifications::alerts::list).post(notifications::alerts::create),
         )
         .route(
             "/{workspace}/alert-rules/{id}",
-            get(alerts::get)
-                .patch(alerts::update)
-                .delete(alerts::delete),
+            get(notifications::alerts::get)
+                .patch(notifications::alerts::update)
+                .delete(notifications::alerts::delete),
         )
-        .route("/{workspace}/alert-events", get(alerts::history))
-        .route("/{workspace}/alert-events/{id}", get(alerts::detail))
+        .route(
+            "/{workspace}/alert-events",
+            get(notifications::alerts::history),
+        )
+        .route(
+            "/{workspace}/alert-events/{id}",
+            get(notifications::alerts::detail),
+        )
         .route(
             "/{workspace}/cron-jobs",
             get(cron_jobs::list).post(cron_jobs::create),
@@ -496,7 +479,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/{workspace}/pipelines/{id}/runs",
-            post(pipeline_runs::trigger),
+            post(pipelines::runs::trigger),
         )
         .route(
             "/{workspace}/config-templates",
@@ -512,49 +495,52 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/config-templates/{id}/renderings",
             post(templates::configs::render),
         )
-        .route("/{workspace}/pipeline-artifacts", get(artifacts::list))
+        .route(
+            "/{workspace}/pipeline-artifacts",
+            get(pipelines::artifacts::list),
+        )
         .route(
             "/{workspace}/pipeline-artifacts/{id}/content",
-            get(artifacts::download),
+            get(pipelines::artifacts::download),
         )
         .route(
             "/{workspace}/pipeline-groups",
-            get(pipeline_contexts::groups::list).post(pipeline_contexts::groups::create),
+            get(pipelines::contexts::groups::list).post(pipelines::contexts::groups::create),
         )
         .route(
             "/{workspace}/pipeline-groups/ordering",
-            axum::routing::patch(pipeline_contexts::reorder_groups),
+            axum::routing::patch(pipelines::contexts::reorder_groups),
         )
         .route(
             "/{workspace}/pipeline-groups/{id}",
-            get(pipeline_contexts::groups::get)
-                .patch(pipeline_contexts::groups::update)
-                .delete(pipeline_contexts::groups::remove),
+            get(pipelines::contexts::groups::get)
+                .patch(pipelines::contexts::groups::update)
+                .delete(pipelines::contexts::groups::remove),
         )
         .route(
             "/{workspace}/pipeline-environments",
-            get(pipeline_contexts::environments::list)
-                .post(pipeline_contexts::environments::create),
+            get(pipelines::contexts::environments::list)
+                .post(pipelines::contexts::environments::create),
         )
         .route(
             "/{workspace}/pipeline-environments/{id}",
-            get(pipeline_contexts::environments::get)
-                .patch(pipeline_contexts::environments::update)
-                .delete(pipeline_contexts::environments::remove),
+            get(pipelines::contexts::environments::get)
+                .patch(pipelines::contexts::environments::update)
+                .delete(pipelines::contexts::environments::remove),
         )
-        .route("/{workspace}/pipeline-runs", get(pipeline_runs::list))
-        .route("/{workspace}/pipeline-runs/{id}", get(pipeline_runs::get))
+        .route("/{workspace}/pipeline-runs", get(pipelines::runs::list))
+        .route("/{workspace}/pipeline-runs/{id}", get(pipelines::runs::get))
         .route(
             "/{workspace}/pipeline-runs/{id}/logs",
-            get(pipeline_runs::log_list),
+            get(pipelines::runs::log_list),
         )
         .route(
             "/{workspace}/pipeline-runs/{id}/cancellations",
-            post(pipeline_runs::cancel),
+            post(pipelines::runs::cancel),
         )
         .route(
             "/{workspace}/pipeline-runs/{id}/jobs/{key}/approvals",
-            post(pipeline_runs::approve),
+            post(pipelines::runs::approve),
         )
         .route(
             "/{workspace}/app-templates",
@@ -587,28 +573,32 @@ async fn main() -> anyhow::Result<()> {
         .route("/{workspace}/dashboard", get(hosts::dashboard))
         .route(
             "/{workspace}/roles",
-            get(workspace_admin::roles).post(workspace_admin::create_role),
+            get(accounts::workspace_admin::roles).post(accounts::workspace_admin::create_role),
         )
         .route(
             "/{workspace}/roles/{id}",
-            get(workspace_admin::get_role)
-                .patch(workspace_admin::update_role)
-                .delete(workspace_admin::delete_role),
+            get(accounts::workspace_admin::get_role)
+                .patch(accounts::workspace_admin::update_role)
+                .delete(accounts::workspace_admin::delete_role),
         )
-        .route("/{workspace}/members", get(workspace_admin::members))
+        .route(
+            "/{workspace}/members",
+            get(accounts::workspace_admin::members),
+        )
         .route(
             "/{workspace}/members/invitation",
-            get(workspace_admin::invitation).post(workspace_admin::rotate_invitation),
+            get(accounts::workspace_admin::invitation)
+                .post(accounts::workspace_admin::rotate_invitation),
         )
         .route(
             "/{workspace}/members/role-options",
-            get(workspace_admin::role_options),
+            get(accounts::workspace_admin::role_options),
         )
         .route(
             "/{workspace}/members/{id}",
-            get(workspace_admin::get_member)
-                .patch(workspace_admin::update_member)
-                .delete(workspace_admin::delete_member),
+            get(accounts::workspace_admin::get_member)
+                .patch(accounts::workspace_admin::update_member)
+                .delete(accounts::workspace_admin::delete_member),
         )
         .route("/{workspace}/activity", get(hosts::list_activity))
         .route(
@@ -639,41 +629,47 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/{workspace}/nodes/{id}/connection-tests",
-            post(remote::test_connection),
+            post(hosts::remote::test_connection),
         )
-        .route("/{workspace}/nodes/{id}/metrics", get(host_monitor::read))
+        .route("/{workspace}/nodes/{id}/metrics", get(hosts::monitor::read))
         .route(
             "/{workspace}/nodes/{id}/file-systems",
-            get(remote::file_systems),
+            get(hosts::remote::file_systems),
         )
         .route(
             "/{workspace}/nodes/{id}/terminal-sessions",
-            get(remote::terminal),
+            get(hosts::remote::terminal),
         )
         .route(
             "/{workspace}/nodes/{id}/files",
-            get(remote::list_dir)
-                .post(remote::create_entry)
-                .delete(remote::delete_file),
+            get(hosts::remote::list_dir)
+                .post(hosts::remote::create_entry)
+                .delete(hosts::remote::delete_file),
         )
         .route(
             "/{workspace}/nodes/{id}/files/content",
             // The global JSON limit must not apply here: an upload is streamed
             // straight to the host and is never held in memory, so capping it
             // at the body limit would cap every file at 256 KiB.
-            get(remote::download)
-                .put(remote::upload)
+            get(hosts::remote::download)
+                .put(hosts::remote::upload)
                 .layer(DefaultBodyLimit::disable()),
         )
-        .route("/{workspace}/runner-tokens", post(runner::create_token))
-        .route("/{workspace}/runner-tokens/{id}", get(runner::token_status))
+        .route(
+            "/{workspace}/runner-tokens",
+            post(hosts::runner::create_token),
+        )
+        .route(
+            "/{workspace}/runner-tokens/{id}",
+            get(hosts::runner::token_status),
+        )
         .route(
             "/{workspace}/nodes/{id}/connection-credentials",
-            get(runner::connection_command).post(runner::reset_connection_command),
+            get(hosts::runner::connection_command).post(hosts::runner::reset_connection_command),
         )
         .route(
             "/{workspace}/nodes/{id}/runner-updates",
-            get(runner::update_status).post(runner::start_update),
+            get(hosts::runner::update_status).post(hosts::runner::start_update),
         )
         .route(
             "/{workspace}/pipelines",
@@ -720,52 +716,52 @@ async fn main() -> anyhow::Result<()> {
         );
 
     let workspace_api = workspace_api
-        .merge(transfers::routes())
-        .merge(value_files::routes());
+        .merge(resources::transfers::routes())
+        .merge(maintenance::files::routes());
 
     let draining = drain.subscribe();
     let app = Router::new()
         .route("/api/status", get(status))
         // A runner is not a browser: it proves itself with the protocol's Hello
         // frame, so these two sit outside the session cookie.
-        .route("/api/runners/connect", get(runner::connect))
-        .route("/api/runners/install.sh", get(runner_install::shell))
-        .route("/api/runners/install.ps1", get(runner_install::powershell))
-        .route("/api/runners/install/{target}", get(runner_install::artifact))
-        .route("/api/runners/sessions/{session}", get(runner::session))
-        .route("/api/permissions", get(workspace::permission_catalogue))
+        .route("/api/runners/connect", get(hosts::runner::connect))
+        .route("/api/runners/install.sh", get(hosts::runner::install::shell))
+        .route("/api/runners/install.ps1", get(hosts::runner::install::powershell))
+        .route("/api/runners/install/{target}", get(hosts::runner::install::artifact))
+        .route("/api/runners/sessions/{session}", get(hosts::runner::session))
+        .route("/api/permissions", get(accounts::workspace::permission_catalogue))
         .route(
             "/api/setup",
-            get(platform::status).post(platform::initialize),
+            get(accounts::platform::status).post(accounts::platform::initialize),
         )
-        .route("/api/platform/users", get(platform::list_users))
+        .route("/api/platform/users", get(accounts::platform::list_users))
         .route(
             "/api/platform/users/{id}",
-            get(platform::get_user).patch(platform::update_user),
+            get(accounts::platform::get_user).patch(accounts::platform::update_user),
         )
         .route(
             "/api/platform/workspaces",
-            get(platform::list_workspaces).post(platform::create_workspace),
+            get(accounts::platform::list_workspaces).post(accounts::platform::create_workspace),
         )
         .route(
             "/api/platform/workspaces/{id}",
-            get(platform::get_workspace).patch(platform::update_workspace),
+            get(accounts::platform::get_workspace).patch(accounts::platform::update_workspace),
         )
         .route(
             "/api/platform/settings/1",
-            get(platform::get_settings).patch(platform::update_settings),
+            get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
         )
-        .route("/api/users", post(auth::register))
-        .route("/api/sessions", post(auth::login).delete(auth::logout))
-        .route("/api/me", get(auth::me))
+        .route("/api/users", post(accounts::auth::register))
+        .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
+        .route("/api/me", get(accounts::auth::me))
         .route(
             "/api/profile/1",
-            get(auth::profile).patch(auth::update_profile),
+            get(accounts::auth::profile).patch(accounts::auth::update_profile),
         )
-        .route("/api/repository-providers/callback",get(repository_auth::complete))
-        .route("/api/repository-events/{id}",post(repository_monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
-        .route("/api/workspaces", post(workspace::create))
-        .route("/api/workspace-memberships", post(workspace::join))
+        .route("/api/repository-providers/callback",get(repositories::auth::complete))
+        .route("/api/repository-events/{id}",post(repositories::monitor::receive).layer(DefaultBodyLimit::max(1024 * 1024)))
+        .route("/api/workspaces", post(accounts::workspace::create))
+        .route("/api/workspace-memberships", post(accounts::workspace::join))
         .nest("/api/workspaces", workspace_api)
         .fallback(assets::serve)
         .layer(DefaultBodyLimit::max(256 * 1024))
@@ -983,11 +979,11 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
 /// of connection is one more arm here and no change to any caller.
 pub async fn channel_open(
     s: &state::AppState,
-    host: &remote::Host,
-) -> error::Result<Box<dyn channel::HostChannel>> {
+    host: &hosts::remote::Host,
+) -> error::Result<Box<dyn hosts::channel::HostChannel>> {
     match host.connection.as_str() {
-        "ssh" => ssh::open(s, host).await,
-        "runner" => runner::open(s, host).await,
+        "ssh" => hosts::ssh::open(s, host).await,
+        "runner" => hosts::runner::open(s, host).await,
         _ => Err(error::ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             i18n::Message::new("host.connectionUnknown"),

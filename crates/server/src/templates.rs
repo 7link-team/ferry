@@ -1,12 +1,12 @@
 //! Creation-time parameter expansion; runtime pipeline placeholders remain unchanged.
 use crate::error::{Json, Path, Query};
 use crate::{
+    accounts::workspace::Scope,
     db,
     error::{ApiError, Result},
-    resource::{self, ListQuery, Spec},
+    resources::resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
-    workspace::Scope,
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
@@ -204,11 +204,12 @@ fn expand(
                                 crate::i18n::Message::new("templates.fieldNameForbidden"),
                             ));
                         }
-                        offset = crate::actions::expression_end(key, start + 2)? + 2;
+                        offset = crate::pipelines::actions::expression_end(key, start + 2)? + 2;
                     }
                 }
                 if kind == Kind::Pipeline
-                    && map.get("engine").and_then(Value::as_str) == Some(crate::actions::ENGINE)
+                    && map.get("engine").and_then(Value::as_str)
+                        == Some(crate::pipelines::actions::ENGINE)
                     && key == "workflow"
                 {
                     let workflow: Value =
@@ -257,7 +258,8 @@ fn expand(
                                         .and_then(Value::as_str)
                                         .and_then(|name| name.strip_prefix("Archive "))
                                 {
-                                    let name = crate::artifacts::legacy_artifact_name(path);
+                                    let name =
+                                        crate::pipelines::artifacts::legacy_artifact_name(path);
                                     step["with"]["name"] = json!(name);
                                 }
                             }
@@ -329,7 +331,7 @@ fn expand(
                     && start > 0
                     && text.as_bytes()[start - 1] == b'$'
                 {
-                    let end = crate::actions::expression_end(text, start + 2)?;
+                    let end = crate::pipelines::actions::expression_end(text, start + 2)?;
                     output.push_str(&text[offset..end + 2]);
                     offset = end + 2;
                     continue;
@@ -557,7 +559,7 @@ fn render_content(
     })?;
     match kind {
         Kind::App => {
-            crate::manifest::parse(&text)?;
+            crate::deployments::manifest::parse(&text)?;
         }
         Kind::Pipeline => {
             crate::pipelines::validate_definition(&text)?;
@@ -571,14 +573,14 @@ fn render_content(
 /// Backup storage is handled by the migration; renders and old imports use the same converter.
 pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
     let doc = document(content)?;
-    if doc.get("engine").and_then(Value::as_str) == Some(crate::actions::ENGINE) {
+    if doc.get("engine").and_then(Value::as_str) == Some(crate::pipelines::actions::ENGINE) {
         return Ok(content.to_owned());
     }
     // A plain Actions workflow (YAML with jobs) gets the standard envelope so
     // the template picker can use it; its text, placeholders included, is kept.
     if doc.get("jobs").is_some() {
         return serde_json::to_string(&json!({
-            "engine": crate::actions::ENGINE,
+            "engine": crate::pipelines::actions::ENGINE,
             "workflow": content,
             "executor_bindings": [],
             "checkout_bindings": [],
@@ -642,7 +644,7 @@ async fn config_unreferenced(
         .all(conn)
         .await?
     {
-        let manifest = crate::manifest::parse(&row.manifest)?;
+        let manifest = crate::deployments::manifest::parse(&row.manifest)?;
         if manifest
             .services
             .iter()
@@ -792,14 +794,14 @@ mod tests {
         // A template saved as a plain Actions YAML workflow (as alpha.32 allowed).
         let plain = "name: Build\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo {{ .Values.command }}\n";
         let wrapped: Value = serde_json::from_str(&convert_legacy_content(plain).unwrap()).unwrap();
-        assert_eq!(wrapped["engine"], crate::actions::ENGINE);
+        assert_eq!(wrapped["engine"], crate::pipelines::actions::ENGINE);
         assert_eq!(wrapped["workflow"], plain);
         let again = convert_legacy_content(&wrapped.to_string()).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&again).unwrap(), wrapped);
         let legacy = r#"{"workdir":"/tmp/{{run}}","steps":[{"name":"Build","run":"{{ .Values.command }}"}]}"#;
         let converted: Value =
             serde_json::from_str(&convert_legacy_content(legacy).unwrap()).unwrap();
-        assert_eq!(converted["engine"], crate::actions::ENGINE);
+        assert_eq!(converted["engine"], crate::pipelines::actions::ENGINE);
         assert!(
             converted["workflow"]
                 .as_str()
@@ -820,23 +822,27 @@ jobs:
     steps:
       - run: echo {{ .Values.message }} ${{ secrets[inputs.key] }}
 "#;
-        let content = json!({"engine":crate::actions::ENGINE, "workflow":workflow}).to_string();
+        let content =
+            json!({"engine":crate::pipelines::actions::ENGINE, "workflow":workflow}).to_string();
         let parameters = r#"[{"name":"message","type":"string","default":"hello"}]"#;
         validate_template(&content, parameters, Kind::Pipeline).unwrap();
         let rendered =
             render_content(&content, parameters, &BTreeMap::new(), Kind::Pipeline).unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let expected: Value =
             serde_yaml_ng::from_str(&workflow.replace("{{ .Values.message }}", "hello")).unwrap();
         let actual: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         assert_eq!(actual, expected);
         assert!(document.workflow.contains("{{ .Values.not_a_parameter }}"));
         assert_eq!(
-            crate::actions::references(&document).unwrap().secrets.names,
+            crate::pipelines::actions::references(&document)
+                .unwrap()
+                .secrets
+                .names,
             BTreeSet::from(["TOKEN".into()])
         );
         assert!(
-            crate::actions::references(&document)
+            crate::pipelines::actions::references(&document)
                 .unwrap()
                 .secrets
                 .deliver_all
@@ -860,11 +866,12 @@ jobs:
         env:
           STEP_TOKEN: '{{ .Values.token }}'
 "#;
-        let content = json!({"engine":crate::actions::ENGINE,"workflow":workflow}).to_string();
+        let content =
+            json!({"engine":crate::pipelines::actions::ENGINE,"workflow":workflow}).to_string();
         let parameters = r#"[{"name":"token","type":"string","secret":true}]"#;
         let values = BTreeMap::from([("token".into(), json!("db-token"))]);
         let rendered = render_content(&content, parameters, &values, Kind::Pipeline).unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         for value in [
             &workflow["env"]["GLOBAL_TOKEN"],
@@ -877,7 +884,7 @@ jobs:
             workflow["jobs"]["build"]["env"]["EXISTING"],
             "${{ secrets.EXISTING }}"
         );
-        let references = crate::actions::references(&document).unwrap();
+        let references = crate::pipelines::actions::references(&document).unwrap();
         assert_eq!(
             references.secrets.names,
             BTreeSet::from(["db-token".into(), "EXISTING".into()])
@@ -886,7 +893,8 @@ jobs:
             "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: '{{ .Values.token }}'\n",
             "env:\n  TOKEN: 'prefix {{ .Values.token }}'\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo ok\n",
         ] {
-            let content = json!({"engine":crate::actions::ENGINE,"workflow":workflow}).to_string();
+            let content =
+                json!({"engine":crate::pipelines::actions::ENGINE,"workflow":workflow}).to_string();
             assert!(validate_template(&content, parameters, Kind::Pipeline).is_err());
         }
         assert!(
@@ -912,7 +920,7 @@ jobs:
             Kind::Pipeline,
         )
         .unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         let upload = workflow["jobs"]["build"]["steps"]
             .as_array()
@@ -923,7 +931,7 @@ jobs:
         assert_eq!(upload["name"], "Archive bin/app");
         assert_eq!(
             upload["with"]["name"],
-            crate::artifacts::legacy_artifact_name("bin/app")
+            crate::pipelines::artifacts::legacy_artifact_name("bin/app")
         );
         assert_eq!(upload["with"]["path"], "/tmp/build/bin/app");
     }
@@ -947,7 +955,7 @@ jobs:
                 Kind::Pipeline,
             )
             .unwrap();
-            let document = crate::actions::document(&rendered).unwrap();
+            let document = crate::pipelines::actions::document(&rendered).unwrap();
             let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
             let step = workflow["jobs"]["build"]["steps"]
                 .as_array()
@@ -972,7 +980,7 @@ jobs:
         }
         let rendered =
             render_content(&converted, parameters, &BTreeMap::new(), Kind::Pipeline).unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let workflow: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         assert_eq!(
             workflow["jobs"]["build"]["steps"]
@@ -1033,7 +1041,7 @@ jobs:
             Kind::Pipeline,
         )
         .unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let value: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         let setup = &value["jobs"]["build"]["steps"][0];
         assert_eq!(setup["id"], "prepare_workspace");
@@ -1129,7 +1137,7 @@ jobs:
         let pipeline = json!({"workdir":"/tmp/{{run}}","env":[{"name":"TOKEN","valueFrom":"{{ .Values.token }}"}],"steps":[{"name":"build","run":"true"}]});
         let rendered =
             render_content(&pipeline.to_string(), defs, &values, Kind::Pipeline).unwrap();
-        let document = crate::actions::document(&rendered).unwrap();
+        let document = crate::pipelines::actions::document(&rendered).unwrap();
         let value: Value = serde_yaml_ng::from_str(&document.workflow).unwrap();
         assert_eq!(
             value["jobs"]["build"]["env"]["TOKEN"],

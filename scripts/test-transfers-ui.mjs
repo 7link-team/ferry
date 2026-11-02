@@ -9,8 +9,8 @@ import { createServer } from 'node:net';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 // Read the real navigation tree without loading browser-only label rendering in Node.
 // This acceptance loop uses resource/params only; translated label getters stay lazy.
-const navSource = await readFile(new URL('../src/nav.ts', import.meta.url), 'utf8');
-const labelImport = 'import { commonText } from "./i18n";';
+const navSource = await readFile(new URL('../src/app/nav.ts', import.meta.url), 'utf8');
+const labelImport = 'import { commonText } from "../shared/i18n/i18n";';
 assert(navSource.includes(labelImport), 'navigation label import is explicitly isolated');
 const navModule = ts.transpileModule(navSource.replace(labelImport, 'const commonText = (key: string) => key;'), {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },

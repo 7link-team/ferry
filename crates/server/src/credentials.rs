@@ -10,12 +10,12 @@ use crate::snowflake::Id;
 
 use crate::error::{Json, Path, Query};
 use crate::{
+    accounts::workspace::Scope,
     db,
     error::{ApiError, Result},
-    resource::{self, ListQuery, Spec},
+    resources::resource::{self, ListQuery, Spec},
     state::AppState,
     vault,
-    workspace::Scope,
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
@@ -395,7 +395,7 @@ pub async fn remove(
         .await?
     {
         if run.credential_id == i64::from(id)
-            || crate::actions::snapshot(&run.definition).is_some_and(|snapshot| {
+            || crate::pipelines::actions::snapshot(&run.definition).is_some_and(|snapshot| {
                 snapshot
                     .checkouts
                     .iter()
@@ -430,7 +430,7 @@ pub async fn remove(
 /// Decrypts a credential for the server's own use. There is no HTTP route to
 /// this; the caller is a channel that is about to connect somewhere.
 pub async fn unseal(s: &AppState, workspace_id: &Id, id: &Id) -> Result<(String, String, String)> {
-    crate::repository_auth::ensure_fresh(s, *workspace_id, *id).await?;
+    crate::repositories::auth::ensure_fresh(s, *workspace_id, *id).await?;
     let row = credentials::Entity::find()
         .filter(credentials::Column::WorkspaceId.eq(*workspace_id))
         .filter(credentials::Column::Id.eq(*id))
