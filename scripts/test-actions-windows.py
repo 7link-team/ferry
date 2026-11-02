@@ -165,6 +165,19 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
               second_row['state'] == 'succeeded' and 'FIRST' in first_output and 'PERSISTED' in second_output,
               f"{second_row['state']} {second_output[-2000:]}")
 
+        # Declared artifacts become upload-artifact steps, which the worker runs
+        # itself: no Node.js is needed on the host (CI also runs this without it).
+        archived = api(root + '/pipelines', {
+            'name': 'Converted legacy artifact', 'target_kind': 'host', 'target_ref': host,
+            'definition': json.dumps({'workdir': legacy_definition['workdir'], 'artifacts': ['dist/app.txt'],
+                                      'steps': [{'name': 'Build', 'run': 'mkdir -p dist; echo built > dist/app.txt'}]}),
+        }, status=201)['id']
+        archived_run = run(archived)
+        archived_row = finished(archived_run)
+        check('converted legacy artifacts publish without Node.js on the host',
+              archived_row['state'] == 'succeeded' and len(archived_row['artifacts']) == 1,
+              f"{archived_row['state']} {archived_row['artifacts']} {text(archived_run)[-1500:]}")
+
         exits = api(root + '/pipelines', {
             'name': 'Converted legacy exact exit', 'target_kind': 'host', 'target_ref': host,
             'definition': json.dumps({'workdir': legacy_definition['workdir'],
