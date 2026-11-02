@@ -37,7 +37,7 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
       { title: "基本信息", fields: [
         { key: "event", label: "事件", type: "select", options: repositoryEventOptions },
         text("repository", "仓库"), text("reference", "分支 / 标签"),
-        text("actor", "操作人", { display: row => String(row.actor || "未知（见下方说明）"), when: () => true }),
+        text("actor", "操作人", { when: has("actor") }),
         text("action", "动作"),
         text("created_at", "记录时间", { display: row => time(row.created_at) }),
         { key: "source", label: "来源", type: "select", options: [{ value: "webhook", label: "事件推送" }, { value: "polling", label: "主动轮询" }], when: has("source") },

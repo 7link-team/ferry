@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_names_known_operators_marks_unknown_ones_and_keeps_detail_out_of_the_baseline() {
+    fn diff_names_only_known_operators_and_keeps_detail_out_of_the_baseline() {
         let before = BTreeMap::from([(
             "team/repo".to_owned(),
             Repository {
@@ -314,25 +314,21 @@ mod tests {
         let events = changes(&before, &after, &all_events());
         let find = |kind: &str| events.iter().find(|e| e.event == kind).unwrap();
         let created = find("branch.created");
-        assert_eq!(created.actor, "bob");
+        // Polling cannot know who pushed: no operator, and no note saying so.
+        assert!(created.actor.is_empty());
         assert_eq!(created.detail["commit"]["message"], "init feature");
         assert_eq!(created.detail["source"], "polling");
-        assert!(created.detail["note"].as_str().unwrap().contains("推送人"));
+        assert!(created.detail.get("note").is_none());
         let deleted = find("branch.deleted");
         assert!(deleted.actor.is_empty());
         assert_eq!(deleted.detail["before"], "x");
-        assert!(
-            deleted.detail["note"]
-                .as_str()
-                .unwrap()
-                .contains("事件推送")
-        );
+        assert!(deleted.detail.get("note").is_none());
         let tag = find("tag.created");
         assert_eq!(
             (tag.actor.as_str(), tag.detail["message"].as_str()),
             ("tom", Some("release notes"))
         );
-        assert!(find("tag.deleted").detail["note"].is_string());
+        assert!(find("tag.deleted").detail.get("note").is_none());
         let merge = find("merge");
         assert_eq!(merge.actor, "lead");
         assert_eq!(merge.detail["request"]["description"], "Secret plan");
@@ -358,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn push_commits_stop_at_the_previous_revision_and_name_the_head_author() {
+    fn push_commits_stop_at_the_previous_revision_without_guessing_the_pusher() {
         let commits = vec![
             json!({"id":"d","message":"third","author":"Cy","author_username":"cy"}),
             json!({"id":"c","message":"second","author":"Bo"}),
@@ -369,7 +365,8 @@ mod tests {
         assert_eq!(event.detail["total_commits"], 2);
         assert_eq!(event.detail["commits"][0]["id"], "d");
         assert_eq!(event.detail["commits"].as_array().unwrap().len(), 2);
-        assert_eq!(event.actor, "cy");
+        assert!(event.actor.is_empty());
+        assert!(event.detail.get("note").is_none());
         // Rewritten history: report the newest commits and say why.
         let mut forced = push("gone");
         apply_commits(&mut forced, commits);
@@ -390,7 +387,7 @@ mod tests {
                 branch.actor.as_str(),
                 branch.detail["commit"]["id"].as_str()
             ),
-            ("Dee", Some("h"))
+            ("", Some("h"))
         );
     }
 }
@@ -417,10 +414,6 @@ struct Request {
     #[serde(skip)]
     detail: Value,
 }
-
-const NOTE_OPERATOR: &str =
-    "轮询只能发现变化结果，平台未提供执行该操作的账号；如需操作人请改用事件推送模式。";
-const NOTE_PUSH_AUTHOR: &str = "操作人为最新提交的作者；轮询无法获知实际推送人。";
 
 fn note(detail: &mut Value, text: &str) {
     if let Value::Object(map) = detail {
@@ -630,7 +623,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
     for (path, current) in new {
         let Some(previous) = old.get(path) else {
             let mut detail = json!({ "repository": current.info });
-            note(&mut detail, NOTE_OPERATOR);
             add(
                 "repository.created",
                 path,
@@ -646,24 +638,21 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             match previous.branches.get(name) {
                 None => {
                     let mut detail = json!({ "after": revision });
-                    let mut actor = String::new();
+                    // Polling cannot tell who created the branch; the commit
+                    // author is shown with the commit, not as the operator.
                     if let Some(commit) = current
                         .branch_detail
                         .get(name)
                         .and_then(|d| d.get("commit"))
                     {
-                        actor = detail::commit_author(commit);
                         detail["commit"] = commit.clone();
-                        if !actor.is_empty() {
-                            note(&mut detail, NOTE_PUSH_AUTHOR);
-                        }
                     }
                     add(
                         "branch.created",
                         path,
                         name,
                         "轮询检测：新增分支",
-                        actor,
+                        String::new(),
                         detail,
                     )
                 }
@@ -684,7 +673,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             .filter(|(name, _)| !current.branches.contains_key(*name))
         {
             let mut detail = json!({ "before": revision });
-            note(&mut detail, NOTE_OPERATOR);
             add(
                 "branch.deleted",
                 path,
@@ -706,7 +694,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 .unwrap_or_else(|| json!({}));
             let tagger = detail::field(&detail, &["/tagger"], 200);
             let actor = if tagger.is_empty() {
-                note(&mut detail, NOTE_OPERATOR);
                 String::new()
             } else {
                 tagger
@@ -726,7 +713,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             .filter(|(name, _)| !current.tags.contains_key(*name))
         {
             let mut detail = json!({ "target": target });
-            note(&mut detail, NOTE_OPERATOR);
             add(
                 "tag.deleted",
                 path,
@@ -749,9 +735,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 } else {
                     String::new()
                 };
-                if actor.is_empty() {
-                    note(&mut detail, NOTE_OPERATOR);
-                }
                 add(
                     if merged { "merge" } else { "pull_request" },
                     path,
@@ -771,7 +754,6 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
     }
     for path in old.keys().filter(|path| !new.contains_key(*path)) {
         let mut detail = json!({});
-        note(&mut detail, NOTE_OPERATOR);
         add(
             "repository.deleted",
             path,
@@ -809,11 +791,7 @@ async fn enrich(access: &MonitorAccess, events: &mut [Event]) {
 fn apply_commits(event: &mut Event, commits: Vec<Value>) {
     if event.event == "branch.created" {
         if let Some(head) = commits.first() {
-            event.actor = bounded(&detail::commit_author(head));
             event.detail["commit"] = head.clone();
-            if !event.actor.is_empty() {
-                note(&mut event.detail, NOTE_PUSH_AUTHOR);
-            }
         }
         return;
     }
@@ -839,12 +817,6 @@ fn apply_commits(event: &mut Event, commits: Vec<Value>) {
             .cloned()
             .collect::<Vec<_>>(),
     );
-    if let Some(head) = pushed.first() {
-        event.actor = bounded(&detail::commit_author(head));
-        if !event.actor.is_empty() {
-            note(&mut event.detail, NOTE_PUSH_AUTHOR);
-        }
-    }
 }
 
 struct Claim {

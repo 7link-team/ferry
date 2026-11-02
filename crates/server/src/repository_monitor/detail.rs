@@ -145,11 +145,6 @@ pub(super) fn commit(value: &Value) -> Value {
     Value::Object(map)
 }
 
-/// Author of a commit for the operator column, preferring the account name.
-pub(super) fn commit_author(commit: &Value) -> String {
-    field(commit, &["/author_username", "/author"], 200)
-}
-
 /// A merge request / pull request from a listing or webhook object.
 pub(super) fn request(value: &Value) -> Value {
     let mut map = Map::new();
@@ -504,23 +499,18 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
         add("提交数", total.to_string());
     }
     if let Some(commits) = detail["commits"].as_array() {
+        // One field per fact, so receivers can read or parse each one.
         for commit in commits.iter().take(5) {
-            let first = message(commit, &["/message"], 300)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .to_owned();
+            add("提交", field(commit, &["/short_id", "/id"], 12));
             add(
-                "提交",
-                format!(
-                    "{} {} — {}",
-                    field(commit, &["/short_id", "/id"], 12),
-                    first,
-                    field(commit, &["/author"], 200)
-                )
-                .trim_end_matches(" — ")
-                .to_owned(),
+                "提交信息",
+                message(commit, &["/message"], 300)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_owned(),
             );
+            add("提交作者", field(commit, &["/author"], 200));
         }
         if commits.len() > 5 {
             add(
@@ -530,19 +520,16 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
         }
     }
     if let Some(commit) = detail.get("commit") {
+        add("最新提交", field(commit, &["/short_id", "/id"], 12));
         add(
-            "最新提交",
-            format!(
-                "{} {}",
-                field(commit, &["/short_id", "/id"], 12),
-                message(commit, &["/message"], 300)
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-            )
-            .trim()
-            .to_owned(),
+            "提交信息",
+            message(commit, &["/message"], 300)
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_owned(),
         );
+        add("提交作者", field(commit, &["/author"], 200));
     }
     add(
         "标签说明",
@@ -706,7 +693,7 @@ mod tests {
         assert_eq!(commit(&codeup)["author"], "Cy");
         assert!(!commit(&codeup).to_string().contains("c@x"));
         let push = json!({"id":"p","message":"m","timestamp":"t","url":"u","author":{"name":"Dee","email":"d@x","username":"dee"}});
-        assert_eq!(commit_author(&commit(&push)), "dee");
+        assert_eq!(commit(&push)["author_username"], "dee");
     }
 
     #[test]
@@ -772,8 +759,11 @@ notes"})),
         let detail = json!({"total_commits":7,"commits":[{"short_id":"a1","message":"one\nbody","author":"Ann"},{"short_id":"a2","message":"two"}],"compare_url":"https://x/c"});
         let summary = lines(&detail);
         assert!(summary.contains(&("提交数".into(), "7".into())));
-        assert!(summary.contains(&("提交".into(), "a1 one — Ann".into())));
-        assert!(summary.contains(&("提交".into(), "a2 two".into())));
+        assert!(summary.contains(&("提交".into(), "a1".into())));
+        assert!(summary.contains(&("提交信息".into(), "one".into())));
+        assert!(summary.contains(&("提交作者".into(), "Ann".into())));
+        assert!(summary.contains(&("提交信息".into(), "two".into())));
+        assert!(!summary.iter().any(|(_, value)| value.contains(" — ")));
         assert!(summary.contains(&("链接".into(), "https://x/c".into())));
         let polled =
             lines(&json!({"commits":[{"short_id":"b1","message":"m","url":"https://code/c/b1"}]}));
