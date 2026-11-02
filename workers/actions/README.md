@@ -86,6 +86,36 @@ days are recovered. The server owns persistence, replacement/deletion of
 previously published archives and expiry enforcement. `artifacts` is the final
 archive manifest, including restored archives that still exist.
 
+Host jobs (the selected platform is `-self-hosted`, without `container:`) always
+run `actions/upload-artifact@v4` / `@v4.*` and
+`actions/download-artifact@v4` / `@v4.*` through built-in worker helpers; these
+two actions need no Node installation or remote action fetch. Other versions
+and container jobs retain act's real actions. An exact-match act patch rewrites
+steps at the step factory, including composite and reusable-workflow steps,
+while keeping step conditions, IDs, environment, timeouts and outputs. Helpers
+invoke this worker executable using explicit `sh` (Unix) or hidden `cmd`
+(Windows). Inputs travel through step environment variables and use act's
+normal expression evaluation, without interpolating user values into shell code.
+
+The upload helper supports `name` (default `artifact`), multiline `path` entries
+(files/directories/globs, including `**` and `!` exclusions),
+`if-no-files-found` (`warn`/`error`/`ignore`), `retention-days`,
+`compression-level` (0–9; default 6), `overwrite` and `include-hidden-files`.
+Hidden files/directories are excluded by default unless explicitly selected.
+ZIP names are relative to the common search root; executable mode bits survive
+download on Unix. Outputs are `artifact-id`, `artifact-digest` (ZIP SHA-256)
+and `artifact-url` (empty for this local backend).
+
+The download helper supports `name`, `pattern`, `path` (default
+`GITHUB_WORKSPACE`, with `~` expansion), and `merge-multiple`. Without a name,
+artifacts go into separate artifact-name directories unless merging is enabled.
+It emits `download-path`. Cross-run `github-token`, `repository`, and `run-id`
+inputs fail explicitly because the local backend only serves the current run.
+Both helpers use the same authenticated v4 protocol and signed blob URLs as the
+Node actions; server-side confinement, retention, overwrite and run scoping
+remain authoritative. Transfers and input errors fail the step and appear in
+its masked log.
+
 `actions/cache` uses act's `pkg/artifactcache` service, bound to `127.0.0.1` on
 an ephemeral port. `cache_dir` selects persistent storage; the default is
 `os.UserCacheDir()/ferry/actions-cache`. `ACTIONS_CACHE_URL` and a runtime token
@@ -119,8 +149,8 @@ ACTIONS_TEST_REMOTE=1 bash go.sh test -run TestArtifactActions -count=1
 ACTIONS_TEST_REMOTE=1 ACTIONS_TEST_DOCKER_IMAGE=<local-node-image> bash go.sh test -run TestArtifactActions -count=1
 ```
 
-The remote test fetches `actions/upload-artifact@v4` and
-`actions/download-artifact@v4`. The container variant additionally requires a
+The remote test fetches checkout; artifact steps use the built-ins in host
+mode. The container variant fetches the upstream artifact actions and requires a
 local Docker daemon and an image with Git, Node, CA certificates and `sh`.
 
 Worker builds and tests use `go.sh` to apply the pinned act PTY synchronization

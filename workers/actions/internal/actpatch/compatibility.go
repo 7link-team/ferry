@@ -11,6 +11,13 @@ import (
 // isolated RunContexts, leaving step/action/reusable-workflow execution in act.
 func patchCompatibility(moduleDir string) error {
 	for _, patch := range []struct{ file, before, after string }{
+		// Preserve working-directory on built-in uses steps until the factory rewrite.
+		{"schema/workflow_schema.json", "\"with\": \"step-with\",\n          \"env\": \"step-env\"", "\"with\": \"step-with\",\n          \"working-directory\": \"string-steps-context\",\n          \"env\": \"step-env\""},
+		// Rewrite at the step factory so host composite/reusable steps use the
+		// same builtin path as top-level steps. Container selection stays in act.
+		{"runner/runner.go", "type Config struct {", "type Config struct {\n\tFerryRewriteStep func(*model.Step) error"},
+		{"runner/step_factory.go", "\"fmt\"", "\"fmt\"\n\t\"context\""},
+		{"runner/step_factory.go", "\tswitch stepModel.Type() {", "\thostRC := rc\n\tfor hostRC.Parent != nil { hostRC = hostRC.Parent }\n\tif rc.Config.FerryRewriteStep != nil && hostRC.Run.Job().Container() == nil && hostRC.platformImage(context.Background()) == \"-self-hosted\" {\n\t\tif err := rc.Config.FerryRewriteStep(stepModel); err != nil { return nil, err }\n\t}\n\tswitch stepModel.Type() {"},
 		{"exprparser/functions.go", "func (impl *interperterImpl) jobSuccess() (bool, error) {", "func (impl *interperterImpl) jobSuccess() (bool, error) {\n\tif impl.env.Job.Status == \"cancelled\" { return false, nil }"},
 		{"model/workflow.go", "matrixProduct := common.CartesianProduct(m)", "matrixProduct := orderedMatrixProduct(m, j.Strategy.RawMatrix)"},
 		{"model/workflow.go", "\t\"github.com/nektos/act/pkg/common\"\n", ""},

@@ -3,6 +3,7 @@ module ferry/actions-worker
 go 1.25.0
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.8.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/nektos/act v0.2.89
@@ -15,7 +16,6 @@ require (
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
-	github.com/bmatcuk/doublestar/v4 v4.8.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
