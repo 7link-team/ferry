@@ -518,17 +518,20 @@ export function AutoForm({
         className={className}
         data-auto-form
         noValidate
-        onInput={(event) => {
+        onChange={(event) => {
+          // Native selects emit input before change. Rendering between those
+          // events restores the old controlled value before onChange can read it.
           const key = (event.target as Element).closest<HTMLElement>(
             "[data-auto-field]",
           )?.dataset.autoField;
           if (key)
             setErrors((previous) => {
+              if (!Object.hasOwn(previous, key)) return previous;
               const next = { ...previous };
               delete next[key];
               return next;
             });
-          props.onInput?.(event);
+          props.onChange?.(event);
         }}
         onSubmit={async (event) => {
           event.preventDefault();

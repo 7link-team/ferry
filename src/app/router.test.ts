@@ -1,6 +1,7 @@
 import { beforeEach,describe,expect,it } from "vitest";
 import { setLocale } from "../shared/i18n/locale";
 import { href,parse } from "./router";
+import { nav } from "./nav";
 
 beforeEach(() => { localStorage.clear(); history.replaceState({}, "", "/en-US/"); setLocale("en-US", false); });
 
@@ -10,11 +11,23 @@ it("preserves each module through credential list, create, detail and edit links
     for (const suffix of ["", "/new", "/123", "/123/edit"]) {
       const path = `/workspaces/${workspace}/credentials${suffix}`;
       const route = parse(path, `?scope=${scope}`);
-      expect(route.group).toBe(scope);
+      expect(route.group).toBe(scope === "build" ? "repository" : scope);
       expect(href(route, {})).toBe(`/en-US${path}?scope=${scope}`);
     }
   }
-  expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("build");
+  expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("repository");
+});
+it("places repository management between build and hosts and preserves old bookmarks", () => {
+  const keys = nav.map(group => group.key);
+  expect(keys.indexOf("repository")).toBe(keys.indexOf("build") + 1);
+  expect(keys.indexOf("host")).toBe(keys.indexOf("repository") + 1);
+  for (const [item, resource] of [["repositories", "code-connections"], ["code-insights", "code-insights"], ["repository-events", "repository-events"]]) {
+    for (const suffix of ["", "/new", "/109124836743184391", "/109124836743184391/edit"]) {
+      const legacy = parse(`/zh-CN/${workspace}/build/${item}${suffix}`, "");
+      expect(legacy).toMatchObject({ group: "repository", item, workspace });
+      expect(href(legacy, { page: "2" })).toBe(`/zh-CN/workspaces/${workspace}/${resource}${suffix}?page=2`);
+    }
+  }
 });
 it("round trips node workspace URLs without changing snowflake precision", () => {
   const path = `/workspaces/${workspace}/nodes/109174082875949056/workspace`;

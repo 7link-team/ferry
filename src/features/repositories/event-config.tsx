@@ -93,7 +93,7 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
       {
         label: hostRepositoryText("repository-monitor.012"),
         to: (row) => ({
-          group: "build",
+          group: "repository",
           item: "repositories",
           mode: "view",
           id: String(row.connection_id),
@@ -363,7 +363,7 @@ export function repositoryEventList(
       {
         label: hostRepositoryText("repository-monitor.095"),
         to: (row) => ({
-          group: "build",
+          group: "repository",
           item: "repository-events",
           mode: "view",
           id: String(row.id),

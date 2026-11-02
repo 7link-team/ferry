@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { i18n } from "../../i18n/i18n";
@@ -6,6 +6,29 @@ import { AutoField,AutoForm,FieldControl,selectDisplay } from "./auto-form";
 import type { FormConfig } from "./types";
 
 let root: Root, host: HTMLDivElement;
+it("does not reset a native selection between its input and change events", async () => {
+  const changed = vi.fn();
+  const input = vi.fn();
+  function Form() {
+    const [value, setValue] = useState("");
+    return <AutoForm onInput={input} onChange={changed}>
+      <AutoField label="Connection"><select value={value} onChange={event => setValue(event.target.value)}>
+        <option value="">Choose connection</option><option value="109721924120088576">Codeup</option>
+      </select></AutoField>
+    </AutoForm>;
+  }
+  await act(async () => root.render(<Form />));
+  const select = host.querySelector('select')!;
+  await act(async () => {
+    select.value = '109721924120088576';
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(select.value).toBe('109721924120088576');
+  await act(async () => select.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(select.value).toBe('109721924120088576');
+  expect(input).toHaveBeenCalledOnce();
+  expect(changed).toHaveBeenCalledOnce();
+});
 it("distinguishes absent references from valid zero enum values and unavailable selections", () => {
   const optional = { emptyValues: [0, "0"], emptyLabel: "No jump host", options: [{ value: "7", label: "Gateway" }] };
   expect(selectDisplay("0", optional)).toBe("No jump host");

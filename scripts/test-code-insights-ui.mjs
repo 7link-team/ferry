@@ -1,4 +1,16 @@
 /** Browser acceptance for insight creation, memberships and author mapping. Run npm run build first. */
+
+async function chooseNative(control, value) {
+  await control.waitFor();
+  const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
+  assert(index >= 0, `Missing option ${value}`);
+  await control.click();
+  await control.press('Home');
+  for (let i = 0; i < index; i++) await control.press('ArrowDown');
+  await control.press('Enter');
+  assert.equal(await control.inputValue(), value, 'Native selection must persist');
+}
+
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -137,24 +149,26 @@ try {
   await page.locator('input[name="name"]').fill("Engineering");
   const connection = page.getByLabel("仓库连接", { exact: true });
   repositoryMode = 'slow';
-  await connection.selectOption('11');
+  await connection.click();
+  await page.keyboard.press('Home');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  assert.equal(await connection.inputValue(), '11', 'Real mouse/keyboard selection must retain the connection');
   await page.locator('[role="status"]').filter({ hasText: '正在读取可见仓库' }).waitFor();
-  await connection.selectOption('12');
+  await chooseNative(connection, '12');
   await page.getByLabel('Git 仓库地址', { exact: true }).fill('https://git.example.invalid/team/pending.git');
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent.includes('加入洞察') && !button.disabled));
   releaseRepository();
   repositoryMode = 'empty';
-  await connection.selectOption('11');
+  await chooseNative(connection, '11');
   await page.getByText('此连接没有可访问的仓库。请检查授权范围，或更换连接后重试。', { exact: true }).waitFor();
   repositoryMode = 'error';
   await page.getByRole('button', { name: '刷新连接', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Provider unavailable' }).waitFor();
   repositoryMode = 'normal';
   await page.getByRole('button', { name: '重试读取仓库', exact: true }).click();
-  await page.getByLabel("仓库连接", { exact: true }).selectOption("11");
-  await page
-    .getByLabel("添加洞察仓库", { exact: true })
-    .selectOption("https://git.example.invalid/team/project.git");
+  await chooseNative(page.getByLabel("仓库连接", { exact: true }), "11");
+  await chooseNative(page.getByLabel("添加洞察仓库", { exact: true }), "https://git.example.invalid/team/project.git");
   assert.equal(
     await submit.isDisabled(),
     true,
@@ -168,7 +182,7 @@ try {
     true,
     "Platform repository does not require a pipeline",
   );
-  await page.getByLabel("仓库连接", { exact: true }).selectOption("12");
+  await chooseNative(page.getByLabel("仓库连接", { exact: true }), "12");
   await page
     .getByLabel("Git 仓库地址", { exact: true })
     .fill("https://git.example.invalid/team/other.git");
@@ -179,11 +193,7 @@ try {
     true,
     "Plain Git requires a pipeline when enabled",
   );
-  await page
-    .getByLabel("分析流水线 https://git.example.invalid/team/other.git", {
-      exact: true,
-    })
-    .selectOption("21");
+  await chooseNative(page.getByLabel("分析流水线 https://git.example.invalid/team/other.git", { exact: true }), "21");
   await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === false);
   assert.equal(await submit.isEnabled(), true);
   for (const width of [1366, 768, 390, 320]) {
@@ -202,7 +212,8 @@ try {
     await page.screenshot({ path: `${output}/create-${width}.png` });
   }
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.locator('select[name="update_mode"]').selectOption("event");
+  await page.getByRole('combobox', { name: /^更新方式/ }).click();
+  await page.getByRole('option', { name: '事件更新', exact: true }).click();
   assert.equal(
     await page.locator('input[aria-label="Cron 表达式"]').count(),
     0,

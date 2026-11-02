@@ -55,9 +55,6 @@ export const nav: NavGroup[] = [
     key: "build",
     get label() { return commonText("nav.build"); },
     items: [
-      { key: "repositories", get label() { return commonText("nav.repositories"); }, resource: "code-connections", permission: "repositories.read" },
-      { key: "code-insights", get label() { return commonText("nav.insights"); }, resource: "code-insights", permission: "code-insights.read" },
-      { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read", hidden: true, parent: "repositories" },
       { key: "pipelines", get label() { return commonText("shell.pipeline"); }, resource: "pipelines", permission: "pipelines.read" },
       {key:"pipeline-groups",get label() { return commonText("table.groups"); },resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},
       {key:"pipeline-environments",get label() { return commonText("nav.environments"); },resource:"pipeline-environments",permission:"pipeline-environments.read",hidden:true,parent:"pipelines"},
@@ -65,10 +62,19 @@ export const nav: NavGroup[] = [
       { key: "artifacts", get label() { return commonText("nav.artifacts"); }, resource: "pipeline-artifacts", permission: "pipelines.read" },
       { key: "runs", get label() { return commonText("nav.runHistory"); }, resource: "pipeline-runs", permission: "pipelines.read" },
       { key: "pipeline-templates", get label() { return commonText("nav.pipelineTemplates"); }, resource: "pipeline-templates", permission: "pipeline-templates.read" },
-      { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "build" }, permission: "credentials.read" },
       { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "build" }, permission: "variables.read" },
       { key: "cron-jobs", get label() { return commonText("nav.cronJobs"); }, resource: "cron-jobs", params: { scope: "build" }, permission: "cron-jobs.read" },
       { key: "cron-runs", get label() { return commonText("nav.cronRuns"); }, resource: "cron-runs", params: {scope:"build"}, permission:"cron-jobs.read", hidden:true },
+    ],
+  },
+  {
+    key: "repository",
+    get label() { return commonText("nav.repository"); },
+    items: [
+      { key: "repositories", get label() { return commonText("nav.repositories"); }, resource: "code-connections", permission: "repositories.read" },
+      { key: "code-insights", get label() { return commonText("nav.insights"); }, resource: "code-insights", permission: "code-insights.read" },
+      { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read", hidden: true, parent: "repositories" },
+      { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "build" }, permission: "credentials.read" },
     ],
   },
   {

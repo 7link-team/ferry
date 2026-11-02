@@ -19,6 +19,8 @@ import { nav } from "./nav";
 
 export type { Route } from "../shared/routing/types";
 
+const movedRepositoryItems = new Set(["repositories", "code-insights", "repository-events", "credentials", "repository-auth", "api-tokens"]);
+
 export function parse(pathname = location.pathname, search = location.search): Route {
   const locale = pathLocale(pathname);
   const route = parseRoute(stripLocalePrefix(pathname), search);
@@ -56,7 +58,8 @@ function parseRoute(pathname: string, search: string): Route {
       mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
   }
   const fallback = nav[0]!;
-  const resolved = nav.find((g) => g.key === (group === "infrastructure" ? "host" : group)) ?? fallback;
+  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "infrastructure" ? "host" : group;
+  const resolved = nav.find((g) => g.key === groupKey) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
   const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
@@ -82,7 +85,8 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
     r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : r.mode === "workspace" ? `/${r.id}/workspace` : "";
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
-  const item = nav.find(group => group.key === r.group)?.items.find(item => item.key === r.item);
+  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group;
+  const item = nav.find(group => group.key === groupKey)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
   if (r.workspace === "_account") return localizedPath("/account", r.locale ?? currentLocale());
   const base = r.workspace === "_platform" ? `/platform/${r.item}` :

@@ -1,4 +1,16 @@
 /** Real Chromium platform connection -> private Git checkout -> build acceptance. */
+
+async function chooseNative(control, value) {
+  await control.waitFor();
+  const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
+  assert(index >= 0, `Missing option ${value}`);
+  await control.click();
+  await control.press('Home');
+  for (let i = 0; i < index; i++) await control.press('ArrowDown');
+  await control.press('Enter');
+  assert.equal(await control.inputValue(), value, 'Native selection must persist');
+}
+
 import assert from 'node:assert/strict';
 import { parseDocument } from 'yaml';
 import { createServer as createHttpServer } from 'node:http';
@@ -135,13 +147,13 @@ try {
   assert.equal(await p.getByRole('navigation',{name:'仓库页面',exact:true}).count(),0,'no separate repository authorization tabs');
   assert.equal(await p.getByRole('link',{name:'平台授权',exact:true}).count(),0);
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
-  await p.getByLabel('代码平台',{exact:true}).selectOption('github');
+  await chooseNative(p.getByLabel('代码平台',{exact:true}), 'github');
   await p.getByLabel(/^连接名称/).fill('Preserved draft');
   await p.getByLabel(/^备注/).fill('Keep this during OAuth');
   assert.equal(await p.getByLabel(/^默认分支/).count(),0,'connections do not own a default branch');
   assert.equal(await p.getByLabel('选择平台仓库',{exact:true}).count(),0,'connections do not select one repository');
   await p.waitForFunction(()=>document.querySelector('select[aria-label="平台授权方式"] option[value="web"]')?.disabled===false);
-  await p.getByLabel('平台授权方式',{exact:true}).selectOption('web');
+  await chooseNative(p.getByLabel('平台授权方式',{exact:true}), 'web');
   const popupPromise=p.waitForEvent('popup');
   await p.getByRole('button',{name:'打开网页授权',exact:true}).click();
   const popup=await popupPromise;
@@ -171,9 +183,9 @@ try {
 
   const invalidCredential=await post(owner,root+'/credentials',{name:'Invalid platform PAT',kind:'token',username:'browser-authorized-user',secret:'invalid-token',description:''});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
-  await p.getByLabel('代码平台',{exact:true}).selectOption('gitee');
+  await chooseNative(p.getByLabel('代码平台',{exact:true}), 'gitee');
   await p.getByLabel(/^连接名称/).fill('Gitee connection');
-  await p.getByLabel('凭据',{exact:true}).selectOption(invalidCredential.id);
+  await chooseNative(p.getByLabel('凭据',{exact:true}), invalidCredential.id);
   assert.equal(await p.locator('input[type="password"]').count(),0,'connection form never copies credential secrets');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
   await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
@@ -197,7 +209,7 @@ try {
   await credentialPage.close();
   assert.equal(await p.getByLabel(/^连接名称/).inputValue(),'Gitee connection');assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
   await p.getByRole('button',{name:'刷新凭据',exact:true}).click();
-  await p.getByLabel('凭据',{exact:true}).selectOption(personalCredential.id);
+  await chooseNative(p.getByLabel('凭据',{exact:true}), personalCredential.id);
   await p.setViewportSize({width:390,height:844});
   assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'connection form fits mobile viewport');
   if(process.env.UI_SCREENSHOT) await p.screenshot({path:process.env.UI_SCREENSHOT,fullPage:true});
@@ -211,9 +223,9 @@ try {
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${giteeConnection.id}/edit`);assert.equal(await p.getByLabel('凭据',{exact:true}).inputValue(),personalCredential.id);assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),new URL(providerOrigin).href);
 
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
-  await p.getByLabel('代码平台',{exact:true}).selectOption('codeup');
+  await chooseNative(p.getByLabel('代码平台',{exact:true}), 'codeup');
   await p.getByLabel(/^连接名称/).fill('Codeup private checkout');
-  await p.getByLabel('凭据',{exact:true}).selectOption(personalCredential.id);
+  await chooseNative(p.getByLabel('凭据',{exact:true}), personalCredential.id);
   await p.getByLabel('Codeup 组织 ID',{exact:true}).fill('test-org');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
   await p.getByLabel('平台网站地址',{exact:true}).fill(providerOrigin);
@@ -222,6 +234,31 @@ try {
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
   const codeupConnection=rows.items.find(row=>row.provider==='codeup');assert(codeupConnection);
+
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-insights/new`);
+  assert.equal(await p.getByRole('textbox',{name:/^说明/}).count(),0);
+  assert.equal(await p.getByText('尚未选择仓库。',{exact:true}).count(),0);
+  await p.locator('input[name="name"]').pressSequentially('Browser insight');
+  const createInsight=p.getByRole('button',{name:'创建',exact:true});
+  assert(await createInsight.isDisabled(),'Repository membership is required');
+  await chooseNative(p.getByLabel('仓库连接',{exact:true}),codeupConnection.id);
+  const insightRepository=p.getByLabel('添加洞察仓库',{exact:true});
+  await p.waitForFunction(expected=>[...document.querySelectorAll('select option')].some(option=>option.value===expected),providerOrigin+'/test-org/team/test-repo.git');
+  await chooseNative(insightRepository,providerOrigin+'/test-org/team/test-repo.git');
+  await p.getByRole('button',{name:'加入洞察',exact:true}).click();
+  await p.getByRole('checkbox',{name:'持续采集',exact:true}).uncheck();
+  await createInsight.click();
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/code-insights`);
+  const savedInsights=await (await owner.request.get(`${origin}/api${root}/code-insights`)).json();
+  const savedInsight=savedInsights.items.find(row=>row.name==='Browser insight');assert(savedInsight);
+  const persistedInsight=await (await owner.request.get(`${origin}/api${root}/code-insights/${savedInsight.id}`)).json();
+  assert.equal(persistedInsight.repositories[0].connection_id,codeupConnection.id);
+  assert.equal(persistedInsight.repositories[0].repository,'test-org/team/test-repo');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-insights/${savedInsight.id}/edit`);
+  await p.locator('input[name="name"]').waitFor();
+  assert.equal(await p.locator('input[name="name"]').inputValue(),'Browser insight');
+  await p.getByText('已加入 1 个仓库',{exact:true}).waitFor();
+  console.log('PASS: insight native connection/repository selection, required membership, real backend create and edit reload');
 
   await p.setViewportSize({width:1280,height:900});
   const connectionPath=`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${codeupConnection.id}`;
@@ -262,11 +299,11 @@ try {
   await p.keyboard.press('Escape');
   assert(hostCredential.id&&appCredential.id);
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
-  await p.getByLabel('代码平台',{exact:true}).selectOption('git');
+  await chooseNative(p.getByLabel('代码平台',{exact:true}), 'git');
   assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Node SSH only'}).count(),0);
   assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);
   await p.getByLabel('Git 仓库地址（可选）',{exact:true}).fill(providerOrigin+'/generic.git');
-  await p.getByLabel('凭据',{exact:true}).selectOption(passwordCredential.id);
+  await chooseNative(p.getByLabel('凭据',{exact:true}), passwordCredential.id);
   await p.getByLabel(/^连接名称/).fill('Generic with password');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
@@ -287,11 +324,11 @@ try {
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);
   await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:'任务 1',exact:true}).click();
-  await p.getByLabel('任务执行器',{exact:true}).selectOption(buildHost.id);
+  await chooseNative(p.getByLabel('任务执行器',{exact:true}), buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
-  await p.getByLabel('步骤类型').selectOption('checkout');
-  await p.getByLabel('仓库连接',{exact:true}).selectOption(codeupConnection.id);
-  await p.getByLabel('节点仓库',{exact:true}).selectOption(providerOrigin+'/test-org/team/test-repo.git');
+  await chooseNative(p.getByLabel('步骤类型'), 'checkout');
+  await chooseNative(p.getByLabel('仓库连接',{exact:true}), codeupConnection.id);
+  await chooseNative(p.getByLabel('节点仓库',{exact:true}), providerOrigin+'/test-org/team/test-repo.git');
   assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),'');
   await p.locator('datalist option[value="develop"]').waitFor({state:'attached'});
   await p.getByRole('button',{name:'加载更多分支',exact:true}).click();

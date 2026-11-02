@@ -149,12 +149,7 @@ export function CodeInsightRepositories({
           {insightText("selectedRepositories", { count: selected.length })}
         </span>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {insightText(
-          "可选择多个连接中的仓库；同一仓库可加入不同洞察，各洞察的作者映射独立。",
-        )}
-      </p>
-      {selected.length ? (
+      {selected.length > 0 && (
         <ul className="divide-y rounded-lg border">
           {selected.map((row, index) => (
             <li
@@ -272,13 +267,6 @@ export function CodeInsightRepositories({
             </li>
           ))}
         </ul>
-      ) : (
-        <p
-          role="status"
-          className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground"
-        >
-          {insightText("尚未选择仓库。")}
-        </p>
       )}
       {!readOnly && canSelect && (
         <div className="grid min-w-0 gap-4 rounded-lg bg-muted/40 p-4 sm:grid-cols-2">
@@ -311,9 +299,6 @@ export function CodeInsightRepositories({
               <Plus aria-hidden="true" className="size-4" />
               {insightText("加入洞察")}
             </Button>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {insightText("选择仓库后，点击加入洞察完成添加。")}
-            </p>
           </div>
         </div>
       )}

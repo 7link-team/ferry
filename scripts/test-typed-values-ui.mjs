@@ -40,7 +40,7 @@ try {
       const [, resource, id] = match;
       if (request.method() === 'POST' || request.method() === 'PATCH') {
         const body = request.postDataJSON(); requests.push({ resource, body });
-        const row = { ...body, id: id || String(rows[resource].length + 1), version: Number(body.version || 0) + 1, builtin: false, value_summary: body.value_json };
+        const row = { ...body, id: id || String(rows[resource].length + 1), version: Number(body.version || 0) + 1, builtin: body.builtin ?? false, value_summary: body.value_json };
         if (id) rows[resource] = rows[resource].map(old => old.id === id ? row : old); else rows[resource].push(row);
         value = { id: row.id, version: row.version };
       } else if (id) value = rows[resource].find(row => row.id === id);
@@ -48,13 +48,39 @@ try {
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
   });
+  // Built-in definitions are protected; the operational value must remain editable.
+  rows.settings.push({ id: '109124836743184391', key: 'heartbeat_timeout_seconds',
+    name: 'Runner 心跳超时（秒）', description: '', category: 'general', builtin: true,
+    value_type: 'num', value_json: '60', value: 60, version: 1,
+    schema_json: '{"min":40,"max":600,"decimals":0}' });
+  await page.goto(`${origin}/zh-CN/workspaces/2/settings/109124836743184391/edit`);
+  const heartbeat = page.getByRole('spinbutton', { name: '值', exact: true });
+  await heartbeat.waitFor();
+  assert.equal(await page.locator('form section h2').first().innerText(), '当前值');
+  assert.equal(await heartbeat.isEnabled(), true);
+  assert.equal(await page.getByLabel('值类型', { exact: true }).isDisabled(), true);
+  await heartbeat.click();
+  await heartbeat.press('ControlOrMeta+A');
+  await heartbeat.pressSequentially('120');
+  await heartbeat.press('Tab');
+  assert.equal(await heartbeat.inputValue(), '120');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.waitForURL(/\/settings$/);
+  assert.equal(requests.at(-1).body.value_json, '120');
+  assert.equal(requests.at(-1).body.value, 120);
+  rows.settings.length = 0;
   const types = ['text', 'num', 'tab', 'selection', 'image', 'video', 'file', 'code', 'markdown', 'html', 'richtext', 'json'];
   for (const type of types) {
     console.log(`Checking ${type}`);
     await page.goto(`${origin}/workspaces/2/dictionaries/new`, { waitUntil: 'domcontentloaded' });
     await page.getByRole('textbox', { name: /^标识/ }).fill(`test-${type}`);
     await page.getByRole('textbox', { name: /^名称/ }).fill(`Typed ${type}`);
-    await page.getByLabel('值类型', { exact: true }).selectOption(type);
+    const typeSelector = page.getByLabel('值类型', { exact: true });
+    await typeSelector.click();
+    await typeSelector.press('Home');
+    for (let i = 0; i < types.indexOf(type); i++) await typeSelector.press('ArrowDown');
+    await typeSelector.press('Enter');
+    assert.equal(await typeSelector.inputValue(), type);
     if (type === 'tab' || type === 'selection') {
       await page.getByRole('button', { name: '添加选项', exact: true }).click();
       await page.getByLabel('选项 1 值', { exact: true }).fill('first');

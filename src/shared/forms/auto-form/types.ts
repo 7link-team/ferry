@@ -64,7 +64,7 @@ export interface FieldRendererProps {
 }
 export interface AutoFormProps extends Omit<
   ComponentProps<"form">,
-  "onChange"
+  "onError"
 > {
   fields?: FormConfig;
   initialData?: FormValues;

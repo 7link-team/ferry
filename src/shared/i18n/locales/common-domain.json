@@ -53,6 +53,7 @@
     "nav.cronJobs": "Scheduled tasks",
     "nav.cronRuns": "Scheduled task history",
     "nav.build": "Build",
+    "nav.repository": "Repositories",
     "nav.repositories": "Repository connections",
     "nav.insights": "Code insights",
     "nav.repositoryEvents": "Repository events",
@@ -417,6 +418,7 @@
     "nav.cronJobs": "定时任务",
     "nav.cronRuns": "定时任务执行历史",
     "nav.build": "构建",
+    "nav.repository": "仓库",
     "nav.repositories": "仓库连接",
     "nav.insights": "代码洞察",
     "nav.repositoryEvents": "仓库事件",
@@ -781,6 +783,7 @@
     "nav.cronJobs": "排程任務",
     "nav.cronRuns": "排程任務記錄",
     "nav.build": "建置",
+    "nav.repository": "倉庫",
     "nav.repositories": "儲存庫連線",
     "nav.insights": "程式碼洞察",
     "nav.repositoryEvents": "儲存庫事件",
@@ -1453,7 +1456,8 @@
     "cron.weekday": "曜日",
     "cron.day": "日",
     "cron.customHelp": "この式はカスタムルールを使っています",
-    "cron.expression": "Cron 式"
+    "cron.expression": "Cron 式",
+    "nav.repository": "リポジトリ"
   },
   "ko-KR": {
     "common.add": "추가",
@@ -1817,7 +1821,8 @@
     "cron.weekday": "요일",
     "cron.day": "날짜",
     "cron.customHelp": "이 표현식은 사용자 정의 규칙을 사용합니다",
-    "cron.expression": "Cron 표현식"
+    "cron.expression": "Cron 표현식",
+    "nav.repository": "저장소"
   },
   "ms-MY": {
     "common.add": "Tambah",
@@ -2181,6 +2186,7 @@
     "cron.weekday": "Hari minggu",
     "cron.day": "Hari dalam bulan",
     "cron.customHelp": "Ungkapan ini menggunakan peraturan tersuai",
-    "cron.expression": "Ungkapan Cron"
+    "cron.expression": "Ungkapan Cron",
+    "nav.repository": "Repositori"
   }
 }

@@ -236,7 +236,7 @@ it("has one repository entry and no separate authorization tabs", async () => {
   permissions = ["repositories.read", "repositories.create", "credentials.read", "credentials.create"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/code-connections");
   await act(async () => root.render(<App />));
-  const sidebar = host.querySelector('nav[aria-label="构建"]')!;
+  const sidebar = host.querySelector('nav[aria-label="仓库"]')!;
   expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "凭据"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库连接");
   expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
@@ -266,7 +266,7 @@ it("does not expose repository creation to a credentials-only role", async () =>
   permissions = ["credentials.read"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/credentials");
   await act(async () => root.render(<App />));
-  expect([...host.querySelectorAll('nav[aria-label="构建"] a')].map(a => a.textContent)).toEqual(["凭据"]);
+  expect([...host.querySelectorAll('nav[aria-label="仓库"] a')].map(a => a.textContent)).toEqual(["凭据"]);
 });
 it("gives pipeline creation a full-page editor with its own action bar", async () => {
   required = false;

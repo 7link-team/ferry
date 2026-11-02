@@ -1,4 +1,16 @@
 /** Real Chromium marketplace source connection selection, synchronization, import and deletion. */
+
+async function chooseNative(control, value) {
+  await control.waitFor();
+  const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
+  assert(index >= 0, `Missing option ${value}`);
+  await control.click();
+  await control.press('Home');
+  for (let i = 0; i < index; i++) await control.press('ArrowDown');
+  await control.press('Enter');
+  assert.equal(await control.inputValue(), value, 'Native selection must persist');
+}
+
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -62,8 +74,8 @@ try {
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByRole('textbox',{name:/^名称/}).fill('Legacy browser source');
-    await p.getByLabel('仓库来源',{exact:true}).selectOption('legacy');
-    await p.getByLabel('外部仓库',{exact:true}).selectOption(legacy.id);
+    await chooseNative(p.getByLabel('仓库来源',{exact:true}), 'legacy');
+    await chooseNative(p.getByLabel('外部仓库',{exact:true}), legacy.id);
     await p.getByRole('textbox',{name:/^API 接入点/}).fill(fixtureOrigin);
     await p.getByRole('textbox',{name:/^项目路径/}).fill('owner/repository');
     await p.getByRole('button',{name:'创建',exact:true}).click();
@@ -73,7 +85,7 @@ try {
     await p.getByRole('button',{name:'保存',exact:true}).click();await p.waitForURL(`**/workspaces/${workspace_tenant}/marketplace-sources`);
     const retained=await(await owner.request.get(`${origin}/api${root}/marketplace-sources/${legacySource.id}`)).json();assert.equal(retained.repository_id,legacy.id);assert.equal(new URL(retained.api_base).href,new URL(fixtureOrigin).href);assert.equal(retained.project,'owner/repository');
     await p.getByRole('button',{name:'创建',exact:true}).click();await p.getByRole('textbox',{name:/^名称/}).fill('Browser source');
-    await p.getByLabel('仓库连接',{exact:true}).selectOption(connection.id);await p.getByLabel('连接仓库',{exact:true}).selectOption(fixtureOrigin+'/owner/repository.git');
+    await chooseNative(p.getByLabel('仓库连接',{exact:true}), connection.id);await chooseNative(p.getByLabel('连接仓库',{exact:true}), fixtureOrigin+'/owner/repository.git');
     await p.getByRole('textbox',{name:/^API 接入点/}).fill(fixtureOrigin);await p.getByRole('textbox',{name:/^项目路径/}).fill('owner/repository');
     await p.getByRole('button',{name:'创建',exact:true}).click();await p.waitForURL(`**/workspaces/${workspace_tenant}/marketplace-sources`);
     const sources=await(await owner.request.get(`${origin}/api${root}/marketplace-sources`)).json();const source=sources.items.find(row=>row.name==='Browser source');assert(source);

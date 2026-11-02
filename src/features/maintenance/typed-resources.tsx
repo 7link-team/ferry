@@ -29,11 +29,16 @@ export function typedResourceList(workspace: string, resource: Resource): ListCo
 export function typedResourceForm(resource: Resource): FormConfig<TypedValueRow> {
   const isSetting = resource === "settings";
   const type = isSetting ? "text" : "selection";
+  const valueSection: FormConfig<TypedValueRow>["sections"][number] = {
+    title: "当前值", titleKey: "typed-domain:currentValue",
+    fields: [{ key: "value_json", label: "值", labelKey: "typed-domain:value", type: "custom", span: 2, render: props => <TypedValueEditor {...props} resource={resource} /> }],
+  };
   return {
     resource, heading: row => row.name,
     blank: { key: "", name: "", description: "", category: "general", value_type: type, value_json: initialValue(type), schema_json: "{}", ...(isSetting ? {} : { items: "[]" }) },
     copy: row => ({ key: `${row.key}-copy`, name: typedText("copyName", { name: row.name }), description: row.description, category: row.category, value_type: row.value_type, value_json: row.value_json, schema_json: row.schema_json, items: row.items, value: row.value, builtin: false }),
     sections: [
+      ...(isSetting ? [valueSection] : []),
       { title: "基础信息", titleKey: "typed-domain:basic", fields: [
         { key: "category", label: "分类", labelKey: "typed-domain:category", type: "text", required: true, disabled: row => !!row.builtin && isSetting },
         { key: "key", label: "标识", labelKey: "typed-domain:key", type: "text", required: true, immutable: true },
@@ -42,7 +47,7 @@ export function typedResourceForm(resource: Resource): FormConfig<TypedValueRow>
         { key: "description", label: "说明", labelKey: "typed-domain:description", type: "textarea", span: 2, disabled: row => !!row.builtin && isSetting },
       ] },
       { title: "值约束", titleKey: "typed-domain:constraints", fields: [{ key: "schema_json", label: "值约束", labelKey: "typed-domain:constraints", type: "custom", span: 2, disabled: row => !!row.builtin, render: props => <TypedSchemaEditor {...props} resource={resource} /> }] },
-      { title: "值", titleKey: "typed-domain:value", fields: [{ key: "value_json", label: "值", labelKey: "typed-domain:value", type: "custom", span: 2, render: props => <TypedValueEditor {...props} resource={resource} /> }] },
+      ...(!isSetting ? [valueSection] : []),
     ],
   };
 }

@@ -148,7 +148,7 @@ export function ConnectionInsights({
           <a
             className="text-sm text-primary underline underline-offset-4"
             href={href(
-              { group: "build", item: "code-insights", mode: "list", id: "" },
+              { group: "repository", item: "code-insights", mode: "list", id: "" },
               {},
             )}
           >
