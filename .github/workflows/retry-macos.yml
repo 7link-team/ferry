@@ -1,4 +1,4 @@
-﻿name: Recover alpha35 macOS hosted capacity cancellation
+name: Recover alpha35 macOS hosted capacity cancellation
 on:
   push:
     branches: [feat/alpha35-release-dispatch]
@@ -9,6 +9,7 @@ permissions:
 jobs:
   retry:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/github-script@v7
         with:
@@ -18,5 +19,14 @@ jobs:
             if(run.head_sha!=='b50b9933502385542ecb4e4ebeafd9eb51914ea5')throw Error('Unexpected source');
             const {data:job}=await github.rest.actions.getJobForWorkflowRun({...repo,job_id:125455177657});
             if(job.conclusion!=='cancelled')throw Error('Unexpected job state');
-            await github.rest.actions.reRunJobForWorkflowRun({...repo,job_id:job.id});
+            for(let attempt=0;attempt<300;attempt++) {
+              const {data:current}=await github.rest.actions.getWorkflowRun({...repo,run_id:run.id});
+              if(current.status==='completed') {
+                if(current.run_attempt!==1)throw Error('Already retried; inspect existing run');
+                await github.rest.actions.reRunWorkflowFailedJobs({...repo,run_id:run.id});
+                return core.notice('Retry unfinished jobs once after original build completes; source unchanged');
+              }
+              await new Promise(resolve=>setTimeout(resolve,10000));
+            }
+            throw Error('Original build remains active; no duplicate dispatched');
             core.notice('Retry only the macOS ARM desktop task cancelled by hosted runner capacity');
