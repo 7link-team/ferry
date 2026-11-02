@@ -2984,6 +2984,23 @@ impl MigrationTrait for PipelineRunInputs {
                     .to_owned(),
             ),
         )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_run_jobs",
+                "concurrency_group",
+                Table::alter()
+                    .table(Alias::new("pipeline_run_jobs"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("concurrency_group"))
+                            .string_len(255)
+                            .not_null()
+                            .default(""),
+                    )
+                    .to_owned(),
+            ),
+        )
         .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {

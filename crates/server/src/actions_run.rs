@@ -95,6 +95,7 @@ async fn execute_reserved(
 ) -> Result<()> {
     let opened = history::open_variables(s, run)?;
     let delivered = Delivered::new(&opened, &snapshot)?;
+    let job_cancel_in_progress = opened.job_cancel_in_progress.clone();
     let approvals: BTreeSet<String> = opened
         .environments
         .iter()
@@ -158,6 +159,7 @@ async fn execute_reserved(
             let variables = &variables;
             let delivered = &delivered;
             let approvals = &approvals;
+            let job_cancel_in_progress = &job_cancel_in_progress;
             let credential = credential.as_ref();
             let seq = &seq;
             async move {
@@ -170,6 +172,41 @@ async fn execute_reserved(
                         artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
                     });
                 }
+                let grouped = job_cancel_in_progress.get(&job.key).copied();
+                if let Some(cancel) = grouped
+                    && !acquire_job_group(s, run.id, &job.key, cancel, &mut stop).await?
+                {
+                    job_state(s, run.id, &job.key, "cancelled", None).await?;
+                    return Ok(Outcome {
+                        state: "cancelled".into(), steps: BTreeMap::new(),
+                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
+                    });
+                }
+                // A grouped job can be cancelled alone by a newer job of its
+                // group (cancel-in-progress), so it also watches its own row.
+                let (mut stop, poller) = match grouped {
+                    Some(_) => {
+                        let (cancel, job_stop) = tokio::sync::watch::channel(*stop.borrow());
+                        let (s, id, key, mut run_stop) = (s.clone(), run.id, job.key.clone(), stop.clone());
+                        let poller = tokio::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    changed = run_stop.changed() => {
+                                        if changed.is_err() { break; }
+                                        if *run_stop.borrow() { cancel.send_replace(true); }
+                                    }
+                                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                                        if job_cancelling(&s, id, &key).await.unwrap_or(false) {
+                                            cancel.send_replace(true);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        (job_stop, Some(poller))
+                    }
+                    None => (stop, None),
+                };
                 job_state(s, run.id, &job.key, "running", None).await?;
                 let result = if has_approval {
                     let reserve = crate::runner_updates::reserve_with(s.cluster.as_ref(),vec![job.host_id.to_string()]);
@@ -189,6 +226,9 @@ async fn execute_reserved(
                     )
                     .await
                 };
+                if let Some(poller) = poller {
+                    poller.abort();
+                }
                 let outcome = match result {
                     Ok(result) => result,
                     Err(error) => {
@@ -259,9 +299,16 @@ async fn execute_reserved(
     let final_state = if *stop.borrow() || !history::active(s, run.id).await? {
         "cancelled"
     } else if completed.values().any(|outcome| {
-        !outcome.tolerated() && !matches!(outcome.state.as_str(), "success" | "skipped")
+        !outcome.tolerated()
+            && !matches!(outcome.state.as_str(), "success" | "skipped" | "cancelled")
     }) {
         "failed"
+    } else if completed
+        .values()
+        .any(|outcome| outcome.state == "cancelled")
+    {
+        // e.g. a job cancelled by a newer job of its concurrency group.
+        "cancelled"
     } else {
         "succeeded"
     };
@@ -506,6 +553,75 @@ fn state(value: &str) -> &str {
         _ => "failed",
     }
 }
+async fn job_cancelling(s: &AppState, run: i64, key: &str) -> Result<bool> {
+    Ok(jobs::Entity::find()
+        .filter(jobs::Column::RunId.eq(run))
+        .filter(jobs::Column::JobKey.eq(key))
+        .one(&s.db)
+        .await?
+        .is_some_and(|row| row.state == "cancelling"))
+}
+
+/// GitHub job concurrency: one running job per group. A newer job replaces an
+/// older pending one; with cancel-in-progress it also cancels the running
+/// one. Returns false when this job was replaced or the run was cancelled.
+async fn acquire_job_group(
+    s: &AppState,
+    run: i64,
+    key: &str,
+    cancel_in_progress: bool,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool> {
+    let own = jobs::Entity::find()
+        .filter(jobs::Column::RunId.eq(run))
+        .filter(jobs::Column::JobKey.eq(key))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if own.concurrency_group.is_empty() {
+        return Ok(true);
+    }
+    let replace = |state: &'static str, from: &'static str| {
+        jobs::Entity::update_many()
+            .col_expr(jobs::Column::State, Expr::value(state))
+            .filter(jobs::Column::ConcurrencyGroup.eq(own.concurrency_group.clone()))
+            .filter(jobs::Column::State.eq(from))
+            .filter(jobs::Column::Id.ne(own.id))
+            .exec(&s.db)
+    };
+    replace("cancelled", "pending").await?;
+    if cancel_in_progress {
+        replace("cancelling", "running").await?;
+    }
+    job_state(s, run, key, "pending", None).await?;
+    loop {
+        if *stop.borrow() || !history::active(s, run).await? {
+            return Ok(false);
+        }
+        let current = jobs::Entity::find_by_id(own.id)
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if current.state == "cancelled" {
+            return Ok(false);
+        }
+        let held = jobs::Entity::find()
+            .filter(jobs::Column::ConcurrencyGroup.eq(own.concurrency_group.clone()))
+            .filter(jobs::Column::State.is_in(["running", "cancelling"]))
+            .filter(jobs::Column::Id.ne(own.id))
+            .one(&s.db)
+            .await?
+            .is_some();
+        if !held {
+            return Ok(true);
+        }
+        tokio::select! {
+            _ = stop.changed() => {},
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+        }
+    }
+}
+
 /// A job whose environment requires approval waits until someone approves it
 /// (true) or the run is cancelled (false). Unlike a manual gate it then runs.
 async fn wait_for_environment(
@@ -1724,6 +1840,7 @@ mod tests {
             host_id: sea_orm::Set(0),
             state: sea_orm::Set("queued".into()),
             outputs: sea_orm::Set(None),
+            concurrency_group: sea_orm::Set(String::new()),
             started_at: sea_orm::Set(0),
             finished_at: sea_orm::Set(0),
         })

@@ -45,6 +45,9 @@ pub(crate) struct VariableSnapshot {
     /// Actions jobs that declare `environment`, by job key.
     #[serde(default)]
     pub(crate) environments: BTreeMap<String, JobEnvironment>,
+    /// Actions jobs with `concurrency`: job key -> cancel-in-progress.
+    #[serde(default)]
+    pub(crate) job_cancel_in_progress: BTreeMap<String, bool>,
 }
 
 /// A job's GitHub `environment`: its Ferry environment's contexts (None when
@@ -528,6 +531,7 @@ pub(crate) async fn trigger_as(
         "run_attempt": 1, "server_url": server_url,
     });
     let no_vars = BTreeMap::new();
+    let mut job_groups: BTreeMap<String, String> = BTreeMap::new();
     if let (Some(document), Some(references), Some(actions)) =
         (&workflow_document, &references, &actions)
     {
@@ -543,6 +547,45 @@ pub(crate) async fn trigger_as(
             .await?;
         let mut declared = BTreeMap::new();
         for job in &actions.jobs {
+            if let Some(raw) = crate::actions::job_policies(document, &job.key)
+                .and_then(|policy| policy.concurrency)
+            {
+                let (group, cancel) = match &raw {
+                    Value::String(group) => (group.clone(), Value::Bool(false)),
+                    Value::Object(object) => (
+                        object
+                            .get("group")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_owned(),
+                        object
+                            .get("cancel-in-progress")
+                            .cloned()
+                            .unwrap_or(Value::Bool(false)),
+                    ),
+                    _ => {
+                        return Err(ApiError::bad(format!(
+                            "任务 {} 的 concurrency 必须是组名或包含 group 的对象。",
+                            job.key
+                        )));
+                    }
+                };
+                let group = crate::concurrency::template(&group, &contexts)?;
+                if !group.is_empty() {
+                    // Groups are per workspace, like GitHub's per repository.
+                    let group = format!("{}:{group}", scope.workspace_id);
+                    let group = if group.chars().count() > 255 {
+                        format!("sha256:{}", crate::runner::fingerprint(&group))
+                    } else {
+                        group
+                    };
+                    job_groups.insert(job.key.clone(), group);
+                    snapshot.job_cancel_in_progress.insert(
+                        job.key.clone(),
+                        crate::concurrency::flag(&cancel, &contexts)?,
+                    );
+                }
+            }
             let Some(raw) = crate::actions::job_policies(document, &job.key)
                 .and_then(|policy| policy.environment)
             else {
@@ -718,6 +761,7 @@ pub(crate) async fn trigger_as(
                 host_id: Set(job.host_id),
                 state: Set("queued".into()),
                 outputs: Set(None),
+                concurrency_group: Set(job_groups.get(&job.key).cloned().unwrap_or_default()),
                 started_at: Set(0),
                 finished_at: Set(0),
             })

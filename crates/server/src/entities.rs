@@ -1024,6 +1024,8 @@ pub mod pipeline_run_jobs {
         pub host_id: i64,
         pub state: String,
         pub outputs: Option<String>,
+        /// `<workspace>:<group>` of the job's GitHub concurrency; "" for none.
+        pub concurrency_group: String,
         pub started_at: i64,
         pub finished_at: i64,
     }

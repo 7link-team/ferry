@@ -65,7 +65,8 @@ export function stateBadge(state: string): {
     case "queued": return { label: "排队中", variant: "secondary", className: "" };
     case "cancelling": return { label: "正在取消", variant: "secondary", className: "" };
     case "running": return { label: "运行中", variant: "default", className: "" };
-    case "waiting": return { label: "等待人工确认", variant: "secondary", className: "" };
+    case "waiting": return { label: "等待审批", variant: "secondary", className: "" };
+    case "pending": return { label: "等待并发组", variant: "secondary", className: "" };
     case "approved": return { label: "已确认", variant: "secondary", className: "" };
     case "succeeded": return { label: "成功", variant: "outline", className: "text-success border-success" };
     case "failed": return { label: "失败", variant: "destructive", className: "" };
