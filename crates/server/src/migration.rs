@@ -100,6 +100,7 @@ impl MigratorTrait for Migrator {
             Box::new(RepositoryEventDetail),
             Box::new(PipelineRunNames),
             Box::new(PipelineRunInputs),
+            Box::new(EnvironmentApproval),
         ]
     }
 }
@@ -2911,6 +2912,40 @@ impl MigrationTrait for CredentialScopes {
     }
 }
 
+struct EnvironmentApproval;
+impl MigrationName for EnvironmentApproval {
+    fn name(&self) -> &str {
+        "pipeline_environment_approval_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for EnvironmentApproval {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_contexts",
+                "requires_approval",
+                Table::alter()
+                    .table(Alias::new("pipeline_contexts"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("requires_approval"))
+                            .big_integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .to_owned(),
+            ),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
 struct PipelineRunInputs;
 impl MigrationName for PipelineRunInputs {
     fn name(&self) -> &str {
@@ -2929,6 +2964,23 @@ impl MigrationTrait for PipelineRunInputs {
                 Table::alter()
                     .table(Alias::new("pipeline_runs"))
                     .add_column(long_text("inputs", m.get_database_backend()).null())
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_runs",
+                "concurrency_group",
+                Table::alter()
+                    .table(Alias::new("pipeline_runs"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("concurrency_group"))
+                            .string_len(255)
+                            .not_null()
+                            .default(""),
+                    )
                     .to_owned(),
             ),
         )

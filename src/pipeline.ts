@@ -10,6 +10,10 @@ export interface PipelineRun {
   environment_name?: string;
   triggered_by: string;
   triggered_by_name?: string;
+  /** workflow_dispatch inputs the run was started with. */
+  inputs?: Record<string, unknown>;
+  /** GitHub `environment` declared by each job, by job key. */
+  environments?: Record<string, { name: string; url: string; approval: boolean }>;
   state: string;
   commit: string;
   started_at: number;

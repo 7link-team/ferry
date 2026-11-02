@@ -42,6 +42,20 @@ pub(crate) struct VariableSnapshot {
     pub(crate) secrets: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub(crate) vars: Option<BTreeMap<String, String>>,
+    /// Actions jobs that declare `environment`, by job key.
+    #[serde(default)]
+    pub(crate) environments: BTreeMap<String, JobEnvironment>,
+}
+
+/// A job's GitHub `environment`: its Ferry environment's contexts (None when
+/// no Ferry environment has that name) and whether the job awaits approval.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct JobEnvironment {
+    pub(crate) name: String,
+    pub(crate) url: String,
+    pub(crate) approval: bool,
+    pub(crate) secrets: Option<BTreeMap<String, String>>,
+    pub(crate) vars: Option<BTreeMap<String, String>>,
 }
 fn snapshot_aad(workspace: i64, run: i64) -> String {
     crate::vault::aad(
@@ -130,7 +144,16 @@ pub async fn get(
     )
     .await?;
     if r.variable_snapshot.is_some() {
-        v["variables"] = json!(open_variables(&s, &r)?.sources);
+        let opened = open_variables(&s, &r)?;
+        v["variables"] = json!(opened.sources);
+        // Names and urls only; the environment's values stay sealed.
+        v["environments"] = json!(
+            opened
+                .environments
+                .iter()
+                .map(|(key, environment)| (key.clone(), json!({"name": environment.name, "url": environment.url, "approval": environment.approval})))
+                .collect::<serde_json::Map<_, _>>()
+        );
     }
     v["steps"] = json!(
         rows.iter()
@@ -194,6 +217,73 @@ pub struct TriggerBody {
     /// workflow_dispatch inputs (strings, booleans or numbers).
     #[serde(default)]
     inputs: BTreeMap<String, Value>,
+}
+
+/// GitHub semantics for workflow_dispatch inputs: undeclared names are
+/// refused, missing ones take their default, required ones must be given,
+/// and each value must match its declared type.
+fn dispatch_inputs(
+    specs: &[crate::actions::InputSpec],
+    given: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>> {
+    if let Some(name) = given
+        .keys()
+        .find(|name| !specs.iter().any(|spec| &spec.name == *name))
+    {
+        return Err(ApiError::bad(format!(
+            "workflow_dispatch 没有声明 input：{name}。"
+        )));
+    }
+    let text = |value: &Value| match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    };
+    let mut values = BTreeMap::new();
+    for spec in specs {
+        let Some(value) = given.get(&spec.name).or(spec.default.as_ref()) else {
+            if spec.required {
+                return Err(ApiError::bad(format!("缺少必填 input：{}。", spec.name)));
+            }
+            continue;
+        };
+        let invalid = |kind: &str| ApiError::bad(format!("input {} 必须是{kind}。", spec.name));
+        let value = match spec.r#type.as_str() {
+            "boolean" => match value {
+                Value::Bool(_) => value.clone(),
+                Value::String(flag) if flag == "true" || flag == "false" => {
+                    Value::Bool(flag == "true")
+                }
+                _ => return Err(invalid("布尔值")),
+            },
+            "number" => match value {
+                Value::Number(_) => value.clone(),
+                Value::String(number) => number
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(Value::Number)
+                    .ok_or_else(|| invalid("数字"))?,
+                _ => return Err(invalid("数字")),
+            },
+            "choice" => {
+                let choice = text(value);
+                if !spec.options.contains(&choice) {
+                    return Err(invalid(&format!(
+                        "以下选项之一：{}",
+                        spec.options.join("、")
+                    )));
+                }
+                Value::String(choice)
+            }
+            _ => Value::String(text(value)),
+        };
+        if spec.required && value == Value::String(String::new()) {
+            return Err(ApiError::bad(format!("缺少必填 input：{}。", spec.name)));
+        }
+        values.insert(spec.name.clone(), value);
+    }
+    Ok(values)
 }
 
 pub async fn trigger(
@@ -296,7 +386,9 @@ pub(crate) async fn trigger_as(
     let commit = body.commit.unwrap_or_default();
     for (name, value) in &body.inputs {
         if name.is_empty()
-            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
             || !(value.is_string() || value.is_boolean() || value.is_number())
         {
             return Err(ApiError::bad(
@@ -304,8 +396,15 @@ pub(crate) async fn trigger_as(
             ));
         }
     }
-    let inputs = (!body.inputs.is_empty())
-        .then(|| serde_json::to_string(&body.inputs))
+    let input_values = match crate::actions::document(&p.definition) {
+        Some(document) => {
+            dispatch_inputs(&crate::actions::dispatch_inputs(&document), &body.inputs)?
+        }
+        None if body.inputs.is_empty() => BTreeMap::new(),
+        None => return Err(ApiError::bad("该流水线没有声明 workflow_dispatch inputs。")),
+    };
+    let inputs = (!input_values.is_empty())
+        .then(|| serde_json::to_string(&input_values))
         .transpose()
         .map_err(|_| ApiError::bad("无法保存 inputs。"))?;
     for value in [&branch, &commit] {
@@ -348,20 +447,26 @@ pub(crate) async fn trigger_as(
     let environment_id = Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0));
     // Actions: GitHub semantics (dynamic indexing delivers every authorized
     // value; undefined names are ""). Legacy definitions keep strict names.
-    let variable_rows = if let Some(document) = crate::actions::document(&p.definition) {
-        let references = crate::actions::references(&document)?;
+    let workflow_document = crate::actions::document(&p.definition);
+    let references = workflow_document
+        .as_ref()
+        .map(crate::actions::references)
+        .transpose()?;
+    let variable_rows = if let Some(references) = &references {
         let contexts = crate::variables::snapshot_for_actions(
             &s,
             &tx,
             scope.workspace_id,
             id,
             environment_id,
-            &references,
+            references,
         )
         .await?;
         // Server-side redaction masks every delivered secret.
         for (name, value) in &contexts.secrets {
-            snapshot.values.insert(format!("secrets:{name}"), value.clone());
+            snapshot
+                .values
+                .insert(format!("secrets:{name}"), value.clone());
         }
         snapshot.sources = contexts.sources;
         snapshot.secrets = Some(contexts.secrets);
@@ -405,6 +510,103 @@ pub(crate) async fn trigger_as(
         }
         snapshot.values.insert(name, value);
     }
+    // Contexts GitHub allows in workflow-level expressions (environment names,
+    // concurrency groups): github, inputs and vars.
+    let (server_url, repository) = crate::actions_run::repository_parts(&repo_url);
+    let expression_github = json!({
+        "workflow": workflow_document
+            .as_ref()
+            .and_then(|document| serde_yaml_ng::from_str::<Value>(&document.workflow).ok())
+            .and_then(|value| value.get("name").and_then(Value::as_str).map(str::to_owned))
+            .unwrap_or_else(|| p.name.clone()),
+        "ref": if branch.is_empty() { String::new() } else { format!("refs/heads/{branch}") },
+        "ref_name": branch, "head_ref": "", "base_ref": "",
+        "event_name": if kind == "schedule" { "schedule" } else { "workflow_dispatch" },
+        "sha": commit, "repository": repository,
+        "repository_owner": repository.split('/').next().unwrap_or(""),
+        "actor": scope.user.name, "run_id": run_id.to_string(), "run_number": number,
+        "run_attempt": 1, "server_url": server_url,
+    });
+    let no_vars = BTreeMap::new();
+    if let (Some(document), Some(references), Some(actions)) =
+        (&workflow_document, &references, &actions)
+    {
+        let contexts = crate::concurrency::Contexts {
+            github: expression_github.clone(),
+            inputs: &input_values,
+            vars: snapshot.vars.as_ref().unwrap_or(&no_vars),
+        };
+        let environments = crate::entities::pipeline_contexts::Entity::find()
+            .filter(crate::entities::pipeline_contexts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(crate::entities::pipeline_contexts::Column::Kind.eq("environment"))
+            .all(&tx)
+            .await?;
+        let mut declared = BTreeMap::new();
+        for job in &actions.jobs {
+            let Some(raw) = crate::actions::job_policies(document, &job.key)
+                .and_then(|policy| policy.environment)
+            else {
+                continue;
+            };
+            let (name, url) = match &raw {
+                Value::String(name) => (name.clone(), String::new()),
+                Value::Object(object) => (
+                    object
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    object
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                _ => {
+                    return Err(ApiError::bad(format!(
+                        "任务 {} 的 environment 必须是名称或包含 name 的对象。",
+                        job.key
+                    )));
+                }
+            };
+            let name = crate::concurrency::template(&name, &contexts)?;
+            if name.is_empty() {
+                continue;
+            }
+            // The url may use job outputs (evaluated by GitHub later); keep it as written then.
+            let url = crate::concurrency::template(&url, &contexts).unwrap_or(url);
+            // GitHub environment names are case-insensitive.
+            let row = environments
+                .iter()
+                .find(|row| row.name.eq_ignore_ascii_case(&name));
+            let mut entry = JobEnvironment {
+                name,
+                url,
+                approval: row.is_some_and(|row| row.requires_approval != 0),
+                ..JobEnvironment::default()
+            };
+            if let Some(row) = row {
+                let scoped = crate::variables::snapshot_for_actions(
+                    &s,
+                    &tx,
+                    scope.workspace_id,
+                    id,
+                    Id::from(row.id),
+                    references,
+                )
+                .await?;
+                for (secret, value) in &scoped.secrets {
+                    snapshot
+                        .values
+                        .insert(format!("secrets:{}:{secret}", job.key), value.clone());
+                }
+                entry.secrets = Some(scoped.secrets);
+                entry.vars = Some(scoped.vars);
+            }
+            declared.insert(job.key.clone(), entry);
+        }
+        snapshot.environments = declared;
+    }
     let variable_snapshot = if snapshot.values.is_empty() && snapshot.secrets.is_none() {
         None
     } else {
@@ -433,10 +635,34 @@ pub(crate) async fn trigger_as(
         .await?
         .map(|row| row.name)
         .unwrap_or_default();
+    // GitHub concurrency, evaluated now with the contexts GitHub allows there.
+    let policy = workflow_document
+        .as_ref()
+        .and_then(crate::actions::concurrency);
+    let (concurrency_group, cancel_in_progress) = match policy {
+        Some(policy) => {
+            let contexts = crate::concurrency::Contexts {
+                github: expression_github.clone(),
+                inputs: &input_values,
+                vars: snapshot.vars.as_ref().unwrap_or(&no_vars),
+            };
+            let group = crate::concurrency::template(&policy.group, &contexts)?;
+            let cancel = crate::concurrency::flag(&policy.cancel_in_progress, &contexts)?;
+            // Long group names are stored by digest; equal names still match.
+            let group = if group.chars().count() > 255 {
+                format!("sha256:{}", crate::runner::fingerprint(&group))
+            } else {
+                group
+            };
+            (group, cancel)
+        }
+        None => (String::new(), false),
+    };
     let run = runs::Model {
         id: run_id,
         workspace_id: i64::from(scope.workspace_id),
         pipeline_id: p.id,
+        concurrency_group,
         pipeline_name: p.name.clone(),
         host_id,
         host_name,
@@ -500,6 +726,7 @@ pub(crate) async fn trigger_as(
         }
     }
     tx.commit().await?;
+    apply_concurrency(&s, &run, cancel_in_progress).await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -521,27 +748,7 @@ pub async fn cancel(
 ) -> Result<Json<Value>> {
     scope.require("pipelines.run")?;
     let r = scoped(&s, &scope, &id).await?;
-    if crate::actions::snapshot(&r.definition).is_some() {
-        let queued = runs::Entity::update_many()
-            .col_expr(runs::Column::State, Expr::value("cancelling"))
-            .filter(runs::Column::Id.eq(r.id))
-            .filter(runs::Column::State.eq("queued"))
-            .exec(&s.db)
-            .await?
-            .rows_affected;
-        if queued > 0 {
-            finish(&s, r.id, "cancelled").await?;
-        } else {
-            runs::Entity::update_many()
-                .col_expr(runs::Column::State, Expr::value("cancelling"))
-                .filter(runs::Column::Id.eq(r.id))
-                .filter(runs::Column::State.eq("running"))
-                .exec(&s.db)
-                .await?;
-        }
-    } else {
-        finish(&s, r.id, "cancelled").await?;
-    }
+    request_cancel(&s, &r).await?;
     crate::hosts::activity(
         &s,
         &scope,
@@ -553,6 +760,60 @@ pub async fn cancel(
     .await?;
     Ok(Json(json!({"ok":true})))
 }
+/// A queued run ends as cancelled; a running Actions run moves to
+/// cancelling so its scheduler stops workers and cleans up.
+pub(crate) async fn request_cancel(s: &AppState, r: &runs::Model) -> Result<()> {
+    if crate::actions::snapshot(&r.definition).is_some() {
+        let queued = runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("cancelling"))
+            .filter(runs::Column::Id.eq(r.id))
+            .filter(runs::Column::State.eq("queued"))
+            .exec(&s.db)
+            .await?
+            .rows_affected;
+        if queued > 0 {
+            finish(s, r.id, "cancelled").await?;
+        } else {
+            runs::Entity::update_many()
+                .col_expr(runs::Column::State, Expr::value("cancelling"))
+                .filter(runs::Column::Id.eq(r.id))
+                .filter(runs::Column::State.eq("running"))
+                .exec(&s.db)
+                .await?;
+        }
+    } else {
+        finish(s, r.id, "cancelled").await?;
+    }
+    Ok(())
+}
+
+/// GitHub concurrency for a new run: older pending runs of its group are
+/// replaced, and with cancel-in-progress running ones are cancelled too.
+async fn apply_concurrency(
+    s: &AppState,
+    run: &runs::Model,
+    cancel_in_progress: bool,
+) -> Result<()> {
+    if run.concurrency_group.is_empty() {
+        return Ok(());
+    }
+    let mut states = vec!["queued"];
+    if cancel_in_progress {
+        states.push("running");
+    }
+    let others = runs::Entity::find()
+        .filter(runs::Column::WorkspaceId.eq(run.workspace_id))
+        .filter(runs::Column::ConcurrencyGroup.eq(run.concurrency_group.clone()))
+        .filter(runs::Column::Id.ne(run.id))
+        .filter(runs::Column::State.is_in(states))
+        .all(&s.db)
+        .await?;
+    for other in others {
+        request_cancel(s, &other).await?;
+    }
+    Ok(())
+}
+
 pub async fn approve(
     State(s): State<AppState>,
     scope: Scope,
@@ -561,8 +822,8 @@ pub async fn approve(
     scope.require("pipelines.run")?;
     let run = scoped(&s, &scope, &id).await?;
     let snapshot = crate::actions::snapshot(&run.definition).ok_or_else(ApiError::missing)?;
-    if run.state != "running" || !snapshot.jobs.iter().any(|job| job.key == key && job.manual) {
-        return Err(ApiError::bad("当前任务不是等待确认的人工卡点。"));
+    if run.state != "running" || !snapshot.jobs.iter().any(|job| job.key == key) {
+        return Err(ApiError::bad("当前任务不在等待审批状态。"));
     }
     use crate::entities::pipeline_run_jobs as jobs;
     let changed = jobs::Entity::update_many()
@@ -574,7 +835,7 @@ pub async fn approve(
         .await?
         .rows_affected;
     if changed == 0 {
-        return Err(ApiError::bad("人工卡点已处理或尚未进入等待状态。"));
+        return Err(ApiError::bad("审批已处理，或任务尚未进入等待审批状态。"));
     }
     crate::hosts::activity(
         &s,
@@ -741,6 +1002,17 @@ async fn claim(s: &AppState, busy: &HashMap<i64, i64>) -> Result<Option<runs::Mo
             }
         };
         if limit > 0 && busy.get(&r.workspace_id).copied().unwrap_or(0) >= limit {
+            continue;
+        }
+        if !r.concurrency_group.is_empty()
+            && runs::Entity::find()
+                .filter(runs::Column::WorkspaceId.eq(r.workspace_id))
+                .filter(runs::Column::ConcurrencyGroup.eq(r.concurrency_group.clone()))
+                .filter(runs::Column::State.is_in(["running", "cancelling"]))
+                .one(&s.db)
+                .await?
+                .is_some()
+        {
             continue;
         }
         let claimed = runs::Entity::update_many()
@@ -1136,6 +1408,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workflow_dispatch_inputs_follow_github_rules() {
+        let spec =
+            |name: &str, kind: &str, required: bool, default: Option<Value>, options: &[&str]| {
+                crate::actions::InputSpec {
+                    name: name.into(),
+                    r#type: kind.into(),
+                    required,
+                    default,
+                    options: options.iter().map(|option| option.to_string()).collect(),
+                    description: String::new(),
+                }
+            };
+        let specs = vec![
+            spec(
+                "target",
+                "choice",
+                true,
+                Some(json!("staging")),
+                &["staging", "production"],
+            ),
+            spec("dry", "boolean", false, Some(json!(false)), &[]),
+            spec("count", "number", false, None, &[]),
+            spec("note", "string", true, None, &[]),
+        ];
+        let given = |value: Value| -> BTreeMap<String, Value> {
+            value.as_object().unwrap().clone().into_iter().collect()
+        };
+        let values = dispatch_inputs(
+            &specs,
+            &given(json!({"note": "hi", "dry": "true", "count": "3"})),
+        )
+        .unwrap();
+        assert_eq!(
+            values["target"],
+            json!("staging"),
+            "default fills a missing input"
+        );
+        assert_eq!(values["dry"], json!(true));
+        assert_eq!(values["count"], json!(3.0));
+        assert_eq!(values["note"], json!("hi"));
+        assert!(!values.contains_key("missing"));
+        for bad in [
+            json!({}),
+            json!({"note": ""}),
+            json!({"note": "x", "target": "dev"}),
+            json!({"note": "x", "unknown": "y"}),
+            json!({"note": "x", "dry": "yes"}),
+            json!({"note": "x", "count": "many"}),
+        ] {
+            assert!(
+                dispatch_inputs(&specs, &given(bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
     fn shell_quote_preserves_single_quotes_without_evaluation() {
         assert_eq!(quote("a'b$(id)"), "'a'\\''b$(id)'");
     }
@@ -1179,6 +1508,7 @@ mod tests {
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
+            concurrency_group: String::new(),
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

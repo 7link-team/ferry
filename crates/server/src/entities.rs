@@ -373,6 +373,8 @@ pub mod pipeline_runs {
         pub triggered_by_name: String,
         /// workflow_dispatch inputs as JSON; None when the run had none.
         pub inputs: Option<String>,
+        /// Evaluated GitHub concurrency group; "" when the workflow has none.
+        pub concurrency_group: String,
         pub number: i64,
         pub state: String,
         pub trigger_kind: String,
@@ -1044,6 +1046,8 @@ pub mod pipeline_contexts {
         pub position: i64,
         pub target_kind: String,
         pub target_ref: i64,
+        /// Environments only: 1 when jobs declaring it wait for approval.
+        pub requires_approval: i64,
         pub created_at: i64,
         pub updated_at: i64,
         pub version: i64,

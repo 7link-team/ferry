@@ -39,6 +39,9 @@ pub struct Body {
     target_kind: String,
     #[serde(default)]
     target_ref: String,
+    /// Environments: jobs that declare this environment wait for approval.
+    #[serde(default)]
+    requires_approval: bool,
     #[serde(default)]
     version: i64,
 }
@@ -47,6 +50,7 @@ fn to_json(row: &rows::Model) -> Value {
     if row.kind == "environment" {
         value["target_kind"] = json!(row.target_kind);
         value["target_ref"] = json!(Id::from(row.target_ref));
+        value["requires_approval"] = json!(row.requires_approval != 0);
     }
     value
 }
@@ -151,6 +155,7 @@ async fn create_in(
         } else {
             0
         }),
+        requires_approval: Set(i64::from(kind == "environment" && body.requires_approval)),
         created_at: Set(now),
         updated_at: Set(now),
         version: Set(1),
@@ -201,6 +206,10 @@ async fn update(
             } else {
                 0
             }),
+        )
+        .col_expr(
+            rows::Column::RequiresApproval,
+            Expr::value(i64::from(kind == "environment" && body.requires_approval)),
         )
         .col_expr(rows::Column::UpdatedAt, Expr::value(db::now()))
         .col_expr(

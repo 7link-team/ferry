@@ -48,7 +48,13 @@ pub async fn execute(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    if snapshot.jobs.iter().any(|job| job.manual) {
+    // Jobs that wait for a person (manual gates, protected environments)
+    // must not hold every host's update reservation meanwhile.
+    let environment_approval = history::open_variables(s, run)?
+        .environments
+        .values()
+        .any(|environment| environment.approval);
+    if environment_approval || snapshot.jobs.iter().any(|job| job.manual) {
         return execute_reserved(s, run, snapshot, stop).await;
     }
     let hosts = snapshot
@@ -89,6 +95,12 @@ async fn execute_reserved(
 ) -> Result<()> {
     let opened = history::open_variables(s, run)?;
     let delivered = Delivered::new(&opened, &snapshot)?;
+    let approvals: BTreeSet<String> = opened
+        .environments
+        .iter()
+        .filter(|(_, environment)| environment.approval)
+        .map(|(key, _)| key.clone())
+        .collect();
     let mut variables = opened.values;
     // Include every source credential in server-side redaction, even if a later
     // job fails before its worker can install its own log masks.
@@ -136,7 +148,7 @@ async fn execute_reserved(
         )
     };
     let seq = tokio::sync::Mutex::new(0i64);
-    let has_approval = snapshot.jobs.iter().any(|job| job.manual);
+    let has_approval = !approvals.is_empty() || snapshot.jobs.iter().any(|job| job.manual);
     let completed = schedule_jobs(
         &snapshot.jobs,
         stop,
@@ -145,11 +157,18 @@ async fn execute_reserved(
             let snapshot = &snapshot;
             let variables = &variables;
             let delivered = &delivered;
+            let approvals = &approvals;
             let credential = credential.as_ref();
             let seq = &seq;
             async move {
                 if job.manual {
                     return wait_for_approval(s, run.id, &job.key, &mut stop).await;
+                }
+                if approvals.contains(&job.key) && !wait_for_environment(s, run.id, &job.key, &mut stop).await? {
+                    return Ok(Outcome {
+                        state: "cancelled".into(), steps: BTreeMap::new(),
+                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
+                    });
                 }
                 job_state(s, run.id, &job.key, "running", None).await?;
                 let result = if has_approval {
@@ -331,18 +350,40 @@ where
     Ok(completed)
 }
 
-/// The secrets and vars contexts every job of a run receives.
+/// The secrets and vars contexts the jobs of a run receive; jobs whose
+/// `environment` names a Ferry environment get that environment's values.
 struct Delivered {
     secrets: BTreeMap<String, String>,
     vars: BTreeMap<String, String>,
+    jobs: BTreeMap<String, (BTreeMap<String, String>, BTreeMap<String, String>)>,
 }
 
 impl Delivered {
+    fn for_job(&self, key: &str) -> (&BTreeMap<String, String>, &BTreeMap<String, String>) {
+        self.jobs
+            .get(key)
+            .map(|(secrets, vars)| (secrets, vars))
+            .unwrap_or((&self.secrets, &self.vars))
+    }
+
     fn new(opened: &history::VariableSnapshot, snapshot: &Snapshot) -> Result<Self> {
         if let (Some(secrets), Some(vars)) = (&opened.secrets, &opened.vars) {
+            let jobs = opened
+                .environments
+                .iter()
+                .filter_map(
+                    |(key, environment)| match (&environment.secrets, &environment.vars) {
+                        (Some(secrets), Some(vars)) => {
+                            Some((key.clone(), (secrets.clone(), vars.clone())))
+                        }
+                        _ => None,
+                    },
+                )
+                .collect();
             return Ok(Self {
                 secrets: secrets.clone(),
                 vars: vars.clone(),
+                jobs,
             });
         }
         // Runs queued before contexts were snapshotted: static references only.
@@ -350,6 +391,7 @@ impl Delivered {
         let mut delivered = Self {
             secrets: BTreeMap::new(),
             vars: BTreeMap::new(),
+            jobs: BTreeMap::new(),
         };
         for reference in references {
             let (namespace, name) = reference
@@ -432,19 +474,23 @@ fn github_context(run: &runs::Model) -> GithubContext {
 
 /// (`https://host`, `owner/repo`) from an HTTP(S), ssh:// or scp-style Git URL,
 /// without any credentials it may contain.
-fn repository_parts(url: &str) -> (String, String) {
+pub(crate) fn repository_parts(url: &str) -> (String, String) {
     let url = url.trim().trim_end_matches('/');
     let url = url.strip_suffix(".git").unwrap_or(url);
     if let Some((scheme, rest)) = url.split_once("://") {
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
         let scheme = if scheme == "http" { "http" } else { "https" };
         return (format!("{scheme}://{host}"), path.to_owned());
     }
     if let Some((authority, path)) = url.split_once(':')
         && !authority.contains('/')
     {
-        let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
         return (format!("https://{host}"), path.to_owned());
     }
     (String::new(), String::new())
@@ -460,6 +506,36 @@ fn state(value: &str) -> &str {
         _ => "failed",
     }
 }
+/// A job whose environment requires approval waits until someone approves it
+/// (true) or the run is cancelled (false). Unlike a manual gate it then runs.
+async fn wait_for_environment(
+    s: &AppState,
+    run: i64,
+    key: &str,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool> {
+    job_state(s, run, key, "waiting", None).await?;
+    loop {
+        if *stop.borrow() || !history::active(s, run).await? {
+            job_state(s, run, key, "cancelled", None).await?;
+            return Ok(false);
+        }
+        let row = jobs::Entity::find()
+            .filter(jobs::Column::RunId.eq(run))
+            .filter(jobs::Column::JobKey.eq(key))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if row.state == "approved" {
+            return Ok(true);
+        }
+        tokio::select! {
+            _ = stop.changed() => {},
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+        }
+    }
+}
+
 async fn wait_for_approval(
     s: &AppState,
     run: i64,
@@ -697,8 +773,9 @@ async fn execute_private(
     if code != 0 {
         return Err(ApiError::bad("仓库拉取失败。"));
     }
-    let mut secrets = delivered.secrets.clone();
-    let vars = delivered.vars.clone();
+    let (secrets, vars) = delivered.for_job(&job.key);
+    let mut secrets = secrets.clone();
+    let vars = vars.clone();
     let image = if job.image == "host" {
         "-self-hosted"
     } else {
@@ -1115,6 +1192,36 @@ async fn event(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn github_repository_comes_from_the_url_without_credentials() {
+        use super::repository_parts;
+        for (url, expected) in [
+            (
+                "https://github.com/acme/app.git",
+                ("https://github.com", "acme/app"),
+            ),
+            (
+                "https://user:token@codeup.aliyun.com/org/group/app",
+                ("https://codeup.aliyun.com", "org/group/app"),
+            ),
+            (
+                "git@github.com:acme/app.git",
+                ("https://github.com", "acme/app"),
+            ),
+            (
+                "ssh://git@git.example.com:2222/acme/app.git",
+                ("https://git.example.com:2222", "acme/app"),
+            ),
+            (
+                "http://git.local/acme/app/",
+                ("http://git.local", "acme/app"),
+            ),
+            ("", ("", "")),
+        ] {
+            let (server, repository) = repository_parts(url);
+            assert_eq!((server.as_str(), repository.as_str()), expected, "{url}");
+        }
+    }
     use super::*;
     use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel, Schema};
 
@@ -1444,6 +1551,7 @@ mod tests {
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
+            concurrency_group: String::new(),
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),
@@ -1586,6 +1694,7 @@ mod tests {
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
+            concurrency_group: String::new(),
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

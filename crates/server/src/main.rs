@@ -6,6 +6,7 @@ mod assets;
 mod auth;
 mod channel;
 mod cluster;
+mod concurrency;
 mod credentials;
 mod cron_jobs;
 mod db;

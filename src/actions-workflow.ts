@@ -16,6 +16,29 @@ jobs:
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const strings = (value: unknown): string[] => value == null ? [] : Array.isArray(value) ? value.map(String) : [String(value)];
 
+export interface DispatchInput { name: string; type: string; required: boolean; default?: unknown; options: string[]; description: string }
+
+/** The workflow_dispatch inputs a workflow declares, in declaration order. */
+export function dispatchInputs(source: string): DispatchInput[] {
+  try {
+    const on = (parseDocument(source).toJS() as Record<string, unknown> | null)?.on;
+    const dispatch = on && typeof on === "object" ? (on as Record<string, unknown>).workflow_dispatch : undefined;
+    const inputs = dispatch && typeof dispatch === "object" ? (dispatch as Record<string, unknown>).inputs : undefined;
+    if (!inputs || typeof inputs !== "object") return [];
+    return Object.entries(inputs as Record<string, unknown>).map(([name, raw]) => {
+      const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      return {
+        name, type: typeof input.type === "string" ? input.type : "string", required: input.required === true,
+        ...(input.default === undefined ? {} : { default: input.default }),
+        options: Array.isArray(input.options) ? input.options.map(String) : [],
+        description: typeof input.description === "string" ? input.description : "",
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export function parseActions(source: string): { document: Document; jobs: ActionJob[] } {
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));

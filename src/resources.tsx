@@ -1,5 +1,5 @@
 import { importResources, exportResources } from "./components/ResourceTransfer";
-import { DEFAULT_ACTIONS, parseActions } from "./actions-workflow";
+import { DEFAULT_ACTIONS, dispatchInputs, parseActions } from "./actions-workflow";
 import { api } from "./api";
 /**
  * Every resource page in one place: a `ListConfig` and a `FormConfig` per
@@ -154,12 +154,25 @@ const namedOptions = (workspace: string, resource: string) => async (): Promise<
     if (!result.items.length || page * result.page_size >= result.total) return items;
   }
 };
-interface PipelineContext {id:string;name:string;description:string;target_kind:string;target_ref:string;version:number}
+interface PipelineContext {id:string;name:string;description:string;target_kind:string;target_ref:string;requires_approval?:boolean;version:number}
+// workflow_dispatch inputs become form fields named input:<name>.
+const inputsOf = (row: Pipeline) => row.definition_format === "github-actions" ? dispatchInputs(row.definition) : [];
 const pipelineRunAction = (workspace:string): RowAction<Pipeline> => ({
  label:"触发",permission:"pipelines.run",
- parameters: row=>row.environments?.length ? [{key:"environment_id",label:"执行环境",type:"select",required:true,options:row.environments.map(environment=>({value:environment.id,label:environment.name})),help:"环境默认执行器替代流水线默认值；任务单独指定的执行器优先。环境变量覆盖流水线默认变量。"}] : [],
+ parameters: row=>[
+  ...(row.environments?.length ? [{key:"environment_id",label:"执行环境",type:"select" as const,required:true,options:row.environments.map(environment=>({value:environment.id,label:environment.name})),help:"环境默认执行器替代流水线默认值；任务单独指定的执行器优先。环境变量覆盖流水线默认变量。"}] : []),
+  ...inputsOf(row).map(input=>({key:`input:${input.name}`,label:input.name,required:input.required&&input.type!=="boolean",...(input.description?{help:input.description}:{}),
+   ...(input.type==="boolean"?{type:"switch" as const}:input.type==="choice"?{type:"select" as const,options:input.options.map(option=>({value:option,label:option}))}:input.type==="number"?{type:"number" as const}:{type:"text" as const})})),
+ ],
+ initialValues: row=>Object.fromEntries(inputsOf(row).filter(input=>input.default!==undefined).map(input=>[`input:${input.name}`,input.type==="boolean"?input.default===true||input.default==="true":input.default])),
  action:async(row,values)=>{
-  const run=await runItemAction<{id:string}>(workspace,"pipelines",row.id,"run",values??{});
+  const body: Record<string, unknown> = {}, inputs: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values ?? {})) {
+   if (key.startsWith("input:")) { if (value !== "" && value !== undefined) inputs[key.slice(6)] = value; }
+   else body[key] = value;
+  }
+  if (Object.keys(inputs).length) body.inputs = inputs;
+  const run=await runItemAction<{id:string}>(workspace,"pipelines",row.id,"run",body);
   navigate({workspace,group:"build",item:"runs",id:run.id,mode:"view"},{});
  }
 });
@@ -683,7 +696,8 @@ export function formConfigs(workspace: string, permissions?: Set<string>): Recor
       sections:[{fields:[{key:"name",label:"名称",type:"text",required:true},{key:"description",label:"说明",type:"textarea"},
         {key:"target_kind",label:"默认执行器类型",type:"select",options:TARGETS,resetOnChange:["target_ref"]},
         {key:"target_ref",label:"默认主机",type:"select",required:true,options:namedOptions(workspace,"hosts"),when:row=>row.target_kind==="host"},
-        {key:"target_ref",label:"默认主机组",type:"select",required:true,options:namedOptions(workspace,"host-groups"),when:row=>row.target_kind==="host-group"}
+        {key:"target_ref",label:"默认主机组",type:"select",required:true,options:namedOptions(workspace,"host-groups"),when:row=>row.target_kind==="host-group"},
+        {key:"requires_approval",label:"需要审批",type:"switch",help:"Actions 任务声明 environment 为此环境名称时，开始执行前需要有执行权限的成员批准（相当于 GitHub 环境的必需审阅者）。"}
       ]}]}),
     pipelines: form({
       ...(permissions?.has("pipeline-templates.read") ? { generator: templateGenerator(workspace, "pipeline-templates", "definition") } : {}),
