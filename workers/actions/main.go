@@ -237,7 +237,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 	ctx = runner.WithJobLoggerFactory(ctx, factory)
 	config := &runner.Config{Actor: request.Actor, Token: request.Secrets["GITHUB_TOKEN"], Workdir: request.Workdir, ActionCacheDir: filepath.Join(filepath.Dir(request.Workdir), "action-cache", strconv.Itoa(index)), EventName: request.EventName, EventPath: request.EventPath, Platforms: request.Platforms,
 		Env: request.Env, Secrets: request.Secrets, Vars: request.Vars, Inputs: request.Inputs, LogOutput: true, JSONLogger: true, AutoRemove: true,
-		GitHubInstance: "github.com", RemoteName: "origin", ConcurrentJobs: 4}
+		GitHubInstance: "github.com", RemoteName: "origin", ConcurrentJobs: 4, FerryRewriteStep: rewriteBuiltinArtifactStep}
 	if request.ArtifactDir != "" {
 		config.ArtifactServerPath = request.ArtifactDir
 		if strings.Contains(request.Env["ACTIONS_RUNTIME_URL"], "host.docker.internal") {
@@ -361,6 +361,13 @@ func jobTimeBudget(limit int, minutes string) (int, error) {
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "artifact" {
+		if err := runArtifactHelper(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "Artifact error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	path := flag.String("request", "", "private execution request JSON file")
 	version := flag.Bool("version", false, "print pinned engine version")
 	flag.Parse()

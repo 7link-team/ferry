@@ -626,9 +626,6 @@ func compatUnsupported(o compatObservation) (string, string) {
 }
 
 func TestCompatAuditArtifacts(t *testing.T) {
-	if os.Getenv("ACTIONS_TEST_REMOTE") != "1" {
-		t.Skip("remote artifact actions require network; local protocol fixtures run by default")
-	}
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows host audit")
 	}
@@ -641,11 +638,10 @@ jobs:
   upload:
     runs-on: self-hosted
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/upload-artifact@v4
         with:
           name: proof
-          path: proof.txt
+          path: ${{ env.AUDIT_ROOT }}/proof.txt
   download:
     needs: upload
     runs-on: self-hosted
