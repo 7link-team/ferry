@@ -153,8 +153,16 @@ impl MigrationTrait for LegacyPipelineRemoval {
                     crate::pipelines::convert_legacy(&original, &kind, &target.to_string())
                 } else {
                     crate::templates::convert_legacy_content(&original)
-                }
-                .map_err(|error| DbErr::Custom(format!("Cannot convert {table} {id}: {error}")))?;
+                };
+                // One unconvertible row must not keep the server from starting:
+                // keep it unchanged (it fails clearly when used) and say so.
+                let converted = match converted {
+                    Ok(converted) => converted,
+                    Err(error) => {
+                        tracing::warn!(table, id, error = %error.1, "旧格式流水线定义无法自动转换，已保持原样");
+                        continue;
+                    }
+                };
                 // Definition and backup change atomically. Reapplying after a DDL
                 // interruption sees Actions and leaves the original backup intact.
                 let update = Query::update()

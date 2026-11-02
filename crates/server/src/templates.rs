@@ -501,6 +501,18 @@ pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
     if doc.get("engine").and_then(Value::as_str) == Some(crate::actions::ENGINE) {
         return Ok(content.to_owned());
     }
+    // A plain Actions workflow (YAML with jobs) gets the standard envelope so
+    // the template picker can use it; its text, placeholders included, is kept.
+    if doc.get("jobs").is_some() {
+        return serde_json::to_string(&json!({
+            "engine": crate::actions::ENGINE,
+            "workflow": content,
+            "executor_bindings": [],
+            "checkout_bindings": [],
+            "graph_layout": {},
+        }))
+        .map_err(|_| ApiError::bad("无法转换流水线模板。"));
+    }
     crate::pipelines::convert_legacy(&doc.to_string(), "", "")
 }
 #[derive(Deserialize)]
@@ -671,6 +683,20 @@ mod tests {
     use super::*;
     fn application() -> Value {
         json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"web"},"services":[{"name":"web","image":"nginx:{{ .Values.image.tag }}","ports":[{"container":"{{ .Values.port }}"}]}]})
+    }
+    #[test]
+    fn upgrade_wraps_plain_actions_templates_and_converts_only_legacy_ones() {
+        // A template saved as a plain Actions YAML workflow (as alpha.32 allowed).
+        let plain = "name: Build\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo {{ .Values.command }}\n";
+        let wrapped: Value = serde_json::from_str(&convert_legacy_content(plain).unwrap()).unwrap();
+        assert_eq!(wrapped["engine"], crate::actions::ENGINE);
+        assert_eq!(wrapped["workflow"], plain);
+        let again = convert_legacy_content(&wrapped.to_string()).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&again).unwrap(), wrapped);
+        let legacy = r#"{"workdir":"/tmp/{{run}}","steps":[{"name":"Build","run":"{{ .Values.command }}"}]}"#;
+        let converted: Value = serde_json::from_str(&convert_legacy_content(legacy).unwrap()).unwrap();
+        assert_eq!(converted["engine"], crate::actions::ENGINE);
+        assert!(converted["workflow"].as_str().unwrap().contains("{{ .Values.command }}"));
     }
     #[test]
     fn actions_expressions_survive_template_validation_and_rendering() {
