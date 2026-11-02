@@ -1,0 +1,31 @@
+﻿name: Retry verified transient alpha35 registry connection failure
+on:
+  push:
+    branches: [feat/alpha35-release-dispatch]
+    paths: [.github/workflows/retry-image.yml]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const repo=context.repo;
+            const run_id=41496916590;
+            for(let attempt=0;attempt<240;attempt++) {
+              const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id});
+              if(run.head_sha!=='b50b9933502385542ecb4e4ebeafd9eb51914ea5')throw Error('Unexpected source');
+              if(run.status==='completed') {
+                if(run.conclusion!=='failure')throw Error('Unexpected conclusion');
+                if(run.run_attempt!==1)throw Error('Already retried');
+                await github.rest.actions.reRunWorkflowFailedJobs({...repo,run_id});
+                core.notice('Retried failed image jobs once: captured npm ECONNRESET at dependency download; source unchanged');
+                return;
+              }
+              await new Promise(resolve=>setTimeout(resolve,10000));
+            }
+            throw Error('Image still active; inspect before retrying');
