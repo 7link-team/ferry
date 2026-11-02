@@ -82,7 +82,14 @@ pub struct Body {
 
 impl Body {
     fn stored_definition(&self) -> Result<String> {
-        match self.definition_format.as_str() {
+        // Scripts that read a pipeline and write back an old JSON definition
+        // keep the format label they read; the definition's shape decides.
+        let format = if legacy_shaped(&self.definition) {
+            "legacy"
+        } else {
+            self.definition_format.as_str()
+        };
+        match format {
             "" | "legacy" => {
                 validate_definition(&self.definition)?;
                 convert_legacy(&self.definition, &self.target_kind, &self.target_ref)
@@ -98,6 +105,13 @@ impl Body {
             _ => Err(ApiError::bad("未知的流水线定义格式。")),
         }
     }
+}
+
+/// An old pipeline definition: a JSON object with steps and no Actions jobs.
+fn legacy_shaped(definition: &str) -> bool {
+    serde_json::from_str::<Value>(definition).is_ok_and(|value| {
+        value.get("steps").is_some_and(Value::is_array) && value.get("jobs").is_none()
+    })
 }
 
 async fn check(
@@ -905,6 +919,25 @@ pub fn variable_names(definition: &Definition) -> std::collections::BTreeSet<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_definitions_are_recognised_by_shape() {
+        assert!(super::legacy_shaped(
+            r#"{"workdir":"/w","steps":[{"name":"a","run":"true"}]}"#
+        ));
+        assert!(!super::legacy_shaped(
+            "on: workflow_dispatch
+jobs:
+  a:
+    runs-on: self-hosted
+    steps: []
+"
+        ));
+        assert!(!super::legacy_shaped(
+            r#"{"on":"workflow_dispatch","jobs":{"a":{"steps":[]}},"steps":[]}"#
+        ));
+        assert!(!super::legacy_shaped("{{ .Values.x }}"));
+    }
 
     #[test]
     fn legacy_conversion_is_deterministic_complete_and_idempotent() {

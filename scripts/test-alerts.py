@@ -148,7 +148,8 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(owner,root+'/pipelines/'+pipeline+'/runs',{},expected=201)
         eventually(lambda:any(e['state']=='firing' for e in events(pipeline_rule)))
         old=request(owner,root+'/pipelines/'+pipeline)
-        request(owner,root+'/pipelines/'+pipeline,dict(old,definition=json.dumps({'workdir':str(data/'pipeline'),'steps':[{'name':'Success','run':'true'}]})),'PATCH')
+        # A legacy JSON definition is converted on write when sent as the legacy format.
+        request(owner,root+'/pipelines/'+pipeline,dict(old,definition_format='legacy',definition=json.dumps({'workdir':str(data/'pipeline'),'steps':[{'name':'Success','run':'true'}]})),'PATCH')
         request(owner,root+'/pipelines/'+pipeline+'/runs',{},expected=201)
         eventually(lambda:any(e['state']=='recovered' for e in events(pipeline_rule)))
         check(True,'real pipeline failure and success drive alert transitions')

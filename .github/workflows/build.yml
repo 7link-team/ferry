@@ -382,6 +382,7 @@ jobs:
               echo "| $HARNESS | $round/3 | PASS | $GITHUB_RUN_ID | $GITHUB_SHA |" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "| $HARNESS | $round/3 | FAIL | $GITHUB_RUN_ID | $GITHUB_SHA |" >> "$GITHUB_STEP_SUMMARY"
+              python3 .github/scripts/annotate-failures.py "harness-logs/round-$round.log"
               exit 1
             fi
             echo "::endgroup::"
