@@ -1,3 +1,4 @@
+import { executionText } from "./i18n";
 import { parseDocument, type Document } from "yaml";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
@@ -43,18 +44,18 @@ export function parseActions(source: string): { document: Document; jobs: Action
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));
   const value = document.toJS({ maxAliasCount: 50 });
-  if (!object(value) || !object(value.jobs) || !Object.keys(value.jobs).length) throw new Error("工作流需要至少一个 jobs 任务。");
+  if (!object(value) || !object(value.jobs) || !Object.keys(value.jobs).length) throw new Error(executionText("workflow.jobsRequired"));
   const jobs = Object.entries(value.jobs).map(([id, raw]) => {
-    if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(id) || !object(raw)) throw new Error(`任务标识 ${id} 无效。`);
-    if (raw.steps !== undefined && (!Array.isArray(raw.steps) || raw.steps.some(step => !object(step)))) throw new Error(`任务 ${id} 的 steps 必须是步骤数组。`);
+    if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(id) || !object(raw)) throw new Error(executionText("workflow.invalidJobId", { id }));
+    if (raw.steps !== undefined && (!Array.isArray(raw.steps) || raw.steps.some(step => !object(step)))) throw new Error(executionText("workflow.stepsArray", { id }));
     return { id, name: String(raw.name || id), needs: strings(raw.needs), runsOn: strings(raw["runs-on"]), steps: (raw.steps || []) as ActionStep[], raw };
   });
   const byId = new Map(jobs.map(job => [job.id, job]));
   const visited = new Set<string>(), visiting = new Set<string>();
   function visit(id: string) {
     const job = byId.get(id);
-    if (!job) throw new Error(`依赖任务 ${id} 不存在。`);
-    if (visiting.has(id)) throw new Error("任务依赖存在循环，无法执行。");
+    if (!job) throw new Error(executionText("workflow.dependencyMissing", { id }));
+    if (visiting.has(id)) throw new Error(executionText("workflow.cycle"));
     if (visited.has(id)) return;
     visiting.add(id); job.needs.forEach(visit); visiting.delete(id); visited.add(id);
   }
@@ -70,23 +71,23 @@ function patch(document: Document, path: (string | number)[], values: Record<str
 }
 export function editActionJob(source: string, job: string, values: Record<string, unknown>): string {
   const { document, jobs } = parseActions(source);
-  if (!jobs.some(row => row.id === job)) throw new Error("任务不存在。");
+  if (!jobs.some(row => row.id === job)) throw new Error(executionText("workflow.jobMissing"));
   patch(document, ["jobs", job], values); return serialize(document);
 }
 export function editActionStep(source: string, job: string, index: number, values: Record<string, unknown>): string {
   const { document, jobs } = parseActions(source);
-  if (!jobs.find(row => row.id === job)?.steps[index]) throw new Error("步骤不存在。");
+  if (!jobs.find(row => row.id === job)?.steps[index]) throw new Error(executionText("workflow.stepMissing"));
   patch(document, ["jobs", job, "steps", index], values); return serialize(document);
 }
 export function connectActionJobs(source: string, from: string, to: string): string {
   const { jobs } = parseActions(source);
   const target = jobs.find(job => job.id === to);
-  if (!target || !jobs.some(job => job.id === from)) throw new Error("任务不存在。");
+  if (!target || !jobs.some(job => job.id === from)) throw new Error(executionText("workflow.jobMissing"));
   return editActionJob(source, to, { needs: [...new Set([...target.needs, from])] });
 }
 export function removeActionJob(source: string, id: string): string {
   const { document, jobs } = parseActions(source);
-  if (jobs.length <= 1) throw new Error("至少保留一个任务。");
+  if (jobs.length <= 1) throw new Error(executionText("workflow.keepJob"));
   document.deleteIn(["jobs", id]);
   for (const job of jobs.filter(job => job.id !== id && job.needs.includes(id))) patch(document, ["jobs", job.id], { needs: job.needs.filter(need => need !== id) });
   return serialize(document);
@@ -96,21 +97,21 @@ export function addActionJob(source: string, checkout = false, placement?: { job
   let suffix = 1; while (jobs.some(job => job.id === `job_${suffix}`)) suffix++;
   const id = `job_${suffix}`;
   const anchor = placement && jobs.find(job => job.id === placement.job);
-  if (placement && !anchor) throw new Error("任务不存在。");
+  if (placement && !anchor) throw new Error(executionText("workflow.jobMissing"));
   const needs = anchor ? placement?.mode === "serial" ? [anchor.id] : anchor.needs : [];
   document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "步骤1", uses: "actions/checkout@v4" }] : []), { name: checkout ? "步骤2" : "步骤1", run: "echo hello" }] });
   return { source: serialize(document), id };
 }
 export function addActionStep(source: string, job: string, kind: "run" | "checkout" = "run"): string {
   const { document, jobs } = parseActions(source);
-  const row = jobs.find(row => row.id === job); if (!row) throw new Error("任务不存在。");
+  const row = jobs.find(row => row.id === job); if (!row) throw new Error(executionText("workflow.jobMissing"));
   const name = `步骤${row.steps.length + 1}`;
   document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name, uses: "actions/checkout@v4" } : { name, run: "echo hello" });
   return serialize(document);
 }
 export function removeActionStep(source: string, job: string, index: number): string {
   const { document, jobs } = parseActions(source);
-  if ((jobs.find(row => row.id === job)?.steps.length || 0) <= 1) throw new Error("任务至少保留一个步骤。");
+  if ((jobs.find(row => row.id === job)?.steps.length || 0) <= 1) throw new Error(executionText("workflow.keepStep"));
   document.deleteIn(["jobs", job, "steps", index]); return serialize(document);
 }
 
@@ -121,7 +122,7 @@ export function ensureActionCheckout(source: string): string {
   for (const job of jobs) {
     if (job.raw.uses || job.steps.some(step => /^actions\/checkout@/.test(String(step.uses ?? "")))) continue;
     const steps = document.getIn(["jobs", job.id, "steps"]);
-    if (!steps || !("items" in Object(steps))) throw new Error(`任务 ${job.id} 缺少 steps。`);
+    if (!steps || !("items" in Object(steps))) throw new Error(executionText("workflow.stepsMissing", { id: job.id }));
     (steps as { items: unknown[] }).items.unshift(document.createNode({ name: "拉取代码", uses: "actions/checkout@v4" }));
     changed = true;
   }

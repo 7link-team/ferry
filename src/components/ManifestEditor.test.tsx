@@ -3,6 +3,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { ManifestEditor, readManifest } from "./ManifestEditor";
+import { named } from "../resource";
+import { i18n, hostRepositoryText } from "../i18n";
 
 const fixture = `# original application
 apiVersion: ferry/v1
@@ -28,7 +30,30 @@ overrides:
       web:
         restart: unless-stopped
 `;
+it("shows empty artifact references and preserves unavailable IDs without claiming deletion", async () => {
+  const onChange=vi.fn();
+  const render=async(pipeline:string,run:string)=>{
+    const value=fixture.replace('    image: nginx:alpine # keep image comment',`    artifact: {source: pipeline, pipeline: '${pipeline}', run: '${run}', path: dist}`);
+    await act(async()=>root.render(<ManifestEditor workspace="ops" value={value} mode="native" readOnly={false} onChange={onChange} onValidityChange={()=>{}}/>));
+  };
+  const fetch=vi.fn(async(_url:string)=>({ok:true,status:200,json:async()=>({items:[],total:0,page_size:200})}));
+  vi.stubGlobal('fetch',fetch);
+  await render('0','0');
+  expect(reference('流水线').textContent).toBe('请选择流水线');expect(reference('固定构建').textContent).toBe('最新成功构建');
+  expect(fetch.mock.calls.every(call=>!String(call[0]).includes('pipeline-runs'))).toBe(true);
+  await render('missing','saved-run');
+  expect(reference('流水线').textContent).toBe(named(undefined,'missing'));
+  expect(reference('固定构建').textContent).toBe(named(undefined,'saved-run'));
+  expect(onChange).not.toHaveBeenCalled();
+});
+it("shows a successful artifact build without a completion timestamp as unavailable time", async () => {
+  vi.stubGlobal('fetch',vi.fn(async(url:string)=>({ok:true,status:200,json:async()=>({items:url.includes('pipeline-runs')?[{id:'r1',number:1,finished_at:0}]:[{id:'p1',name:'Build'}],total:1,page_size:200})})));
+  const value=fixture.replace('    image: nginx:alpine # keep image comment','    artifact: {source: pipeline, pipeline: p1, run: r1, path: dist}');
+  await act(async()=>root.render(<ManifestEditor workspace="ops" value={value} mode="native" readOnly={false} onChange={()=>{}} onValidityChange={()=>{}}/>));
+  expect(reference('固定构建').textContent).toBe('#1 · —');
+});
 let root: Root, host: HTMLDivElement, latest: string, blocked: boolean;
+const reference=(label:string)=>[...host.querySelectorAll('[data-auto-field]')].find(field=>field.firstElementChild?.textContent?.trim().startsWith(label))!.querySelector('[role="combobox"]')!;
 function Harness({ source = fixture, readOnly = false, mode = "compose" }) {
   const [value, setValue] = useState(source);
   latest = value;
@@ -74,6 +99,7 @@ const click = async (name: string, region: ParentNode = host) => {
   await act(async () => button(name, region).click());
 };
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal("confirm", () => true);
   host = document.createElement("div");
@@ -85,6 +111,23 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  await i18n.changeLanguage('en-US');
+});
+it("switches editor labels and existing validation feedback in six languages without changing YAML",async()=>{
+ await act(async()=>root.render(<Harness/>));
+ const original=latest;
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+  await act(async()=>{await i18n.changeLanguage(locale);});
+  expect(host.textContent).toContain(hostRepositoryText('manifest.016'));
+  expect(host.textContent).toContain(hostRepositoryText('manifest.032'));
+  expect(latest).toBe(original);
+  expect(host.textContent).toContain('nginx:alpine');
+ }
+ await act(async()=>root.render(<ManifestEditor value={'metadata: &shared {}\nservices: []\nshared: *shared\n'} mode="compose" readOnly={false} onChange={()=>{}} onValidityChange={()=>{}}/>));
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+  await act(async()=>{await i18n.changeLanguage(locale);});
+  expect(host.textContent).toContain(hostRepositoryText('manifest.001'));
+ }
 });
 it("edits one field without losing comments, typed labels, secret references, commands or overrides", async () => {
   await act(async () => root.render(<Harness />));

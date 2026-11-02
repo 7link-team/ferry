@@ -29,10 +29,12 @@ impl Id {
         if value.trim().is_empty() {
             return Ok(Self(0));
         }
-        value
-            .trim()
-            .parse()
-            .map_err(|_| crate::error::ApiError::bad("引用 ID 无效。"))
+        value.trim().parse().map_err(|_| {
+            crate::error::ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("resource.referenceInvalid"),
+            )
+        })
     }
 }
 impl From<i64> for Id {

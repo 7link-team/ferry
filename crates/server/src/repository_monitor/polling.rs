@@ -2,11 +2,12 @@
 use super::*;
 use crate::{entities::locks, lock, repository_auth::MonitorAccess};
 use futures::{StreamExt, stream};
+use sea_orm::QuerySelect;
 use std::collections::BTreeMap;
 use tokio::sync::watch;
 
 const LEASE_MS: i64 = 60_000;
-type Snapshot = BTreeMap<String, Repository>;
+pub(super) type Snapshot = BTreeMap<String, Repository>;
 
 #[cfg(test)]
 mod tests {
@@ -93,6 +94,7 @@ mod tests {
             version: Set(1),
             created_at: Set(0),
             updated_at: Set(0),
+            ..Default::default()
         })
         .exec_without_returning(&s.db)
         .await
@@ -220,6 +222,273 @@ mod tests {
         assert_eq!(config.poll_interval_minutes, 1);
         assert!(supported_events("codeup", Mode::Poll).contains(&"repository.created"));
         assert!(!supported_events("codeup", Mode::Push).contains(&"repository.created"));
+    }
+
+    #[tokio::test]
+    async fn disappeared_repository_queues_only_event_analysis_without_notification_leak() {
+        use crate::entities::{
+            repository_analysis_configs as configs, repository_analysis_jobs as jobs,
+            repository_analysis_sources as sources,
+        };
+        use sea_orm::PaginatorTrait;
+        let (_dir, s) = test_state().await;
+        let connection = connections::Model {
+            id: 2,
+            workspace_id: 1,
+            user_id: 1,
+            provider: "github".into(),
+            name: "test".into(),
+            description: String::new(),
+            credential_id: 3,
+            account: String::new(),
+            refresh_secret: String::new(),
+            expires_at: 0,
+            state: "connected".into(),
+            last_error: String::new(),
+            client_id: String::new(),
+            config_fingerprint: String::new(),
+            token_config: None,
+            version: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let analysis = crate::repository_analysis::Config {
+            enabled: true,
+            event_repositories: Some(vec!["team/event".into()]),
+            ..Default::default()
+        };
+        configs::Entity::insert(
+            configs::Model {
+                id: 2,
+                workspace_id: 1,
+                config: serde_json::to_string(&analysis).unwrap(),
+                coverage_start: 0,
+                next_reconcile_at: db::now() + 86_400_000,
+                last_error: String::new(),
+                version: 1,
+                created_at: 0,
+                updated_at: 0,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        for (id, path) in [(10, "team/event"), (11, "team/scheduled")] {
+            sources::Entity::insert(
+                sources::Model {
+                    id,
+                    workspace_id: 1,
+                    connection_id: 2,
+                    repository_id: id + 10,
+                    remote_path: path.into(),
+                    coverage_start: 0,
+                    config_version: 1,
+                    state: "complete".into(),
+                    last_error: String::new(),
+                    synced_at: 1,
+                }
+                .into_active_model(),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+            jobs::Entity::insert(
+                jobs::Model {
+                    id,
+                    workspace_id: 1,
+                    generation: 1,
+                    completed_generation: 1,
+                    state: "complete".into(),
+                    cursor: String::new(),
+                    retry_at: 0,
+                    lease_owner: String::new(),
+                    lease_until: 0,
+                    last_error: String::new(),
+                    updated_at: 0,
+                }
+                .into_active_model(),
+            )
+            .exec(&s.db)
+            .await
+            .unwrap();
+        }
+        let previous = BTreeMap::from([
+            ("team/event".into(), Repository::default()),
+            ("team/scheduled".into(), Repository::default()),
+        ]);
+        let next = Snapshot::new();
+        let notification = Config {
+            all_repositories: false,
+            repositories: vec!["team/notification-only".into()],
+            events: vec!["repository.deleted".into()],
+            ..Default::default()
+        };
+        let tx = crate::variables::transaction(&s, 1.into()).await.unwrap();
+        observe_analysis(&s, &tx, &connection, Some(&previous), &next)
+            .await
+            .unwrap();
+        // The same notifications admission used by observe() must exclude the
+        // analysis-only repository even when deletion notifications are enabled.
+        for event in changes(&previous, &next, &notification)
+            .into_iter()
+            .filter(|event| {
+                notification.all_repositories
+                    || notification.repositories.contains(&event.repository)
+            })
+        {
+            record(&s, &tx, &connection, &notification, &event, "removed-test")
+                .await
+                .unwrap();
+        }
+        tx.commit().await.unwrap();
+        let event_job = jobs::Entity::find_by_id(10)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event_job.generation, 2);
+        assert_eq!(event_job.state, "queued");
+        let scheduled_job = jobs::Entity::find_by_id(11)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(scheduled_job.generation, 1);
+        assert_eq!(scheduled_job.state, "complete");
+        assert_eq!(events::Entity::find().count(&s.db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn git_polling_shares_analysis_capacity_and_fences_a_lost_slot() {
+        let (_dir, s) = test_state().await;
+        connections::Entity::insert(
+            connections::Model {
+                id: 2,
+                workspace_id: 1,
+                user_id: 1,
+                provider: "git".into(),
+                name: "refs".into(),
+                description: String::new(),
+                credential_id: 0,
+                account: String::new(),
+                refresh_secret: String::new(),
+                expires_at: 0,
+                state: "connected".into(),
+                last_error: String::new(),
+                client_id: String::new(),
+                config_fingerprint: String::new(),
+                token_config: None,
+                version: 1,
+                created_at: 0,
+                updated_at: 0,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let config = Config {
+            enabled: true,
+            mode: Mode::Poll,
+            provider: "git".into(),
+            ..Default::default()
+        };
+        monitors::Entity::insert(monitors::ActiveModel {
+            id: Set(2),
+            workspace_id: Set(1),
+            version: Set(1),
+            config: Set(s
+                .vault
+                .seal(&serde_json::to_string(&config).unwrap(), &aad(1, 2))
+                .unwrap()),
+            created_at: Set(0),
+            updated_at: Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let row = polls::Model {
+            id: 2,
+            workspace_id: 1,
+            config_version: 1,
+            snapshot: String::new(),
+            last_polled_at: 0,
+            next_poll_at: 0,
+            last_error: String::new(),
+        };
+        polls::Entity::insert(row.clone().into_active_model())
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let slot = "repository-analysis-slot:0";
+        assert!(
+            lock::acquire(&s.db, slot, "analysis", db::now(), LEASE_MS)
+                .await
+                .unwrap()
+        );
+        assert!(claim(&s, row.clone()).await.unwrap().is_none());
+        assert!(
+            locks::Entity::find_by_id(lease_name(2))
+                .one(&s.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            polls::Entity::find_by_id(2)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap()
+                .next_poll_at,
+            0
+        );
+        lock::release(&s.db, slot, "analysis").await.unwrap();
+        let claimed = claim(&s, row).await.unwrap().unwrap();
+        current(&s.db, &claimed).await.unwrap();
+        assert_eq!(claimed.slot.as_deref(), Some(slot));
+        locks::Entity::update_many()
+            .col_expr(locks::Column::Owner, Expr::value("replacement"))
+            .filter(locks::Column::Name.eq(slot))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert!(current(&s.db, &claimed).await.is_err());
+        assert_eq!(lock::release(&s.db, slot, &claimed.owner).await.unwrap(), 0);
+    }
+
+    #[test]
+    fn git_event_capabilities_and_moved_tags_preserve_actual_ref_changes() {
+        assert!(supported_events("git", Mode::Push).is_empty());
+        let allowed = supported_events("git", Mode::Poll);
+        assert_eq!(allowed.len(), 6);
+        assert!(!allowed.contains(&"pull_request"));
+        assert!(!allowed.contains(&"repository.deleted"));
+        assert!(!supported_events("github", Mode::Poll).contains(&"tag.updated"));
+        let config = Config {
+            provider: "git".into(),
+            events: allowed.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let state = |target: &str| {
+            BTreeMap::from([(
+                "https://git.example.test/project.git".into(),
+                Repository {
+                    tags: BTreeMap::from([("v1".into(), target.into())]),
+                    ..Default::default()
+                },
+            )])
+        };
+        let old = state("a");
+        let new = state("b");
+        assert!(changes(&new, &new, &config).is_empty());
+        let events = changes(&old, &new, &config);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event, "tag.updated");
+        assert!(events[0].actor.is_empty());
+        assert_eq!(events[0].detail["before"], "a");
+        assert_eq!(events[0].detail["after"], "b");
     }
 
     #[test]
@@ -372,7 +641,13 @@ mod tests {
         apply_commits(&mut forced, commits);
         assert!(forced.detail.get("total_commits").is_none());
         assert_eq!(forced.detail["commits"].as_array().unwrap().len(), 3);
-        assert!(forced.detail["note"].as_str().unwrap().contains("强制推送"));
+        assert!(
+            crate::i18n::render_stored(
+                crate::i18n::Locale::ZhCn,
+                forced.detail["note"].as_str().unwrap()
+            )
+            .contains("强制推送")
+        );
         let mut branch = Event {
             event: "branch.created".into(),
             detail: json!({}),
@@ -393,9 +668,9 @@ mod tests {
 }
 
 #[derive(Default, Serialize, Deserialize)]
-struct Repository {
-    branches: BTreeMap<String, String>,
-    tags: BTreeMap<String, String>,
+pub(super) struct Repository {
+    pub(super) branches: BTreeMap<String, String>,
+    pub(super) tags: BTreeMap<String, String>,
     requests: BTreeMap<String, Request>,
     // Listing detail of the current poll only, for event detail; never part of
     // the persisted baseline.
@@ -415,13 +690,23 @@ struct Request {
     detail: Value,
 }
 
-fn note(detail: &mut Value, text: &str) {
+fn note(detail: &mut Value, message: crate::i18n::Message) {
     if let Value::Object(map) = detail {
         let joined = match map.get("note").and_then(Value::as_str) {
-            Some(existing) if !existing.is_empty() => format!("{existing}；{text}"),
-            _ => text.to_owned(),
+            Some(existing) if !existing.is_empty() => {
+                let joined = crate::i18n::Message::new("repository.monitor.notes")
+                    .with_message("second", message);
+                match crate::i18n::decode_stored(existing) {
+                    Some(first) => joined.with_message("first", first),
+                    None => joined.with("first", existing),
+                }
+            }
+            _ => message,
         };
-        map.insert("note".into(), Value::from(joined));
+        map.insert(
+            "note".into(),
+            Value::from(crate::i18n::store_message(&joined)),
+        );
     }
 }
 
@@ -436,7 +721,10 @@ fn reference_details(rows: &[Value]) -> BTreeMap<String, Value> {
 }
 
 fn invalid() -> ApiError {
-    ApiError::bad("代码平台返回了不完整的监控数据，保留上次基线。")
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("repository.monitor.dataIncomplete"),
+    )
 }
 fn bounded(value: &str) -> String {
     value.chars().take(400).collect()
@@ -457,7 +745,10 @@ async fn resource(access: &MonitorAccess, path: &str, name: &str) -> Result<Vec<
             return Ok(result);
         }
     }
-    Err(ApiError::bad("代码平台分页超出支持范围，保留上次基线。"))
+    Err(ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("repository.monitor.paginationUnsupported"),
+    ))
 }
 fn references(rows: Vec<Value>, require_revision: bool) -> Result<BTreeMap<String, String>> {
     let mut result = BTreeMap::new();
@@ -526,19 +817,29 @@ async fn snapshot(
     s: &AppState,
     connection: &connections::Model,
     config: &Config,
-) -> Result<(Snapshot, MonitorAccess)> {
+) -> Result<(Snapshot, Option<MonitorAccess>)> {
     if connection.state != "connected" {
-        return Err(ApiError::bad("仓库连接授权已失效，请重新授权。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.authorizationInvalid"),
+        ));
     }
     let scope =
         Scope::for_actor(s, connection.workspace_id.into(), connection.user_id.into()).await?;
     scope.require("repositories.read")?;
     scope.require("credentials.read")?;
+    if connection.provider == "git" {
+        return super::git::snapshot(s, connection, config)
+            .await
+            .map(|snapshot| (snapshot, None));
+    }
     let access = MonitorAccess::load(s, connection).await?;
-    let branches = config
-        .events
-        .iter()
-        .any(|e| e == "push" || e.starts_with("branch."));
+    let analysis = crate::repository_analysis::monitor_subscription(&s.db, connection.id).await?;
+    let branches = analysis.is_some()
+        || config
+            .events
+            .iter()
+            .any(|e| e == "push" || e.starts_with("branch."));
     let tags = config.events.iter().any(|e| e.starts_with("tag."));
     let prs = config
         .events
@@ -553,7 +854,9 @@ async fn snapshot(
                 .as_str()
                 .filter(|p| !p.is_empty())
                 .ok_or_else(invalid)?;
-            if !config.all_repositories && !config.repositories.iter().any(|p| p == path) {
+            let notification_selected =
+                config.all_repositories || config.repositories.iter().any(|p| p == path);
+            if !notification_selected && !analysis.as_ref().is_some_and(|v| v.selects(path)) {
                 continue;
             }
             if result.contains_key(path) {
@@ -566,7 +869,7 @@ async fn snapshot(
             } else {
                 Default::default()
             };
-            let (tags, tag_detail) = if tags {
+            let (tags, tag_detail) = if tags && notification_selected {
                 let rows = resource(&access, path, "tags").await?;
                 let detail = reference_details(&rows);
                 (references(rows, false)?, detail)
@@ -576,7 +879,7 @@ async fn snapshot(
             let repository = Repository {
                 branches,
                 tags,
-                requests: if prs {
+                requests: if prs && notification_selected {
                     requests(resource(&access, path, "requests").await?)?
                 } else {
                     BTreeMap::new()
@@ -588,10 +891,13 @@ async fn snapshot(
             result.insert(path.into(), repository);
         }
         if repositories["has_more"].as_bool() == Some(false) {
-            return Ok((result, access));
+            return Ok((result, Some(access)));
         }
     }
-    Err(ApiError::bad("代码平台分页超出支持范围，保留上次基线。"))
+    Err(ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("repository.monitor.paginationUnsupported"),
+    ))
 }
 
 fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
@@ -615,7 +921,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 repository: bounded(repository),
                 reference: bounded(reference),
                 actor: bounded(&actor),
-                action: action.into(),
+                action: crate::i18n::store_message(&crate::i18n::Message::new(action)),
                 detail,
             });
         }
@@ -627,7 +933,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 "repository.created",
                 path,
                 "",
-                "轮询检测：仓库首次出现在当前凭据的可见列表中",
+                "repository.monitor.detectedRepository",
                 String::new(),
                 detail,
             );
@@ -651,7 +957,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                         "branch.created",
                         path,
                         name,
-                        "轮询检测：新增分支",
+                        "repository.monitor.detectedBranch",
                         String::new(),
                         detail,
                     )
@@ -660,7 +966,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                     "push",
                     path,
                     name,
-                    "轮询检测：分支提交发生变化",
+                    "repository.monitor.detectedPush",
                     String::new(),
                     json!({ "before": before, "after": revision }),
                 ),
@@ -677,21 +983,37 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 "branch.deleted",
                 path,
                 name,
-                "轮询检测：分支已移除",
+                "repository.monitor.detectedBranchDeleted",
                 String::new(),
                 detail,
             );
+        }
+        if config.provider == "git" {
+            for (name, revision) in &current.tags {
+                if let Some(before) = previous.tags.get(name).filter(|before| *before != revision) {
+                    add(
+                        "tag.updated",
+                        path,
+                        name,
+                        "repository.monitor.detectedTagChanged",
+                        String::new(),
+                        json!({"before":before,"after":revision,"target":revision}),
+                    );
+                }
+            }
         }
         for name in current
             .tags
             .keys()
             .filter(|name| !previous.tags.contains_key(*name))
         {
-            let detail = current
-                .tag_detail
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| json!({}));
+            let detail = current.tag_detail.get(name).cloned().unwrap_or_else(|| {
+                if config.provider == "git" {
+                    json!({"target":current.tags[name]})
+                } else {
+                    json!({})
+                }
+            });
             let tagger = detail::field(&detail, &["/tagger"], 200);
             let actor = if tagger.is_empty() {
                 String::new()
@@ -702,7 +1024,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 "tag.created",
                 path,
                 name,
-                "轮询检测：新增标签",
+                "repository.monitor.detectedTag",
                 actor,
                 detail,
             );
@@ -717,7 +1039,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                 "tag.deleted",
                 path,
                 name,
-                "轮询检测：标签已移除",
+                "repository.monitor.detectedTagDeleted",
                 String::new(),
                 detail,
             );
@@ -740,11 +1062,11 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
                     path,
                     &request.reference,
                     if merged {
-                        "轮询检测：合并请求已合并"
+                        "repository.monitor.detectedMerged"
                     } else if prior.is_none() {
-                        "轮询检测：新增合并请求"
+                        "repository.monitor.detectedRequest"
                     } else {
-                        "轮询检测：合并请求发生变化"
+                        "repository.monitor.detectedRequestChanged"
                     },
                     actor,
                     detail,
@@ -758,7 +1080,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             "repository.deleted",
             path,
             "",
-            "轮询检测：仓库已不可见，可能已删除或访问权限发生变化",
+            "repository.monitor.detectedRepositoryGone",
             String::new(),
             detail,
         );
@@ -778,10 +1100,14 @@ async fn enrich(access: &MonitorAccess, events: &mut [Event]) {
     {
         match access.commits(&event.repository, &event.reference).await {
             Ok(rows) => apply_commits(event, rows.iter().map(detail::commit).collect()),
-            Err(error) => note(
-                &mut event.detail,
-                &format!("提交明细获取失败：{}", bounded(&error.1)),
-            ),
+            Err(error) => {
+                let message = crate::i18n::Message::new("repository.monitor.commitsFailed");
+                let message = match error.2 {
+                    Some(cause) => message.with_message("error", cause),
+                    None => message.with("error", bounded(&error.1)),
+                };
+                note(&mut event.detail, message);
+            }
         }
     }
 }
@@ -804,7 +1130,7 @@ fn apply_commits(event: &mut Event, commits: Vec<Value>) {
         Some(count) => event.detail["total_commits"] = json!(count),
         None => note(
             &mut event.detail,
-            "最近的提交中未找到推送前的版本，可能是强制推送或一次推送了大量提交；以下为该分支最新的提交",
+            crate::i18n::Message::new("repository.monitor.historyRewritten"),
         ),
     }
     if pushed.len() > detail::COMMITS {
@@ -826,8 +1152,17 @@ struct Claim {
     state: polls::Model,
     owner: String,
     name: String,
+    slot: Option<String>,
 }
+#[cfg(test)]
 async fn claim(s: &AppState, row: polls::Model) -> Result<Option<Claim>> {
+    claim_with_limit(s, row, std::num::NonZeroUsize::new(1).unwrap()).await
+}
+async fn claim_with_limit(
+    s: &AppState,
+    row: polls::Model,
+    concurrency: std::num::NonZeroUsize,
+) -> Result<Option<Claim>> {
     let tx = crate::variables::transaction(s, row.workspace_id.into()).await?;
     let Some(monitor) = monitors::Entity::find_by_id(row.id).one(&tx).await? else {
         return Ok(None);
@@ -861,6 +1196,19 @@ async fn claim(s: &AppState, row: polls::Model) -> Result<Option<Claim>> {
     if !lock::acquire(&tx, &name, &owner, now, LEASE_MS).await? {
         return Ok(None);
     }
+    let mut slot = None;
+    if connection.provider == "git" {
+        for index in 0..concurrency.get() {
+            let candidate = format!("repository-analysis-slot:{index}");
+            if lock::acquire(&tx, &candidate, &owner, now, LEASE_MS).await? {
+                slot = Some(candidate);
+                break;
+            }
+        }
+        if slot.is_none() {
+            return Ok(None); // Roll back the tentative connection lock; keep the task due.
+        }
+    }
     polls::Entity::update_many()
         .col_expr(
             polls::Column::NextPollAt,
@@ -877,6 +1225,7 @@ async fn claim(s: &AppState, row: polls::Model) -> Result<Option<Claim>> {
         state,
         owner,
         name,
+        slot,
     }))
 }
 async fn current(tx: &impl sea_orm::ConnectionTrait, claim: &Claim) -> Result<()> {
@@ -889,15 +1238,32 @@ async fn current(tx: &impl sea_orm::ConnectionTrait, claim: &Claim) -> Result<()
         .await?
         .ok_or_else(ApiError::missing)?;
     let lease = locks::Entity::find_by_id(&claim.name)
+        .lock_exclusive()
         .one(tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    if let Some(slot) = &claim.slot {
+        let slot = locks::Entity::find_by_id(slot)
+            .lock_exclusive()
+            .one(tx)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if slot.owner != claim.owner || slot.expires_at <= db::now() {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("repository.monitor.gitSlotExpired"),
+            ));
+        }
+    }
     if monitor.version != claim.monitor.version
         || connection.version != claim.connection.version
         || lease.owner != claim.owner
         || lease.expires_at <= db::now()
     {
-        return Err(ApiError::conflict("轮询归属或连接配置已变更，结果已丢弃。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repository.monitor.pollOwnershipChanged"),
+        ));
     }
     Ok(())
 }
@@ -910,7 +1276,12 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
                 &claim.state.snapshot,
                 &poll_aad(claim.state.workspace_id, claim.state.id),
             )?)
-            .map_err(|_| ApiError::bad("轮询基线无法读取。"))?,
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.monitor.baselineRead"),
+                )
+            })?,
         )
     };
     // Diff and fetch commit detail before taking the workspace lock: provider
@@ -921,7 +1292,15 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
                 .as_ref()
                 .map(|previous| changes(previous, &next, &claim.config))
                 .unwrap_or_default();
-            enrich(&access, &mut events).await;
+            // The sampled snapshot includes analysis-only repositories too;
+            // notification admission still follows only its own selection.
+            events.retain(|event| {
+                claim.config.all_repositories
+                    || claim.config.repositories.contains(&event.repository)
+            });
+            if let Some(access) = access {
+                enrich(&access, &mut events).await;
+            }
             (Ok(next), events)
         }
         Err(error) => (Err(error), Vec::new()),
@@ -938,7 +1317,33 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
         )
         .await?;
         scope.require("repositories.read")?;
-        scope.require("credentials.read")
+        scope.require("credentials.read")?;
+        if claim.connection.provider == "git" {
+            scope.require("hosts.terminal")?;
+            let connection = connections::Entity::find_by_id(claim.connection.id)
+                .one(&tx)
+                .await?
+                .ok_or_else(ApiError::missing)?;
+            if connection.state != "connected" {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.monitor.authorizationBaseline"),
+                ));
+            }
+            let runner: Id = claim.config.runner_id.parse().map_err(|_| invalid())?;
+            if crate::entities::hosts::Entity::find_by_id(i64::from(runner))
+                .filter(
+                    crate::entities::hosts::Column::WorkspaceId.eq(claim.connection.workspace_id),
+                )
+                .filter(crate::entities::hosts::Column::Connection.eq("runner"))
+                .one(&tx)
+                .await?
+                .is_none()
+            {
+                return Err(ApiError::missing());
+            }
+        }
+        Ok(())
     }
     .await;
     if let Err(error) = authorized {
@@ -947,6 +1352,7 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
     let mut deliveries = Vec::new();
     match observed {
         Ok(next) => {
+            observe_analysis(s, &tx, &claim.connection, previous.as_ref(), &next).await?;
             for (index, event) in candidates.into_iter().enumerate() {
                 // Unique persisted sampling identity distinguishes A→B→A→B.
                 let key = format!("poll:{}:{index}", claim.owner);
@@ -969,7 +1375,14 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
         }
         Err(error) => {
             polls::Entity::update_many()
-                .col_expr(polls::Column::LastError, Expr::value(bounded(&error.1)))
+                .col_expr(
+                    polls::Column::LastError,
+                    Expr::value(if error.2.is_some() {
+                        error.stored()
+                    } else {
+                        crate::i18n::store_raw(&bounded(&error.1))
+                    }),
+                )
                 .filter(polls::Column::Id.eq(claim.state.id))
                 .exec(&tx)
                 .await?;
@@ -991,11 +1404,36 @@ async fn observe(s: &AppState, claim: &Claim) -> Result<()> {
     }
     Ok(())
 }
-async fn poll(s: &AppState, row: polls::Model, drain: &mut watch::Receiver<bool>) -> Result<()> {
+
+/// Admit analysis hints independently of notification selection, after the poll's
+/// ownership and permission fences. Disappearance can mean deletion or lost access.
+async fn observe_analysis(
+    s: &AppState,
+    tx: &impl sea_orm::ConnectionTrait,
+    connection: &connections::Model,
+    previous: Option<&Snapshot>,
+    next: &Snapshot,
+) -> Result<()> {
+    for (path, repository) in next {
+        crate::repository_analysis::observes(s, tx, connection, path, &repository.branches).await?;
+    }
+    if let Some(previous) = previous {
+        for path in previous.keys().filter(|path| !next.contains_key(*path)) {
+            crate::repository_analysis::event(s, tx, connection, path).await?;
+        }
+    }
+    Ok(())
+}
+async fn poll(
+    s: &AppState,
+    row: polls::Model,
+    drain: &mut watch::Receiver<bool>,
+    concurrency: std::num::NonZeroUsize,
+) -> Result<()> {
     if *drain.borrow() {
         return Ok(());
     }
-    let Some(claim) = claim(s, row).await? else {
+    let Some(claim) = claim_with_limit(s, row, concurrency).await? else {
         return Ok(());
     };
     let result = {
@@ -1005,8 +1443,13 @@ async fn poll(s: &AppState, row: polls::Model, drain: &mut watch::Receiver<bool>
             interval.tick().await;
             loop {
                 interval.tick().await;
-                if lock::renew(&s.db, &claim.name, &claim.owner, db::now(), LEASE_MS).await? != 1 {
-                    return Err(ApiError::conflict("轮询租约已失效，结果已丢弃。"));
+                for name in std::iter::once(&claim.name).chain(claim.slot.iter()) {
+                    if lock::renew(&s.db, name, &claim.owner, db::now(), LEASE_MS).await? != 1 {
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::CONFLICT,
+                            crate::i18n::Message::new("repository.monitor.pollLeaseExpired"),
+                        ));
+                    }
                 }
             }
         };
@@ -1016,7 +1459,9 @@ async fn poll(s: &AppState, row: polls::Model, drain: &mut watch::Receiver<bool>
             result = renewal => result,
         }
     };
-    lock::release(&s.db, &claim.name, &claim.owner).await?;
+    for name in std::iter::once(&claim.name).chain(claim.slot.iter()) {
+        lock::release(&s.db, name, &claim.owner).await?;
+    }
     result
 }
 /// Remove repository events older than each workspace's configured retention.
@@ -1065,7 +1510,11 @@ async fn prune(s: &AppState) -> Result<()> {
     Ok(())
 }
 
-pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
+pub async fn scheduler(
+    s: AppState,
+    concurrency: std::num::NonZeroUsize,
+    mut drain: watch::Receiver<bool>,
+) {
     let mut pruned_at = 0;
     loop {
         if *drain.borrow() {
@@ -1087,7 +1536,7 @@ pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
                     .map(|row| {
                         let s = s.clone();
                         let mut drain = drain.clone();
-                        async move { poll(&s, row, &mut drain).await }
+                        async move { poll(&s, row, &mut drain, concurrency).await }
                     })
                     .buffer_unordered(4);
                 while let Some(result) = work.next().await {

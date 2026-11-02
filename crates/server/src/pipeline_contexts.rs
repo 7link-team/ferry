@@ -1,4 +1,5 @@
 //! Workspace pipeline groups/environments and their classification references.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{
@@ -11,11 +12,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
     QuerySelect, QueryTrait, Set,
@@ -69,7 +66,10 @@ pub async fn scoped(
 }
 async fn check(conn: &impl ConnectionTrait, scope: &Scope, kind: &str, body: &Body) -> Result<()> {
     if body.name.trim().is_empty() || body.name.trim().chars().count() > 60 {
-        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("credentials.nameRequired"),
+        ));
     }
     if kind == "environment" {
         let id = Id::reference(&body.target_ref)?;
@@ -86,10 +86,18 @@ async fn check(conn: &impl ConnectionTrait, scope: &Scope, kind: &str, body: &Bo
                     .count(conn)
                     .await?
             }
-            _ => return Err(ApiError::bad("环境执行目标必须是主机或主机组。")),
+            _ => {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("contexts.targetKind"),
+                ));
+            }
         };
         if count == 0 {
-            return Err(ApiError::bad("环境执行目标不存在于当前工作空间。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("contexts.targetMissing"),
+            ));
         }
     }
     Ok(())
@@ -185,7 +193,10 @@ async fn update(
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let current = scoped(&tx, scope.workspace_id, kind, id).await?;
     if current.version != body.version {
-        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("contexts.changed"),
+        ));
     }
     check(&tx, &scope, kind, &body).await?;
     rows::Entity::update_many()
@@ -341,7 +352,10 @@ pub async fn reorder_groups(
     let expected: HashSet<i64> = current.iter().map(|row| row.id).collect();
     let actual: HashSet<i64> = ids.iter().map(|id| i64::from(*id)).collect();
     if actual != expected || ids.len() != current.len() {
-        return Err(ApiError::bad("分组顺序已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("contexts.orderChanged"),
+        ));
     }
     for (position, id) in ids.iter().enumerate() {
         rows::Entity::update_many()
@@ -401,7 +415,10 @@ pub async fn check_single(
         }
     };
     if count == 0 {
-        return Err(ApiError::bad("分类对象不存在于当前工作空间。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("contexts.objectMissing"),
+        ));
     }
     Ok(())
 }
@@ -419,7 +436,10 @@ pub async fn replace_links(
     }
     for id in &ids {
         if i64::from(*id) == 0 {
-            return Err(ApiError::bad("请选择有效分类对象。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("contexts.objectInvalid"),
+            ));
         }
         check_single(tx, workspace, kind, *id).await?;
     }
@@ -463,7 +483,10 @@ pub async fn selected(
         return Ok(None);
     }
     if !allowed.contains(&selected) {
-        return Err(ApiError::bad("请选择该流水线绑定的执行环境。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("contexts.environmentBinding"),
+        ));
     }
     Ok(Some(
         scoped(conn, workspace, "environment", selected).await?,
@@ -519,8 +542,9 @@ pub async fn ensure_unreferenced(
         }
     };
     if count > 0 {
-        return Err(ApiError::conflict(
-            "对象仍被流水线或执行环境引用，请先解除关联。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("contexts.objectReferenced"),
         ));
     }
     Ok(())

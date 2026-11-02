@@ -1,3 +1,4 @@
+import { i18n } from "../i18n";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,7 +6,7 @@ import { dirname, join } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { HostConnectionCommand, RunnerConnection, runnerInstallCommand, runnerServerOrigin, runnerUninstallCommand } from "./RunnerConnection";
+import { HostConnectionCommand, RunnerConnection, RunnerUpdateStatus, runnerInstallCommand, runnerServerOrigin, runnerUninstallCommand } from "./RunnerConnection";
 
 it.skipIf(process.platform !== "win32")("rejects legacy Runner help before native installation with an actionable error", () => {
   const harness = `
@@ -292,6 +293,8 @@ const click = async (label: string) => {
   await act(async () => button.click());
 };
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
+  localStorage.setItem("ui.locale", "zh-CN");
   vi.useFakeTimers();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -516,4 +519,34 @@ it("regenerates consumed but expired tokens, while connected offline hosts keep 
   await act(async () => vi.advanceTimersByTimeAsync(18000));
   expect(host.textContent).toContain("已注册，等待主机上线");
   expect(host.textContent).not.toContain("命令已过期");
+});
+
+it("shows automatic upgrade policy, drain and persisted retry status", async () => {
+  const value = { agent_version: "0.1.0", target_version: "0.2.0", supported: true, ready: true, enabled: true,
+    auto_update: "inherit", global_auto_update: true,
+    update: { state: "draining", version: "0.2.0", message: "等待完整任务结束", auto: { attempts: 1, next_retry_at: 0 } } };
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => structuredClone(value) })));
+  await act(async () => root.render(<RunnerUpdateStatus workspace="ops" hostId="h1" />));
+  expect(host.textContent).toContain("当前版本 0.1.0");
+  expect(host.textContent).toContain("启用（跟随平台默认）");
+  expect(host.textContent).toContain("等待任务结束");
+  value.update = { state: "retrying", version: "0.2.0", message: "下载失败", auto: { attempts: 2, next_retry_at: 1800000000000 } };
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).toContain("等待重试");
+  expect(host.textContent).toContain(new Date(1800000000000).toLocaleString());
+  value.update.state = "rolled_back"; value.update.auto.next_retry_at = 0;
+  await act(async () => vi.advanceTimersByTimeAsync(5000));
+  expect(host.textContent).toContain("已回退");
+  expect(host.textContent).not.toContain("下次尝试");
+});
+
+it("reports upgrade status fetch errors and stops polling after unmount", async () => {
+  const get = vi.fn(async () => { throw new Error("offline"); });
+  vi.stubGlobal("fetch", get);
+  await act(async () => root.render(<RunnerUpdateStatus workspace="ops" hostId="h1" />));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("无法刷新升级状态");
+  await act(async () => root.render(<div />));
+  const count = get.mock.calls.length;
+  await act(async () => vi.advanceTimersByTimeAsync(10000));
+  expect(get).toHaveBeenCalledTimes(count);
 });

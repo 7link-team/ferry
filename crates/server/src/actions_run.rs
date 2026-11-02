@@ -1,4 +1,5 @@
 //! Actions job orchestration. All target I/O uses the existing HostChannel.
+use crate::i18n::Message;
 use crate::{
     actions::{Job, Snapshot},
     channel::HostChannel,
@@ -7,10 +8,11 @@ use crate::{
         hosts, pipeline_run_jobs as jobs, pipeline_run_steps as steps, pipeline_runs as runs,
     },
     error::{ApiError, Result},
-    pipeline_runs::{self as history, append, quote, upload},
+    pipeline_runs::{self as history, append, append_message, quote, upload},
     snowflake::Id,
     state::AppState,
 };
+use axum::http::StatusCode;
 use futures::{StreamExt, stream::FuturesUnordered};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr};
 use serde::{Deserialize, Serialize};
@@ -127,7 +129,10 @@ async fn execute_reserved(
     for checkout in &mut snapshot.checkouts {
         if checkout.binding.pipeline_repository() {
             if run.repo_url.is_empty() {
-                return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.repositoryRequired"),
+                ));
             }
             checkout.binding.repository_url = run.repo_url.clone();
             checkout.binding.git_ref = if run.commit.is_empty() {
@@ -294,17 +299,15 @@ async fn execute_reserved(
                 let outcome = match result {
                     Ok(result) => result,
                     Err(error) => {
-                        append(
+                        append_failure(
                             s,
                             run.id,
-                            -1,
                             &mut *seq.lock().await,
-                            "stderr",
-                            &history::redact(
-                                format!("任务 {} 执行或清理失败：{}\n", job.key, error.1),
-                                credential,
-                                &variables,
-                            ),
+                            &job.key,
+                            None,
+                            error,
+                            credential,
+                            &variables,
                         )
                         .await?;
                         Outcome {
@@ -319,7 +322,7 @@ async fn execute_reserved(
                 };
                 let sealed = s.vault.seal(
                     &serde_json::to_string(&outcome.outputs)
-                        .map_err(|_| ApiError::bad("无法保存任务输出。"))?,
+                        .map_err(|_| ApiError::localized(StatusCode::BAD_REQUEST, Message::new("execution.saveJobOutput")))?,
                     &crate::vault::aad(
                         &run.workspace_id.to_string(),
                         "actions-job-outputs",
@@ -522,7 +525,10 @@ where
         return Err(error);
     }
     if !*cancelled.borrow() && completed.len() != jobs.len() {
-        return Err(ApiError::bad("Actions 依赖无法调度。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.dependenciesUnscheduled"),
+        ));
     }
     Ok(completed)
 }
@@ -571,14 +577,21 @@ impl Delivered {
             jobs: BTreeMap::new(),
         };
         for reference in references {
-            let (namespace, name) = reference
-                .name
-                .split_once(':')
-                .ok_or_else(|| ApiError::bad("变量引用无效。"))?;
+            let (namespace, name) = reference.name.split_once(':').ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.referenceInvalid"),
+                )
+            })?;
             let value = opened
                 .values
                 .get(name)
-                .ok_or_else(|| ApiError::bad("缺少变量快照。"))?
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.snapshotMissing"),
+                    )
+                })?
                 .clone();
             if namespace == "secrets" {
                 delivered.secrets.insert(name.to_owned(), value);
@@ -928,8 +941,9 @@ async fn execute_job(
         .ok_or_else(ApiError::missing)?;
     let windows = host.os == "windows";
     if windows && job.image != "host" {
-        return Err(ApiError::bad(
-            "Windows 主机只能直接在主机上执行任务（runs-on: self-hosted），不支持容器镜像。",
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.windowsContainer"),
         ));
     }
     let host = crate::remote::Host {
@@ -958,7 +972,10 @@ async fn execute_job(
             )
             .await?;
         if made.code != 0 {
-            return Err(ApiError::bad("无法创建 Actions 工作目录。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.createWorkdir"),
+            ));
         }
         (ch, private)
     };
@@ -985,7 +1002,10 @@ async fn execute_job(
         )
         .await?;
     if cleanup.code != 0 {
-        return Err(ApiError::bad("Actions 临时目录清理失败。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.cleanupFailed"),
+        ));
     }
     result
 }
@@ -1015,8 +1035,9 @@ async fn execute_private(
         // Git for Windows' sh reports MINGW64_NT-10.0-… / MSYS_NT-….
         Some(name) if name.starts_with("MINGW") || name.starts_with("MSYS") => "windows",
         _ => {
-            return Err(ApiError::bad(
-                "Actions worker 需要 Linux、macOS 或 Windows 执行器。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.workerOs"),
             ));
         }
     };
@@ -1024,7 +1045,12 @@ async fn execute_private(
     let arch = match lines.get(1).copied() {
         Some("x86_64") => "amd64",
         Some("aarch64" | "arm64") => "arm64",
-        _ => return Err(ApiError::bad("执行器架构尚未支持。")),
+        _ => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.workerArch"),
+            ));
+        }
     };
     let directory = std::env::var_os("ACTIONS_WORKER_DIR")
         .map(std::path::PathBuf::from)
@@ -1035,7 +1061,12 @@ async fn execute_private(
         });
     let binary = tokio::fs::read(directory.join(format!("actions-worker-{os}-{arch}{exe}")))
         .await
-        .map_err(|_| ApiError::bad("缺少对应平台 Actions worker，请完成安装。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.workerMissing"),
+            )
+        })?;
     let chunks: Vec<_> = binary
         .chunks(65536)
         .map(|chunk| Ok(bytes::Bytes::copy_from_slice(chunk)))
@@ -1105,7 +1136,10 @@ async fn execute_private(
         });
     }
     if code != 0 {
-        return Err(ApiError::bad("仓库拉取失败。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.checkoutFailed"),
+        ));
     }
     let (secrets, vars) = delivered.for_job(&job.key);
     let mut secrets = secrets.clone();
@@ -1128,10 +1162,18 @@ async fn execute_private(
             .jobs
             .iter()
             .find(|job| job.key == key)
-            .ok_or_else(|| ApiError::bad("Actions 依赖不存在。"))?;
-        let outcome = completed
-            .get(&key)
-            .ok_or_else(|| ApiError::bad("Actions 依赖尚未完成。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.dependencyMissing"),
+                )
+            })?;
+        let outcome = completed.get(&key).ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.dependencyIncomplete"),
+            )
+        })?;
         ancestors.extend(ancestor.needs.iter().cloned());
         let mut outcome = outcome.clone();
         if outcome.tolerated() {
@@ -1156,7 +1198,10 @@ async fn execute_private(
     for artifact in &existing {
         crate::artifacts::validate_paths(&[artifact.path.clone()])?;
         if !artifact.path.starts_with(&format!("artifacts/{}/", run.id)) {
-            return Err(ApiError::bad("Actions 产物路径无效。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.artifactPathInvalid"),
+            ));
         }
         let path = format!("{private}/{}", artifact.path);
         let parent = path.rsplit_once('/').unwrap().0;
@@ -1167,17 +1212,27 @@ async fn execute_private(
             )
             .await?;
         if made.code != 0 {
-            return Err(ApiError::bad("无法准备产物下载目录。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.prepareArtifactDir"),
+            ));
         }
         let file = tokio::fs::File::open(crate::artifacts::file_path(s, artifact))
             .await
-            .map_err(|_| ApiError::bad("构建产物已丢失。"))?;
+            .map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.artifactMissing"),
+                )
+            })?;
         let stream = futures::stream::try_unfold(file, |mut file| async move {
             let mut bytes = vec![0; 65536];
-            let count = file
-                .read(&mut bytes)
-                .await
-                .map_err(|_| ApiError::bad("无法读取构建产物。"))?;
+            let count = file.read(&mut bytes).await.map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.readArtifact"),
+                )
+            })?;
             if count == 0 {
                 return Ok(None);
             }
@@ -1187,12 +1242,21 @@ async fn execute_private(
         ch.write_file(&path, 0o600, Box::pin(stream)).await?;
     }
     let workflow = checkout_workflow(snapshot, job, variables, &mut secrets)?;
-    let mut workflow: Value =
-        serde_yaml_ng::from_str(&workflow).map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    let mut workflow: Value = serde_yaml_ng::from_str(&workflow).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.yamlInvalid"),
+        )
+    })?;
     let container = job.image != "host" || workflow["jobs"][&job.key].get("container").is_some();
     let job_env = workflow["jobs"][&job.key]
         .as_object_mut()
-        .ok_or_else(|| ApiError::bad("Actions 任务不存在。"))?
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.jobMissing"),
+            )
+        })?
         .entry("env")
         .or_insert_with(|| json!({}));
     if !run.repo_url.is_empty() {
@@ -1244,7 +1308,10 @@ async fn execute_private(
                 ("GIT_CONFIG_KEY_0", "credential.helper".into()),
                 ("GIT_CONFIG_VALUE_0", "".into()),
                 ("GIT_CONFIG_KEY_1", "credential.helper".into()),
-                ("GIT_CONFIG_VALUE_1", format!("{private}/credential-helper")),
+                (
+                    "GIT_CONFIG_VALUE_1",
+                    format!("!{}", quote(&format!("{private}/credential-helper"))),
+                ),
                 ("GIT_CONFIG_KEY_2", "core.askPass".into()),
                 ("GIT_CONFIG_VALUE_2", "".into()),
                 ("GIT_ASKPASS", "".into()),
@@ -1254,8 +1321,12 @@ async fn execute_private(
             }
         }
     }
-    let workflow =
-        serde_json::to_string(&workflow).map_err(|_| ApiError::bad("无法准备任务环境。"))?;
+    let workflow = serde_json::to_string(&workflow).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.prepareJobEnv"),
+        )
+    })?;
     let context = github_context(run);
     upload(
         ch,
@@ -1312,15 +1383,26 @@ async fn execute_private(
             steps: BTreeMap::new(),
         });
     }
-    let result = outcome.ok_or_else(|| ApiError::bad("Actions worker 没有返回执行结果。"))?;
+    let result = outcome.ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.workerNoResult"),
+        )
+    })?;
     if leg.plan {
         if code != 0 {
-            return Err(ApiError::bad("Actions 矩阵展开失败。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.matrixExpansion"),
+            ));
         }
         return Ok(result);
     }
     if code != 0 && result.state == "success" {
-        return Err(ApiError::bad("Actions worker 异常退出。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.workerExit"),
+        ));
     }
     let paths: Vec<_> = result
         .artifacts
@@ -1332,7 +1414,10 @@ async fn execute_private(
         .iter()
         .any(|path| !path.starts_with(&format!("artifacts/{}/", run.id)) || !path.ends_with(".zip"))
     {
-        return Err(ApiError::bad("Actions worker 返回了无效产物路径。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.workerArtifactPath"),
+        ));
     }
     let retention: BTreeMap<_, _> = result
         .artifact_retention
@@ -1355,8 +1440,12 @@ async fn execute_private(
             retention.contains_key(path) || !existing.iter().any(|artifact| artifact.path == *path)
         })
         .collect();
-    let workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow)
-        .map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    let workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.yamlInvalid"),
+        )
+    })?;
     let source_workdir = workflow["jobs"][&job.key]["defaults"]["run"]["working-directory"]
         .as_str()
         .map(|path| runtime_path(path, run))
@@ -1497,16 +1586,16 @@ async fn execute_legs(
                 ..whole.clone()
             };
             let mut leg_stop = aborted.clone();
-            append(
+            append_message(
                 s,
                 run.id,
                 -1,
                 &mut *seq.lock().await,
                 "stdout",
-                &format!(
-                    "任务 {} 的矩阵实例 {} 分配到主机 {host}\n",
-                    job.key, instance.name
-                ),
+                Message::new("execution.matrixAssigned")
+                    .with("job", job.key.clone())
+                    .with("name", instance.name.clone())
+                    .with("host", host.to_string()),
             )
             .await?;
             running.push(async move {
@@ -1545,17 +1634,15 @@ async fn execute_legs(
                 let outcome = match result {
                     Ok(outcome) => outcome,
                     Err(error) => {
-                        append(
+                        append_failure(
                             s,
                             run.id,
-                            -1,
                             &mut *seq.lock().await,
-                            "stderr",
-                            &history::redact(
-                                format!("任务 {} 的矩阵实例 {name} 执行失败：{}\n", job.key, error.1),
-                                credential,
-                                variables,
-                            ),
+                            &job.key,
+                            Some(&name),
+                            error,
+                            credential,
+                            variables,
                         )
                         .await?;
                         Outcome {
@@ -1623,8 +1710,13 @@ fn checkout_workflow(
     if snapshot.checkouts.is_empty() && !snapshot.jobs.iter().any(|item| item.manual) {
         return Ok(snapshot.document.workflow.clone());
     }
-    let mut workflow: Value = serde_yaml_ng::from_str(&snapshot.document.workflow)
-        .map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
+    let mut workflow: Value =
+        serde_yaml_ng::from_str(&snapshot.document.workflow).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.yamlInvalid"),
+            )
+        })?;
     for gate in snapshot.jobs.iter().filter(|item| item.manual) {
         workflow["jobs"][&gate.key] = json!({
             "name": gate.name,
@@ -1646,7 +1738,12 @@ fn checkout_workflow(
                     .find(|step| step["id"].as_str() == Some(binding.step_id.as_str()))
             })
             .and_then(Value::as_object_mut)
-            .ok_or_else(|| ApiError::bad("代码源步骤不存在。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.sourceStepMissing"),
+                )
+            })?;
         let mut env = step
             .get("env")
             .and_then(Value::as_object)
@@ -1668,7 +1765,12 @@ fn checkout_workflow(
         step.insert("env".into(), json!(env));
         step.insert("run".into(), json!(checkout_node_script(binding)));
     }
-    serde_json::to_string(&workflow).map_err(|_| ApiError::bad("无法准备代码源步骤。"))
+    serde_json::to_string(&workflow).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.prepareSourceStep"),
+        )
+    })
 }
 
 fn checkout_node_script(binding: &crate::actions::CheckoutBinding) -> String {
@@ -1725,12 +1827,13 @@ printf 'username=%s\npassword=%s\n\n' "${{SOURCE_USER:-git}}" "$SOURCE_SECRET"
 HELPER
     chmod 700 "$credential_dir/helper"
     export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=''
-    export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1="$credential_dir/helper"
+    export SOURCE_CREDENTIAL_HELPER="$credential_dir/helper"
+    export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1={helper}
 fi
 git init -q
 git remote remove origin 2>/dev/null || true
 git remote add origin {url}
-git fetch --no-tags -- origin {reference}
+git fetch --prune --no-tags -- origin {reference}
 revision=$(git rev-parse --verify --end-of-options 'FETCH_HEAD^{{commit}}')
 git checkout --detach "$revision" --
 if [ -n "${{GITHUB_OUTPUT:-}}" ]; then
@@ -1739,7 +1842,8 @@ fi
 "#,
         path = quote(path),
         url = quote(&binding.repository_url),
-        reference = quote(reference)
+        reference = quote(reference),
+        helper = quote("!\"$SOURCE_CREDENTIAL_HELPER\"")
     )
 }
 
@@ -1782,7 +1886,7 @@ async fn stream_events(
                     if failure.is_some(){continue;}
                     let buffer=buffers.entry(stream.clone()).or_default();buffer.extend(data);
                     if buffer.len()>1024*1024 {
-                        failure=Some(ApiError::bad("Actions 日志单行超过 1MB。"));
+                        failure=Some(ApiError::localized(StatusCode::BAD_REQUEST, Message::new("execution.logLineTooLarge")));
                         cancel.send_replace(true);buffer.clear();continue;
                     }
                     while let Some(end)=buffer.iter().position(|byte|*byte==b'\n') {
@@ -1842,9 +1946,12 @@ async fn event(
     let raw = String::from_utf8_lossy(line);
     let value: Value = serde_json::from_slice(line).unwrap_or(Value::Null);
     if worker && stream == "stdout" && value["kind"] == "result" {
-        *outcome = Some(
-            serde_json::from_value(value).map_err(|_| ApiError::bad("Actions 结果格式无效。"))?,
-        );
+        *outcome = Some(serde_json::from_value(value).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.resultInvalid"),
+            )
+        })?);
         return Ok(());
     }
     let step_ids = value
@@ -1940,8 +2047,214 @@ fn step_exit_code(message: &str) -> Option<i32> {
         .and_then(|code| code.parse().ok())
 }
 
+fn redact_message(
+    mut message: Message,
+    credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
+) -> Message {
+    for value in message.params.values_mut() {
+        *value = history::redact(std::mem::take(value), credential, variables);
+    }
+    for child in message.children.values_mut() {
+        *child = redact_message(child.clone(), credential, variables);
+    }
+    message
+}
+
+async fn append_failure(
+    s: &AppState,
+    run: i64,
+    seq: &mut i64,
+    job: &str,
+    matrix: Option<&str>,
+    error: ApiError,
+    credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
+) -> Result<()> {
+    let key = match (matrix.is_some(), error.2.is_some()) {
+        (false, true) => "execution.jobFailed",
+        (true, true) => "execution.matrixFailed",
+        (false, false) => "execution.jobFailedPrefix",
+        (true, false) => "execution.matrixFailedPrefix",
+    };
+    let mut message = Message::new(key).with("job", job);
+    if let Some(name) = matrix {
+        message = message.with("name", name);
+    }
+    if let Some(cause) = error.2 {
+        message = message.with_message("error", cause);
+        append_message(
+            s,
+            run,
+            -1,
+            seq,
+            "stderr",
+            redact_message(message, credential, variables),
+        )
+        .await
+    } else {
+        append_message(
+            s,
+            run,
+            -1,
+            seq,
+            "stderr",
+            redact_message(message, credential, variables),
+        )
+        .await?;
+        // Provider output may be arbitrarily large; keep it in raw UTF-8 chunks.
+        append(
+            s,
+            run,
+            -1,
+            seq,
+            "stderr",
+            &history::redact(format!("{}\n", error.1), credential, variables),
+        )
+        .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn execution_logs_preserve_raw_collisions_large_causes_and_reader_locale() {
+        use crate::{
+            entities::pipeline_run_logs as logs,
+            i18n::{self, Locale},
+        };
+        use sea_orm::{ConnectionTrait, Schema, Set};
+        let dir = tempfile::tempdir().unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        db.execute(&Schema::new(db.get_database_backend()).create_table_from_entity(logs::Entity))
+            .await
+            .unwrap();
+        let s = std::sync::Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "execution-log-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
+        });
+        let legacy = r#"{"$system_message":{"key":"execution.historicalRun","params":{}}}"#;
+        logs::Entity::insert(logs::ActiveModel {
+            id: Set(1),
+            run_id: Set(7),
+            seq: Set(1),
+            step_index: Set(3),
+            stream: Set("stdout".into()),
+            chunk: Set(legacy.into()),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let mut seq = 1;
+        let raw = format!(
+            "{legacy}\n{}\n{}",
+            i18n::StoredText::from_message(Message::new("execution.historicalRun")).stored(),
+            "界".repeat(6000)
+        );
+        append(&s, 7, 3, &mut seq, "stdout", &raw).await.unwrap();
+        let raw_end = seq;
+        let nested = Message::new("execution.templateUnsupported")
+            .with("token", "{{secret}}")
+            .with_message(
+                "context",
+                Message::new("execution.stepContext")
+                    .with("index", "1")
+                    .with("name", "secret"),
+            );
+        let variables = BTreeMap::from([("TOKEN".into(), "secret".into())]);
+        append_failure(
+            &s,
+            7,
+            &mut seq,
+            "build",
+            None,
+            ApiError::localized(StatusCode::BAD_REQUEST, nested),
+            None,
+            &variables,
+        )
+        .await
+        .unwrap();
+        let translated_seq = seq;
+        let large = format!("{}secret", "原始 {error}\n".repeat(40000));
+        append_failure(
+            &s,
+            7,
+            &mut seq,
+            "build",
+            Some("linux"),
+            ApiError::raw(StatusCode::BAD_REQUEST, large.clone()),
+            None,
+            &variables,
+        )
+        .await
+        .unwrap();
+        let rows = logs::Entity::find()
+            .filter(logs::Column::RunId.eq(7))
+            .order_by_asc(logs::Column::Seq)
+            .all(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(rows.len() as i64, seq);
+        for (index, row) in rows.iter().enumerate() {
+            assert_eq!(row.seq, index as i64 + 1);
+            assert_eq!(row.step_index, if row.seq <= raw_end { 3 } else { -1 });
+            assert_eq!(
+                row.stream,
+                if row.seq <= raw_end {
+                    "stdout"
+                } else {
+                    "stderr"
+                }
+            );
+        }
+        for locale in Locale::ALL {
+            assert_eq!(i18n::render_text_stored(locale, &rows[0].chunk), legacy);
+            let restored: String = rows
+                .iter()
+                .filter(|row| row.seq > 1 && row.seq <= raw_end)
+                .map(|row| {
+                    let raw = i18n::render_text_stored(locale, &row.chunk);
+                    assert!(raw.len() <= 16384);
+                    raw
+                })
+                .collect();
+            assert_eq!(restored, raw);
+            let localized = &rows[(translated_seq - 1) as usize].chunk;
+            assert!(localized.contains("execution.templateUnsupported"));
+            let displayed = i18n::render_text_stored(locale, localized);
+            assert!(displayed.contains("[REDACTED]"));
+            assert!(!displayed.contains("secret"));
+            let cause: String = rows
+                .iter()
+                .filter(|row| row.seq > translated_seq + 1)
+                .map(|row| {
+                    let raw = i18n::render_text_stored(locale, &row.chunk);
+                    assert!(raw.len() <= 16384);
+                    raw
+                })
+                .collect();
+            assert_eq!(
+                cause,
+                format!("{}\n", large.replace("secret", "[REDACTED]"))
+            );
+        }
+        let localized = &rows[(translated_seq - 1) as usize].chunk;
+        assert_ne!(
+            i18n::render_text_stored(Locale::EnUs, localized),
+            i18n::render_text_stored(Locale::JaJp, localized)
+        );
+    }
+
     #[test]
     fn step_exit_codes_come_from_engine_error_lines() {
         use super::step_exit_code;
@@ -2324,6 +2637,40 @@ mod tests {
         assert!(steps[1].get("uses").is_none());
         assert_eq!(steps[2]["id"], "after");
         assert_eq!(secrets["__SOURCE_0_SECRET"], "private-token");
+    }
+
+    #[test]
+    fn checkout_credential_helper_handles_spaces_and_quotes_in_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace with spaces and ' quote");
+        std::fs::create_dir(&workspace).unwrap();
+        let script = checkout_node_script(&crate::actions::CheckoutBinding::default());
+        let auth = script.split_once("git init -q\n").unwrap().0;
+        let script = format!(
+            "{auth}\nprintf 'protocol=https\\nhost=fixture.invalid\\n\\n' | git -c core.askPass= credential fill\n"
+        );
+        let mut command = std::process::Command::new("sh");
+        command
+            .args(["-c", &script])
+            .current_dir(&workspace)
+            .env("SOURCE_KIND", "password")
+            .env("SOURCE_USER", "fixture-user")
+            .env("SOURCE_SECRET", "fixture-password");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = String::from_utf8(output.stdout).unwrap();
+        assert!(output.contains("username=fixture-user"));
+        assert!(output.contains("password=fixture-password"));
+        assert!(std::fs::read_dir(&workspace).unwrap().next().is_none());
     }
 
     #[test]

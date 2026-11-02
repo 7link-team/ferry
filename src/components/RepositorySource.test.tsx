@@ -2,23 +2,52 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RepositorySource } from "./RepositorySource";
+import { named } from "../resource";
+import { selectDisplay } from "./auto-form";
+import { i18n, hostRepositoryText } from "../i18n";
 
 let root: Root, host: HTMLDivElement;
 let patch = vi.fn<(value: Record<string, unknown>) => void>();
 let validity = vi.fn<(value: boolean) => void>();
 let requests: string[];
+it("keeps an unknown provider visible in edit and read-only modes without guessing a platform",async()=>{
+ await mount({provider:'future-provider',credential_id:'0'});
+ const provider=host.querySelector<HTMLSelectElement>('[aria-label="代码平台"]')!;
+ expect(provider.value).toBe('future-provider');
+ expect(provider.selectedOptions[0]?.textContent).toBe(selectDisplay('future-provider',{options:[]}));
+ expect(patch).not.toHaveBeenCalled();
+ await act(async()=>root.unmount());root=createRoot(host);requests=[];
+ await mount({provider:'future-provider',credential_id:'11',credential_name:'Team PAT'},true);
+ expect(host.textContent).toContain(selectDisplay('future-provider',{options:[]}));
+ expect(host.textContent).toContain('Team PAT');expect(requests).toEqual([]);
+});
+it("uses neutral unavailable-reference wording for a credential whose name is not supplied",async()=>{
+ await mount({provider:'github',credential_id:'88'},true);
+ expect(host.textContent).toContain(named(undefined,'88'));expect(requests).toEqual([]);
+});
 const credentials = [{id:"11",name:"Team PAT",kind:"token"},{id:"12",name:"Deploy key",kind:"ssh-key"},{id:"13",name:"Git password",kind:"password"}];
 const select = async (label: string, value: string) => { const node = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; expect(node).not.toBeNull(); await act(async()=>{node.value=value;node.dispatchEvent(new Event("change",{bubbles:true}));}); };
 async function mount(draft: Record<string, unknown> = {name:"Team connection",provider:"github",credential_id:"0"}, readOnly=false) {
  function Harness(){const [state,setState]=useState(draft);return <RepositorySource workspace="ops" draft={state} readOnly={readOnly} onChange={value=>{patch(value);setState(current=>({...current,...value}));}} onValidityChange={validity}/>;}
  await act(async()=>root.render(<Harness/>));
 }
-beforeEach(()=>{
+beforeEach(async()=>{
+ await i18n.changeLanguage('zh-CN');
  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});history.replaceState({},"","/ops/build/repositories/new");
  host=document.createElement("div");document.body.append(host);root=createRoot(host);patch=vi.fn();validity=vi.fn();requests=[];
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);return {ok:true,status:200,json:async()=>({items:url.includes("/credentials")?credentials:[{id:"github",web_available:true}]})};}));
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();vi.restoreAllMocks();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();vi.restoreAllMocks();await i18n.changeLanguage('en-US');});
+it("rerenders repository controls in all six languages and preserves the selected provider",async()=>{
+ await mount({provider:'git',credential_id:'0'});
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+   await act(async()=>{await i18n.changeLanguage(locale);});
+   expect(host.textContent).toContain(hostRepositoryText('repository.037'));
+   expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe('git');
+   expect(host.textContent).toContain(hostRepositoryText('repository.001'));
+ }
+ expect(patch).not.toHaveBeenCalled();
+});
 it("named platform connections select credential IDs without repository, branch or secret inputs",async()=>{
  await mount();
  expect(requests.some(url=>url.includes("/credentials?scope=build&"))).toBe(true);
@@ -29,7 +58,7 @@ it("named platform connections select credential IDs without repository, branch 
  expect(host.textContent).not.toContain("选择平台仓库");
  expect(host.textContent).not.toContain("默认分支");
  expect(host.querySelector('[aria-label="凭据"]')?.textContent).not.toContain("Deploy key");
- expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/workspaces/ops/credentials/new?scope=build");
+ expect(host.querySelector('a[target="_blank"]')?.getAttribute("href")).toBe("/en-US/workspaces/ops/credentials/new?scope=build");
 });
 it("ordinary Git permits an optional URL and all existing Git credential kinds",async()=>{
  await mount({name:"Git connection",provider:"git",credential_id:"0"});
@@ -65,7 +94,7 @@ it("OAuth validates the popup sender and navigates directly to the created conne
  await act(async()=>window.dispatchEvent(new MessageEvent("message",{origin:"https://attacker.invalid",source:opened as unknown as Window,data:{type:"repository-authorized",provider:"github",status:"connected",connection_id:"45"}})));
  expect(location.pathname).toBe("/ops/build/repositories/new");
  await act(async()=>window.dispatchEvent(new MessageEvent("message",{origin:location.origin,source:opened as unknown as Window,data:{type:"repository-authorized",provider:"github",status:"connected",connection_id:"45"}})));
- expect(location.pathname).toBe("/workspaces/ops/code-connections/45");expect(patch).not.toHaveBeenCalled();
+ expect(location.pathname).toBe("/en-US/workspaces/ops/code-connections/45");expect(patch).not.toHaveBeenCalled();
  expect(requests.some(url=>url.includes("/repositories?"))).toBe(false);
 });
 it("credential loading is visible and resolves into the existing picker",async()=>{

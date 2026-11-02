@@ -16,6 +16,7 @@ mod entities;
 mod error;
 mod host_monitor;
 mod hosts;
+mod i18n;
 mod lock;
 mod maintenance;
 mod manifest;
@@ -28,6 +29,7 @@ mod pipelines;
 mod platform;
 mod remote;
 mod repositories;
+mod repository_analysis;
 mod repository_auth;
 mod repository_monitor;
 mod resource;
@@ -39,6 +41,7 @@ mod ssh;
 mod state;
 mod templates;
 mod transfers;
+mod value_files;
 mod variables;
 mod vault;
 mod webhook;
@@ -76,6 +79,13 @@ struct Config {
     cluster_namespace: String,
     #[arg(long, env = "FERRY_NATS_REPLICAS", default_value_t = 1)]
     nats_replicas: usize,
+    /// Cluster-wide concurrent repository analysis workers (use the same value on every replica).
+    #[arg(
+        long,
+        env = "FERRY_REPOSITORY_ANALYSIS_CONCURRENCY",
+        default_value = "1"
+    )]
+    repository_analysis_concurrency: std::num::NonZeroUsize,
     #[arg(long, env = "FERRY_BIND", default_value = "127.0.0.1:4290")]
     bind: SocketAddr,
     /// Docker/web deployment: no desktop launcher owns this process.
@@ -121,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
 
     let instance_id = instance_id(&cfg.data_dir)?;
     let db = match &cfg.database_url {
-        Some(url) => Database::connect(ConnectOptions::new(url.clone())).await?,
+        Some(url) => Database::connect(db::utc_options(ConnectOptions::new(url.clone()))).await?,
         None => {
             let path = cfg.data_dir.canonicalize()?.join("ferry.sqlite");
             let mut options = ConnectOptions::new("sqlite://ferry");
@@ -131,7 +141,7 @@ async fn main() -> anyhow::Result<()> {
                     .journal_mode(sea_orm::sqlx::sqlite::SqliteJournalMode::Wal)
                     .foreign_keys(true)
             });
-            Database::connect(options).await?
+            Database::connect(db::utc_options(options)).await?
         }
     };
     migration::Migrator::up(&db, None).await?;
@@ -196,6 +206,12 @@ async fn main() -> anyhow::Result<()> {
     repository_auth::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    repository_analysis::recover(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
+    repository_analysis::insights::recover(&s)
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", e.1))?;
     marketplace::recover(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
@@ -221,9 +237,19 @@ async fn main() -> anyhow::Result<()> {
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
+    let runner_auto_update_task =
+        tokio::spawn(runner::automatic_updates(s.clone(), drain_rx.clone()));
     let host_monitor_task = tokio::spawn(host_monitor::collect(s.clone(), drain_rx.clone()));
-    let repository_monitor_task =
-        tokio::spawn(repository_monitor::scheduler(s.clone(), drain_rx.clone()));
+    let repository_monitor_task = tokio::spawn(repository_monitor::scheduler(
+        s.clone(),
+        cfg.repository_analysis_concurrency,
+        drain_rx.clone(),
+    ));
+    let repository_analysis_task = tokio::spawn(repository_analysis::scheduler(
+        s.clone(),
+        cfg.repository_analysis_concurrency,
+        drain_rx.clone(),
+    ));
     let recovery_state = s.clone();
     let mut recovery_stop = drain_rx.clone();
     let recovery_task = tokio::spawn(async move {
@@ -257,6 +283,40 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
+        .route(
+            "/{workspace}/code-insights",
+            get(repository_analysis::insights::list).post(repository_analysis::insights::create),
+        )
+        .route(
+            "/{workspace}/code-insights/{id}",
+            get(repository_analysis::insights::get)
+                .patch(repository_analysis::insights::update)
+                .delete(repository_analysis::insights::delete),
+        )
+        .route(
+            "/{workspace}/code-insights/{id}/sync",
+            post(repository_analysis::insights::retry),
+        )
+        .route(
+            "/{workspace}/code-insights/{id}/reports/{kind}",
+            get(repository_analysis::insight_report),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}/analysis",
+            get(repository_analysis::get).patch(repository_analysis::update),
+        )
+        .route(
+            "/{workspace}/code-connection-analyses/{id}",
+            get(repository_analysis::flat_get),
+        )
+        .route(
+            "/{workspace}/code-connections/{id}/analysis-runs",
+            post(repository_analysis::retry),
+        )
+        .route(
+            "/{workspace}/code-contributions/{kind}",
+            get(repository_analysis::report),
+        )
         .route(
             "/{workspace}/repository-providers/{provider}/connections",
             post(repository_auth::connect_token),
@@ -358,10 +418,15 @@ async fn main() -> anyhow::Result<()> {
             post(cron_jobs::acknowledge),
         )
         .route("/{workspace}/preferences", get(maintenance::preferences))
-        .route("/{workspace}/settings", get(maintenance::list_settings))
+        .route(
+            "/{workspace}/settings",
+            get(maintenance::list_settings).post(maintenance::create_setting),
+        )
         .route(
             "/{workspace}/settings/{id}",
-            get(maintenance::get_setting).patch(maintenance::update_setting),
+            get(maintenance::get_setting)
+                .patch(maintenance::update_setting)
+                .delete(maintenance::delete_setting),
         )
         .route(
             "/{workspace}/dictionaries",
@@ -654,7 +719,9 @@ async fn main() -> anyhow::Result<()> {
                 .delete(hosts::delete_tag),
         );
 
-    let workspace_api = workspace_api.merge(transfers::routes());
+    let workspace_api = workspace_api
+        .merge(transfers::routes())
+        .merge(value_files::routes());
 
     let draining = drain.subscribe();
     let app = Router::new()
@@ -710,13 +777,14 @@ async fn main() -> anyhow::Result<()> {
                 if *draining.borrow() && !req.uri().path().starts_with("/api/runners/") {
                     return (
                         StatusCode::SERVICE_UNAVAILABLE,
-                        "服务正在安全关闭，请稍后重试。",
+                        i18n::message("server.draining"),
                     )
                         .into_response();
                 }
                 guard(req, next, &hosts).await
             }
         }))
+        .layer(middleware::from_fn(i18n::middleware))
         .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%request.uri().path())))
         .with_state(s.clone());
 
@@ -748,7 +816,9 @@ async fn main() -> anyhow::Result<()> {
     let _ = drain.send(true);
     alerts_task.await?;
     host_monitor_task.await?;
+    runner_auto_update_task.await?;
     repository_monitor_task.await?;
+    repository_analysis_task.await?;
     recovery_task.await?;
     cron_task.await?;
     deployment_task.await?;
@@ -850,7 +920,7 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
         .map(|a| a.host().to_string())
         .unwrap_or_default();
     if !allowed.iter().any(|h| h.eq_ignore_ascii_case(&hostname)) {
-        return (StatusCode::FORBIDDEN, "此主机地址未在允许列表中。").into_response();
+        return (StatusCode::FORBIDDEN, i18n::message("guard.host")).into_response();
     }
     let mutating = !matches!(
         *req.method(),
@@ -872,7 +942,7 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
             .and_then(|v| v.to_str().ok())
             != Some("1")
     {
-        return (StatusCode::FORBIDDEN, "缺少操作校验标识。").into_response();
+        return (StatusCode::FORBIDDEN, i18n::message("guard.request")).into_response();
     }
     if let Some(origin) = req
         .headers()
@@ -881,7 +951,7 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
         && origin != format!("http://{host}")
         && origin != format!("https://{host}")
     {
-        return (StatusCode::FORBIDDEN, "不允许此来源发起操作。").into_response();
+        return (StatusCode::FORBIDDEN, i18n::message("guard.origin")).into_response();
     }
     let oauth_callback = req.uri().path() == "/api/repository-providers/callback";
     let mut response = next.run(req).await;
@@ -916,6 +986,9 @@ pub async fn channel_open(
     match host.connection.as_str() {
         "ssh" => ssh::open(s, host).await,
         "runner" => runner::open(s, host).await,
-        _ => Err(error::ApiError::bad("未知的接入方式。")),
+        _ => Err(error::ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            i18n::Message::new("host.connectionUnknown"),
+        )),
     }
 }

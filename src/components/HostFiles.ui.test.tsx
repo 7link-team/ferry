@@ -1,3 +1,4 @@
+import { i18n, hostRepositoryText } from "../i18n";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,11 +9,25 @@ vi.mock("./HostTerminal", () => ({ HostTerminal: ({ directory }: { directory: st
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
+  localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, json: async () => url.endsWith('/file-systems') ? { platform: "unix", items: [{ path: "/", name: "root", total: 1024, used: 128 }] } : { items: [{ name: "logs", kind: "directory", size: 0, mode: 493, modified_at: 0 }] } })));
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); await i18n.changeLanguage('en-US'); });
+it("updates file controls in six languages while preserving remote file names and paths",async()=>{
+ await act(async()=>root.render(<HostFiles workspace="ops" hostId="1"/>));
+ const calls=vi.mocked(fetch).mock.calls.length;
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+  await act(async()=>{await i18n.changeLanguage(locale);});
+  expect(host.querySelector('input[name="name"]')).toBeNull();
+  expect(host.querySelector('button[title="'+hostRepositoryText('host-files.043')+'"]')).not.toBeNull();
+  expect(host.textContent).toContain('logs');
+  expect(host.querySelector<HTMLInputElement>('input[aria-label="'+hostRepositoryText('host-files.033')+'"]')?.value).toBe('/');
+ }
+ expect(fetch).toHaveBeenCalledTimes(calls);
+});
 
 it("opens current and selected directories in a closable terminal panel", async () => {
   await act(async () => root.render(<HostFiles workspace="ops" hostId="1" canTerminal />));

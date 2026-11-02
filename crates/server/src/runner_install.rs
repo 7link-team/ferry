@@ -1,11 +1,12 @@
 //! Agent bootstrap metadata reuses the signed Runner release catalog.
+use crate::error::Path;
 use crate::{
     error::{ApiError, Result},
     runner,
     state::AppState,
 };
 use axum::{
-    extract::{Path, State},
+    extract::State,
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
 };
@@ -21,7 +22,10 @@ fn metadata(
     let artifact = verify_catalog(bytes, signature, key, target, "0.0.0-0", version)?;
     anyhow::ensure!(
         !artifact.url.chars().any(char::is_control),
-        "下载地址包含控制字符"
+        ferry_protocol::release::ValidationError::new(
+            "urlControl",
+            "The download URL contains control characters."
+        )
     );
     Ok(format!(
         "{version}\n{}\n{}\n{}\n",
@@ -53,22 +57,30 @@ async fn download(client: &reqwest::Client, url: &str, limit: usize) -> Result<V
         .send()
         .await
         .map_err(|_| {
-            ApiError(
+            ApiError::localized(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "无法下载 Runner 发布清单，请检查服务器外网连接。".into(),
+                crate::i18n::Message::new("runner.catalogDownload"),
             )
         })?
         .error_for_status()
-        .map_err(|_| ApiError::bad("当前版本的 Runner 发布包尚不可用，请等待发布完成。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.releaseUnavailable"),
+            )
+        })?;
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|_| {
-        ApiError(
+        ApiError::localized(
             StatusCode::SERVICE_UNAVAILABLE,
-            "Runner 发布清单下载中断。".into(),
+            crate::i18n::Message::new("runner.catalogInterrupted"),
         )
     })? {
         if bytes.len() + chunk.len() > limit {
-            return Err(ApiError::bad("Runner 发布清单超过大小限制。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.catalogSize"),
+            ));
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -94,14 +106,73 @@ pub async fn artifact(
     ]
     .contains(&target.as_str())
     {
-        return Err(ApiError::bad("当前系统或架构暂不支持安装 Runner。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.installUnsupported"),
+        ));
     }
+    let catalog = catalog().await?;
+    let version = env!("CARGO_PKG_VERSION");
+    let body = metadata(
+        &catalog.bytes,
+        &catalog.signature,
+        &catalog.key,
+        &target,
+        version,
+    )
+    .map_err(|error| verification_error(&error))?;
+    // Metadata retrieval never consumes enrollment.
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    ))
+}
+
+pub(crate) struct SignedCatalog {
+    pub bytes: Vec<u8>,
+    pub signature: String,
+    pub key: String,
+}
+
+pub(crate) fn verification_error(error: &anyhow::Error) -> ApiError {
+    let message = crate::i18n::Message::new("runner.verification");
+    let message = if let Some(validation) =
+        error.downcast_ref::<ferry_protocol::release::ValidationError>()
+    {
+        message.with_message(
+            "detail",
+            crate::i18n::Message::new(format!("runner.release.{}", validation.code)),
+        )
+    } else {
+        message.with(
+            "detail",
+            error.to_string().chars().take(512).collect::<String>(),
+        )
+    };
+    ApiError::localized(StatusCode::BAD_REQUEST, message)
+}
+
+/// Bootstrap and automatic upgrades use the exact running server release.
+pub(crate) async fn catalog() -> Result<SignedCatalog> {
     let config: serde_json::Value =
-        serde_json::from_str(include_str!("../../../desktop/tauri.conf.json"))
-            .map_err(|_| ApiError::bad("Runner 发布来源配置无效。"))?;
+        serde_json::from_str(include_str!("../../../desktop/tauri.conf.json")).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.releaseConfig"),
+            )
+        })?;
     let repository = config["plugins"]["release"]["repository"]
         .as_str()
-        .ok_or_else(|| ApiError::bad("未配置 Runner 发布来源。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.releaseSource"),
+            )
+        })?;
     let parts: Vec<_> = repository.split('/').collect();
     if parts.len() != 2
         || parts.iter().any(|p| {
@@ -113,11 +184,19 @@ pub async fn artifact(
                     .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
         })
     {
-        return Err(ApiError::bad("Runner 发布仓库配置无效。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.releaseRepository"),
+        ));
     }
     let key = config["plugins"]["updater"]["pubkey"]
         .as_str()
-        .ok_or_else(|| ApiError::bad("未配置 Runner 发布公钥。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.releaseKey"),
+            )
+        })?;
     let version = env!("CARGO_PKG_VERSION");
     let base =
         format!("https://github.com/{repository}/releases/download/v{version}/runner-update.json");
@@ -126,31 +205,50 @@ pub async fn artifact(
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
-        .map_err(|_| ApiError::bad("无法创建 Runner 下载连接。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.downloadClient"),
+            )
+        })?;
     let signature_url = format!("{base}.sig");
     let (bytes, signature) = tokio::try_join!(
         download(&client, &base, MAX_CATALOG),
         download(&client, &signature_url, 8192)
     )?;
-    let signature =
-        String::from_utf8(signature).map_err(|_| ApiError::bad("Runner 发布签名格式无效。"))?;
-    let body = metadata(&bytes, &signature, key, &target, version)
-        .map_err(|e| ApiError::bad(format!("Runner 发布校验失败：{e}")))?;
-    // Downloading metadata does not consume enrolment; only the real runner's
-    // authenticated Hello can claim its one host identity.
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        body,
-    ))
+    let signature = String::from_utf8(signature).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.signatureEncoding"),
+        )
+    })?;
+    Ok(SignedCatalog {
+        bytes,
+        signature,
+        key: key.to_owned(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_validation_identity_is_rendered_for_the_reader() {
+        let error: anyhow::Error =
+            ferry_protocol::release::ValidationError::new("signatureInvalid", "invalid signature")
+                .into();
+        let error = verification_error(&error);
+        let stored = error.stored();
+        for locale in crate::i18n::Locale::ALL {
+            let rendered = error.render(locale);
+            assert_eq!(crate::i18n::render_stored(locale, &stored), rendered);
+            assert!(!rendered.contains("runner.release."));
+            if locale != crate::i18n::Locale::EnUs {
+                assert_ne!(rendered, error.1);
+            }
+        }
+    }
     #[test]
     #[ignore = "requires scripts/test-runner-update.py signing fixtures"]
     fn bootstrap_uses_verified_exact_release_and_never_returns_untrusted_metadata() {

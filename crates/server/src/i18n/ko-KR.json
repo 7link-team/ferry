@@ -1,0 +1,20 @@
+{
+  "activity.systemActor": "시스템",
+  "vault.encryptionFailed": "암호화에 실패했습니다. 자격 증명이 저장되지 않았습니다.",
+  "vault.decryptionFailed": "자격 증명을 복호화할 수 없습니다.",
+  "state.idUnavailable": "지금은 ID를 생성할 수 없습니다. 나중에 다시 시도하세요.",
+  "host.monitorTimeout": "호스트 모니터링 수집 시간이 초과되었습니다.",
+  "resource.referenceInvalid": "참조 ID가 올바르지 않습니다.",
+  "host.connectionUnknown": "알 수 없는 연결 방식입니다.",
+  "error.unauthorized": "계속하려면 로그인하세요.",
+  "error.forbidden": "현재 계정에는 이 작업을 수행할 권한이 없습니다. 관리자에게 문의하세요.",
+  "error.missing": "기록이 없거나 더 이상 사용할 수 없습니다.",
+  "error.database": "데이터를 저장하거나 읽지 못했습니다. 잠시 후 다시 시도하세요. 입력한 내용은 유지됩니다.",
+  "error.file": "파일 작업에 실패했습니다. 디스크 공간과 디렉터리 권한을 확인하세요.",
+  "server.draining": "서비스를 안전하게 종료하고 있습니다. 잠시 후 다시 시도하세요.",
+  "guard.host": "이 호스트 주소는 허용 목록에 없습니다.",
+  "guard.request": "작업 확인 헤더가 없습니다.",
+  "guard.origin": "이 출처의 작업 요청은 허용되지 않습니다.",
+  "assets.not_built": "인터페이스 파일이 빌드되지 않았습니다. 먼저 npm run build를 실행하세요.",
+  "terminal.heartbeatTimeout": "터미널 연결의 하트비트가 시간 초과되었습니다. 다시 연결하세요."
+}

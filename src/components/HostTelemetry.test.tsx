@@ -2,18 +2,29 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HostTelemetry, TerminalMetrics } from "./HostTelemetry";
+import { i18n, hostRepositoryText } from "../i18n";
 
 let root: Root;
 let element: HTMLDivElement;
 const monitor = { cpu_percent: 25, load1: 1, memory_used: 4 * 1024 ** 3, memory_total: 8 * 1024 ** 3,
   disks: [{ name: "disk", mount: "/", used: 30, total: 100 }], networks: [] };
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers();
   element = document.createElement("div"); document.body.append(element); root = createRoot(element);
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => monitor })));
 });
-afterEach(async () => { await act(async () => root.unmount()); element.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(async () => { await act(async () => root.unmount()); element.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en-US'); });
+it("switches terminal metric labels in all six languages without collecting again",async()=>{
+ await render();const calls=vi.mocked(fetch).mock.calls.length;
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+   await act(async()=>{await i18n.changeLanguage(locale);});
+   expect(element.textContent).toContain(hostRepositoryText('host.039'));
+   expect(element.querySelector('[aria-label]')?.getAttribute('aria-label')).toBe(hostRepositoryText('host.058'));
+ }
+ expect(fetch).toHaveBeenCalledTimes(calls);
+});
 const render = async (enabled = true) => {
   await act(async () => root.render(<HostTelemetry workspace="ops" hostId="1" enabled={enabled}><TerminalMetrics /><TerminalMetrics /></HostTelemetry>));
 };

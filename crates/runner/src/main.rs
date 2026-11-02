@@ -395,9 +395,9 @@ async fn hold(
                         wire::Control::Ping => send(&mut socket, &wire::Report::Pong).await?,
                         wire::Control::Update { request, version, manifest, signature } => {
                             if !cfg.managed || !preparing.is_empty() {
-                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务或已有升级进行中".into() }).await?;
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "代理不是托管服务或已有升级进行中".into(), message: Some(wire::SystemMessage::new("runner.updateUnavailable")) }).await?;
                             } else if cfg.failed_version.as_deref() == Some(&version) {
-                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "该版本启动失败，已回退，不能自动重复尝试".into() }).await?;
+                                send(&mut socket, &wire::Report::UpdateFailed { request, error: "该版本启动失败，已回退，不能自动重复尝试".into(), message: Some(wire::SystemMessage::new("runner.failedTarget")) }).await?;
                             } else {
                                 let root = cfg.state_dir.clone();
                                 preparing.spawn(async move { (request, update::download(&root, &manifest, &signature, &version).await) });
@@ -405,7 +405,7 @@ async fn hold(
                         }
                         wire::Control::OpenSession { session: id, kind } => {
                             if !preparing.is_empty() {
-                                send(&mut socket, &wire::Report::SessionFailed { session: id, error: "代理正在准备升级".into() }).await?;
+                                send(&mut socket, &wire::Report::SessionFailed { session: id, error: "代理正在准备升级".into(), message: Some(wire::SystemMessage::new("runnerExtra.preparingUpgrade")) }).await?;
                                 continue;
                             }
                             let url = ws_url(&session_base, &format!("/api/runners/sessions/{id}"))?;
@@ -435,7 +435,7 @@ async fn hold(
                     Ok(candidate) => return Err(update::Prepared(candidate).into()),
                     Err(error) => {
                         tracing::warn!(error=?error, "更新验证或下载失败");
-                        send(&mut socket, &wire::Report::UpdateFailed { request, error: "更新下载或校验失败，保留原版本".into() }).await?;
+                        send(&mut socket, &wire::Report::UpdateFailed { request, error: "更新下载或校验失败，保留原版本".into(), message: Some(wire::SystemMessage::new("runner.updateFailed")) }).await?;
                     }
                 }
             }

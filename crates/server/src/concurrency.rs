@@ -9,6 +9,7 @@
 //! Anything else is refused with a precise message rather than guessed.
 
 use crate::error::{ApiError, Result};
+use crate::i18n::Message;
 use serde_json::{Value, json};
 
 pub(crate) struct Contexts<'a> {
@@ -18,7 +19,17 @@ pub(crate) struct Contexts<'a> {
 }
 
 fn unsupported(detail: &str) -> ApiError {
-    ApiError::bad(format!("concurrency 表达式不受支持：{detail}。"))
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        Message::new("concurrency.unsupported").with("detail", detail),
+    )
+}
+
+fn unsupported_message(detail: Message) -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        Message::new("concurrency.unsupported").with_message("detail", detail),
+    )
 }
 
 /// A `concurrency.group`-style string: literal text with `${{ }}` parts.
@@ -49,7 +60,9 @@ pub(crate) fn flag(value: &Value, contexts: &Contexts) -> Result<bool> {
                 .unwrap_or(text);
             Ok(truthy(&evaluate(inner, contexts)?))
         }
-        _ => Err(unsupported("cancel-in-progress 必须是布尔值或表达式")),
+        _ => Err(unsupported_message(Message::new(
+            "concurrency.flagRequired",
+        ))),
     }
 }
 
@@ -88,7 +101,12 @@ fn tokenize(source: &str) -> Result<Vec<Token>> {
             i += 1;
             loop {
                 match chars.get(i) {
-                    None => return Err(ApiError::bad("Actions 表达式字符串未闭合。")),
+                    None => {
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            Message::new("concurrency.stringUnclosed"),
+                        ));
+                    }
                     Some('\'') if chars.get(i + 1) == Some(&'\'') => {
                         text.push('\'');
                         i += 2;
@@ -233,13 +251,15 @@ impl Parser<'_> {
             return if self.eat(")") {
                 Ok(value)
             } else {
-                Err(unsupported("缺少右括号"))
+                Err(unsupported_message(Message::new(
+                    "concurrency.parenthesisMissing",
+                )))
             };
         }
         let token = self
             .peek()
             .cloned()
-            .ok_or_else(|| unsupported("表达式不完整"))?;
+            .ok_or_else(|| unsupported_message(Message::new("concurrency.incomplete")))?;
         self.at += 1;
         match token {
             Token::Str(text) => Ok(Value::String(text)),
@@ -263,7 +283,9 @@ impl Parser<'_> {
                     break;
                 }
                 if !self.eat(",") {
-                    return Err(unsupported("函数参数格式错误"));
+                    return Err(unsupported_message(Message::new(
+                        "concurrency.argumentsInvalid",
+                    )));
                 }
             }
         }
@@ -304,7 +326,9 @@ impl Parser<'_> {
                 serde_json::to_string_pretty(args.first().unwrap_or(&Value::Null))
                     .unwrap_or_default(),
             )),
-            other => Err(unsupported(&format!("函数 {other}()"))),
+            other => Err(unsupported_message(
+                Message::new("concurrency.functionUnsupported").with("name", other),
+            )),
         }
     }
     fn path(&mut self, root: &str) -> Result<Value> {
@@ -313,9 +337,9 @@ impl Parser<'_> {
             "inputs" => json!(self.contexts.inputs),
             "vars" => json!(self.contexts.vars),
             other => {
-                return Err(unsupported(&format!(
-                    "上下文 {other}（concurrency 只能使用 github、inputs、vars）"
-                )));
+                return Err(unsupported_message(
+                    Message::new("concurrency.contextUnsupported").with("name", other),
+                ));
             }
         };
         loop {
@@ -325,12 +349,18 @@ impl Parser<'_> {
                         self.at += 1;
                         name
                     }
-                    _ => return Err(unsupported("属性名")),
+                    _ => {
+                        return Err(unsupported_message(Message::new(
+                            "concurrency.propertyRequired",
+                        )));
+                    }
                 }
             } else if self.eat("[") {
                 let key = display(&self.or()?);
                 if !self.eat("]") {
-                    return Err(unsupported("缺少 ]"));
+                    return Err(unsupported_message(Message::new(
+                        "concurrency.bracketMissing",
+                    )));
                 }
                 key
             } else {
@@ -441,5 +471,46 @@ mod tests {
             "matrix is not available for workflow concurrency"
         );
         assert!(template("${{ hashFiles('x') }}", &c).is_err());
+    }
+
+    #[test]
+    fn diagnostics_keep_typed_causes_and_literal_expression_tokens() {
+        use crate::i18n::{Locale, render_stored};
+        let inputs = BTreeMap::new();
+        let vars = BTreeMap::new();
+        let contexts = contexts(&inputs, &vars);
+        let errors = [
+            flag(&json!(42), &contexts).unwrap_err(),
+            evaluate("(true", &contexts).unwrap_err(),
+            evaluate("", &contexts).unwrap_err(),
+            evaluate("format('x' 'y')", &contexts).unwrap_err(),
+            evaluate("unknownFn()", &contexts).unwrap_err(),
+            evaluate("matrix.os", &contexts).unwrap_err(),
+            evaluate("github.", &contexts).unwrap_err(),
+            evaluate("github['ref'", &contexts).unwrap_err(),
+            evaluate("'unclosed", &contexts).unwrap_err(),
+        ];
+        for error in errors {
+            assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+            let stored = error.stored();
+            for locale in Locale::ALL {
+                assert_eq!(render_stored(locale, &stored), error.render(locale));
+                if locale != Locale::EnUs {
+                    assert_ne!(error.render(locale), error.1, "{}", locale.tag());
+                }
+            }
+        }
+        let error = evaluate("matrix.os", &contexts).unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, "concurrency.unsupported");
+        assert_eq!(
+            error.render(Locale::ZhCn),
+            "concurrency 表达式不受支持：上下文 matrix（concurrency 只能使用 github、inputs、vars）。"
+        );
+        // Reserved-envelope text supplied as an expression diagnostic is literal data.
+        let token = r#"{"$system_message":{"key":"error.forbidden"}}"#;
+        let error = unsupported(token);
+        for locale in Locale::ALL {
+            assert!(render_stored(locale, &error.stored()).contains(token));
+        }
     }
 }

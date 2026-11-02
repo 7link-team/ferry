@@ -1,3 +1,4 @@
+import { i18n } from "../i18n";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
@@ -16,6 +17,8 @@ const click = async (text: string) => {
   await act(async () => button!.click());
 };
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
+  localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
   history.replaceState({}, "", "/ops/deploy/variables/10");
@@ -49,6 +52,25 @@ it("renders a header view action once, not again in untitled read-only sections"
 it("lists deployment modes from native through Docker, Compose and Swarm", () => {
   const field = formConfigs("ops").deployments!.sections.flatMap(section => section.fields).find(field => field.key === "mode")!;
   expect((field.options as { value: string }[]).map(option => option.value)).toEqual(["native", "docker", "compose", "stack"]);
+});
+it("shows semantic empty labels for zero host references and resolves real group and jump names", async () => {
+  history.replaceState({}, "", "/ops/deploy/hosts/17");
+  stored = { id: "17", name: "SSH target", connection: "ssh", group_id: "0", jump_host_id: 0, credential_id: "8", address: "target.example.invalid", port: 22, username: "root", tag_ids: [] };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes("/nodes/17") ? stored : { items: url.includes("node-groups") ? [{ id: "2", name: "Production group" }] : url.includes("credentials") ? [{ id: "8", name: "SSH login", kind: "password" }] : url.includes("/nodes?") ? [{ id: "3", name: "Jump server", jump_host_id: "0" }] : [], total: 1, page: 1, page_size: 200 } })));
+  const config = formConfigs("ops").hosts!;
+  const render = () => root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["hosts.read"])} />);
+  await act(async () => render());
+  expect(host.textContent).toContain("未分组");
+  expect(host.textContent).toContain("不使用跳板主机");
+  expect(host.textContent).toContain("SSH login");
+  expect(host.textContent).not.toContain("选项不可用（0）");
+  expect(stored.group_id).toBe("0"); expect(stored.jump_host_id).toBe(0);
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  stored = { ...stored, group_id: "2", jump_host_id: "3" };
+  await act(async () => render());
+  expect(host.textContent).toContain("Production group");
+  expect(host.textContent).toContain("Jump server");
 });
 it("shows a repository event's commits, links and times, and omits an unknown operator", async () => {
   history.replaceState({}, "", "/ops/build/repository-events/8");
@@ -200,7 +222,7 @@ it("saves and runs a pipeline from the full-page action bar", async () => {
     "/api/workspaces/ops/pipelines",
     "/api/workspaces/ops/pipelines/pipeline-1/runs",
   ]);
-  expect(location.pathname).toBe("/workspaces/ops/pipeline-runs/run-1");
+  expect(location.pathname).toBe("/zh-CN/workspaces/ops/pipeline-runs/run-1");
 });
 it("asks for a bound environment after saving before starting a pipeline", async () => {
   history.replaceState({}, "", "/ops/build/pipelines/new");
@@ -221,7 +243,7 @@ it("asks for a bound environment after saving before starting a pipeline", async
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("执行环境");
   expect(requests.some(row => row.url.endsWith("/runs"))).toBe(false);
   await act(async () => (Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(button => button.textContent === "取消")!).click());
-  expect(location.pathname).toBe("/workspaces/ops/pipelines/pipeline-1/edit");
+  expect(location.pathname).toBe("/zh-CN/workspaces/ops/pipelines/pipeline-1/edit");
 });
 it("shows an install command immediately in the runner host mode", async () => {
   history.replaceState({}, "", "/ops/host/nodes/new");

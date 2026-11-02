@@ -4,8 +4,12 @@
  * reads the envelope, so a resource page never assembles a query string.
  */
 import { api } from "./api";
+import { commonText } from "./i18n";
 
 export interface Envelope<T> {
+  /** Optional report metadata and full filtered chart series, before pagination. */
+  coverage?: unknown;
+  series?: T[];
   has_more?: boolean;
   items: T[];
   total: number;
@@ -15,7 +19,7 @@ export interface Envelope<T> {
 
 /** A referenced record shown by name: the API sends `*_name` next to each ID. */
 export const named = (name: string | undefined, id: string | undefined) =>
-  name || (id && id !== "0" ? `已删除（ID ${id}）` : "—");
+  name || (id && id !== "0" ? commonText("form.unavailableReference", { id }) : "—");
 
 export const resourceName = (resource: string) =>
   resource === "hosts" ? "nodes" : resource === "host-groups" ? "node-groups" : resource;

@@ -2,14 +2,28 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HostMonitor, isMonitor, isVirtualNetwork, networkRates, type MonitorSample } from "./HostMonitor";
+import { i18n, hostRepositoryText } from "../i18n";
 
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); await i18n.changeLanguage('en-US'); });
+it("updates monitoring controls and chart descriptions in six languages without fetching again",async()=>{
+ const fetch=vi.fn(async()=>response({...metrics(0),sampled_at:Date.now()}));vi.stubGlobal('fetch',fetch);
+ await act(async()=>root.render(<HostMonitor workspace="ops" hostId="h1"/>));
+ const calls=fetch.mock.calls.length;
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+   await act(async()=>{await i18n.changeLanguage(locale);});
+   expect(host.textContent).toContain(hostRepositoryText('host.015'));
+   expect(host.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain(hostRepositoryText('host.035'));
+   expect(host.textContent).toContain('0.0%');
+ }
+ expect(fetch).toHaveBeenCalledTimes(calls);
+});
 
 it("shows individual disks and network interfaces from the host monitor endpoint", async () => {
   const fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({
@@ -57,6 +71,22 @@ const metrics = (cpu_percent = 20) => ({ cpu_percent, load1: 0.4, memory_used: 1
   disks: [{ name: "system", mount: "/", used: 1024, total: 4096 }], networks: [{ name: "eth0", received: 100, transmitted: 100 }] });
 const response = (body: object) => ({ ok: true, status: 200, json: async () => body });
 const sample = (sampled_at: number, cpu = 20): MonitorSample => ({ sampled_at, monitor: metrics(cpu) });
+it("rejects zero response and history timestamps while retaining valid zero metrics", async () => {
+  vi.useFakeTimers();
+  const now=Date.now();
+  vi.stubGlobal('fetch',vi.fn()
+    .mockResolvedValueOnce(response({...metrics(0),sampled_at:now,server_time:now,samples:[sample(now,0)]}))
+    .mockResolvedValueOnce(response({...metrics(99),sampled_at:0,server_time:now}))
+    .mockResolvedValueOnce(response({...metrics(99),sampled_at:now,server_time:0}))
+    .mockResolvedValue(response({...metrics(99),sampled_at:now,server_time:now,samples:[sample(0)]})));
+  await act(async()=>root.render(<HostMonitor workspace="ops" hostId="h1"/>));
+  expect(host.textContent).toContain('0.0%');
+  for(let i=0;i<3;i++){
+    await act(async()=>vi.advanceTimersByTimeAsync(30_000));
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+    expect(host.textContent).toContain('0.0%');expect(host.textContent).not.toContain('99.0%');
+  }
+});
 
 it("rejects nonfinite metrics instead of rendering invalid percentages", () => {
   expect(isMonitor({ ...metrics(), memory_total: NaN })).toBe(false);

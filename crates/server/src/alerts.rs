@@ -1,3 +1,4 @@
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{
@@ -5,16 +6,13 @@ use crate::{
         pipeline_runs, pipelines,
     },
     error::{ApiError, Result},
+    i18n::{self, Message},
     resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
     sea_query::{Expr, ExprTrait},
@@ -55,10 +53,10 @@ pub struct Body {
     version: i64,
 }
 fn public(r: rules::Model) -> Value {
-    json!({"id":Id::from(r.id),"name":r.name,"description":r.description,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"metric":r.metric,"threshold":r.threshold,"enabled":r.enabled==1,"has_webhook":!r.webhook.is_empty(),"last_error":r.last_error,"version":r.version,"created_at":r.created_at,"updated_at":r.updated_at})
+    json!({"id":Id::from(r.id),"name":r.name,"description":r.description,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"metric":r.metric,"threshold":r.threshold,"enabled":r.enabled==1,"has_webhook":!r.webhook.is_empty(),"last_error":crate::i18n::display_stored(&r.last_error),"version":r.version,"created_at":r.created_at,"updated_at":r.updated_at})
 }
 fn event(r: events::Model) -> Value {
-    json!({"id":Id::from(r.id),"rule_id":Id::from(r.rule_id),"rule_name":r.rule_name,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"state":r.state,"message":r.message,"triggered_at":r.triggered_at,"recovered_at":r.recovered_at,"trigger_delivery":r.trigger_delivery,"recovery_delivery":r.recovery_delivery,"created_at":r.created_at,"version":r.version})
+    json!({"id":Id::from(r.id),"rule_id":Id::from(r.rule_id),"rule_name":r.rule_name,"target_kind":r.target_kind,"target_ref":Id::from(r.target_ref),"state":r.state,"message":crate::i18n::display_stored(&r.message),"triggered_at":r.triggered_at,"recovered_at":r.recovered_at,"trigger_delivery":crate::i18n::display_stored(&r.trigger_delivery),"recovery_delivery":crate::i18n::display_stored(&r.recovery_delivery),"created_at":r.created_at,"version":r.version})
 }
 fn permission(kind: &str) -> Result<&'static str> {
     match kind {
@@ -66,7 +64,10 @@ fn permission(kind: &str) -> Result<&'static str> {
         "pipeline" => Ok("pipelines.read"),
         "deployment" => Ok("deployments.read"),
         "cron-job" => Ok("cron-jobs.read"),
-        _ => Err(ApiError::bad("监控目标类型无效。")),
+        _ => Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("alerts.targetInvalid"),
+        )),
     }
 }
 async fn target(conn: &impl ConnectionTrait, scope: &Scope, kind: &str, id: Id) -> Result<()> {
@@ -98,7 +99,10 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
         || b.name.chars().count() > 60
         || b.description.chars().count() > 2000
     {
-        return Err(ApiError::bad("规则名称需1–60字，描述不超过2000字。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("alerts.nameInvalid"),
+        ));
     }
     let valid = if b.target_kind == "host" {
         match b.metric.as_str() {
@@ -111,12 +115,18 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
         b.metric == "execution-failed"
     };
     if !valid {
-        return Err(ApiError::bad(
-            "指标或阈值无效；主机支持离线、负载、内存/磁盘百分比，执行目标支持执行失败。",
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("alerts.metricInvalid"),
         ));
     }
     if let Some(url) = b.webhook.as_ref().filter(|s| !s.is_empty()) {
-        let parsed = reqwest::Url::parse(url).map_err(|_| ApiError::bad("Webhook URL无效。"))?;
+        let parsed = reqwest::Url::parse(url).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("alerts.webhookInvalid"),
+            )
+        })?;
         if url.len() > 4096
             || !matches!(parsed.scheme(), "http" | "https")
             || parsed.host_str().is_none()
@@ -124,8 +134,9 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
             || parsed.password().is_some()
             || parsed.fragment().is_some()
         {
-            return Err(ApiError::bad(
-                "Webhook需为HTTP(S)地址，不支持用户信息或片段。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("alerts.webhookAddressInvalid"),
             ));
         }
     }
@@ -242,7 +253,10 @@ pub async fn update(
         || old.target_ref != i64::from(Id::reference(&b.target_ref)?)
         || old.metric != b.metric
     {
-        return Err(ApiError::bad("监控目标和指标不可更改；请创建新规则。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("alerts.targetImmutable"),
+        ));
     }
     let n = rules::Entity::update_many()
         .col_expr(rules::Column::Name, Expr::value(b.name.trim()))
@@ -265,7 +279,10 @@ pub async fn update(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("规则已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("alerts.ruleChanged"),
+        ));
     }
     crate::hosts::activity_in(
         &s,
@@ -334,7 +351,7 @@ pub async fn detail(
         .ok_or_else(ApiError::missing)?;
     Ok(Json(event(row)))
 }
-async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, String)>> {
+async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, Message)>> {
     let scope = Scope::for_actor(s, r.workspace_id.into(), r.run_as.into()).await?;
     scope.require("alerts.read")?;
     target(&s.db, &scope, &r.target_kind, r.target_ref.into()).await?;
@@ -346,7 +363,7 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, String
         if r.metric == "offline" {
             return Ok(Some((
                 host.state != "online",
-                format!("主机状态：{}", host.state),
+                Message::new("alerts.hostState").with("state", host.state),
             )));
         }
         if host.state != "online" {
@@ -373,7 +390,10 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, String
         return Ok(value.filter(|v| v.is_finite()).map(|v| {
             (
                 v > r.threshold as f64,
-                format!("{} = {:.2}；阈值 > {}", r.metric, v, r.threshold),
+                Message::new("alerts.metricValue")
+                    .with("metric", r.metric.clone())
+                    .with("value", format!("{v:.2}"))
+                    .with("threshold", r.threshold.to_string()),
             )
         }));
     }
@@ -402,8 +422,10 @@ async fn abnormal(s: &AppState, r: &rules::Model) -> Result<Option<(bool, String
         _ => None,
     };
     Ok(state.and_then(|v| match v.as_str() {
-        "failed" | "needs-review" => Some((true, format!("最近执行状态：{v}"))),
-        "succeeded" => Some((false, "最近执行成功。".into())),
+        "failed" | "needs-review" => {
+            Some((true, Message::new("alerts.executionState").with("state", v)))
+        }
+        "succeeded" => Some((false, Message::new("alerts.executionSucceeded"))),
         _ => None,
     }))
 }
@@ -428,32 +450,32 @@ async fn deliver(
         .open_secret(&r.webhook, &aad(r.workspace_id.into(), r.id.into()))
     {
         Ok(url) => {
-            let title = format!(
-                "{}：{}",
-                if recovered {
-                    "报警恢复"
+            let title = i18n::render(
+                i18n::current_locale(),
+                &Message::new(if recovered {
+                    "alerts.noticeRecovered"
                 } else {
-                    "报警触发"
-                },
-                row.rule_name
+                    "alerts.noticeTriggered"
+                })
+                .with("name", row.rule_name.clone()),
             );
             let (state, kind, message) = (
                 row.state.clone(),
                 row.target_kind.clone(),
-                row.message.clone(),
+                i18n::display_stored(&row.message),
             );
             let notice = crate::webhook::Notice {
                 title: &title,
                 fields: vec![
-                    ("状态".into(), state),
-                    ("对象类型".into(), kind),
-                    ("信息".into(), message),
+                    (i18n::message("alerts.stateLabel"), state),
+                    (i18n::message("alerts.kindLabel"), kind),
+                    (i18n::message("alerts.messageLabel"), message),
                 ],
                 generic: json!({"event":if recovered{"recovered"}else{"triggered"},"data":event(row)}),
             };
             crate::webhook::deliver(client, &url, &notice).await
         }
-        Err(_) => "Webhook无法解密；未投递".into(),
+        Err(_) => i18n::store_message(&Message::new("alerts.webhookDecryptFailed")),
     };
     events::Entity::update_many()
         .col_expr(column, Expr::value(result))
@@ -465,9 +487,9 @@ async fn deliver(
 async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Result<()> {
     let observed = abnormal(s, &r).await;
     let error = if observed.is_err() {
-        "当前执行身份权限或监控目标不可用。"
+        i18n::store_message(&Message::new("alerts.targetUnavailable"))
     } else {
-        ""
+        String::new()
     };
     rules::Entity::update_many()
         .col_expr(rules::Column::LastError, Expr::value(error))
@@ -494,9 +516,9 @@ async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Re
         .await?;
     let now = db::now();
     let delivery = if current.webhook.is_empty() {
-        "未配置Webhook"
+        i18n::store_message(&Message::new("alerts.webhookMissing"))
     } else {
-        "投递中"
+        i18n::store_message(&Message::new("alerts.delivering"))
     };
     let transition = match (firing, active) {
         (true, None) => {
@@ -509,7 +531,7 @@ async fn evaluate(s: &AppState, client: &reqwest::Client, r: rules::Model) -> Re
                 target_kind: Set(r.target_kind.clone()),
                 target_ref: Set(r.target_ref),
                 state: Set("firing".into()),
-                message: Set(message),
+                message: Set(i18n::store_message(&message)),
                 triggered_at: Set(now),
                 recovered_at: Set(0),
                 trigger_delivery: Set(delivery.into()),
@@ -608,6 +630,29 @@ async fn prune(s: &AppState) -> Result<()> {
     }
     Ok(())
 }
+async fn recover_deliveries(conn: &impl ConnectionTrait) -> Result<()> {
+    for column in [
+        events::Column::TriggerDelivery,
+        events::Column::RecoveryDelivery,
+    ] {
+        events::Entity::update_many()
+            .col_expr(
+                column,
+                Expr::value(i18n::store_message(&Message::new(
+                    "alerts.deliveryInterrupted",
+                ))),
+            )
+            .filter(
+                sea_orm::Condition::any()
+                    .add(column.eq("投递中"))
+                    .add(column.eq(i18n::store_message(&Message::new("alerts.delivering")))),
+            )
+            .exec(conn)
+            .await?;
+    }
+    Ok(())
+}
+
 pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
     let client = match reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -620,19 +665,9 @@ pub async fn scheduler(s: AppState, mut drain: watch::Receiver<bool>) {
             return;
         }
     };
-    for column in [
-        events::Column::TriggerDelivery,
-        events::Column::RecoveryDelivery,
-    ] {
-        if let Err(error) = events::Entity::update_many()
-            .col_expr(column, Expr::value("服务中断，投递结果不确定；不自动重试"))
-            .filter(column.eq("投递中"))
-            .exec(&s.db)
-            .await
-        {
-            tracing::error!(%error,"告警投递恢复失败");
-            return;
-        }
+    if let Err(error) = recover_deliveries(&s.db).await {
+        tracing::error!(%error,"告警投递恢复失败");
+        return;
     }
     let mut cleanup = std::time::Instant::now();
     loop {
@@ -679,7 +714,113 @@ pub async fn ensure_unreferenced(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("目标仍被告警规则引用，请先删除规则。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("alerts.targetReferenced"),
+        ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+    use crate::i18n::{Locale, render_stored, with_locale};
+    use sea_orm::{Database, IntoActiveModel};
+    use sea_orm_migration::MigratorTrait;
+
+    #[tokio::test]
+    async fn persisted_event_projection_and_restart_keep_identity_and_legacy_values() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        crate::migration::Migrator::up(&db, None).await.unwrap();
+        let name = r#"User {name} {"$system_message":{"key":"error.forbidden"}}"#;
+        let message = Message::new("alerts.metricValue")
+            .with("metric", "load1")
+            .with("value", "4.20")
+            .with("threshold", "3");
+        let pending = i18n::store_message(&Message::new("alerts.delivering"));
+        for (id, delivery) in [
+            (1, pending.clone()),
+            (2, "投递中".into()),
+            (3, "HTTP 204".into()),
+        ] {
+            events::Entity::insert(
+                events::Model {
+                    id,
+                    workspace_id: 7,
+                    rule_id: 8,
+                    rule_name: name.into(),
+                    target_kind: "host".into(),
+                    target_ref: 9,
+                    state: "firing".into(),
+                    message: i18n::store_message(&message),
+                    triggered_at: 1,
+                    recovered_at: 0,
+                    trigger_delivery: delivery.clone(),
+                    recovery_delivery: delivery,
+                    version: 1,
+                    created_at: 1,
+                    updated_at: 1,
+                }
+                .into_active_model(),
+            )
+            .exec(&db)
+            .await
+            .unwrap();
+        }
+        recover_deliveries(&db).await.unwrap();
+        // A second startup neither changes final statuses nor initiates a retry.
+        recover_deliveries(&db).await.unwrap();
+        for id in [1, 2, 3] {
+            let row = events::Entity::find_by_id(id)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.rule_name, name);
+            if id == 3 {
+                assert_eq!(row.trigger_delivery, "HTTP 204");
+                assert_eq!(row.recovery_delivery, "HTTP 204");
+            } else {
+                assert_eq!(
+                    row.trigger_delivery,
+                    i18n::store_message(&Message::new("alerts.deliveryInterrupted"))
+                );
+                assert_eq!(row.recovery_delivery, row.trigger_delivery);
+            }
+            for locale in Locale::ALL {
+                let view = with_locale(locale, async { event(row.clone()) }).await;
+                assert_eq!(view["rule_name"], name);
+                assert_eq!(view["message"], i18n::render(locale, &message));
+                assert_eq!(
+                    view["trigger_delivery"],
+                    render_stored(locale, &row.trigger_delivery)
+                );
+                assert_eq!(view["state"], "firing");
+            }
+        }
+        let rule = rules::Model {
+            id: 8,
+            workspace_id: 7,
+            name: name.into(),
+            description: name.into(),
+            target_kind: "host".into(),
+            target_ref: 9,
+            metric: "load1".into(),
+            threshold: 3,
+            enabled: 1,
+            run_as: 1,
+            webhook: String::new(),
+            last_error: i18n::store_message(&Message::new("alerts.targetUnavailable")),
+            version: 1,
+            created_at: 1,
+            updated_at: 1,
+        };
+        for locale in Locale::ALL {
+            let view = with_locale(locale, async { public(rule.clone()) }).await;
+            assert_eq!(view["last_error"], render_stored(locale, &rule.last_error));
+            assert_eq!(view["name"], name);
+            assert_eq!(view["description"], name);
+        }
+    }
 }

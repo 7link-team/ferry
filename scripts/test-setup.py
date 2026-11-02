@@ -26,6 +26,6 @@ if status['required']:
             'name': 'Platform fixture', 'email': 'platform-fixture@example.invalid',
             'password': 'temporary-platform-password'}
     req = urllib.request.Request(base + '/setup', data=json.dumps(body).encode(),
-        headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+        headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
     with client.open(req, timeout=30) as response:
         assert response.status == 200

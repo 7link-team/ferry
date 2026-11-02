@@ -117,9 +117,9 @@ impl Vault {
                 },
             )
             .map_err(|_| {
-                ApiError(
+                ApiError::localized(
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                    "加密失败，凭据未保存。".into(),
+                    crate::i18n::Message::new("vault.encryptionFailed"),
                 )
             })?;
         Ok(format!(
@@ -131,9 +131,9 @@ impl Vault {
 
     pub fn open_secret(&self, stored: &str, aad: &str) -> Result<String> {
         let broken = || {
-            ApiError(
+            ApiError::localized(
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "凭据无法解密。".into(),
+                crate::i18n::Message::new("vault.decryptionFailed"),
             )
         };
         let mut parts = stored.splitn(3, '.');
@@ -328,5 +328,21 @@ mod tests {
         ] {
             assert!(v.open_secret(bad, "aad").is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn decryption_failure_has_a_localized_identity_without_exposing_ciphertext() {
+        let error = vault()
+            .open_secret("malformed-private-ciphertext", "private-aad")
+            .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.2.as_ref().unwrap().key, "vault.decryptionFailed");
+        let mut translations = std::collections::HashSet::new();
+        for locale in crate::i18n::Locale::ALL {
+            let text = error.render(locale);
+            assert!(!text.contains("private"));
+            translations.insert(text);
+        }
+        assert_eq!(translations.len(), 6);
     }
 }

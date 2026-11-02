@@ -48,11 +48,13 @@ impl ListQuery {
         let number = |key: &str, fallback: u64| -> Result<u64> {
             match raw.get(key) {
                 None => Ok(fallback),
-                Some(text) => text
-                    .parse::<u64>()
-                    .ok()
-                    .filter(|v| *v > 0)
-                    .ok_or_else(|| ApiError::bad(format!("{key} 必须是正整数。"))),
+                Some(text) => text.parse::<u64>().ok().filter(|v| *v > 0).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("resource.positive_integer")
+                            .with("field", key.to_owned()),
+                    )
+                }),
             }
         };
         let page = number("page", 1)?;
@@ -65,7 +67,11 @@ impl ListQuery {
         let descending = requested.starts_with('-');
         let sort = requested.trim_start_matches('-').to_owned();
         if !spec.sortable.contains(&sort.as_str()) {
-            return Err(ApiError::bad(format!("不支持按 {sort} 排序。")));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("resource.sort_unsupported")
+                    .with("field", sort.to_owned()),
+            ));
         }
 
         let search = raw
@@ -82,7 +88,11 @@ impl ListQuery {
                 continue;
             }
             if !spec.filters.contains(&key.as_str()) {
-                return Err(ApiError::bad(format!("不支持按 {key} 过滤。")));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("resource.filter_unsupported")
+                        .with("field", key.to_owned()),
+                ));
             }
             let values: Vec<String> = value
                 .split(',')

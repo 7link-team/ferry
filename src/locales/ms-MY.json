@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "Platform operasi",
+    "modules": "Modul",
+    "platform": "Pentadbiran platform",
+    "account": "Profil",
+    "signOut": "Log keluar",
+    "workspaces": "Cipta atau sertai ruang kerja"
+  },
+  "language": {
+    "label": "Bahasa",
+    "changed": "Bahasa ditukar kepada {{language}}"
+  },
+  "common": {
+    "loading": "Memuatkan…",
+    "back": "Kembali",
+    "close": "Tutup",
+    "save": "Simpan",
+    "cancel": "Batal",
+    "edit": "Edit",
+    "delete": "Padam",
+    "create": "Cipta",
+    "search": "Cari",
+    "refresh": "Muat semula",
+    "retry": "Cuba lagi"
+  },
+  "errors": {
+    "network": "Tidak dapat menyambung ke perkhidmatan. Semak rangkaian anda dan cuba lagi.",
+    "operation": "Operasi gagal. Sila cuba lagi."
+  }
+}

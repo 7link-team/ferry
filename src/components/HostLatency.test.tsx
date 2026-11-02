@@ -2,11 +2,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { HostLatency } from "./HostLatency";
+import { i18n, hostRepositoryText } from "../i18n";
 
 let root: Root;
 let element: HTMLDivElement;
 let complete: (response: { ok: boolean; stderr?: string }) => void;
 beforeEach(() => {
+  void i18n.changeLanguage('zh-CN');
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.useFakeTimers();
   element = document.createElement("div"); document.body.append(element);
@@ -19,10 +21,20 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   element.remove(); vi.unstubAllGlobals(); vi.useRealTimers();
+  await i18n.changeLanguage('en-US');
 });
 const render = async (hostId = "1") => {
   await act(async () => root.render(<HostLatency workspace="ops" hostId={hostId} />));
 };
+it("switches the pending probe label and explanatory tooltip in six languages",async()=>{
+ await render();
+ for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
+  await act(async()=>{await i18n.changeLanguage(locale);});
+  expect(element.textContent).toBe(hostRepositoryText('host.003'));
+  expect(element.firstElementChild?.getAttribute('title')).toContain(hostRepositoryText('host.006'));
+ }
+ expect(fetch).toHaveBeenCalledTimes(1);
+});
 
 it.each([[30, "text-success"], [150, "text-warning"], [450, "text-destructive"]])(
   "shows measured %i ms with the corresponding color and animated icon", async (delay, color) => {

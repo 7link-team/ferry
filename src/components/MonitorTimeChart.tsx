@@ -1,9 +1,11 @@
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
+import { currentLocale } from "../locale";
 import { useState } from "react";
 
 export type MonitorPoint = { at: number; value: number | null };
 export type MonitorSeries = { name: string; points: MonitorPoint[]; secondary?: boolean };
 
-const clock = (at: number, seconds: boolean) => new Date(at).toLocaleTimeString([], {
+const clock = (at: number, seconds: boolean) => new Date(at).toLocaleTimeString(currentLocale(), {
   hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), hour12: false,
 });
 
@@ -12,6 +14,7 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
   label: string; series: MonitorSeries[]; start: number; end: number; step: number;
   ceiling?: number; format: (value: number) => string;
 }) {
+  useCommonTranslation();
   const [selected, setSelected] = useState<number>();
   const points = series[0]?.points ?? [];
   const max = ceiling ?? Math.max(1, ...series.flatMap(item => item.points.map(point => point.value ?? 0))) * 1.1;
@@ -43,7 +46,7 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
       <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 flex w-11 flex-col justify-between pr-1 text-right text-xs tabular-nums text-muted-foreground">
         <span>{format(max)}</span><span>{format(max / 2)}</span><span>{format(0)}</span>
       </div>
-      <svg role="img" aria-label={`${label}，${clock(start, true)} 至 ${clock(end, true)}，${points.filter(point => visible(point) && point.value !== null).length} 个真实采样点。左右方向键查看采样。`}
+      <svg role="img" aria-label={hostRepositoryText("host-chart.001", {value1: label, value2: clock(start, true), value3: clock(end, true), value4: points.filter(point => visible(point) && point.value !== null).length})}
         tabIndex={0} viewBox="0 0 600 120" preserveAspectRatio="none"
         className="h-32 w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onFocus={() => { if (points.length) setSelected(points.length - 1); }}
@@ -72,9 +75,9 @@ export function MonitorTimeChart({ label, series, start, end, step, ceiling, for
         </g>)}
         {active && <line x1={x(active.at)} x2={x(active.at)} y1="0" y2="120" stroke="var(--muted-foreground)" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />}
       </svg>
-      {!hasValues && <span className="pointer-events-none absolute inset-0 flex items-center justify-center pl-12 text-xs text-muted-foreground">等待有效采样</span>}
+      {!hasValues && <span className="pointer-events-none absolute inset-0 flex items-center justify-center pl-12 text-xs text-muted-foreground">{hostRepositoryText("host-chart.002")}</span>}
       {active && <div role="tooltip" className="pointer-events-none absolute right-2 top-1 z-10 rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-sm">
-        <div className="mb-1 font-medium tabular-nums">{new Date(active.at).toLocaleString([], { hour12: false })}</div>
+        <div className="mb-1 font-medium tabular-nums">{new Date(active.at).toLocaleString(currentLocale(), { hour12: false })}</div>
         {series.map(item => <div key={item.name} className="flex justify-between gap-4"><span>{item.name}</span><span className="tabular-nums">{item.points[selected!]?.value == null ? "—" : format(item.points[selected!]!.value!)}</span></div>)}
       </div>}
     </div>

@@ -1,4 +1,6 @@
 //! Pipeline run history, immutable snapshots and Actions scheduling.
+use crate::error::{Json, Path, Query};
+use crate::i18n::Message;
 use crate::{
     channel::HostChannel,
     db,
@@ -12,11 +14,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use bytes::Bytes;
 use sea_orm::{
     ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -71,7 +69,12 @@ pub(crate) fn open_variables(s: &AppState, run: &runs::Model) -> Result<Variable
             &s.vault
                 .open_secret(sealed, &snapshot_aad(run.workspace_id, run.id))?,
         )
-        .map_err(|_| ApiError::bad("流水线变量快照无效。")),
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.variableSnapshotInvalid"),
+            )
+        }),
         None => Ok(VariableSnapshot::default()),
     }
 }
@@ -156,10 +159,11 @@ pub async fn get(
                 .collect::<serde_json::Map<_, _>>()
         );
     }
+    let snapshot = crate::actions::snapshot(&r.definition);
     v["steps"] = json!(
         rows.iter()
             .map(
-                |v| json!({"index":v.step_index,"name":v.name,"state":v.state,
+                |v| json!({"index":v.step_index,"name":display_step_name(snapshot.as_ref(), v.step_index, &v.name),"state":v.state,
         "exit_code":v.exit_code,"started_at":v.started_at,"finished_at":v.finished_at})
             )
             .collect::<Vec<_>>()
@@ -168,7 +172,6 @@ pub async fn get(
         .filter(crate::entities::pipeline_run_jobs::Column::RunId.eq(r.id))
         .all(&s.db)
         .await?;
-    let snapshot = crate::actions::snapshot(&r.definition);
     v["jobs"] = json!(jobs.iter().map(|job| {
         let definition = snapshot.as_ref().and_then(|s| s.jobs.iter().find(|item| item.key == job.job_key));
         json!({"key":job.job_key,"name":definition.map(|item| item.name.as_str()).unwrap_or(&job.job_key),
@@ -177,6 +180,25 @@ pub async fn get(
     }).collect::<Vec<_>>());
     v["artifacts"] = crate::artifacts::for_run(s.as_ref(), r.workspace_id, r.id).await?;
     Ok(Json(v))
+}
+fn display_step_name(
+    snapshot: Option<&crate::actions::Snapshot>,
+    index: i64,
+    name: &str,
+) -> String {
+    if name == "Run command"
+        && snapshot.is_some_and(|snapshot| {
+            snapshot
+                .jobs
+                .iter()
+                .flat_map(|job| &job.steps)
+                .any(|step| step.index == index && step.default_name)
+        })
+    {
+        crate::i18n::message("actions.runCommand")
+    } else {
+        name.to_owned()
+    }
 }
 pub async fn log_list(
     State(s): State<AppState>,
@@ -190,10 +212,18 @@ pub async fn log_list(
         .get("after")
         .map(|v| v.parse::<i64>())
         .transpose()
-        .map_err(|_| ApiError::bad("after 必须是非负整数。"))?
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.afterInvalid"),
+            )
+        })?
         .unwrap_or(0);
     if after < 0 {
-        return Err(ApiError::bad("after 必须是非负整数。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.afterInvalid"),
+        ));
     }
     let rows = logs::Entity::find()
         .filter(logs::Column::RunId.eq(r.id))
@@ -204,7 +234,7 @@ pub async fn log_list(
         .await?;
     Ok(Json(
         json!({"items":rows.iter().map(|v|json!({"seq":v.seq,"step_index":v.step_index,
-        "stream":v.stream,"chunk":v.chunk})).collect::<Vec<_>>(),
+        "stream":v.stream,"chunk":crate::i18n::display_text_stored(&v.chunk)})).collect::<Vec<_>>(),
         "next_seq":rows.last().map(|v|v.seq).unwrap_or(after)}),
     ))
 }
@@ -231,9 +261,10 @@ fn dispatch_inputs(
         .keys()
         .find(|name| !specs.iter().any(|spec| &spec.name == *name))
     {
-        return Err(ApiError::bad(format!(
-            "workflow_dispatch 没有声明 input：{name}。"
-        )));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.inputUndeclared").with("name", name.clone()),
+        ));
     }
     let text = |value: &Value| match value {
         Value::String(text) => text.clone(),
@@ -243,18 +274,28 @@ fn dispatch_inputs(
     for spec in specs {
         let Some(value) = given.get(&spec.name).or(spec.default.as_ref()) else {
             if spec.required {
-                return Err(ApiError::bad(format!("缺少必填 input：{}。", spec.name)));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.inputRequired").with("name", spec.name.clone()),
+                ));
             }
             continue;
         };
-        let invalid = |kind: &str| ApiError::bad(format!("input {} 必须是{kind}。", spec.name));
+        let invalid = |kind: Message| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.inputType")
+                    .with("name", spec.name.clone())
+                    .with_message("kind", kind),
+            )
+        };
         let value = match spec.r#type.as_str() {
             "boolean" => match value {
                 Value::Bool(_) => value.clone(),
                 Value::String(flag) if flag == "true" || flag == "false" => {
                     Value::Bool(flag == "true")
                 }
-                _ => return Err(invalid("布尔值")),
+                _ => return Err(invalid(Message::new("execution.booleanKind"))),
             },
             "number" => match value {
                 Value::Number(_) => value.clone(),
@@ -264,23 +305,26 @@ fn dispatch_inputs(
                     .ok()
                     .and_then(serde_json::Number::from_f64)
                     .map(Value::Number)
-                    .ok_or_else(|| invalid("数字"))?,
-                _ => return Err(invalid("数字")),
+                    .ok_or_else(|| invalid(Message::new("execution.numberKind")))?,
+                _ => return Err(invalid(Message::new("execution.numberKind"))),
             },
             "choice" => {
                 let choice = text(value);
                 if !spec.options.contains(&choice) {
-                    return Err(invalid(&format!(
-                        "以下选项之一：{}",
-                        spec.options.join("、")
-                    )));
+                    return Err(invalid(
+                        Message::new("execution.choiceKind")
+                            .with("options", spec.options.join("、")),
+                    ));
                 }
                 Value::String(choice)
             }
             _ => Value::String(text(value)),
         };
         if spec.required && value == Value::String(String::new()) {
-            return Err(ApiError::bad(format!("缺少必填 input：{}。", spec.name)));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.inputRequired").with("name", spec.name.clone()),
+            ));
         }
         values.insert(spec.name.clone(), value);
     }
@@ -305,6 +349,19 @@ pub(crate) async fn trigger_as(
     body: Bytes,
     kind: &str,
 ) -> Result<(StatusCode, Json<Value>)> {
+    trigger_with_analysis_source(s, scope, id, body, kind, None).await
+}
+
+/// Analysis instantiates one checkout of its authorized connection from a saved
+/// workflow template. The saved pipeline and ordinary/manual runs are unchanged.
+pub(crate) async fn trigger_with_analysis_source(
+    s: AppState,
+    scope: Scope,
+    id: String,
+    body: Bytes,
+    kind: &str,
+    source: Option<(i64, String)>,
+) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.run")?;
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -313,11 +370,68 @@ pub(crate) async fn trigger_as(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    if let Some((connection, url)) = source {
+        let mut document = crate::actions::document(&p.definition).ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.analysisActionsRequired"),
+            )
+        })?;
+        let bindings: Vec<_> = document
+            .checkout_bindings
+            .iter_mut()
+            .filter(|v| v.connection_id == connection.to_string())
+            .collect();
+        if bindings.len() != 1 {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.analysisSourceRequired"),
+            ));
+        }
+        let binding = bindings.into_iter().next().unwrap();
+        binding.repository_url = url;
+        binding.git_ref = "+refs/heads/*:refs/remotes/origin/*".into();
+        // Keep the YAML step's declarative repository/ref consistent with its
+        // connection binding (the validator rejects conflicting values).
+        let mut yaml: serde_json::Value =
+            serde_yaml_ng::from_str(&document.workflow).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.analysisTemplateRead"),
+                )
+            })?;
+        if let Some(steps) = yaml["jobs"][&binding.job_id]["steps"].as_array_mut() {
+            if let Some(step) = steps
+                .iter_mut()
+                .find(|v| v["id"].as_str() == Some(&binding.step_id))
+            {
+                if let Some(with) = step.get_mut("with").and_then(Value::as_object_mut) {
+                    with.remove("repository");
+                    with.remove("ref");
+                }
+            }
+        }
+        document.workflow = serde_yaml_ng::to_string(&yaml).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.analysisTemplateEncode"),
+            )
+        })?;
+        p.definition = serde_json::to_string(&document).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.analysisTemplateEncode"),
+            )
+        })?;
+    }
     let body: TriggerBody = if body.is_empty() {
         TriggerBody::default()
     } else {
         serde_json::from_slice(&body).map_err(|_| {
-            ApiError::bad("执行参数必须是包含 branch/commit/environment_id/inputs 的 JSON 对象。")
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.triggerObject"),
+            )
         })?
     };
     let environment = crate::pipeline_contexts::selected(
@@ -352,7 +466,12 @@ pub(crate) async fn trigger_as(
                         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
                         .one(&tx)
                         .await?
-                        .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
+                        .ok_or_else(|| {
+                            ApiError::localized(
+                                StatusCode::BAD_REQUEST,
+                                Message::new("execution.hostGroupMissing"),
+                            )
+                        })?;
                     // One run has one concrete host. Resolve direct online members once,
                     // deterministically, and retain that host even if group membership changes.
                     candidates
@@ -362,10 +481,18 @@ pub(crate) async fn trigger_as(
                         .one(&tx)
                         .await?
                 }
-                _ => return Err(ApiError::bad("未知的执行目标类型。")),
+                _ => {
+                    return Err(ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.unknownTarget"),
+                    ));
+                }
             }
             .ok_or_else(|| {
-                ApiError::bad("当前工作空间中没有可用的执行主机（主机组需要在线成员）。")
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.noExecutionHost"),
+                )
             })?,
         )
     };
@@ -375,7 +502,12 @@ pub(crate) async fn trigger_as(
                 .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
                 .one(&tx)
                 .await?
-                .ok_or_else(|| ApiError::bad("仓库不存在于当前工作空间。"))?,
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.repositoryMissing"),
+                    )
+                })?,
         )
     } else {
         None
@@ -392,8 +524,9 @@ pub(crate) async fn trigger_as(
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
             || !(value.is_string() || value.is_boolean() || value.is_number())
         {
-            return Err(ApiError::bad(
-                "inputs 必须是名称到字符串、布尔值或数字的映射。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.inputsMap"),
             ));
         }
     }
@@ -402,16 +535,27 @@ pub(crate) async fn trigger_as(
             dispatch_inputs(&crate::actions::dispatch_inputs(&document), &body.inputs)?
         }
         None if body.inputs.is_empty() => BTreeMap::new(),
-        None => return Err(ApiError::bad("该流水线没有声明 workflow_dispatch inputs。")),
+        None => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.inputsNotDeclared"),
+            ));
+        }
     };
     let inputs = (!input_values.is_empty())
         .then(|| serde_json::to_string(&input_values))
         .transpose()
-        .map_err(|_| ApiError::bad("无法保存 inputs。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.saveInputs"),
+            )
+        })?;
     for value in [&branch, &commit] {
         if value.chars().count() > 255 || value.contains('\0') {
-            return Err(ApiError::bad(
-                "branch 和 commit 不能超过 255 字或包含空字符。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.branchCommitInvalid"),
             ));
         }
     }
@@ -453,9 +597,12 @@ pub(crate) async fn trigger_as(
         .as_ref()
         .map(crate::actions::references)
         .transpose()?;
-    let actions_references = references
-        .as_ref()
-        .ok_or_else(|| ApiError::bad("流水线必须是 Actions 定义。"))?;
+    let actions_references = references.as_ref().ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.actionsDefinitionRequired"),
+        )
+    })?;
     let contexts = crate::variables::snapshot_for_actions(
         &s,
         &tx,
@@ -525,10 +672,11 @@ pub(crate) async fn trigger_as(
                             .unwrap_or(Value::Bool(false)),
                     ),
                     _ => {
-                        return Err(ApiError::bad(format!(
-                            "任务 {} 的 concurrency 必须是组名或包含 group 的对象。",
-                            job.key
-                        )));
+                        return Err(ApiError::localized(
+                            StatusCode::BAD_REQUEST,
+                            Message::new("execution.concurrencyInvalid")
+                                .with("name", job.key.clone()),
+                        ));
                     }
                 };
                 let group = crate::concurrency::template(&group, &contexts)?;
@@ -567,10 +715,10 @@ pub(crate) async fn trigger_as(
                         .to_owned(),
                 ),
                 _ => {
-                    return Err(ApiError::bad(format!(
-                        "任务 {} 的 environment 必须是名称或包含 name 的对象。",
-                        job.key
-                    )));
+                    return Err(ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.environmentInvalid").with("name", job.key.clone()),
+                    ));
                 }
             };
             let name = crate::concurrency::template(&name, &contexts)?;
@@ -614,24 +762,31 @@ pub(crate) async fn trigger_as(
     let variable_snapshot = if snapshot.values.is_empty() && snapshot.secrets.is_none() {
         None
     } else {
-        Some(
-            s.vault.seal(
-                &serde_json::to_string(&snapshot)
-                    .map_err(|_| ApiError::bad("无法保存流水线变量快照。"))?,
-                &crate::vault::aad(
-                    &scope.workspace_id.to_string(),
-                    "pipeline-run-variables",
-                    &run_id.to_string(),
-                ),
-            )?,
-        )
+        Some(s.vault.seal(
+            &serde_json::to_string(&snapshot).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.saveVariableSnapshot"),
+                )
+            })?,
+            &crate::vault::aad(
+                &scope.workspace_id.to_string(),
+                "pipeline-run-variables",
+                &run_id.to_string(),
+            ),
+        )?)
     };
     let host_id = actions
         .as_ref()
         .and_then(|snapshot| snapshot.jobs.first())
         .map(|job| job.host_id)
         .or_else(|| host.as_ref().map(|row| row.id))
-        .ok_or_else(|| ApiError::bad("流水线缺少执行主机。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.hostMissing"),
+            )
+        })?;
     // Names as they are now, so history keeps them after a rename or delete.
     let host_name = crate::entities::hosts::Entity::find_by_id(host_id)
         .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
@@ -682,8 +837,12 @@ pub(crate) async fn trigger_as(
         triggered_by: i64::from(scope.user.id),
         inputs,
         definition: match &actions {
-            Some(snapshot) => serde_json::to_string(snapshot)
-                .map_err(|_| ApiError::bad("无法保存 Actions 执行快照。"))?,
+            Some(snapshot) => serde_json::to_string(snapshot).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.saveRunSnapshot"),
+                )
+            })?,
             None => p.definition,
         },
         variable_snapshot,
@@ -828,7 +987,10 @@ pub async fn approve(
     let run = scoped(&s, &scope, &id).await?;
     let snapshot = crate::actions::snapshot(&run.definition).ok_or_else(ApiError::missing)?;
     if run.state != "running" || !snapshot.jobs.iter().any(|job| job.key == key) {
-        return Err(ApiError::bad("当前任务不在等待审批状态。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.notWaitingApproval"),
+        ));
     }
     use crate::entities::pipeline_run_jobs as jobs;
     let changed = jobs::Entity::update_many()
@@ -840,7 +1002,10 @@ pub async fn approve(
         .await?
         .rows_affected;
     if changed == 0 {
-        return Err(ApiError::bad("审批已处理，或任务尚未进入等待审批状态。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.approvalProcessed"),
+        ));
     }
     crate::hosts::activity(
         &s,
@@ -1046,7 +1211,7 @@ async fn dispatch(
     let r = &r;
     if execute(s, r, stop).await.is_err() {
         // Never log arbitrary remote errors here: they may contain credentials.
-        append(
+        append_message(
             s,
             r.id,
             -1,
@@ -1058,7 +1223,7 @@ async fn dispatch(
                 .map(|l| l.seq)
                 .unwrap_or(0),
             "stderr",
-            "执行或凭据清理失败，请检查主机连接与配置。\n",
+            Message::new("execution.dispatchFailed"),
         )
         .await?;
         finish(s, r.id, "failed").await?;
@@ -1097,19 +1262,59 @@ pub(crate) async fn append(
         while !rest.is_char_boundary(end) {
             end -= 1;
         }
-        *seq += 1;
-        logs::Entity::insert(logs::ActiveModel {
-            id: Set(i64::from(s.next_id()?)),
-            run_id: Set(run),
-            seq: Set(*seq),
-            step_index: Set(index),
-            stream: Set(stream.into()),
-            chunk: Set(rest[..end].into()),
-        })
-        .exec(&s.db)
+        append_record(
+            s,
+            run,
+            index,
+            seq,
+            stream,
+            crate::i18n::store_raw(&rest[..end]),
+        )
         .await?;
         rest = &rest[end..];
     }
+    Ok(())
+}
+
+/// Application messages remain atomic; raw stdout/stderr always uses `append`.
+pub(crate) async fn append_message(
+    s: &AppState,
+    run: i64,
+    index: i64,
+    seq: &mut i64,
+    stream: &str,
+    message: Message,
+) -> Result<()> {
+    append_record(
+        s,
+        run,
+        index,
+        seq,
+        stream,
+        crate::i18n::StoredText::from_message(message).stored(),
+    )
+    .await
+}
+
+async fn append_record(
+    s: &AppState,
+    run: i64,
+    index: i64,
+    seq: &mut i64,
+    stream: &str,
+    chunk: String,
+) -> Result<()> {
+    *seq += 1;
+    logs::Entity::insert(logs::ActiveModel {
+        id: Set(i64::from(s.next_id()?)),
+        run_id: Set(run),
+        seq: Set(*seq),
+        step_index: Set(index),
+        stream: Set(stream.into()),
+        chunk: Set(chunk),
+    })
+    .exec(&s.db)
+    .await?;
     Ok(())
 }
 async fn execute(
@@ -1120,14 +1325,18 @@ async fn execute(
     if let Some(snapshot) = crate::actions::snapshot(&r.definition) {
         return crate::actions_run::execute(s, r, snapshot, stop).await;
     }
-    Err(ApiError::bad(
-        "历史流水线运行不能重新执行，请创建新的运行。",
+    Err(ApiError::localized(
+        StatusCode::BAD_REQUEST,
+        Message::new("execution.historicalRun"),
     ))
 }
 
 pub(crate) fn checkout_script(r: &runs::Model) -> Result<String> {
     if r.repo_url.is_empty() {
-        return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.repositoryRequired"),
+        ));
     }
     let target = if r.commit.is_empty() {
         format!("refs/remotes/origin/{}^{{commit}}", r.branch)
@@ -1185,13 +1394,15 @@ pub(crate) async fn credential_environment(
                 ch,
                 &format!("{private}/credential-helper"),
                 format!(
-                    "#!/bin/sh\ncat >/dev/null\n[ \"$1\" = get ] || exit 0\nprintf 'username='\ncat {private}/username\nprintf '\\npassword='\ncat {private}/password\nprintf '\\n\\n'\n"
+                    "#!/bin/sh\ncat >/dev/null\n[ \"$1\" = get ] || exit 0\nprintf 'username='\ncat {}\nprintf '\\npassword='\ncat {}\nprintf '\\n\\n'\n",
+                    quote(&format!("{private}/username")),
+                    quote(&format!("{private}/password")),
                 ),
                 0o700,
             ).await?;
             env.push_str(&format!(
                 "unset GIT_ASKPASS SSH_ASKPASS\nexport GIT_CONFIG_COUNT=3\nexport GIT_CONFIG_KEY_0=credential.helper\nexport GIT_CONFIG_VALUE_0=''\nexport GIT_CONFIG_KEY_1=credential.helper\nexport GIT_CONFIG_VALUE_1={}\nexport GIT_CONFIG_KEY_2=core.askPass\nexport GIT_CONFIG_VALUE_2=''\n",
-                quote(&format!("{private}/credential-helper"))
+                quote(&format!("!{}", quote(&format!("{private}/credential-helper"))))
             ));
         }
     }
@@ -1221,6 +1432,187 @@ pub(crate) fn redact(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn run_reader_localizes_only_marked_unchanged_default_step_names() {
+        use sea_orm::{ConnectionTrait, Schema};
+        let dir = tempfile::tempdir().unwrap();
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        let schema = Schema::new(db.get_database_backend());
+        for table in [
+            schema.create_table_from_entity(runs::Entity),
+            schema.create_table_from_entity(steps::Entity),
+            schema.create_table_from_entity(crate::entities::pipeline_run_jobs::Entity),
+            schema.create_table_from_entity(crate::entities::pipeline_artifacts::Entity),
+        ] {
+            db.execute(&table).await.unwrap();
+        }
+        let s = std::sync::Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "step-name-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
+        });
+        let document = crate::actions::document(&json!({"engine":"github-actions", "workflow":"jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo default\n      - name: Run command\n        run: echo explicit\n      - run: echo engine\n"}).to_string()).unwrap();
+        let (jobs, _) = crate::actions::parse(&document).unwrap();
+        let snapshot = crate::actions::Snapshot {
+            engine: "github-actions".into(),
+            document,
+            jobs,
+            checkouts: vec![],
+        };
+        let definition = serde_json::to_string(&snapshot).unwrap();
+        runs::Entity::insert(runs::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(1),
+            pipeline_id: Set(1),
+            environment_id: Set(0),
+            environment_name: Set(String::new()),
+            inputs: Set(None),
+            concurrency_group: Set(String::new()),
+            pipeline_name: Set("literal pipeline".into()),
+            host_name: Set("literal host".into()),
+            triggered_by_name: Set("literal user".into()),
+            host_id: Set(1),
+            number: Set(1),
+            state: Set("succeeded".into()),
+            trigger_kind: Set("manual".into()),
+            triggered_by: Set(1),
+            definition: Set(definition.clone()),
+            variable_snapshot: Set(None),
+            repo_url: Set(String::new()),
+            branch: Set(String::new()),
+            commit: Set(String::new()),
+            credential_id: Set(0),
+            created_at: Set(0),
+            started_at: Set(0),
+            finished_at: Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        for (index, name) in [
+            (0, "Run command"),
+            (1, "Run command"),
+            (2, "engine evaluated name {name}"),
+        ] {
+            steps::Entity::insert(steps::ActiveModel {
+                id: Set(index + 2),
+                run_id: Set(1),
+                step_index: Set(index),
+                name: Set(name.into()),
+                state: Set("success".into()),
+                exit_code: Set(Some(0)),
+                started_at: Set(0),
+                finished_at: Set(0),
+            })
+            .exec(&s.db)
+            .await
+            .unwrap();
+        }
+        for locale in crate::i18n::Locale::ALL {
+            let scope = Scope {
+                workspace_id: Id::from(1),
+                user: crate::auth::User {
+                    id: Id::from(1),
+                    email: String::new(),
+                    name: "literal user".into(),
+                    is_superadmin: false,
+                },
+                permissions: std::collections::HashSet::from(["pipelines.read".into()]),
+            };
+            let Json(value) = crate::i18n::with_locale(
+                locale,
+                get(State(s.clone()), scope, Path(("1".into(), "1".into()))),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                value["steps"][0]["name"],
+                crate::i18n::render(locale, &Message::new("actions.runCommand"))
+            );
+            assert_eq!(
+                value["steps"][1]["name"], "Run command",
+                "explicit identical user name stays literal"
+            );
+            assert_eq!(value["steps"][2]["name"], "engine evaluated name {name}");
+        }
+        let mut legacy: Value = serde_json::from_str(&definition).unwrap();
+        for job in legacy["jobs"].as_array_mut().unwrap() {
+            for step in job["steps"].as_array_mut().unwrap() {
+                step.as_object_mut().unwrap().remove("default_name");
+            }
+        }
+        let old = crate::actions::snapshot(&legacy.to_string()).unwrap();
+        for locale in crate::i18n::Locale::ALL {
+            assert_eq!(
+                crate::i18n::with_locale(locale, async {
+                    display_step_name(Some(&old), 0, "Run command")
+                })
+                .await,
+                "Run command"
+            );
+        }
+        let stored = runs::Entity::find_by_id(1)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.definition, definition,
+            "reader never rewrites the frozen snapshot"
+        );
+        let stored = steps::Entity::find()
+            .order_by_asc(steps::Column::StepIndex)
+            .all(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(stored[0].name, "Run command");
+    }
+
+    #[test]
+    fn dispatch_input_errors_preserve_localized_type_and_raw_input_names() {
+        for (kind, key) in [
+            ("boolean", "execution.booleanKind"),
+            ("number", "execution.numberKind"),
+            ("choice", "execution.choiceKind"),
+        ] {
+            let name = "user {kind} {{name}}";
+            let specs = [crate::actions::InputSpec {
+                name: name.into(),
+                r#type: kind.into(),
+                required: false,
+                default: None,
+                options: vec!["raw {option}".into()],
+                description: String::new(),
+            }];
+            let error = dispatch_inputs(&specs, &BTreeMap::from([(name.into(), json!("invalid"))]))
+                .unwrap_err();
+            let message = error.2.as_ref().unwrap();
+            assert_eq!(message.key, "execution.inputType");
+            assert_eq!(message.params["name"], name);
+            assert_eq!(message.children["kind"].key, key);
+            for locale in crate::i18n::Locale::ALL {
+                let displayed = error.render(locale);
+                assert!(displayed.contains(name));
+                if kind == "choice" {
+                    assert!(displayed.contains("raw {option}"));
+                }
+                assert_eq!(
+                    crate::i18n::render_stored(locale, &error.stored()),
+                    displayed
+                );
+            }
+        }
+    }
 
     #[test]
     fn workflow_dispatch_inputs_follow_github_rules() {

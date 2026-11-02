@@ -1,4 +1,5 @@
 //! Browser authorization for external repositories. App secrets stay server-side.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{
@@ -11,12 +12,7 @@ use crate::{
     vault,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::Redirect,
-};
+use axum::{extract::State, http::StatusCode, response::Redirect};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngCore;
 use sea_orm::{
@@ -37,7 +33,12 @@ struct Provider {
 fn endpoint(base: &reqwest::Url, path: &str) -> Result<reqwest::Url> {
     let mut url = base.clone();
     url.path_segments_mut()
-        .map_err(|_| ApiError::bad("授权接入点无效。"))?
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.endpointInvalid"),
+            )
+        })?
         .pop_if_empty()
         .extend(path.split('/'));
     Ok(url)
@@ -67,7 +68,12 @@ fn default_base(kind: &str) -> &str {
     }
 }
 fn parse_endpoint(value: &str) -> Result<reqwest::Url> {
-    let url = reqwest::Url::parse(value).map_err(|_| ApiError::bad("授权接入点无效。"))?;
+    let url = reqwest::Url::parse(value).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.endpointInvalid"),
+        )
+    })?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
         || !url.username().is_empty()
@@ -75,18 +81,51 @@ fn parse_endpoint(value: &str) -> Result<reqwest::Url> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err(ApiError::bad(
-            "授权接入点必须为不带凭据或查询参数的HTTP(S)地址。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.endpointFormat"),
         ));
     }
     Ok(url)
 }
+
+fn validate_anonymous_git_address(address: &str) -> Result<()> {
+    if address.starts_with("git://") {
+        let url = reqwest::Url::parse(address).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitAddressInvalid"),
+            )
+        })?;
+        if url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || address.chars().any(char::is_control)
+        {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitAddressCredentials"),
+            ));
+        }
+        Ok(())
+    } else {
+        parse_endpoint(address).map(|_| ())
+    }
+}
 impl OAuthSettings {
     pub(crate) fn read(s: &AppState, stored: Option<&str>) -> Result<Self> {
         if let Some(stored) = stored {
-            let mut config: Self =
-                serde_json::from_str(&s.vault.open_secret(stored, SETTINGS_AAD)?)
-                    .map_err(|_| ApiError::bad("平台网页授权配置损坏。"))?;
+            let mut config: Self = serde_json::from_str(
+                &s.vault.open_secret(stored, SETTINGS_AAD)?,
+            )
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.oauthConfigCorrupt"),
+                )
+            })?;
             for kind in PROVIDERS {
                 config.providers.entry(kind.into()).or_default();
             }
@@ -124,7 +163,7 @@ impl OAuthSettings {
     pub(crate) fn view(&self, s: &AppState, saved: bool) -> Value {
         let mut view = json!({"oauth_public_url":self.public_url,
             "oauth_callback_url":self.callback(s).unwrap_or_default(),
-            "oauth_source":if saved { "平台设置（保存后立即生效）" } else { "服务端环境变量（网页保存后以平台设置为准）" }});
+            "oauth_source":if saved { crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.sourceSaved")) } else { crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.sourceEnvironment")) }});
         for (kind, value) in &self.providers {
             for (key, field) in [
                 ("enabled", json!(value.enabled)),
@@ -150,11 +189,17 @@ impl OAuthSettings {
             secret: bool,
         ) -> Result<()> {
             if let Some(value) = patch.get(key) {
-                let value = value
-                    .as_str()
-                    .ok_or_else(|| ApiError::bad("网页授权配置字段类型无效。"))?;
+                let value = value.as_str().ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.oauthFieldType"),
+                    )
+                })?;
                 if value.len() > 8192 || value.chars().any(char::is_control) {
-                    return Err(ApiError::bad("网页授权配置字段过长或包含控制字符。"));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.oauthFieldLength"),
+                    ));
                 }
                 if !secret || !value.is_empty() {
                     *target = if secret {
@@ -171,15 +216,20 @@ impl OAuthSettings {
             self.callback(s)?;
         }
         for kind in PROVIDERS {
-            let value = self
-                .providers
-                .get_mut(kind)
-                .ok_or_else(|| ApiError::bad("平台网页授权配置损坏。"))?;
+            let value = self.providers.get_mut(kind).ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.oauthConfigCorrupt"),
+                )
+            })?;
             let prefix = format!("oauth_{kind}_");
             if let Some(enabled) = patch.get(&(prefix.clone() + "enabled")) {
-                value.enabled = enabled
-                    .as_bool()
-                    .ok_or_else(|| ApiError::bad("网页授权启用状态无效。"))?;
+                value.enabled = enabled.as_bool().ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.oauthEnabledInvalid"),
+                    )
+                })?;
             }
             text(
                 patch,
@@ -214,18 +264,26 @@ impl OAuthSettings {
     }
     pub(crate) fn seal(&self, s: &AppState) -> Result<String> {
         s.vault.seal(
-            &serde_json::to_string(self).map_err(|_| ApiError::bad("网页授权配置编码失败。"))?,
+            &serde_json::to_string(self).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.oauthConfigEncode"),
+                )
+            })?,
             SETTINGS_AAD,
         )
     }
     fn provider(&self, kind: &str) -> Result<Provider> {
-        let value = self
-            .providers
-            .get(kind)
-            .ok_or_else(|| ApiError::bad("该平台请使用API令牌授权。"))?;
+        let value = self.providers.get(kind).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.apiTokenRequired"),
+            )
+        })?;
         if !value.enabled || value.client_id.is_empty() || value.client_secret.is_empty() {
-            return Err(ApiError::bad(
-                "平台尚未启用或配置该网页授权应用，请联系平台管理员。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.oauthNotConfigured"),
             ));
         }
         let base = parse_endpoint(if value.base_url.is_empty() {
@@ -265,7 +323,10 @@ impl OAuthSettings {
             .host_str()
             .is_none_or(|h| matches!(h, "0.0.0.0" | "[::]"))
         {
-            return Err(ApiError::bad("请在平台设置中配置有效公开访问地址。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.publicUrlRequired"),
+            ));
         }
         Ok(endpoint(&url, "api/repository-providers/callback")?.to_string())
     }
@@ -275,7 +336,10 @@ fn config_fingerprint(config: &Provider) -> String {
 }
 fn require_same_config(config: &Provider, fingerprint: &str) -> Result<()> {
     if config_fingerprint(config) != fingerprint {
-        return Err(ApiError::bad("授权应用或接入点已变化，请重新授权。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.oauthEndpointChanged"),
+        ));
     }
     Ok(())
 }
@@ -295,23 +359,33 @@ fn connection_aad(workspace: Id, id: Id) -> String {
 }
 async fn response_json(mut response: reqwest::Response) -> Result<Value> {
     if !response.status().is_success() {
-        return Err(ApiError::bad(format!(
-            "授权提供方返回HTTP {}，请重新授权。",
-            response.status().as_u16()
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.providerHttp")
+                .with("status", response.status().as_u16().to_string()),
+        ));
     }
     let mut bytes = Vec::new();
-    while let Some(part) = response
-        .chunk()
-        .await
-        .map_err(|_| ApiError::bad("读取授权结果失败。"))?
-    {
+    while let Some(part) = response.chunk().await.map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.authorizationRead"),
+        )
+    })? {
         if bytes.len() + part.len() > 1024 * 1024 {
-            return Err(ApiError::bad("授权响应过大。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.authorizationTooLarge"),
+            ));
         }
         bytes.extend_from_slice(&part);
     }
-    serde_json::from_slice(&bytes).map_err(|_| ApiError::bad("授权提供方返回了无效结果。"))
+    serde_json::from_slice(&bytes).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.authorizationInvalid"),
+        )
+    })
 }
 fn http() -> Result<reqwest::Client> {
     reqwest::Client::builder()
@@ -319,7 +393,12 @@ fn http() -> Result<reqwest::Client> {
         .timeout(Duration::from_secs(20))
         .user_agent("workspace-repository-authorization/1")
         .build()
-        .map_err(|_| ApiError::bad("无法初始化授权连接。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.authorizationClient"),
+            )
+        })
 }
 
 // Codeup may return fewer items than requested; the documented response headers
@@ -349,15 +428,18 @@ fn codeup_has_more(response: &reqwest::Response, page: u32) -> Option<bool> {
 async fn repository_response(response: reqwest::Response, kind: &str) -> Result<Value> {
     if kind == "codeup" && !response.status().is_success() {
         let message = match response.status().as_u16() {
-            401 => "Codeup令牌无效或已过期，请更新凭据。",
-            403 => "Codeup拒绝访问，请检查令牌的代码仓库、分支只读权限及账号的仓库权限。",
-            404 => "Codeup资源不存在或不可见，请检查组织ID、仓库地址和API接入点。",
-            429 => "Codeup请求过于频繁，请稍后重试。",
-            500..=599 => "Codeup服务暂时不可用，请稍后重试。",
-            300..=399 => "Codeup接入点返回重定向，请填写最终API地址；不会转发令牌。",
-            _ => "Codeup请求失败，请检查接入点和授权配置。",
+            401 => "repository.auth.codeupUnauthorized",
+            403 => "repository.auth.codeupForbidden",
+            404 => "repository.auth.codeupMissing",
+            429 => "repository.auth.codeupRateLimit",
+            500..=599 => "repository.auth.codeupUnavailable",
+            300..=399 => "repository.auth.codeupRedirect",
+            _ => "repository.auth.codeupFailed",
         };
-        return Err(ApiError::bad(message));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new(message),
+        ));
     }
     response_json(response).await
 }
@@ -369,29 +451,45 @@ fn token_data(value: &Value) -> Result<(&str, i64, Option<&str>)> {
         .get("access_token")
         .and_then(Value::as_str)
         .filter(|v| valid(v))
-        .ok_or_else(|| ApiError::bad("授权未返回有效访问令牌，请重新授权。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.accessTokenMissing"),
+            )
+        })?;
     let expires = match value.get("expires_in") {
         None => 0,
         Some(v) => {
             let seconds = v
                 .as_u64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                .ok_or_else(|| ApiError::bad("授权有效期无效。"))?;
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.expiryInvalid"),
+                    )
+                })?;
             i64::try_from(seconds)
                 .ok()
                 .and_then(|v| v.checked_mul(1000))
                 .and_then(|v| db::now().checked_add(v))
                 .filter(|v| *v <= 8_640_000_000_000_000)
-                .ok_or_else(|| ApiError::bad("授权有效期无效。"))?
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.expiryInvalid"),
+                    )
+                })?
         }
     };
     let refresh = match value.get("refresh_token") {
         None | Some(Value::Null) => None,
-        Some(v) => Some(
-            v.as_str()
-                .filter(|v| valid(v))
-                .ok_or_else(|| ApiError::bad("授权刷新令牌无效。"))?,
-        ),
+        Some(v) => Some(v.as_str().filter(|v| valid(v)).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.refreshTokenInvalid"),
+            )
+        })?),
     };
     Ok((access, expires, refresh))
 }
@@ -425,7 +523,19 @@ pub async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>
                 }
             })
             .unwrap_or("not-connected");
-        rows.push(json!({"id":kind,"provider":kind,"web_available":configured,"state":state,"credential_id":row.as_ref().map(|r|Id::from(r.credential_id)),"account":row.as_ref().map(|r|r.account.as_str()).unwrap_or(""),"expires_at":row.as_ref().map(|r|r.expires_at).unwrap_or(0),"last_error":row.as_ref().map(|r|r.last_error.as_str()).unwrap_or(""),"setup":if configured{""}else if kind=="codeup"{"使用Codeup个人访问令牌。"}else{"尚未配置网页授权应用，请联系平台管理员；也可使用API令牌。"}}));
+        let setup = if configured {
+            String::new()
+        } else {
+            crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new(if kind == "codeup" {
+                    "repository.auth.setupCodeup"
+                } else {
+                    "repository.auth.setupOAuth"
+                }),
+            )
+        };
+        rows.push(json!({"id":kind,"provider":kind,"web_available":configured,"state":state,"credential_id":row.as_ref().map(|r|Id::from(r.credential_id)),"account":row.as_ref().map(|r|r.account.as_str()).unwrap_or(""),"expires_at":row.as_ref().map(|r|r.expires_at).unwrap_or(0),"last_error":crate::i18n::display_stored(row.as_ref().map(|r|r.last_error.as_str()).unwrap_or("")),"setup":setup}));
     }
     Ok(Json(
         json!({"items":rows,"total":5,"page":1,"page_size":20}),
@@ -457,7 +567,10 @@ pub async fn start(
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-')
     {
-        return Err(ApiError::bad("授权窗口标识无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.popupInvalid"),
+        ));
     }
     if !options.name.is_empty() {
         validate_connection_name(&options.name, &options.description)?;
@@ -472,7 +585,10 @@ pub async fn start(
             || options.name.is_empty()
             || row.token_config.is_some()
         {
-            return Err(ApiError::bad("请选择同平台的网页授权连接重新授权。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.reauthorizeSameProvider"),
+            ));
         }
     }
     let settings = OAuthSettings::load(&s, &s.db).await?;
@@ -482,7 +598,7 @@ pub async fn start(
     let verifier = random_token();
     let id = s.next_id()?;
     let now = db::now();
-    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config),"popup":options.popup,"channel":options.channel,"name":options.name,"description":options.description,"connection_id":options.connection_id});
+    let proof = json!({"verifier":verifier,"redirect":redirect,"client_id":config.client_id,"base":config.base.as_str(),"config":config_fingerprint(&config),"popup":options.popup,"channel":options.channel,"name":options.name,"description":options.description,"connection_id":options.connection_id,"locale":crate::i18n::current_locale().tag()});
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     flows::Entity::delete_many()
         .filter(flows::Column::ExpiresAt.lt(now))
@@ -542,6 +658,27 @@ pub async fn start(
     }
     Ok(Json(json!({"url":url.as_str()})))
 }
+fn oauth_return_path(workspace: Id, provider: &str, proof: &Value) -> String {
+    // The callback's browser/provider headers do not identify the initiating
+    // UI language. Restore it only from the authenticated encrypted proof.
+    let locale = proof["locale"]
+        .as_str()
+        .and_then(crate::i18n::Locale::from_tag)
+        .unwrap_or_default();
+    if proof["popup"].as_bool() == Some(true) {
+        format!(
+            "/{}/workspaces/{workspace}/code-connections/new?oauth_popup=1&provider={provider}&oauth_channel={}",
+            locale.tag(),
+            proof["channel"].as_str().unwrap_or("")
+        )
+    } else {
+        format!(
+            "/{}/workspaces/{workspace}/code-connections/new?provider={provider}",
+            locale.tag()
+        )
+    }
+}
+
 #[derive(Deserialize)]
 pub struct Callback {
     #[serde(default)]
@@ -562,7 +699,12 @@ pub async fn complete(
         .filter(flows::Column::ExpiresAt.gt(db::now()))
         .one(&s.db)
         .await?
-        .ok_or_else(|| ApiError::bad("授权状态无效或已过期，请从原工作空间重新发起授权。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.stateExpired"),
+            )
+        })?;
     let scope = Scope::for_actor(&s, pending.workspace_id.into(), account.user.id).await?;
     scope.require("credentials.create")?;
     let workspace = scope.workspace_id;
@@ -575,7 +717,12 @@ pub async fn complete(
             .filter(flows::Column::ExpiresAt.gt(db::now()))
             .one(&tx)
             .await?
-            .ok_or_else(|| ApiError::bad("授权状态无效或已过期，请从原工作空间重新发起授权。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.stateExpired"),
+                )
+            })?;
         flows::Entity::delete_by_id(row.id).exec(&tx).await?;
         tx.commit().await?;
         row
@@ -584,19 +731,13 @@ pub async fn complete(
         &s.vault
             .open_secret(&flow.proof, &flow_aad(scope.workspace_id, flow.id.into()))?,
     )
-    .map_err(|_| ApiError::bad("授权状态损坏，请重新授权。"))?;
-    let return_path = if proof["popup"].as_bool() == Some(true) {
-        format!(
-            "/workspaces/{workspace}/code-connections/new?oauth_popup=1&provider={}&oauth_channel={}",
-            flow.provider,
-            proof["channel"].as_str().unwrap_or("")
+    .map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.stateCorrupt"),
         )
-    } else {
-        format!(
-            "/workspaces/{workspace}/code-connections/new?provider={}",
-            flow.provider
-        )
-    };
+    })?;
+    let return_path = oauth_return_path(workspace, &flow.provider, &proof);
     if !b.error.is_empty() || b.code.is_empty() {
         return Ok(Redirect::to(&format!(
             "{return_path}&authorization=cancelled"
@@ -608,7 +749,10 @@ pub async fn complete(
         || proof["client_id"].as_str() != Some(&config.client_id)
         || proof["base"].as_str() != Some(config.base.as_str())
     {
-        return Err(ApiError::bad("授权应用配置已变化，请重新授权。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.oauthConfigChanged"),
+        ));
     }
     require_same_config(&config, proof["config"].as_str().unwrap_or(""))?;
     let mut form = vec![
@@ -636,7 +780,12 @@ pub async fn complete(
             .form(&form)
             .send()
             .await
-            .map_err(|_| ApiError::bad("授权交换失败，请重新授权。"))?,
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.exchangeFailed"),
+                )
+            })?,
     )
     .await?;
     let (access, expires, refresh) = token_data(&tokens)?;
@@ -646,19 +795,24 @@ pub async fn complete(
     } else {
         request = request.bearer_auth(access);
     }
-    let account = response_json(
-        request
-            .send()
-            .await
-            .map_err(|_| ApiError::bad("读取授权账号失败，请重新授权。"))?,
-    )
+    let account = response_json(request.send().await.map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.accountRead"),
+        )
+    })?)
     .await?;
     let account = account
         .get("login")
         .or_else(|| account.get("username"))
         .and_then(Value::as_str)
         .filter(|v| !v.is_empty() && v.len() < 255)
-        .ok_or_else(|| ApiError::bad("授权提供方未返回有效账号。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.accountMissing"),
+            )
+        })?;
     let connection_name = proof["name"].as_str().unwrap_or("");
     let target = Id::reference(proof["connection_id"].as_str().unwrap_or(""))?;
     let (connection_id, _) = save_connection(
@@ -712,7 +866,10 @@ async fn save_connection(
             fresh.require("repositories.update")?;
             let row = owned_connection(&tx, &fresh, id).await?;
             if row.provider != kind || row.token_config.is_some() {
-                return Err(ApiError::bad("连接授权类型已变化，请重新发起授权。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.authorizationTypeChanged"),
+                ));
             }
             Some(row)
         }
@@ -771,7 +928,10 @@ async fn save_connection(
             scope: Set("build".into()),
             username: Set(account.into()),
             secret: Set(sealed),
-            description: Set("仓库连接管理；请在仓库表单中重新连接。".into()),
+            description: Set(crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.auth.managedCredentialDescription"),
+            )),
             version: Set(1),
             created_at: Set(now),
             updated_at: Set(now),
@@ -803,6 +963,14 @@ async fn save_connection(
         updated_at: Set(now),
     })
     .exec(&tx)
+    .await?;
+    crate::repository_analysis::connection_changed(
+        &s,
+        &tx,
+        scope.workspace_id.into(),
+        scope.user.id.into(),
+        id.into(),
+    )
     .await?;
     crate::hosts::activity_in(
         &s,
@@ -842,7 +1010,12 @@ async fn connection_provider(
 ) -> Result<Provider> {
     let config = if let Some(value) = &row.token_config {
         serde_json::from_str::<TokenConfig>(value)
-            .map_err(|_| ApiError::bad("仓库连接配置损坏。"))?
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.connectionConfigCorrupt"),
+                )
+            })?
             .provider()?
     } else {
         OAuthSettings::load(s, conn)
@@ -866,7 +1039,10 @@ pub struct TokenConnect {
 }
 fn token_config(kind: &str, body: &TokenConnect) -> Result<TokenConfig> {
     if !PROVIDERS.contains(&kind) && kind != "codeup" {
-        return Err(ApiError::bad("请选择支持的代码平台。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.providerInvalid"),
+        ));
     }
     if body.token.is_empty()
         || body.token.len() > 65536
@@ -875,14 +1051,20 @@ fn token_config(kind: &str, body: &TokenConnect) -> Result<TokenConfig> {
             .chars()
             .any(|c| c.is_control() || c.is_whitespace())
     {
-        return Err(ApiError::bad("请填写有效个人访问令牌。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.tokenRequired"),
+        ));
     }
     if kind == "codeup"
         && (body.username.trim().is_empty()
             || body.username.len() > 255
             || body.username.chars().any(char::is_control))
     {
-        return Err(ApiError::bad("请填写Codeup的Git用户名，用于后续拉取仓库。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.codeupUsername"),
+        ));
     }
     let base = parse_endpoint(if body.base_url.trim().is_empty() {
         if kind == "codeup" {
@@ -912,13 +1094,19 @@ fn token_config(kind: &str, body: &TokenConnect) -> Result<TokenConfig> {
             .chars()
             .any(|c| c.is_control() || matches!(c, '/' | '?' | '#'))
     {
-        return Err(ApiError::bad("Codeup组织ID无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.codeupOrganizationInvalid"),
+        ));
     }
     if kind == "codeup"
         && api.host_str() == Some("openapi-rdc.aliyuncs.com")
         && body.organization.trim().is_empty()
     {
-        return Err(ApiError::bad("Codeup中心版需要填写组织ID。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.codeupOrganizationRequired"),
+        ));
     }
     Ok(TokenConfig {
         base_url: base.to_string(),
@@ -953,9 +1141,12 @@ async fn remote_repositories(
         "codeup" => {
             let mut url = endpoint(&config.api, "oapi/v1/codeup")?;
             {
-                let mut path = url
-                    .path_segments_mut()
-                    .map_err(|_| ApiError::bad("API地址无效。"))?;
+                let mut path = url.path_segments_mut().map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.apiUrlInvalid"),
+                    )
+                })?;
                 if !organization.is_empty() {
                     path.push("organizations").push(organization);
                 }
@@ -984,14 +1175,22 @@ async fn remote_repositories(
     let response = authorize_request(http()?.get(url), kind, access, personal)
         .send()
         .await
-        .map_err(|_| ApiError::bad("读取代码平台仓库失败，请检查接入点和网络。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.repositoriesRead"),
+            )
+        })?;
     let has_more = (kind == "codeup")
         .then(|| codeup_has_more(&response, page))
         .flatten();
     let value = repository_response(response, kind).await?;
-    let rows = value
-        .as_array()
-        .ok_or_else(|| ApiError::bad("代码平台返回了无效仓库列表。"))?;
+    let rows = value.as_array().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.repositoriesInvalid"),
+        )
+    })?;
     let mut items = Vec::new();
     for row in rows {
         let text = |keys: &[&str]| {
@@ -1008,7 +1207,10 @@ async fn remote_repositories(
         let url = if clone_url.is_empty() && kind == "codeup" {
             let web = text(&["webUrl"]);
             if web.is_empty() {
-                return Err(ApiError::bad("Codeup未返回仓库地址。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.codeupRepositoryMissing"),
+                ));
             }
             format!("{}.git", web.trim_end_matches('/').trim_end_matches(".git"))
         } else {
@@ -1019,12 +1221,16 @@ async fn remote_repositories(
             || address.port_or_known_default() != config.base.port_or_known_default()
             || (config.base.scheme() == "https" && address.scheme() != "https")
         {
-            return Err(ApiError::bad(
-                "代码平台返回的仓库地址与配置的网站地址不匹配。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.repositoryHostMismatch"),
             ));
         }
         items.push(json!({"name":text(&["name"]),"full_name":text(&["full_name","path_with_namespace","pathWithNamespace","name"]),
-            "url":url,"default_branch":text(&["default_branch","defaultBranch"])}));
+            "url":url,"default_branch":text(&["default_branch","defaultBranch"]),
+            "provider_instance":config.api.as_str(),
+            "remote_id":row.get("id").or_else(||row.get("repositoryId"))
+                .map(|v|v.as_str().map(str::to_owned).unwrap_or_else(||v.to_string())).unwrap_or_default()}));
     }
     Ok(json!({"items":items,"page":page,"has_more":has_more.unwrap_or(rows.len()==50)}))
 }
@@ -1050,7 +1256,12 @@ pub async fn connect_token(
             )
             .send()
             .await
-            .map_err(|_| ApiError::bad("无法验证代码平台令牌。"))?,
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.tokenVerify"),
+                )
+            })?,
         )
         .await?;
         value
@@ -1058,14 +1269,23 @@ pub async fn connect_token(
             .or_else(|| value.get("username"))
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty() && v.len() < 255)
-            .ok_or_else(|| ApiError::bad("代码平台未返回有效账号。"))?
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.platformAccountMissing"),
+                )
+            })?
             .to_owned()
     };
     // Do not save a credential or mark connected unless repository access also succeeds.
     let mut result =
         remote_repositories(&kind, &config, &body.token, true, &settings.organization, 1).await?;
-    let stored =
-        serde_json::to_string(&settings).map_err(|_| ApiError::bad("连接配置编码失败。"))?;
+    let stored = serde_json::to_string(&settings).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.connectionConfigEncode"),
+        )
+    })?;
     let (_, id) = save_connection(
         &s,
         &scope,
@@ -1100,7 +1320,10 @@ pub async fn browse_repositories(
     scope.require("credentials.read")?;
     scope.require("repositories.create")?;
     if page.page == 0 || page.page > 10000 {
-        return Err(ApiError::bad("页码无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.pageInvalid"),
+        ));
     }
     let row = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
@@ -1109,7 +1332,12 @@ pub async fn browse_repositories(
         .filter(connections::Column::Name.eq(""))
         .one(&s.db)
         .await?
-        .ok_or_else(|| ApiError::bad("请先连接代码平台。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.connectFirst"),
+            )
+        })?;
     let config = connection_provider(&s, &s.db, &row).await?;
     ensure_fresh(&s, scope.workspace_id, row.credential_id.into()).await?;
     let (_, _, secret) =
@@ -1119,7 +1347,12 @@ pub async fn browse_repositories(
         .as_deref()
         .map(serde_json::from_str::<TokenConfig>)
         .transpose()
-        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.configCorrupt"),
+            )
+        })?;
     let mut result = remote_repositories(
         &kind,
         &config,
@@ -1152,14 +1385,18 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
             return Ok(());
         };
         if row.state == "reauthorize" {
-            return Err(ApiError::bad(
-                "仓库网页授权已失效，请在仓库授权页面重新授权。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.oauthInvalid"),
             ));
         }
         if row.state == "refreshing" {
             tx.commit().await?;
             if std::time::Instant::now() >= deadline {
-                return Err(ApiError::bad("仓库授权正在续期，请稍后重试。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.refreshPending"),
+                ));
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
@@ -1171,7 +1408,10 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
             if row.expires_at > db::now() {
                 return Ok(());
             }
-            return Err(ApiError::bad("仓库网页授权已过期，请重新授权。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.oauthExpired"),
+            ));
         }
         let version = row.version + 1;
         connections::Entity::update_many()
@@ -1212,7 +1452,12 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
                 .form(&form)
                 .send()
                 .await
-                .map_err(|_| ApiError::bad("授权续期失败，请重新授权。"))?,
+                .map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.refreshFailed"),
+                    )
+                })?,
         )
         .await?;
         let (access, expires, new_refresh) = token_data(&tokens)?;
@@ -1269,26 +1514,56 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
     }
     .await;
     if let Err(error) = &result {
-        connections::Entity::update_many()
+        let tx = crate::variables::transaction(s, workspace).await?;
+        let changed = connections::Entity::update_many()
             .col_expr(connections::Column::State, Expr::value("reauthorize"))
-            .col_expr(connections::Column::LastError, Expr::value(error.1.clone()))
+            .col_expr(connections::Column::LastError, Expr::value(error.stored()))
             .filter(connections::Column::Id.eq(row.id))
             .filter(connections::Column::Version.eq(version))
-            .exec(&s.db)
+            .exec(&tx)
             .await?;
+        if changed.rows_affected == 1 {
+            crate::repository_analysis::connection_changed(
+                s,
+                &tx,
+                row.workspace_id,
+                row.user_id,
+                row.id,
+            )
+            .await?;
+        }
+        tx.commit().await?;
     }
     result
 }
 pub async fn recover(s: &AppState) -> Result<()> {
+    let interrupted = connections::Entity::find()
+        .filter(connections::Column::State.eq("refreshing"))
+        .all(&s.db)
+        .await?;
     connections::Entity::update_many()
         .col_expr(connections::Column::State, Expr::value("reauthorize"))
         .col_expr(
             connections::Column::LastError,
-            Expr::value("服务中断，授权续期结果不确定，请重新授权。"),
+            Expr::value(crate::i18n::store_message(&crate::i18n::Message::new(
+                "repository.authorization.interrupted",
+            ))),
         )
         .filter(connections::Column::State.eq("refreshing"))
         .exec(&s.db)
         .await?;
+    for connection in interrupted {
+        let tx = crate::variables::transaction(s, connection.workspace_id.into()).await?;
+        crate::repository_analysis::connection_changed(
+            s,
+            &tx,
+            connection.workspace_id,
+            connection.user_id,
+            connection.id,
+        )
+        .await?;
+        tx.commit().await?;
+    }
     flows::Entity::delete_many()
         .filter(flows::Column::ExpiresAt.lt(db::now()))
         .exec(&s.db)
@@ -1327,14 +1602,20 @@ pub async fn validate_target(
         } else {
             address.to_owned()
         };
-    let actual = reqwest::Url::parse(&address).map_err(|_| ApiError::bad("仓库地址无效。"))?;
+    let actual = reqwest::Url::parse(&address).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.repositoryUrlInvalid"),
+        )
+    })?;
     if actual.host_str() != expected.host_str()
         || (actual.scheme() != "ssh"
             && actual.port_or_known_default() != expected.port_or_known_default())
         || (expected.scheme() == "https" && actual.scheme() == "http")
     {
-        return Err(ApiError::bad(
-            "网页授权凭据只能用于该授权平台的仓库和API接入点。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.oauthScopeMismatch"),
         ));
     }
     Ok(())
@@ -1343,6 +1624,66 @@ pub async fn validate_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn validation_errors_retain_identity_and_render_for_each_reader() {
+        let error = parse_endpoint("file:///local/repository").unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error.2.as_ref().unwrap().key,
+            "repository.auth.endpointFormat"
+        );
+        let stored = error.stored();
+        for locale in crate::i18n::Locale::ALL {
+            crate::i18n::with_locale(locale, async {
+                assert_eq!(crate::i18n::display_stored(&stored), error.render(locale));
+                assert!(!error.render(locale).contains("repository.auth."));
+            })
+            .await;
+        }
+        assert_ne!(
+            error.render(crate::i18n::Locale::EnUs),
+            error.render(crate::i18n::Locale::JaJp)
+        );
+    }
+
+    #[test]
+    fn oauth_return_restores_initiating_locale_without_localizing_callback_routes() {
+        let workspace = Id::from(7);
+        assert_eq!(
+            oauth_return_path(workspace, "github", &json!({"locale":"ja-JP"})),
+            "/ja-JP/workspaces/7/code-connections/new?provider=github"
+        );
+        assert_eq!(
+            oauth_return_path(
+                workspace,
+                "gitlab",
+                &json!({"locale":"zh-Hant","popup":true,"channel":"test-123"})
+            ),
+            "/zh-TW/workspaces/7/code-connections/new?oauth_popup=1&provider=gitlab&oauth_channel=test-123"
+        );
+        for proof in [json!({}), json!({"locale":"//invalid/path"})] {
+            assert_eq!(
+                oauth_return_path(workspace, "gitee", &proof),
+                "/en-US/workspaces/7/code-connections/new?provider=gitee"
+            );
+        }
+    }
+
+    #[test]
+    fn anonymous_git_transport_keeps_platform_endpoints_and_credentials_separate() {
+        assert!(validate_anonymous_git_address("git://git.example.test:9418/project.git").is_ok());
+        assert!(validate_anonymous_git_address("https://git.example.test/project.git").is_ok());
+        for value in [
+            "git://reader@git.example.test/project.git",
+            "git://git.example.test/project.git?token=secret",
+            "git://git.example.test/project.git#ref",
+            "file:///tmp/project.git",
+            "git://git.example.test/proj\nect.git",
+        ] {
+            assert!(validate_anonymous_git_address(value).is_err(), "{value}");
+        }
+        assert!(parse_endpoint("git://git.example.test/project.git").is_err());
+    }
     #[test]
     fn malformed_tokens_cannot_be_persisted_as_permanent_credentials() {
         assert_eq!(
@@ -1385,7 +1726,7 @@ fn connection_json(row: &connections::Model) -> Value {
     let mut value = json!({"id":Id::from(row.id),"name":row.name,"provider":row.provider,
         "description":row.description,"credential_id":Id::from(row.credential_id),
         "account":row.account,"state":row.state,"expires_at":row.expires_at,
-        "last_error":row.last_error,"authorization":if row.token_config.is_none(){"oauth"}else{"credential"},
+        "last_error":crate::i18n::display_stored(&row.last_error),"authorization":if row.token_config.is_none(){"oauth"}else{"credential"},
         "base_url":config["base_url"].as_str().unwrap_or(""),
         "api_url":config["api_url"].as_str().unwrap_or(""),
         "organization":config["organization"].as_str().unwrap_or(""),
@@ -1415,8 +1756,9 @@ fn validate_connection_name(name: &str, description: &str) -> Result<()> {
         || name.chars().any(char::is_control)
         || description.chars().count() > 255
     {
-        return Err(ApiError::bad(
-            "连接名称必填且不超过60个字符，描述不超过255个字符。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.connectionNameInvalid"),
         ));
     }
     Ok(())
@@ -1505,13 +1847,17 @@ async fn check_connection(
         .one(&s.db)
         .await?;
     if managed.is_some() {
-        return Err(ApiError::bad(
-            "网页授权凭据请通过网页授权创建或重新授权连接。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.oauthCredentialFlow"),
         ));
     }
     if body.provider == "git" {
         if !crate::credentials::KINDS.contains(&kind.as_str()) {
-            return Err(ApiError::bad("请选择Git授权凭据。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitCredentialRequired"),
+            ));
         }
         if !body.url.is_empty() {
             validate_git_credential(&body.url, &kind)?;
@@ -1524,7 +1870,10 @@ async fn check_connection(
         ));
     }
     if kind != "token" {
-        return Err(ApiError::bad("代码平台API连接需要个人访问令牌凭据。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.apiCredentialRequired"),
+        ));
     }
     let settings = token_config(
         &body.provider,
@@ -1549,7 +1898,12 @@ async fn check_connection(
             )
             .send()
             .await
-            .map_err(|_| ApiError::bad("无法验证代码平台令牌。"))?,
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.tokenVerify"),
+                )
+            })?,
         )
         .await?;
         value
@@ -1557,7 +1911,12 @@ async fn check_connection(
             .or_else(|| value.get("username"))
             .and_then(Value::as_str)
             .filter(|v| !v.is_empty() && v.len() < 255)
-            .ok_or_else(|| ApiError::bad("代码平台未返回有效账号。"))?
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.platformAccountMissing"),
+                )
+            })?
             .to_owned()
     };
     remote_repositories(
@@ -1572,7 +1931,12 @@ async fn check_connection(
     Ok((
         credential,
         account,
-        serde_json::to_string(&settings).map_err(|_| ApiError::bad("连接配置编码失败。"))?,
+        serde_json::to_string(&settings).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.connectionConfigEncode"),
+            )
+        })?,
         config_fingerprint(&provider),
     ))
 }
@@ -1638,7 +2002,12 @@ async fn require_credential_in(
         .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
         .one(conn)
         .await?
-        .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.credentialMissing"),
+            )
+        })?;
     Ok(())
 }
 
@@ -1656,7 +2025,10 @@ pub async fn update_connection(
         if body.provider != existing.provider
             || Id::reference(&body.credential_id)? != Id::from(existing.credential_id)
         {
-            return Err(ApiError::bad("网页授权连接请通过重新授权更换账号。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.oauthAccountChange"),
+            ));
         }
         None
     } else {
@@ -1694,7 +2066,10 @@ pub async fn update_connection(
             );
     }
     if update.exec(&tx).await?.rows_affected == 0 {
-        return Err(ApiError::conflict("连接已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repository.auth.connectionChanged"),
+        ));
     }
     crate::hosts::activity_in(
         &s,
@@ -1731,8 +2106,9 @@ pub async fn delete_connection(
                 .iter()
                 .any(|binding| Id::reference(&binding.connection_id).is_ok_and(|value| value == id))
         }) {
-            return Err(ApiError::conflict(
-                "流水线源码节点仍在使用该连接，请先解除引用。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("repository.auth.sourceReference"),
             ));
         }
     }
@@ -1751,7 +2127,10 @@ pub async fn delete_connection(
                 Id::reference(&checkout.binding.connection_id).is_ok_and(|value| value == id)
             })
         }) {
-            return Err(ApiError::conflict("代码连接仍有流水线任务尚未结束。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("repository.auth.pipelineRunning"),
+            ));
         }
     }
     // OAuth refresh ownership is retained while an existing source binding uses it.
@@ -1763,7 +2142,10 @@ pub async fn delete_connection(
             .count(&tx)
             .await?;
         if used > 0 {
-            return Err(ApiError::conflict("已有仓库使用该网页授权，请先解除引用。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("repository.auth.repositoryReference"),
+            ));
         }
     }
     crate::entities::repository_monitors::Entity::delete_by_id(row.id)
@@ -1777,6 +2159,8 @@ pub async fn delete_connection(
         .exec(&tx)
         .await?;
     connections::Entity::delete_by_id(row.id).exec(&tx).await?;
+    crate::repository_analysis::connection_changed(&s, &tx, row.workspace_id, row.user_id, row.id)
+        .await?;
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -1800,7 +2184,10 @@ pub async fn connection_repositories(
     scope.require("repositories.read")?;
     scope.require("credentials.read")?;
     if page.page == 0 || page.page > 10000 {
-        return Err(ApiError::bad("页码无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.pageInvalid"),
+        ));
     }
     let row = owned_connection(&s.db, &scope, id.parse().map_err(|_| ApiError::missing())?).await?;
     if row.provider == "git" {
@@ -1815,7 +2202,12 @@ pub async fn connection_repositories(
         .as_deref()
         .map(serde_json::from_str::<TokenConfig>)
         .transpose()
-        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.configCorrupt"),
+            )
+        })?;
     let mut result = remote_repositories(
         &row.provider,
         &config,
@@ -1846,6 +2238,79 @@ pub(crate) struct MonitorPage {
     pub has_more: bool,
 }
 impl MonitorAccess {
+    /// Analysis uses the same pinned endpoint, token refresh and redirect policy
+    /// as browsing. Resource segments are encoded individually, never URLs.
+    pub(crate) async fn analysis_request(
+        &self,
+        path: &str,
+        resource: &[&str],
+        query: &[(&str, String)],
+    ) -> Result<(Value, Option<bool>)> {
+        let mut url = self.config.api.clone();
+        {
+            let mut segments = url.path_segments_mut().map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.apiUrlInvalid"),
+                )
+            })?;
+            segments.pop_if_empty();
+            match self.provider.as_str() {
+                "codeup" => {
+                    segments.extend(["oapi", "v1", "codeup"]);
+                    if !self.organization.is_empty() {
+                        segments.push("organizations").push(&self.organization);
+                    }
+                    segments.push("repositories").push(path);
+                }
+                "gitlab" => {
+                    segments.push("projects").push(path).push("repository");
+                }
+                _ => {
+                    segments.push("repos").extend(path.split('/'));
+                }
+            }
+            segments.extend(resource.iter().copied());
+        }
+        url.query_pairs_mut()
+            .extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
+        let response = authorize_request(
+            http()?.get(url),
+            &self.provider,
+            &self.access,
+            self.personal,
+        )
+        .send()
+        .await
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.analysisRequestFailed"),
+            )
+        })?;
+        let page = query
+            .iter()
+            .find(|(k, _)| *k == "page")
+            .and_then(|(_, v)| v.parse().ok())
+            .unwrap_or(1);
+        let more = codeup_has_more(&response, page)
+            .or_else(|| {
+                response
+                    .headers()
+                    .get("x-next-page")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| !v.is_empty())
+            })
+            .or_else(|| {
+                response
+                    .headers()
+                    .get("link")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v.contains("rel=\"next\""))
+            });
+        Ok((repository_response(response, &self.provider).await?, more))
+    }
+
     pub(crate) async fn load(s: &AppState, row: &connections::Model) -> Result<Self> {
         let config = connection_provider(s, &s.db, row).await?;
         ensure_fresh(s, row.workspace_id.into(), row.credential_id.into()).await?;
@@ -1857,7 +2322,12 @@ impl MonitorAccess {
             .as_deref()
             .map(serde_json::from_str::<TokenConfig>)
             .transpose()
-            .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.configCorrupt"),
+                )
+            })?;
         Ok(Self {
             provider: row.provider.clone(),
             config,
@@ -1902,9 +2372,12 @@ impl MonitorAccess {
         let mut url = self.config.api.clone();
         let requests = resource == "requests";
         {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| ApiError::bad("API地址无效。"))?;
+            let mut segments = url.path_segments_mut().map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.apiUrlInvalid"),
+                )
+            })?;
             segments.pop_if_empty();
             match self.provider.as_str() {
                 "codeup" => {
@@ -1973,7 +2446,12 @@ impl MonitorAccess {
         )
         .send()
         .await
-        .map_err(|_| ApiError::bad("轮询代码平台失败，请检查接入点和网络。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.pollRequestFailed"),
+            )
+        })?;
         let more = codeup_has_more(&response, page).or_else(|| {
             response
                 .headers()
@@ -1984,7 +2462,12 @@ impl MonitorAccess {
         let value = repository_response(response, &self.provider).await?;
         let rows = value
             .as_array()
-            .ok_or_else(|| ApiError::bad("代码平台返回了无效列表，未更新监控基线。"))?
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.pollListInvalid"),
+                )
+            })?
             .clone();
         let has_more = more.unwrap_or(rows.len() == 50);
         Ok(MonitorPage { rows, has_more })
@@ -1994,8 +2477,9 @@ impl MonitorAccess {
 fn validate_git_credential(address: &str, kind: &str) -> Result<()> {
     let ssh = address.starts_with("git@") || address.starts_with("ssh://");
     if (kind == "ssh-key") != ssh {
-        return Err(ApiError::bad(
-            "SSH地址需使用SSH私钥，HTTP(S)地址需使用账号密码或令牌。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.gitCredentialScheme"),
         ));
     }
     if ssh {
@@ -2004,13 +2488,20 @@ fn validate_git_credential(address: &str, kind: &str) -> Result<()> {
             .and_then(|v| v.split_once(':'))
             .map(|(host, path)| format!("ssh://git@{host}/{path}"))
             .unwrap_or_else(|| address.to_owned());
-        let parsed =
-            reqwest::Url::parse(&normalized).map_err(|_| ApiError::bad("Git地址无效。"))?;
+        let parsed = reqwest::Url::parse(&normalized).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitAddressInvalid"),
+            )
+        })?;
         if parsed.host_str().is_none()
             || parsed.password().is_some()
             || address.chars().any(char::is_control)
         {
-            return Err(ApiError::bad("Git地址无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitAddressInvalid"),
+            ));
         }
     } else {
         parse_endpoint(address)?;
@@ -2054,7 +2545,10 @@ async fn resolve_connection_row(
     address: &str,
 ) -> Result<(String, Id)> {
     if row.state != "connected" {
-        return Err(ApiError::bad("代码连接授权已失效，请重新授权。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.connectionAuthorizationInvalid"),
+        ));
     }
     let credential = Id::from(row.credential_id);
     if credential != Id::from(0) {
@@ -2062,8 +2556,15 @@ async fn resolve_connection_row(
             .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.credentialMissing"),
+                )
+            })?;
         validate_git_credential(address, &auth.kind)?;
+    } else if row.provider == "git" {
+        validate_anonymous_git_address(address)?;
     } else {
         parse_endpoint(address)?;
     }
@@ -2080,7 +2581,10 @@ fn validate_origin(expected: &reqwest::Url, address: &str) -> Result<()> {
         || actual.port_or_known_default() != expected.port_or_known_default()
         || (expected.scheme() == "https" && actual.scheme() != "https")
     {
-        return Err(ApiError::bad("仓库地址与所选代码平台不匹配。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.selectedProviderMismatch"),
+        ));
     }
     Ok(())
 }
@@ -2101,13 +2605,19 @@ pub async fn connection_branches(
     scope.require("repositories.read")?;
     scope.require("credentials.read")?;
     if query.page == 0 || query.page > 10000 {
-        return Err(ApiError::bad("页码无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.pageInvalid"),
+        ));
     }
     let id: Id = id.parse().map_err(|_| ApiError::missing())?;
     resolve_connection(&s, &s.db, &scope, id, &query.url).await?;
     let row = owned_connection(&s.db, &scope, id).await?;
     if row.provider == "git" {
-        return Err(ApiError::bad("普通Git请填写分支或引用。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.gitRefRequired"),
+        ));
     }
     let config = connection_provider(&s, &s.db, &row).await?;
     let source = parse_endpoint(&query.url)?;
@@ -2118,25 +2628,41 @@ pub async fn connection_branches(
         .trim_start_matches('/')
         .trim_end_matches(".git");
     if path.is_empty() {
-        return Err(ApiError::bad("请选择有效仓库。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.repositoryRequired"),
+        ));
     }
     // Url::path is already escaped. Decode before pushing API path segments to
     // avoid turning %E4 into %25E4 for Unicode, spaces and literal percent signs.
     let path = percent_encoding::percent_decode_str(path)
         .decode_utf8()
-        .map_err(|_| ApiError::bad("仓库路径编码无效。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.repositoryPathInvalid"),
+            )
+        })?;
     let path = path.as_ref();
     let token = row
         .token_config
         .as_deref()
         .map(serde_json::from_str::<TokenConfig>)
         .transpose()
-        .map_err(|_| ApiError::bad("连接配置损坏。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.configCorrupt"),
+            )
+        })?;
     let mut url = config.api.clone();
     {
-        let mut segments = url
-            .path_segments_mut()
-            .map_err(|_| ApiError::bad("API地址无效。"))?;
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.apiUrlInvalid"),
+            )
+        })?;
         segments.pop_if_empty();
         match row.provider.as_str() {
             "gitlab" => {
@@ -2183,14 +2709,22 @@ pub async fn connection_branches(
     let response = authorize_request(http()?.get(url), &row.provider, &secret, token.is_some())
         .send()
         .await
-        .map_err(|_| ApiError::bad("读取仓库分支失败。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.branchesRead"),
+            )
+        })?;
     let has_more = (row.provider == "codeup")
         .then(|| codeup_has_more(&response, query.page))
         .flatten();
     let value = repository_response(response, &row.provider).await?;
-    let rows = value
-        .as_array()
-        .ok_or_else(|| ApiError::bad("代码平台返回了无效分支列表。"))?;
+    let rows = value.as_array().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.branchesInvalid"),
+        )
+    })?;
     let items = rows
         .iter()
         .filter_map(|row| {

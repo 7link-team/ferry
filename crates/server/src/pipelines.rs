@@ -1,4 +1,6 @@
 use crate::entities::{host_groups, hosts, pipelines, repositories};
+use crate::error::{Json, Path, Query};
+use crate::i18n::Message;
 use crate::snowflake::Id;
 use crate::{
     db,
@@ -7,11 +9,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QuerySelect, QueryTrait, Set,
     sea_query::{Expr, ExprTrait},
@@ -101,8 +99,16 @@ impl Body {
                 checkout_bindings: self.checkout_bindings.clone(),
                 graph_layout: self.graph_layout.clone(),
             })
-            .map_err(|_| ApiError::bad("无法保存 Actions 定义。")),
-            _ => Err(ApiError::bad("未知的流水线定义格式。")),
+            .map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.saveDefinition"),
+                )
+            }),
+            _ => Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.unknownFormat"),
+            )),
         }
     }
 }
@@ -122,7 +128,10 @@ async fn check(
 ) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.nameRequired"),
+        ));
     }
     crate::pipeline_contexts::check_single(
         conn,
@@ -148,7 +157,10 @@ async fn check(
             .any(crate::actions::CheckoutBinding::pipeline_repository)
             && Id::reference(&body.repository_id)? == Id::from(0)
         {
-            return Err(ApiError::bad("拉取代码步骤需要选择仓库。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.repositoryRequired"),
+            ));
         }
     }
     let node_only = crate::actions::document(&stored).is_some()
@@ -165,10 +177,10 @@ async fn check(
                     && !binding.target_ref.is_empty()
                     && binding.target_ref != "0"
             }) {
-                return Err(ApiError::bad(format!(
-                    "请为任务 {} 选择执行主机。",
-                    job.name
-                )));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.jobHostRequired").with("name", job.name.clone()),
+                ));
             }
         }
     }
@@ -176,11 +188,20 @@ async fn check(
         "host" => "hosts",
         "host-group" => "host_groups",
         "" if node_only => "hosts",
-        _ => return Err(ApiError::bad("流水线目标类型必须是 host 或 host-group。")),
+        _ => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.targetKind"),
+            ));
+        }
     };
     for (table, id, noun) in [
-        ("repositories", body.repository_id.trim(), "仓库"),
-        (target_table, body.target_ref.trim(), "执行目标"),
+        (
+            "repositories",
+            body.repository_id.trim(),
+            "execution.repositoryNoun",
+        ),
+        (target_table, body.target_ref.trim(), "execution.targetNoun"),
     ] {
         if (table == "repositories" || node_only) && Id::reference(id)? == Id::from(0) {
             continue;
@@ -211,7 +232,10 @@ async fn check(
             _ => unreachable!("validated target table"),
         };
         if exists == 0 {
-            return Err(ApiError::bad(format!("所选{noun}不存在于当前工作空间。")));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.referenceMissing").with_message("noun", Message::new(noun)),
+            ));
         }
     }
     Ok(name.to_owned())
@@ -375,7 +399,10 @@ pub async fn update(
         .await?
         .ok_or_else(ApiError::missing)?;
     if current.version != body.version {
-        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("execution.versionConflict"),
+        ));
     }
     if body.environment_ids.is_none() {
         use crate::entities::pipeline_links as links;
@@ -503,7 +530,10 @@ pub async fn remove(
                 .as_ref()
                 .is_some_and(|a| a.pipeline == id.to_string())
         }) {
-            return Err(ApiError::conflict("流水线仍被应用的构建产物引用。"));
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                Message::new("execution.artifactReferenced"),
+            ));
         }
     }
     let affected = pipelines::Entity::delete_many()
@@ -534,24 +564,45 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
     if !input.contains(".Values.") {
         validate_definition(input)?;
     }
-    let legacy: Value =
-        serde_json::from_str(input).map_err(|_| ApiError::bad("流水线定义必须是合法的 JSON。"))?;
-    let object = legacy
-        .as_object()
-        .ok_or_else(|| ApiError::bad("流水线定义必须是 JSON 对象。"))?;
+    let legacy: Value = serde_json::from_str(input).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionJson"),
+        )
+    })?;
+    let object = legacy.as_object().ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionObject"),
+        )
+    })?;
     if object
         .keys()
         .any(|key| !["workdir", "env", "steps", "artifacts"].contains(&key.as_str()))
     {
-        return Err(ApiError::bad("流水线定义包含未知字段。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionUnknownFields"),
+        ));
     }
     let workdir = legacy
         .get("workdir")
         .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::bad("流水线 workdir 必须是绝对路径字符串。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.workdirString"),
+            )
+        })?;
     if !workdir.contains(".Values.") {
-        crate::channel::check_path(workdir)
-            .map_err(|e| ApiError::bad(format!("流水线工作目录无效：{e}")))?;
+        crate::channel::check_path(workdir).map_err(|error| {
+            let message = crate::i18n::Message::new("pipelines.workdirInvalid");
+            let message = match error.2 {
+                Some(cause) => message.with_message("error", cause),
+                None => message.with("error", error.1),
+            };
+            ApiError::localized(axum::http::StatusCode::BAD_REQUEST, message)
+        })?;
     }
     let normalized_workdir;
     let workdir = if workdir.starts_with("\\\\") || workdir.as_bytes().get(1) == Some(&b':') {
@@ -564,7 +615,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
         .get("steps")
         .and_then(Value::as_array)
         .filter(|steps| !steps.is_empty())
-        .ok_or_else(|| ApiError::bad("流水线 steps 必须是非空数组。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepsNonempty"),
+            )
+        })?;
     let mut steps = vec![json!({"id":"prepare_workspace", "name":"Prepare workspace",
         "run":"[ -d \"$FERRY_LEGACY_WORKDIR\" ] || mkdir -p -- \"$FERRY_LEGACY_WORKDIR\"", "shell":"sh",
         "working-directory":"${{ github.workspace }}",
@@ -575,12 +631,17 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
             step.keys()
                 .any(|key| !["name", "run", "checkout", "timeout_seconds"].contains(&key.as_str()))
         }) {
-            return Err(ApiError::bad("流水线步骤包含未知字段。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepUnknownFields"),
+            ));
         }
-        let name = source
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ApiError::bad("流水线步骤需要名称。"))?;
+        let name = source.get("name").and_then(Value::as_str).ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepNameRequired"),
+            )
+        })?;
         let mut step = json!({"name": legacy_expressions(name)});
         if source
             .get("checkout")
@@ -599,10 +660,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
                 path: legacy_expressions(workdir),
             });
         } else {
-            let command = source
-                .get("run")
-                .and_then(Value::as_str)
-                .ok_or_else(|| ApiError::bad("流水线步骤需要命令。"))?;
+            let command = source.get("run").and_then(Value::as_str).ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.stepCommandRequired"),
+                )
+            })?;
             step["run"] = json!(legacy_expressions(command));
             step["id"] = json!(format!("legacy_{}", index + 1));
         }
@@ -616,7 +679,10 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
             {
                 json!(format!("{{{{ ceilMinutes {} }}}}", token.trim()))
             } else {
-                return Err(ApiError::bad("无效的步骤超时。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.stepTimeoutInvalid"),
+                ));
             };
         } else {
             step["timeout-minutes"] = json!(30);
@@ -634,12 +700,17 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
             env.keys()
                 .any(|key| !["name", "value", "valueFrom"].contains(&key.as_str()))
         }) {
-            return Err(ApiError::bad("流水线环境变量包含未知字段。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.envUnknownFields"),
+            ));
         }
-        let name = entry
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ApiError::bad("流水线环境变量需要名称。"))?;
+        let name = entry.get("name").and_then(Value::as_str).ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.envNameRequired"),
+            )
+        })?;
         let value = if let Some(reference) = entry.get("valueFrom").and_then(Value::as_str) {
             if let Some(name) = reference.strip_prefix("variable/") {
                 // Explicit secrets references use the same scoped variable lookup
@@ -648,15 +719,18 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
             } else if reference.contains(".Values.") {
                 reference.to_owned()
             } else {
-                return Err(ApiError::bad("无效的流水线变量引用。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.variableReferenceInvalid"),
+                ));
             }
         } else {
-            legacy_expressions(
-                entry
-                    .get("value")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ApiError::bad("流水线环境变量需要值。"))?,
-            )
+            legacy_expressions(entry.get("value").and_then(Value::as_str).ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.envValueRequired"),
+                )
+            })?)
         };
         env.insert(name.into(), json!(value));
     }
@@ -666,9 +740,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
         .into_iter()
         .flatten()
     {
-        let path = path
-            .as_str()
-            .ok_or_else(|| ApiError::bad("产物路径必须是字符串。"))?;
+        let path = path.as_str().ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.artifactPathString"),
+            )
+        })?;
         steps.push(json!({"name":format!("Archive {path}"), "if":"success()",
         "uses":"actions/upload-artifact@v4", "with": {
             "name":crate::artifacts::legacy_artifact_name(path),
@@ -692,8 +769,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
         "steps":steps}}});
     let document = crate::actions::Document {
         engine: crate::actions::ENGINE.into(),
-        workflow: serde_yaml_ng::to_string(&workflow)
-            .map_err(|_| ApiError::bad("无法转换流水线。"))?,
+        workflow: serde_yaml_ng::to_string(&workflow).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.convertFailed"),
+            )
+        })?,
         executor_bindings: vec![crate::actions::Binding {
             job_id: "build".into(),
             target_kind: target_kind.into(),
@@ -703,7 +784,12 @@ pub(crate) fn convert_legacy(input: &str, target_kind: &str, target_ref: &str) -
         checkout_bindings: checkouts,
         graph_layout: Value::Null,
     };
-    serde_json::to_string(&document).map_err(|_| ApiError::bad("无法转换流水线。"))
+    serde_json::to_string(&document).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.convertFailed"),
+        )
+    })
 }
 
 fn legacy_expressions(value: &str) -> String {
@@ -767,20 +853,26 @@ pub struct Step {
 }
 
 /// Only exact tokens are supported; no whitespace folding, nesting or expressions.
-fn check_templates(input: &str, context: &str) -> Result<()> {
+fn check_templates(input: &str, context: &Message) -> Result<()> {
     let mut remaining = input;
     while let Some(start) = remaining.find("{{") {
         let token = &remaining[start + 2..];
         let Some(end) = token.find("}}") else {
-            return Err(ApiError::bad(format!(
-                "{context}的模板变量「{{{{{token}」未闭合。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.templateUnclosed")
+                    .with_message("context", context.clone())
+                    .with("token", format!("{{{{{token}")),
+            ));
         };
         let variable = &token[..end];
         if !["run", "branch", "repo_url", "commit"].contains(&variable) {
-            return Err(ApiError::bad(format!(
-                "{context}包含不支持的模板变量「{{{{{variable}}}}}」，只允许 run、branch、repo_url 和 commit。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.templateUnsupported")
+                    .with_message("context", context.clone())
+                    .with("token", format!("{{{{{variable}}}}}")),
+            ));
         }
         remaining = &token[end + 2..];
     }
@@ -792,25 +884,43 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
         return crate::actions::summary(&document);
     }
     if input.len() > 64 * 1024 {
-        return Err(ApiError::bad("流水线定义不能超过 64KB。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionTooLarge"),
+        ));
     }
-    let value: Value =
-        serde_json::from_str(input).map_err(|_| ApiError::bad("流水线定义必须是合法的 JSON。"))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| ApiError::bad("流水线定义必须是 JSON 对象。"))?;
+    let value: Value = serde_json::from_str(input).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionJson"),
+        )
+    })?;
+    let object = value.as_object().ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionObject"),
+        )
+    })?;
     let steps = object
         .get("steps")
         .and_then(Value::as_array)
         .filter(|steps| !steps.is_empty() && steps.len() <= 50)
-        .ok_or_else(|| ApiError::bad("流水线 steps 必须是包含 1 到 50 个步骤的数组。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepsRange"),
+            )
+        })?;
     for (index, step) in steps.iter().enumerate() {
         let name = step.get("name").and_then(Value::as_str).unwrap_or("");
-        let context = format!("第 {} 步「{}」", index + 1, name);
+        let context = Message::new("execution.stepContext")
+            .with("index", (index + 1).to_string())
+            .with("name", name);
         if name.trim().is_empty() || name.chars().count() > 60 {
-            return Err(ApiError::bad(format!(
-                "{context}的名称必须是 1 到 60 字的非空字符串。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepNameInvalid").with_message("context", context.clone()),
+            ));
         }
         let run = step.get("run").and_then(Value::as_str).unwrap_or("");
         let checkout = step
@@ -818,48 +928,68 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if checkout && step.get("run").is_some() {
-            return Err(ApiError::bad(format!(
-                "{context}的 checkout 与 run 不能同时填写。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepCheckoutRun").with_message("context", context.clone()),
+            ));
         }
         if !checkout && (run.trim().is_empty() || run.len() > 8 * 1024 || run.contains('\0')) {
-            return Err(ApiError::bad(format!(
-                "{context}的命令必须是非空字符串、不含空字符且不能超过 8KB。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepCommandInvalid")
+                    .with_message("context", context.clone()),
+            ));
         }
         if let Some(timeout) = step.get("timeout_seconds")
             && !timeout.as_u64().is_some_and(|n| (1..=86400).contains(&n))
         {
-            return Err(ApiError::bad(format!(
-                "{context}的超时时间必须在 1 到 86400 秒之间。"
-            )));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepTimeoutRange").with_message("context", context.clone()),
+            ));
         }
         check_templates(name, &context)?;
         check_templates(run, &context)?;
         serde_json::from_value::<Step>(step.clone()).map_err(|_| {
-            ApiError::bad(format!(
-                "{context}的字段无效，只支持 name、run、checkout 和 timeout_seconds。"
-            ))
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.stepFieldsInvalid")
+                    .with_message("context", context.clone()),
+            )
         })?;
     }
     let workdir = object
         .get("workdir")
         .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::bad("流水线 workdir 必须是绝对路径字符串。"))?;
-    crate::channel::check_path(workdir)
-        .map_err(|e| ApiError::bad(format!("流水线工作目录无效：{e}")))?;
-    check_templates(workdir, "流水线工作目录")?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.workdirString"),
+            )
+        })?;
+    crate::channel::check_path(workdir).map_err(|error| {
+        let message = crate::i18n::Message::new("pipelines.workdirInvalid");
+        let message = match error.2 {
+            Some(cause) => message.with_message("error", cause),
+            None => message.with("error", error.1),
+        };
+        ApiError::localized(axum::http::StatusCode::BAD_REQUEST, message)
+    })?;
+    check_templates(workdir, &Message::new("execution.workdirContext"))?;
     if let Some(env) = object.get("env") {
-        let env = env
-            .as_array()
-            .ok_or_else(|| ApiError::bad("流水线 env 必须是环境变量数组。"))?;
+        let env = env.as_array().ok_or_else(|| {
+            ApiError::localized(StatusCode::BAD_REQUEST, Message::new("execution.envArray"))
+        })?;
         let mut names = std::collections::HashSet::new();
         for (index, item) in env.iter().enumerate() {
-            let context = format!("第 {} 个环境变量", index + 1);
+            let context =
+                Message::new("execution.envContext").with("index", (index + 1).to_string());
             let entry: Environment = serde_json::from_value(item.clone()).map_err(|_| {
-                ApiError::bad(format!(
-                    "{context}必须包含字符串 name，且 value 和 valueFrom 二选一。"
-                ))
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.envEntryInvalid")
+                        .with_message("context", context.clone()),
+                )
             })?;
             let mut bytes = entry.name.bytes();
             let valid = bytes
@@ -867,20 +997,28 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
                 .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
                 && bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_');
             if !valid {
-                return Err(ApiError::bad(format!(
-                    "{context}的名称必须符合 [A-Za-z_][A-Za-z0-9_]*。"
-                )));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.envNameInvalid")
+                        .with_message("context", context.clone()),
+                ));
             }
             if !names.insert(entry.name.clone()) {
-                return Err(ApiError::bad(format!(
-                    "{context}的名称「{}」重复。",
-                    entry.name
-                )));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.envNameDuplicate")
+                        .with_message("context", context.clone())
+                        .with("name", entry.name.clone()),
+                ));
             }
             match (&entry.value, &entry.value_from) {
                 (Some(value), None) => {
                     if value.contains('\0') {
-                        return Err(ApiError::bad(format!("{context}的值不能包含空字符。")));
+                        return Err(ApiError::localized(
+                            StatusCode::BAD_REQUEST,
+                            Message::new("execution.envNull")
+                                .with_message("context", context.clone()),
+                        ));
                     }
                     check_templates(value, &context)?;
                 }
@@ -889,15 +1027,20 @@ pub fn validate_definition(input: &str) -> Result<Definition> {
                         .strip_prefix("variable/")
                         .is_some_and(crate::variables::valid_name) => {}
                 _ => {
-                    return Err(ApiError::bad(format!(
-                        "{context}必须使用 value 或 valueFrom: variable/变量名，不能同时填写。"
-                    )));
+                    return Err(ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.envValueChoice")
+                            .with_message("context", context.clone()),
+                    ));
                 }
             }
         }
     }
     let definition: Definition = serde_json::from_value(value).map_err(|_| {
-        ApiError::bad("流水线定义字段无效，只支持 workdir、env、steps 和 artifacts。")
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("execution.definitionFieldsInvalid"),
+        )
     })?;
     crate::artifacts::validate_paths(&definition.artifacts)?;
     Ok(definition)
@@ -918,6 +1061,31 @@ pub fn variable_names(definition: &Definition) -> std::collections::BTreeSet<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn template_errors_preserve_nested_identity_and_literal_parameters() {
+        use crate::i18n::{Locale, Message};
+        let name = "user {token} {{commit}}";
+        let context = Message::new("execution.stepContext")
+            .with("index", "2")
+            .with("name", name);
+        let error = super::check_templates("{{unknown}}", &context).unwrap_err();
+        let message = error.2.as_ref().unwrap();
+        assert_eq!(message.key, "execution.templateUnsupported");
+        assert_eq!(message.children["context"].key, "execution.stepContext");
+        assert_eq!(message.children["context"].params["name"], name);
+        assert_eq!(message.params["token"], "{{unknown}}");
+        for locale in Locale::ALL {
+            let displayed = error.render(locale);
+            assert!(displayed.contains(name), "{}: {displayed}", locale.tag());
+            assert!(displayed.contains("{{unknown}}"));
+            assert_eq!(
+                crate::i18n::render_stored(locale, &error.stored()),
+                displayed
+            );
+        }
+        assert_ne!(error.render(Locale::EnUs), error.render(Locale::JaJp));
+    }
+
     use super::*;
 
     #[test]
@@ -1017,8 +1185,9 @@ jobs:
     }
     fn rejects(value: &Value, message: &str) {
         let error = validate_definition(&value.to_string()).unwrap_err();
-        assert!(error.1.contains(message), "{error}");
-        assert!(error.1.ends_with('。'), "{error}");
+        let displayed = error.render(crate::i18n::Locale::ZhCn);
+        assert!(displayed.contains(message), "{displayed}");
+        assert!(displayed.ends_with('。'), "{displayed}");
     }
 
     #[test]
@@ -1031,7 +1200,7 @@ jobs:
         assert!(
             validate_definition(&invalid.to_string())
                 .unwrap_err()
-                .1
+                .render(crate::i18n::Locale::ZhCn)
                 .contains("不存在")
         );
     }
@@ -1235,10 +1404,11 @@ jobs:
                     _ => v["env"][0]["value"] = json!(token),
                 }
                 let error = validate_definition(&v.to_string()).unwrap_err();
-                assert!(error.1.contains("模板变量"), "{field}: {error}");
-                assert!(error.1.contains(token.trim_end_matches('}')), "{error}");
+                let displayed = error.render(crate::i18n::Locale::ZhCn);
+                assert!(displayed.contains("模板变量"), "{field}: {error}");
+                assert!(displayed.contains(token.trim_end_matches('}')), "{error}");
                 if field == "run" || field == "name" {
-                    assert!(error.1.contains("第 1 步"), "{error}");
+                    assert!(displayed.contains("第 1 步"), "{error}");
                 }
             }
         }

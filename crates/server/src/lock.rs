@@ -1,6 +1,8 @@
-//! Portable UPDATE-then-INSERT locks. Callers release explicitly, or roll back
+//! Portable conflict-safe INSERT-then-UPDATE locks. Callers release explicitly, or roll back
 //! the enclosing transaction on error (worker allocation uses that path).
-use sea_orm::{ActiveValue::Set, Condition, IntoActiveModel, QueryFilter, entity::prelude::*};
+use sea_orm::{
+    ActiveValue::Set, Condition, IntoActiveModel, QueryFilter, QuerySelect, entity::prelude::*,
+};
 
 use crate::entities::locks::{ActiveModel, Column, Entity, Model};
 
@@ -17,6 +19,20 @@ pub async fn acquire(
     let expires = now
         .checked_add(ttl)
         .ok_or_else(|| DbErr::Custom("lock expiry overflow".into()))?;
+    // Insert before updating: an UPDATE of a missing key takes a MySQL RR gap
+    // lock, so concurrent inserts of different lock names can deadlock.
+    Entity::insert(
+        Model {
+            name: name.into(),
+            owner: owner.into(),
+            acquired_at: now,
+            expires_at: expires,
+        }
+        .into_active_model(),
+    )
+    .on_conflict_do_nothing()
+    .exec_without_returning(db)
+    .await?;
     let changed = Entity::update_many()
         .col_expr(Column::Owner, Expr::value(owner))
         .col_expr(Column::AcquiredAt, Expr::value(now))
@@ -33,29 +49,14 @@ pub async fn acquire(
     if changed == 1 {
         return Ok(true);
     }
-    let result = Entity::insert(
-        Model {
-            name: name.into(),
-            owner: owner.into(),
-            acquired_at: now,
-            expires_at: expires,
-        }
-        .into_active_model(),
-    )
-    .exec(db)
-    .await;
-    match result {
-        Ok(_) => Ok(true),
-        Err(e)
-            if matches!(
-                e.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) =>
-        {
-            Ok(false)
-        }
-        Err(e) => Err(e),
-    }
+    // A duplicate must not abort PostgreSQL callers' enclosing transactions.
+    // Check ownership instead of affected rows: MySQL's no-op upsert may report
+    // a matched row. A locking read also sees current ownership under MySQL RR.
+    Ok(Entity::find_by_id(name)
+        .lock_exclusive()
+        .one(db)
+        .await?
+        .is_some_and(|row| row.owner == owner))
 }
 pub async fn release(db: &impl ConnectionTrait, name: &str, owner: &str) -> Result<u64, DbErr> {
     Ok(Entity::delete_many()
@@ -130,5 +131,38 @@ pub(crate) mod tests {
         assert_eq!(release(&db, "test", "a").await.unwrap(), 0);
         assert_eq!(release(&db, "test", "b").await.unwrap(), 1);
         assert!(acquire(&db, "test", "a", 1151, 100).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn contention_does_not_abort_the_enclosing_transaction() {
+        use sea_orm::TransactionTrait;
+        let (_dir, db) = database().await;
+        assert!(acquire(&db, "occupied", "first", 1000, 100).await.unwrap());
+        let tx = db.begin().await.unwrap();
+        assert!(!acquire(&tx, "occupied", "second", 1000, 100).await.unwrap());
+        assert!(
+            acquire(&tx, "available", "second", 1000, 100)
+                .await
+                .unwrap()
+        );
+        tx.commit().await.unwrap();
+        assert_eq!(
+            Entity::find_by_id("occupied")
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .owner,
+            "first"
+        );
+        assert_eq!(
+            Entity::find_by_id("available")
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap()
+                .owner,
+            "second"
+        );
     }
 }

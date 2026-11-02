@@ -8,6 +8,7 @@
 use crate::entities::{credentials, hosts, repositories};
 use crate::snowflake::Id;
 
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     error::{ApiError, Result},
@@ -16,11 +17,7 @@ use crate::{
     vault,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect, Select,
     Set,
@@ -109,7 +106,10 @@ pub struct Body {
 
 fn check_scope(value: &str) -> Result<()> {
     if !["host", "build", "deploy"].contains(&value) {
-        return Err(ApiError::bad("请选择凭据所属模块：主机、构建或应用。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("credentials.scopeInvalid"),
+        ));
     }
     Ok(())
 }
@@ -120,16 +120,30 @@ fn check(body: &Body, creating: bool) -> Result<String> {
     }
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("credentials.nameRequired"),
+        ));
     }
     if creating {
         if !KINDS.contains(&body.kind.trim()) {
-            return Err(ApiError::bad("请选择凭据类型：密码、SSH 私钥或令牌。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("credentials.kindInvalid"),
+            ));
         }
         match body.secret.as_deref().map(str::trim) {
-            None | Some("") => return Err(ApiError::bad("请填写凭据内容。")),
+            None | Some("") => {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("credentials.secretRequired"),
+                ));
+            }
             Some(secret) if secret.len() > 64 * 1024 => {
-                return Err(ApiError::bad("凭据内容过长（上限 64KB）。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("credentials.secretTooLarge"),
+                ));
             }
             Some(_) => {}
         }
@@ -254,8 +268,9 @@ pub async fn update(
     if managed
         && (body.kind != "token" || body.secret.as_ref().is_some_and(|v| !v.trim().is_empty()))
     {
-        return Err(ApiError::bad(
-            "网页授权凭据的令牌由系统维护，请通过仓库授权页面重新授权。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("credentials.managedToken"),
         ));
     }
     let name = check(&body, false)?;
@@ -340,9 +355,10 @@ pub async fn remove(
         .count(&tx)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "还有 {used} 台主机在用这条凭据，请先改掉再删除。"
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("credentials.hostReference").with("count", used.to_string()),
+        ));
     }
     let used = repositories::Entity::find()
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
@@ -350,9 +366,11 @@ pub async fn remove(
         .count(&tx)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "还有 {used} 个仓库在用这条凭据，请先改掉再删除。"
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("credentials.repositoryReference")
+                .with("count", used.to_string()),
+        ));
     }
     let used = crate::entities::repository_connections::Entity::find()
         .filter(crate::entities::repository_connections::Column::WorkspaceId.eq(scope.workspace_id))
@@ -361,7 +379,10 @@ pub async fn remove(
         .count(&tx)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict("代码连接仍在使用该凭据，请先解除引用。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("credentials.connectionReference"),
+        ));
     }
     for run in crate::entities::pipeline_runs::Entity::find()
         .filter(crate::entities::pipeline_runs::Column::WorkspaceId.eq(scope.workspace_id))
@@ -381,7 +402,10 @@ pub async fn remove(
                     .any(|checkout| checkout.credential_id == i64::from(id))
             })
         {
-            return Err(ApiError::conflict("凭据仍有流水线任务尚未结束。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("credentials.pipelineRunning"),
+            ));
         }
     }
     let affected = credentials::Entity::delete_many()
@@ -412,7 +436,12 @@ pub async fn unseal(s: &AppState, workspace_id: &Id, id: &Id) -> Result<(String,
         .filter(credentials::Column::Id.eq(*id))
         .one(&s.db)
         .await?
-        .ok_or_else(|| ApiError::bad("这台主机引用的凭据已不存在，请重新选择。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("credentials.hostCredentialMissing"),
+            )
+        })?;
     let secret = s.vault.open_secret(
         &row.secret,
         &vault::aad(&workspace_id.to_string(), "credentials", &id.to_string()),

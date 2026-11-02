@@ -1,4 +1,5 @@
 use crate::entities::{credentials, pipelines, repositories};
+use crate::error::{Json, Path, Query};
 use crate::snowflake::Id;
 use crate::{
     db,
@@ -7,11 +8,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set,
     sea_query::{Expr, ExprTrait},
@@ -75,23 +72,35 @@ async fn bind_inline(
 ) -> Result<()> {
     if let Some(auth) = body.inline_credential.take() {
         if body.provider != "git" {
-            return Err(ApiError::bad("代码平台请先完成网页授权或令牌连接。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repositories.platformConnectFirst"),
+            ));
         }
         let ssh = body.url.starts_with("git@") || body.url.starts_with("ssh://");
         if (auth.kind == "ssh-key") != ssh {
-            return Err(ApiError::bad(
-                "SSH地址需使用SSH私钥，HTTP(S)地址需使用账号密码或令牌。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.gitCredentialScheme"),
             ));
         }
         if auth.kind == "password" && auth.username.trim().is_empty() {
-            return Err(ApiError::bad("请填写Git账号。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repositories.gitUsernameRequired"),
+            ));
         }
         let credential: crate::credentials::Body = serde_json::from_value(json!({"name":body.name,"kind":auth.kind,"username":auth.username,"secret":auth.secret}))
-            .map_err(|_|ApiError::bad("仓库授权信息无效。"))?;
+            .map_err(|_|ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("repositories.authorizationInvalid")))?;
         let (_, Json(saved)) = crate::credentials::create_in(s, tx, scope, credential).await?;
         body.credential_id = saved["id"]
             .as_str()
-            .ok_or_else(|| ApiError::bad("保存仓库授权失败。"))?
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repositories.authorizationSave"),
+                )
+            })?
             .into();
     }
     Ok(())
@@ -131,15 +140,22 @@ async fn check(
 ) -> Result<String> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("credentials.nameRequired"),
+        ));
     }
     if !valid_url(body.url.trim()) {
-        return Err(ApiError::bad(
-            "请填写有效的远程仓库地址（255 字以内，仅支持 HTTP、HTTPS、SSH 或 git@host:path）。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repositories.urlInvalid"),
         ));
     }
     if !["git", "github", "gitlab", "gitee", "gitea", "codeup"].contains(&body.provider.as_str()) {
-        return Err(ApiError::bad("请选择支持的代码平台或普通Git。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repositories.providerInvalid"),
+        ));
     }
     if body.provider != "git" {
         let connection = crate::entities::repository_connections::Entity::find()
@@ -153,9 +169,17 @@ async fn check(
             )
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("请先连接所选代码平台并选择仓库。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repositories.connectionRequired"),
+                )
+            })?;
         if connection.state != "connected" {
-            return Err(ApiError::bad("代码平台授权已失效，请重新连接。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repositories.authorizationExpired"),
+            ));
         }
     }
     if Id::reference(&body.credential_id)? != Id::from(0) {
@@ -173,9 +197,17 @@ async fn check(
             .filter(credentials::Column::Id.eq(Id::reference(&body.credential_id)?))
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("所选凭据不存在于当前工作空间。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.auth.credentialMissing"),
+                )
+            })?;
         if !crate::credentials::KINDS.contains(&row.kind.as_str()) {
-            return Err(ApiError::bad("仓库凭据必须是密码、SSH 私钥或令牌。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repositories.credentialKind"),
+            ));
         }
     }
     Ok(name.to_owned())
@@ -206,7 +238,12 @@ pub(crate) async fn bind_selection(
     let (_, Json(saved)) = create_in(s, tx, scope, body).await?;
     Ok(saved["id"]
         .as_str()
-        .ok_or_else(|| ApiError::bad("保存仓库失败。"))?
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repositories.saveFailed"),
+            )
+        })?
         .to_owned())
 }
 
@@ -317,7 +354,10 @@ pub async fn update(
         .await?
         .ok_or_else(ApiError::missing)?;
     if current.version != body.version {
-        return Err(ApiError::conflict("仓库已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repositories.changed"),
+        ));
     }
     if body.provider.is_empty() {
         body.provider = current.provider;
@@ -392,7 +432,10 @@ pub async fn remove(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("仓库仍被市场来源引用，请先删除来源。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repositories.marketplaceReference"),
+        ));
     }
     let used = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
@@ -400,9 +443,11 @@ pub async fn remove(
         .count(&tx)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "还有 {used} 条流水线在用这个仓库，请先改掉再删除。"
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repositories.pipelineReference")
+                .with("count", used.to_string()),
+        ));
     }
     let affected = repositories::Entity::delete_many()
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))

@@ -1,3 +1,4 @@
+import { i18n } from "../i18n";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -18,10 +19,28 @@ vi.mock("../resource", async original => ({ ...await original<typeof import("../
 let root: Root;
 let element: HTMLDivElement;
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
+  localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   element = document.createElement("div"); document.body.append(element); root = createRoot(element);
 });
 afterEach(async () => { await act(async () => root.unmount()); element.remove(); vi.clearAllMocks(); });
+it("renders report metadata from the fetched envelope and hides stale charts after refresh failure", async () => {
+  const envelope = { items: [{ id: "1", name: "Alpha" }], total: 4, page: 1, page_size: 1, coverage: { complete: false }, series: [{ id: "2", name: "Full series" }] };
+  vi.mocked(listResource).mockResolvedValueOnce(envelope);
+  const summary = vi.fn((data: typeof envelope) => <p>Report {data.series[0]!.name}</p>);
+  const config: ListConfig<{ id: string; name: string }> = {
+    resource: "report", rowKey: row => row.id, columns: [{ key: "name", label: "Name" }],
+    summary: data => summary(data as typeof envelope), toolbar: { create: false },
+  };
+  await act(async () => root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+  expect(summary).toHaveBeenLastCalledWith(envelope);
+  expect(element.textContent).toContain("Report Full series");
+  vi.mocked(listResource).mockRejectedValueOnce(new Error("Report unavailable"));
+  await act(async () => [...element.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "刷新")!.click());
+  expect(element.textContent).toContain("Report unavailable");
+  expect(element.textContent).not.toContain("Report Full series");
+});
 it("shows refresh failures even when a remote page already contains rows, then recovers", async () => {
   const first = { items: [{ id: "1", name: "Repository" }], total: 0, page: 1, page_size: 50, has_more: true };
   vi.mocked(listResource).mockResolvedValueOnce(first);

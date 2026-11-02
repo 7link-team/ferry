@@ -1,3 +1,4 @@
+import { commonText } from "./i18n";
 /** Wire types and presentation shared by build history and run detail. */
 export interface PipelineRun {
   id: string;
@@ -53,27 +54,27 @@ export function mergeLogs(current: RunLog[], incoming: RunLog[]): RunLog[] {
 export function duration(start: number, end: number, now = Date.now()): string {
   if (!start) return "—";
   const seconds = Math.max(0, Math.floor(((end || now) - start) / 1000));
-  if (seconds < 60) return `${seconds} 秒`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
-  return `${Math.floor(seconds / 3600)} 时 ${Math.floor(seconds % 3600 / 60)} 分 ${seconds % 60} 秒`;
+  if (seconds < 60) return commonText("duration.seconds", { seconds });
+  if (seconds < 3600) return commonText("duration.minutes", { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
+  return commonText("duration.hours", { hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds % 3600 / 60), seconds: seconds % 60 });
 }
 
 export function stateBadge(state: string): {
   label: string; variant: "default" | "secondary" | "destructive" | "outline"; className: string;
 } {
   switch (state) {
-    case "queued": return { label: "排队中", variant: "secondary", className: "" };
-    case "cancelling": return { label: "正在取消", variant: "secondary", className: "" };
-    case "running": return { label: "运行中", variant: "default", className: "" };
-    case "waiting": return { label: "等待审批", variant: "secondary", className: "" };
-    case "pending": return { label: "等待并发组", variant: "secondary", className: "" };
-    case "approved": return { label: "已确认", variant: "secondary", className: "" };
-    case "succeeded": return { label: "成功", variant: "outline", className: "text-success border-success" };
-    case "failed": return { label: "失败", variant: "destructive", className: "" };
-    case "cancelled": return { label: "已取消", variant: "outline", className: "text-muted-foreground" };
-    case "timed_out": return { label: "超时", variant: "outline", className: "text-destructive border-destructive" };
-    case "skipped": return { label: "已跳过", variant: "secondary", className: "" };
-    default: return { label: state, variant: "outline", className: "" };
+    case "queued": return { label: commonText("state.queued"), variant: "secondary", className: "" };
+    case "cancelling": return { label: commonText("state.cancelling"), variant: "secondary", className: "" };
+    case "running": return { label: commonText("state.running"), variant: "default", className: "" };
+    case "waiting": return { label: commonText("state.waitingApproval"), variant: "secondary", className: "" };
+    case "pending": return { label: commonText("state.waitingConcurrency"), variant: "secondary", className: "" };
+    case "approved": return { label: commonText("state.approved"), variant: "secondary", className: "" };
+    case "succeeded": return { label: commonText("state.succeeded"), variant: "outline", className: "text-success border-success" };
+    case "failed": return { label: commonText("state.failed"), variant: "destructive", className: "" };
+    case "cancelled": return { label: commonText("state.cancelled"), variant: "outline", className: "text-muted-foreground" };
+    case "timed_out": return { label: commonText("state.timedOut"), variant: "outline", className: "text-destructive border-destructive" };
+    case "skipped": return { label: commonText("state.skipped"), variant: "secondary", className: "" };
+    default: return { label: state ? commonText("state.unknown", { value: state }) : "—", variant: "outline", className: "" };
   }
 }
 export const isActive = (state: string) => state === "queued" || state === "running" || state === "cancelling";

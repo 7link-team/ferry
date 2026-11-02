@@ -115,7 +115,7 @@ fn probe_command(service: &Service, probe: &Probe) -> Result<String> {
                 .find(|p| p.name.as_deref() == Some(name))
                 .map(|p| u64::from(p.container))
         })
-        .ok_or_else(|| bad("健康检查端口必须是1到65535的端口号或已声明的端口名称。"))?;
+        .ok_or_else(|| bad("deployment.manifest.001"))?;
     if !probe.http_get.path.starts_with('/')
         || probe.http_get.path.starts_with("//")
         || probe.http_get.path.len() > 2048
@@ -129,7 +129,7 @@ fn probe_command(service: &Service, probe: &Probe) -> Result<String> {
         || !(1..=600).contains(&probe.timeout_seconds)
         || !(1..=100).contains(&probe.failure_threshold)
     {
-        return Err(bad("健康检查路径或周期/超时/失败阈值无效。"));
+        return Err(bad("deployment.manifest.002"));
     }
     let url = shell_quote(&format!("http://127.0.0.1:{port}{}", probe.http_get.path));
     Ok(format!(
@@ -149,7 +149,7 @@ fn quantity(value: &Value, cpu: bool) -> Result<u64> {
     let text = match value {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
-        _ => return Err(bad("资源数量必须是数字或数量字符串。")),
+        _ => return Err(bad("deployment.manifest.003")),
     };
     let (number, multiplier) = if cpu {
         match text.strip_suffix('m') {
@@ -178,9 +178,7 @@ fn quantity(value: &Value, cpu: bool) -> Result<u64> {
         || !fraction.bytes().all(|b| b.is_ascii_digit())
         || fraction.len() > 9
     {
-        return Err(bad(
-            "资源数量必须为正数，CPU可使用m，内存可使用Ki/Mi/Gi/Ti或K/M/G/T。",
-        ));
+        return Err(bad("deployment.manifest.004"));
     }
     let scale = 10u128.pow(fraction.len() as u32);
     let numerator = whole
@@ -192,7 +190,7 @@ fn quantity(value: &Value, cpu: bool) -> Result<u64> {
         .and_then(|n| n.checked_mul(u128::from(multiplier)))
         .filter(|n| *n > 0 && n % scale == 0)
         .and_then(|n| u64::try_from(n / scale).ok());
-    scaled.ok_or_else(|| bad("资源数量过大、为零或精度超出支持范围。"))
+    scaled.ok_or_else(|| bad("deployment.manifest.005"))
 }
 fn resource_values(values: &BTreeMap<String, Value>) -> Result<BTreeMap<String, Value>> {
     let mut out = BTreeMap::new();
@@ -212,7 +210,7 @@ fn resource_values(values: &BTreeMap<String, Value>) -> Result<BTreeMap<String, 
             "memory" => {
                 out.insert("memory".into(), json!(quantity(value, false)?.to_string()));
             }
-            _ => return Err(bad("resources 仅支持 cpu 和 memory。")),
+            _ => return Err(bad("deployment.manifest.006")),
         }
     }
     Ok(out)
@@ -225,7 +223,7 @@ fn validate_resources(resources: &Resources) -> Result<()> {
             (resources.requests.get(name), resources.limits.get(name))
         {
             if quantity(request, name == "cpu")? > quantity(limit, name == "cpu")? {
-                return Err(bad("资源 requests 不能大于 limits。"));
+                return Err(bad("deployment.manifest.007"));
             }
         }
     }
@@ -309,8 +307,11 @@ pub struct Overrides {
     pub stack: BTreeMap<String, Value>,
 }
 
-fn bad(message: impl Into<String>) -> ApiError {
-    ApiError::bad(message)
+fn bad(key: &str) -> ApiError {
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new(key),
+    )
 }
 fn identifier(v: &str) -> bool {
     !v.is_empty()
@@ -332,53 +333,48 @@ pub fn parse(input: &str) -> Result<Manifest> {
 }
 pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
     if input.len() > 64 * 1024 || input.contains('\0') {
-        return Err(bad("manifest 不能超过64KB或包含空字符。"));
+        return Err(bad("deployment.manifest.008"));
     }
     let m: Manifest = serde_yaml_ng::from_str(input).map_err(|e| {
-        bad(format!(
-            "manifest YAML/JSON 无效：{e}。字段不符合应用描述格式；请删除未实现的字段。"
-        ))
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.manifest.085").with("detail", e.to_string()),
+        )
     })?;
     let mode = effective_mode(&m, mode);
     if m.api_version != "ferry/v1" || m.kind != "Application" {
-        return Err(bad(
-            "manifest 必须使用 apiVersion: ferry/v1 和 kind: Application。",
-        ));
+        return Err(bad("deployment.manifest.009"));
     }
     if !identifier(&m.metadata.name) || m.services.is_empty() || m.services.len() > 50 {
-        return Err(bad(
-            "应用名必须是小写标识符，services 必须包含1到50个服务。",
-        ));
+        return Err(bad("deployment.manifest.010"));
     }
     if let Some(s) = &m.strategy {
         if s.kind != "recreate" && !(mode == "stack" && s.kind == "rolling") {
-            return Err(bad(
-                "Compose 不支持滚动更新；strategy.type 仅支持 recreate。",
-            ));
+            return Err(bad("deployment.manifest.011"));
         }
         if s.max_unavailable.is_some_and(|n| n > 100)
             || (mode != "stack" && s.max_unavailable.is_some())
         {
-            return Err(bad("maxUnavailable仅用于Swarm，范围0到100。"));
+            return Err(bad("deployment.manifest.012"));
         }
         if !(1..=600).contains(&s.health_timeout) {
-            return Err(bad("healthTimeout 必须为1到600秒的整数。"));
+            return Err(bad("deployment.manifest.013"));
         }
     }
     let mut names = BTreeSet::new();
     for s in &m.services {
         if !identifier(&s.name) || !names.insert(&s.name) {
-            return Err(bad("服务名必须是唯一的小写标识符。"));
+            return Err(bad("deployment.manifest.014"));
         }
         if let Some(resources) = &s.resources {
             validate_resources(resources)?;
         }
         if s.image.is_empty() == s.artifact.is_none() {
-            return Err(bad("每个服务必须且只能指定image或artifact。"));
+            return Err(bad("deployment.manifest.015"));
         }
         if let Some(artifact) = &s.artifact {
             if artifact.source != "pipeline" || artifact.pipeline.trim().is_empty() {
-                return Err(bad("artifact必须引用构建流水线。"));
+                return Err(bad("deployment.manifest.016"));
             }
             crate::artifacts::validate_paths(&[artifact.path.clone()])?;
             if artifact
@@ -386,31 +382,31 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
                 .as_ref()
                 .is_some_and(|r| r.parse::<crate::snowflake::Id>().is_err())
             {
-                return Err(bad("artifact.run必须是构建执行ID。"));
+                return Err(bad("deployment.manifest.017"));
             }
         }
         if s.replicas == 0 || s.replicas > 100 {
-            return Err(bad("replicas 必须在1到100之间。"));
+            return Err(bad("deployment.manifest.018"));
         }
         let mut env = BTreeSet::new();
         for e in &s.env {
             if e.value.is_some() == e.value_from.is_some() {
-                return Err(bad("环境变量必须且只能填写 value 或 valueFrom。"));
+                return Err(bad("deployment.manifest.019"));
             }
             if e.value_from.as_deref().is_some_and(|reference| {
                 !reference
                     .strip_prefix("variable/")
                     .is_some_and(crate::variables::valid_name)
             }) {
-                return Err(bad("valueFrom 必须是 variable/变量名。"));
+                return Err(bad("deployment.manifest.020"));
             }
             if !environment_name(&e.name) || !env.insert(&e.name) {
-                return Err(bad("环境变量名无效或重复。"));
+                return Err(bad("deployment.manifest.021"));
             }
         }
         let mut paths = BTreeSet::new();
         if s.files.len() > 20 {
-            return Err(bad("每个服务最多挂载20个配置文件。"));
+            return Err(bad("deployment.manifest.022"));
         }
         for file in &s.files {
             if crate::channel::check_path(&file.path).is_err()
@@ -419,7 +415,7 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
                 || file.from_template.trim().is_empty()
                 || file.from_template.chars().count() > 60
             {
-                return Err(bad("配置文件路径无效、重复或模板引用无效。"));
+                return Err(bad("deployment.manifest.023"));
             }
         }
         for v in &s.volumes {
@@ -427,7 +423,7 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
                 || crate::channel::check_path(&v.path).is_err()
                 || !paths.insert(&v.path)
             {
-                return Err(bad("卷名无效、挂载路径不是绝对路径或重复。"));
+                return Err(bad("deployment.manifest.024"));
             }
         }
     }
@@ -441,8 +437,8 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
             _ => false,
         }
     }
-    if contains_nul(&serde_json::to_value(&m).map_err(|_| bad("manifest 无法序列化。"))?) {
-        return Err(bad("manifest 字段不能包含空字符。"));
+    if contains_nul(&serde_json::to_value(&m).map_err(|_| bad("deployment.error.006"))?) {
+        return Err(bad("deployment.manifest.025"));
     }
     // Validating the effective document also covers changes made by overrides.
     render_for(&m, mode)?;
@@ -495,15 +491,13 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
         return render_native(m);
     }
     if m.services.iter().any(|s| s.artifact.is_some()) {
-        return Err(bad("容器模式需要image，可执行artifact请使用native模式。"));
+        return Err(bad("deployment.manifest.026"));
     }
     if !["compose", "docker", "stack"].contains(&mode) {
-        return Err(bad("部署模式尚未实现。"));
+        return Err(bad("deployment.manifest.027"));
     }
     if mode == "docker" && m.services.iter().any(|s| s.replicas != 1) {
-        return Err(bad(
-            "Docker模式每台主机的每个服务只能运行一个实例，请使用Compose或主机组。",
-        ));
+        return Err(bad("deployment.manifest.028"));
     }
     if mode == "docker"
         && m.services.iter().any(|s| {
@@ -512,18 +506,14 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
                 .is_some_and(|r| r.requests.contains_key("cpu"))
         })
     {
-        return Err(bad(
-            "Docker模式不提供CPU资源预留，请使用limits.cpu限制上限。",
-        ));
+        return Err(bad("deployment.manifest.029"));
     }
 
     let mut services = BTreeMap::new();
     let mut volumes = BTreeMap::new();
     for s in &m.services {
         if mode == "stack" && !s.depends_on.is_empty() {
-            return Err(bad(
-                "Swarm不保证dependsOn启动顺序，请移除该约束并让服务自行重连依赖。",
-            ));
+            return Err(bad("deployment.manifest.030"));
         }
         let mut v = json!({"image":s.image,"deploy":{"replicas":s.replicas}});
         if mode == "stack" {
@@ -537,7 +527,7 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
         }
         if let Some(health) = &s.health {
             if health.readiness.is_none() && health.liveness.is_none() {
-                return Err(bad("health 至少声明 readiness 或 liveness。"));
+                return Err(bad("deployment.manifest.031"));
             }
             if let Some(probe) = &health.readiness {
                 probe_command(s, probe)?;
@@ -666,9 +656,7 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
                 .get(&env)
                 .is_some()
         {
-            return Err(bad(
-                "Compose overrides 不得删除引用变量的服务或覆盖 valueFrom 环境项。",
-            ));
+            return Err(bad("deployment.manifest.032"));
         }
     }
     let mut references = BTreeMap::<String, BTreeMap<String, String>>::new();
@@ -693,13 +681,13 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
     if mode == "docker" {
         for service in document["services"].as_object().unwrap().values() {
             if service["deploy"]["replicas"].as_u64().unwrap_or(1) != 1 {
-                return Err(bad("Docker模式每个服务只支持一个实例。"));
+                return Err(bad("deployment.manifest.033"));
             }
             if service["deploy"]["resources"]["reservations"]
                 .get("cpus")
                 .is_some()
             {
-                return Err(bad("Docker模式不支持CPU资源预留。"));
+                return Err(bad("deployment.manifest.034"));
             }
         }
     }
@@ -708,7 +696,7 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
     }
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
-        .map_err(|_| bad("无法序列化 Compose 产物。"))
+        .map_err(|_| bad("deployment.error.021"))
 }
 
 fn render_native(m: &Manifest) -> Result<String> {
@@ -716,25 +704,21 @@ fn render_native(m: &Manifest) -> Result<String> {
     let mut volumes = BTreeMap::new();
     for service in &m.services {
         if service.artifact.is_none() || !service.image.is_empty() || service.replicas != 1 {
-            return Err(bad(
-                "native模式每个服务只支持一个可执行产物实例；不能使用镜像或多副本。",
-            ));
+            return Err(bad("deployment.manifest.035"));
         }
         if service
             .ports
             .iter()
             .any(|p| p.published.is_some_and(|port| port != p.container))
         {
-            return Err(bad(
-                "native模式不提供端口映射，请让程序直接监听声明的端口。",
-            ));
+            return Err(bad("deployment.manifest.036"));
         }
         if service
             .resources
             .as_ref()
             .is_some_and(|r| !r.requests.is_empty())
         {
-            return Err(bad("native模式支持资源limits，不提供资源requests预留。"));
+            return Err(bad("deployment.manifest.037"));
         }
         if let Some(health) = &service.health {
             for probe in [&health.readiness, &health.liveness].into_iter().flatten() {
@@ -756,7 +740,7 @@ fn render_native(m: &Manifest) -> Result<String> {
             .collect();
         if let Some(cpu) = service.resources.as_ref().and_then(|r| r.limits.get("cpu")) {
             if quantity(cpu, true)? % 100_000 != 0 {
-                return Err(bad("native CPU限制精度最多为0.0001核（0.01%）。"));
+                return Err(bad("deployment.manifest.038"));
             }
         }
         let limits = service
@@ -774,7 +758,7 @@ fn render_native(m: &Manifest) -> Result<String> {
             .iter()
             .any(|name| !services.contains_key(name))
         {
-            return Err(bad("依赖服务不存在。"));
+            return Err(bad("deployment.manifest.039"));
         }
     }
     while !remaining.is_empty() {
@@ -787,31 +771,31 @@ fn render_native(m: &Manifest) -> Result<String> {
             .map(|s| s.name.clone())
             .collect();
         if ready.is_empty() {
-            return Err(bad("服务依赖包含循环。"));
+            return Err(bad("deployment.manifest.040"));
         }
         for name in ready {
             remaining.remove(&name);
         }
     }
     if m.overrides.native.keys().any(|key| key != "units") {
-        return Err(bad("native overrides仅支持按服务名覆盖units完整文本。"));
+        return Err(bad("deployment.manifest.041"));
     }
     if let Some(units) = m.overrides.native.get("units") {
         let units = units
             .as_object()
-            .ok_or_else(|| bad("native.units必须是服务名到unit文本的映射。"))?;
+            .ok_or_else(|| bad("deployment.manifest.042"))?;
         if units
             .iter()
             .any(|(name, value)| !services.contains_key(name) || !value.is_string())
         {
-            return Err(bad("native unit覆盖必须引用已有服务，内容为字符串。"));
+            return Err(bad("deployment.manifest.043"));
         }
     }
     serde_json::to_string_pretty(
         &json!({"services":services,"volumes":volumes,"x-native-overrides":m.overrides.native}),
     )
     .map(|s| s + "\n")
-    .map_err(|_| bad("无法渲染native产物。"))
+    .map_err(|_| bad("deployment.manifest.044"))
 }
 pub(crate) fn native_probes(m: &Manifest) -> Result<Vec<(String, String, u32)>> {
     m.services
@@ -843,37 +827,35 @@ pub fn readiness(m: &Manifest) -> Result<Vec<(String, String, u32)>> {
 fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
     let root = doc
         .as_object()
-        .ok_or_else(|| bad("Compose 产物必须是对象。"))?;
+        .ok_or_else(|| bad("deployment.manifest.045"))?;
     if root
         .keys()
         .any(|k| !["services", "volumes"].contains(&k.as_str()))
     {
-        return Err(bad("首批 Compose overrides 顶层仅支持 services、volumes。"));
+        return Err(bad("deployment.manifest.046"));
     }
     let services = doc["services"]
         .as_object()
         .filter(|s| !s.is_empty() && s.len() <= 50)
-        .ok_or_else(|| bad("Compose services 必须包含1到50个服务。"))?;
+        .ok_or_else(|| bad("deployment.manifest.047"))?;
     let mut published = BTreeSet::new();
     let mut dependencies = BTreeMap::<String, Vec<String>>::new();
     if let Some(volumes) = doc.get("volumes") {
         let volumes = volumes
             .as_object()
-            .ok_or_else(|| bad("Compose volumes 必须是对象。"))?;
+            .ok_or_else(|| bad("deployment.manifest.048"))?;
         for (name, config) in volumes {
             if !identifier(name) || config.as_object().is_none_or(|v| !v.is_empty()) {
-                return Err(bad(
-                    "首批仅支持由 Compose 管理的命名卷，不支持 external 或自定义驱动。",
-                ));
+                return Err(bad("deployment.manifest.049"));
             }
         }
     }
     for (name, config) in services {
         let service = config
             .as_object()
-            .ok_or_else(|| bad("Compose 服务配置必须是对象。"))?;
+            .ok_or_else(|| bad("deployment.manifest.050"))?;
         if !identifier(name) {
-            return Err(bad("Compose 服务名无效。"));
+            return Err(bad("deployment.manifest.051"));
         }
         for key in service.keys() {
             if ![
@@ -891,15 +873,16 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
             ]
             .contains(&key.as_str())
             {
-                return Err(bad(format!(
-                    "首批 Compose overrides 不支持服务字段 {key}。"
-                )));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.manifest.086").with("field", key),
+                ));
             }
         }
         if let Some(check) = service.get("healthcheck") {
             let check = check
                 .as_object()
-                .ok_or_else(|| bad("healthcheck 必须是对象。"))?;
+                .ok_or_else(|| bad("deployment.manifest.052"))?;
             if check.keys().any(|k| {
                 ![
                     "test",
@@ -912,17 +895,17 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 ]
                 .contains(&k.as_str())
             }) {
-                return Err(bad("healthcheck 字段无效。"));
+                return Err(bad("deployment.manifest.053"));
             }
             if let Some(test) = check.get("test") {
                 let test = test
                     .as_array()
-                    .ok_or_else(|| bad("healthcheck.test 必须为字符串数组。"))?;
+                    .ok_or_else(|| bad("deployment.manifest.054"))?;
                 if test.is_empty()
                     || !test.iter().all(Value::is_string)
                     || !["CMD", "CMD-SHELL", "NONE"].contains(&test[0].as_str().unwrap_or(""))
                 {
-                    return Err(bad("healthcheck.test 必须使用 CMD、CMD-SHELL 或 NONE。"));
+                    return Err(bad("deployment.manifest.055"));
                 }
             }
             for key in ["interval", "timeout", "start_period", "start_interval"] {
@@ -933,7 +916,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                                 .all(|c| c.is_ascii_digit() || b".nsumh".contains(&c))
                     })
                 }) {
-                    return Err(bad("healthcheck 时间必须是有效的时长字符串。"));
+                    return Err(bad("deployment.manifest.056"));
                 }
             }
             if check
@@ -941,15 +924,13 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 .is_some_and(|v| !v.as_u64().is_some_and(|n| (1..=100).contains(&n)))
                 || check.get("disable").is_some_and(|v| !v.is_boolean())
             {
-                return Err(bad("healthcheck 阈值或开关无效。"));
+                return Err(bad("deployment.manifest.057"));
             }
         }
         if mode == "stack"
             && (service.contains_key("depends_on") || service.contains_key("restart"))
         {
-            return Err(bad(
-                "Swarm不支持depends_on/restart字段，请使用服务重连和Swarm重启策略。",
-            ));
+            return Err(bad("deployment.manifest.058"));
         }
         let image = config["image"].as_str().unwrap_or("");
         if image.is_empty()
@@ -958,23 +939,21 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 .chars()
                 .any(|c| c.is_whitespace() || c.is_control() || c == '$')
         {
-            return Err(bad("每个服务必须指定有效镜像引用，镜像不支持环境插值。"));
+            return Err(bad("deployment.manifest.059"));
         }
         let replicas = if let Some(deploy) = service.get("deploy") {
             let d = deploy
                 .as_object()
-                .ok_or_else(|| bad("deploy 必须是对象。"))?;
+                .ok_or_else(|| bad("deployment.manifest.060"))?;
             if d.keys().any(|k| {
                 k != "replicas" && k != "resources" && !(mode == "stack" && k == "update_config")
             }) {
-                return Err(bad(
-                    "Compose deploy 仅支持 replicas、resources；不支持滚动更新。",
-                ));
+                return Err(bad("deployment.manifest.061"));
             }
             if let Some(update) = d.get("update_config") {
                 let update = update
                     .as_object()
-                    .ok_or_else(|| bad("update_config必须是对象。"))?;
+                    .ok_or_else(|| bad("deployment.manifest.062"))?;
                 if update
                     .keys()
                     .any(|k| !["parallelism", "order", "failure_action"].contains(&k.as_str()))
@@ -986,30 +965,28 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                     })
                     || update.get("failure_action").is_some_and(|v| v != "pause")
                 {
-                    return Err(bad(
-                        "Swarm更新配置仅支持parallelism(0–100)、order(start-first/stop-first)、failure_action(pause)。",
-                    ));
+                    return Err(bad("deployment.manifest.063"));
                 }
             }
             if let Some(resources) = d.get("resources") {
                 let resources = resources
                     .as_object()
-                    .ok_or_else(|| bad("deploy.resources 必须为对象。"))?;
+                    .ok_or_else(|| bad("deployment.manifest.064"))?;
                 let mut normalized = Resources::default();
                 for (kind, values) in resources {
                     let target = match kind.as_str() {
                         "limits" => &mut normalized.limits,
                         "reservations" => &mut normalized.requests,
-                        _ => return Err(bad("资源字段仅支持 limits/reservations。")),
+                        _ => return Err(bad("deployment.manifest.065")),
                     };
                     for (name, value) in values
                         .as_object()
-                        .ok_or_else(|| bad("资源配置必须为对象。"))?
+                        .ok_or_else(|| bad("deployment.manifest.066"))?
                     {
                         let name = match name.as_str() {
                             "cpus" => "cpu",
                             "memory" => "memory",
-                            _ => return Err(bad("Compose资源仅支持cpus/memory。")),
+                            _ => return Err(bad("deployment.manifest.067")),
                         };
                         target.insert(name.into(), value.clone());
                     }
@@ -1020,7 +997,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 Some(v) => v
                     .as_u64()
                     .filter(|v| (1..=100).contains(v))
-                    .ok_or_else(|| bad("replicas 必须在1到100之间。"))?,
+                    .ok_or_else(|| bad("deployment.manifest.018"))?,
                 None => 1,
             }
         } else {
@@ -1031,54 +1008,61 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 .as_array()
                 .is_none_or(|v| v.iter().any(|x| !x.is_string()))
             {
-                return Err(bad("command 必须是字符串数组。"));
+                return Err(bad("deployment.manifest.068"));
             }
         }
         for field in ["environment", "labels"] {
             if let Some(value) = service.get(field) {
-                let entries = value
-                    .as_object()
-                    .ok_or_else(|| bad(format!("{field} 必须是字符串映射。")))?;
+                let entries = value.as_object().ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.manifest.087").with("field", field),
+                    )
+                })?;
                 if entries.iter().any(|(k, v)| {
                     !v.is_string() || (field == "environment" && !environment_name(k))
                 }) {
-                    return Err(bad(format!(
-                        "{field} 必须是有效名称和字符串值，不支持变量引用。"
-                    )));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.manifest.088").with("field", field),
+                    ));
                 }
             }
         }
         if let Some(ports) = service.get("ports") {
-            for p in ports.as_array().ok_or_else(|| bad("ports 必须是数组。"))? {
+            for p in ports
+                .as_array()
+                .ok_or_else(|| bad("deployment.manifest.069"))?
+            {
                 let p = p
                     .as_object()
-                    .ok_or_else(|| bad("ports 必须使用长格式对象。"))?;
+                    .ok_or_else(|| bad("deployment.manifest.070"))?;
                 if p.keys()
                     .any(|k| !["target", "published", "protocol"].contains(&k.as_str()))
                 {
-                    return Err(bad("端口字段无效。"));
+                    return Err(bad("deployment.manifest.071"));
                 }
                 if !p
                     .get("target")
                     .and_then(Value::as_u64)
                     .is_some_and(|v| (1..=65535).contains(&v))
                 {
-                    return Err(bad("容器端口必须在1到65535之间。"));
+                    return Err(bad("deployment.manifest.072"));
                 }
                 let protocol = p.get("protocol").and_then(Value::as_str).unwrap_or("tcp");
                 if !["tcp", "udp"].contains(&protocol) {
-                    return Err(bad("端口协议仅支持 tcp/udp。"));
+                    return Err(bad("deployment.manifest.073"));
                 }
                 if let Some(port) = p.get("published") {
                     let port = port
                         .as_str()
                         .and_then(|s| s.parse::<u16>().ok())
                         .filter(|n| *n > 0)
-                        .ok_or_else(|| bad("published 必须是1到65535的端口字符串。"))?;
+                        .ok_or_else(|| bad("deployment.manifest.074"))?;
                     if (mode != "stack" && replicas > 1)
                         || !published.insert((port, protocol.to_owned()))
                     {
-                        return Err(bad("固定宿主端口不能重复，也不能用于多副本服务。"));
+                        return Err(bad("deployment.manifest.075"));
                     }
                 }
             }
@@ -1087,13 +1071,11 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
         if let Some(value) = service.get("depends_on") {
             for d in value
                 .as_array()
-                .ok_or_else(|| bad("depends_on 必须是服务名数组。"))?
+                .ok_or_else(|| bad("deployment.manifest.076"))?
             {
-                let d = d
-                    .as_str()
-                    .ok_or_else(|| bad("depends_on 必须是服务名数组。"))?;
+                let d = d.as_str().ok_or_else(|| bad("deployment.manifest.076"))?;
                 if !services.contains_key(d) || deps.contains(&d.to_owned()) {
-                    return Err(bad("依赖服务不存在或重复。"));
+                    return Err(bad("deployment.manifest.077"));
                 }
                 deps.push(d.to_owned());
             }
@@ -1103,14 +1085,16 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
             let mut paths = BTreeSet::new();
             for v in value
                 .as_array()
-                .ok_or_else(|| bad("volumes 必须是数组。"))?
+                .ok_or_else(|| bad("deployment.manifest.078"))?
             {
-                let v = v.as_object().ok_or_else(|| bad("卷必须使用长格式对象。"))?;
+                let v = v
+                    .as_object()
+                    .ok_or_else(|| bad("deployment.manifest.079"))?;
                 if v.keys()
                     .any(|k| !["type", "source", "target"].contains(&k.as_str()))
                     || v.get("type").and_then(Value::as_str) != Some("volume")
                 {
-                    return Err(bad("首批仅支持命名卷。"));
+                    return Err(bad("deployment.manifest.080"));
                 }
                 let source = v.get("source").and_then(Value::as_str).unwrap_or("");
                 let target = v.get("target").and_then(Value::as_str).unwrap_or("");
@@ -1118,7 +1102,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                     || crate::channel::check_path(target).is_err()
                     || !paths.insert(target)
                 {
-                    return Err(bad("命名卷未声明或挂载路径无效/重复。"));
+                    return Err(bad("deployment.manifest.081"));
                 }
             }
         }
@@ -1127,13 +1111,13 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 .as_str()
                 .is_some_and(|v| ["no", "always", "on-failure", "unless-stopped"].contains(&v))
             {
-                return Err(bad("restart 策略无效。"));
+                return Err(bad("deployment.manifest.082"));
             }
         }
         if let Some(value) = service.get("logging") {
             let l = value
                 .as_object()
-                .ok_or_else(|| bad("logging 必须是对象。"))?;
+                .ok_or_else(|| bad("deployment.manifest.083"))?;
             if l.keys()
                 .any(|k| !["driver", "options"].contains(&k.as_str()))
                 || l.get("driver").is_some_and(|v| !v.is_string())
@@ -1142,7 +1126,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                         .is_none_or(|m| m.values().any(|v| !v.is_string()))
                 })
             {
-                return Err(bad("logging driver/options 无效。"));
+                return Err(bad("deployment.manifest.084"));
             }
         }
     }
@@ -1154,7 +1138,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
             .map(|(n, _)| n.clone())
             .collect();
         if ready.is_empty() {
-            return Err(bad("服务依赖包含循环。"));
+            return Err(bad("deployment.manifest.040"));
         }
         for n in &ready {
             dependencies.remove(n);
@@ -1174,7 +1158,31 @@ mod tests {
     }
     fn fails(v: &Value, part: &str) {
         let e = parse(&v.to_string()).unwrap_err();
-        assert!(e.1.contains(part), "{e}");
+        let rendered = e.render(crate::i18n::Locale::ZhCn);
+        assert!(rendered.contains(part), "{rendered}");
+    }
+    #[test]
+    fn manifest_errors_keep_identity_and_literal_parser_details_in_six_languages() {
+        use crate::i18n::{Locale, Message, render};
+        let mut value = sample();
+        value["services"][0]["replicas"] = json!(0);
+        let error = parse(&value.to_string()).unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(error.2.as_ref().unwrap().key, "deployment.manifest.018");
+        for locale in Locale::ALL {
+            assert_eq!(
+                error.render(locale),
+                render(locale, &Message::new("deployment.manifest.018"))
+            );
+        }
+        let error = parse("not: [valid\nraw: '{detail} 中文 사용자'").unwrap_err();
+        let message = error.2.as_ref().unwrap();
+        assert_eq!(message.key, "deployment.manifest.085");
+        let detail = &message.params["detail"];
+        for locale in Locale::ALL {
+            assert!(error.render(locale).contains(detail));
+        }
+        assert!(error.1.starts_with("Invalid manifest YAML/JSON:"));
     }
     #[test]
     fn yaml_json_same_bytes_and_dollars_remain_literal() {

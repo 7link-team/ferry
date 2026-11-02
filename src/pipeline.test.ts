@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { i18n } from "./i18n";
 import { duration, isActive, mergeLogs, stateBadge, type RunLog } from "./pipeline";
 const log = (seq: number): RunLog => ({ seq, chunk: `line ${seq}`, stream: "stdout", step_index: 0 });
+beforeEach(() => { void i18n.changeLanguage("zh-CN"); });
 
 describe("增量日志", () => {
   it("乱序、重复 seq 去重且保留旧对象", () => {
@@ -25,7 +27,7 @@ it("状态徽标逐一映射且超时不同于失败", () => {
   expect(["queued", "running", "succeeded", "failed", "cancelled", "timed_out", "skipped"].map(stateBadge).map((b) => b.label))
     .toEqual(["排队中", "运行中", "成功", "失败", "已取消", "超时", "已跳过"]);
   expect(stateBadge("timed_out").variant).not.toBe(stateBadge("failed").variant);
-  expect(stateBadge("future").label).toBe("future");
+  expect(stateBadge("future").label).toBe("未知状态（future）");
   expect(["queued", "running", "succeeded", "failed", "cancelled"].map(isActive)).toEqual([true, true, false, false, false]);
 });
 it("cancelling keeps polling until remote cleanup completes", () => {

@@ -17,9 +17,27 @@
 // ids, no flow control, no head-of-line blocking — an ops host runs a handful
 // of concurrent sessions. Revisit only if that stops being true.
 
+pub mod contribution;
 pub mod release;
 
 use serde::{Deserialize, Serialize};
+
+/// Optional identity for product messages. Raw diagnostics remain in the legacy field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemMessage {
+    pub key: String,
+    #[serde(default)]
+    pub params: std::collections::BTreeMap<String, String>,
+}
+
+impl SystemMessage {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            params: Default::default(),
+        }
+    }
+}
 
 /// Protocol revision. Either side refuses a peer that does not match.
 pub const VERSION: u32 = 1;
@@ -104,6 +122,8 @@ pub enum Report {
     UpdateFailed {
         request: String,
         error: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<SystemMessage>,
     },
     /// Periodic host facts for the dashboard. Doubles as the runner's own
     /// heartbeat: silence in this direction is what makes the server hang up.
@@ -121,6 +141,8 @@ pub enum Report {
     SessionFailed {
         session: String,
         error: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<SystemMessage>,
     },
 }
 
@@ -266,6 +288,36 @@ pub enum Session {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_failure_identity_is_optional_and_legacy_readers_keep_the_reason() {
+        let legacy = r#"{"type":"session_failed","session":"s","error":"provider 原文"}"#;
+        let old: super::Report = serde_json::from_str(legacy).unwrap();
+        assert!(matches!(
+            old,
+            super::Report::SessionFailed { message: None, .. }
+        ));
+        let new = super::Report::SessionFailed {
+            session: "s".into(),
+            error: "代理正在准备升级".into(),
+            message: Some(super::SystemMessage::new("runnerExtra.preparingUpgrade")),
+        };
+        let encoded = serde_json::to_string(&new).unwrap();
+        assert!(
+            matches!(serde_json::from_str::<super::Report>(&encoded).unwrap(),
+            super::Report::SessionFailed { message: Some(message), .. } if message.key == "runnerExtra.preparingUpgrade")
+        );
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum LegacyReport {
+            SessionFailed { session: String, error: String },
+        }
+        let LegacyReport::SessionFailed { session, error } =
+            serde_json::from_str::<LegacyReport>(&encoded).unwrap();
+        assert_eq!(session, "s");
+        assert_eq!(error, "代理正在准备升级");
+        assert!(!serde_json::to_string(&old).unwrap().contains("message"));
+    }
+
     use super::*;
 
     /// The frames both binaries actually have to agree on, through the exact
@@ -338,6 +390,7 @@ mod tests {
             Report::SessionFailed {
                 session: "a1b2".into(),
                 error: "拨号失败".into(),
+                message: None,
             },
         ] {
             let text = serde_json::to_string(&frame).unwrap();

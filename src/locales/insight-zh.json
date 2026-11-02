@@ -1,0 +1,15 @@
+{
+  "aliasHelp": "JSON 数组，例如 {{example}}。修改昵称时保留 contributor_id；只影响当前洞察。",
+  "legacyAliasHelp": "JSON 数组，例如 {{example}}。多个姓名或邮箱可归并到同一贡献者；修改昵称时保留已有 contributor_id。只修改映射不会重新采集。",
+  "coverageSummary": "{{status}} · 覆盖起点：{{start}} · {{count}} 个仓库来源",
+  "commitCount": "{{date}}：{{count}} 次提交",
+  "trendPoint": "{{author}} · {{date}}：{{effectives}} 有效变更，{{commits}} 次提交",
+  "heatmapScale": "提交数：0 至 {{max}}；每格一天。",
+  "trendScale": "最高有效变更：{{max}}。",
+  "sourceMeta": "{{state}} · 覆盖起点：{{start}} · 最近同步：{{time}}",
+  "jobProgress": "任务：{{state}} · 进度 {{completed}}/{{generation}}",
+  "removeRepository": "移除仓库 {{repository}}",
+  "pipelineFor": "分析流水线 {{repository}}",
+  "viewCommit": "在源平台查看提交 {{sha}}",
+  "periodRanking": "{{period}}贡献排名"
+}

@@ -1,3 +1,4 @@
+import { executionText, useCommonTranslation } from "../i18n";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "./ui/badge";
@@ -7,11 +8,12 @@ import { base, named } from "../resource";
 import { href } from "../router";
 import { duration, isActive, mergeLogs, stateBadge, type LogPage, type PipelineRun, type RunLog } from "../pipeline";
 
-const CANCEL_NOTICE = "停止等待并标记为已取消；目标主机上的命令可能继续执行完毕。";
+const CANCEL_NOTICE = "run.stopNotice";
 
 export function PipelineRunDetail({ workspace, runId, permissions }: {
   workspace: string; runId: string; permissions: Set<string>;
 }) {
+  useCommonTranslation();
   const [run, setRun] = useState<PipelineRun>();
   const [logs, setLogs] = useState<RunLog[]>([]);
   const [error, setError] = useState("");
@@ -90,7 +92,7 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
   }, [logs]);
 
   const actions = run?.definition_format === "github-actions";
-  const cancelNotice = actions ? "取消执行并等待远端任务及临时资源清理完成。" : CANCEL_NOTICE;
+  const cancelNotice = actions ? executionText("run.cancelNotice") : executionText(CANCEL_NOTICE);
   const cancel = async () => {
     if (!window.confirm(cancelNotice)) return;
     const controller = new AbortController();
@@ -124,51 +126,51 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
   return (
     <div className="flex min-h-0 flex-col gap-3 overflow-auto pb-3">
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {!run ? <p className="text-muted-foreground">载入中…</p> : <>
-        <section aria-label="执行概要" className="space-y-3 rounded-lg border border-border bg-card p-4">
+      {!run ? <p className="text-muted-foreground">{executionText("run.loading")}</p> : <>
+        <section aria-label={executionText("run.summary")} className="space-y-3 rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="font-semibold">执行 #{run.number}</h2>
+            <h2 className="font-semibold">{executionText("run.number", { number: run.number })}</h2>
             <Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
             {isActive(run.state) && permissions.has("pipelines.run") && (
               <Button variant="outline" size="sm" disabled={busy || run.state === "cancelling"} onClick={() => void cancel()}>
-                {busy ? "提交中…" : run.state === "cancelling" ? "正在取消…" : actions ? "取消执行" : "停止等待并标记取消"}
+                {busy ? executionText("run.submitting") : run.state === "cancelling" ? executionText("run.cancelling") : actions ? executionText("run.cancel") : executionText("run.stopWaiting")}
               </Button>
             )}
           </div>
           <dl className="grid gap-3 text-sm sm:grid-cols-3">
             {[
-              ["流水线", named(run.pipeline_name, run.pipeline_id)], ["执行环境", run.environment_name || "未指定"], ...(run.host_id !== "0" ? [["目标主机", named(run.host_name, run.host_id)]] : []), ["触发人", named(run.triggered_by_name, run.triggered_by)], ...(run.inputs && Object.keys(run.inputs).length ? [["Inputs", Object.entries(run.inputs).map(([key, value]) => `${key}=${String(value)}`).join("，")]] : []),
-              ["耗时", duration(run.started_at, run.finished_at)], ["Commit", run.commit || "—"],
+              [executionText("shared.common.nav.pipelines"), named(run.pipeline_name, run.pipeline_id)], [executionText("shared.resource.pipeline.environment"), run.environment_name || executionText("run.unspecified")], ...(run.host_id !== "0" ? [[executionText("shared.resource.deployment.targetHost"), named(run.host_name, run.host_id)]] : []), [executionText("shared.resource.execution.triggeredBy"), named(run.triggered_by_name, run.triggered_by)], ...(run.inputs && Object.keys(run.inputs).length ? [[executionText("run.inputs"), Object.entries(run.inputs).map(([key, value]) => `${key}=${String(value)}`).join("，")]] : []),
+              [executionText("shared.resource.execution.duration"), duration(run.started_at, run.finished_at)], [executionText("run.commit"), run.commit || "—"],
             ].map(([label, value]) => <div key={label} className="min-w-0">
               <dt className="text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd>
             </div>)}
           </dl>
-          <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>查看构建产物</a>
+          <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>{executionText("run.artifacts")}</a>
           {isActive(run.state) && <p className="text-xs text-muted-foreground">{cancelNotice}</p>}
         </section>
-        {!!run.variables?.length && <section aria-label="执行变量" className="rounded border p-3 text-sm">
-          <h2 className="font-medium">执行变量</h2><p className="text-muted-foreground">使用触发时的加密快照，修改当前变量不会改变本次执行。</p>
-          <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope === "environment" ? "执行环境" : v.scope_ref !== "0" ? "流水线专属" : v.scope === "global" ? "全局" : "构建模块"} · v{v.version} · {v.secret ? "密钥" : "普通变量"}</li>)}</ul>
+        {!!run.variables?.length && <section aria-label={executionText("run.variables")} className="rounded border p-3 text-sm">
+          <h2 className="font-medium">{executionText("run.variables")}</h2><p className="text-muted-foreground">{executionText("run.snapshotHelp")}</p>
+          <ul>{run.variables.map(v => <li key={v.environment}>{v.environment} ← {v.name} · {v.scope === "environment" ? executionText("shared.resource.pipeline.environment") : v.scope_ref !== "0" ? executionText("run.pipelineScope") : v.scope === "global" ? executionText("shared.resource.variable.global") : executionText("run.buildScope")} · v{v.version} · {v.secret ? executionText("shared.resource.variable.secret") : executionText("run.regularVariable")}</li>)}</ul>
         </section>}
         <div className="grid min-h-0 flex-1 border-y lg:grid-cols-[15rem_minmax(0,1fr)]">
-          <aside aria-label="任务列表" className="border-b bg-muted/30 p-3 lg:border-b-0 lg:border-r">
-            <h2 className="mb-2 px-2 text-sm font-semibold">任务</h2>
+          <aside aria-label={executionText("run.jobList")} className="border-b bg-muted/30 p-3 lg:border-b-0 lg:border-r">
+            <h2 className="mb-2 px-2 text-sm font-semibold">{executionText("shared.resource.cron.task")}</h2>
             <div className="space-y-1">{run.jobs?.map(job => {
               const status = stateBadge(job.state);
               return <button key={job.key} type="button" className={`flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent ${currentJob?.key === job.key ? "bg-accent font-medium" : ""}`} aria-current={currentJob?.key === job.key ? "true" : undefined} onClick={() => setSelectedJob(job.key)}><span className="min-w-0 truncate">{job.name || job.key}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge></button>;
             })}</div>
           </aside>
-          <section aria-label="任务步骤和日志" className="min-w-0 p-3 sm:p-4">
-            <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="font-semibold">{currentJob?.name || currentJob?.key || "执行步骤"}</h2>{currentJob && <span className="text-xs text-muted-foreground">{duration(currentJob.started_at, currentJob.finished_at)}</span>}{complete && <span className="text-xs text-muted-foreground">日志已加载</span>}{currentJob && run.environments?.[currentJob.key] && <span className="text-xs text-muted-foreground">环境：{/^https?:\/\//.test(run.environments[currentJob.key]!.url) ? <a className="underline" href={run.environments[currentJob.key]!.url} target="_blank" rel="noreferrer">{run.environments[currentJob.key]!.name}</a> : run.environments[currentJob.key]!.name}{run.environments[currentJob.key]!.approval ? "（需要审批）" : ""}</span>}{currentJob?.state === "waiting" && permissions.has("pipelines.run") && <Button type="button" size="sm" disabled={busy} onClick={() => void approve(currentJob.key)}>{run.environments?.[currentJob.key]?.approval ? "批准部署" : "确认继续"}</Button>}</div>
+          <section aria-label={executionText("run.stepsAndLogs")} className="min-w-0 p-3 sm:p-4">
+            <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="font-semibold">{currentJob?.name || currentJob?.key || executionText("run.steps")}</h2>{currentJob && <span className="text-xs text-muted-foreground">{duration(currentJob.started_at, currentJob.finished_at)}</span>}{complete && <span className="text-xs text-muted-foreground">{executionText("run.logsLoaded")}</span>}{currentJob && run.environments?.[currentJob.key] && <span className="text-xs text-muted-foreground">{executionText("run.environmentPrefix")}{/^https?:\/\//.test(run.environments[currentJob.key]!.url) ? <a className="underline" href={run.environments[currentJob.key]!.url} target="_blank" rel="noreferrer">{run.environments[currentJob.key]!.name}</a> : run.environments[currentJob.key]!.name}{run.environments[currentJob.key]!.approval ? executionText("run.approvalRequired") : ""}</span>}{currentJob?.state === "waiting" && permissions.has("pipelines.run") && <Button type="button" size="sm" disabled={busy} onClick={() => void approve(currentJob.key)}>{run.environments?.[currentJob.key]?.approval ? executionText("run.approveDeployment") : executionText("run.confirmContinue")}</Button>}</div>
             <div className="divide-y border-y">{visibleSteps.map(step => {
               const status = stateBadge(step.state);
               const stepName = currentJob && step.name.startsWith(`${currentJob.name || currentJob.key} / `) ? step.name.slice((currentJob.name || currentJob.key).length + 3) : step.name;
               const chunks = logs.filter(log => log.step_index === step.index);
               const expanded = expandedSteps[step.index] ?? (step.state === "failed" || step.state === "running" || chunks.length > 0);
-              return <div key={step.index}><button type="button" className="flex w-full items-center gap-2 px-2 py-3 text-left text-sm hover:bg-accent" aria-expanded={expanded} onClick={() => setExpandedSteps(current => ({ ...current, [step.index]: !expanded }))}>{expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}<span className="min-w-0 flex-1 truncate">{stepName}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge><span className="text-xs text-muted-foreground">{duration(step.started_at, step.finished_at)}</span></button>{expanded && <div ref={step.index === visibleSteps[0]?.index ? scroll : undefined} role="region" aria-label={step.index === visibleSteps[0]?.index ? "执行日志" : `${stepName} 日志`} className="max-h-[32rem] min-h-16 overflow-auto border-t bg-background px-3 py-2 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{chunks.length ? chunks.map(log => <LogChunk key={log.seq} log={log} />) : <span className="text-muted-foreground">暂无日志</span>}{step.exit_code !== null && <p className="mt-2 text-muted-foreground">退出码 {step.exit_code}</p>}</div>}</div>;
+              return <div key={step.index}><button type="button" className="flex w-full items-center gap-2 px-2 py-3 text-left text-sm hover:bg-accent" aria-expanded={expanded} onClick={() => setExpandedSteps(current => ({ ...current, [step.index]: !expanded }))}>{expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}<span className="min-w-0 flex-1 truncate">{stepName}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge><span className="text-xs text-muted-foreground">{duration(step.started_at, step.finished_at)}</span></button>{expanded && <div ref={step.index === visibleSteps[0]?.index ? scroll : undefined} role="region" aria-label={step.index === visibleSteps[0]?.index ? executionText("run.executionLogs") : executionText("run.stepLogs", { name: stepName })} className="max-h-[32rem] min-h-16 overflow-auto border-t bg-background px-3 py-2 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{chunks.length ? chunks.map(log => <LogChunk key={log.seq} log={log} />) : <span className="text-muted-foreground">{executionText("run.noLogs")}</span>}{step.exit_code !== null && <p className="mt-2 text-muted-foreground">{executionText("run.exitCodeValue", { code: step.exit_code })}</p>}</div>}</div>;
             })}</div>
-            {otherLogs.length > 0 && <div className="mt-4"><h3 className="mb-2 text-sm font-medium">运行日志</h3><div ref={!visibleSteps.length ? scroll : undefined} role="region" aria-label="运行日志" tabIndex={0} className="max-h-64 min-h-20 overflow-auto border bg-background p-3 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{otherLogs.map(log => <LogChunk key={log.seq} log={log} />)}</div></div>}
-            {!visibleSteps.length && otherLogs.length === 0 && <p className="py-6 text-sm text-muted-foreground">{currentJob?.state === "waiting" ? (run.environments?.[currentJob.key]?.approval ? `等待批准部署到 ${run.environments[currentJob.key]!.name}` : "等待人工确认") : complete ? "暂无步骤日志" : "等待任务开始"}</p>}
+            {otherLogs.length > 0 && <div className="mt-4"><h3 className="mb-2 text-sm font-medium">{executionText("run.runtimeLogs")}</h3><div ref={!visibleSteps.length ? scroll : undefined} role="region" aria-label={executionText("run.runtimeLogs")} tabIndex={0} className="max-h-64 min-h-20 overflow-auto border bg-background p-3 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{otherLogs.map(log => <LogChunk key={log.seq} log={log} />)}</div></div>}
+            {!visibleSteps.length && otherLogs.length === 0 && <p className="py-6 text-sm text-muted-foreground">{currentJob?.state === "waiting" ? (run.environments?.[currentJob.key]?.approval ? executionText("run.waitDeployment", { name: run.environments[currentJob.key]!.name }) : executionText("run.waitApproval")) : complete ? executionText("run.noStepLogs") : executionText("run.waitJob")}</p>}
           </section>
         </div>
       </>}
@@ -178,7 +180,8 @@ export function PipelineRunDetail({ workspace, runId, permissions }: {
 
 // Existing chunks retain object identity and skip rendering on append.
 const LogChunk = memo(function LogChunk({ log }: { log: RunLog }) {
+  useCommonTranslation();
   return <pre data-seq={log.seq} className={`whitespace-pre-wrap break-all ${log.stream === "stderr" ? "text-destructive" : ""}`}>
-    <span className="text-muted-foreground">[{log.seq} · 步骤 {log.step_index + 1} · {log.stream}] </span>{log.chunk}
+    <span className="text-muted-foreground">{executionText("run.logMeta", { seq: log.seq, step: log.step_index + 1, stream: log.stream })}</span>{log.chunk}
   </pre>;
 });

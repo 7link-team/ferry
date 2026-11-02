@@ -19,8 +19,12 @@ pub struct Source {
 }
 impl Source {
     fn url(&self) -> Result<reqwest::Url> {
-        let mut url = reqwest::Url::parse(&self.api_base)
-            .map_err(|_| ApiError::bad("仓库API接入点无效。"))?;
+        let mut url = reqwest::Url::parse(&self.api_base).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.repositoryEndpointInvalid"),
+            )
+        })?;
         if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
@@ -28,8 +32,9 @@ impl Source {
             || url.query().is_some()
             || url.fragment().is_some()
         {
-            return Err(ApiError::bad(
-                "API接入点需为不带用户信息、查询或片段的HTTP(S)地址。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.endpointFormatInvalid"),
             ));
         }
         for (value, limit) in [
@@ -39,8 +44,9 @@ impl Source {
         ] {
             if value.trim().is_empty() || value.len() > limit || value.chars().any(char::is_control)
             {
-                return Err(ApiError::bad(
-                    "仓库、分支与索引路径不能为空或包含控制字符。",
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.sourceFieldsInvalid"),
                 ));
             }
         }
@@ -50,12 +56,18 @@ impl Source {
                 .split('/')
                 .any(|p| matches!(p, "" | "." | ".."))
         {
-            return Err(ApiError::bad("索引路径需为仓库内相对文件路径。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.indexPathInvalid"),
+            ));
         }
         {
-            let mut path = url
-                .path_segments_mut()
-                .map_err(|_| ApiError::bad("API接入点无效。"))?;
+            let mut path = url.path_segments_mut().map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.endpointInvalid"),
+                )
+            })?;
             path.pop_if_empty();
             match self.provider.as_str() {
                 "github" | "gitee" => {
@@ -65,7 +77,10 @@ impl Source {
                             .iter()
                             .any(|s| s.is_empty() || matches!(*s, "." | ".."))
                     {
-                        return Err(ApiError::bad("GitHub/Gitee项目格式为 owner/repository。"));
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("marketplace.projectInvalid"),
+                        ));
                     }
                     path.push("repos")
                         .extend(parts)
@@ -89,7 +104,12 @@ impl Source {
                         .push("files")
                         .extend(self.index_path.split('/'));
                 }
-                _ => return Err(ApiError::bad("请选择GitHub、GitLab、Gitee或Codeup。")),
+                _ => {
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("marketplace.providerRequired"),
+                    ));
+                }
             }
         }
         url.query_pairs_mut().append_pair("ref", &self.branch);
@@ -106,7 +126,12 @@ fn validate_origin(source: &Source, repository_url: &str) -> Result<()> {
     } else {
         repository_url.to_owned()
     };
-    let repo = reqwest::Url::parse(&address).map_err(|_| ApiError::bad("仓库URL无效。"))?;
+    let repo = reqwest::Url::parse(&address).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.repositoryUrlInvalid"),
+        )
+    })?;
     let api = source.url()?;
     let same_host = repo.host_str() == api.host_str()
         && (repo.scheme() == "ssh" || repo.port_or_known_default() == api.port_or_known_default());
@@ -118,12 +143,16 @@ fn validate_origin(source: &Source, repository_url: &str) -> Result<()> {
             _ => false,
         };
     if !same_host && !official {
-        return Err(ApiError::bad(
-            "API接入点必须属于所选仓库主机或该平台官方API域名，不能向其他地址发送仓库凭据。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.endpointOriginInvalid"),
         ));
     }
     if repo.scheme() == "https" && api.scheme() != "https" {
-        return Err(ApiError::bad("HTTPS仓库不可降级到HTTP API。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.httpsDowngradeForbidden"),
+        ));
     }
     Ok(())
 }
@@ -140,7 +169,12 @@ async fn fetch(
         .timeout(timeout.min(Duration::from_secs(20)))
         .user_agent("workspace-template-index/1")
         .build()
-        .map_err(|_| ApiError::bad("无法初始化仓库连接。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.clientInitFailed"),
+            )
+        })?;
     if source.provider == "gitee" {
         if let Some(token) = token {
             url.query_pairs_mut().append_pair("access_token", token);
@@ -157,33 +191,49 @@ async fn fetch(
         };
     }
     // Never expose reqwest errors: they may include Gitee's query credential.
-    let mut response = request
-        .send()
-        .await
-        .map_err(|_| ApiError::bad("仓库请求失败或超时，请检查接入点和凭据。"))?;
+    let mut response = request.send().await.map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.requestFailed"),
+        )
+    })?;
     if !response.status().is_success() {
-        return Err(ApiError::bad(format!(
-            "仓库返回HTTP {}；请检查文件路径、分支和凭据。",
-            response.status().as_u16()
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.httpStatus")
+                .with("status", response.status().as_u16().to_string()),
+        ));
     }
     let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|_| ApiError::bad("读取仓库文件失败。"))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.fileReadFailed"),
+        )
+    })? {
         if bytes.len() + chunk.len() > MAX_INDEX_BYTES * 2 {
-            return Err(ApiError::bad("仓库文件响应过大。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.responseTooLarge"),
+            ));
         }
         bytes.extend_from_slice(&chunk);
     }
-    let document: Value = serde_json::from_slice(&bytes)
-        .map_err(|_| ApiError::bad("仓库未返回JSON文件内容，请检查API接入点。"))?;
+    let document: Value = serde_json::from_slice(&bytes).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.responseJsonRequired"),
+        )
+    })?;
     let content = document
         .get("content")
         .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::bad("目标不是可读取的文件，或提供方响应缺少content。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.contentMissing"),
+            )
+        })?;
     let text = match document
         .get("encoding")
         .and_then(Value::as_str)
@@ -196,14 +246,32 @@ async fn fetch(
                 .collect();
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(compact)
-                .map_err(|_| ApiError::bad("仓库文件Base64编码无效。"))?;
-            String::from_utf8(bytes).map_err(|_| ApiError::bad("索引必须使用UTF-8编码。"))?
+                .map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("marketplace.base64Invalid"),
+                    )
+                })?;
+            String::from_utf8(bytes).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.utf8Required"),
+                )
+            })?
         }
         "text" => content.to_owned(),
-        _ => return Err(ApiError::bad("仓库文件编码不受支持。")),
+        _ => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.encodingUnsupported"),
+            ));
+        }
     };
     if text.len() > MAX_INDEX_BYTES {
-        return Err(ApiError::bad("索引文件不能超过2MiB。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.indexTooLarge"),
+        ));
     }
     Ok(text)
 }
@@ -211,6 +279,50 @@ async fn fetch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn persisted_source_errors_follow_the_reader_while_source_fields_stay_literal() {
+        use crate::i18n::{Locale, Message, with_locale};
+        let error = ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            Message::new("marketplace.httpStatus").with("status", "403"),
+        );
+        let user_text = r#"User {name} {"$system_message":{"key":"error.forbidden"}}"#;
+        let row = sources::Model {
+            id: 1,
+            workspace_id: 2,
+            name: user_text.into(),
+            repository_id: 3,
+            config: serde_json::to_string(&source("github")).unwrap(),
+            state: "failed".into(),
+            last_error: error.stored(),
+            synced_at: 0,
+            run_as: 1,
+            version: 4,
+            created_at: 0,
+            updated_at: 0,
+        };
+        for locale in Locale::ALL {
+            let view = with_locale(locale, async { source_json(row.clone()) })
+                .await
+                .unwrap();
+            assert_eq!(view["last_error"], error.render(locale));
+            assert_eq!(view["name"], user_text);
+            assert_eq!(view["project"], "group/repository");
+            assert_eq!(view["branch"], "feature/a b");
+            assert_eq!(view["state"], "failed");
+            let raw = sources::Model {
+                last_error: crate::i18n::store_raw(user_text),
+                ..row.clone()
+            };
+            assert_eq!(
+                with_locale(locale, async { source_json(raw) })
+                    .await
+                    .unwrap()["last_error"],
+                user_text
+            );
+        }
+    }
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     fn source(provider: &str) -> Source {
         Source {
@@ -329,6 +441,7 @@ mod tests {
     }
 }
 
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{marketplace_entries as entries, marketplace_sources as sources, repositories},
@@ -337,11 +450,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -397,7 +506,12 @@ async fn bind_source_repository(
             "name":selection.name,"provider":provider,"url":selection.url,
             "default_branch":selection.default_branch,"credential_id":credential
         }))
-        .map_err(|_| ApiError::bad("仓库选择无效。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.repositoryInvalid"),
+            )
+        })?;
         body.repository_id = crate::repositories::bind_selection(s, tx, scope, repository).await?;
     }
     Ok(())
@@ -424,10 +538,17 @@ fn empty_parameters() -> Value {
     json!([])
 }
 fn parse_index(text: &str) -> Result<Index> {
-    let index: Index = serde_json::from_str(text)
-        .map_err(|_| ApiError::bad("索引需为含version和templates的JSON对象。"))?;
+    let index: Index = serde_json::from_str(text).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.indexObjectRequired"),
+        )
+    })?;
     if index.version != 1 || index.templates.len() > 500 {
-        return Err(ApiError::bad("索引版本需为1，模板不能超过500项。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.indexVersionInvalid"),
+        ));
     }
     let mut keys = HashSet::new();
     for entry in &index.templates {
@@ -441,19 +562,29 @@ fn parse_index(text: &str) -> Result<Index> {
             || entry.name.trim().is_empty()
             || entry.name.chars().count() > 60
         {
-            return Err(ApiError::bad("每个模板需唯一有效key及1–60字名称。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.templateInvalid"),
+            ));
         }
         crate::templates::validate_app(&entry.content.to_string(), &entry.parameters.to_string())?;
     }
     Ok(index)
 }
 fn source_json(row: sources::Model) -> Result<Value> {
-    let mut value: Value =
-        serde_json::from_str(&row.config).map_err(|_| ApiError::bad("市场来源配置损坏。"))?;
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| ApiError::bad("来源配置损坏。"))?;
-    for(k,v) in json!({"id":Id::from(row.id),"name":row.name,"repository_id":Id::from(row.repository_id),"state":row.state,"last_error":row.last_error,"synced_at":row.synced_at,"version":row.version,"updated_at":row.updated_at}).as_object().unwrap(){object.insert(k.clone(),v.clone());}
+    let mut value: Value = serde_json::from_str(&row.config).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.sourceConfigCorrupt"),
+        )
+    })?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.configCorrupt"),
+        )
+    })?;
+    for(k,v) in json!({"id":Id::from(row.id),"name":row.name,"repository_id":Id::from(row.repository_id),"state":row.state,"last_error":crate::i18n::display_stored(&row.last_error),"synced_at":row.synced_at,"version":row.version,"updated_at":row.updated_at}).as_object().unwrap(){object.insert(k.clone(),v.clone());}
     Ok(value)
 }
 fn entry_json(row: entries::Model) -> Value {
@@ -470,13 +601,21 @@ async fn validate(conn: &impl ConnectionTrait, scope: &Scope, b: &Body) -> Resul
     scope.require("repositories.read")?;
     b.source.url()?;
     if b.name.trim().is_empty() || b.name.chars().count() > 60 {
-        return Err(ApiError::bad("来源名称需1–60字。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("marketplace.nameInvalid"),
+        ));
     }
     let repo = repositories::Entity::find_by_id(i64::from(Id::reference(&b.repository_id)?))
         .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
         .one(conn)
         .await?
-        .ok_or_else(|| ApiError::bad("所选外部仓库不存在于当前工作空间。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.repositoryMissing"),
+            )
+        })?;
     validate_origin(&b.source, &repo.url)?;
     Ok(())
 }
@@ -587,7 +726,10 @@ pub async fn update_source(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("来源已变化或正在同步，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.sourceChanged"),
+        ));
     }
     crate::hosts::activity_in(
         &s,
@@ -611,7 +753,10 @@ pub async fn delete_source(
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let row = scoped(&tx, &scope, id).await?;
     if row.state == "syncing" {
-        return Err(ApiError::conflict("来源正在同步，请等待完成。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.waitForSync"),
+        ));
     }
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "marketplace-source", &[id])
         .await?;
@@ -685,9 +830,12 @@ pub async fn install(
         .await?
         .ok_or_else(ApiError::missing)?;
     if row.version != b.version {
-        return Err(ApiError::conflict("市场目录已变化，请重新查看模板后导入。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("marketplace.catalogChanged"),
+        ));
     }
-    let body=serde_json::from_value(json!({"name":row.name,"description":row.description,"content":row.content,"parameters":row.parameters})).map_err(|_|ApiError::bad("模板记录损坏。"))?;
+    let body=serde_json::from_value(json!({"name":row.name,"description":row.description,"content":row.content,"parameters":row.parameters})).map_err(|_|ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("marketplace.templateCorrupt")))?;
     crate::templates::apps::create(State(s), scope, Json(body)).await
 }
 pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) -> Result<usize> {
@@ -698,7 +846,10 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         let row = scoped(&tx, &scope, id).await?;
         if row.state == "syncing" {
-            return Err(ApiError::conflict("来源正在同步。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("marketplace.syncing"),
+            ));
         }
         sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("syncing"))
@@ -710,8 +861,12 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         row
     };
     let result = async {
-        let config: Source =
-            serde_json::from_str(&row.config).map_err(|_| ApiError::bad("来源配置损坏。"))?;
+        let config: Source = serde_json::from_str(&row.config).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.configCorrupt"),
+            )
+        })?;
         let repository = repositories::Entity::find_by_id(row.repository_id)
             .filter(repositories::Column::WorkspaceId.eq(scope.workspace_id))
             .one(&s.db)
@@ -735,8 +890,9 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             )
             .await?;
             if kind != "token" {
-                return Err(ApiError::bad(
-                    "外部文件API需要令牌凭据；SSH密钥和密码仅用于Git构建。",
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.tokenRequired"),
                 ));
             }
             Some(secret)
@@ -769,7 +925,10 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
         let total = index.templates.len();
         for entry in index.templates {
             if std::time::Instant::now() >= deadline {
-                return Err(ApiError::bad("同步超时，上次成功目录保留。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("marketplace.syncTimeout"),
+                ));
             }
             entries::Entity::insert(entries::ActiveModel {
                 id: Set(s.next_id()?.into()),
@@ -788,7 +947,10 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
             .await?;
         }
         if std::time::Instant::now() >= deadline {
-            return Err(ApiError::bad("同步超时，上次成功目录保留。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("marketplace.syncTimeout"),
+            ));
         }
         sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("idle"))
@@ -814,7 +976,7 @@ pub async fn synchronize(s: &AppState, scope: Scope, id: Id, timeout: Duration) 
     if let Err(error) = &result {
         sources::Entity::update_many()
             .col_expr(sources::Column::State, Expr::value("failed"))
-            .col_expr(sources::Column::LastError, Expr::value(error.1.clone()))
+            .col_expr(sources::Column::LastError, Expr::value(error.stored()))
             .filter(sources::Column::Id.eq(id))
             .exec(&s.db)
             .await?;
@@ -835,7 +997,9 @@ pub async fn recover(s: &AppState) -> Result<()> {
         .col_expr(sources::Column::State, Expr::value("failed"))
         .col_expr(
             sources::Column::LastError,
-            Expr::value("服务中断，同步未完成；上次成功目录保留，请重新同步。"),
+            Expr::value(crate::i18n::store_message(&crate::i18n::Message::new(
+                "marketplace.interrupted",
+            ))),
         )
         .filter(sources::Column::State.eq("syncing"))
         .exec(&s.db)

@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
 
     def api(path, body=None, method=None, status=200):
         request = urllib.request.Request(origin + '/api' + path, data=json.dumps(body).encode() if body is not None else None,
-                                         method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+                                         method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
         try:
             response = opener.open(request, timeout=30)
         except urllib.error.HTTPError as error:

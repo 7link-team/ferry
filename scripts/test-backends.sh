@@ -60,7 +60,7 @@ run_suite() { # run_suite <name> <port> <database-url-or-empty>
   fi
 
   local B="http://127.0.0.1:$port/api" pass=0 fail=0
-  c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -b "$jar" -c "$jar" "$@"; }
+  c() { curl -s -H "Content-Type: application/json" -H "X-Ferry-Request: 1" -H "Accept-Language: zh-CN" -b "$jar" -c "$jar" "$@"; }
   ckn() { # ckn <label> <regex-that-must-NOT-appear> <actual>
     if echo "$3" | grep -q "$2"; then
       fail=$((fail + 1))

@@ -1,7 +1,8 @@
 //! Explicit non-Compose host execution; all transport remains HostChannel.
+use crate::i18n::{Message, StoredText};
 use crate::{
     channel::HostChannel,
-    deployments::{directory, project, quote, upload},
+    deployments::{directory, execution_output, project, quote, upload},
     entities::{deployment_revisions, deployments},
     error::{ApiError, Result},
     manifest,
@@ -13,8 +14,12 @@ use std::{
 };
 
 pub async fn docker_resolve(ch: &dyn HostChannel, rendered: &str) -> Result<String> {
-    let mut artifact: Value =
-        serde_json::from_str(rendered).map_err(|_| ApiError::bad("Docker产物无效。"))?;
+    let mut artifact: Value = serde_json::from_str(rendered).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.001"),
+        )
+    })?;
     artifact
         .as_object_mut()
         .unwrap()
@@ -24,9 +29,12 @@ pub async fn docker_resolve(ch: &dyn HostChannel, rendered: &str) -> Result<Stri
         .unwrap()
         .remove("x-config-references");
     for service in artifact["services"].as_object_mut().unwrap().values_mut() {
-        let image = service["image"]
-            .as_str()
-            .ok_or_else(|| ApiError::bad("缺少镜像。"))?;
+        let image = service["image"].as_str().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.002"),
+            )
+        })?;
         let pull = ch
             .exec(
                 &format!("docker pull {}", quote(image)),
@@ -34,10 +42,10 @@ pub async fn docker_resolve(ch: &dyn HostChannel, rendered: &str) -> Result<Stri
             )
             .await?;
         if pull.code != 0 {
-            return Err(ApiError::bad(format!(
-                "无法拉取镜像，未开始部署：{}",
-                pull.stderr
-            )));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.036").with("detail", pull.stderr),
+            ));
         }
         let inspect = ch
             .exec(
@@ -48,13 +56,22 @@ pub async fn docker_resolve(ch: &dyn HostChannel, rendered: &str) -> Result<Stri
                 Duration::from_secs(30),
             )
             .await?;
-        let digests: Vec<String> = serde_json::from_str(inspect.stdout.trim())
-            .map_err(|_| ApiError::bad("镜像没有可用的仓库摘要。"))?;
+        let digests: Vec<String> = serde_json::from_str(inspect.stdout.trim()).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.003"),
+            )
+        })?;
         let digest = digests
             .first()
             .and_then(|d| d.split_once('@').map(|(_, hash)| hash))
             .filter(|d| d.starts_with("sha256:"))
-            .ok_or_else(|| ApiError::bad("镜像必须有固定仓库摘要。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.004"),
+                )
+            })?;
         let mut repository = image.split('@').next().unwrap();
         if let Some((base, tag)) = repository.rsplit_once(':') {
             if !tag.contains('/') {
@@ -65,7 +82,12 @@ pub async fn docker_resolve(ch: &dyn HostChannel, rendered: &str) -> Result<Stri
     }
     serde_json::to_string_pretty(&artifact)
         .map(|s| s + "\n")
-        .map_err(|_| ApiError::bad("无法保存Docker产物。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.005"),
+            )
+        })
 }
 fn arg(command: &mut String, flag: &str, value: &str) {
     command.push_str(&format!(" {flag} {}", quote(value)));
@@ -77,9 +99,12 @@ fn mount_field(name: &str, value: &str) -> String {
 fn docker_commands(app: &deployments::Model, artifact: &Value, action: &str) -> Result<String> {
     let prefix = project(app);
     let dir = directory(app);
-    let services = artifact["services"]
-        .as_object()
-        .ok_or_else(|| ApiError::bad("Docker服务定义无效。"))?;
+    let services = artifact["services"].as_object().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.006"),
+        )
+    })?;
     let mut output = String::new();
     let mut remaining: BTreeSet<String> = services.keys().cloned().collect();
     let mut ordered = Vec::new();
@@ -95,7 +120,10 @@ fn docker_commands(app: &deployments::Model, artifact: &Value, action: &str) -> 
             .cloned()
             .collect();
         if ready.is_empty() {
-            return Err(ApiError::bad("Docker服务依赖包含循环。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.007"),
+            ));
         }
         for name in ready {
             remaining.remove(&name);
@@ -141,9 +169,12 @@ fn docker_commands(app: &deployments::Model, artifact: &Value, action: &str) -> 
         }
         if let Some(files) = service["env_file"].as_array() {
             for path in files {
-                let path = path
-                    .as_str()
-                    .ok_or_else(|| ApiError::bad("变量文件无效。"))?;
+                let path = path.as_str().ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.mode.008"),
+                    )
+                })?;
                 output.push_str(&format!(". {}; ", quote(&format!("{dir}/{path}"))));
             }
             if let Some(bindings) = artifact["x-variable-bindings"].as_array() {
@@ -316,14 +347,21 @@ pub async fn docker_execute(
     files: &BTreeMap<String, String>,
     protected: bool,
 ) -> Result<(bool, String)> {
-    let artifact: Value =
-        serde_json::from_str(&rev.artifact).map_err(|_| ApiError::bad("Docker历史产物无效。"))?;
+    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.009"),
+        )
+    })?;
     let dir = directory(app);
     let stage = format!("{dir}/revision-{}.json", rev.id);
     let current = format!("{dir}/compose.json");
     let prepare=ch.exec(&format!("set -eu; command -v flock >/dev/null; command -v sha256sum >/dev/null; docker version >/dev/null; umask 077; mkdir -p -- {}",quote(&dir)),Duration::from_secs(30)).await?;
     if prepare.code != 0 {
-        return Ok((false, "Docker、flock、sha256sum或部署目录不可用。".into()));
+        return Ok((
+            false,
+            StoredText::from_message(Message::new("deployment.output.dockerUnavailable")).stored(),
+        ));
     }
     upload(ch, &stage, rev.artifact.clone()).await?;
     let mut temporary: Vec<String> = Vec::new();
@@ -332,7 +370,10 @@ pub async fn docker_execute(
             || !(name.starts_with(".variables-") && name.ends_with(".env")
                 || name.starts_with(".config-") && name.ends_with(".txt"))
         {
-            return Err(ApiError::bad("历史文件路径无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.010"),
+            ));
         }
         let path = format!("{dir}/{name}");
         if let Err(error) = upload(ch, &path, text.clone()).await {
@@ -404,20 +445,21 @@ pub async fn docker_execute(
             )
             .await?;
         if cleanup.code != 0 {
-            return Err(ApiError::bad("Docker变量文件清理失败，请核实目标。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.011"),
+            ));
         }
     }
     let out = result?;
     Ok((
         out.code == 0,
-        if protected {
-            format!(
-                "Docker执行退出码：{}；引用变量的原始输出未保存。\n",
-                out.code
-            )
-        } else {
-            format!("{}{}\n退出码：{}\n", out.stdout, out.stderr, out.code)
-        },
+        execution_output(
+            &out,
+            protected.then(|| {
+                Message::new("deployment.output.dockerProtected").with("code", out.code.to_string())
+            }),
+        ),
     ))
 }
 
@@ -455,23 +497,40 @@ pub(crate) async fn native_resolve(
     app: &deployments::Model,
     rendered: &str,
 ) -> Result<String> {
-    let mut doc: Value =
-        serde_json::from_str(rendered).map_err(|_| ApiError::bad("native产物无效。"))?;
+    let mut doc: Value = serde_json::from_str(rendered).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.012"),
+        )
+    })?;
     for service in doc["services"].as_object_mut().unwrap().values_mut() {
         let reference: manifest::BuildArtifact =
-            serde_json::from_value(service["artifact"].clone())
-                .map_err(|_| ApiError::bad("构建产物引用无效。"))?;
+            serde_json::from_value(service["artifact"].clone()).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.013"),
+                )
+            })?;
         service["artifact"] =
             crate::artifacts::resolve(s, &s.db, app.workspace_id.into(), &reference).await?;
     }
-    serde_json::to_string_pretty(&doc).map_err(|_| ApiError::bad("无法保存native产物。"))
+    serde_json::to_string_pretty(&doc).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.014"),
+        )
+    })
 }
 
 /// Store exact units and probes in the revision, including overrides. Rollback
 /// consumes these bytes, never a freshly rendered unit from a newer server.
 pub(crate) fn native_finalize(app: &deployments::Model, artifact: &str) -> Result<String> {
-    let mut doc: Value =
-        serde_json::from_str(artifact).map_err(|_| ApiError::bad("native产物无效。"))?;
+    let mut doc: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.012"),
+        )
+    })?;
     let m = manifest::parse_for(&app.manifest, "native")?;
     let timeout = m.strategy.as_ref().map(|s| s.health_timeout).unwrap_or(120);
     let dir = directory(app);
@@ -521,7 +580,10 @@ pub(crate) fn native_finalize(app: &deployments::Model, artifact: &str) -> Resul
             let target = mount["target"].as_str().unwrap();
             // ':' is systemd's source:destination separator, not an escapable filename character.
             if target.contains(':') || dir.contains(':') {
-                return Err(ApiError::bad("native挂载路径不能包含冒号。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.015"),
+                ));
             }
             let (directive, path) = if mount["type"] == "volume" {
                 ("BindPaths", format!("{dir}/volumes/{source}"))
@@ -538,7 +600,12 @@ pub(crate) fn native_finalize(app: &deployments::Model, artifact: &str) -> Resul
             ));
         }
         if let Some(cpus) = service["limits"]["cpus"].as_str() {
-            let cpus: f64 = cpus.parse().map_err(|_| ApiError::bad("CPU限制无效。"))?;
+            let cpus: f64 = cpus.parse().map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.016"),
+                )
+            })?;
             unit.push_str(&format!("CPUQuota={:.2}%\n", cpus * 100.0));
         }
         if let Some(memory) = service["limits"]["memory"].as_str() {
@@ -575,7 +642,12 @@ pub(crate) fn native_finalize(app: &deployments::Model, artifact: &str) -> Resul
     doc["x-native-scripts"] = json!(scripts);
     serde_json::to_string_pretty(&doc)
         .map(|s| s + "\n")
-        .map_err(|_| ApiError::bad("无法保存systemd产物。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.017"),
+            )
+        })
 }
 
 pub(crate) async fn native_execute(
@@ -587,18 +659,28 @@ pub(crate) async fn native_execute(
     protected: bool,
 ) -> Result<(bool, String)> {
     use tokio::io::AsyncReadExt;
-    let artifact: Value =
-        serde_json::from_str(&rev.artifact).map_err(|_| ApiError::bad("native历史产物无效。"))?;
+    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.018"),
+        )
+    })?;
     let dir = directory(app);
     let prefix = project(app);
     let staging = format!("{dir}/stage-{}", rev.id);
     let ready = ch.exec(&format!("set -eu; command -v flock >/dev/null; command -v sha256sum >/dev/null; systemctl show-environment >/dev/null; umask 077; mkdir -p -- {}",quote(&staging)),Duration::from_secs(30)).await?;
     if ready.code != 0 {
-        return Ok((false, "systemd、flock、sha256sum或部署目录不可用。".into()));
+        return Ok((
+            false,
+            StoredText::from_message(Message::new("deployment.output.systemdUnavailable")).stored(),
+        ));
     }
-    let units = artifact["x-native-units"]
-        .as_object()
-        .ok_or_else(|| ApiError::bad("历史systemd单元缺失。"))?;
+    let units = artifact["x-native-units"].as_object().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.019"),
+        )
+    })?;
     let mut command = format!(
         "set -eu; umask 077; current={}; actual=$(if [ -e \"$current\" ]; then cat -- \"$current\"; fi | sha256sum); [ \"${{actual%% *}}\" = {} ] || {{ echo '目标产物已变化，请重新预览' >&2; exit 73; }}; ",
         quote(&format!("{dir}/compose.json")),
@@ -608,7 +690,10 @@ pub(crate) async fn native_execute(
     command.push_str(&format!("for unit in /etc/systemd/system/{prefix}-*.service; do [ -e \"$unit\" ] || continue; [ \"$(head -n 1 \"$unit\")\" = {} ] || exit 75; done; ",quote(&format!("# workspace.deployment={prefix}"))));
     for name in units.keys() {
         if !name.starts_with(&format!("{prefix}-")) || name.contains('/') {
-            return Err(ApiError::bad("历史单元名无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.020"),
+            ));
         }
         // Units installed through another systemd search path also count as occupied.
         command.push_str(&format!("found=$(systemctl show -p FragmentPath --value {} 2>/dev/null || :); if [ -n \"$found\" ]; then [ \"$(head -n 1 \"$found\")\" = {} ] || exit 75; fi; ",quote(name),quote(&format!("# workspace.deployment={prefix}"))));
@@ -620,17 +705,24 @@ pub(crate) async fn native_execute(
             let hash = reference["sha256"]
                 .as_str()
                 .filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()))
-                .ok_or_else(|| ApiError::bad("历史产物摘要无效。"))?;
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.mode.021"),
+                    )
+                })?;
             if !uploaded.insert(hash.to_owned()) {
                 continue;
             }
             let file = crate::artifacts::deployment_file(s, reference).await?;
             let stream = futures::stream::try_unfold(file, |mut file| async move {
                 let mut buffer = vec![0u8; 65536];
-                let n = file
-                    .read(&mut buffer)
-                    .await
-                    .map_err(|_| ApiError::bad("读取构建产物失败。"))?;
+                let n = file.read(&mut buffer).await.map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.mode.022"),
+                    )
+                })?;
                 if n == 0 {
                     return Ok(None);
                 }
@@ -651,7 +743,10 @@ pub(crate) async fn native_execute(
             if name.contains('/')
                 || !(name.starts_with(".variables-") || name.starts_with(".config-"))
             {
-                return Err(ApiError::bad("历史文件路径无效。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.010"),
+                ));
             }
             upload(ch, &format!("{staging}/{name}"), text.clone()).await?;
             command.push_str(&format!(
@@ -668,12 +763,17 @@ pub(crate) async fn native_execute(
                 ));
             }
         }
-        for (name, text) in artifact["x-native-scripts"]
-            .as_object()
-            .ok_or_else(|| ApiError::bad("历史探针缺失。"))?
-        {
+        for (name, text) in artifact["x-native-scripts"].as_object().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.023"),
+            )
+        })? {
             if name.contains('/') {
-                return Err(ApiError::bad("历史探针路径无效。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.024"),
+                ));
             }
             upload(
                 ch,
@@ -744,14 +844,13 @@ pub(crate) async fn native_execute(
         .await?;
     Ok((
         result.code == 0,
-        if protected {
-            format!("native执行退出码：{}；原始输出未保存。\n", result.code)
-        } else {
-            format!(
-                "{}{}\n退出码：{}\n",
-                result.stdout, result.stderr, result.code
-            )
-        },
+        execution_output(
+            &result,
+            protected.then(|| {
+                Message::new("deployment.output.nativeProtected")
+                    .with("code", result.code.to_string())
+            }),
+        ),
     ))
 }
 
@@ -759,8 +858,12 @@ pub(crate) async fn native_execute(
 /// through a bind path that exists only on the manager.
 pub(crate) fn stack_finalize(app: &deployments::Model, artifact: &str) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let mut doc: Value =
-        serde_json::from_str(artifact).map_err(|_| ApiError::bad("Swarm产物无效。"))?;
+    let mut doc: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.025"),
+        )
+    })?;
     let mut secrets = serde_json::Map::new();
     let mut sources = serde_json::Map::new();
     for service in doc["services"].as_object_mut().unwrap().values_mut() {
@@ -790,7 +893,12 @@ pub(crate) fn stack_finalize(app: &deployments::Model, artifact: &str) -> Result
     doc["x-secret-sources"] = Value::Object(sources);
     serde_json::to_string_pretty(&doc)
         .map(|s| s + "\n")
-        .map_err(|_| ApiError::bad("无法保存Swarm产物。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.mode.026"),
+            )
+        })
 }
 
 pub(crate) async fn stack_execute(
@@ -800,8 +908,12 @@ pub(crate) async fn stack_execute(
     files: &BTreeMap<String, String>,
     protected: bool,
 ) -> Result<(bool, String)> {
-    let artifact: Value =
-        serde_json::from_str(&rev.artifact).map_err(|_| ApiError::bad("Swarm历史产物无效。"))?;
+    let artifact: Value = serde_json::from_str(&rev.artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.027"),
+        )
+    })?;
     let mut runtime = artifact.clone();
     for service in runtime["services"].as_object_mut().unwrap().values_mut() {
         // A service update is asynchronous: old Running tasks must never satisfy
@@ -817,16 +929,26 @@ pub(crate) async fn stack_execute(
                 .unwrap()
                 .entry("environment")
                 .or_insert(json!({}));
-            for path in paths
-                .as_array()
-                .ok_or_else(|| ApiError::bad("历史变量路径无效。"))?
-            {
-                let text = files
-                    .get(path.as_str().unwrap_or(""))
-                    .ok_or_else(|| ApiError::bad("历史变量快照缺失。"))?;
+            for path in paths.as_array().ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.mode.028"),
+                )
+            })? {
+                let text = files.get(path.as_str().unwrap_or("")).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.mode.029"),
+                    )
+                })?;
                 for line in text.lines() {
-                    let values: BTreeMap<String, String> = serde_json::from_str(line)
-                        .map_err(|_| ApiError::bad("历史Swarm变量快照无效。"))?;
+                    let values: BTreeMap<String, String> =
+                        serde_json::from_str(line).map_err(|_| {
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("deployment.mode.030"),
+                            )
+                        })?;
                     for (key, value) in values {
                         environment[key] = json!(value);
                     }
@@ -836,11 +958,11 @@ pub(crate) async fn stack_execute(
         if let Some(ports) = service["ports"].as_array_mut() {
             for port in ports {
                 if let Some(value) = port["published"].as_str() {
-                    port["published"] = json!(
-                        value
-                            .parse::<u16>()
-                            .map_err(|_| ApiError::bad("Swarm端口无效。"))?
-                    );
+                    port["published"] =
+                        json!(value.parse::<u16>().map_err(|_| ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("deployment.mode.031")
+                        ))?);
                 }
             }
         }
@@ -859,7 +981,7 @@ pub(crate) async fn stack_execute(
     if ready.code != 0 {
         return Ok((
             false,
-            "目标必须是可用的Swarm管理节点，且提供flock、sha256sum和可写部署目录。".into(),
+            StoredText::from_message(Message::new("deployment.output.swarmUnavailable")).stored(),
         ));
     }
     let result=async {
@@ -873,10 +995,10 @@ pub(crate) async fn stack_execute(
         }
         if let Some(sources)=artifact["x-secret-sources"].as_object() {
             for (key,source) in sources {
-                let source=source.as_str().ok_or_else(||ApiError::bad("Swarm配置引用无效。"))?;
-                let content=files.get(source).ok_or_else(||ApiError::bad("历史配置快照缺失。"))?;
-                if content.len()>500*1024 {return Err(ApiError::bad("Swarm单个配置文件不能超过500KiB。"));}
-                let name=artifact["secrets"][key]["name"].as_str().ok_or_else(||ApiError::bad("Swarm配置名称无效。"))?;
+                let source=source.as_str().ok_or_else(||ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.mode.032")))?;
+                let content=files.get(source).ok_or_else(||ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.mode.033")))?;
+                if content.len()>500*1024 {return Err(ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.error.041")));}
+                let name=artifact["secrets"][key]["name"].as_str().ok_or_else(||ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.mode.034")))?;
                 let path=format!("{stage}/{key}");
                 upload(ch,&path,content.clone()).await?;
                 command.push_str(&format!("if docker secret inspect {name} >/dev/null 2>&1; then [ \"$(docker secret inspect --format '{{{{index .Spec.Labels \"workspace.deployment\"}}}}' {name})\" = {owner} ] || exit 75; else docker secret create --label {label} {name} {path} >/dev/null; fi; ",name=quote(name),owner=quote(&prefix),label=quote(&format!("workspace.deployment={prefix}")),path=quote(&path)));
@@ -899,7 +1021,7 @@ pub(crate) async fn stack_execute(
         }
         command.push_str(&format!("cp -- {} {}",quote(&format!("{stage}/artifact.json")),quote(&format!("{dir}/compose.json"))));
         let result=ch.exec(&format!("flock -n {} sh -c {}",quote(&format!("{dir}/execution.lock")),quote(&command)),Duration::from_secs(u64::from(timeout)+180)).await?;
-        Ok::<_,ApiError>((result.code==0,if protected {format!("Swarm执行退出码：{}；原始输出未保存。\n",result.code)}else{format!("{}{}\n退出码：{}\n",result.stdout,result.stderr,result.code)}))
+        Ok::<_,ApiError>((result.code==0,execution_output(&result,protected.then(||Message::new("deployment.output.swarmProtected").with("code",result.code.to_string())))))
     }.await;
     let cleanup = ch
         .exec(
@@ -908,7 +1030,10 @@ pub(crate) async fn stack_execute(
         )
         .await?;
     if cleanup.code != 0 {
-        return Err(ApiError::bad("Swarm临时配置清理失败，请核实目标。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.035"),
+        ));
     }
     result
 }

@@ -110,14 +110,18 @@ pub fn check_path(path: &str) -> Result<&str> {
     // An absent `?path=` must not quietly become "list the root"; only a path
     // that is genuinely all slashes collapses to "/".
     if path.is_empty() {
-        return Err(ApiError::bad("请填写路径。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("channel.pathRequired"),
+        ));
     }
     if ["\\\\?\\", "\\\\.\\", "//?/", "//./"]
         .iter()
         .any(|prefix| path.starts_with(prefix))
     {
-        return Err(ApiError::bad(
-            "不支持 Windows 设备路径，请填写普通磁盘路径。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("channel.devicePathUnsupported"),
         ));
     }
     let drive = path.as_bytes().get(0).is_some_and(u8::is_ascii_alphabetic)
@@ -137,7 +141,10 @@ pub fn check_path(path: &str) -> Result<&str> {
     });
     let path = if trimmed.is_empty() { "/" } else { trimmed };
     if !path.starts_with('/') && !drive && !unc {
-        return Err(ApiError::bad("请填写绝对路径，例如 /var/log 或 C:/Users。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("channel.absolutePathRequired"),
+        ));
     }
     if path
         .split(if drive || unc {
@@ -147,10 +154,16 @@ pub fn check_path(path: &str) -> Result<&str> {
         })
         .any(|part| part == "..")
     {
-        return Err(ApiError::bad("路径不能包含 ..，请填写完整路径。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("channel.parentPathForbidden"),
+        ));
     }
     if path.contains('\0') || path.len() > 4096 {
-        return Err(ApiError::bad("路径无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("channel.pathInvalid"),
+        ));
     }
     // A bare drive prefix is relative on Windows; retain its root separator.
     if drive && path.len() == 2 {

@@ -1,4 +1,5 @@
 //! Immutable build outputs streamed from HostChannel, retained with run history.
+use crate::error::{Json, Path, Query};
 use crate::{
     channel::HostChannel,
     db,
@@ -9,13 +10,7 @@ use crate::{
     state::{AppState, State as ServerState},
     workspace::Scope,
 };
-use axum::{
-    Json,
-    body::Body,
-    extract::{Path, Query, State},
-    http::header,
-    response::IntoResponse,
-};
+use axum::{body::Body, extract::State, http::header, response::IntoResponse};
 use futures::StreamExt;
 use sea_orm::{
     ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
@@ -38,7 +33,10 @@ const SPEC: Spec = Spec {
 pub fn validate_paths(paths: &[String]) -> Result<()> {
     let mut seen = BTreeSet::new();
     if paths.len() > 100 {
-        return Err(ApiError::bad("每次构建最多归档100个文件。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.fileLimit"),
+        ));
     }
     for path in paths {
         if path.len() > 1024
@@ -50,12 +48,16 @@ pub fn validate_paths(paths: &[String]) -> Result<()> {
             || path.contains("{{")
             || !seen.insert(path)
         {
-            return Err(ApiError::bad(
-                "artifacts 必须是唯一、相对于构建工作目录的文件路径，不支持通配符或模板变量。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.pathsInvalid"),
             ));
         }
         if path.contains('*') || path.contains('?') || path.contains('[') {
-            return Err(ApiError::bad("产物路径必须指向具体文件，不支持通配符。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.wildcardsUnsupported"),
+            ));
         }
     }
     Ok(())
@@ -106,17 +108,29 @@ pub(crate) async fn legacy_modes(
 }
 
 fn restore_legacy_mode(path: &std::path::Path, mode: u32) -> Result<(String, u64)> {
-    let mut archive = zip::ZipArchive::new(std::fs::File::open(path)?)
-        .map_err(|_| ApiError::bad("构建产物 ZIP 归档无效。"))?;
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(path)?).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.zipInvalid"),
+        )
+    })?;
     let temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
     let mut writer = zip::ZipWriter::new(temporary);
     for index in 0..archive.len() {
-        let mut entry = archive
-            .by_index(index)
-            .map_err(|_| ApiError::bad("无法读取构建产物 ZIP 成员。"))?;
+        let mut entry = archive.by_index(index).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.zipMemberUnreadable"),
+            )
+        })?;
         let name = entry
             .name()
-            .map_err(|_| ApiError::bad("构建产物 ZIP 文件名无效。"))?
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.zipFilenameInvalid"),
+                )
+            })?
             .into_owned();
         let options = zip::write::SimpleFileOptions::default()
             .system(zip::System::Unix)
@@ -128,20 +142,29 @@ fn restore_legacy_mode(path: &std::path::Path, mode: u32) -> Result<(String, u64
                 mode
             });
         if entry.is_dir() {
-            writer
-                .add_directory(&name, options)
-                .map_err(|_| ApiError::bad("无法保存构建产物目录权限。"))?;
+            writer.add_directory(&name, options).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.directoryModeFailed"),
+                )
+            })?;
         } else {
-            writer
-                .start_file(&name, options)
-                .map_err(|_| ApiError::bad("无法保存构建产物文件权限。"))?;
+            writer.start_file(&name, options).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.fileModeFailed"),
+                )
+            })?;
             std::io::copy(&mut entry, &mut writer)?;
         }
     }
     drop(archive);
-    let temporary = writer
-        .finish()
-        .map_err(|_| ApiError::bad("无法保存构建产物 ZIP 权限。"))?;
+    let temporary = writer.finish().map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.zipModeFailed"),
+        )
+    })?;
     temporary.as_file().sync_all()?;
     let mut file = temporary
         .persist(path)
@@ -255,15 +278,21 @@ pub(crate) async fn collect_with_modes(
     }
     validate_paths(paths)?;
     let dir = directory(s, run.id);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|_| ApiError::bad("无法创建产物存储目录。"))?;
+    tokio::fs::create_dir_all(&dir).await.map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.storageCreateFailed"),
+        )
+    })?;
     let mut created_files = Vec::new();
     let result = async {
         let mut rows = Vec::new();
         for path in paths {
             if *stop.borrow() {
-                return Err(ApiError::bad("服务正在关闭，产物归档中止。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.shutdown"),
+                ));
             }
             let id = i64::from(s.next_id()?);
             let (meta, mut stream) = ch
@@ -273,35 +302,55 @@ pub(crate) async fn collect_with_modes(
             options.write(true).create_new(true);
             #[cfg(unix)]
             options.mode(0o600);
-            let mut file = options
-                .open(dir.join(id.to_string()))
-                .await
-                .map_err(|_| ApiError::bad("无法写入构建产物。"))?;
+            let mut file = options.open(dir.join(id.to_string())).await.map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.writeUnavailable"),
+                )
+            })?;
             created_files.push(dir.join(id.to_string()));
             let mut hash = Sha256::new();
             let mut size = 0u64;
             while let Some(part) = stream.next().await {
                 if *stop.borrow() {
-                    return Err(ApiError::bad("服务正在关闭，产物归档中止。"));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.shutdown"),
+                    ));
                 }
                 let part = part?;
-                size = size
-                    .checked_add(part.len() as u64)
-                    .ok_or_else(|| ApiError::bad("产物过大。"))?;
+                size = size.checked_add(part.len() as u64).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.tooLarge"),
+                    )
+                })?;
                 if size > meta.size {
-                    return Err(ApiError::bad("归档期间产物发生变化，请重新构建。"));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.changedDuringArchive"),
+                    ));
                 }
                 hash.update(&part);
-                file.write_all(&part)
-                    .await
-                    .map_err(|_| ApiError::bad("写入构建产物失败。"))?;
+                file.write_all(&part).await.map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.writeFailed"),
+                    )
+                })?;
             }
             if size != meta.size {
-                return Err(ApiError::bad("构建产物读取不完整。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.readIncomplete"),
+                ));
             }
-            file.sync_all()
-                .await
-                .map_err(|_| ApiError::bad("保存构建产物失败。"))?;
+            file.sync_all().await.map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.saveFailed"),
+                )
+            })?;
             drop(file);
             let mut digest = hex::encode(hash.finalize());
             if let Some(mode) = source_modes.get(path).copied() {
@@ -309,7 +358,12 @@ pub(crate) async fn collect_with_modes(
                 (digest, size) =
                     tokio::task::spawn_blocking(move || restore_legacy_mode(&local, mode))
                         .await
-                        .map_err(|_| ApiError::bad("无法保存构建产物权限。"))??;
+                        .map_err(|_| {
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("artifacts.modeFailed"),
+                            )
+                        })??;
             }
             rows.push(artifacts::Model {
                 id,
@@ -318,7 +372,12 @@ pub(crate) async fn collect_with_modes(
                 run_id: run.id,
                 path: path.clone(),
                 sha256: digest,
-                size: i64::try_from(size).map_err(|_| ApiError::bad("产物过大。"))?,
+                size: i64::try_from(size).map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.tooLarge"),
+                    )
+                })?,
                 mode: i64::from(source_modes.get(path).copied().unwrap_or(meta.mode) & 0o777),
                 created_at: db::now(),
                 // upload-artifact retention-days; 0 leaves it to the history policy.
@@ -342,8 +401,9 @@ pub(crate) async fn collect_with_modes(
             .await?
             .is_some()
         {
-            return Err(ApiError::conflict(
-                "同一执行中的产物名称已被其他任务使用，请为并行任务选择不同的产物名称。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("artifacts.nameConflict"),
             ));
         }
         // A cancelled run publishes only what finished jobs and its cleanup
@@ -355,7 +415,10 @@ pub(crate) async fn collect_with_modes(
             .await?
             .is_none()
         {
-            return Err(ApiError::bad("构建已取消，未发布产物。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.buildCancelled"),
+            ));
         }
         for row in rows {
             artifacts::Entity::insert(row.into_active_model())
@@ -695,8 +758,9 @@ pub(crate) async fn pipeline_id(
             .await?
     };
     if rows.len() != 1 {
-        return Err(ApiError::bad(
-            "产物流水线不存在或名称不唯一，请使用当前空间的流水线ID。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.pipelineInvalid"),
         ));
     }
     Ok(rows[0].id)
@@ -727,11 +791,12 @@ pub(crate) async fn resolve(
             ),
         );
     if let Some(run) = &reference.run {
-        query = query.filter(
-            artifacts::Column::RunId.eq(run
-                .parse::<Id>()
-                .map_err(|_| ApiError::bad("构建执行ID无效。"))?),
-        );
+        query = query.filter(artifacts::Column::RunId.eq(run.parse::<Id>().map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.runIdInvalid"),
+            )
+        })?));
     }
     let rows = query
         .order_by_desc(artifacts::Column::CreatedAt)
@@ -762,7 +827,12 @@ pub(crate) async fn resolve(
         let lookup = member.clone();
         let selected = tokio::task::spawn_blocking(move || inspect_member(&local, &lookup))
             .await
-            .map_err(|_| ApiError::bad("无法读取构建产物归档。"))??;
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("artifacts.archiveUnreadable"),
+                )
+            })??;
         if let Some((_, hash, size, mode)) = selected {
             descriptor["archive_sha256"] = json!(row.sha256);
             descriptor["zip_member"] = json!(member);
@@ -778,8 +848,9 @@ pub(crate) async fn resolve(
             return Ok(descriptor);
         }
     }
-    Err(ApiError::bad(
-        "没有找到成功构建的声明产物，请先构建或选择已有执行。",
+    Err(ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("artifacts.successfulBuildRequired"),
     ))
 }
 
@@ -791,16 +862,26 @@ fn inspect_member(
     member: &str,
 ) -> Result<Option<(std::fs::File, String, u64, u32)>> {
     validate_paths(&[member.to_owned()])?;
-    let mut archive = zip::ZipArchive::new(std::fs::File::open(archive)?)
-        .map_err(|_| ApiError::bad("构建产物 ZIP 归档无效。"))?;
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(archive)?).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.zipInvalid"),
+        )
+    })?;
     let mut entry = match archive.by_name(member) {
         Ok(entry) => entry,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
-        Err(_) => return Err(ApiError::bad("无法读取构建产物 ZIP 成员。")),
+        Err(_) => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.zipMemberUnreadable"),
+            ));
+        }
     };
     if entry.is_dir() || entry.is_symlink() {
-        return Err(ApiError::bad(
-            "native 部署需要 ZIP 中的普通可执行文件，不能选择目录或符号链接。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.nativeExecutableRequired"),
         ));
     }
     let mode = entry.unix_mode().unwrap_or(0o644) & 0o777;
@@ -826,27 +907,53 @@ pub(crate) async fn deployment_file(s: &ServerState, reference: &Value) -> Resul
     let run = reference["run_id"]
         .as_str()
         .and_then(|v| v.parse::<i64>().ok())
-        .ok_or_else(|| ApiError::bad("历史构建ID无效。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.historyRunInvalid"),
+            )
+        })?;
     let id = reference["artifact_id"]
         .as_str()
         .and_then(|v| v.parse::<i64>().ok())
-        .ok_or_else(|| ApiError::bad("历史产物ID无效。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.historyIdInvalid"),
+            )
+        })?;
     let path = directory(s, run).join(id.to_string());
     if let Some(member) = reference["zip_member"].as_str() {
         let member = member.to_owned();
         let (file, hash, _, _) =
             tokio::task::spawn_blocking(move || inspect_member(&path, &member))
                 .await
-                .map_err(|_| ApiError::bad("无法读取历史构建产物。"))??
-                .ok_or_else(|| ApiError::bad("历史构建产物 ZIP 成员缺失。"))?;
+                .map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.historyUnreadable"),
+                    )
+                })??
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.historyMemberMissing"),
+                    )
+                })?;
         if reference["sha256"] != hash {
-            return Err(ApiError::conflict("历史构建产物摘要不匹配。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("artifacts.historyDigestMismatch"),
+            ));
         }
         Ok(tokio::fs::File::from_std(file))
     } else {
-        tokio::fs::File::open(path)
-            .await
-            .map_err(|_| ApiError::bad("历史构建产物文件缺失。"))
+        tokio::fs::File::open(path).await.map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("artifacts.historyFileMissing"),
+            )
+        })
     }
 }
 pub(crate) async fn freeze(
@@ -857,17 +964,28 @@ pub(crate) async fn freeze(
     artifact: &str,
 ) -> Result<()> {
     use crate::entities::deployment_artifact_refs as refs;
-    let doc: Value = serde_json::from_str(artifact).map_err(|_| ApiError::bad("部署产物无效。"))?;
+    let doc: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("artifacts.deploymentInvalid"),
+        )
+    })?;
     let mut docs = vec![doc.clone()];
     if let Some(targets) = doc["targets"].as_array() {
         for target in targets {
             docs.push(
-                serde_json::from_str(
-                    target["artifact"]
-                        .as_str()
-                        .ok_or_else(|| ApiError::bad("主机组产物缺失。"))?,
-                )
-                .map_err(|_| ApiError::bad("主机组产物无效。"))?,
+                serde_json::from_str(target["artifact"].as_str().ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.groupMissing"),
+                    )
+                })?)
+                .map_err(|_| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("artifacts.groupInvalid"),
+                    )
+                })?,
             );
         }
     }
@@ -876,20 +994,31 @@ pub(crate) async fn freeze(
         if let Some(services) = doc["services"].as_object() {
             for service in services.values() {
                 if let Some(id) = service["artifact"]["artifact_id"].as_str() {
-                    let id = id
-                        .parse::<Id>()
-                        .map_err(|_| ApiError::bad("构建产物ID无效。"))?;
+                    let id = id.parse::<Id>().map_err(|_| {
+                        ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("artifacts.idInvalid"),
+                        )
+                    })?;
                     let row = artifacts::Entity::find_by_id(i64::from(id))
                         .filter(artifacts::Column::WorkspaceId.eq(workspace))
                         .one(conn)
                         .await?
-                        .ok_or_else(|| ApiError::conflict("构建产物已清理，请重新预览。"))?;
+                        .ok_or_else(|| {
+                            ApiError::localized(
+                                axum::http::StatusCode::CONFLICT,
+                                crate::i18n::Message::new("artifacts.cleaned"),
+                            )
+                        })?;
                     if service["artifact"]
                         .get("archive_sha256")
                         .unwrap_or(&service["artifact"]["sha256"])
                         != &row.sha256
                     {
-                        return Err(ApiError::conflict("构建产物摘要不匹配，请重新预览。"));
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::CONFLICT,
+                            crate::i18n::Message::new("artifacts.digestMismatch"),
+                        ));
                     }
                     if !seen.insert(row.id) {
                         continue;

@@ -3,6 +3,7 @@
 
 use crate::snowflake::Id;
 
+use crate::error::Json;
 use crate::{
     db,
     entities::{sessions, users, workspace_members, workspace_roles, workspaces},
@@ -14,7 +15,6 @@ use argon2::{
     password_hash::{SaltString, rand_core::OsRng},
 };
 use axum::{
-    Json,
     extract::{FromRequestParts, State},
     http::{HeaderMap, header, request::Parts},
 };
@@ -154,7 +154,12 @@ pub(crate) fn hash(password: &str) -> Result<String> {
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
         .map(|h| h.to_string())
-        .map_err(|_| ApiError::bad("无法保存密码，请重试。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("auth.password_save"),
+            )
+        })
 }
 
 pub(crate) fn verify(password: &str, stored: &str) -> bool {
@@ -171,7 +176,10 @@ pub(crate) fn verify(password: &str, stored: &str) -> bool {
 fn email(raw: &str) -> Result<String> {
     let email = raw.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {
-        return Err(ApiError::bad("请填写有效的邮箱地址。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.email_invalid"),
+        ));
     }
     Ok(email)
 }
@@ -180,10 +188,16 @@ fn password(password: &str) -> Result<()> {
     // Length, not a composition rule: composition rules push people toward
     // "Password1!" and are worse than a longer passphrase.
     if password.chars().count() < 8 {
-        return Err(ApiError::bad("密码至少 8 个字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.password_short").with("minimum", "8"),
+        ));
     }
     if password.len() > 1024 {
-        return Err(ApiError::bad("密码过长。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.password_long"),
+        ));
     }
     Ok(())
 }
@@ -192,7 +206,10 @@ pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<Str
     let email = email(&credentials.email)?;
     password(&credentials.password)?;
     if require_name && credentials.name.trim().is_empty() {
-        return Err(ApiError::bad("请填写姓名。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.name_required"),
+        ));
     }
     Ok(email)
 }
@@ -214,7 +231,10 @@ pub async fn register(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("该邮箱已注册，请直接登录。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("auth.email_registered"),
+        ));
     }
     let (id, now) = (s.next_id()?, db::now());
     users::Entity::insert(users::ActiveModel {
@@ -250,9 +270,9 @@ pub async fn login(
     // One message and one code path for "no such user" and "wrong password",
     // so the response does not say which emails are registered.
     let refused = || {
-        ApiError(
+        ApiError::localized(
             axum::http::StatusCode::UNAUTHORIZED,
-            "邮箱或密码不正确。".into(),
+            crate::i18n::Message::new("auth.login_invalid"),
         )
     };
     let row = row.ok_or_else(refused)?;
@@ -309,6 +329,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         name: String,
         owner_id: i64,
         role_name: String,
+        role_builtin: i64,
         permissions: String,
     }
     let rows = workspace_members::Entity::find()
@@ -320,6 +341,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
             workspaces::Column::OwnerId,
         ])
         .column_as(workspace_roles::Column::Name, "role_name")
+        .column_as(workspace_roles::Column::Builtin, "role_builtin")
         .column(workspace_roles::Column::Permissions)
         .join(
             JoinType::InnerJoin,
@@ -348,7 +370,7 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
                 "id": Id::from(row.id),
                 "slug": row.slug,
                 "name": row.name,
-                "role_name": row.role_name,
+                "role_name": crate::workspace::role_name(&row.role_name, row.role_builtin != 0),
                 "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else { "member" },
                 "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])),
             })
@@ -359,11 +381,16 @@ pub async fn me(State(s): State<AppState>, account: Account) -> Result<Json<Valu
         // whether the administrator is the owner, a member, or neither.
         let roles: std::collections::HashMap<i64, String> = rows
             .iter()
-            .map(|row| (row.id, row.role_name.clone()))
+            .map(|row| {
+                (
+                    row.id,
+                    crate::workspace::role_name(&row.role_name, row.role_builtin != 0),
+                )
+            })
             .collect();
         workspaces = workspaces::Entity::find().order_by_asc(workspaces::Column::Name).all(&s.db).await?
             .into_iter().map(|row| json!({"id": Id::from(row.id), "slug": row.slug, "name": row.name,
-                "role_name": roles.get(&row.id).cloned().unwrap_or_else(|| "平台超级管理员".into()),
+                "role_name": roles.get(&row.id).cloned().unwrap_or_else(|| crate::i18n::message("auth.platform_superadmin")),
                 "relation": if row.owner_id == i64::from(account.user.id) { "owner" } else if roles.contains_key(&row.id) { "member" } else { "none" },
                 "permissions": crate::workspace::PERMISSIONS.iter().map(|p| p.0).collect::<Vec<_>>() })).collect();
     }
@@ -408,7 +435,10 @@ pub async fn update_profile(
     use sea_orm::TransactionTrait;
     let name = body.name.trim().to_owned();
     if name.is_empty() {
-        return Err(ApiError::bad("请填写姓名。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.name_required"),
+        ));
     }
     let new_email = email(&body.email)?;
     if !body.new_password.is_empty() {
@@ -422,13 +452,17 @@ pub async fn update_profile(
         .await?
         .ok_or_else(ApiError::unauthorized)?;
     if row.version != body.version {
-        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("auth.profile_changed"),
+        ));
     }
     let email_changed = new_email != row.email;
     let password_changed = !body.new_password.is_empty();
     if (email_changed || password_changed) && !verify(&body.current_password, &row.password_hash) {
-        return Err(ApiError::bad(
-            "当前密码不正确。修改邮箱或密码需要填写当前密码。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("auth.current_password_invalid"),
         ));
     }
     if email_changed
@@ -438,7 +472,10 @@ pub async fn update_profile(
             .await?
             .is_some()
     {
-        return Err(ApiError::conflict("该邮箱已被其他账号使用。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("auth.email_used"),
+        ));
     }
     let mut update = users::Entity::update_many()
         .col_expr(users::Column::Name, Expr::value(name.clone()))

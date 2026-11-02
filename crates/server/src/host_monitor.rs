@@ -1,4 +1,5 @@
 //! The collector owns sampling; HTTP queries only read the bounded in-memory history.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::hosts,
@@ -7,11 +8,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use ferry_protocol::HostMonitor;
 use futures::StreamExt;
 use sea_orm::{ColumnTrait, EntityTrait, ExprTrait, QueryFilter, sea_query::Expr};
@@ -157,8 +154,9 @@ impl MonitorQuery {
                 .step_seconds
                 .is_some_and(|value| ![5, 15, 30, 60].contains(&value))
         {
-            return Err(ApiError::bad(
-                "监控时段仅支持 5 分钟、15 分钟、1 小时；采样刻度仅支持 5、15、30、60 秒。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("hostMonitor.queryInvalid"),
             ));
         }
         Ok(())
@@ -183,7 +181,7 @@ pub async fn read(
         match cluster.owner(&id.to_string()).await? {
             Some(owner) if owner.workspace != scope.workspace_id => return Err(ApiError::missing()),
             Some(owner) if owner.node != cluster.node => {
-                return Ok(Json(
+                return Ok(Json(display_snapshot(
                     cluster
                         .rpc(
                             &owner.node,
@@ -194,25 +192,37 @@ pub async fn read(
                             },
                         )
                         .await?,
-                ));
+                )));
             }
             None => {
                 let mut value = s
                     .host_monitor
                     .snapshot(scope.workspace_id, id, &query, db::now());
                 value["status"] = json!("offline");
-                value["error"] = json!("主机暂无有效连接或采集服务，等待连接恢复。 ");
+                value["error"] = json!(crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("hostMonitor.waiting")
+                ));
                 return Ok(Json(value));
             }
             _ => {}
         }
     }
-    Ok(Json(s.host_monitor.snapshot(
+    Ok(Json(display_snapshot(s.host_monitor.snapshot(
         scope.workspace_id,
         id,
         &query,
         db::now(),
-    )))
+    ))))
+}
+
+// Keep message identity in snapshots/RPC until the requesting reader receives it.
+fn display_snapshot(mut value: Value) -> Value {
+    if let Some(error) = value.get("error").and_then(Value::as_str) {
+        let displayed = crate::i18n::display_stored(error);
+        value["error"] = json!(displayed);
+    }
+    value
 }
 
 pub async fn collect(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>) {
@@ -284,9 +294,9 @@ pub async fn collect(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>)
                 })
                 .await
                 .unwrap_or_else(|_| {
-                    Err(ApiError(
+                    Err(ApiError::localized(
                         StatusCode::GATEWAY_TIMEOUT,
-                        "主机监控采集超时。".into(),
+                        crate::i18n::Message::new("host.monitorTimeout"),
                     ))
                 });
                 if let (Some(cluster), Some(owner)) = (&s.cluster, &owner) {
@@ -339,7 +349,7 @@ pub async fn collect(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>)
                         );
                     }
                     Err(error) => {
-                        s.host_monitor.failed(workspace, id, error.1);
+                        s.host_monitor.failed(workspace, id, error.stored());
                         if row.connection == "ssh" && row.state != "offline" {
                             let mut update = hosts::Entity::update_many()
                                 .col_expr(hosts::Column::State, Expr::value("offline"))
@@ -399,6 +409,7 @@ mod tests {
         .unwrap();
         // No Runner is connected: a query cannot accidentally rely on remote::open.
         hosts::Entity::insert(hosts::ActiveModel {
+            runner_auto_update: Set("inherit".into()),
             id: Set(2),
             workspace_id: Set(1),
             name: Set("disconnected".into()),
@@ -461,6 +472,30 @@ mod tests {
             assert_eq!(value["cpu_percent"], 42.0);
             assert_eq!(value["sampled_at"], at);
             assert_eq!(value["samples"].as_array().unwrap().len(), 1);
+        }
+        let message = crate::i18n::Message::new("ssh.unreachable")
+            .with("address", "literal host")
+            .with("detail", "provider 原文");
+        let stored = crate::i18n::store_message(&message);
+        s.host_monitor.failed(1.into(), 2.into(), stored.clone());
+        assert_eq!(
+            s.host_monitor.snapshot(1.into(), 2.into(), &query(5), at)["error"],
+            stored
+        );
+        for locale in crate::i18n::Locale::ALL {
+            let Json(value) = crate::i18n::with_locale(
+                locale,
+                read(
+                    State(s.clone()),
+                    scope(1, true),
+                    Path(("1".into(), 2.into())),
+                    Query(query(5)),
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(value["error"], crate::i18n::render(locale, &message));
+            assert_eq!(value["cpu_percent"], 42.0);
         }
         let after = hosts::Entity::find_by_id(2)
             .one(&s.db)

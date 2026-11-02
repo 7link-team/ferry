@@ -2,6 +2,7 @@
 //! that platform's native readable message and is judged by the platform's own
 //! result: several robots answer HTTP 200 even when they reject a message.
 //! Every other URL keeps the generic JSON event and HTTP status semantics.
+use crate::i18n::Message;
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -100,7 +101,7 @@ fn plain(notice: &Notice<'_>) -> String {
         .join("\n")
 }
 
-fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, String> {
+fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, Message> {
     let title = clean(notice.title, 100);
     let markdown = std::iter::once(format!("### {title}"))
         .chain(lines(notice).map(|(name, value)| format!("> **{name}**：{value}")))
@@ -116,7 +117,7 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
                 .query_pairs()
                 .find(|(key, value)| key == "chat_id" && !value.is_empty())
                 .map(|(_, value)| value.into_owned())
-                .ok_or_else(|| "地址缺少 chat_id 参数".to_owned())?;
+                .ok_or_else(|| Message::new("webhook.chatMissing"))?;
             json!({"chat_id":chat,"text":plain(notice),"disable_web_page_preview":true})
         }
         Robot::Slack | Robot::GoogleChat => json!({"text":plain(notice)}),
@@ -126,7 +127,7 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
 }
 
 /// The platform's verdict on an HTTP response.
-fn judge(robot: Robot, status: u16, response: &str) -> Result<(), String> {
+fn judge(robot: Robot, status: u16, response: &str) -> Result<(), Message> {
     let success = (200..300).contains(&status);
     let value: Option<Value> = serde_json::from_str(response).ok();
     let text = |key: &str| {
@@ -140,9 +141,11 @@ fn judge(robot: Robot, status: u16, response: &str) -> Result<(), String> {
     match robot {
         Robot::WeCom | Robot::DingTalk | Robot::Feishu => {
             if !success {
-                return Err(format!("HTTP {status}"));
+                return Err(Message::new("webhook.http").with("status", status.to_string()));
             }
-            let value = value.as_ref().ok_or_else(|| "无法识别的响应".to_owned())?;
+            let value = value
+                .as_ref()
+                .ok_or_else(|| Message::new("webhook.responseInvalid"))?;
             // Current Feishu answers {code,msg}; older robots answered {StatusCode}.
             let (code, message) = match robot {
                 Robot::Feishu if value.get("code").is_none() => ("StatusCode", "StatusMessage"),
@@ -151,8 +154,10 @@ fn judge(robot: Robot, status: u16, response: &str) -> Result<(), String> {
             };
             match value.get(code).and_then(Value::as_i64) {
                 Some(0) => Ok(()),
-                Some(code) => Err(format!("错误码 {code}：{}", text(message))),
-                None => Err("无法识别的响应".to_owned()),
+                Some(code) => Err(Message::new("webhook.code")
+                    .with("code", code.to_string())
+                    .with("detail", text(message))),
+                None => Err(Message::new("webhook.responseInvalid")),
             }
         }
         Robot::Telegram => match value
@@ -161,22 +166,30 @@ fn judge(robot: Robot, status: u16, response: &str) -> Result<(), String> {
             .and_then(Value::as_bool)
         {
             Some(true) if success => Ok(()),
-            _ => Err(format!("HTTP {status}：{}", text("description"))),
+            _ => Err(Message::new("webhook.httpDetail")
+                .with("status", status.to_string())
+                .with("detail", text("description"))),
         },
         // Slack answers the plain text "ok", or an error code such as invalid_payload.
         Robot::Slack if success && response.trim() == "ok" => Ok(()),
-        Robot::Slack => Err(format!("HTTP {status}：{}", clean(response, 200))),
+        Robot::Slack => Err(Message::new("webhook.httpDetail")
+            .with("status", status.to_string())
+            .with("detail", clean(response, 200))),
         Robot::Discord | Robot::GoogleChat if success => Ok(()),
-        Robot::Discord => Err(format!("HTTP {status}：{}", text("message"))),
-        Robot::GoogleChat => Err(format!(
-            "HTTP {status}：{}",
-            value
-                .as_ref()
-                .and_then(|v| v.pointer("/error/message"))
-                .and_then(Value::as_str)
-                .map(|v| clean(v, 200))
-                .unwrap_or_default()
-        )),
+        Robot::Discord => Err(Message::new("webhook.httpDetail")
+            .with("status", status.to_string())
+            .with("detail", text("message"))),
+        Robot::GoogleChat => Err(Message::new("webhook.httpDetail")
+            .with("status", status.to_string())
+            .with(
+                "detail",
+                value
+                    .as_ref()
+                    .and_then(|v| v.pointer("/error/message"))
+                    .and_then(Value::as_str)
+                    .map(|v| clean(v, 200))
+                    .unwrap_or_default(),
+            )),
     }
 }
 
@@ -185,34 +198,58 @@ pub async fn deliver(client: &reqwest::Client, url: &str, notice: &Notice<'_>) -
     let parsed = reqwest::Url::parse(url).ok();
     let Some((robot, parsed)) = parsed.as_ref().and_then(|u| robot(u).map(|r| (r, u))) else {
         return match client.post(url).json(&notice.generic).send().await {
-            Ok(response) if response.status().is_success() => {
-                format!("已投递 HTTP {}", response.status().as_u16())
-            }
-            Ok(response) => format!("投递失败 HTTP {}；不自动重试", response.status().as_u16()),
-            Err(_) => "投递失败或超时；不自动重试".into(),
+            Ok(response) if response.status().is_success() => crate::i18n::store_message(
+                &Message::new("webhook.deliveredHttp")
+                    .with("status", response.status().as_u16().to_string()),
+            ),
+            Ok(response) => crate::i18n::store_message(
+                &Message::new("webhook.failedHttp")
+                    .with("status", response.status().as_u16().to_string()),
+            ),
+            Err(_) => crate::i18n::store_message(&Message::new("webhook.failedTimeout")),
         };
     };
     let name = robot.name();
     let message = match body(robot, parsed, notice) {
         Ok(message) => message,
-        Err(reason) => return format!("未投递：{name}{reason}"),
+        Err(reason) => {
+            return crate::i18n::store_message(
+                &Message::new("webhook.notSent")
+                    .with("provider", name)
+                    .with_message("reason", reason),
+            );
+        }
     };
     match client.post(url).json(&message).send().await {
         Ok(response) => {
             let status = response.status().as_u16();
             let text = response.text().await.unwrap_or_default();
             match judge(robot, status, &text) {
-                Ok(()) => format!("已投递{name}"),
-                Err(reason) => format!("投递失败：{name}返回{reason}；不自动重试"),
+                Ok(()) => crate::i18n::store_message(
+                    &Message::new("webhook.delivered").with("provider", name),
+                ),
+                Err(reason) => crate::i18n::store_message(
+                    &Message::new("webhook.failed")
+                        .with("provider", name)
+                        .with_message("reason", reason),
+                ),
             }
         }
-        Err(_) => format!("投递{name}失败或超时；不自动重试"),
+        Err(_) => crate::i18n::store_message(
+            &Message::new("webhook.providerTimeout").with("provider", name),
+        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Existing provider-verdict goldens also verify legacy Chinese rendering.
+    fn judge(robot: Robot, status: u16, response: &str) -> Result<(), String> {
+        super::judge(robot, status, response)
+            .map_err(|message| crate::i18n::render(crate::i18n::Locale::ZhCn, &message))
+    }
 
     fn detect(url: &str) -> Option<Robot> {
         reqwest::Url::parse(url).ok().as_ref().and_then(robot)
@@ -317,7 +354,8 @@ mod tests {
                 Robot::Telegram,
                 &url("https://api.telegram.org/bot1:A/sendMessage"),
                 &notice
-            ),
+            )
+            .map_err(|message| crate::i18n::render(crate::i18n::Locale::ZhCn, &message)),
             Err("地址缺少 chat_id 参数".into())
         );
         assert_eq!(

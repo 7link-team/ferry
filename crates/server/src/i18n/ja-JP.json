@@ -1,0 +1,20 @@
+{
+  "activity.systemActor": "システム",
+  "vault.encryptionFailed": "暗号化に失敗しました。認証情報は保存されていません。",
+  "vault.decryptionFailed": "認証情報を復号できません。",
+  "state.idUnavailable": "現在 ID を生成できません。しばらくしてから再試行してください。",
+  "host.monitorTimeout": "ホスト監視の収集がタイムアウトしました。",
+  "resource.referenceInvalid": "参照 ID が無効です。",
+  "host.connectionUnknown": "接続方式が不明です。",
+  "error.unauthorized": "ログインして操作を続けてください。",
+  "error.forbidden": "このアカウントには操作の権限がありません。管理者にお問い合わせください。",
+  "error.missing": "レコードが存在しないか、利用できなくなりました。",
+  "error.database": "データの保存または読み取りに失敗しました。しばらくしてから再試行してください。入力内容は保持されます。",
+  "error.file": "ファイル操作に失敗しました。ディスクの空き容量とディレクトリの権限を確認してください。",
+  "server.draining": "サービスを安全に停止しています。しばらくしてから再試行してください。",
+  "guard.host": "このホストアドレスは許可リストに登録されていません。",
+  "guard.request": "操作確認用のヘッダーがありません。",
+  "guard.origin": "このオリジンからの操作は許可されていません。",
+  "assets.not_built": "画面のファイルがビルドされていません。先に npm run build を実行してください。",
+  "terminal.heartbeatTimeout": "ターミナル接続のハートビートがタイムアウトしました。再接続してください。"
+}

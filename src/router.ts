@@ -14,8 +14,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { nav } from "./nav";
 import { resourceName } from "./resource";
+import { currentLocale, localizedPath, LOCALE_EVENT, pathLocale, stripLocalePrefix, type Locale } from "./locale";
 
 export interface Route {
+  locale?: Locale;
   workspace: string;
   group: string;
   item: string;
@@ -24,9 +26,15 @@ export interface Route {
 }
 
 export function parse(pathname = location.pathname, search = location.search): Route {
+  const locale = pathLocale(pathname);
+  const route = parseRoute(stripLocalePrefix(pathname), search);
+  return locale ? { ...route, locale } : route;
+}
+
+function parseRoute(pathname: string, search: string): Route {
   const segments = pathname.replace(/^\/+|\/+$/g, "").split("/");
   if (segments[0] === "platform") {
-    return parse('/_platform/' + segments.slice(1).join('/'), search);
+    return parseRoute('/_platform/' + segments.slice(1).join('/'), search);
   }
   // The signed-in user's own profile: a single record, always edited in place.
   if (segments[0] === "account") return { workspace: "_account", group: "account", item: "profile", id: "1", mode: "edit" };
@@ -82,11 +90,11 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
   const item = nav.find(group => group.key === r.group)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
-  if (r.workspace === "_account") return "/account";
+  if (r.workspace === "_account") return localizedPath("/account", r.locale ?? currentLocale());
   const base = r.workspace === "_platform" ? `/platform/${r.item}` :
     `/workspaces/${encodeURIComponent(r.workspace)}/${resourceName(item?.resource ?? r.item)}`;
   const search = params.toString();
-  return `${base}${tail}${search ? `?${search}` : ""}`;
+  return `${localizedPath(`${base}${tail}`, r.locale ?? currentLocale())}${search ? `?${search}` : ""}`;
 }
 
 const listeners = new Set<() => void>();
@@ -94,9 +102,11 @@ const announce = () => listeners.forEach((fn) => fn());
 const subscribe = (fn: () => void) => {
   listeners.add(fn);
   window.addEventListener("popstate", fn);
+  window.addEventListener(LOCALE_EVENT, fn);
   return () => {
     listeners.delete(fn);
     window.removeEventListener("popstate", fn);
+    window.removeEventListener(LOCALE_EVENT, fn);
   };
 };
 const snapshot = () => location.pathname + location.search;

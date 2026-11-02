@@ -8,6 +8,26 @@ use std::{collections::BTreeMap, io::Read};
 pub const MAX_CATALOG: usize = 64 * 1024;
 pub const MAX_PAYLOAD: u64 = 256 * 1024 * 1024;
 
+/// Stable identity for application validation failures; cryptographic checks are unchanged.
+#[derive(Debug)]
+pub struct ValidationError {
+    pub code: &'static str,
+    fallback: &'static str,
+}
+
+impl ValidationError {
+    pub const fn new(code: &'static str, fallback: &'static str) -> Self {
+        Self { code, fallback }
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.fallback)
+    }
+}
+impl std::error::Error for ValidationError {}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Catalog {
@@ -26,7 +46,13 @@ pub struct Artifact {
 }
 
 fn decoded(value: &str) -> anyhow::Result<String> {
-    ensure!(value.len() <= 8192, "更新签名或公钥过大");
+    ensure!(
+        value.len() <= 8192,
+        ValidationError::new(
+            "signatureSize",
+            "The update signature or public key is too large."
+        )
+    );
     Ok(String::from_utf8(STANDARD.decode(value.trim())?)?)
 }
 
@@ -40,30 +66,48 @@ pub fn verify_catalog(
 ) -> anyhow::Result<Artifact> {
     ensure!(
         !bytes.is_empty() && bytes.len() <= MAX_CATALOG,
-        "更新清单大小无效"
+        ValidationError::new("manifestSize", "The update manifest size is invalid.")
     );
     let key = minisign_verify::PublicKey::decode(&decoded(public_key)?)?;
     let signature = minisign_verify::Signature::decode(&decoded(signature)?)?;
     key.verify(bytes, &signature, false)
-        .context("更新清单签名无效")?;
+        .context(ValidationError::new(
+            "signatureInvalid",
+            "The update manifest signature is invalid.",
+        ))?;
     // Metadata is trusted only after verifying the exact original bytes.
     let mut catalog: Catalog = serde_json::from_slice(bytes)?;
-    ensure!(catalog.schema == 1, "不支持的更新清单版本");
-    ensure!(catalog.protocol == crate::VERSION, "更新协议不兼容");
-    ensure!(catalog.version == expected, "更新版本与请求不一致");
+    ensure!(
+        catalog.schema == 1,
+        ValidationError::new("schema", "The update manifest version is unsupported.")
+    );
+    ensure!(
+        catalog.protocol == crate::VERSION,
+        ValidationError::new("protocol", "The update protocol is incompatible.")
+    );
+    ensure!(
+        catalog.version == expected,
+        ValidationError::new("version", "The update version does not match the request.")
+    );
     ensure!(
         semver::Version::parse(&catalog.version)?
             .cmp_precedence(&semver::Version::parse(current)?)
             .is_gt(),
-        "更新版本必须高于当前版本"
+        ValidationError::new(
+            "upgradeOnly",
+            "The update version must be newer than the current version."
+        )
     );
     let artifact = catalog
         .targets
         .remove(target)
-        .context("更新不支持当前平台架构")?;
+        .context(ValidationError::new(
+            "target",
+            "The update does not support this platform architecture.",
+        ))?;
     ensure!(
         artifact.size > 0 && artifact.size <= MAX_PAYLOAD,
-        "更新文件大小无效"
+        ValidationError::new("payloadSize", "The update file size is invalid.")
     );
     ensure!(
         artifact.sha256.len() == 64
@@ -71,7 +115,7 @@ pub fn verify_catalog(
                 .sha256
                 .bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-        "更新文件哈希无效"
+        ValidationError::new("hash", "The update file hash is invalid.")
     );
     let url = url::Url::parse(&artifact.url)?;
     ensure!(
@@ -80,7 +124,7 @@ pub fn verify_catalog(
             && url.username().is_empty()
             && url.password().is_none()
             && url.fragment().is_none(),
-        "更新下载地址必须为无凭据的HTTPS地址"
+        ValidationError::new("url", "The update URL must use HTTPS without credentials.")
     );
     Ok(artifact)
 }
@@ -96,13 +140,25 @@ impl Artifact {
                 break;
             }
             length += count as u64;
-            ensure!(length <= self.size, "更新文件超出签名清单大小");
+            ensure!(
+                length <= self.size,
+                ValidationError::new(
+                    "payloadOversize",
+                    "The update file exceeds its signed manifest size."
+                )
+            );
             hash.update(&buffer[..count]);
         }
-        ensure!(length == self.size, "更新文件未完整下载");
+        ensure!(
+            length == self.size,
+            ValidationError::new(
+                "payloadIncomplete",
+                "The update file was not fully downloaded."
+            )
+        );
         ensure!(
             format!("{:x}", hash.finalize()) == self.sha256,
-            "更新文件哈希不匹配"
+            ValidationError::new("payloadHash", "The update file hash does not match.")
         );
         Ok(())
     }

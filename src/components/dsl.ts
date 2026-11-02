@@ -8,11 +8,15 @@
  */
 import type { ReactNode } from "react";
 import type { Route } from "../router";
+import type { Envelope } from "../resource";
 
 export interface Option {
   value: string;
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   group?: string;
+  groupKey?: string;
   requires?: string[];
   disabled?: boolean;
 }
@@ -21,14 +25,19 @@ export type Options = Option[] | (() => Promise<Option[]>);
 export interface Filter {
   key: string;
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   type: "text" | "select";
   options?: Options;
   placeholder?: string;
+  placeholderKey?: string;
 }
 
 export interface Column<T> {
   key: string;
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   /** Fixed px width. Leave one column unset so it absorbs the spare space. */
   width?: number;
   align?: "left" | "right";
@@ -38,6 +47,8 @@ export interface Column<T> {
 
 export interface RowAction<T> {
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   icon?: ReactNode;
   newTab?: boolean;
   permission?: string;
@@ -50,6 +61,7 @@ export interface RowAction<T> {
   parameters?: (row: T) => FormField<Record<string, unknown>>[];
   initialValues?: (row: T) => Record<string, unknown>;
   description?: string;
+  descriptionKey?: string;
   destructive?: boolean;
   when?: (row: T) => boolean;
   /** Keep unavailable actions discoverable and explain why. */
@@ -59,12 +71,19 @@ export interface RowAction<T> {
 
 export interface BulkAction {
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   permission?: string;
   destructive?: boolean;
   action: (ids: string[]) => Promise<void>;
 }
 
 export interface ListConfig<T> {
+  /** Isolate URL state when several lists share a detail page. */
+  queryPrefix?: string;
+  filterPresets?: { label: string; labelKey?: string | undefined; presets: { label: string; labelKey?: string | undefined; values: Record<string, string> | (() => Record<string, string>) }[] }[];
+  /** A report summary shares the table's committed filters, loading and refresh. */
+  summary?: (data: Envelope<T>) => ReactNode;
   permissionResource?: string;
   /** REST resource name; the URL is /api/workspaces/{ws}/{resource}. */
   resource: string;
@@ -76,14 +95,14 @@ export interface ListConfig<T> {
   defaultRefresh?: number;
   rowKey: (row: T) => string;
   /** Optional namespace directory browser. An empty key places a row at the root. */
-  grouping?: { label: string; key: (row: T) => string };
+  grouping?: { label: string; labelKey?: string | undefined; key: (row: T) => string };
   filters?: Filter[];
   columns: Column<T>[];
   actions?: RowAction<T>[];
   bulk?: BulkAction[];
   toolbar?: {
     content?: { permission?: string; render: (reload: () => void) => ReactNode };
-    create?: boolean | { label: string };
+    create?: boolean | { label: string; labelKey?: string | undefined };
     import?: boolean;
     export?: boolean;
     refresh?: readonly number[];
@@ -92,9 +111,12 @@ export interface ListConfig<T> {
    *  how one resource serves several menu entries (cron-jobs scope, …). */
   fixed?: Record<string, string>;
   empty?: string;
+  emptyKey?: string;
 }
 
 export type FieldType =
+  | "connection-repositories"
+  | "author-aliases"
   | "repository-source"
   | "marketplace-repository"
   | "actions-editor"
@@ -109,21 +131,33 @@ export type FieldType =
   | "code"
   | "manifest"
   | "multiselect"
+  | "custom"
   /** Read-only list of records (e.g. commits) described by `record`. */
   | "records";
 
 export interface FormField<T> {
   key: string;
   label: string;
+  /** Explicit message key; raw labels remain stable action/configuration identities. */
+  labelKey?: string | undefined;
   type: FieldType;
   required?: boolean;
   /** Inclusive lower bound for a numeric input. */
   min?: number;
-  createOption?: { label: string; permission: string; fields: FormField<Record<string, unknown>>[]; create: (values: Record<string, unknown>) => Promise<Option> };
+  max?: number;
+  disabled?: (draft: Partial<T>) => boolean;
+  render?: (props: { workspace: string; draft: Partial<T>; readOnly: boolean; onPatch: (patch: Partial<T>) => void; onValidityChange: (blocked: boolean) => void }) => ReactNode;
+  createOption?: { label: string; labelKey?: string | undefined; permission: string; fields: FormField<Record<string, unknown>>[]; create: (values: Record<string, unknown>) => Promise<Option> };
   help?: string;
+  helpKey?: string;
   placeholder?: string;
+  placeholderKey?: string;
   options?: Options;
   /** Conditional display, e.g. address/port/user only for an SSH host. */
+  /** Legacy values meaning no selection for this field; never applied to numeric metrics. */
+  emptyValues?: readonly (string | number)[];
+  emptyLabel?: string;
+  emptyLabelKey?: string;
   when?: (draft: Partial<T>) => boolean;
   /** Settable on create, fixed afterwards. */
   immutable?: boolean;
@@ -158,7 +192,7 @@ export interface FormConfig<T> {
   endpoint?: string;
   /** `group` places a section under a side menu entry of that name; sections of
    *  one group that set `tab` are shown as tabs. One save covers every group. */
-  sections: { title?: string; fullWidth?: boolean; group?: string; tab?: string; fields: FormField<T>[] }[];
+  sections: { title?: string; titleKey?: string; fullWidth?: boolean; group?: string; groupKey?: string; tab?: string; tabKey?: string; fields: FormField<T>[] }[];
   /** Heading for the detail and edit pages. */
   heading: (row: T) => string;
   /** Values a create form starts from. */

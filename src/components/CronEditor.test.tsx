@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { CronEditor, cronError } from "./CronEditor";
+import { commonText, i18n } from "../i18n";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -10,9 +11,30 @@ let invalid: boolean;
 const render = async () => act(async () => root.render(<CronEditor value={schedule} readOnly={false} onChange={next => { schedule = next; void render(); }} onValidityChange={value => { invalid = value; }} />));
 
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
   schedule = "0 * * * *"; invalid = false;
+});
+it("changes schedule labels and validation language while preserving the expression and valid zero fields", async () => {
+  schedule = "0 0 * * 0";
+  await render();
+  for (const locale of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"]) {
+    await act(async () => { await i18n.changeLanguage(locale); });
+    expect(schedule).toBe("0 0 * * 0");
+    expect(host.querySelector<HTMLInputElement>(`input[aria-label="${commonText("cron.expression")}"]`)?.value).toBe(schedule);
+    expect(host.querySelector<HTMLInputElement>(`input[aria-label="${commonText("cron.hour")}"]`)?.value).toBe("0");
+    expect(host.querySelector<HTMLSelectElement>(`select[aria-label="${commonText("cron.weekday")}"]`)?.value).toBe("0");
+    expect(invalid).toBe(false);
+  }
+  schedule = "broken";
+  await render();
+  for (const locale of ["en-US", "zh-CN", "ja-JP"]) {
+    await act(async () => { await i18n.changeLanguage(locale); });
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(commonText("cron.fields"));
+    expect(schedule).toBe("broken");
+    expect(invalid).toBe(true);
+  }
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 

@@ -1,4 +1,5 @@
 //! Creation-time parameter expansion; runtime pipeline placeholders remain unchanged.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     error::{ApiError, Result},
@@ -7,11 +8,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, EntityTrait, QueryFilter, Set, TransactionTrait,
     sea_query::{Expr, ExprTrait},
@@ -92,18 +89,25 @@ fn value_check(p: &Parameter, value: &Value) -> Result<()> {
         _ => false,
     };
     if !valid {
-        return Err(ApiError::bad(format!(
-            "参数 {} 的类型或取值不符合定义。",
-            p.name
-        )));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.parameterInvalid").with("name", p.name.clone()),
+        ));
     }
     Ok(())
 }
 fn parameters(text: &str, _kind: Kind) -> Result<BTreeMap<String, Parameter>> {
-    let items: Vec<Parameter> = serde_json::from_str(text)
-        .map_err(|_| ApiError::bad("参数定义必须是 JSON 数组，且只能包含支持的字段。"))?;
+    let items: Vec<Parameter> = serde_json::from_str(text).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.definitionsInvalid"),
+        )
+    })?;
     if items.len() > 64 {
-        return Err(ApiError::bad("模板最多支持64个参数。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.parameterLimit"),
+        ));
     }
     let mut out = BTreeMap::new();
     for p in items {
@@ -111,7 +115,10 @@ fn parameters(text: &str, _kind: Kind) -> Result<BTreeMap<String, Parameter>> {
             || p.label.chars().count() > 100
             || !["string", "integer", "boolean"].contains(&p.kind.as_str())
         {
-            return Err(ApiError::bad("参数名称、标签或类型无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.parameterMetadataInvalid"),
+            ));
         }
         if (p.secret && p.kind != "string")
             || (p.kind != "string"
@@ -123,26 +130,42 @@ fn parameters(text: &str, _kind: Kind) -> Result<BTreeMap<String, Parameter>> {
                 .as_ref()
                 .is_some_and(|v| v.is_empty() || v.len() > 100 || v.iter().any(|s| s.is_empty()))
         {
-            return Err(ApiError::bad("参数校验规则无效；secret仅用于变量引用。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.validationInvalid"),
+            ));
         }
         if let Some(value) = &p.default {
             value_check(&p, value)?;
         }
         let name = p.name.clone();
         if out.insert(name, p).is_some() {
-            return Err(ApiError::bad("参数名称不能重复。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.parameterDuplicate"),
+            ));
         }
     }
     Ok(out)
 }
 fn document(text: &str) -> Result<Value> {
     if text.len() > 262144 {
-        return Err(ApiError::bad("模板内容不能超过256KiB。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.contentTooLarge"),
+        ));
     }
-    let value: Value = serde_yaml_ng::from_str(text)
-        .map_err(|_| ApiError::bad("模板必须是有效JSON/YAML；字符串占位符需加引号。"))?;
+    let value: Value = serde_yaml_ng::from_str(text).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.documentInvalid"),
+        )
+    })?;
     if !value.is_object() {
-        return Err(ApiError::bad("模板顶层必须是对象。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.objectRequired"),
+        ));
     }
     Ok(value)
 }
@@ -156,21 +179,30 @@ fn expand(
     depth: usize,
 ) -> Result<Value> {
     if depth > 64 {
-        return Err(ApiError::bad("模板嵌套过深。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.nestingTooDeep"),
+        ));
     }
     match value {
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
                 if key.contains("{{") && kind != Kind::Actions {
-                    return Err(ApiError::bad("模板参数只能用于值，不能用于字段名。"));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("templates.fieldNameForbidden"),
+                    ));
                 }
                 if kind == Kind::Actions {
                     let mut offset = 0;
                     while let Some(relative) = key[offset..].find("{{") {
                         let start = offset + relative;
                         if start == 0 || key.as_bytes()[start - 1] != b'$' {
-                            return Err(ApiError::bad("模板参数只能用于值，不能用于字段名。"));
+                            return Err(ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("templates.fieldNameForbidden"),
+                            ));
                         }
                         offset = crate::actions::expression_end(key, start + 2)? + 2;
                     }
@@ -181,9 +213,17 @@ fn expand(
                 {
                     let workflow: Value =
                         serde_yaml_ng::from_str(value.as_str().ok_or_else(|| {
-                            ApiError::bad("Actions 模板的 workflow 必须是 YAML 字符串。")
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("templates.workflowStringRequired"),
+                            )
                         })?)
-                        .map_err(|_| ApiError::bad("Actions 模板的 workflow 必须是有效 YAML。"))?;
+                        .map_err(|_| {
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("templates.workflowInvalid"),
+                            )
+                        })?;
                     let mut workflow = expand(
                         &workflow,
                         definitions,
@@ -241,10 +281,12 @@ fn expand(
                     }
                     out.insert(
                         key.clone(),
-                        json!(
-                            serde_yaml_ng::to_string(&workflow)
-                                .map_err(|_| ApiError::bad("无法生成 Actions 模板。"))?
-                        ),
+                        json!(serde_yaml_ng::to_string(&workflow).map_err(|_| {
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("templates.actionsGenerateFailed"),
+                            )
+                        })?),
                     );
                     continue;
                 }
@@ -295,7 +337,12 @@ fn expand(
                 let end = text[start + 2..]
                     .find("}}")
                     .map(|n| start + 2 + n)
-                    .ok_or_else(|| ApiError::bad("模板占位符未闭合。"))?;
+                    .ok_or_else(|| {
+                        ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("templates.placeholderUnclosed"),
+                        )
+                    })?;
                 let token = text[start + 2..end].trim();
                 output.push_str(&text[offset..start]);
                 let (parameter, ceil_minutes) = if kind == Kind::Actions {
@@ -307,9 +354,13 @@ fn expand(
                     (token, false)
                 };
                 if let Some(name) = parameter.strip_prefix(".Values.") {
-                    let p = definitions
-                        .get(name)
-                        .ok_or_else(|| ApiError::bad(format!("模板引用了未声明的参数 {name}。")))?;
+                    let p = definitions.get(name).ok_or_else(|| {
+                        ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("templates.parameterUndeclared")
+                                .with("name", name),
+                        )
+                    })?;
                     used.insert(name.to_owned());
                     let whole = start == 0 && end + 2 == text.len();
                     if ceil_minutes
@@ -320,8 +371,9 @@ fn expand(
                                 ["", "jobs", _, "steps", "*", "timeout-minutes"]
                             ))
                     {
-                        return Err(ApiError::bad(
-                            "ceilMinutes 仅用于步骤 timeout-minutes 的完整整数参数。",
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("templates.ceilMinutesInvalid"),
                         ));
                     }
                     let actions_env = kind == Kind::Actions && actions_env_field(field);
@@ -332,8 +384,9 @@ fn expand(
                         Kind::Config => true,
                     };
                     if p.secret && kind != Kind::Config && (!whole || !secret_field) {
-                        return Err(ApiError::bad(
-                            "secret参数只能作为valueFrom或Actions env的完整值，不能拼入命令或普通环境值。",
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("templates.secretPlacementInvalid"),
                         ));
                     }
                     if let Some(values) = values {
@@ -343,7 +396,10 @@ fn expand(
                                 .as_i64()
                                 .filter(|value| (1..=86400).contains(value))
                                 .ok_or_else(|| {
-                                    ApiError::bad("旧版步骤超时参数必须为1到86400秒。")
+                                    ApiError::localized(
+                                        axum::http::StatusCode::BAD_REQUEST,
+                                        crate::i18n::Message::new("templates.legacyTimeoutInvalid"),
+                                    )
                                 })?;
                             return Ok(json!((seconds + 59) / 60));
                         }
@@ -385,8 +441,9 @@ fn expand(
                 {
                     output.push_str(&text[start..end + 2]);
                 } else {
-                    return Err(ApiError::bad(
-                        "仅支持 .Values.参数名；流水线另保留原有四个运行时占位符。",
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("templates.expressionUnsupported"),
                     ));
                 }
                 offset = end + 2;
@@ -412,7 +469,10 @@ fn validate_template(
     let definitions = parameters(text, kind)?;
     let doc = if kind == Kind::Config {
         if content.len() > 262144 || content.contains('\0') {
-            return Err(ApiError::bad("配置模板不能超过256KiB或包含空字符。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.configInvalid"),
+            ));
         }
         json!(content)
     } else {
@@ -421,7 +481,10 @@ fn validate_template(
     let mut used = BTreeSet::new();
     expand(&doc, &definitions, None, kind, "", &mut used, 0)?;
     if definitions.keys().any(|name| !used.contains(name)) {
-        return Err(ApiError::bad("存在未被模板引用的参数，请删除无效声明。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.parametersUnused"),
+        ));
     }
     Ok((doc, definitions))
 }
@@ -440,14 +503,19 @@ fn render_content(
     };
     let (doc, definitions) = validate_template(content, parameters, kind)?;
     if supplied.keys().any(|k| !definitions.contains_key(k)) {
-        return Err(ApiError::bad("提交了模板未声明的参数。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.parametersUnexpected"),
+        ));
     }
     let mut values = BTreeMap::new();
     for (name, p) in &definitions {
-        let value = supplied
-            .get(name)
-            .or(p.default.as_ref())
-            .ok_or_else(|| ApiError::bad(format!("请填写参数 {name}。")))?;
+        let value = supplied.get(name).or(p.default.as_ref()).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.parameterRequired").with("name", name),
+            )
+        })?;
         value_check(p, value)?;
         let value = if kind == Kind::Pipeline && !p.secret {
             if let Some(value) = value.as_str() {
@@ -481,7 +549,12 @@ fn render_content(
             .map(str::to_owned)
             .unwrap_or_else(|| out.to_string()));
     }
-    let text = serde_json::to_string_pretty(&out).map_err(|_| ApiError::bad("无法生成配置。"))?;
+    let text = serde_json::to_string_pretty(&out).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.configGenerateFailed"),
+        )
+    })?;
     match kind {
         Kind::App => {
             crate::manifest::parse(&text)?;
@@ -511,7 +584,12 @@ pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
             "checkout_bindings": [],
             "graph_layout": {},
         }))
-        .map_err(|_| ApiError::bad("无法转换流水线模板。"));
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.pipelineConvertFailed"),
+            )
+        });
     }
     crate::pipelines::convert_legacy(&doc.to_string(), "", "")
 }
@@ -534,7 +612,10 @@ pub struct RenderBody {
 }
 fn validate_body(body: &Body, kind: Kind) -> Result<()> {
     if body.name.trim().is_empty() || body.name.chars().count() > 60 {
-        return Err(ApiError::bad("模板名称需为1到60字。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("templates.nameInvalid"),
+        ));
     }
     validate_template(&body.content, &body.parameters, kind)?;
     Ok(())
@@ -568,8 +649,9 @@ async fn config_unreferenced(
             .flat_map(|s| &s.files)
             .any(|f| f.from_template == id.to_string() || f.from_template == name)
         {
-            return Err(ApiError::conflict(
-                "配置模板仍被应用引用，请先修改应用配置。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("templates.applicationReferenced"),
             ));
         }
     }
@@ -621,7 +703,7 @@ macro_rules! template_api {
                     .col_expr(rows::Column::Parameters,Expr::value(body.parameters)).col_expr(rows::Column::UpdatedAt,Expr::value(db::now()))
                     .col_expr(rows::Column::Version,Expr::col(rows::Column::Version).add(1))
                     .filter(rows::Column::WorkspaceId.eq(scope.workspace_id)).filter(rows::Column::Id.eq(id)).filter(rows::Column::Version.eq(body.version)).exec(&tx).await?.rows_affected;
-                if n==0 { scoped(&tx,&scope,id).await?; return Err(ApiError::conflict("模板已变化，请刷新后重试。")); }
+                if n==0 { scoped(&tx,&scope,id).await?; return Err(ApiError::localized(axum::http::StatusCode::CONFLICT, crate::i18n::Message::new("templates.changed"))); }
                 crate::hosts::activity_in(&s,&tx,&scope,"update",$resource,&id,json!({"name":body.name})).await?; tx.commit().await?;
                 Ok(Json(json!({"id":id,"version":body.version+1})))
             }
@@ -634,7 +716,7 @@ macro_rules! template_api {
             }
             pub async fn render(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>,Json(body):Json<RenderBody>) -> Result<Json<Value>> {
                 scope.require(concat!($resource,".read"))?; let row=scoped(&s.db,&scope,id).await?;
-                if row.version!=body.version {return Err(ApiError::conflict("模板已变化，请重新载入模板并确认参数。"));}
+                if row.version!=body.version {return Err(ApiError::localized(axum::http::StatusCode::CONFLICT, crate::i18n::Message::new("templates.reloadRequired")));}
                 let text=render_content(&row.content,&row.parameters,&body.values,$kind)?;
                 let text=if $kind==Kind::Config { config_preview(&text) } else { text };
                 Ok(Json(json!({$field:text,"template_id":id,"template_version":row.version})))
@@ -681,6 +763,27 @@ template_api!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_parameter_messages_keep_names_literal_for_all_readers() {
+        let parameter: Parameter = serde_json::from_value(
+            json!({"name":"feature.tag", "label":"用户 {name} 原文", "type":"integer"}),
+        )
+        .unwrap();
+        let error = value_check(&parameter, &json!("wrong type")).unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, "templates.parameterInvalid");
+        for locale in crate::i18n::Locale::ALL {
+            assert!(error.render(locale).contains("feature.tag"));
+            assert_eq!(
+                crate::i18n::render_stored(locale, &error.stored()),
+                error.render(locale)
+            );
+            if locale != crate::i18n::Locale::EnUs {
+                assert_ne!(error.render(locale), error.1);
+            }
+        }
+        assert_eq!(parameter.label, "用户 {name} 原文");
+    }
     fn application() -> Value {
         json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"web"},"services":[{"name":"web","image":"nginx:{{ .Values.image.tag }}","ports":[{"container":"{{ .Values.port }}"}]}]})
     }

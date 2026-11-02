@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import socket
+import ssl
 import struct
 import sys
 import time
@@ -26,12 +27,14 @@ TEXT, BINARY, CLOSE, PING, PONG = 0x1, 0x2, 0x8, 0x9, 0xA
 class Ws:
     def __init__(self, url, cookie=None):
         parsed = urlparse(url)
-        if parsed.scheme != "ws":
-            raise SystemExit(f"only ws:// is supported here, got {url}")
+        if parsed.scheme not in ("ws", "wss"):
+            raise SystemExit(f"only ws:// or wss:// is supported here, got {url}")
         host = parsed.hostname
-        port = parsed.port or 80
+        port = parsed.port or (443 if parsed.scheme == "wss" else 80)
         path = parsed.path + ("?" + parsed.query if parsed.query else "")
         self.sock = socket.create_connection((host, port), timeout=15)
+        if parsed.scheme == "wss":
+            self.sock = ssl.create_default_context().wrap_socket(self.sock, server_hostname=host)
         key = base64.b64encode(os.urandom(16)).decode()
         request = [
             f"GET {path} HTTP/1.1",

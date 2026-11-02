@@ -17,7 +17,7 @@ def main():
         child=subprocess.Popen(args,env=env,stdout=output,stderr=output);children.append(child);return child
     client=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
     def api(path,body=None,method=None,status=200):
-        request=urllib.request.Request(origin+'/api'+path,data=json.dumps(body).encode() if body is not None else None,method=method or ('POST' if body is not None else 'GET'),headers={'Content-Type':'application/json','X-Ferry-Request':'1'})
+        request=urllib.request.Request(origin+'/api'+path,data=json.dumps(body).encode() if body is not None else None,method=method or ('POST' if body is not None else 'GET'),headers={'Content-Type':'application/json','X-Ferry-Request':'1', 'Accept-Language': 'zh-CN'})
         try:
             with client.open(request,timeout=15) as response:code,raw=response.status,response.read()
         except urllib.error.HTTPError as error:code,raw=error.code,error.read()

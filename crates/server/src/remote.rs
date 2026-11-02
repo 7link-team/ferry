@@ -6,6 +6,7 @@
 
 use crate::snowflake::Id;
 
+use crate::error::{Json, Path, Query};
 use crate::{
     channel::{self, HostChannel, PtySize},
     db,
@@ -15,10 +16,9 @@ use crate::{
     workspace::Scope,
 };
 use axum::{
-    Json,
     body::Body,
     extract::{
-        Path, Query, State,
+        State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{StatusCode, header},
@@ -149,26 +149,29 @@ pub async fn terminal(
     crate::hosts::activity(&s, &scope, "terminal-open", "hosts", &id, json!({})).await?;
     let (state, who, host) = (s.clone(), scope.user.clone(), id.clone());
     let permissions = scope.permissions.clone();
-    Ok(upgrade.on_upgrade(move |socket| async move {
-        let opened = db::now();
-        pump(socket, pty, channel).await;
-        // The close is audited too: how long a session lasted is the part an
-        // operator actually asks about afterwards.
-        let seconds = (db::now() - opened) / 1000;
-        let scope = Scope {
-            workspace_id: state_workspace(&state, &host).await.unwrap_or_default(),
-            user: who,
-            permissions,
-        };
-        let _ = crate::hosts::activity(
-            &state,
-            &scope,
-            "terminal-close",
-            "hosts",
-            &host,
-            json!({ "seconds": seconds }),
-        )
-        .await;
+    let locale = crate::i18n::current_locale();
+    Ok(upgrade.on_upgrade(move |socket| {
+        crate::i18n::with_locale(locale, async move {
+            let opened = db::now();
+            pump(socket, pty, channel).await;
+            // The close is audited too: how long a session lasted is the part an
+            // operator actually asks about afterwards.
+            let seconds = (db::now() - opened) / 1000;
+            let scope = Scope {
+                workspace_id: state_workspace(&state, &host).await.unwrap_or_default(),
+                user: who,
+                permissions,
+            };
+            let _ = crate::hosts::activity(
+                &state,
+                &scope,
+                "terminal-close",
+                "hosts",
+                &host,
+                json!({ "seconds": seconds }),
+            )
+            .await;
+        })
     }))
 }
 
@@ -194,7 +197,7 @@ async fn pump(socket: WebSocket, mut pty: Box<dyn channel::Pty>, _channel: Box<d
         tokio::select! {
             _ = heartbeat.tick() => {
                 if last_pong.elapsed() > Duration::from_secs(70) {
-                    let _ = sink.send(Message::Text(json!({"type":"error","error":"终端连接心跳超时，请重新连接。"}).to_string().into())).await;
+                    let _ = sink.send(Message::Text(json!({"type":"error","error":crate::i18n::message("terminal.heartbeatTimeout")}).to_string().into())).await;
                     break;
                 }
                 if sink.send(Message::Ping(bytes::Bytes::new())).await.is_err() {
@@ -214,7 +217,7 @@ async fn pump(socket: WebSocket, mut pty: Box<dyn channel::Pty>, _channel: Box<d
                 }
                 Err(error) => {
                     let _ = sink
-                        .send(Message::Text(json!({"type":"error","error":error.1}).to_string().into()))
+                        .send(Message::Text(json!({"type":"error","error":error.render(crate::i18n::current_locale())}).to_string().into()))
                         .await;
                     break;
                 }
@@ -273,13 +276,19 @@ pub async fn list_dir(
                 .exec(&windows_hidden_command(path), Duration::from_secs(15))
                 .await?;
             if result.code != 0 {
-                return Err(ApiError(
+                return Err(ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    "读取 Windows 隐藏文件属性失败，请重试。".into(),
+                    crate::i18n::Message::new("runner.hiddenRead"),
                 ));
             }
-            serde_json::from_str(result.stdout.trim_start_matches('\u{feff}').trim())
-                .map_err(|_| ApiError::bad("Windows 隐藏文件属性响应无效。"))?
+            serde_json::from_str(result.stdout.trim_start_matches('\u{feff}').trim()).map_err(
+                |_| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("runner.hiddenResponse"),
+                    )
+                },
+            )?
         } else {
             Vec::new()
         };
@@ -304,13 +313,21 @@ pub async fn create_entry(
     scope.require("hosts.files")?;
     let path = channel::check_path(&body.path)?;
     if path == "/" || path.ends_with("/.") {
-        return Err(ApiError::bad("请填写文件或文件夹名称。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.fileName"),
+        ));
     }
     let channel = open(&s, &scope.workspace_id, &id).await?;
     match body.kind.as_str() {
         "file" => channel.create_file(path).await?,
         "directory" => channel.create_dir(path).await?,
-        _ => return Err(ApiError::bad("类型必须是文件或文件夹。")),
+        _ => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.fileKind"),
+            ));
+        }
     }
     crate::hosts::activity(
         &s,
@@ -376,10 +393,12 @@ pub async fn upload(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("hosts.files")?;
     let path = channel::check_path(&query.path)?;
-    let stream = Box::pin(
-        body.into_data_stream()
-            .map_err(|error| ApiError(StatusCode::BAD_REQUEST, format!("上传中断：{error}"))),
-    );
+    let stream = Box::pin(body.into_data_stream().map_err(|error| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.uploadInterrupted").with("detail", error.to_string()),
+        )
+    }));
     let channel = open(&s, &scope.workspace_id, &id).await?;
     let windows = path.as_bytes().get(1) == Some(&b':') || path.starts_with("\\\\");
     let split = if windows {

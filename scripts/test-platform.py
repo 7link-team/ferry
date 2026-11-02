@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
     def request(c, path, body=None, method=None, expected=200):
         req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
         value = json.load(response)
@@ -153,6 +153,31 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             request(admin, '/platform/users/'+admin_id, {'version':1, 'active':active, 'is_superadmin':superadmin}, 'PATCH', 409)
         check(request(admin, '/me')['user']['is_superadmin'], 'last active admin cannot be disabled or demoted')
         settings = request(admin, '/platform/settings/1')
+        check(settings['runner_auto_update'] is True, 'automatic Runner updates default on globally')
+        request(owner, '/platform/settings/1', expected=403)
+        request(admin, '/platform/settings/1', {'version':settings['version'], 'registration_enabled':True, 'runner_auto_update':False}, 'PATCH')
+        settings = request(admin, '/platform/settings/1')
+        check(settings['runner_auto_update'] is False, 'platform administrator can disable the automatic upgrade default')
+        request(admin, '/platform/settings/1', {'version':settings['version'], 'registration_enabled':True}, 'PATCH')
+        settings = request(admin, '/platform/settings/1')
+        check(settings['runner_auto_update'] is False, 'legacy platform edits preserve the automatic upgrade policy')
+        host_path = f'/workspaces/{workspace_tenant}/nodes'
+        upgrade_host = request(admin, host_path, {'name':'automatic policy acceptance', 'connection':'runner'}, expected=201)['id']
+        host_path += '/' + upgrade_host
+        host = request(admin, host_path)
+        check(host['runner_auto_update'] == 'inherit', 'existing host create requests inherit the platform default')
+        for policy, enabled in [('on', True), ('off', False), ('inherit', False)]:
+            request(admin, host_path, {'name':host['name'], 'version':host['version'], 'runner_auto_update':policy}, 'PATCH')
+            host = request(admin, host_path)
+            status = request(admin, host_path+'/runner-updates')
+            check(host['runner_auto_update'] == policy and status['enabled'] is enabled, f'host policy {policy} resolves against disabled global default')
+        request(admin, host_path, {'name':host['name'], 'version':host['version'], 'runner_auto_update':'invalid'}, 'PATCH', 400)
+        request(admin, host_path, {'name':host['name'], 'version':host['version'], 'runner_auto_update':'off'}, 'PATCH')
+        host = request(admin, host_path)
+        request(admin, host_path, {'name':host['name'], 'version':host['version']}, 'PATCH')
+        check(request(admin, host_path)['runner_auto_update'] == 'off', 'legacy host edits preserve explicit automatic update override')
+        request(admin, '/platform/settings/1', {'version':settings['version'], 'registration_enabled':True, 'runner_auto_update':True}, 'PATCH')
+        settings = request(admin, '/platform/settings/1')
         request(admin, '/platform/settings/1', {'version':settings['version'],'registration_enabled':False}, 'PATCH')
         request(admin, '/platform/settings/1', {'version':settings['version'],'registration_enabled':True}, 'PATCH', 409)
         request(anonymous, '/users', {'email':'closed@example.invalid','name':'Closed','password':password}, expected=403)
@@ -177,7 +202,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(sorted(x[0] for x in results) == [200,409], 'concurrent admin demotion retains one active admin')
         survivor = owner if results[0][0] == 200 else admin
         check(sum(r['is_superadmin'] and r['active'] for r in request(survivor, '/platform/users')['items']) == 1, 'exactly one active admin remains')
-        logs = (data / 'server.log').read_text()
+        logs = (data / 'server.log').read_text(encoding='utf-8')
         check(token not in logs and password not in logs and new_password not in logs, 'logs contain no initialization token or password')
         print(f'PASS: {checks} platform acceptance checks')
     finally:

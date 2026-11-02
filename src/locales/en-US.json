@@ -1,0 +1,6 @@
+{
+  "app": { "title": "Operations platform", "modules": "Modules", "platform": "Platform administration", "account": "Profile", "signOut": "Sign out", "workspaces": "Create or join a workspace" },
+  "language": { "label": "Language", "changed": "Language changed to {{language}}" },
+  "common": { "loading": "Loading…", "back": "Back", "close": "Close", "save": "Save", "cancel": "Cancel", "edit": "Edit", "delete": "Delete", "create": "Create", "search": "Search", "refresh": "Refresh", "retry": "Retry" },
+  "errors": { "network": "Cannot connect to the service. Check your network and try again.", "operation": "The operation failed. Please try again." }
+}

@@ -1,11 +1,45 @@
+import { i18n } from "../../i18n";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { AutoForm, AutoField } from "./auto-form";
+import { AutoForm, AutoField, FieldControl, selectDisplay } from "./auto-form";
 import type { FormConfig } from "./types";
 
 let root: Root, host: HTMLDivElement;
+it("distinguishes absent references from valid zero enum values and unavailable selections", () => {
+  const optional = { emptyValues: [0, "0"], emptyLabel: "No jump host", options: [{ value: "7", label: "Gateway" }] };
+  expect(selectDisplay("0", optional)).toBe("No jump host");
+  expect(selectDisplay(0, optional)).toBe("No jump host");
+  expect(selectDisplay(null, optional)).toBe("No jump host");
+  expect(selectDisplay(undefined, optional)).toBe("No jump host");
+  expect(selectDisplay("", optional)).toBe("No jump host");
+  expect(selectDisplay("7", optional)).toBe("Gateway");
+  expect(selectDisplay("9", optional)).toBe("选项不可用（9）");
+  expect(selectDisplay(0, { ...optional, options: [{ value: "0", label: "Disabled" }] })).toBe("Disabled");
+  expect(selectDisplay(0, { options: [] })).toBe("选项不可用（0）");
+});
+it("shows an absent reference in edit mode without modifying its raw zero and permits explicit clearing", async () => {
+  const change = vi.fn();
+  await act(async () => root.render(<FieldControl name="jump_host_id" field={{ name: "Jump host", type: "select", config: { emptyValues: [0], emptyLabel: "No jump host", options: [] } }} value={0} onChange={change} />));
+  expect(host.querySelector('[role="combobox"]')?.textContent).toBe("No jump host");
+  expect(change).not.toHaveBeenCalled();
+});
+it("retains missing multiselect references and numeric zero in read-only presentation", async () => {
+  await act(async () => root.render(<><FieldControl name="tags" field={{ name: "Tags", type: "multi-select", config: { options: [{ value: "7", label: "Known tag" }] } }} value={["7", "9"]} readonly onChange={() => {}} /><FieldControl name="threshold" field={{ name: "Threshold", type: "number" }} value={0} readonly onChange={() => {}} /></>));
+  expect(host.textContent).toContain("Known tag, 选项不可用（9）");
+  expect(host.querySelectorAll("p")[1]?.textContent).toBe("0");
+});
+it("keeps unavailable selected multiselect entries visible instead of dropping them", async () => {
+  const change = vi.fn();
+  await act(async () => root.render(<FieldControl name="tags" field={{ name: "Tags", type: "multi-select", config: { options: [{ value: "7", label: "Known tag" }] } }} value={["7", "9"]} onChange={change} />));
+  const select = host.querySelector("select")!;
+  expect([...select.selectedOptions].map(option => option.value)).toEqual(["9", "7"]);
+  expect(select.textContent).toContain("选项不可用（9）");
+  expect(change).not.toHaveBeenCalled();
+});
 beforeEach(() => {
+  void i18n.changeLanguage("zh-CN");
+  localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     callback(0);

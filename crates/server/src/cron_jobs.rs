@@ -1,4 +1,5 @@
 //! A shared scheduler for host, build and deployment tasks.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{
@@ -6,16 +7,13 @@ use crate::{
         hosts, pipeline_runs, pipelines,
     },
     error::{ApiError, Result},
+    i18n::{self, Message, StoredText},
     resource::{self, ListQuery, Spec},
     snowflake::Id,
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -67,26 +65,48 @@ fn retry_delay() -> u64 {
     30
 }
 fn next(body: &Body, after: i64) -> Result<i64> {
-    if body.schedule.len() > 256 || ![5, 6].contains(&body.schedule.split_whitespace().count()) {
-        return Err(ApiError::bad(
-            "Cron 表达式需为5字段（分 时 日 月 周）或6字段（含秒）。",
+    next_schedule(&body.schedule, &body.timezone, after)
+}
+
+pub(crate) fn next_schedule(schedule: &str, timezone: &str, after: i64) -> Result<i64> {
+    if schedule.len() > 256 || ![5, 6].contains(&schedule.split_whitespace().count()) {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.fieldsInvalid"),
         ));
     }
     let schedule = croner::parser::CronParser::builder()
         .seconds(croner::parser::Seconds::Optional)
         .build()
-        .parse(&body.schedule)
-        .map_err(|_| ApiError::bad("Cron 表达式无效。"))?;
-    let timezone = chrono_tz::Tz::from_str(&body.timezone)
-        .map_err(|_| ApiError::bad("请选择有效 IANA 时区，例如 Asia/Shanghai 或 UTC。"))?;
+        .parse(schedule)
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("cron.expressionInvalid"),
+            )
+        })?;
+    let timezone = chrono_tz::Tz::from_str(timezone).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.timezoneInvalid"),
+        )
+    })?;
     let mut cursor = DateTime::<Utc>::from_timestamp_millis(after)
-        .ok_or_else(|| ApiError::bad("调度时间无效。"))?
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("cron.timeInvalid"),
+            )
+        })?
         .with_timezone(&timezone);
     // Do not make up a catch-up occurrence for a wall-clock time skipped by DST.
     for _ in 0..32 {
-        let candidate = schedule
-            .find_next_occurrence(&cursor, false)
-            .map_err(|_| ApiError::bad("表达式没有未来执行时间。"))?;
+        let candidate = schedule.find_next_occurrence(&cursor, false).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("cron.noFutureTime"),
+            )
+        })?;
         if candidate.timestamp_millis() > after
             && schedule.is_time_matching(&candidate).unwrap_or(false)
         {
@@ -94,7 +114,10 @@ fn next(body: &Body, after: i64) -> Result<i64> {
         }
         cursor = candidate;
     }
-    Err(ApiError::bad("表达式在所选时区没有有效的未来执行时间。"))
+    Err(ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("cron.noFutureLocalTime"),
+    ))
 }
 
 async fn validate(
@@ -109,8 +132,9 @@ async fn validate(
         || b.max_retries > 10
         || !(1..=3600).contains(&b.retry_delay_seconds)
     {
-        return Err(ApiError::bad(
-            "名称需为1到60字；超时1–86400秒；重试0–10次，间隔1–3600秒。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.configurationInvalid"),
         ));
     }
     if schedule {
@@ -170,7 +194,12 @@ async fn validate(
                 .await?
                 .is_some()
         }
-        _ => return Err(ApiError::bad("任务所属模块、动作及目标类型不匹配。")),
+        _ => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("cron.targetMismatch"),
+            ));
+        }
     };
     if !present {
         return Err(ApiError::missing());
@@ -178,16 +207,26 @@ async fn validate(
     if b.scope == "host"
         && (b.command.trim().is_empty() || b.command.len() > 65536 || b.command.contains('\0'))
     {
-        return Err(ApiError::bad("请填写不超过64KiB的主机命令。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.commandRequired"),
+        ));
     }
     if b.scope != "host" && !b.command.is_empty() {
-        return Err(ApiError::bad("构建/部署任务不接受主机命令字段。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.commandForbidden"),
+        ));
     }
     Ok(())
 }
 fn job_json(row: jobs::Model) -> Result<Value> {
-    let mut value: Value =
-        serde_json::from_str(&row.config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
+    let mut value: Value = serde_json::from_str(&row.config).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.configCorrupt"),
+        )
+    })?;
     value["id"] = json!(Id::from(row.id));
     value["version"] = json!(row.version);
     value["enabled"] = json!(row.enabled == 1);
@@ -201,7 +240,7 @@ fn job_json(row: jobs::Model) -> Result<Value> {
 fn run_json(row: runs::Model, detail: bool) -> Value {
     let mut value = json!({"id":Id::from(row.id),"job_id":Id::from(row.job_id),"job_name":row.job_name,"scope":row.scope,"state":row.state,"trigger_kind":row.trigger_kind,"triggered_by":Id::from(row.triggered_by),"scheduled_at":row.scheduled_at,"started_at":row.started_at,"finished_at":row.finished_at,"attempt":row.attempt,"downstream_id":Id::from(row.downstream_id),"downstream_kind":row.downstream_kind,"created_at":row.created_at,"version":row.version});
     if detail {
-        value["output"] = json!(row.output);
+        value["output"] = json!(i18n::display_text_stored(&row.output));
         value["config"] = json!(row.config);
     }
     value
@@ -302,7 +341,10 @@ pub async fn update(
     validate(&tx, &scope, &b, true).await?;
     let old = scoped(&tx, &scope, id).await?;
     if old.scope != b.scope {
-        return Err(ApiError::bad("任务所属模块创建后不可修改。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.moduleImmutable"),
+        ));
     }
     let count = jobs::Entity::update_many()
         .col_expr(jobs::Column::Name, Expr::value(b.name.trim()))
@@ -341,7 +383,10 @@ pub async fn update(
         .await?
         .rows_affected;
     if count == 0 {
-        return Err(ApiError::conflict("任务配置已变化，请刷新。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.configChanged"),
+        ));
     }
     crate::hosts::activity_in(
         &s,
@@ -375,7 +420,10 @@ pub async fn delete(
     scoped(&tx, &scope, id).await?;
     crate::alerts::ensure_unreferenced(&tx, scope.workspace_id, "cron-job", &[id]).await?;
     if busy(&tx, scope.workspace_id, id).await? {
-        return Err(ApiError::conflict("任务仍有排队/执行中或待核实记录。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.runsBusy"),
+        ));
     }
     runs::Entity::delete_many()
         .filter(runs::Column::WorkspaceId.eq(scope.workspace_id))
@@ -398,7 +446,7 @@ async fn insert_run(
     actor: Id,
     kind: &str,
     state: &str,
-    message: &str,
+    message: Option<Message>,
     scheduled: i64,
 ) -> Result<Id> {
     let id = s.next_id()?;
@@ -419,7 +467,9 @@ async fn insert_run(
         started_at: Set(0),
         finished_at: Set(if state == "skipped" { now } else { 0 }),
         attempt: Set(0),
-        output: Set(message.into()),
+        output: Set(message
+            .map(|message| StoredText::from_message(message).stored())
+            .unwrap_or_default()),
         downstream_id: Set(0),
         downstream_kind: Set(String::new()),
         created_at: Set(now),
@@ -437,13 +487,19 @@ pub async fn run_now(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("cron-jobs.run")?;
     let row = scoped(&s.db, &scope, id).await?;
-    let b: Body = serde_json::from_str(&row.config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
+    let b: Body = serde_json::from_str(&row.config).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.configCorrupt"),
+        )
+    })?;
     validate(&s.db, &scope, &b, false).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let current = scoped(&tx, &scope, id).await?;
     if current.version != row.version || busy(&tx, scope.workspace_id, id).await? {
-        return Err(ApiError::conflict(
-            "配置已变化，或任务已有执行/待核实记录。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.changedOrBusy"),
         ));
     }
     let run = insert_run(
@@ -453,7 +509,7 @@ pub async fn run_now(
         scope.user.id,
         "manual",
         "queued",
-        "",
+        None,
         db::now(),
     )
     .await?;
@@ -526,7 +582,10 @@ pub async fn acknowledge(
 ) -> Result<Json<Value>> {
     scope.require("cron-jobs.run")?;
     if b.note.trim().is_empty() || b.note.chars().count() > 1000 {
-        return Err(ApiError::bad("请填写1到1000字核实说明。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.noteRequired"),
+        ));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let row = runs::Entity::find_by_id(i64::from(id))
@@ -534,12 +593,11 @@ pub async fn acknowledge(
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    let mut output = StoredText::from_stored(&row.output);
+    output.push_message(Message::new("cron.manualNote").with("note", b.note.clone()));
     let n = runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value("failed"))
-        .col_expr(
-            runs::Column::Output,
-            Expr::value(format!("{}\n人工核实：{}", row.output, b.note)),
-        )
+        .col_expr(runs::Column::Output, Expr::value(output.stored()))
         .col_expr(runs::Column::FinishedAt, Expr::value(db::now()))
         .col_expr(
             runs::Column::Version,
@@ -553,7 +611,10 @@ pub async fn acknowledge(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("记录已变化或无需核实。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.reviewChanged"),
+        ));
     }
     crate::hosts::activity_in(
         &s,
@@ -581,8 +642,12 @@ async fn due(s: &AppState, recovery: bool) -> Result<()> {
             .await?;
         let count = candidates.len();
         for job in candidates {
-            let b: Body =
-                serde_json::from_str(&job.config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
+            let b: Body = serde_json::from_str(&job.config).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("cron.configCorrupt"),
+                )
+            })?;
             let future = next(&b, now).unwrap_or(0);
             let tx = crate::variables::transaction(s, job.workspace_id.into()).await?;
             let n = jobs::Entity::update_many()
@@ -611,11 +676,11 @@ async fn due(s: &AppState, recovery: bool) -> Result<()> {
                     "queued"
                 },
                 if recovery {
-                    "服务停机期间错过的触发不补跑。"
+                    Some(Message::new("cron.skipDowntime"))
                 } else if overlap {
-                    "前次执行尚未结束或需核实，本次触发跳过。"
+                    Some(Message::new("cron.skipOverlap"))
                 } else {
-                    ""
+                    None
                 },
                 job.next_run_at,
             )
@@ -643,19 +708,12 @@ async fn due(s: &AppState, recovery: bool) -> Result<()> {
     }
     Ok(())
 }
-async fn finish(s: &AppState, id: i64, state: &str, output: &str) -> Result<()> {
-    let mut text = output.to_owned();
-    if text.len() > 1_048_576 {
-        let mut limit = 1_048_576;
-        while !text.is_char_boundary(limit) {
-            limit -= 1;
-        }
-        text.truncate(limit);
-        text.push_str("\n输出已达到1MiB上限。");
-    }
+async fn finish(s: &AppState, id: i64, state: &str, output: &StoredText) -> Result<()> {
+    let mut text = output.clone();
+    text.truncate_raw(1_048_576);
     runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value(state))
-        .col_expr(runs::Column::Output, Expr::value(text))
+        .col_expr(runs::Column::Output, Expr::value(text.stored()))
         .col_expr(
             runs::Column::FinishedAt,
             Expr::value(if state == "queued" { 0 } else { db::now() }),
@@ -673,16 +731,20 @@ async fn finish(s: &AppState, id: i64, state: &str, output: &str) -> Result<()> 
 
 struct Outcome {
     state: &'static str,
-    output: String,
+    output: StoredText,
     retryable: bool,
 }
 impl Outcome {
-    fn new(state: &'static str, output: impl Into<String>, retryable: bool) -> Self {
+    fn new(state: &'static str, output: StoredText, retryable: bool) -> Self {
         Self {
             state,
-            output: output.into(),
+            output,
             retryable,
         }
+    }
+
+    fn message(state: &'static str, message: Message, retryable: bool) -> Self {
+        Self::new(state, StoredText::from_message(message), retryable)
     }
 }
 async fn downstream(
@@ -702,44 +764,56 @@ async fn downstream(
                 .one(&s.db)
                 .await?
                 .ok_or_else(ApiError::missing)?;
-            (r.state, format!("流水线执行 {}", id))
+            (
+                r.state,
+                Message::new("cron.pipelineRun").with("id", id.to_string()),
+            )
         } else {
             let r = deployment_revisions::Entity::find_by_id(id)
                 .filter(deployment_revisions::Column::WorkspaceId.eq(run.workspace_id))
                 .one(&s.db)
                 .await?
                 .ok_or_else(ApiError::missing)?;
-            (r.state, format!("部署执行 {}", id))
+            (
+                r.state,
+                Message::new("cron.deploymentRun").with("id", id.to_string()),
+            )
         };
         match state.as_str() {
-            "succeeded" => return Ok(Outcome::new("succeeded", format!("{detail}成功。"), false)),
+            "succeeded" => {
+                return Ok(Outcome::message(
+                    "succeeded",
+                    Message::new("cron.downstreamSucceeded").with_message("detail", detail),
+                    false,
+                ));
+            }
             "failed" | "cancelled" => {
-                return Ok(Outcome::new(
+                return Ok(Outcome::message(
                     "failed",
-                    format!("{detail}失败或取消；请查看对应执行日志。"),
+                    Message::new("cron.downstreamFailed").with_message("detail", detail),
                     state == "failed",
                 ));
             }
             "needs-review" => {
-                return Ok(Outcome::new(
+                return Ok(Outcome::message(
                     "needs-review",
-                    format!("{detail}结果不确定，请先核实下游执行。"),
+                    Message::new("cron.downstreamUncertain").with_message("detail", detail),
                     false,
                 ));
             }
             "queued" if *drain.borrow() => {
-                return Ok(Outcome::new(
+                return Ok(Outcome::message(
                     "queued",
-                    format!("{detail}尚未领取，服务重启后继续跟踪该执行，不重复触发。"),
+                    Message::new("cron.downstreamQueued").with_message("detail", detail),
                     false,
                 ));
             }
             _ => {}
         }
         if *stop.borrow() || started.elapsed() >= Duration::from_secs(b.timeout_seconds) {
-            return Ok(Outcome::new(
+            return Ok(Outcome::message(
                 "needs-review",
-                format!("等待{detail}超时或服务中断；未终止下游执行，不自动重试。"),
+                Message::new("cron.downstreamTimeout").with_message("detail", detail),
                 false,
             ));
         }
@@ -756,17 +830,17 @@ async fn once(
     let scope = match Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await {
         Ok(scope) => scope,
         Err(_) => {
-            return Ok(Outcome::new(
+            return Ok(Outcome::message(
                 "failed",
-                "执行身份已停用或不再属于此空间。",
+                Message::new("cron.actorUnavailable"),
                 false,
             ));
         }
     };
     if validate(&s.db, &scope, b, false).await.is_err() {
-        return Ok(Outcome::new(
+        return Ok(Outcome::message(
             "failed",
-            "当前权限或目标配置不再满足执行条件。",
+            Message::new("cron.targetUnavailable"),
             false,
         ));
     }
@@ -798,9 +872,13 @@ async fn once(
                 .collect()
         };
         if ids.is_empty() {
-            return Ok(Outcome::new("failed", "主机组没有成员。", false));
+            return Ok(Outcome::message(
+                "failed",
+                Message::new("cron.groupEmpty"),
+                false,
+            ));
         }
-        let mut output = String::new();
+        let mut output = StoredText::new();
         for id in ids {
             let fresh =
                 Scope::for_actor(s, run.workspace_id.into(), run.triggered_by.into()).await?;
@@ -809,28 +887,31 @@ async fn once(
             let channel = match crate::remote::open(s, &scope.workspace_id, &id).await {
                 Ok(channel) => channel,
                 Err(_) => {
-                    return Ok(Outcome::new(
-                        "failed",
-                        format!("{output}\n主机 {id} 连接失败，未向该主机发送命令。"),
-                        true,
-                    ));
+                    output.push_message(
+                        Message::new("cron.hostConnectFailed").with("host", id.to_string()),
+                    );
+                    return Ok(Outcome::new("failed", output, true));
                 }
             };
-            let result = tokio::select! { result=channel.exec(&b.command,Duration::from_secs(b.timeout_seconds))=>result, _=stop.changed()=>return Ok(Outcome::new("needs-review","服务中断；远端命令可能仍在运行，请核实。",false)) };
+            let result = tokio::select! { result=channel.exec(&b.command,Duration::from_secs(b.timeout_seconds))=>result, _=stop.changed()=>return Ok(Outcome::message("needs-review",Message::new("cron.remoteInterrupted"),false)) };
             let out = match result {
                 Ok(out) => out,
                 Err(_) => {
-                    return Ok(Outcome::new(
-                        "needs-review",
-                        format!("{output}\n主机{id}执行超时或连接中断，结果不确定；不自动重试。"),
-                        false,
-                    ));
+                    output.push_message(
+                        Message::new("cron.hostUncertain").with("host", id.to_string()),
+                    );
+                    return Ok(Outcome::new("needs-review", output, false));
                 }
             };
-            output.push_str(&format!(
-                "主机 {id} · 退出码 {}\n{}\n{}\n",
-                out.code, out.stdout, out.stderr
-            ));
+            output.push_message(
+                Message::new("cron.hostExit")
+                    .with("host", id.to_string())
+                    .with("code", out.code.to_string()),
+            );
+            output.push_raw(out.stdout);
+            output.push_raw("\n");
+            output.push_raw(out.stderr);
+            output.push_raw("\n");
             if out.code != 0 {
                 return Ok(Outcome::new("failed", output, true));
             }
@@ -838,9 +919,9 @@ async fn once(
         return Ok(Outcome::new("succeeded", output, false));
     }
     if *drain.borrow() {
-        return Ok(Outcome::new(
+        return Ok(Outcome::message(
             "queued",
-            "服务正在关闭，尚未触发下游执行。",
+            Message::new("cron.shutdownQueued"),
             false,
         ));
     }
@@ -853,14 +934,14 @@ async fn once(
         )
         .await
         {
-            Ok(count) => Ok(Outcome::new(
+            Ok(count) => Ok(Outcome::message(
                 "succeeded",
-                format!("市场目录同步完成，共{count}个模板。"),
+                Message::new("cron.marketplaceSynced").with("count", count.to_string()),
                 false,
             )),
-            Err(_) => Ok(Outcome::new(
+            Err(_) => Ok(Outcome::message(
                 "failed",
-                "市场目录同步失败，请查看来源同步结果。",
+                Message::new("cron.marketplaceFailed"),
                 true,
             )),
         };
@@ -875,11 +956,12 @@ async fn once(
         )
         .await?;
         (
-            Id::reference(
-                value["id"]
-                    .as_str()
-                    .ok_or_else(|| ApiError::bad("执行ID缺失。"))?,
-            )?,
+            Id::reference(value["id"].as_str().ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("cron.runIdMissing"),
+                )
+            })?)?,
             "pipeline-runs",
         )
     } else {
@@ -889,11 +971,14 @@ async fn once(
             {
                 Ok(id) => id,
                 Err(error) if error.0.is_client_error() => {
-                    return Ok(Outcome::new(
-                        "failed",
-                        format!("部署请求未入队：{}", error.1),
-                        false,
-                    ));
+                    let mut output =
+                        StoredText::from_message(Message::new("cron.deploymentRejected"));
+                    if let Some(message) = error.2 {
+                        output.push_message(message);
+                    } else {
+                        output.push_raw(error.1);
+                    }
+                    return Ok(Outcome::new("failed", output, false));
                 }
                 Err(error) => return Err(error),
             },
@@ -914,8 +999,13 @@ async fn execute(
     mut stop: watch::Receiver<bool>,
     mut drain: watch::Receiver<bool>,
 ) -> Result<()> {
-    let b: Body = serde_json::from_str(&run.config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
-    let mut output = run.output.clone();
+    let b: Body = serde_json::from_str(&run.config).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("cron.configCorrupt"),
+        )
+    })?;
+    let mut output = StoredText::from_stored(&run.output);
     for attempt in std::cmp::max(run.attempt, 1)..=i64::from(b.max_retries) + 1 {
         runs::Entity::update_many()
             .col_expr(runs::Column::Attempt, Expr::value(attempt))
@@ -924,16 +1014,16 @@ async fn execute(
             .await?;
         let result = match once(&s, &run, &b, &mut stop, &mut drain).await {
             Ok(result) => result,
-            Err(error) => Outcome::new(
+            Err(error) => Outcome::message(
                 "needs-review",
-                format!(
-                    "执行或记录更新中断，结果需核实（HTTP {}）；请检查当前账号权限、目标与配置。",
-                    error.0.as_u16()
-                ),
+                Message::new("cron.executionInterrupted")
+                    .with("status", error.0.as_u16().to_string()),
                 false,
             ),
         };
-        output.push_str(&format!("\n第 {attempt} 次尝试\n{}\n", result.output));
+        output.push_message(Message::new("cron.attempt").with("attempt", attempt.to_string()));
+        output.extend(result.output);
+        output.push_raw("\n");
         if !result.retryable
             || attempt > i64::from(b.max_retries)
             || *stop.borrow()
@@ -947,7 +1037,7 @@ async fn execute(
         runs::Entity::update_many()
             .col_expr(runs::Column::DownstreamId, Expr::value(0i64))
             .col_expr(runs::Column::DownstreamKind, Expr::value(""))
-            .col_expr(runs::Column::Output, Expr::value(output.clone()))
+            .col_expr(runs::Column::Output, Expr::value(output.stored()))
             .filter(runs::Column::Id.eq(run.id))
             .exec(&s.db)
             .await?;
@@ -988,11 +1078,11 @@ pub async fn scheduler(
                 &s,
                 row.id,
                 state,
-                if state == "needs-review" {
-                    "服务重启前执行未完成，远端结果不确定；请先核实，不自动重放或重试。"
+                &StoredText::from_message(Message::new(if state == "needs-review" {
+                    "cron.recoveryUncertain"
                 } else {
-                    "已恢复对既有下游执行的跟踪，没有重复触发。"
-                },
+                    "cron.recoveryTracking"
+                })),
             )
             .await?;
         }
@@ -1054,7 +1144,9 @@ pub async fn scheduler(
                                         &state,
                                         id,
                                         "needs-review",
-                                        "执行记录更新或执行器异常，请核实远端结果。",
+                                        &StoredText::from_message(Message::new(
+                                            "cron.executorFailed",
+                                        )),
                                     )
                                     .await;
                                 }
@@ -1149,14 +1241,19 @@ pub async fn check_pipeline_environments(
             .map(|row| row.config),
     );
     for config in configs {
-        let body: Body =
-            serde_json::from_str(&config).map_err(|_| ApiError::bad("任务配置损坏。"))?;
+        let body: Body = serde_json::from_str(&config).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("cron.configCorrupt"),
+            )
+        })?;
         let environment = Id::reference(&body.environment_id)?;
         if !(environments.contains(&environment)
             || (environments.is_empty() && i64::from(environment) == 0))
         {
-            return Err(ApiError::conflict(
-                "执行环境仍被定时任务引用，请先修改或删除任务。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("cron.environmentReferenced"),
             ));
         }
     }
@@ -1178,8 +1275,9 @@ pub async fn ensure_unreferenced(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict(
-            "目标仍被定时任务引用，请先修改或删除任务。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.targetReferenced"),
         ));
     }
     if runs::Entity::find()
@@ -1191,8 +1289,9 @@ pub async fn ensure_unreferenced(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict(
-            "目标仍被排队/执行中或待核实的定时任务引用。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("cron.targetRunsBusy"),
         ));
     }
     Ok(())
@@ -1201,6 +1300,165 @@ pub async fn ensure_unreferenced(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stored_run_output_keeps_large_logs_and_localizes_skips_and_manual_review_per_reader() {
+        use crate::entities::workspaces;
+        use crate::i18n::{Locale, with_locale};
+        let (dir, db) = crate::lock::tests::database().await;
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, tokio::time::Instant::now().into_std())
+                    .unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "cron-locale-test".into(),
+            server_mode: false,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+            host_monitor: Default::default(),
+            cluster: None,
+        });
+        workspaces::Entity::insert(workspaces::ActiveModel {
+            id: Set(1),
+            slug: Set("cron-locale-test".into()),
+            name: Set("Workspace".into()),
+            owner_id: Set(1),
+            join_code: Set("cron-locale-test".into()),
+            pipeline_run_number: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let user_text = r#"User {name} {"$system_message":{"key":"error.forbidden"}}"#;
+        let job = jobs::Model {
+            id: 2,
+            workspace_id: 1,
+            name: user_text.into(),
+            description: user_text.into(),
+            scope: "host".into(),
+            config: serde_json::to_string(&body("* * * * *", "UTC")).unwrap(),
+            target_kind: "host".into(),
+            target_ref: 3,
+            enabled: 1,
+            run_as: 1,
+            run_as_name: user_text.into(),
+            next_run_at: 0,
+            version: 1,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let id = insert_run(
+            &s,
+            &s.db,
+            &job,
+            1.into(),
+            "scheduled",
+            "skipped",
+            Some(Message::new("cron.skipDowntime")),
+            10,
+        )
+        .await
+        .unwrap();
+        let row = runs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        for locale in Locale::ALL {
+            let view = with_locale(locale, async { run_json(row.clone(), true) }).await;
+            assert_eq!(
+                view["output"],
+                i18n::render(locale, &Message::new("cron.skipDowntime"))
+            );
+            assert_eq!(view["job_name"], user_text);
+        }
+        let header = Message::new("cron.hostExit")
+            .with("host", "3")
+            .with("code", "0");
+        let raw = "x".repeat(1_048_575);
+        let mut output = StoredText::from_message(header.clone());
+        output.push_raw(raw.clone());
+        output.push_raw("界");
+        finish(&s, i64::from(id), "needs-review", &output)
+            .await
+            .unwrap();
+        let before = runs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            before.output.len() > 1_048_576,
+            "encoded metadata is outside the raw log budget"
+        );
+        for locale in Locale::ALL {
+            let view = with_locale(locale, async { run_json(before.clone(), true) }).await;
+            assert_eq!(
+                view["output"],
+                format!(
+                    "{}{}{}",
+                    i18n::render(locale, &header),
+                    raw,
+                    i18n::render(locale, &Message::new("output.truncated"))
+                )
+            );
+        }
+        assert_eq!(
+            runs::Entity::find_by_id(i64::from(id))
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap(),
+            before
+        );
+        let scope = Scope {
+            workspace_id: 1.into(),
+            user: crate::auth::User {
+                id: 1.into(),
+                email: "test@example.invalid".into(),
+                name: user_text.into(),
+                is_superadmin: false,
+            },
+            permissions: ["cron-jobs.run".into()].into_iter().collect(),
+        };
+        let Json(reviewed) = with_locale(
+            Locale::JaJp,
+            acknowledge(
+                State(s.clone()),
+                scope,
+                Path(("1".into(), id)),
+                Json(Review {
+                    version: before.version,
+                    note: user_text.into(),
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reviewed["ok"], true);
+        let after = runs::Entity::find_by_id(i64::from(id))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.state, "failed");
+        assert_eq!(after.version, before.version + 1);
+        for locale in Locale::ALL {
+            let view = with_locale(locale, async { run_json(after.clone(), true) }).await;
+            let output = view["output"].as_str().unwrap();
+            assert!(output.contains(&raw));
+            assert!(output.contains(user_text));
+            assert!(output.contains(&i18n::render(
+                locale,
+                &Message::new("cron.manualNote").with("note", user_text)
+            )));
+        }
+    }
     fn body(schedule: &str, timezone: &str) -> Body {
         Body {
             name: "test".into(),

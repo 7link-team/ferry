@@ -1,21 +1,31 @@
-import { useMemo } from "react";
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
+import { selectDisplay } from "./auto-form";
+import { currentLocale } from "../locale";
+import { useCallback, useMemo } from "react";
 import { Bell, Pencil } from "lucide-react";
 import type { FormConfig, ListConfig } from "./dsl";
 import { ResourceForm } from "./ResourceForm";
 import { ResourceTable } from "./ResourceTable";
-import { patchResource, base } from "../resource";
+import { patchResource, base, listResource, named } from "../resource";
 
 export const repositoryEventOptions = [
-  ["repository.created", "新增仓库"], ["repository.deleted", "删除仓库"],
-  ["branch.created", "新增分支"], ["branch.deleted", "删除分支"],
-  ["push", "代码推送"], ["pull_request", "PR / 合并请求变更"], ["merge", "合并完成"],
-  ["tag.created", "新增标签"], ["tag.deleted", "删除标签"],
-].map(([value, label]) => ({ value: value!, label: label! }));
+  ["repository.created", "repository-monitor.001"], ["repository.deleted", "repository-monitor.002"],
+  ["branch.created", "repository-monitor.003"], ["branch.deleted", "repository-monitor.004"],
+  ["push", "repository-monitor.005"], ["pull_request", "repository-monitor.006"], ["merge", "repository-monitor.007"],
+  ["tag.created", "repository-monitor.008"], ["tag.deleted", "repository-monitor.009"],
+].map(([value, key]) => ({ value: value!, get label() { return hostRepositoryText(key!); } }));
+
+export const gitRepositoryEventOptions = [
+  ...repositoryEventOptions.filter(option => ["push", "branch.created", "branch.deleted", "tag.created", "tag.deleted"].includes(option.value)),
+  { value: "tag.updated", get label() { return hostRepositoryText("repository-monitor.010"); } },
+];
+const eventLabel = (value: unknown) => selectDisplay(value, { options: [...repositoryEventOptions, ...gitRepositoryEventOptions] });
 
 const time = (value: unknown) => {
-  if (typeof value === "number" && value > 0) return new Date(value).toLocaleString();
+  if (value == null || value === "" || value === 0 || value === "0") return "—";
+  if (typeof value === "number" && value > 0) return new Date(value).toLocaleString(currentLocale());
   const parsed = typeof value === "string" && value ? Date.parse(value) : NaN;
-  return Number.isNaN(parsed) ? String(value ?? "") : new Date(parsed).toLocaleString();
+  return Number.isNaN(parsed) ? String(value ?? "") : new Date(parsed).toLocaleString(currentLocale());
 };
 const has = (key: string) => (row: Record<string, unknown>) => row[key] !== undefined && row[key] !== null && row[key] !== "";
 const commitRecord = {
@@ -31,95 +41,118 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
     ({ key, label, type: "text" as const, when: has(key), ...extra });
   return {
     resource: "repository-events", permissionResource: "repositories", width: "full", blank: {}, readOnly: () => true,
-    heading: row => `${repositoryEventOptions.find(option => option.value === row.event)?.label ?? String(row.event ?? "仓库事件")} · ${String(row.repository ?? "")}`,
-    viewActions: [{ label: "返回仓库连接", to: row => ({ group: "build", item: "repositories", mode: "view", id: String(row.connection_id) }), query: () => ({ tab: "events" }) }],
+    heading: row => `${eventLabel(row.event) || hostRepositoryText("repository-monitor.011")} · ${String(row.repository ?? "")}`,
+    viewActions: [{ label: hostRepositoryText("repository-monitor.012"), to: row => ({ group: "build", item: "repositories", mode: "view", id: String(row.connection_id) }), query: () => ({ tab: "events" }) }],
     sections: [
-      { title: "基本信息", fields: [
-        { key: "event", label: "事件", type: "select", options: repositoryEventOptions },
-        text("repository", "仓库"), text("reference", "分支 / 标签"),
-        text("actor", "操作人", { when: has("actor") }),
-        text("action", "动作"),
-        text("created_at", "记录时间", { display: row => time(row.created_at) }),
-        { key: "source", label: "来源", type: "select", options: [{ value: "webhook", label: "事件推送" }, { value: "polling", label: "主动轮询" }], when: has("source") },
-        text("delivery", "通知结果"),
+      { title: hostRepositoryText("repository-monitor.013"), fields: [
+        { key: "event", label: hostRepositoryText("repository-monitor.014"), type: "select", options: [...repositoryEventOptions, { value: "tag.updated", label: hostRepositoryText("repository-monitor.010") }] },
+        text("repository", hostRepositoryText("repository.004")), text("reference", hostRepositoryText("repository-monitor.015")),
+        text("actor", hostRepositoryText("repository-monitor.016"), { when: has("actor") }),
+        text("action", hostRepositoryText("repository-monitor.017")),
+        text("created_at", hostRepositoryText("repository-monitor.018"), { display: row => time(row.created_at) }),
+        { key: "source", label: hostRepositoryText("repository-monitor.019"), type: "select", options: [{ value: "webhook", label: hostRepositoryText("repository-monitor.020") }, { value: "polling", label: hostRepositoryText("repository-monitor.021") }], when: has("source") },
+        text("delivery", hostRepositoryText("repository-monitor.022")),
       ] },
-      { title: "提交", fullWidth: true, fields: [
-        text("total_commits", "提交数"), text("before", "推送前版本"), text("after", "推送后版本"),
-        { key: "forced", label: "强制推送", type: "switch", when: has("forced") },
-        text("compare_url", "对比", { link: true, span: 2 }),
-        { key: "commits", label: "提交列表", type: "records", record: commitRecord, span: 2, when: has("commits") },
-        text("commits_truncated", "说明", { span: 2 }),
-        { key: "head_commit", label: "最新提交", type: "records", record: commitRecord, span: 2, when: has("head_commit") },
+      { title: hostRepositoryText("repository-monitor.023"), fullWidth: true, fields: [
+        text("total_commits", hostRepositoryText("repository-monitor.024")), text("before", hostRepositoryText("repository-monitor.025")), text("after", hostRepositoryText("repository-monitor.026")),
+        { key: "forced", label: hostRepositoryText("repository-monitor.027"), type: "switch", when: has("forced") },
+        text("compare_url", hostRepositoryText("repository-monitor.028"), { link: true, span: 2 }),
+        { key: "commits", label: hostRepositoryText("repository-monitor.029"), type: "records", record: commitRecord, span: 2, when: has("commits") },
+        text("commits_truncated", hostRepositoryText("repository-monitor.030"), { span: 2 }),
+        { key: "head_commit", label: hostRepositoryText("repository-monitor.031"), type: "records", record: commitRecord, span: 2, when: has("head_commit") },
       ] },
-      { title: "合并请求", fullWidth: true, fields: [
-        text("request_number", "编号"), text("request_title", "标题"), text("request_state", "状态"), text("request_branches", "分支"),
-        text("request_author", "作者"), text("request_merged_by", "合并人"), text("request_reviewers", "评审人"), text("request_merge_commit", "合并提交"),
-        text("request_created_at", "创建时间", { display: row => time(row.request_created_at) }),
-        text("request_updated_at", "更新时间", { display: row => time(row.request_updated_at) }),
-        text("request_merged_at", "合并时间", { display: row => time(row.request_merged_at) }),
-        text("request_closed_at", "关闭时间", { display: row => time(row.request_closed_at) }),
-        text("request_url", "链接", { link: true, span: 2 }),
-        { key: "request_description", label: "说明", type: "textarea", span: 2, when: has("request_description") },
+      { title: hostRepositoryText("repository-monitor.032"), fullWidth: true, fields: [
+        text("request_number", hostRepositoryText("repository-monitor.033")), text("request_title", hostRepositoryText("repository-monitor.034")), text("request_state", hostRepositoryText("repository-monitor.035")), text("request_branches", hostRepositoryText("repository-monitor.036")),
+        text("request_author", hostRepositoryText("repository-monitor.037")), text("request_merged_by", hostRepositoryText("repository-monitor.038")), text("request_reviewers", hostRepositoryText("repository-monitor.039")), text("request_merge_commit", hostRepositoryText("repository-monitor.040")),
+        text("request_created_at", hostRepositoryText("repository-monitor.041"), { display: row => time(row.request_created_at) }),
+        text("request_updated_at", hostRepositoryText("repository-monitor.042"), { display: row => time(row.request_updated_at) }),
+        text("request_merged_at", hostRepositoryText("repository-monitor.043"), { display: row => time(row.request_merged_at) }),
+        text("request_closed_at", hostRepositoryText("repository-monitor.044"), { display: row => time(row.request_closed_at) }),
+        text("request_url", hostRepositoryText("repository-monitor.045"), { link: true, span: 2 }),
+        { key: "request_description", label: hostRepositoryText("repository-monitor.030"), type: "textarea", span: 2, when: has("request_description") },
       ] },
-      { title: "标签", fields: [
-        text("tag_target", "指向提交"), text("tagger", "创建人"),
-        { key: "tag_message", label: "标签说明", type: "textarea", span: 2, when: has("tag_message") },
+      { title: hostRepositoryText("repository-monitor.046"), fields: [
+        text("tag_target", hostRepositoryText("repository-monitor.047")), text("tagger", hostRepositoryText("repository-monitor.048")),
+        { key: "tag_message", label: hostRepositoryText("repository-monitor.049"), type: "textarea", span: 2, when: has("tag_message") },
       ] },
-      { title: "仓库信息", fields: [
-        text("repository_visibility", "可见性"), text("repository_default_branch", "默认分支"),
-        text("repository_url", "地址", { link: true, span: 2 }),
-        { key: "repository_description", label: "描述", type: "textarea", span: 2, when: has("repository_description") },
+      { title: hostRepositoryText("repository-monitor.050"), fields: [
+        text("repository_visibility", hostRepositoryText("repository-monitor.051")), text("repository_default_branch", hostRepositoryText("repository-monitor.052")),
+        text("repository_url", hostRepositoryText("repository-monitor.053"), { link: true, span: 2 }),
+        { key: "repository_description", label: hostRepositoryText("repository-monitor.054"), type: "textarea", span: 2, when: has("repository_description") },
       ] },
-      { title: "说明", fullWidth: true, fields: [{ key: "note", label: "说明", type: "textarea", span: 2, when: has("note") }] },
+      { title: hostRepositoryText("repository-monitor.030"), fullWidth: true, fields: [{ key: "note", label: hostRepositoryText("repository-monitor.030"), type: "textarea", span: 2, when: has("note") }] },
     ],
   };
 }
 
-export function RepositoryMonitor({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
+export function RepositoryMonitor({ workspace, connectionId, permissions, provider }: { workspace: string; connectionId: string; permissions: Set<string>; provider?: string | undefined }) {
+  const { i18n } = useCommonTranslation();
+  const canSelectRunner = permissions.has("hosts.read") && permissions.has("hosts.terminal");
+  const runnerOptions = useCallback(async () => {
+    const options: { value: string; label: string }[] = [];
+    if (!canSelectRunner) return options;
+    for (let page = 1; ; page++) {
+      const result = await listResource<{ id: string; name: string; connection: string }>(workspace, "nodes", { page, page_size: 100 });
+      options.push(...result.items.filter(node => node.connection === "runner").map(node => ({ value: node.id, label: node.name })));
+      if (!result.items.length || page * 100 >= result.total) break;
+    }
+    return options;
+  }, [workspace, canSelectRunner]);
   const form = useMemo<FormConfig<Record<string, unknown>>>(() => ({
-    resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => "事件订阅", readOnly: () => true,
+    resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => hostRepositoryText("repository-monitor.055"), readOnly: () => true,
     pollMs: row => row.enabled && row.mode === "poll" ? 15000 : 0,
-    sections: [{ title: "订阅配置", fullWidth: true, fields: [
-      { key: "mode", label: "监控类型", type: "select", options: [{ value: "push", label: "事件推送" }, { value: "poll", label: "主动轮询" }] },
-      { key: "poll_interval_minutes", label: "轮询间隔（分钟）", type: "number", when: row => row.mode === "poll" },
-      { key: "poll_status", label: "轮询状态", type: "text", when: row => row.mode === "poll" },
-      { key: "last_poll_error", label: "检查错误", type: "text", when: row => row.mode === "poll" && !!row.last_poll_error, span: 2 },
-      { key: "enabled", label: "启用监控", type: "switch" },
-      { key: "all_repositories", label: "全部仓库", type: "switch" },
-      { key: "repositories", label: "指定仓库", type: "textarea", when: row => !row.all_repositories },
-      { key: "events", label: "订阅事件", type: "multiselect", options: repositoryEventOptions, span: 2 },
-      { key: "capability_note", label: "平台支持范围", type: "text", span: 2 },
-      { key: "callback_path", when: row => row.mode !== "poll", label: "平台事件接收地址", type: "text", span: 2, help: `在代码平台填写可公开访问的服务地址加此路径。当前地址：${location.origin}。127.0.0.1 无法被云平台访问。` },
-      { key: "secret", label: "Webhook 验证密钥", type: "secret", stored: "has_secret", when: row => row.mode !== "poll" },
-      { key: "webhook", label: "通知 Webhook", type: "secret", stored: "has_webhook" },
-      { key: "provider_changed", label: "连接平台已变更，需要重新保存监控配置", type: "switch", when: row => !!row.provider_changed },
+    sections: [{ title: hostRepositoryText("repository-monitor.056"), fullWidth: true, fields: [
+      { key: "mode", label: hostRepositoryText("repository-monitor.057"), type: "select", options: [{ value: "push", label: hostRepositoryText("repository-monitor.020") }, { value: "poll", label: hostRepositoryText("repository-monitor.021") }] },
+      { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", when: row => row.mode === "poll" },
+      { key: "poll_status", label: hostRepositoryText("repository-monitor.059"), type: "text", when: row => row.mode === "poll" },
+      { key: "last_poll_error", label: hostRepositoryText("repository-monitor.060"), type: "text", when: row => row.mode === "poll" && !!row.last_poll_error, span: 2 },
+      { key: "enabled", label: hostRepositoryText("repository-monitor.061"), type: "switch" },
+      { key: "runner_id", label: hostRepositoryText("repository-monitor.062"), type: "text", when: row => row.provider === "git", display: row => named(typeof row.runner_name === "string" ? row.runner_name : undefined, String(row.runner_id ?? "")), help: canSelectRunner ? hostRepositoryText("repository-monitor.063") : hostRepositoryText("repository-monitor.064") },
+      { key: "all_repositories", label: hostRepositoryText("repository-monitor.065"), type: "switch", when: row => row.provider !== "git" },
+      { key: "repositories", label: hostRepositoryText("repository-monitor.066"), type: "textarea", when: row => !row.all_repositories },
+      { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions, when: row => row.provider !== "git", span: 2 },
+      { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: gitRepositoryEventOptions, when: row => row.provider === "git", span: 2 },
+      { key: "capability_note", label: hostRepositoryText("repository-monitor.068"), type: "text", span: 2 },
+      { key: "callback_path", when: row => row.provider !== "git" && row.mode !== "poll", label: hostRepositoryText("repository-monitor.069"), type: "text", span: 2, help: hostRepositoryText("repository-monitor.070", { origin: location.origin }) },
+      { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "secret", stored: "has_secret", when: row => row.provider !== "git" && row.mode !== "poll" },
+      { key: "webhook", label: hostRepositoryText("repository-monitor.072"), type: "secret", stored: "has_webhook" },
+      { key: "provider_changed", label: hostRepositoryText("repository-monitor.073"), type: "switch", when: row => !!row.provider_changed },
     ] }],
     viewActions: [{
-      label: "修改订阅配置", section: "订阅配置", iconOnly: true, icon: <Pencil className="size-4" />, permission: "repositories.update",
-      when: row => row.provider !== "git",
-      description: "保存后生效。轮询复用当前连接凭据；首次检查仅建立基线，修改配置后重新建立基线。密钥和通知地址留空保留原值。",
-      initialValues: row => ({ enabled: row.enabled, mode: row.mode ?? "push", poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.all_repositories, repositories: row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository.")) : [] }),
-      parameters: row => [
-        { key: "mode", label: "监控类型", type: "select", required: true, options: [{ value: "push", label: "事件推送" }, { value: "poll", label: "主动轮询" }], resetOnChange: ["events"], help: "切换类型后请重新选择事件。事件推送由代码平台回调；主动轮询由服务定时查询。" },
-        { key: "poll_interval_minutes", label: "轮询间隔（分钟）", type: "number", min: 1, required: true, when: value => value.mode === "poll", help: "最短 1 分钟。连接需具备所选仓库、分支、标签及合并请求的读取权限。" },
-        { key: "enabled", label: "启用监控", type: "switch" },
-        { key: "all_repositories", label: "全部仓库", type: "switch" },
-        { key: "repositories", label: "指定仓库路径", type: "textarea", when: value => !value.all_repositories, required: true, help: "从仓库列表复制完整路径，每行一个，例如 team/project。精确匹配，支持多级命名空间。" },
-        { key: "events", label: "订阅事件", type: "multiselect", options: repositoryEventOptions.filter(option => row.provider !== "codeup" || !option.value.startsWith("repository.")), required: true, when: value => value.mode !== "poll" },
-        { key: "events", label: "订阅事件", type: "multiselect", options: repositoryEventOptions, required: true, when: value => value.mode === "poll" },
-        { key: "secret", label: "Webhook 验证密钥", type: "password", when: value => value.mode !== "poll", required: !row.has_secret, help: "16–256 位 ASCII 字符。在代码平台 Webhook 中填写同一密钥；更换后旧密钥立即失效。" },
-        { key: "webhook", label: "通知 Webhook 地址", type: "password", help: "可选。HTTP(S) JSON 接收地址；每个事件投递一次，失败记录原因且不重试。留空时仍记录事件。" },
-        { key: "clear_webhook", label: "清除已保存的通知地址", type: "switch", when: () => !!row.has_webhook },
+      label: hostRepositoryText("repository-monitor.074"), section: hostRepositoryText("repository-monitor.056"), iconOnly: true, icon: <Pencil className="size-4" />, permission: "repositories.update",
+      when: row => row.provider !== "git" || canSelectRunner,
+      description: hostRepositoryText("repository-monitor.075"),
+      initialValues: row => ({ enabled: row.enabled, mode: row.provider === "git" ? "poll" : row.mode ?? "push", ...(row.provider === "git" ? { runner_id: row.runner_id ?? "" } : {}), poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.provider === "git" ? false : row.all_repositories, repositories: Array.isArray(row.repositories) ? row.repositories.join("\n") : row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => ![...repositoryEventOptions, ...gitRepositoryEventOptions].some(option => option.value === event) || (row.provider === "git" ? gitRepositoryEventOptions.some(option => option.value === event) : row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository."))) : [] }),
+      parameters: row => row.provider === "git" ? [
+        { key: "runner_id", label: hostRepositoryText("repository-monitor.062"), type: "select", required: true, options: runnerOptions, help: hostRepositoryText("repository-monitor.076") },
+        { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", min: 1, required: true, help: hostRepositoryText("repository-monitor.077") },
+        { key: "enabled", label: hostRepositoryText("repository-monitor.061"), type: "switch" },
+        { key: "repositories", label: hostRepositoryText("repository-monitor.078"), type: "textarea", required: true, help: hostRepositoryText("repository-monitor.079") },
+        { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: gitRepositoryEventOptions, required: true },
+        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "password", help: hostRepositoryText("repository-monitor.081") },
+        { key: "clear_webhook", label: hostRepositoryText("repository-monitor.082"), type: "switch", when: () => !!row.has_webhook },
+      ] : [
+        { key: "mode", label: hostRepositoryText("repository-monitor.057"), type: "select", required: true, options: [{ value: "push", label: hostRepositoryText("repository-monitor.020") }, { value: "poll", label: hostRepositoryText("repository-monitor.021") }], resetOnChange: ["events"], help: hostRepositoryText("repository-monitor.083") },
+        { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", min: 1, required: true, when: value => value.mode === "poll", help: hostRepositoryText("repository-monitor.084") },
+        { key: "enabled", label: hostRepositoryText("repository-monitor.061"), type: "switch" },
+        { key: "all_repositories", label: hostRepositoryText("repository-monitor.065"), type: "switch" },
+        { key: "repositories", label: hostRepositoryText("repository-monitor.085"), type: "textarea", when: value => !value.all_repositories, required: true, help: hostRepositoryText("repository-monitor.086") },
+        { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions.filter(option => row.provider !== "codeup" || !option.value.startsWith("repository.")), required: true, when: value => value.mode !== "poll" },
+        { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions, required: true, when: value => value.mode === "poll" },
+        { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "password", when: value => value.mode !== "poll", required: !row.has_secret, help: hostRepositoryText("repository-monitor.087") },
+        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "password", help: hostRepositoryText("repository-monitor.088") },
+        { key: "clear_webhook", label: hostRepositoryText("repository-monitor.082"), type: "switch", when: () => !!row.has_webhook },
       ],
-      action: async (row, values) => { await patchResource(workspace, "code-connection-monitors", connectionId, { ...values, version: row.version }); },
+      action: async (row, values) => { await patchResource(workspace, "code-connection-monitors", connectionId, { ...values, ...(row.provider === "git" ? { mode: "poll", all_repositories: false } : {}), version: row.version }); },
     }],
-  }), [workspace, connectionId]);
+  }), [workspace, connectionId, canSelectRunner, runnerOptions, i18n.resolvedLanguage]);
   return <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto">
     <div className="rounded-lg border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground">
-      <p className="flex items-center gap-2 font-medium text-foreground"><Bell className="size-4" />监控仓库变化，通知到你的 Webhook</p>
-      <p>主动轮询：最短每分钟检查一次，无需公开回调地址或事件密钥。首次检查建立基线；失败时保留上次基线。两次检查之间发生又撤销的变化无法检测，仓库不可见也可能由权限变化引起。</p>
-      <p>在代码平台创建 JSON Webhook，填写本页接收地址和事件密钥，并勾选对应事件。新增、删除仓库需要组织级或系统级 Webhook；仅配置单仓库 Webhook 无法覆盖新仓库。</p>
-      <p>GitHub 使用 SHA256 签名；Gitea 使用 X-Gitea-Signature；GitLab 使用 Secret Token。Codeup 使用 X-Codeup-Token，Gitee 使用密码模式的 X-Gitee-Token。平台未提供的事件不会由本服务推断或补造。</p>
+      <p className="flex items-center gap-2 font-medium text-foreground"><Bell className="size-4" />{hostRepositoryText("repository-monitor.089")}</p>
+      {provider === "git" && !canSelectRunner && <p>{hostRepositoryText("repository-monitor.064")}</p>}
+      <p>{hostRepositoryText("repository-monitor.090")}</p>
+      {provider !== "git" && <><p>{hostRepositoryText("repository-monitor.091")}</p>
+      <p>{hostRepositoryText("repository-monitor.092")}</p></>}
     </div>
     <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />
 
@@ -130,23 +163,24 @@ export function RepositoryMonitor({ workspace, connectionId, permissions }: { wo
  * Repository event list: one connection's history, or (without a connection)
  * every connection the user owns in the workspace, with its connection name.
  */
-export function repositoryEventList(workspace: string, connectionId?: string): ListConfig<Record<string, unknown>> {
+export function repositoryEventList(workspace: string, connectionId?: string, provider?: string): ListConfig<Record<string, unknown>> {
   return {
     resource: "repository-events", permissionResource: "repositories", rowKey: row => String(row.id), defaultRefresh: 15,
     ...(connectionId ? { endpoint: `${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}/events` } : {}),
-    filters: [{ key: "q", label: "仓库 / 分支 / 操作人", type: "text" }, { key: "event", label: "事件", type: "select", options: repositoryEventOptions }],
+    filters: [{ key: "q", label: hostRepositoryText("repository-monitor.093"), type: "text" }, { key: "event", label: hostRepositoryText("repository-monitor.014"), type: "select", options: provider === "git" ? gitRepositoryEventOptions : repositoryEventOptions }],
     columns: [
-      { key: "created_at", label: "记录时间", sortable: true, render: row => new Date(Number(row.created_at)).toLocaleString() },
-      ...(connectionId ? [] : [{ key: "connection_name", label: "仓库连接" }]),
-      { key: "repository", label: "仓库", sortable: true },
-      { key: "event", label: "事件", render: row => repositoryEventOptions.find(option => option.value === row.event)?.label ?? String(row.event) },
-      { key: "reference", label: "分支 / 标签" }, { key: "summary", label: "摘要" }, { key: "actor", label: "操作人" }, { key: "action", label: "动作" }, { key: "delivery", label: "通知结果" },
-    ], actions: [{ label: "查看", to: row => ({ group: "build", item: "repository-events", mode: "view", id: String(row.id) }) }],
-    toolbar: { create: false, import: false, export: false }, empty: "尚无匹配事件。事件推送需配置平台 Webhook；主动轮询首次检查仅建立基线。",
+      { key: "created_at", label: hostRepositoryText("repository-monitor.018"), sortable: true, render: row => time(row.created_at) },
+      ...(connectionId ? [] : [{ key: "connection_name", label: hostRepositoryText("repository.002") }]),
+      { key: "repository", label: hostRepositoryText("repository.004"), sortable: true },
+      { key: "event", label: hostRepositoryText("repository-monitor.014"), render: row => eventLabel(row.event) },
+      { key: "reference", label: hostRepositoryText("repository-monitor.015") }, { key: "summary", label: hostRepositoryText("repository-monitor.094") }, { key: "actor", label: hostRepositoryText("repository-monitor.016") }, { key: "action", label: hostRepositoryText("repository-monitor.017") }, { key: "delivery", label: hostRepositoryText("repository-monitor.022") },
+    ], actions: [{ label: hostRepositoryText("repository-monitor.095"), to: row => ({ group: "build", item: "repository-events", mode: "view", id: String(row.id) }) }],
+    toolbar: { create: false, import: false, export: false }, empty: provider === "git" ? hostRepositoryText("repository-monitor.096") : hostRepositoryText("repository-monitor.097"),
   };
 }
 
-export function RepositoryEventHistory({ workspace, connectionId, permissions }: { workspace: string; connectionId: string; permissions: Set<string> }) {
-  const events = useMemo(() => repositoryEventList(workspace, connectionId), [workspace, connectionId]);
-  return <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label="仓库事件记录"><h3 className="text-base font-semibold">事件记录</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>;
+export function RepositoryEventHistory({ workspace, connectionId, permissions, provider }: { workspace: string; connectionId: string; permissions: Set<string>; provider?: string | undefined }) {
+  const { i18n } = useCommonTranslation();
+  const events = useMemo(() => repositoryEventList(workspace, connectionId, provider), [workspace, connectionId, provider, i18n.resolvedLanguage]);
+  return <section className="flex min-h-80 flex-1 flex-col gap-3" aria-label={hostRepositoryText("repository-monitor.098")}><h3 className="text-base font-semibold">{hostRepositoryText("repository-monitor.099")}</h3><ResourceTable config={events} workspace={workspace} permissions={permissions} /></section>;
 }

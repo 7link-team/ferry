@@ -1,17 +1,38 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { PipelineRepository } from "./PipelineRepository";
+import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
+import { named } from "../resource";
+import { i18n } from "../i18n";
 let root:Root, host:HTMLDivElement, saved:Record<string,unknown>;
+it('shows an empty optional repository and retains unresolved legacy bindings by ID',async()=>{
+ const props={workspace:'ops',options:[],onChange:vi.fn(),onValidityChange:vi.fn()};
+ await act(async()=>root.render(<MarketplaceRepository {...props} draft={{repository_id:'0'}} readOnly/>));
+ expect(host.textContent).toBe('—');
+ await act(async()=>root.render(<MarketplaceRepository {...props} draft={{repository_id:'missing'}} readOnly={false}/>));
+ expect((host.querySelector('[aria-label="仓库来源"]') as HTMLSelectElement).value).toBe('legacy');
+ const repository=host.querySelector('[aria-label="外部仓库"]') as HTMLSelectElement;
+ expect(repository.value).toBe('missing');
+ expect(repository.selectedOptions[0]?.textContent).toBe(named(undefined,'missing'));
+ expect(props.onChange).not.toHaveBeenCalled();
+});
+it('shows a zero connection as an empty selection without changing its stored value',async()=>{
+ await act(async()=>root.render(<MarketplaceRepository workspace="ops" draft={{repository_selection:{connection_id:'0',url:''}}} readOnly={false} onChange={vi.fn()} onValidityChange={()=>{}}/>));
+ const connection=host.querySelector('[aria-label="仓库连接"]') as HTMLSelectElement;
+ expect(connection.value).toBe('');
+ expect([...connection.options].some(option=>option.value==='0')).toBe(false);
+ expect(connection.textContent).toContain('GitLab');
+});
 const definition = 'jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - uses: actions/checkout@v4\n      - run: cat proof.txt\n';
 function Harness(){const [draft,setDraft]=useState<Record<string,unknown>>({definition,definition_format:"github-actions",checkout_bindings:[]});saved=draft;return <PipelineRepository workspace="ops" draft={draft} jobId="build" stepIndex={0} readOnly={false} onChange={patch=>setDraft(value=>({...value,...patch}))} onValidityChange={()=>{}}/>;}
 beforeEach(async()=>{
+ await i18n.changeLanguage('zh-CN');
  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
  vi.stubGlobal('fetch',vi.fn(async(url:string)=>({ok:true,status:200,json:async()=>url.includes('/branches?')?{items:[{name:'feature/node-source'}]}:url.includes('/repositories?')?{items:[{name:'repo',full_name:'team/repo',url:'https://git.example/team/repo.git',default_branch:'main'}],has_more:false}: {items:[{id:'c1',name:'My GitLab',provider:'gitlab',state:'connected'}],total:1,page:1,page_size:200}})));
  await act(async()=>root.render(<Harness/>));
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();await i18n.changeLanguage('en-US');});
 async function select(label:string,value:string){const node=host.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;expect(node).not.toBeNull();await act(async()=>{node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));});}
 it('binds a visible repository and non-default branch to the checkout step, not pipeline globals',async()=>{
  await select('仓库连接','c1');await select('节点仓库','https://git.example/team/repo.git');

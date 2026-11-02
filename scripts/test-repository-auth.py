@@ -143,14 +143,14 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         env[prefix+'_CLIENT_SECRET']='fixture-client-secret'
         env[prefix+'_BASE_URL']=api_base;env[prefix+'_API_URL']=api_base
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
-    def request(c, path, body=None, method=None, expected=200):
+    def request(c, path, body=None, method=None, expected=200, language='zh-CN', return_locale='zh-CN'):
         req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': language})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
         if path.startswith("/repository-providers/callback"):assert response.headers["Referrer-Policy"]=="no-referrer"
         if path.startswith('/repository-providers/callback') and response.code == 303:
-            assert urlparse(response.headers['Location']).path == f'/workspaces/{workspace_tenant}/code-connections/new'
+            assert urlparse(response.headers['Location']).path == f'/{return_locale}/workspaces/{workspace_tenant}/code-connections/new'
         raw = response.read()
         try: value = json.loads(raw) if raw else None
         except ValueError: raise AssertionError((path, response.code, raw))
@@ -434,12 +434,16 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(owner,root+'/credentials/'+shared,method='DELETE',expected=204)
         request(owner,root+'/credentials/'+wrong,method='DELETE',expected=204)
         def status(provider):return next(r for r in request(owner,root+'/repository-providers')['items'] if r['id']==provider)
-        def authorize(provider,options=None):
-            url=request(owner,root+'/repository-providers/'+provider+'/authorizations'+('?'+urlencode(options) if options else ''),{})['url']
+        def authorize(provider,options=None,language='zh-CN'):
+            url=request(owner,root+'/repository-providers/'+provider+'/authorizations'+('?'+urlencode(options) if options else ''),{},language=language)['url']
             try:owner.open(url)
             except urllib.error.HTTPError as response:
                 assert response.code==302;return response.headers['Location'][len(base):]
             raise AssertionError('provider did not redirect')
+        locale_callback=authorize('github',language='ja-JP')
+        locale_cancel=locale_callback.split('?')[0]+'?'+urlencode({'state':parse_qs(urlparse(locale_callback).query)['state'][0],'error':'access_denied'})
+        request(owner,locale_cancel,expected=303,language='en-US',return_locale='ja-JP')
+        check(True,'OAuth cancellation restores initiating Japanese locale independently of callback header')
         request(guest,root+'/repository-providers/github/authorizations',{},expected=403)
         role=request(owner,root+'/roles',{'name':'Authorize only','permissions':['credentials.create']})['id']
         member=request(owner,root+'/members?q=guest')['items'][0]

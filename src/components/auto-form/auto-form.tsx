@@ -1,7 +1,9 @@
+import { commonText, useCommonTranslation } from "../../i18n";
 /** Adapted from 7link-mall-web AutoForm: configuration, conditional fields, renderer extension and shared layout. */
 import {
   createContext,
   useContext,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -66,6 +68,7 @@ export function AutoField({
   className?: string | undefined;
   hideLabel?: boolean;
 } & Omit<ComponentProps<"div">, "children">) {
+  useCommonTranslation();
   const id = useId();
   const errors = useContext(Errors);
   const error = ownError ?? errors[name ?? id];
@@ -171,6 +174,7 @@ export function AutoFields({
   columns?: 1 | 2;
   className?: string | undefined;
 }) {
+  useCommonTranslation();
   const errors = useContext(Errors);
   return (
     <div
@@ -260,6 +264,16 @@ export function AutoFields({
   );
 }
 
+/** Resolve presentation only. Never rewrite the draft's persisted selection. */
+export function selectDisplay(value: unknown, config: NonNullable<FieldConfig["config"]>): string {
+  const text = String(value ?? "");
+  const option = config.options?.find(option => option.value === text);
+  if (option) return option.label;
+  if (!text || config.emptyValues?.some(empty => String(empty) === text))
+    return config.emptyLabel ?? commonText("common.notSet");
+  return commonText("form.unavailableOption", { value: text });
+}
+
 export function FieldControl({
   name,
   field,
@@ -277,6 +291,7 @@ export function FieldControl({
   readonly?: boolean;
   onChange: (value: unknown) => void;
 }) {
+  useCommonTranslation();
   const config = field.config ?? {};
   const text = String(value ?? "");
   if (readonly)
@@ -290,16 +305,16 @@ export function FieldControl({
       >
         {field.type === "password"
           ? value
-            ? "已设置"
-            : "未设置"
+            ? commonText("common.set")
+            : commonText("common.notSet")
           : field.type === "switch"
             ? value
-              ? "是"
-              : "否"
+              ? commonText("common.yes")
+              : commonText("common.no")
+            : field.type === "multi-select"
+              ? Array.isArray(value) && value.length ? value.map(item => selectDisplay(item, config)).join(", ") : commonText("common.notSet")
             : field.type === "select"
-              ? (config.options?.find((option) => option.value === text)
-                  ?.label ??
-                (text || "—"))
+              ? selectDisplay(value, config)
               : text || "—"}
       </p>
     );
@@ -316,7 +331,7 @@ export function FieldControl({
     return (
       <Select
         name={name}
-        value={text}
+        value={config.options?.some(option => option.value === text) ? text || "__auto_empty__" : config.emptyValues?.some(empty => String(empty) === text) ? "" : text}
         required={required}
         disabled={disabled}
         onValueChange={(value) =>
@@ -326,15 +341,18 @@ export function FieldControl({
         <SelectTrigger className="w-full">
           <SelectValue
             placeholder={
-              config.placeholder ??
+              config.placeholder ?? config.emptyLabel ??
               config.options?.find((option) => option.value === "")?.label ??
-              "请选择"
+              commonText("common.select")
             }
           />
         </SelectTrigger>
         <SelectContent>
-          {text && !config.options?.some((option) => option.value === text) && (
-            <SelectItem value={text}>{text}</SelectItem>
+          {text && !config.options?.some((option) => option.value === text) && !config.emptyValues?.some(empty => String(empty) === text) && (
+            <SelectItem value={text} disabled>{selectDisplay(value, config)}</SelectItem>
+          )}
+          {!required && !config.options?.some(option => option.value === "") && (
+            <SelectItem value="__auto_empty__">{config.emptyLabel ?? commonText("common.notSet")}</SelectItem>
           )}
           {config.options?.map((option) => (
             <SelectItem
@@ -363,6 +381,9 @@ export function FieldControl({
           )
         }
       >
+        {Array.isArray(value) && value.map(String).filter(item => !config.options?.some(option => option.value === item)).map(item => (
+          <option key={item} value={item}>{selectDisplay(item, config)}</option>
+        ))}
         {config.options?.map((option) => (
           <option
             key={option.value}
@@ -422,6 +443,25 @@ export function FieldControl({
   );
 }
 
+
+/** Browser validity messages follow the browser UI language, so render our own. */
+function controlError(control: HTMLInputElement): string {
+  const frame = control.closest<HTMLElement>("[data-auto-field]");
+  const name = frame?.querySelector("[data-auto-label]")?.textContent?.replace(/\*$/, "").trim()
+    || control.getAttribute("aria-label") || control.name || commonText("common.thisField");
+  const validity = control.validity;
+  if (validity.customError) return control.validationMessage;
+  if (validity.valueMissing) return commonText("form.required", { name });
+  if (validity.typeMismatch) return commonText(control.type === "email" ? "form.email" : "form.url", { name });
+  if (validity.badInput) return commonText("form.number", { name });
+  if (validity.rangeUnderflow) return commonText("form.minimum", { name, value: control.min });
+  if (validity.rangeOverflow) return commonText("form.maximum", { name, value: control.max });
+  if (validity.tooShort) return commonText("form.minLength", { name, value: control.minLength });
+  if (validity.tooLong) return commonText("form.maxLength", { name, value: control.maxLength });
+  if (validity.patternMismatch) return commonText("form.pattern", { name });
+  return commonText("form.invalid", { name });
+}
+
 /** Accepts configuration or composed children, so rich editors share validation and form behavior. */
 export function AutoForm({
   fields,
@@ -438,6 +478,7 @@ export function AutoForm({
   className,
   ...props
 }: AutoFormProps) {
+  const { i18n: translations } = useCommonTranslation();
   const [local, setLocal] = useState<FormValues>(() =>
     Object.fromEntries(
       Object.entries(fields ?? {})
@@ -454,6 +495,14 @@ export function AutoForm({
   );
   const values = controlled ?? local;
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const generatedErrors = useRef<Record<string, () => string>>({});
+  const currentFields = useRef(fields);
+  currentFields.current = fields;
+  useEffect(() => {
+    // Labels in composed fields have committed their translated DOM by now.
+    setErrors(previous => Object.keys(previous).length ? { ...previous } : previous);
+  }, [translations.language]);
+  const renderedErrors = Object.fromEntries(Object.entries(errors).map(([key, message]) => [key, generatedErrors.current[key]?.() ?? message]));
   const [submitError, setSubmitError] = useState("");
   const summary = useRef<HTMLDivElement>(null);
   const submitting = useRef(false);
@@ -463,7 +512,7 @@ export function AutoForm({
     setErrors({});
   };
   return (
-    <Errors.Provider value={errors}>
+    <Errors.Provider value={renderedErrors}>
       <form
         {...props}
         className={className}
@@ -490,6 +539,7 @@ export function AutoForm({
           setSubmitError("");
           try {
             const nextErrors: Record<string, string> = {};
+            generatedErrors.current = {};
             const nativeInvalid = [...form.elements].filter(
               (control): control is HTMLInputElement =>
                 "validity" in control &&
@@ -501,15 +551,9 @@ export function AutoForm({
                 frame?.dataset.autoField ||
                 control.name ||
                 control.id ||
-                "字段";
-              const label =
-                frame
-                  ?.querySelector("[data-auto-label]")
-                  ?.textContent?.replace(/\*$/, "") ||
-                control.getAttribute("aria-label") ||
-                control.name ||
-                "此项";
-              nextErrors[key] = `${label}：${control.validationMessage}`;
+                commonText("common.field");
+              generatedErrors.current[key] = () => controlError(control);
+              nextErrors[key] = controlError(control);
             }
             for (const [key, field] of Object.entries(fields ?? {})) {
               if (!isVisible(field, values) || field.type === "title") continue;
@@ -519,12 +563,17 @@ export function AutoForm({
                 (value == null ||
                   value === "" ||
                   (Array.isArray(value) && !value.length))
-              )
-                nextErrors[key] =
-                  `请填写${typeof field.name === "string" ? field.name : "此项"}。`;
+              ) {
+                generatedErrors.current[key] = () => {
+                  const name = currentFields.current?.[key]?.name;
+                  return commonText("form.required", { name: typeof name === "string" ? name : commonText("common.thisField") });
+                };
+                nextErrors[key] = generatedErrors.current[key]!();
+              }
               for (const rule of field.config?.rules ?? []) {
                 const message = await rule(value, values);
                 if (message) {
+                  delete generatedErrors.current[key];
                   nextErrors[key] = message;
                   break;
                 }
@@ -556,7 +605,7 @@ export function AutoForm({
             if (onError) onError(error);
             else
               setSubmitError(
-                error instanceof Error ? error.message : "操作失败，请重试。",
+                error instanceof Error ? error.message : commonText("form.operationFailed"),
               );
           } finally {
             submitting.current = false;
@@ -578,9 +627,9 @@ export function AutoForm({
             role="alert"
             className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
           >
-            <p className="font-medium">请检查以下内容</p>
+            <p className="font-medium">{commonText("form.validationTitle")}</p>
             <ul className="mt-1 space-y-1">
-              {Object.entries(errors).map(([key, message]) => (
+              {Object.entries(renderedErrors).map(([key, message]) => (
                 <li key={key}>
                   <button
                     type="button"

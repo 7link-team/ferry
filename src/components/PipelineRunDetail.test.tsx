@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PipelineRunDetail } from "./PipelineRunDetail";
 import { stateBadge } from "../pipeline";
+import { i18n } from "../i18n";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -25,6 +26,8 @@ const mount = async (permissions = new Set<string>()) => {
   await act(async () => { root.render(<PipelineRunDetail workspace="ops" runId="1" permissions={permissions} />); });
 };
 beforeEach(() => {
+  localStorage.setItem("ui.locale", "zh-CN");
+  void i18n.changeLanguage("zh-CN");
   vi.useFakeTimers();
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   Object.defineProperty(document, "hidden", { configurable: true, value: false });

@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react";
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
+import { lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, Columns2, FolderOpen, Plus, Rows2, SquareTerminal, X } from "lucide-react";
 import { api, errorText } from "../api";
 import { href } from "../router";
@@ -14,7 +15,7 @@ const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ defau
 type Kind = "terminal" | "files";
 type Pane = { id: string; kind: Kind; opened: Kind[]; directory?: string };
 type Node = Pane | { id: string; axis: "horizontal" | "vertical"; children: [Node, Node] };
-type WorkspaceTab = { id: string; root: Node; activePane: string; label: string };
+type WorkspaceTab = { id: string; root: Node; activePane: string; labelKind: Kind; number: number };
 let nextId = 0;
 const id = () => `pane-${++nextId}`;
 const pane = (kind: Kind, directory?: string): Pane => ({ id: id(), kind, opened: [kind], ...(directory ? { directory } : {}) });
@@ -39,17 +40,19 @@ function arrange(node: Node, rect: Rect = { left: 0, top: 0, width: 100, height:
   })];
 }
 
-export function HostWorkspace({ workspace, hostId, permissions }: { workspace: string; hostId: string; permissions: Set<string> }) {
+export function HostWorkspace({ workspace, hostId, permissions, headerActions }: { workspace: string; hostId: string; permissions: Set<string>; headerActions?: ReactNode }) {
+  useCommonTranslation();
   const canTerminal = permissions.has("hosts.terminal");
   const canFiles = permissions.has("hosts.files");
   const initialKind: Kind = new URLSearchParams(location.search).get("tool") === "files" && canFiles ? "files" : canTerminal ? "terminal" : "files";
   const initialDirectory = new URLSearchParams(location.search).get("directory") ?? undefined;
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => {
     const root = pane(initialKind, initialDirectory);
-    return [{ id: id(), root, activePane: root.id, label: initialKind === "terminal" ? "终端 1" : "文件 1" }];
+    return [{ id: id(), root, activePane: root.id, labelKind: initialKind, number: 1 }];
   });
   const [activeTab, setActiveTab] = useState(tabs[0]!.id);
-  const [hostName, setHostName] = useState("主机工作台");
+  const [hostName, setHostName] = useState("");
+  const tabLabel = (tab: WorkspaceTab) => `${hostRepositoryText(tab.labelKind === "terminal" ? "host.071" : "host.072")} ${tab.number}`;
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -62,7 +65,7 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
 
   const addTab = (kind: Kind, directory?: string) => {
     const root = pane(kind, directory);
-    const tab = { id: id(), root, activePane: root.id, label: `${kind === "terminal" ? "终端" : "文件"} ${tabs.filter(item => firstPane(item.root).kind === kind).length + 1}` };
+    const tab = { id: id(), root, activePane: root.id, labelKind: kind, number: tabs.filter(item => firstPane(item.root).kind === kind).length + 1 };
     setTabs(current => [...current, tab]);
     setActiveTab(tab.id);
   };
@@ -79,7 +82,7 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
     const remaining = tabs.filter(tab => tab.id !== target);
     if (!remaining.length) {
       const root = pane(canTerminal ? "terminal" : "files");
-      const replacement = { id: id(), root, activePane: root.id, label: canTerminal ? "终端 1" : "文件 1" };
+      const replacement = { id: id(), root, activePane: root.id, labelKind: (canTerminal ? "terminal" : "files") as Kind, number: 1 };
       setTabs([replacement]); setActiveTab(replacement.id); return;
     }
     setTabs(remaining);
@@ -87,43 +90,44 @@ export function HostWorkspace({ workspace, hostId, permissions }: { workspace: s
   };
 
   const renderPane = (node: Pane, tab: WorkspaceTab, canClose: boolean): React.ReactNode => {
-    return <Tabs.Root value={node.kind} onValueChange={value => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: value as Kind, opened: [...new Set([...old.opened, value as Kind])] })) }))} asChild><section aria-label={node.kind === "terminal" ? "终端分屏" : "文件分屏"} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
+    return <Tabs.Root value={node.kind} onValueChange={value => changeTab(current => ({ ...current, root: replace(current.root, node.id, old => ({ ...old, kind: value as Kind, opened: [...new Set([...old.opened, value as Kind])] })) }))} asChild><section aria-label={node.kind === "terminal" ? hostRepositoryText("host.073") : hostRepositoryText("host.074")} className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${tab.activePane === node.id ? "bg-accent/20" : ""}`} onPointerDown={() => { if (tab.id === activeTab) changeTab(current => ({ ...current, activePane: node.id })); }}>
       <div className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
-        <Tabs.List aria-label="分屏工具" className="inline-flex shrink-0 items-center gap-1">
-          {canTerminal && <Tabs.Trigger value="terminal" asChild><Button variant={node.kind === "terminal" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><SquareTerminal className="size-4" />终端</Button></Tabs.Trigger>}
-          {canFiles && <Tabs.Trigger value="files" asChild><Button variant={node.kind === "files" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><FolderOpen className="size-4" />文件</Button></Tabs.Trigger>}
+        <Tabs.List aria-label={hostRepositoryText("host.075")} className="inline-flex shrink-0 items-center gap-1">
+          {canTerminal && <Tabs.Trigger value="terminal" asChild><Button variant={node.kind === "terminal" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><SquareTerminal className="size-4" />{hostRepositoryText("host.071")}</Button></Tabs.Trigger>}
+          {canFiles && <Tabs.Trigger value="files" asChild><Button variant={node.kind === "files" ? "secondary" : "ghost"} size="sm" className="h-8 px-2"><FolderOpen className="size-4" />{hostRepositoryText("host.072")}</Button></Tabs.Trigger>}
         </Tabs.List>
         <div className="min-w-0 flex-1" />
-        <Button variant="ghost" size="icon" className="size-7" aria-label="左右分屏" title="左右分屏" onClick={() => split(node.id, "horizontal", node.kind)}><Columns2 className="size-4" /></Button>
-        <Button variant="ghost" size="icon" className="size-7" aria-label="上下分屏" title="上下分屏" onClick={() => split(node.id, "vertical", node.kind)}><Rows2 className="size-4" /></Button>
-        {canClose && <Button variant="ghost" size="icon" className="size-7" aria-label="关闭分屏" title="关闭分屏" onClick={() => closePane(node.id)}><X className="size-4" /></Button>}
+        <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.076")} title={hostRepositoryText("host.076")} onClick={() => split(node.id, "horizontal", node.kind)}><Columns2 className="size-4" /></Button>
+        <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.077")} title={hostRepositoryText("host.077")} onClick={() => split(node.id, "vertical", node.kind)}><Rows2 className="size-4" /></Button>
+        {canClose && <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.078")} title={hostRepositoryText("host.078")} onClick={() => closePane(node.id)}><X className="size-4" /></Button>}
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto p-2">
-        {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<p role="status">正在加载终端…</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
+        {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<p role="status">{hostRepositoryText("host.079")}</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
         {node.opened.includes("files") && <Tabs.Content value="files" forceMount className={node.kind === "files" ? "h-full min-h-0" : "hidden"}><HostFiles workspace={workspace} hostId={hostId} canTerminal={canTerminal} {...(node.directory ? { initialPath: node.directory } : {})} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} /></Tabs.Content>}
       </div>
     </section></Tabs.Root>;
   };
 
-  if (!canTerminal && !canFiles) return <p role="alert" className="p-6">当前角色没有终端或文件权限。</p>;
+  if (!canTerminal && !canFiles) return <p role="alert" className="p-6">{hostRepositoryText("host.080")}</p>;
   return <HostTelemetry workspace={workspace} hostId={hostId} enabled={tabs.some(tab => tab.id === activeTab && hasTerminal(tab.root))}><div className="flex h-dvh min-h-[420px] min-w-0 flex-col bg-background text-foreground">
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-      <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label="返回主机详情" title="返回主机详情"><ArrowLeft className="size-4" /></a>
-      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={hostName}>{hostName}</h1>
+    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-3 border-b px-3">
+      <a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "view" }, {})} className="inline-flex size-8 items-center justify-center rounded hover:bg-accent" aria-label={hostRepositoryText("host.081")} title={hostRepositoryText("host.081")}><ArrowLeft className="size-4" /></a>
+      <h1 className="min-w-0 flex-1 truncate text-sm font-semibold" title={hostName || hostRepositoryText("host.070")}>{hostName || hostRepositoryText("host.070")}</h1>
       <HostLatency workspace={workspace} hostId={hostId} />
-      {canTerminal && <Button variant="outline" size="icon" aria-label="新建终端" title="新建终端" onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}
-      {canFiles && <Button variant="outline" size="icon" aria-label="新建文件标签" title="新建文件标签" onClick={() => addTab("files")}><FolderOpen className="size-4" /></Button>}
+      {canTerminal && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.082")} title={hostRepositoryText("host.082")} onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}
+      {canFiles && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.083")} title={hostRepositoryText("host.083")} onClick={() => addTab("files")}><FolderOpen className="size-4" /></Button>}
+      {headerActions}
     </header>
     {error && <p role="alert" className="border-b px-3 py-1 text-sm text-destructive">{error}</p>}
-    <div role="tablist" aria-label="主机工作标签" className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
+    <div role="tablist" aria-label={hostRepositoryText("host.084")} className="flex h-10 shrink-0 items-center gap-1 overflow-x-auto border-b px-2">
       {tabs.map(tab => <div key={tab.id} className={`inline-flex h-8 shrink-0 items-center rounded border ${activeTab === tab.id ? "bg-accent" : ""}`}>
-        <button type="button" role="tab" aria-selected={activeTab === tab.id} className="h-full px-3 text-sm" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>
-        <Button variant="ghost" size="icon" className="size-7" aria-label={`关闭${tab.label}`} onClick={() => closeTab(tab.id)}><X className="size-3.5" /></Button>
+        <button type="button" role="tab" aria-selected={activeTab === tab.id} className="h-full px-3 text-sm" onClick={() => setActiveTab(tab.id)}>{tabLabel(tab)}</button>
+        <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.085", {value1: tabLabel(tab)})} onClick={() => closeTab(tab.id)}><X className="size-3.5" /></Button>
       </div>)}
-      <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label="新建标签" title="新建标签"><Plus className="size-4" /></Button></DropdownMenuTrigger>
+      <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7 shrink-0" aria-label={hostRepositoryText("host.086")} title={hostRepositoryText("host.086")}><Plus className="size-4" /></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="start">
-          {canTerminal && <DropdownMenuItem onSelect={() => addTab("terminal")}><SquareTerminal className="size-4" />新建终端</DropdownMenuItem>}
-          {canFiles && <DropdownMenuItem onSelect={() => addTab("files")}><FolderOpen className="size-4" />新建文件管理</DropdownMenuItem>}
+          {canTerminal && <DropdownMenuItem onSelect={() => addTab("terminal")}><SquareTerminal className="size-4" />{hostRepositoryText("host.082")}</DropdownMenuItem>}
+          {canFiles && <DropdownMenuItem onSelect={() => addTab("files")}><FolderOpen className="size-4" />{hostRepositoryText("host.087")}</DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -1,2 +1,2 @@
-export { AutoForm, AutoFields, AutoField, FieldControl } from "./auto-form";
+export { AutoForm, AutoFields, AutoField, FieldControl, selectDisplay } from "./auto-form";
 export * from "./types";

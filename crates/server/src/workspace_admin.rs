@@ -1,4 +1,5 @@
 //! Workspace membership and role administration, using the tenant list/form contract.
+use crate::error::{Json, Path, Query};
 use crate::{
     auth::User,
     db,
@@ -10,8 +11,7 @@ use crate::{
     workspace::{self, Scope},
 };
 use axum::{
-    Json,
-    extract::{Path, Query, State},
+    extract::State,
     http::{StatusCode, header},
 };
 use sea_orm::{
@@ -97,15 +97,23 @@ pub(crate) async fn authorize(
 }
 fn grant(scope: &Scope, permissions: &[String]) -> Result<()> {
     if permissions.iter().any(|p| !scope.permissions.contains(p)) {
-        return Err(ApiError::bad("不能授予或管理超出自身权限的角色。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.grant_exceeded"),
+        ));
     }
     Ok(())
 }
 fn role_permissions(role: &roles::Model) -> Result<Vec<String>> {
-    serde_json::from_str(&role.permissions).map_err(|_| ApiError::bad("角色权限数据无效。"))
+    serde_json::from_str(&role.permissions).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.role_permissions_invalid"),
+        )
+    })
 }
 fn role_json(row: roles::Model) -> Value {
-    json!({"id": Id::from(row.id), "name": row.name, "builtin": row.builtin != 0,
+    json!({"id": Id::from(row.id), "name": workspace::role_name(&row.name, row.builtin != 0), "builtin": row.builtin != 0,
         "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])), "version": row.version, "created_at": row.created_at})
 }
 async fn role(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<roles::Model> {
@@ -157,14 +165,20 @@ pub struct RoleBody {
 fn validate_role(scope: &Scope, body: &RoleBody) -> Result<(String, Vec<String>)> {
     let name = body.name.trim().to_owned();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("角色名称需为1–60个字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.role_name_invalid"),
+        ));
     }
     if body
         .permissions
         .iter()
         .any(|p| !workspace::PERMISSIONS.iter().any(|known| known.0 == p))
     {
-        return Err(ApiError::bad("存在未知权限，请刷新权限目录。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.permission_unknown"),
+        ));
     }
     let permissions = workspace::expand(&body.permissions);
     grant(scope, &permissions)?;
@@ -183,7 +197,10 @@ async fn unique_name(
         query = query.filter(roles::Column::Id.ne(id));
     }
     if query.count(conn).await? != 0 {
-        return Err(ApiError::conflict("该角色名称已存在。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.role_name_used"),
+        ));
     }
     Ok(())
 }
@@ -243,10 +260,16 @@ pub async fn update_role(
     let scope = authorize(&tx, &scope, "roles.update").await?;
     let old = role(&tx, scope.workspace_id, id).await?;
     if old.builtin != 0 {
-        return Err(ApiError::bad("内置角色不可修改，请先复制为自定义角色。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.builtin_immutable"),
+        ));
     }
     if body.version != Some(old.version) {
-        return Err(ApiError::conflict("角色已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.role_changed"),
+        ));
     }
     grant(&scope, &role_permissions(&old)?)?;
     let (name, permissions) = validate_role(&scope, &body)?;
@@ -286,7 +309,10 @@ pub async fn delete_role(
     let scope = authorize(&tx, &scope, "roles.delete").await?;
     let old = role(&tx, scope.workspace_id, id).await?;
     if old.builtin != 0 {
-        return Err(ApiError::bad("内置角色不可删除。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.builtin_delete"),
+        ));
     }
     grant(&scope, &role_permissions(&old)?)?;
     if members::Entity::find()
@@ -296,7 +322,10 @@ pub async fn delete_role(
         .await?
         > 0
     {
-        return Err(ApiError::conflict("仍有成员使用该角色，请先调整成员角色。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.role_in_use"),
+        ));
     }
     roles::Entity::delete_many()
         .filter(roles::Column::Id.eq(id))
@@ -325,6 +354,7 @@ struct Member {
     email: String,
     active: i64,
     role_name: String,
+    role_builtin: i64,
     owner_id: i64,
     state: String,
     version: i64,
@@ -332,7 +362,7 @@ struct Member {
 }
 impl Member {
     fn json(self) -> Value {
-        json!({"id":Id::from(self.id),"user_id":Id::from(self.user_id),"role_id":Id::from(self.role_id),"name":self.name,"email":self.email,"role_name":self.role_name,"active":self.active!=0,"owner":self.user_id==self.owner_id,"state":self.state,"version":self.version,"created_at":self.created_at})
+        json!({"id":Id::from(self.id),"user_id":Id::from(self.user_id),"role_id":Id::from(self.role_id),"name":self.name,"email":self.email,"role_name":workspace::role_name(&self.role_name, self.role_builtin != 0),"active":self.active!=0,"owner":self.user_id==self.owner_id,"state":self.state,"version":self.version,"created_at":self.created_at})
     }
 }
 fn member_select() -> sea_orm::Select<members::Entity> {
@@ -352,6 +382,7 @@ fn member_select() -> sea_orm::Select<members::Entity> {
             users::Column::Active,
         ])
         .column_as(roles::Column::Name, "role_name")
+        .column_as(roles::Column::Builtin, "role_builtin")
         .column(workspaces::Column::OwnerId)
         .join(
             JoinType::InnerJoin,
@@ -445,7 +476,10 @@ async fn mutable_member(
         .await?
         .ok_or_else(ApiError::missing)?;
     if row.user_id == workspace.owner_id {
-        return Err(ApiError::bad("不能修改或移除工作空间拥有者。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.owner_immutable"),
+        ));
     }
     grant(
         scope,
@@ -469,11 +503,17 @@ pub async fn update_member(
     let scope = authorize(&tx, &scope, "members.update").await?;
     let old = mutable_member(&tx, &scope, &workspace, id).await?;
     if old.version != body.version {
-        return Err(ApiError::conflict("成员已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.member_changed"),
+        ));
     }
     let target = role(&tx, scope.workspace_id, body.role_id).await?;
     if target.builtin != 0 && target.name == "拥有者" {
-        return Err(ApiError::bad("拥有者身份不能通过成员角色编辑授予。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.owner_role_grant"),
+        ));
     }
     grant(&scope, &role_permissions(&target)?)?;
     members::Entity::update_many()
@@ -578,4 +618,83 @@ pub async fn rotate_invitation(
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({"code":code})),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope() -> Scope {
+        Scope {
+            workspace_id: Id::from(1),
+            user: User {
+                id: Id::from(2),
+                email: "member@example.test".into(),
+                name: "Member".into(),
+                is_superadmin: false,
+            },
+            permissions: ["hosts.read".into()].into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn role_validation_preserves_constraints_and_defaults_to_english() {
+        let scope = scope();
+        let error = validate_role(
+            &scope,
+            &RoleBody {
+                name: " ".into(),
+                permissions: vec![],
+                version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert_eq!(error.1, "The role name must contain 1–60 characters.");
+        let error = validate_role(
+            &scope,
+            &RoleBody {
+                name: "Role".into(),
+                permissions: vec!["unknown.read".into()],
+                version: None,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.1,
+            "Unknown permissions were found. Please refresh the permission catalog."
+        );
+        let error = grant(&scope, &["hosts.delete".into()]).unwrap_err();
+        assert_eq!(
+            error.1,
+            "You cannot grant or manage roles beyond your own permissions."
+        );
+        let valid = validate_role(
+            &scope,
+            &RoleBody {
+                name: " 用户原文 ".into(),
+                permissions: vec!["hosts.read".into()],
+                version: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(valid, ("用户原文".into(), vec!["hosts.read".into()]));
+    }
+
+    #[test]
+    fn role_presentation_translates_only_flagged_builtins() {
+        let row = roles::Model {
+            id: 1,
+            workspace_id: 1,
+            name: "拥有者".into(),
+            permissions: "[]".into(),
+            builtin: 1,
+            created_at: 0,
+            updated_at: 0,
+            version: 1,
+        };
+        assert_eq!(role_json(row.clone())["name"], "Owner");
+        let custom = roles::Model { builtin: 0, ..row };
+        assert_eq!(role_json(custom)["name"], "拥有者");
+    }
 }

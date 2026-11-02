@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { i18n } from "./i18n";
+beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
 import { parseActions, editActionJob, editActionStep, connectActionJobs, removeActionJob, ensureActionCheckout, addActionJob, DEFAULT_ACTIONS } from "./actions-workflow";
 
 it("starts with neutral numbered steps and retains Action inputs in YAML", () => {

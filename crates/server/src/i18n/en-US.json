@@ -1,0 +1,20 @@
+{
+  "activity.systemActor": "System",
+  "vault.encryptionFailed": "Encryption failed. The credential was not saved.",
+  "vault.decryptionFailed": "The credential could not be decrypted.",
+  "state.idUnavailable": "An ID cannot be generated right now. Try again later.",
+  "host.monitorTimeout": "Host monitoring collection timed out.",
+  "resource.referenceInvalid": "The reference ID is invalid.",
+  "host.connectionUnknown": "Unknown connection method.",
+  "error.unauthorized": "Please sign in to continue.",
+  "error.forbidden": "Your account does not have permission for this operation. Please contact an administrator.",
+  "error.missing": "The record does not exist or is no longer available.",
+  "error.database": "Could not save or read data. Please try again later; your entered content will be kept.",
+  "error.file": "The file operation failed. Please check disk space and directory permissions.",
+  "server.draining": "The service is shutting down safely. Please try again later.",
+  "guard.host": "This host address is not in the allowlist.",
+  "guard.request": "The operation verification header is missing.",
+  "guard.origin": "Requests from this origin are not allowed.",
+  "assets.not_built": "The interface assets have not been built. Please run npm run build first.",
+  "terminal.heartbeatTimeout": "The terminal connection heartbeat timed out. Please reconnect."
+}

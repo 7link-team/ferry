@@ -1,5 +1,6 @@
 //! Global administration. Admin extraction is separate from tenant Scope;
 //! every privileged mutation rechecks the actor under the singleton lock.
+use crate::error::{Json, Path, Query};
 use crate::{
     auth::{self, Account},
     db,
@@ -10,8 +11,7 @@ use crate::{
     state::AppState,
 };
 use axum::{
-    Json,
-    extract::{FromRequestParts, Path, Query, State},
+    extract::{FromRequestParts, State},
     http::{header, request::Parts},
 };
 use sea_orm::sea_query::{Expr, ExprTrait};
@@ -121,7 +121,10 @@ pub async fn initialize(
     let tx = s.db.begin().await?;
     let state = lock(&tx).await?;
     if state.initialized != 0 {
-        return Err(ApiError::conflict("平台已初始化，请登录。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("platform.initialized"),
+        ));
     }
     let token = std::fs::read_to_string(s.data_dir.join("setup-token"))?;
     // Compare fixed-length digests without data-dependent early exits.
@@ -142,7 +145,10 @@ pub async fn initialize(
         .await?;
     let (id, name) = if let Some(row) = existing {
         if row.active == 0 || !auth::verify(&body.credentials.password, &row.password_hash) {
-            return Err(ApiError::bad("已有账号的邮箱或密码不正确，或账号已停用。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("platform.accountInvalid"),
+            ));
         }
         users::Entity::update_many()
             .col_expr(users::Column::IsSuperadmin, Expr::value(1))
@@ -308,7 +314,10 @@ pub async fn update_user(
         .await?
         .ok_or_else(ApiError::missing)?;
     if old.version != body.version {
-        return Err(ApiError::conflict("记录已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("contexts.changed"),
+        ));
     }
     if old.active != 0
         && old.is_superadmin != 0
@@ -320,7 +329,10 @@ pub async fn update_user(
             .await?
             <= 1
     {
-        return Err(ApiError::conflict("必须保留至少一个启用的平台超级管理员。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("platform.adminRequired"),
+        ));
     }
     users::Entity::update_many()
         .col_expr(users::Column::Active, Expr::value(i64::from(body.active)))
@@ -477,8 +489,12 @@ pub async fn create_workspace(
     lock(&tx).await?;
     check_admin(&tx, &admin).await?;
     let value = crate::workspace::create_in(&s, admin.0.user.id, body, &tx).await?;
-    let id: Id = serde_json::from_value(value["id"].clone())
-        .map_err(|_| ApiError::bad("工作空间标识无效。"))?;
+    let id: Id = serde_json::from_value(value["id"].clone()).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("platform.workspaceInvalid"),
+        )
+    })?;
     audit(
         &s,
         &tx,
@@ -505,7 +521,10 @@ pub async fn update_workspace(
 ) -> Result<Json<Value>> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写工作空间名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.name_invalid"),
+        ));
     }
     let tx = s.db.begin().await?;
     lock(&tx).await?;
@@ -519,7 +538,10 @@ pub async fn update_workspace(
         .exec(&tx)
         .await?;
     if changed.rows_affected != 1 {
-        return Err(ApiError::conflict("记录已被修改或删除，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("platform.recordChangedOrDeleted"),
+        ));
     }
     audit(
         &s,
@@ -544,6 +566,7 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
             .view(&s, row.repository_oauth.is_some());
     view["id"] = json!("1");
     view["registration_enabled"] = json!(row.registration_enabled != 0);
+    view["runner_auto_update"] = json!(row.runner_auto_update != 0);
     view["version"] = json!(row.version);
     Ok(Json(view))
 }
@@ -551,6 +574,8 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
 pub struct SettingsUpdate {
     version: i64,
     registration_enabled: bool,
+    #[serde(default)]
+    runner_auto_update: Option<bool>,
     #[serde(flatten)]
     oauth: serde_json::Map<String, Value>,
 }
@@ -563,8 +588,15 @@ pub async fn update_settings(
     let row = lock(&tx).await?;
     check_admin(&tx, &admin).await?;
     if row.version != body.version {
-        return Err(ApiError::conflict("设置已被修改，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("platform.settingsChanged"),
+        ));
     }
+    let runner_auto_update = body
+        .runner_auto_update
+        .map(i64::from)
+        .unwrap_or(row.runner_auto_update);
     let mut repository_oauth = row.repository_oauth.clone();
     let oauth_changed = body.oauth.keys().any(|key| {
         key == "oauth_public_url"
@@ -579,6 +611,10 @@ pub async fn update_settings(
         repository_oauth = Some(config.seal(&s)?);
     }
     platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::RunnerAutoUpdate,
+            Expr::value(runner_auto_update),
+        )
         .col_expr(
             platform_state::Column::RepositoryOauth,
             Expr::value(repository_oauth),
@@ -601,7 +637,7 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled, "repository_oauth_updated": oauth_changed}),
+        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed}),
     )
     .await?;
     tx.commit().await?;

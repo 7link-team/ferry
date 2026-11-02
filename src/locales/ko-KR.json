@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "운영 관리 플랫폼",
+    "modules": "모듈",
+    "platform": "플랫폼 관리",
+    "account": "프로필",
+    "signOut": "로그아웃",
+    "workspaces": "워크스페이스 만들기 또는 참여"
+  },
+  "language": {
+    "label": "언어",
+    "changed": "언어가 {{language}}(으)로 변경되었습니다"
+  },
+  "common": {
+    "loading": "불러오는 중…",
+    "back": "뒤로",
+    "close": "닫기",
+    "save": "저장",
+    "cancel": "취소",
+    "edit": "편집",
+    "delete": "삭제",
+    "create": "새로 만들기",
+    "search": "검색",
+    "refresh": "새로 고침",
+    "retry": "다시 시도"
+  },
+  "errors": {
+    "network": "서비스에 연결할 수 없습니다. 네트워크를 확인하고 다시 시도하세요.",
+    "operation": "작업에 실패했습니다. 다시 시도하세요."
+  }
+}

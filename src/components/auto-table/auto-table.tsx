@@ -1,3 +1,4 @@
+import { commonText, useCommonTranslation } from "../../i18n";
 /** Port of 7link-mall-web AutoTable. Uses Ferry primitives and Chinese labels; no commerce/i18n runtime. */
 import {
   Fragment,
@@ -39,6 +40,7 @@ function AutoTableInner<T>(
   options: TableOptions<T>,
   ref: React.ForwardedRef<AutoTableHandle>,
 ) {
+  useCommonTranslation();
   const local = useAutoTable(options);
   const state = options.state;
   const rows = state?.rows ?? local.rows;
@@ -154,8 +156,7 @@ function AutoTableInner<T>(
             <tr>
               {options.showSequence && (
                 <th className={cellClass(0, true)} style={style(0, true)}>
-                  序号
-                </th>
+                  {commonText("table.sequence")}</th>
               )}
               {options.selectable && (
                 <th
@@ -163,7 +164,7 @@ function AutoTableInner<T>(
                   style={style(sequenceOffset, true)}
                 >
                   <Checkbox
-                    aria-label="全选"
+                    aria-label={commonText("table.selectAll")}
                     checked={
                       allSelected
                         ? true
@@ -216,8 +217,7 @@ function AutoTableInner<T>(
                   className={cn(cellClass(count - 1, true), "text-right")}
                   style={style(count - 1, true)}
                 >
-                  操作
-                </th>
+                  {commonText("table.actions")}</th>
               )}
             </tr>
           </thead>
@@ -268,12 +268,7 @@ function AutoTableInner<T>(
                               <FolderTree className="size-4" />
                               {group}
                               <span className="text-xs font-normal text-muted-foreground">
-                                {
-                                  rows.filter(
-                                    (item) => options.groupBy?.(item) === group,
-                                  ).length
-                                }{" "}
-                                项 · 当前页
+                                {commonText("table.groupCount", { count: rows.filter(item => options.groupBy?.(item) === group).length })}
                               </span>
                             </button>
                           </td>
@@ -329,7 +324,7 @@ function AutoTableInner<T>(
                             onClick={(event) => event.stopPropagation()}
                           >
                             <Checkbox
-                              aria-label="选择此行"
+                              aria-label={commonText("table.selectRow")}
                               checked={selected.has(key)}
                               onCheckedChange={() =>
                                 options.onToggleSelect
@@ -433,11 +428,10 @@ function AutoTableInner<T>(
                         size="sm"
                         onClick={retry}
                       >
-                        重试
-                      </Button>
+                        {commonText("common.retry")}</Button>
                     </div>
                   ) : (
-                    (options.empty ?? "没有符合条件的记录。")
+                    (options.empty ?? commonText("table.empty"))
                   )}
                 </td>
               </tr>
@@ -454,12 +448,12 @@ function AutoTableInner<T>(
           <span className="flex-1" />
           <span className="text-muted-foreground">
             {options.pagination === "next"
-              ? `第 ${query.page} 页 · 本页 ${rows.length} 条`
-              : `共 ${total} 条 · ${total ? (query.page - 1) * query.pageSize + 1 : 0}–${Math.min(query.page * query.pageSize, total)}`}
+              ? commonText("table.nextPageSummary", { page: query.page, count: rows.length })
+              : commonText("table.totalSummary", { count: total, start: total ? (query.page - 1) * query.pageSize + 1 : 0, end: Math.min(query.page * query.pageSize, total) })}
           </span>
-          <nav className="flex items-center gap-2" aria-label="分页">
+          <nav className="flex items-center gap-2" aria-label={commonText("table.pagination")}>
             <select
-              aria-label="每页条数"
+              aria-label={commonText("table.pageSize")}
               className="h-8 rounded-md border border-input bg-background px-2 text-sm"
               value={query.pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}
@@ -469,8 +463,7 @@ function AutoTableInner<T>(
                 options.pageSizeOptions ?? [10, 20, 50, 100, 200],
               ).map((size) => (
                 <option key={size} value={size}>
-                  {size} 条/页
-                </option>
+                  {size} {commonText("table.perPage")}</option>
               ))}
             </select>
             <Button
@@ -478,7 +471,7 @@ function AutoTableInner<T>(
               variant="outline"
               size="icon"
               className="size-8"
-              aria-label="上一页"
+              aria-label={commonText("table.previous")}
               disabled={query.page <= 1 || loading}
               onClick={() => setPage(query.page - 1)}
             >
@@ -494,7 +487,7 @@ function AutoTableInner<T>(
               variant="outline"
               size="icon"
               className="size-8"
-              aria-label="下一页"
+              aria-label={commonText("table.next")}
               disabled={
                 loading ||
                 !!error ||
@@ -519,6 +512,7 @@ function CellContent<T>({
   row: T;
   column: ColumnConfig<T>;
 }): ReactNode {
+  useCommonTranslation();
   const value = (row as Record<string, unknown>)[String(column.field)];
   if (column.render) return column.render(value, row, { column });
   return (

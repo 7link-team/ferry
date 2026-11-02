@@ -21,9 +21,9 @@ impl State {
     pub fn next_id(&self) -> crate::error::Result<crate::snowflake::Id> {
         self.ids.next_id().map_err(|error| {
             tracing::error!(%error, "ID generation failed");
-            crate::error::ApiError(
+            crate::error::ApiError::localized(
                 axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                "暂时无法发号，请稍后重试。".into(),
+                crate::i18n::Message::new("state.idUnavailable"),
             )
         })
     }

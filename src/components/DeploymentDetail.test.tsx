@@ -3,10 +3,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { DeploymentDetail } from "./DeploymentDetail";
 import { artifactDiff } from "../deployment";
+import { i18n } from "../i18n";
 let root: Root, host: HTMLDivElement, state: string, calls: string[];
 const mount = async () => { await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={new Set(["deployments.apply"])} />)); };
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
 beforeEach(() => {
+  localStorage.setItem("ui.locale", "zh-CN");
+  void i18n.changeLanguage("zh-CN");
   vi.useFakeTimers(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   Object.defineProperty(document, "hidden", { configurable: true, value: false });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);

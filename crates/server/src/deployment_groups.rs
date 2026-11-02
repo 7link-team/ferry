@@ -15,7 +15,12 @@ pub(super) async fn members(
         .filter(host_groups::Column::WorkspaceId.eq(workspace))
         .one(conn)
         .await?
-        .ok_or_else(|| ApiError::bad("目标主机组不存在。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.051"),
+            )
+        })?;
     Ok(hosts::Entity::find()
         .filter(hosts::Column::WorkspaceId.eq(workspace))
         .filter(hosts::Column::GroupId.eq(group))
@@ -27,22 +32,39 @@ pub(super) async fn members(
         .collect())
 }
 fn plans(artifact: &str) -> Result<Vec<(Id, String)>> {
-    let doc: Value =
-        serde_json::from_str(artifact).map_err(|_| ApiError::bad("主机组产物无效。"))?;
+    let doc: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.052"),
+        )
+    })?;
     let rows = doc["targets"]
         .as_array()
         .filter(|rows| !rows.is_empty())
-        .ok_or_else(|| ApiError::bad("主机组没有固定目标，请重新预览。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.053"),
+            )
+        })?;
     let mut seen = BTreeSet::new();
     rows.iter()
         .map(|row| {
             let id = Id::reference(row["host_id"].as_str().unwrap_or(""))?;
             if !seen.insert(id.to_string()) {
-                return Err(ApiError::bad("主机组目标重复。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.054"),
+                ));
             }
             let artifact = row["artifact"]
                 .as_str()
-                .ok_or_else(|| ApiError::bad("目标产物缺失。"))?
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.error.055"),
+                    )
+                })?
                 .to_owned();
             Ok((id, artifact))
         })
@@ -60,7 +82,10 @@ pub(super) async fn preview(
     } else {
         let ids = members(&s.db, scope.workspace_id, app.target_ref).await?;
         if ids.is_empty() {
-            return Err(ApiError::bad("主机组没有直接成员。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.056"),
+            ));
         }
         let (metadata, _, _) = bindings(&s.db, app, &app.manifest).await?;
         let mut rows = Vec::new();
@@ -68,20 +93,32 @@ pub(super) async fn preview(
         for id in &ids {
             let channel = remote::open(s, &scope.workspace_id, id).await?;
             let artifact = prepare_artifact(s, scope, channel.as_ref(), app, &metadata).await?;
-            let doc: Value =
-                serde_json::from_str(&artifact).map_err(|_| ApiError::bad("目标产物无效。"))?;
+            let doc: Value = serde_json::from_str(&artifact).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.057"),
+                )
+            })?;
             encoded_metadata = doc.get("x-variable-bindings").cloned().unwrap_or(json!([]));
             rows.push(json!({"host_id":id,"artifact":artifact}));
         }
         let desired = serde_json::to_string_pretty(
             &json!({"targets":rows,"x-variable-bindings":encoded_metadata}),
         )
-        .map_err(|_| ApiError::bad("主机组产物无效。"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.052"),
+            )
+        })?;
         let tx = crate::variables::transaction(s, scope.workspace_id).await?;
         if members(&tx, scope.workspace_id, app.target_ref).await? != ids
             || bindings(&tx, app, &app.manifest).await?.0 != metadata
         {
-            return Err(ApiError::conflict("主机组成员或变量已变化，请重新预览。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("deployment.error.058"),
+            ));
         }
         save_preview(&tx, scope, app, &desired).await?;
         tx.commit().await?;
@@ -97,8 +134,12 @@ pub(super) async fn preview(
         hashes.insert(id.to_string(), hash(&value));
         existing.push(json!({"host_id":id,"artifact":value}));
     }
-    let expected =
-        hash(&serde_json::to_string(&hashes).map_err(|_| ApiError::bad("目标摘要无效。"))?);
+    let expected = hash(&serde_json::to_string(&hashes).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.035"),
+        )
+    })?);
     crate::hosts::activity(
         s,
         scope,
@@ -109,7 +150,7 @@ pub(super) async fn preview(
     )
     .await?;
     Ok(Json(
-        json!({"desired":desired,"current":serde_json::to_string_pretty(&json!({"targets":existing})).unwrap(),"expected_hash":expected,"target_hashes":hashes,"preview_token":preview_token(&desired,&expected,app.version,source),"version":app.version,"changed":changed,"variables":artifact_bindings(&desired)?,"notice":"目标按主机ID顺序逐台执行；遇到失败立即停止，已成功主机不自动回滚。回滚使用历史目标列表及加密保存的配置和变量，卷数据不回滚。"}),
+        json!({"desired":desired,"current":serde_json::to_string_pretty(&json!({"targets":existing})).unwrap(),"expected_hash":expected,"target_hashes":hashes,"preview_token":preview_token(&desired,&expected,app.version,source),"version":app.version,"changed":changed,"variables":artifact_bindings(&desired)?,"notice":crate::i18n::message("deployment.notice.group")}),
     ))
 }
 pub(super) async fn enqueue(
@@ -126,27 +167,45 @@ pub(super) async fn enqueue(
         && members(conn, app.workspace_id.into(), app.target_ref).await?
             != plans.iter().map(|(id, _)| *id).collect::<Vec<_>>()
     {
-        return Err(ApiError::conflict("主机组成员已变化，请重新预览。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.059"),
+        ));
     }
     if body.target_hashes.len() != plans.len()
-        || hash(
-            &serde_json::to_string(&body.target_hashes)
-                .map_err(|_| ApiError::bad("目标摘要无效。"))?,
-        ) != body.expected_hash
+        || hash(&serde_json::to_string(&body.target_hashes).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.035"),
+            )
+        })?) != body.expected_hash
     {
-        return Err(ApiError::bad("目标摘要与预览不一致。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.060"),
+        ));
     }
     for (position, (host, artifact)) in plans.into_iter().enumerate() {
         hosts::Entity::find_by_id(i64::from(host))
             .filter(hosts::Column::WorkspaceId.eq(app.workspace_id))
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("历史目标主机已不存在。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.061"),
+                )
+            })?;
         let expected = body
             .target_hashes
             .get(&host.to_string())
             .filter(|h| h.len() == 64 && h.bytes().all(|c| c.is_ascii_hexdigit()))
-            .ok_or_else(|| ApiError::bad("目标主机摘要缺失或无效。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.062"),
+                )
+            })?;
         targets::Entity::insert(
             targets::Model {
                 id: s.next_id()?.into(),
@@ -179,7 +238,7 @@ pub(super) async fn details(
         .order_by_asc(targets::Column::Position)
         .all(conn)
         .await?;
-    Ok(json!(rows.into_iter().map(|r|json!({"id":Id::from(r.id),"host_id":Id::from(r.host_id),"position":r.position,"state":r.state,"output":r.output,"started_at":r.started_at,"finished_at":r.finished_at,"artifact":r.artifact})).collect::<Vec<_>>()))
+    Ok(json!(rows.into_iter().map(|r|json!({"id":Id::from(r.id),"host_id":Id::from(r.host_id),"position":r.position,"state":r.state,"output":crate::i18n::display_text_stored(&r.output),"started_at":r.started_at,"finished_at":r.finished_at,"artifact":r.artifact})).collect::<Vec<_>>()))
 }
 pub(super) async fn current(conn: &impl ConnectionTrait, workspace: Id, app: i64) -> Result<Value> {
     let rows = current::Entity::find()
@@ -196,7 +255,10 @@ pub(super) async fn settle(conn: &impl ConnectionTrait, revision: i64) -> Result
         .col_expr(targets::Column::FinishedAt, Expr::value(db::now()))
         .col_expr(
             targets::Column::Output,
-            Expr::value("执行结果未确认，请核实目标服务。"),
+            Expr::value(
+                StoredText::from_message(Message::new("deployment.output.targetUncertain"))
+                    .stored(),
+            ),
         )
         .filter(targets::Column::RevisionId.eq(revision))
         .filter(targets::Column::State.eq("running"))
@@ -207,7 +269,9 @@ pub(super) async fn settle(conn: &impl ConnectionTrait, revision: i64) -> Result
         .col_expr(targets::Column::FinishedAt, Expr::value(db::now()))
         .col_expr(
             targets::Column::Output,
-            Expr::value("前序目标失败或执行中断，未尝试此目标。"),
+            Expr::value(
+                StoredText::from_message(Message::new("deployment.output.skipped")).stored(),
+            ),
         )
         .filter(targets::Column::RevisionId.eq(revision))
         .filter(targets::Column::State.eq("pending"))
@@ -228,15 +292,19 @@ pub(super) async fn execute(
         .all(&s.db)
         .await?;
     if rows.is_empty() {
-        return Err(ApiError::bad("主机组执行快照缺失。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.063"),
+        ));
     }
-    let mut output = String::new();
+    let mut output = StoredText::new();
     for row in rows {
         let scope =
             match Scope::for_actor(s, rev.workspace_id.into(), rev.triggered_by.into()).await {
                 Ok(scope) => scope,
                 Err(error) if error.0 == StatusCode::FORBIDDEN => {
-                    return Ok((false, format!("{output}执行身份已失效，后续目标未执行。\n")));
+                    output.push_message(Message::new("deployment.output.identityRevoked"));
+                    return Ok((false, output.stored()));
                 }
                 Err(error) => return Err(error),
             };
@@ -248,7 +316,8 @@ pub(super) async fn execute(
             })
             .is_err()
         {
-            return Ok((false, format!("{output}执行权限已撤回，后续目标未执行。\n")));
+            output.push_message(Message::new("deployment.output.permissionRevoked"));
+            return Ok((false, output.stored()));
         }
         targets::Entity::update_many()
             .col_expr(targets::Column::State, Expr::value("running"))
@@ -267,7 +336,10 @@ pub(super) async fn execute(
             Ok(value) => value,
             Err(error) => {
                 return Err(if protected {
-                    ApiError::bad("主机组引用变量执行结果无法确认，请核实当前目标。")
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.error.064"),
+                    )
                 } else {
                     error
                 });
@@ -313,20 +385,19 @@ pub(super) async fn execute(
             }
         }
         tx.commit().await?;
-        output.push_str(&format!(
-            "主机 {}：{}\n",
-            row.host_id,
-            if success {
-                "成功"
+        output.push_message(
+            Message::new(if success {
+                "deployment.output.hostSuccess"
             } else {
-                "失败；后续目标不再执行"
-            }
-        ));
+                "deployment.output.hostFailure"
+            })
+            .with("host", row.host_id.to_string()),
+        );
         if !success {
-            return Ok((false, output));
+            return Ok((false, output.stored()));
         }
     }
-    Ok((true, output))
+    Ok((true, output.stored()))
 }
 
 pub(super) async fn remove(conn: &impl ConnectionTrait, workspace: Id, app: i64) -> Result<()> {

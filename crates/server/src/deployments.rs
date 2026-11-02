@@ -1,7 +1,9 @@
 //! Deployments use the shared tenant resource and host channel contracts.
+use crate::i18n::{Message, StoredText};
 #[path = "deployment_groups.rs"]
 mod groups;
 use crate::channel::HostChannel;
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{deployment_revisions as revisions, deployments as apps, hosts},
@@ -12,11 +14,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, QueryTrait,
     TransactionTrait,
@@ -50,7 +48,7 @@ fn app_json(r: &apps::Model) -> Value {
 }
 fn revision_json(r: &revisions::Model) -> Value {
     json!({"id":Id::from(r.id),"deployment_id":Id::from(r.deployment_id),"number":r.number,
-        "action":r.action,"source_revision":Id::from(r.source_revision),"state":r.state,"output":r.output,
+        "action":r.action,"source_revision":Id::from(r.source_revision),"state":r.state,"output":crate::i18n::display_text_stored(&r.output),
         "rendered":r.rendered,"artifact":r.artifact,"triggered_by":Id::from(r.triggered_by),
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
@@ -85,24 +83,32 @@ async fn check(
     b: &Body,
 ) -> Result<(String, String, Id)> {
     if b.name.trim().is_empty() || b.name.chars().count() > 60 {
-        return Err(ApiError::bad("名称必须为1到60字。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.001"),
+        ));
     }
     if !["compose", "docker", "native", "stack"].contains(&b.mode.as_str())
         || !["host", "host-group"].contains(&b.target_kind.as_str())
     {
-        return Err(ApiError::bad("请选择已支持的部署模式及单主机目标。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.002"),
+        ));
     }
     let workdir = crate::channel::check_path(&b.workdir)?;
     if b.mode == "native"
         && (workdir.chars().any(char::is_control) || workdir.contains(['[', ']', '*', '?', '\\']))
     {
-        return Err(ApiError::bad(
-            "native工作目录不能包含控制字符、反斜线或glob通配符。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.003"),
         ));
     }
     if workdir.len() > 900 || workdir == "/" {
-        return Err(ApiError::bad(
-            "请填写900字节以内的部署工作目录，不能使用根目录。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.004"),
         ));
     }
     let host_id = Id::reference(&b.target_ref)?;
@@ -113,7 +119,12 @@ async fn check(
             .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("目标主机不存在于当前工作空间。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.005"),
+                )
+            })?;
     }
     let mut manifest = manifest::parse_for(&b.manifest, &b.mode)?;
     for service in &mut manifest.services {
@@ -131,8 +142,12 @@ async fn check(
 
     Ok((
         b.name.trim().into(),
-        serde_json::to_string_pretty(&manifest)
-            .map_err(|_| ApiError::bad("manifest 无法序列化。"))?,
+        serde_json::to_string_pretty(&manifest).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.006"),
+            )
+        })?,
         host_id,
     ))
 }
@@ -317,8 +332,9 @@ pub async fn update(
         || b.workdir.trim_end_matches('/') != r.workdir
         || b.mode != r.mode
     {
-        return Err(ApiError::bad(
-            "部署模式、目标主机和工作目录创建后不能修改。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.007"),
         ));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
@@ -341,8 +357,9 @@ pub async fn update(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict(
-            "记录已变化、正在执行或需要核实，请刷新。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.008"),
         ));
     }
     tx.commit().await?;
@@ -385,7 +402,10 @@ pub async fn remove(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("执行中或需要核实的记录不能删除。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.009"),
+        ));
     }
     groups::remove(&tx, scope.workspace_id, r.id).await?;
     crate::entities::deployment_artifact_refs::Entity::delete_many()
@@ -453,7 +473,10 @@ async fn remote_artifact(ch: &dyn HostChannel, r: &apps::Model) -> Result<String
         )
         .await?;
     if out.code != 0 {
-        return Err(ApiError::bad("无法读取目标主机上的部署产物。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.010"),
+        ));
     }
     Ok(out.stdout)
 }
@@ -502,8 +525,9 @@ async fn bindings(
                     .await?
             };
             if matches.len() != 1 {
-                return Err(ApiError::bad(
-                    "配置模板不存在或名称不唯一，请使用当前空间的模板ID。",
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.011"),
                 ));
             }
             let row = &matches[0];
@@ -511,13 +535,21 @@ async fn bindings(
                 crate::templates::config_content(&row.content, &row.parameters, &file.values)?;
             size += text.len();
             if size > 4 * 1024 * 1024 {
-                return Err(ApiError::bad("部署配置文件总量不能超过4MiB。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.012"),
+                ));
             }
             for (i, part) in text.split('\0').enumerate() {
                 if i % 2 == 1 {
                     names.insert(
                         part.strip_prefix("variable/")
-                            .ok_or_else(|| ApiError::bad("配置变量引用无效。"))?
+                            .ok_or_else(|| {
+                                ApiError::localized(
+                                    axum::http::StatusCode::BAD_REQUEST,
+                                    crate::i18n::Message::new("deployment.error.013"),
+                                )
+                            })?
                             .to_owned(),
                     );
                 }
@@ -563,12 +595,18 @@ fn config_files(
             if i % 2 == 0 {
                 content.push_str(part);
             } else {
-                let name = part
-                    .strip_prefix("variable/")
-                    .ok_or_else(|| ApiError::bad("配置变量引用无效。"))?;
-                let row = rows
-                    .get(name)
-                    .ok_or_else(|| ApiError::bad("配置变量未定义。"))?;
+                let name = part.strip_prefix("variable/").ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.error.013"),
+                    )
+                })?;
+                let row = rows.get(name).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("deployment.error.014"),
+                    )
+                })?;
                 let value = s.vault.open_secret(
                     &row.value,
                     &crate::vault::aad(
@@ -586,8 +624,12 @@ fn config_files(
 }
 
 fn artifact_bindings(artifact: &str) -> Result<Value> {
-    let document: Value =
-        serde_json::from_str(artifact).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    let document: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.015"),
+        )
+    })?;
     let mut metadata = document
         .get("x-variable-bindings")
         .cloned()
@@ -610,32 +652,47 @@ fn bind_artifact(artifact: &str, metadata: &Value) -> Result<String> {
     if metadata == &json!([]) {
         return Ok(artifact.to_owned());
     }
-    let mut document: Value =
-        serde_json::from_str(artifact).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
-    for binding in metadata
-        .as_array()
-        .ok_or_else(|| ApiError::bad("变量绑定无效。"))?
-    {
+    let mut document: Value = serde_json::from_str(artifact).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.015"),
+        )
+    })?;
+    for binding in metadata.as_array().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.016"),
+        )
+    })? {
         if binding["kind"] == "file-variable" {
             continue;
         }
-        let service = binding["service"]
-            .as_str()
-            .ok_or_else(|| ApiError::bad("变量服务无效。"))?;
+        let service = binding["service"].as_str().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.017"),
+            )
+        })?;
         if !document["services"][service].is_object() {
-            return Err(ApiError::bad("变量引用的服务不存在。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.018"),
+            ));
         }
         if binding["kind"] == "file" {
-            let path = binding["path"]
-                .as_str()
-                .ok_or_else(|| ApiError::bad("配置路径无效。"))?;
+            let path = binding["path"].as_str().ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.019"),
+                )
+            })?;
             let source = format!("./{}", config_path(metadata, service, path));
             let entry = document["services"][service]
                 .as_object_mut()
                 .unwrap()
                 .entry("volumes")
                 .or_insert(json!([]));
-            entry.as_array_mut().ok_or_else(||ApiError::bad("服务挂载无效。"))?.push(json!({"type":"bind","source":source,"target":path,"read_only":true,"bind":{"create_host_path":false}}));
+            entry.as_array_mut().ok_or_else(||ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.error.020")))?.push(json!({"type":"bind","source":source,"target":path,"read_only":true,"bind":{"create_host_path":false}}));
         } else {
             document["services"][service]["env_file"] =
                 json!([environment_path(metadata, service)]);
@@ -651,7 +708,12 @@ fn bind_artifact(artifact: &str, metadata: &Value) -> Result<String> {
     }
     serde_json::to_string_pretty(&document)
         .map(|s| s + "\n")
-        .map_err(|_| ApiError::bad("无法序列化 Compose 产物。"))
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.021"),
+            )
+        })
 }
 fn dotenv_value(value: &str) -> String {
     let mut encoded = String::from("\"");
@@ -676,19 +738,27 @@ fn environment_files(
     mode: &str,
 ) -> Result<BTreeMap<String, String>> {
     let mut files = BTreeMap::<String, String>::new();
-    for binding in metadata
-        .as_array()
-        .ok_or_else(|| ApiError::bad("变量绑定无效。"))?
-    {
+    for binding in metadata.as_array().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.016"),
+        )
+    })? {
         if binding.get("kind").is_some() {
             continue;
         }
-        let name = binding["name"]
-            .as_str()
-            .ok_or_else(|| ApiError::bad("变量名称无效。"))?;
-        let row = rows
-            .get(name)
-            .ok_or_else(|| ApiError::bad("变量未定义。"))?;
+        let name = binding["name"].as_str().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.022"),
+            )
+        })?;
+        let row = rows.get(name).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.023"),
+            )
+        })?;
         let value = s.vault.open_secret(
             &row.value,
             &crate::vault::aad(
@@ -697,12 +767,18 @@ fn environment_files(
                 &row.id.to_string(),
             ),
         )?;
-        let service = binding["service"]
-            .as_str()
-            .ok_or_else(|| ApiError::bad("变量服务无效。"))?;
-        let env = binding["environment"]
-            .as_str()
-            .ok_or_else(|| ApiError::bad("环境变量名无效。"))?;
+        let service = binding["service"].as_str().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.017"),
+            )
+        })?;
+        let env = binding["environment"].as_str().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.024"),
+            )
+        })?;
         // Compose dotenv double quotes use JSON escapes; $$ disables interpolation.
         let encoded = dotenv_value(&value);
         files
@@ -737,12 +813,20 @@ fn open_snapshot(
     let sealed = rev.variable_snapshot.as_deref().unwrap_or_default();
     if sealed.is_empty() {
         if artifact_bindings(&rev.artifact)? != json!([]) {
-            return Err(ApiError::bad("历史变量快照缺失，不能执行。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.025"),
+            ));
         }
         return Ok(BTreeMap::new());
     }
     let text = vault.open_secret(sealed, &snapshot_aad(rev.workspace_id, rev.id))?;
-    serde_json::from_str(&text).map_err(|_| ApiError::bad("历史变量快照无效。"))
+    serde_json::from_str(&text).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.026"),
+        )
+    })
 }
 fn seal_snapshot(
     vault: &crate::vault::Vault,
@@ -753,7 +837,12 @@ fn seal_snapshot(
     if files.is_empty() {
         return Ok(String::new());
     }
-    let text = serde_json::to_string(files).map_err(|_| ApiError::bad("无法保存变量快照。"))?;
+    let text = serde_json::to_string(files).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.027"),
+        )
+    })?;
     vault.seal(&text, &snapshot_aad(workspace, revision))
 }
 #[derive(Default, Deserialize)]
@@ -778,7 +867,12 @@ async fn old_revision(
         .filter(revisions::Column::State.eq("succeeded"))
         .one(conn)
         .await?
-        .ok_or_else(|| ApiError::bad("只能回滚本应用已成功的 revision。"))
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.028"),
+            )
+        })
 }
 pub async fn preview(
     State(s): State<AppState>,
@@ -800,7 +894,10 @@ pub async fn preview(
         let artifact = prepare_artifact(&s, &scope, ch.as_ref(), &r, &metadata).await?;
         let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
         if bindings(&tx, &r, &r.manifest).await?.0 != metadata {
-            return Err(ApiError::conflict("变量已变化，请重新预览。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("deployment.error.029"),
+            ));
         }
         save_preview(&tx, &scope, &r, &artifact).await?;
         tx.commit().await?;
@@ -821,7 +918,7 @@ pub async fn preview(
         json!({"desired":desired,"current":current,"expected_hash":expected,
         "preview_token":preview_token(&desired,&expected,r.version,source),"version":r.version,"changed":current!=desired,
         "variables": artifact_bindings(&desired)?,
-        "notice": if source != 0 {"回滚将恢复该历史版本的镜像、配置及变量值；已轮换的旧密钥可能失效。卷数据不会回滚。"} else {"对比目标主机保存的部署产物，不代表服务实时状态。镜像或构建产物摘要已固定；引用变量在入队时加密保存，后续变量变更不影响已入队执行。"}}),
+        "notice": crate::i18n::message(if source != 0 {"deployment.notice.rollback"} else {"deployment.notice.preview"})}),
     ))
 }
 async fn prepare_artifact(
@@ -861,7 +958,10 @@ async fn save_preview(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("记录已变化，请刷新后重新预览。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.030"),
+        ));
     }
     Ok(())
 }
@@ -877,39 +977,56 @@ async fn resolve_artifact(
     if r.mode == "docker" || r.mode == "stack" {
         return crate::deployment_modes::docker_resolve(ch, rendered).await;
     }
-    let mut public: Value =
-        serde_json::from_str(rendered).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    let mut public: Value = serde_json::from_str(rendered).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.015"),
+        )
+    })?;
     public
         .as_object_mut()
-        .ok_or_else(|| ApiError::bad("Compose 产物无效。"))?
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.015"),
+            )
+        })?
         .remove("x-variable-references");
     public
         .as_object_mut()
         .unwrap()
         .remove("x-config-references");
-    let rendered =
-        serde_json::to_string(&public).map_err(|_| ApiError::bad("Compose 产物无效。"))?;
+    let rendered = serde_json::to_string(&public).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.015"),
+        )
+    })?;
     let dir = directory(r);
     let path = format!("{dir}/preview-{}.json", s.next_id()?);
     let prepare=ch.exec(&format!("set -eu; command -v flock >/dev/null; command -v sha256sum >/dev/null; docker compose version; umask 077; mkdir -p -- {}",quote(&dir)),Duration::from_secs(30)).await?;
     if prepare.code != 0 {
-        return Err(ApiError::bad(format!(
-            "目标需要 Docker Compose v2+、flock、sha256sum 和可写目录。{}",
-            prepare.stderr
-        )));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.037").with("detail", prepare.stderr),
+        ));
     }
     upload(ch, &path, rendered.to_owned()).await?;
     let result=ch.exec(&format!("docker compose --project-name {} -f {} config --resolve-image-digests --format json",quote(&project(r)),quote(&path)),Duration::from_secs(120)).await;
     ch.delete_file(&path).await?;
     let out = result?;
     if out.code != 0 {
-        return Err(ApiError::bad(format!(
-            "无法解析镜像摘要，未开始部署：{}",
-            out.stderr
-        )));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.mode.038").with("detail", out.stderr),
+        ));
     }
-    let value: Value =
-        serde_json::from_str(&out.stdout).map_err(|_| ApiError::bad("Compose 未返回有效产物。"))?;
+    let value: Value = serde_json::from_str(&out.stdout).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.031"),
+        )
+    })?;
     if value["services"].as_object().is_none_or(|services| {
         services.is_empty()
             || services.values().any(|v| {
@@ -918,7 +1035,10 @@ async fn resolve_artifact(
                     .is_some_and(|image| image.contains("@sha256:"))
             })
     }) {
-        return Err(ApiError::bad("全部镜像都必须解析为固定摘要。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.032"),
+        ));
     }
     Ok(out.stdout)
 }
@@ -946,7 +1066,10 @@ pub async fn scheduled(s: &AppState, scope: Scope, id: &str, restart: bool) -> R
     scope.require("deployments.apply")?;
     let row = scoped(&s.db, &scope, id).await?;
     if restart && row.current_revision == 0 {
-        return Err(ApiError::bad("应用尚无成功版本，不能重启。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.033"),
+        ));
     }
     let revision_id = if restart {
         Some(Id::from(row.current_revision).to_string())
@@ -963,15 +1086,23 @@ pub async fn scheduled(s: &AppState, scope: Scope, id: &str, restart: bool) -> R
     )
     .await?;
     let body = RunBody {
-        version: preview["version"]
-            .as_i64()
-            .ok_or_else(|| ApiError::bad("预览版本缺失。"))?,
+        version: preview["version"].as_i64().ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.034"),
+            )
+        })?,
         expected_hash: preview["expected_hash"].as_str().unwrap_or_default().into(),
         preview_token: preview["preview_token"].as_str().unwrap_or_default().into(),
         target_hashes: serde_json::from_value(
             preview.get("target_hashes").cloned().unwrap_or(json!({})),
         )
-        .map_err(|_| ApiError::bad("目标摘要无效。"))?,
+        .map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.035"),
+            )
+        })?,
         revision_id: revision_id.unwrap_or_default(),
     };
     let (_, Json(result)) = trigger(s, &scope, id, body, false, restart).await?;
@@ -1001,24 +1132,37 @@ async fn trigger(
     let tx = crate::variables::transaction(s, scope.workspace_id).await?;
     let r = scoped(&tx, scope, id).await?;
     if restart && r.state != "succeeded" {
-        return Err(ApiError::conflict(
-            "应用上次执行未全部成功，请先回滚或重新部署后再重启。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.036"),
         ));
     }
     if b.version != r.version {
-        return Err(ApiError::conflict("记录已变化，请刷新后重新预览。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.030"),
+        ));
     }
     if b.expected_hash.len() != 64 || !b.expected_hash.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err(ApiError::bad("请先预览目标主机，再提交部署。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.037"),
+        ));
     }
     let (source, manifest, rendered, artifact, files) = if rollback || restart {
         let old = old_revision(&tx, scope, r.id, &b.revision_id).await?;
         if restart && old.id != r.current_revision {
-            return Err(ApiError::conflict("当前运行版本已变化，请重新预览。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("deployment.error.038"),
+            ));
         }
         let source = Id::from(old.id);
         if old.artifact.is_empty() {
-            return Err(ApiError::bad("revision 没有可回滚产物。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.039"),
+            ));
         }
         let files = open_snapshot(&s.vault, &old)?;
         (
@@ -1038,7 +1182,10 @@ async fn trigger(
         }
         let (metadata, rows, configs) = bindings(&tx, &r, &r.manifest).await?;
         if r.preview_artifact.is_empty() || artifact_bindings(&r.preview_artifact)? != metadata {
-            return Err(ApiError::conflict("变量或预览已变化，请重新预览后执行。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("deployment.error.040"),
+            ));
         }
         let mut files = environment_files(s, &metadata, &rows, &r.mode)?;
         files.extend(config_files(s, &metadata, &rows, &configs)?);
@@ -1055,12 +1202,18 @@ async fn trigger(
             .iter()
             .any(|(name, text)| name.starts_with(".config-") && text.len() > 500 * 1024)
     {
-        return Err(ApiError::bad("Swarm单个配置文件不能超过500KiB。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.041"),
+        ));
     }
     if artifact.is_empty()
         || b.preview_token != preview_token(&artifact, &b.expected_hash, r.version, source)
     {
-        return Err(ApiError::conflict("预览已失效，请重新预览后执行。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.042"),
+        ));
     }
     let (id, now) = (s.next_id()?, db::now());
     if r.target_kind == "host-group" {
@@ -1070,7 +1223,12 @@ async fn trigger(
             .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
             .one(&tx)
             .await?
-            .ok_or_else(|| ApiError::bad("目标主机不存在。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("deployment.error.043"),
+                )
+            })?;
     }
     crate::artifacts::freeze(s, &tx, scope.workspace_id, id, &artifact).await?;
     let variable_snapshot = seal_snapshot(&s.vault, r.workspace_id, i64::from(id), &files)?;
@@ -1093,7 +1251,10 @@ async fn trigger(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("记录已变化、执行中或需要核实，请刷新。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.044"),
+        ));
     }
     let current = apps::Entity::find_by_id(r.id)
         .one(&tx)
@@ -1158,7 +1319,10 @@ pub async fn acknowledge(
 ) -> Result<Json<Value>> {
     scope.require("deployments.apply")?;
     if b.note.trim().is_empty() || b.note.chars().count() > 500 {
-        return Err(ApiError::bad("请填写核实说明（1到500字）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.045"),
+        ));
     }
     let r = scoped(&s.db, &scope, &id).await?;
     let n = apps::Entity::update_many()
@@ -1175,7 +1339,10 @@ pub async fn acknowledge(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("记录状态已变化，请刷新。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("deployment.error.046"),
+        ));
     }
     crate::hosts::activity(
         &s,
@@ -1235,7 +1402,7 @@ pub async fn scheduler(
                 &s,
                 &r,
                 "needs-review",
-                "服务重启前执行未完成；请核实远端进程及容器后确认，再重新预览。\n",
+                &StoredText::from_message(Message::new("deployment.output.recovered")).stored(),
             )
             .await?;
         }
@@ -1290,7 +1457,7 @@ async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -
         .await?;
     let outcome = tokio::select! {
         v=execute(s,&rev)=>v,
-        _=stop.changed()=>Err(ApiError::bad("服务停止等待，远端命令可能仍在执行。")),
+        _=stop.changed()=>Err(ApiError::localized(axum::http::StatusCode::BAD_REQUEST, crate::i18n::Message::new("deployment.error.047"))),
     };
     match outcome {
         Ok((success, output)) => {
@@ -1303,13 +1470,15 @@ async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -
             .await?
         }
         Err(e) => {
-            finish(
-                s,
-                &rev,
-                "needs-review",
-                &format!("执行结果无法确认：{} 请核实远端进程及容器。\n", e.1),
-            )
-            .await?
+            let mut output =
+                StoredText::from_message(Message::new("deployment.output.uncertainPrefix"));
+            if let Some(message) = e.2 {
+                output.push_message(message);
+            } else {
+                output.push_raw(e.1);
+            }
+            output.push_message(Message::new("deployment.output.verifyRemote"));
+            finish(s, &rev, "needs-review", &output.stored()).await?
         }
     }
     Ok(())
@@ -1331,8 +1500,9 @@ async fn execute(s: &AppState, rev: &revisions::Model) -> Result<(bool, String)>
         .is_some_and(|v| !v.is_empty())
         || artifact_bindings(&rev.artifact)? != json!([]);
     match execute_inner(s, rev, protected).await {
-        Err(_) if protected => Err(ApiError::bad(
-            "引用变量部署结果无法确认，原始错误未保存，请在目标主机核实。",
+        Err(_) if protected => Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("deployment.error.048"),
         )),
         result => result,
     }
@@ -1376,26 +1546,29 @@ async fn execute_host(
     }
     let current = remote_artifact(ch.as_ref(), &r).await?;
     if hash(&current) != rev.expected_hash {
-        return Ok((false, "目标产物已变化，请重新预览。\n".into()));
+        return Ok((
+            false,
+            StoredText::from_message(Message::new("deployment.output.artifactChanged")).stored(),
+        ));
     }
     let dir = directory(&r);
     let stage = format!("{dir}/revision-{}.json", rev.id);
     let prepare=ch.exec(&format!("set -eu; command -v flock >/dev/null; docker compose version; umask 077; mkdir -p -- {}",quote(&dir)),Duration::from_secs(30)).await?;
     if prepare.code != 0 {
-        return Ok((
-            false,
-            if protected {
-                format!(
-                    "前置检查失败，退出码：{}。原始输出未保存，请在主机核实。\n",
-                    prepare.code
-                )
+        return Ok((false, {
+            let mut text = StoredText::new();
+            text.push_message(if protected {
+                Message::new("deployment.output.preflightProtected")
+                    .with("code", prepare.code.to_string())
             } else {
-                format!(
-                    "目标需要 Docker Compose v2+、flock 和可写工作目录。\n{}{}",
-                    prepare.stdout, prepare.stderr
-                )
-            },
-        ));
+                Message::new("deployment.output.preflightCompose")
+            });
+            if !protected {
+                text.push_raw(prepare.stdout);
+                text.push_raw(prepare.stderr);
+            }
+            text.stored()
+        }));
     }
     let artifact = rev.artifact.clone();
     // Persist the exact artifact BEFORE mutating containers. Rollback never re-renders it.
@@ -1417,7 +1590,10 @@ async fn execute_host(
             || !(name.starts_with(".variables-") && name.ends_with(".env")
                 || name.starts_with(".config-") && name.ends_with(".txt"))
         {
-            return Err(ApiError::bad("变量快照路径无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.049"),
+            ));
         }
         let path = format!("{dir}/{name}");
         if let Err(error) = upload(ch.as_ref(), &path, text.clone()).await {
@@ -1507,30 +1683,227 @@ async fn execute_host(
             )
             .await?;
         if cleanup.code != 0 {
-            return Err(ApiError::bad("环境文件清理未完成，请在目标主机核实。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("deployment.error.050"),
+            ));
         }
     }
     Ok((
         out.code == 0,
-        if protected {
-            format!(
-                "{}。引用变量的原始命令输出不予保存。\n退出码：{}\n",
-                if out.code == 0 {
-                    "部署成功"
-                } else {
-                    "部署失败"
-                },
-                out.code
-            )
-        } else {
-            format!("{}{}\n退出码：{}\n", out.stdout, out.stderr, out.code)
-        },
+        execution_output(
+            &out,
+            protected.then(|| {
+                Message::new("deployment.output.deploymentProtected")
+                    .with_message(
+                        "result",
+                        Message::new(if out.code == 0 {
+                            "deployment.output.succeeded"
+                        } else {
+                            "deployment.output.failed"
+                        }),
+                    )
+                    .with("code", out.code.to_string())
+            }),
+        ),
     ))
+}
+
+/// Preserve literal command output while keeping application status messages reader-localized.
+pub(crate) fn execution_output(out: &crate::channel::Output, protected: Option<Message>) -> String {
+    let mut text = StoredText::new();
+    if let Some(message) = protected {
+        text.push_message(message);
+    } else {
+        text.push_raw(out.stdout.clone());
+        text.push_raw(out.stderr.clone());
+        text.push_message(
+            Message::new("deployment.output.exitCode").with("code", out.code.to_string()),
+        );
+    }
+    text.stored()
 }
 
 #[cfg(test)]
 mod variable_snapshot_tests {
     use super::*;
+    #[tokio::test]
+    async fn deployment_outputs_and_validation_use_each_http_readers_language() {
+        use crate::i18n::{Locale, render};
+        use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Schema};
+        let conn = Database::connect("sqlite::memory:").await.unwrap();
+        let backend = conn.get_database_backend();
+        let schema = Schema::new(backend);
+        for table in [
+            schema.create_table_from_entity(revisions::Entity),
+            schema.create_table_from_entity(crate::entities::deployment_revision_targets::Entity),
+        ] {
+            conn.execute_raw(backend.build(&table)).await.unwrap();
+        }
+        let literal = format!(
+            "{}\n{{\"$system_message\":{{\"version\":1}}}}\n{{code}} 中文 사용자",
+            "x".repeat(300 * 1024)
+        );
+        let mut row = revision();
+        row.output = execution_output(
+            &crate::channel::Output {
+                code: 7,
+                stdout: literal.clone(),
+                stderr: "literal stderr".into(),
+            },
+            None,
+        );
+        let stored = row.output.clone();
+        revisions::Entity::insert(row.clone().into_active_model())
+            .exec(&conn)
+            .await
+            .unwrap();
+        for (id, state) in [(10, "running"), (11, "pending")] {
+            crate::entities::deployment_revision_targets::Entity::insert(
+                crate::entities::deployment_revision_targets::Model {
+                    id,
+                    workspace_id: row.workspace_id,
+                    revision_id: row.id,
+                    host_id: id,
+                    position: id,
+                    artifact: "{}".into(),
+                    expected_hash: String::new(),
+                    state: state.into(),
+                    output: String::new(),
+                    started_at: 0,
+                    finished_at: 0,
+                }
+                .into_active_model(),
+            )
+            .exec(&conn)
+            .await
+            .unwrap();
+        }
+        groups::settle(&conn, row.id).await.unwrap();
+        async fn project(State(conn): State<DatabaseConnection>) -> Json<Value> {
+            let row = revisions::Entity::find().one(&conn).await.unwrap().unwrap();
+            let mut value = revision_json(&row);
+            value["targets"] = groups::details(&conn, row.workspace_id.into(), row.id)
+                .await
+                .unwrap();
+            Json(value)
+        }
+        async fn validate(State(conn): State<DatabaseConnection>) -> Result<Json<Value>> {
+            let scope = Scope {
+                workspace_id: 1.into(),
+                user: crate::auth::User {
+                    id: 1.into(),
+                    name: "reader".into(),
+                    email: String::new(),
+                    is_superadmin: false,
+                },
+                permissions: Default::default(),
+            };
+            check(
+                &conn,
+                &scope,
+                &Body {
+                    name: String::new(),
+                    manifest: String::new(),
+                    mode: "compose".into(),
+                    target_kind: "host".into(),
+                    target_ref: "1".into(),
+                    workdir: "/srv".into(),
+                    description: String::new(),
+                    version: 1,
+                },
+            )
+            .await?;
+            Ok(Json(json!({})))
+        }
+        let router = axum::Router::new()
+            .route("/status", axum::routing::get(project))
+            .route("/validate", axum::routing::get(validate))
+            .with_state(conn.clone())
+            .layer(axum::middleware::from_fn(crate::i18n::middleware));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let root = format!("http://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let client = reqwest::Client::new();
+        for locale in Locale::ALL {
+            let value: Value = client
+                .get(format!("{root}/status"))
+                .header("Accept-Language", locale.tag())
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(
+                value["output"],
+                format!(
+                    "{literal}literal stderr{}",
+                    render(
+                        locale,
+                        &Message::new("deployment.output.exitCode").with("code", "7")
+                    )
+                )
+            );
+            assert_eq!(
+                value["targets"][0]["output"],
+                render(locale, &Message::new("deployment.output.targetUncertain"))
+            );
+            assert_eq!(
+                value["targets"][1]["output"],
+                render(locale, &Message::new("deployment.output.skipped"))
+            );
+            let response = client
+                .get(format!("{root}/validate"))
+                .header("Accept-Language", locale.tag())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let error: Value = response.json().await.unwrap();
+            assert_eq!(
+                error["error"],
+                render(locale, &Message::new("deployment.error.001"))
+            );
+        }
+        assert_eq!(
+            revisions::Entity::find_by_id(row.id)
+                .one(&conn)
+                .await
+                .unwrap()
+                .unwrap()
+                .output,
+            stored
+        );
+        let mut legacy = row.clone();
+        legacy.output=r#"{"$system_message":{"version":1,"message":{"key":"deployment.error.001","params":{}}}}"#.into();
+        assert_eq!(revision_json(&legacy)["output"], legacy.output);
+        task.abort();
+    }
+
+    #[test]
+    fn protected_deployment_output_never_retains_command_output() {
+        use crate::i18n::{Locale, render_text_stored};
+        let out = crate::channel::Output {
+            code: 9,
+            stdout: "secret stdout".into(),
+            stderr: "secret stderr".into(),
+        };
+        for key in [
+            "deployment.output.dockerProtected",
+            "deployment.output.nativeProtected",
+            "deployment.output.swarmProtected",
+        ] {
+            let stored = execution_output(&out, Some(Message::new(key).with("code", "9")));
+            assert!(!stored.contains("secret"));
+            for locale in Locale::ALL {
+                let rendered = render_text_stored(locale, &stored);
+                assert!(rendered.contains('9'));
+                assert!(!rendered.contains("secret"));
+                assert!(!rendered.contains("$system_text"));
+            }
+        }
+    }
     fn revision() -> revisions::Model {
         revisions::Model {
             id: 10,

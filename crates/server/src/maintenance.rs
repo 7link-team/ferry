@@ -1,4 +1,5 @@
 //! Workspace preferences and shared enumeration dictionaries.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{dictionaries, dictionary_items, settings, workspaces},
@@ -8,11 +9,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
     sea_query::{Expr, ExprTrait},
@@ -20,6 +17,121 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
+
+#[path = "maintenance_values.rs"]
+mod typed;
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+    use crate::i18n::{Locale, with_locale};
+
+    #[tokio::test]
+    async fn localized_builtin_names_roundtrip_across_reader_locales_without_rewriting_user_labels()
+    {
+        let (dir, db) = crate::lock::tests::database().await;
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, tokio::time::Instant::now().into_std())
+                    .unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "maintenance-test".into(),
+            server_mode: false,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+            host_monitor: Default::default(),
+            cluster: None,
+        });
+        workspaces::Entity::insert(workspaces::ActiveModel {
+            id: Set(1),
+            slug: Set("maintenance-test".into()),
+            name: Set("Workspace".into()),
+            owner_id: Set(1),
+            join_code: Set("maintenance-test".into()),
+            pipeline_run_number: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        seed(&s, &s.db, 1.into()).await.unwrap();
+        let scope = || Scope {
+            workspace_id: 1.into(),
+            user: crate::auth::User {
+                id: 1.into(),
+                email: "test@example.invalid".into(),
+                name: "User 原文".into(),
+                is_superadmin: false,
+            },
+            permissions: ["settings.update".to_owned()].into_iter().collect(),
+        };
+        let row = settings::Entity::find()
+            .filter(settings::Column::Key.eq("default_page_size"))
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let id = Id::from(row.id);
+        for locale in Locale::ALL {
+            let current = settings::Entity::find_by_id(row.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let mut view = with_locale(locale, async { setting_json(current.clone()) }).await;
+            assert_eq!(view["name"], setting_name("default_page_size", locale));
+            view["value_json"] = json!("21");
+            let body: SettingBody = serde_json::from_value(view).unwrap();
+            // A user may switch language after loading the draft and before saving it.
+            let Json(saved) = with_locale(
+                Locale::JaJp,
+                update_setting(
+                    State(s.clone()),
+                    scope(),
+                    Path(("1".into(), id)),
+                    Json(body),
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(saved["version"], current.version + 1);
+            let stored = settings::Entity::find_by_id(row.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.name, row.name);
+            assert_eq!(stored.value, 21);
+            assert_eq!(stored.version, current.version + 1);
+            with_locale(locale, seed(&s, &s.db, 1.into()))
+                .await
+                .unwrap();
+            let dictionary = dictionaries::Entity::find()
+                .filter(dictionaries::Column::Key.eq("environment"))
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                dictionary.name, "Environment",
+                "existing editable seed labels stay literal"
+            );
+        }
+        let mut custom = row;
+        custom.key = "custom".into();
+        custom.name = "用户 {name} 原文".into();
+        for locale in Locale::ALL {
+            assert_eq!(
+                with_locale(locale, async { setting_json(custom.clone()) }).await["name"],
+                custom.name
+            );
+        }
+    }
+}
 
 const SETTINGS: &[(&str, &str, i64, i64, i64)] = &[
     ("default_page_size", "默认每页条数", 20, 1, 200),
@@ -53,15 +165,15 @@ const SETTINGS: &[(&str, &str, i64, i64, i64)] = &[
     ),
 ];
 const SPEC: Spec = Spec {
-    search: &["key"],
-    filters: &[],
-    sortable: &["key", "updated_at"],
+    search: &["key", "name", "description"],
+    filters: &["category", "value_type"],
+    sortable: &["key", "name", "category", "updated_at"],
     default_sort: "key",
 };
 const DICT_SPEC: Spec = Spec {
     search: &["key", "name", "description"],
-    filters: &[],
-    sortable: &["key", "name", "created_at", "updated_at"],
+    filters: &["category", "value_type"],
+    sortable: &["key", "name", "category", "created_at", "updated_at"],
     default_sort: "key",
 };
 
@@ -69,7 +181,12 @@ pub async fn setting(conn: &impl ConnectionTrait, workspace: Id, key: &str) -> R
     let fallback = SETTINGS
         .iter()
         .find(|v| v.0 == key)
-        .ok_or_else(|| ApiError::bad("未知配置项。"))?
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("maintenance.settingUnknown"),
+            )
+        })?
         .2;
     Ok(settings::Entity::find()
         .filter(settings::Column::WorkspaceId.eq(workspace))
@@ -81,7 +198,7 @@ pub async fn setting(conn: &impl ConnectionTrait, workspace: Id, key: &str) -> R
 }
 pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> Result<()> {
     let now = db::now();
-    for &(key, _, value, _, _) in SETTINGS {
+    for &(key, name, value, _, _) in SETTINGS {
         if settings::Entity::find()
             .filter(settings::Column::WorkspaceId.eq(workspace))
             .filter(settings::Column::Key.eq(key))
@@ -94,6 +211,12 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                 workspace_id: Set(workspace.into()),
                 key: Set(key.into()),
                 value: Set(value),
+                name: Set(name.into()),
+                description: Set(String::new()),
+                category: Set("general".into()),
+                value_type: Set("num".into()),
+                value_json: Set(None),
+                schema_json: Set(None),
                 version: Set(1),
                 created_at: Set(now),
                 updated_at: Set(now),
@@ -101,29 +224,42 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
             .exec(conn)
             .await?;
         }
+        // Added metadata must match the displayed built-in names for list search.
+        // Preserve the operational value, optimistic version and timestamps.
+        settings::Entity::update_many()
+            .col_expr(settings::Column::Name, Expr::value(name))
+            .filter(settings::Column::WorkspaceId.eq(workspace))
+            .filter(settings::Column::Key.eq(key))
+            .filter(settings::Column::Name.eq(""))
+            .exec(conn)
+            .await?;
     }
     for (key, name, items) in [
         (
             "host-state",
-            "主机状态",
-            vec![("online", "在线"), ("offline", "离线"), ("unknown", "未知")],
+            crate::i18n::message("maintenance.hostStateName"),
+            vec![
+                ("online", crate::i18n::message("maintenance.online")),
+                ("offline", crate::i18n::message("maintenance.offline")),
+                ("unknown", crate::i18n::message("maintenance.unknown")),
+            ],
         ),
         (
             "environment",
-            "环境",
+            crate::i18n::message("maintenance.environmentName"),
             vec![
-                ("dev", "开发"),
-                ("staging", "预发布"),
-                ("production", "生产"),
+                ("dev", crate::i18n::message("maintenance.development")),
+                ("staging", crate::i18n::message("maintenance.staging")),
+                ("production", crate::i18n::message("maintenance.production")),
             ],
         ),
         (
             "app-category",
-            "应用分类",
+            crate::i18n::message("maintenance.appCategoryName"),
             vec![
-                ("web", "Web 服务"),
-                ("worker", "后台任务"),
-                ("database", "数据库"),
+                ("web", crate::i18n::message("maintenance.webService")),
+                ("worker", crate::i18n::message("maintenance.backgroundTask")),
+                ("database", crate::i18n::message("maintenance.database")),
             ],
         ),
     ] {
@@ -140,6 +276,10 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                 workspace_id: Set(workspace.into()),
                 key: Set(key.into()),
                 name: Set(name.into()),
+                category: Set("general".into()),
+                value_type: Set("selection".into()),
+                value_json: Set(None),
+                schema_json: Set(None),
                 description: Set(String::new()),
                 builtin: Set(1),
                 version: Set(1),
@@ -174,9 +314,36 @@ pub async fn prepare(s: &AppState) -> Result<()> {
     }
     Ok(())
 }
+fn setting_name(key: &str, locale: crate::i18n::Locale) -> String {
+    crate::i18n::render(
+        locale,
+        &crate::i18n::Message::new(match key {
+            "default_page_size" => "maintenance.pageSize",
+            "heartbeat_timeout_seconds" => "maintenance.heartbeatTimeout",
+            "history_retention_days" => "maintenance.historyRetention",
+            "repository_event_retention_days" => "maintenance.repositoryRetention",
+            "pipeline_concurrent_runs" => "maintenance.pipelineConcurrency",
+            _ => return key.to_owned(),
+        }),
+    )
+}
+
 fn setting_json(r: settings::Model) -> Value {
-    let def = SETTINGS.iter().find(|v| v.0 == r.key).unwrap();
-    json!({"id":Id::from(r.id),"key":r.key,"name":def.1,"type":"integer","value":r.value,"default":def.2,"min":def.3,"max":def.4,"version":r.version,"updated_at":r.updated_at})
+    let def = SETTINGS.iter().find(|v| v.0 == r.key);
+    let raw = if def.is_some() {
+        r.value.to_string()
+    } else {
+        r.value_json.unwrap_or_else(|| r.value.to_string())
+    };
+    let schema = def
+        .map(|d| json!({"min":d.3,"max":d.4,"decimals":0}).to_string())
+        .unwrap_or_else(|| r.schema_json.unwrap_or_else(|| "{}".into()));
+    json!({"id":Id::from(r.id),"key":r.key,"name":def.map(|d|setting_name(d.0, crate::i18n::current_locale())).unwrap_or(r.name),
+        "description":r.description,"category":r.category,"value_type":r.value_type,
+        "value_json":raw,"schema_json":schema,"value_summary":typed::summary(&raw),
+        "builtin":def.is_some(),"type":if r.value_type=="num" {"integer"} else {r.value_type.as_str()},
+        "value":r.value,"default":def.map(|d|d.2),"min":def.map(|d|d.3),"max":def.map(|d|d.4),
+        "version":r.version,"created_at":r.created_at,"updated_at":r.updated_at})
 }
 pub async fn list_settings(
     State(s): State<AppState>,
@@ -220,8 +387,131 @@ pub async fn get_setting(
 }
 #[derive(Deserialize)]
 pub struct SettingBody {
-    value: i64,
+    #[serde(default)]
+    value: Option<i64>,
+    #[serde(default)]
     version: i64,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    value_type: Option<String>,
+    #[serde(default)]
+    value_json: Option<String>,
+    #[serde(default)]
+    schema_json: Option<String>,
+}
+
+fn metadata(key: &str, name: &str, category: &str, description: &str) -> Result<()> {
+    if key.is_empty()
+        || key.len() > 60
+        || !key
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+        || name.trim().is_empty()
+        || name.chars().count() > 100
+        || category.trim().is_empty()
+        || category.chars().count() > 100
+        || description.chars().count() > 10000
+        || [key, name, category, description]
+            .iter()
+            .any(|s| s.contains('\0'))
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.metadataInvalid"),
+        ));
+    }
+    Ok(())
+}
+
+pub async fn create_setting(
+    State(s): State<AppState>,
+    scope: Scope,
+    Json(body): Json<SettingBody>,
+) -> Result<(StatusCode, Json<Value>)> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let result = create_setting_in(&s, &tx, &scope, body).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub(crate) async fn create_setting_in(
+    s: &AppState,
+    tx: &sea_orm::DatabaseTransaction,
+    scope: &Scope,
+    body: SettingBody,
+) -> Result<(StatusCode, Json<Value>)> {
+    scope.require("settings.create")?;
+    let key = body.key.unwrap_or_default();
+    let name = body.name.unwrap_or_default();
+    let category = body.category.unwrap_or_else(|| "general".into());
+    let description = body.description.unwrap_or_default();
+    metadata(&key, &name, &category, &description)?;
+    if SETTINGS.iter().any(|d| d.0 == key) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.systemKeyReserved"),
+        ));
+    }
+    let kind = body.value_type.unwrap_or_else(|| "num".into());
+    let raw = body
+        .value_json
+        .unwrap_or_else(|| body.value.unwrap_or_default().to_string());
+    let typed = typed::validate(
+        &kind,
+        &raw,
+        &body.schema_json.unwrap_or_else(|| "{}".into()),
+    )?;
+    if matches!(kind.as_str(), "image" | "video" | "file") {
+        crate::value_files::validate_references(
+            s,
+            scope.workspace_id,
+            "settings",
+            &typed.value,
+            &typed.schema,
+        )
+        .await?;
+    }
+    lock(tx, scope.workspace_id).await?;
+    if settings::Entity::find()
+        .filter(settings::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(settings::Column::Key.eq(&key))
+        .one(tx)
+        .await?
+        .is_some()
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("maintenance.settingExists"),
+        ));
+    }
+    let id = s.next_id()?;
+    let now = db::now();
+    settings::Entity::insert(settings::ActiveModel {
+        id: Set(id.into()),
+        workspace_id: Set(scope.workspace_id.into()),
+        key: Set(key),
+        name: Set(name),
+        description: Set(description),
+        category: Set(category),
+        value_type: Set(kind),
+        value: Set(typed.value.as_i64().unwrap_or_default()),
+        value_json: Set(Some(typed.value.to_string())),
+        schema_json: Set(Some(typed.schema.to_string())),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(tx)
+    .await?;
+    crate::hosts::activity_in(s, tx, scope, "create", "settings", &id, json!({})).await?;
+    Ok((StatusCode::CREATED, Json(json!({"id":id,"version":1}))))
 }
 pub async fn update_setting(
     State(s): State<AppState>,
@@ -232,15 +522,97 @@ pub async fn update_setting(
     scope.require("settings.update")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let row = setting_row(&tx, scope.workspace_id, id).await?;
-    let def = SETTINGS.iter().find(|v| v.0 == row.key).unwrap();
-    if !(def.3..=def.4).contains(&body.value) {
-        return Err(ApiError::bad(format!(
-            "{} 必须在 {} 到 {} 之间。",
-            def.1, def.3, def.4
-        )));
+    let def = SETTINGS.iter().find(|v| v.0 == row.key);
+    if body.key.as_ref().is_some_and(|k| k != &row.key) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.settingKeyImmutable"),
+        ));
     }
+    if let Some(d) = def {
+        let fixed_schema = json!({"min":d.3,"max":d.4,"decimals":0});
+        if body.name.as_deref().is_some_and(|v| {
+            v != d.1
+                && !crate::i18n::Locale::ALL
+                    .into_iter()
+                    .any(|locale| v == setting_name(d.0, locale))
+        }) || body.category.as_deref().is_some_and(|v| v != row.category)
+            || body
+                .description
+                .as_deref()
+                .is_some_and(|v| v != row.description)
+            || body.schema_json.as_deref().is_some_and(|v| {
+                serde_json::from_str::<Value>(v).ok().as_ref() != Some(&fixed_schema)
+            })
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("maintenance.systemMetadataImmutable"),
+            ));
+        }
+    }
+    let name = def
+        .map(|d| d.1.to_string())
+        .unwrap_or_else(|| body.name.unwrap_or_else(|| row.name.clone()));
+    let description = body.description.unwrap_or_else(|| row.description.clone());
+    let category = body.category.unwrap_or_else(|| row.category.clone());
+    metadata(&row.key, &name, &category, &description)?;
+    let kind = body.value_type.unwrap_or_else(|| row.value_type.clone());
+    if def.is_some() && kind != "num" {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.systemTypeImmutable"),
+        ));
+    }
+    let schema = if let Some(d) = def {
+        json!({"min":d.3,"max":d.4,"decimals":0}).to_string()
+    } else {
+        body.schema_json
+            .unwrap_or_else(|| row.schema_json.clone().unwrap_or_else(|| "{}".into()))
+    };
+    let raw = body
+        .value_json
+        .or_else(|| body.value.map(|n| n.to_string()))
+        .unwrap_or_else(|| {
+            row.value_json
+                .clone()
+                .unwrap_or_else(|| row.value.to_string())
+        });
+    let typed = typed::validate(&kind, &raw, &schema)?;
+    if matches!(kind.as_str(), "image" | "video" | "file") {
+        crate::value_files::validate_references(
+            &s,
+            scope.workspace_id,
+            "settings",
+            &typed.value,
+            &typed.schema,
+        )
+        .await?;
+    }
+    let value = if def.is_some() {
+        typed.value.as_i64().ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("maintenance.systemIntegerRequired"),
+            )
+        })?
+    } else {
+        typed.value.as_i64().unwrap_or_default()
+    };
     let n = settings::Entity::update_many()
-        .col_expr(settings::Column::Value, Expr::value(body.value))
+        .col_expr(settings::Column::Value, Expr::value(value))
+        .col_expr(settings::Column::Name, Expr::value(name))
+        .col_expr(settings::Column::Description, Expr::value(description))
+        .col_expr(settings::Column::Category, Expr::value(category))
+        .col_expr(settings::Column::ValueType, Expr::value(kind))
+        .col_expr(
+            settings::Column::ValueJson,
+            Expr::value(typed.value.to_string()),
+        )
+        .col_expr(
+            settings::Column::SchemaJson,
+            Expr::value(typed.schema.to_string()),
+        )
         .col_expr(
             settings::Column::Version,
             Expr::col(settings::Column::Version).add(1),
@@ -253,20 +625,43 @@ pub async fn update_setting(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("配置已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("maintenance.settingChanged"),
+        ));
     }
-    crate::hosts::activity_in(
-        &s,
-        &tx,
-        &scope,
-        "update",
-        "settings",
-        &id,
-        json!({"key":row.key,"value":body.value}),
-    )
-    .await?;
+    let audit = if def.is_some() {
+        json!({"key":row.key,"value":value})
+    } else {
+        json!({"key":row.key})
+    };
+    crate::hosts::activity_in(&s, &tx, &scope, "update", "settings", &id, audit).await?;
     tx.commit().await?;
     Ok(Json(json!({"id":id,"version":body.version+1})))
+}
+
+pub async fn delete_setting(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+) -> Result<StatusCode> {
+    scope.require("settings.delete")?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let old = setting_row(&tx, scope.workspace_id, id).await?;
+    if SETTINGS.iter().any(|d| d.0 == old.key) {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.systemSettingDeleteForbidden"),
+        ));
+    }
+    settings::Entity::delete_many()
+        .filter(settings::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(settings::Column::Id.eq(id))
+        .exec(&tx)
+        .await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "delete", "settings", &id, json!({})).await?;
+    tx.commit().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -280,43 +675,51 @@ pub struct DictionaryBody {
     name: String,
     #[serde(default)]
     description: String,
-    items: String,
+    #[serde(default)]
+    items: Option<String>,
+    #[serde(default = "default_category")]
+    category: String,
+    #[serde(default = "default_dictionary_type")]
+    value_type: String,
+    #[serde(default)]
+    value_json: Option<String>,
+    #[serde(default)]
+    schema_json: Option<String>,
     #[serde(default)]
     version: i64,
 }
+fn default_category() -> String {
+    "general".into()
+}
+fn default_dictionary_type() -> String {
+    "selection".into()
+}
+
+fn dictionary_value(body: &DictionaryBody) -> Result<typed::TypedValue> {
+    metadata(&body.key, &body.name, &body.category, &body.description)?;
+    let raw = if matches!(body.value_type.as_str(), "selection" | "tab") {
+        body.items.as_deref().or(body.value_json.as_deref())
+    } else {
+        body.value_json.as_deref()
+    };
+    typed::validate(
+        &body.value_type,
+        raw.unwrap_or("[]"),
+        body.schema_json.as_deref().unwrap_or("{}"),
+    )
+}
 fn validate(body: &DictionaryBody) -> Result<Vec<Item>> {
-    if body.key.is_empty()
-        || body.key.len() > 60
-        || !body
-            .key
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
-        || body.name.trim().is_empty()
-        || body.name.chars().count() > 100
-    {
-        return Err(ApiError::bad(
-            "字典标识需为小写字母/数字/中划线，名称需为1到100字。",
-        ));
-    }
-    let items: Vec<Item> = serde_json::from_str(&body.items)
-        .map_err(|_| ApiError::bad("字典项需为含value和label的JSON数组。"))?;
-    let mut values = HashSet::new();
-    if items.len() > 200
-        || items.iter().any(|i| {
-            i.value.trim().is_empty()
-                || i.value.chars().count() > 100
-                || i.label.trim().is_empty()
-                || i.label.chars().count() > 100
-                || i.value.contains('\0')
-                || i.label.contains('\0')
-                || !values.insert(&i.value)
+    let typed = dictionary_value(body)?;
+    if matches!(body.value_type.as_str(), "selection" | "tab") {
+        serde_json::from_value(typed::options(&typed.value)).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("maintenance.optionsInvalid"),
+            )
         })
-    {
-        return Err(ApiError::bad(
-            "字典最多200项；值需唯一，值和标签均需为1到100字。",
-        ));
+    } else {
+        Ok(Vec::new())
     }
-    Ok(items)
 }
 async fn write_items(
     s: &AppState,
@@ -373,7 +776,11 @@ async fn items(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<Vec
         .collect())
 }
 fn dict_json(row: dictionaries::Model) -> Value {
-    json!({"id":Id::from(row.id),"key":row.key,"name":row.name,"description":row.description,"builtin":row.builtin==1,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
+    let raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
+    json!({"id":Id::from(row.id),"key":row.key,"name":row.name,"description":row.description,
+        "category":row.category,"value_type":row.value_type,"value_json":raw,
+        "schema_json":row.schema_json.unwrap_or_else(|| "{}".into()),"value_summary":typed::summary(&raw),
+        "builtin":row.builtin==1,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
 }
 pub async fn list_dictionaries(
     State(s): State<AppState>,
@@ -390,8 +797,39 @@ pub async fn list_dictionaries(
         &q,
     )
     .await?;
+    let legacy_ids: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.value_json.is_none())
+        .map(|r| r.id)
+        .collect();
+    let mut old_items: HashMap<i64, Vec<Item>> = HashMap::new();
+    if !legacy_ids.is_empty() {
+        for item in dictionary_items::Entity::find()
+            .filter(dictionary_items::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(dictionary_items::Column::DictionaryId.is_in(legacy_ids))
+            .order_by_asc(dictionary_items::Column::Position)
+            .all(&s.db)
+            .await?
+        {
+            old_items.entry(item.dictionary_id).or_default().push(Item {
+                value: item.value,
+                label: item.label,
+            });
+        }
+    }
+    let records: Vec<Value> = rows
+        .into_iter()
+        .map(|mut r| {
+            if r.value_json.is_none() {
+                r.value_json = Some(
+                    serde_json::to_string(&old_items.remove(&r.id).unwrap_or_default()).unwrap(),
+                );
+            }
+            dict_json(r)
+        })
+        .collect();
     Ok(Json(
-        json!({"items":rows.into_iter().map(dict_json).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size}),
+        json!({"items":records,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
 }
 pub async fn get_dictionary(
@@ -400,9 +838,16 @@ pub async fn get_dictionary(
     Path((_, id)): Path<(String, Id)>,
 ) -> Result<Json<Value>> {
     scope.require("dictionaries.read")?;
-    let mut row = dict_json(dict_row(&s.db, scope.workspace_id, id).await?);
-    row["items"] =
-        json!(serde_json::to_string_pretty(&items(&s.db, scope.workspace_id, id).await?).unwrap());
+    let model = dict_row(&s.db, scope.workspace_id, id).await?;
+    let legacy = model.value_json.is_none();
+    let mut row = dict_json(model);
+    let options =
+        serde_json::to_string_pretty(&items(&s.db, scope.workspace_id, id).await?).unwrap();
+    row["items"] = json!(options);
+    if legacy {
+        row["value_json"] = json!(options);
+        row["value_summary"] = json!(typed::summary(&options));
+    }
     Ok(Json(row))
 }
 // Serialize dictionary writers on the existing workspace row, also protecting key uniqueness.
@@ -435,6 +880,17 @@ pub(crate) async fn create_dictionary_in(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("dictionaries.create")?;
     let values = validate(&body)?;
+    let typed = dictionary_value(&body)?;
+    if matches!(body.value_type.as_str(), "image" | "video" | "file") {
+        crate::value_files::validate_references(
+            s,
+            scope.workspace_id,
+            "dictionaries",
+            &typed.value,
+            &typed.schema,
+        )
+        .await?;
+    }
     lock(tx, scope.workspace_id).await?;
     if dictionaries::Entity::find()
         .filter(dictionaries::Column::WorkspaceId.eq(scope.workspace_id))
@@ -443,7 +899,10 @@ pub(crate) async fn create_dictionary_in(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("字典标识已存在。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("maintenance.dictionaryExists"),
+        ));
     }
     let id = s.next_id()?;
     let now = db::now();
@@ -453,6 +912,10 @@ pub(crate) async fn create_dictionary_in(
         key: Set(body.key),
         name: Set(body.name),
         description: Set(body.description),
+        category: Set(body.category),
+        value_type: Set(body.value_type),
+        value_json: Set(Some(typed.value.to_string())),
+        schema_json: Set(Some(typed.schema.to_string())),
         builtin: Set(0),
         version: Set(1),
         created_at: Set(now),
@@ -481,11 +944,31 @@ pub async fn update_dictionary(
 ) -> Result<Json<Value>> {
     scope.require("dictionaries.update")?;
     let values = validate(&body)?;
+    let typed = dictionary_value(&body)?;
+    if matches!(body.value_type.as_str(), "image" | "video" | "file") {
+        crate::value_files::validate_references(
+            &s,
+            scope.workspace_id,
+            "dictionaries",
+            &typed.value,
+            &typed.schema,
+        )
+        .await?;
+    }
     let tx = s.db.begin().await?;
     lock(&tx, scope.workspace_id).await?;
     let old = dict_row(&tx, scope.workspace_id, id).await?;
     if old.key != body.key {
-        return Err(ApiError::bad("字典标识创建后不可修改。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.dictionaryKeyImmutable"),
+        ));
+    }
+    if old.builtin == 1 && !matches!(body.value_type.as_str(), "selection" | "tab") {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.systemDictionaryTypeRequired"),
+        ));
     }
     if old.key == "host-state"
         && values
@@ -494,12 +977,26 @@ pub async fn update_dictionary(
             .collect::<HashSet<_>>()
             != HashSet::from(["online", "offline", "unknown"])
     {
-        return Err(ApiError::bad(
-            "主机状态由系统控制，只能修改显示标签和排序。",
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.hostStateControlled"),
         ));
     }
     let n = dictionaries::Entity::update_many()
         .col_expr(dictionaries::Column::Name, Expr::value(body.name))
+        .col_expr(dictionaries::Column::Category, Expr::value(body.category))
+        .col_expr(
+            dictionaries::Column::ValueType,
+            Expr::value(body.value_type),
+        )
+        .col_expr(
+            dictionaries::Column::ValueJson,
+            Expr::value(typed.value.to_string()),
+        )
+        .col_expr(
+            dictionaries::Column::SchemaJson,
+            Expr::value(typed.schema.to_string()),
+        )
         .col_expr(
             dictionaries::Column::Description,
             Expr::value(body.description),
@@ -516,7 +1013,10 @@ pub async fn update_dictionary(
         .await?
         .rows_affected;
     if n == 0 {
-        return Err(ApiError::conflict("字典已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("maintenance.dictionaryChanged"),
+        ));
     }
     write_items(&s, &tx, scope.workspace_id, id, &values).await?;
     crate::hosts::activity_in(
@@ -542,7 +1042,10 @@ pub async fn delete_dictionary(
     lock(&tx, scope.workspace_id).await?;
     let old = dict_row(&tx, scope.workspace_id, id).await?;
     if old.builtin == 1 {
-        return Err(ApiError::bad("系统字典不可删除；可修改其显示内容。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.systemDictionaryDeleteForbidden"),
+        ));
     }
     dictionary_items::Entity::delete_many()
         .filter(dictionary_items::Column::WorkspaceId.eq(scope.workspace_id))

@@ -1,3 +1,4 @@
+import { commonText, configText, useCommonTranslation } from "../i18n";
 /**
  * The one list implementation. A resource page is a `ListConfig`, never a
  * hand-written table — see CLAUDE.md §12. This component owns:
@@ -144,19 +145,21 @@ export function ResourceTable<T>({
   workspace: string;
   permissions: Set<string>;
 }) {
+  useCommonTranslation();
   const route = useRoute();
-  const [page, setPage] = useQueryValue("page", 1);
-  const [pageSize, setPageSize] = useQueryValue("page_size", config.defaultPageSize ?? 20);
-  const [sort, setSort] = useQueryValue("sort", "");
-  const [tableView, setTableView] = useQueryValue("table_view", "list");
+  const queryKey = (key: string) => config.queryPrefix ? `${config.queryPrefix}.${key}` : key;
+  const [page, setPage] = useQueryValue(queryKey("page"), 1);
+  const [pageSize, setPageSize] = useQueryValue(queryKey("page_size"), config.defaultPageSize ?? 20);
+  const [sort, setSort] = useQueryValue(queryKey("sort"), "");
+  const [tableView, setTableView] = useQueryValue(queryKey("table_view"), "list");
   const grouped = !!config.grouping && tableView === "groups";
-  const [folder, setFolder] = useQueryValue("folder", "");
+  const [folder, setFolder] = useQueryValue(queryKey("folder"), "");
 
   // Two layers: `draft` is what the inputs show, the URL is what has been
   // searched. Typing must not refetch on every keystroke, and the URL must
   // stay shareable, so the committed values are the ones in the query string.
   const filterKeys = useMemo(() => (config.filters ?? []).map((f) => f.key), [config.filters]);
-  const [committed, setCommitted] = useState<Record<string, string>>(() => readFilters(filterKeys));
+  const [committed, setCommitted] = useState<Record<string, string>>(() => readFilters(filterKeys, config.queryPrefix));
   const [draft, setDraft] = useState<Record<string, string>>(committed);
 
   const [data, setData] = useState<Envelope<T>>();
@@ -168,7 +171,7 @@ export function ResourceTable<T>({
   const runningActions = useRef(new Set<string>());
   const [busyActions, setBusyActions] = useState<Set<string>>(new Set());
   const [pendingAction,setPendingAction]=useState<{action:RowAction<T>;row:T}>();
-  const [pendingDelete, setPendingDelete] = useState<{ action: string; target: string; run: () => Promise<void> }>();
+  const [pendingDelete, setPendingDelete] = useState<{ action: string; actionKey?: string | undefined; target: string; run: () => Promise<void> }>();
   const reloadToken = useRef(0);
 
   const params = useMemo(
@@ -195,7 +198,7 @@ export function ResourceTable<T>({
           items.push(...part.items);
           const more = part.has_more ?? (next * params.page_size < part.total);
           if (!more) break;
-          if (!part.items.length) throw new Error("仓库分页返回空页，请刷新后重试。");
+          if (!part.items.length) throw new Error(commonText("repository.pageEmpty"));
         }
         return { items, total: items.length, page: 1, page_size: items.length };
       };
@@ -263,7 +266,7 @@ export function ResourceTable<T>({
 
   const search = () => {
     setCommitted(draft);
-    writeFilters(draft);
+    writeFilters(draft, config.queryPrefix);
     setPage(1);
     setSelected(new Set());
   };
@@ -271,7 +274,7 @@ export function ResourceTable<T>({
     const empty = Object.fromEntries(filterKeys.map((key) => [key, ""]));
     setDraft(empty);
     setCommitted(empty);
-    writeFilters(empty);
+    writeFilters(empty, config.queryPrefix);
     setPage(1);
     setSelected(new Set());
   };
@@ -315,12 +318,20 @@ export function ResourceTable<T>({
 
 
   return (
-    <div className="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3">
+    <div className={config.summary ? "grid min-h-min min-w-0 flex-1 grid-rows-[auto_minmax(16rem,1fr)] gap-3" : "grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-3"}>
       {/* ---------------------------------------------------- 搜索过滤 + 工具栏 */}
       {pendingAction&&<ResourceActionDialog action={pendingAction.action} row={pendingAction.row} workspace={workspace} permissions={permissions} onClose={()=>setPendingAction(undefined)} onDone={()=>{setPendingAction(undefined);reload();}} />}
-      {pendingDelete && <DeleteConfirmDialog action={pendingDelete.action} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
+      {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.action, pendingDelete.actionKey)} target={pendingDelete.target} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
       <div className="flex flex-col gap-3">
         {error && !!rows.length && <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+        {config.filterPresets?.map(group => <div key={group.label} role="group" aria-label={configText(group.label, group.labelKey)} className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-muted-foreground">{configText(group.label, group.labelKey)}</span>
+          {group.presets.map(preset => <Button key={preset.label} size="sm" variant="outline" onClick={() => {
+            const values = typeof preset.values === "function" ? preset.values() : preset.values;
+            const next = { ...committed, ...values };
+            setDraft(next); setCommitted(next); writeFilters(next, config.queryPrefix); setPage(1); setSelected(new Set());
+          }}>{configText(preset.label, preset.labelKey)}</Button>)}
+        </div>)}
         {!!config.filters?.length && (
           <AutoForm
             className="flex flex-wrap items-end gap-3"
@@ -339,11 +350,9 @@ export function ResourceTable<T>({
             ))}
             <div className="flex gap-2">
               <Button type="submit" size="sm">
-                <Search /> 搜索
-              </Button>
+                <Search /> {commonText("common.search")}</Button>
               <Button type="button" size="sm" variant="outline" onClick={clear}>
-                <X /> 清空
-              </Button>
+                <X /> {commonText("common.clear")}</Button>
             </div>
           </AutoForm>
         )}
@@ -360,17 +369,16 @@ export function ResourceTable<T>({
               disabled={loading}
             >
               <RefreshCw className={cn(loading && "animate-spin")} />
-              刷新
-            </Button>
+              {commonText("common.refresh")}</Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
                   variant="outline"
                   className="rounded-l-none px-2"
-                  aria-label="定时刷新"
+                  aria-label={commonText("table.autoRefresh")}
                 >
-                  {refresh ? `${refresh}s` : "关"}
+                  {refresh ? `${refresh}s` : commonText("table.off")}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
@@ -386,7 +394,7 @@ export function ResourceTable<T>({
                       }
                     }}
                   >
-                    {seconds === 0 ? "关闭自动刷新" : `每 ${seconds} 秒`}
+                    {seconds === 0 ? commonText("table.disableRefresh") : commonText("table.refreshEvery", { seconds })}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -394,8 +402,8 @@ export function ResourceTable<T>({
           </div>
 
           <span className="flex-1" />
-          {config.grouping && <div role="group" aria-label="列表显示模式" title={`按${config.grouping.label}分组`} className="inline-flex rounded-md border p-0.5">
-            {([["list", "列表", List], ["groups", "分组", FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
+          {config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
+            {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
           </div>}
 
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
@@ -409,33 +417,34 @@ export function ResourceTable<T>({
               asChild={false}
             >
               <Plus />
-              {typeof config.toolbar?.create === "object" ? config.toolbar.create.label : "创建"}
+              {typeof config.toolbar?.create === "object" ? configText(config.toolbar.create.label, config.toolbar.create.labelKey) : commonText("common.create")}
             </Button>
           )}
         </div>
+        {data && !loading && !error && config.summary?.(data)}
       </div>
 
       {grouped ? <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-        <nav aria-label="仓库分组路径" className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border px-2 py-1">
-          <Button size="icon" variant="ghost" aria-label="上级分组" title="上级分组" disabled={!folder} onClick={() => enterFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowUp className="size-4" /></Button>
-          <Button size="sm" variant="ghost" onClick={() => enterFolder("")}>全部仓库</Button>
+        <nav aria-label={commonText("repository.path")} className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border px-2 py-1">
+          <Button size="icon" variant="ghost" aria-label={commonText("repository.parent")} title={commonText("repository.parent")} disabled={!folder} onClick={() => enterFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowUp className="size-4" /></Button>
+          <Button size="sm" variant="ghost" onClick={() => enterFolder("")}>{commonText("repository.all")}</Button>
           {folder.split('/').filter(Boolean).map((name, index, parts) => <span key={index} className="inline-flex min-w-0 items-center"><ChevronRight className="size-3 shrink-0 text-muted-foreground" /><Button size="sm" variant="ghost" className="max-w-48 truncate" title={name} aria-current={index === parts.length - 1 ? "page" : undefined} onClick={() => enterFolder(parts.slice(0, index + 1).join('/'))}>{name}</Button></span>)}
         </nav>
         <AutoTable<(typeof directoryRows)[number]> fill layout="auto" rowKey={entry => entry.path}
           state={{ rows: directoryRows.slice((page - 1) * pageSize, page * pageSize), total: directoryRows.length, query: { page, pageSize }, loading, error: error || undefined }}
           columns={[
-            { field: 'name', name: '名称', render: (_value, entry) => entry.row ? <span className="inline-flex items-center gap-2"><GitBranch className="size-4 shrink-0 text-muted-foreground" />{entry.name}</span> : <button type="button" className="inline-flex items-center gap-2 text-left hover:text-primary" onClick={() => enterFolder(entry.path)}><Folder className="size-4 shrink-0 text-primary" />{entry.name}</button> },
-            { field: 'count', name: '内容', render: (_value, entry) => entry.row ? "仓库" : `${entry.count} 个仓库` },
-            ...config.columns.filter(column => column.key !== 'full_name').map(column => ({ field: column.key, name: column.label, render: (_value: unknown, entry: (typeof directoryRows)[number]) => entry.row ? column.render ? column.render(entry.row) : String((entry.row as Record<string, unknown>)[column.key] ?? '') : '—' })),
+            { field: 'name', name: commonText("common.name"), render: (_value, entry) => entry.row ? <span className="inline-flex items-center gap-2"><GitBranch className="size-4 shrink-0 text-muted-foreground" />{entry.name}</span> : <button type="button" className="inline-flex items-center gap-2 text-left hover:text-primary" onClick={() => enterFolder(entry.path)}><Folder className="size-4 shrink-0 text-primary" />{entry.name}</button> },
+            { field: 'count', name: commonText("common.content"), render: (_value, entry) => entry.row ? commonText("dashboard.repositories") : commonText("repository.count", { count: entry.count }) },
+            ...config.columns.filter(column => column.key !== 'full_name').map(column => ({ field: column.key, name: configText(column.label, column.labelKey), render: (_value: unknown, entry: (typeof directoryRows)[number]) => entry.row ? column.render ? column.render(entry.row) : String((entry.row as Record<string, unknown>)[column.key] ?? '') : '—' })),
           ]}
           sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
-          onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty="此分组下暂无仓库。" />
+          onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
       </div> : <AutoTable<T> fill layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
-        columns={config.columns.map(column => ({ field: column.key, name: column.label, width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
+        columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
         state={{ rows, total, query: { page, pageSize, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
         showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={data?.has_more}
         sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: true }}
-        groupBy={grouped ? config.grouping!.key : undefined} empty={config.empty}
+        groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
         onPageChange={setPage}
         onPageSizeChange={value => { setPageSize(value); setPage(1); }}
         pageSizeOptions={[...PAGE_SIZES]} onSortChange={key => { setSort(sort === key ? `-${key}` : sort === `-${key}` ? "" : key); setPage(1); }}
@@ -448,8 +457,8 @@ export function ResourceTable<T>({
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
                               <RowActionButton
-                                key={action.label}
-                                label={action.label}
+                                key={configText(action.label, action.labelKey)}
+                                label={configText(action.label, action.labelKey)}
                                 icon={busyActions.has(JSON.stringify([config.resource, key, action.label])) ? <Loader2 className="size-4 animate-spin" /> : action.icon ?? actionIcon(action.label)}
                                 newTab={action.newTab}
                                 disabled={busy || busyActions.has(JSON.stringify([config.resource, key, action.label])) || action.disabled?.(row)}
@@ -466,7 +475,7 @@ export function ResourceTable<T>({
                                   ? {
                                       onRun: async () => {
                                         if (action.destructive) {
-                                          setPendingDelete({ action: action.label, target: rowName(row, config.rowKey(row)), run: async () => {
+                                          setPendingDelete({ action: action.label, actionKey: action.labelKey, target: rowName(row, config.rowKey(row)), run: async () => {
                                             if (action.parameters?.(row).length) { setPendingAction({ action, row }); return; }
                                             await action.action!(row);
                                             reload();
@@ -494,10 +503,10 @@ export function ResourceTable<T>({
                             ))}</>; } : undefined}
         footerContent={<>        {!!selected.size && (
           <>
-            <span className="text-muted-foreground">已选 {selected.size} 项</span>
+            <span className="text-muted-foreground">{commonText("table.selected", { count: selected.size })}</span>
             {visibleBulk.map((action) => (
               <Button
-                key={action.label}
+                key={configText(action.label, action.labelKey)}
                 size="sm"
                 variant={action.destructive ? "destructive" : "outline"}
                 disabled={busy}
@@ -508,7 +517,7 @@ export function ResourceTable<T>({
                       const row = rows.find(row => config.rowKey(row) === id);
                       return row ? rowName(row, id) : id;
                     });
-                    setPendingDelete({ action: action.label, target: names.length <= 5 ? names.join("、") : `${names.slice(0, 5).join("、")}等 ${ids.length} 项`, run: async () => {
+                    setPendingDelete({ action: action.label, actionKey: action.labelKey, target: names.length <= 5 ? names.join("、") : commonText("table.selectionNames", { names: names.slice(0, 5).join(", "), count: ids.length }), run: async () => {
                       await action.action(ids);
                       setSelected(new Set());
                       reload();
@@ -517,7 +526,7 @@ export function ResourceTable<T>({
                 }}
               >
                 {busy && <Loader2 className="animate-spin" />}
-                {action.label}
+                {configText(action.label, action.labelKey)}
               </Button>
             ))}
           </>
@@ -551,6 +560,7 @@ function RowActionButton({
   onNavigate?: (() => void) | undefined;
   onRun?: (() => void | Promise<void>) | undefined;
 }) {
+  useCommonTranslation();
   // A navigating action stays a real link: middle-click, copy-link and
   // open-in-new-tab all keep working.
   if (to && !disabled)
@@ -603,20 +613,21 @@ function FilterField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  useCommonTranslation();
   const { options, error } = useOptions(filter.options);
   return (
-    <AutoField label={filter.label}>
+    <AutoField label={configText(filter.label, filter.labelKey)}>
       {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
       {filter.type === "select" ? (
         <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
-          <SelectTrigger aria-label={filter.label} size="sm" className="w-40">
-            <SelectValue placeholder="全部" />
+          <SelectTrigger aria-label={configText(filter.label, filter.labelKey)} size="sm" className="w-40">
+            <SelectValue placeholder={commonText("group.all")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">全部</SelectItem>
+            <SelectItem value="__all__">{commonText("group.all")}</SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {option.label}
+                {configText(option.label, option.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -625,7 +636,7 @@ function FilterField({
         <Input
           className="h-8 w-48"
           value={value}
-          placeholder={filter.placeholder}
+          placeholder={configText(filter.placeholder, filter.placeholderKey)}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
@@ -633,17 +644,18 @@ function FilterField({
   );
 }
 
-function readFilters(keys: string[]): Record<string, string> {
+function readFilters(keys: string[], prefix?: string): Record<string, string> {
   const params = new URLSearchParams(location.search);
-  return Object.fromEntries(keys.map((key) => [key, params.get(key) ?? ""]));
+  return Object.fromEntries(keys.map((key) => [key, params.get(prefix ? `${prefix}.${key}` : key) ?? ""]));
 }
 
 /** Filters are replaceState so a search does not add a history entry per key. */
-function writeFilters(values: Record<string, string>) {
+function writeFilters(values: Record<string, string>, prefix?: string) {
   const params = new URLSearchParams(location.search);
   for (const [key, value] of Object.entries(values)) {
-    if (value) params.set(key, value);
-    else params.delete(key);
+    const queryKey = prefix ? `${prefix}.${key}` : key;
+    if (value) params.set(queryKey, value);
+    else params.delete(queryKey);
   }
   params.delete("at");
   const search = params.toString();

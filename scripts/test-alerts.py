@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
     def request(c, path, body=None, method=None, expected=200):
         req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
         raw = response.read()

@@ -1,10 +1,22 @@
 //! Structured event detail shared by event push and polling: commits, merge
 //! requests, tags and repositories normalised across Codeup, GitHub, GitLab,
 //! Gitee and Gitea. Author e-mail addresses are never kept.
-use serde_json::{Map, Value, json};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::{Map, Value};
 
 /// Maximum commits kept per event; the total count is reported separately.
 pub(super) const COMMITS: usize = 20;
+
+/// Only application-owned notes are decoded; provider and user fields stay literal.
+pub(super) fn display(detail: &Value) -> Value {
+    let mut detail = detail.clone();
+    if let Some(note) = detail.get("note").and_then(Value::as_str) {
+        let displayed = crate::i18n::display_stored(note);
+        detail["note"] = Value::from(displayed);
+    }
+    detail
+}
 
 fn clean(value: &str, limit: usize, multiline: bool) -> String {
     value
@@ -444,18 +456,45 @@ pub(super) fn webhook_actor(payload: &Value) -> String {
 }
 
 /// Readable event name, matching the event options of the interface.
-pub(super) fn label(event: &str) -> &str {
+pub(super) fn label(event: &str) -> String {
     match event {
-        "repository.created" => "新增仓库",
-        "repository.deleted" => "删除仓库",
-        "branch.created" => "新增分支",
-        "branch.deleted" => "删除分支",
-        "push" => "代码推送",
-        "pull_request" => "PR / 合并请求变更",
-        "merge" => "合并完成",
-        "tag.created" => "新增标签",
-        "tag.deleted" => "删除标签",
-        other => other,
+        "repository.created" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.repositoryCreated"),
+        ),
+        "repository.deleted" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.repositoryDeleted"),
+        ),
+        "branch.created" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.branchCreated"),
+        ),
+        "branch.deleted" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.branchDeleted"),
+        ),
+        "push" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.push"),
+        ),
+        "pull_request" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.pullRequest"),
+        ),
+        "merge" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.merge"),
+        ),
+        "tag.created" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.tagCreated"),
+        ),
+        "tag.deleted" => crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.tagDeleted"),
+        ),
+        other => other.to_owned(),
     }
 }
 
@@ -469,7 +508,10 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
     };
     if let Some(request) = detail.get("request") {
         add(
-            "合并请求",
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.requestLabel"),
+            ),
             format!(
                 "#{} {}",
                 field(request, &["/number"], 32),
@@ -479,72 +521,157 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
             .trim()
             .to_owned(),
         );
-        add("分支", {
-            let (source, target) = (
-                field(request, &["/source"], 400),
-                field(request, &["/target"], 400),
-            );
-            if source.is_empty() && target.is_empty() {
-                String::new()
-            } else {
-                format!("{source} → {target}")
-            }
-        });
-        add("作者", field(request, &["/author"], 200));
-        add("合并人", field(request, &["/merged_by"], 200));
-        add("说明", message(request, &["/description"], 500));
-        add("链接", field(request, &["/url"], 1000));
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.branchLabel"),
+            ),
+            {
+                let (source, target) = (
+                    field(request, &["/source"], 400),
+                    field(request, &["/target"], 400),
+                );
+                if source.is_empty() && target.is_empty() {
+                    String::new()
+                } else {
+                    format!("{source} → {target}")
+                }
+            },
+        );
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.authorLabel"),
+            ),
+            field(request, &["/author"], 200),
+        );
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.mergerLabel"),
+            ),
+            field(request, &["/merged_by"], 200),
+        );
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.noteLabel"),
+            ),
+            message(request, &["/description"], 500),
+        );
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.linkLabel"),
+            ),
+            field(request, &["/url"], 1000),
+        );
     }
     if let Some(total) = detail["total_commits"].as_u64() {
-        add("提交数", total.to_string());
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.commitCountLabel"),
+            ),
+            total.to_string(),
+        );
     }
     if let Some(commits) = detail["commits"].as_array() {
         // One field per fact, so receivers can read or parse each one.
         for commit in commits.iter().take(5) {
-            add("提交", field(commit, &["/short_id", "/id"], 12));
             add(
-                "提交信息",
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.commitLabel"),
+                ),
+                field(commit, &["/short_id", "/id"], 12),
+            );
+            add(
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.commitMessageLabel"),
+                ),
                 message(commit, &["/message"], 300)
                     .lines()
                     .next()
                     .unwrap_or("")
                     .to_owned(),
             );
-            add("提交作者", field(commit, &["/author"], 200));
+            add(
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.commitAuthorLabel"),
+                ),
+                field(commit, &["/author"], 200),
+            );
         }
         if commits.len() > 5 {
             add(
-                "更多提交",
-                format!("另有 {} 条，见事件详情", commits.len() - 5),
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.moreCommitsLabel"),
+                ),
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.moreCommits")
+                        .with("count", (commits.len() - 5).to_string()),
+                ),
             );
         }
     }
     if let Some(commit) = detail.get("commit") {
-        add("最新提交", field(commit, &["/short_id", "/id"], 12));
         add(
-            "提交信息",
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.latestCommitLabel"),
+            ),
+            field(commit, &["/short_id", "/id"], 12),
+        );
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.commitMessageLabel"),
+            ),
             message(commit, &["/message"], 300)
                 .lines()
                 .next()
                 .unwrap_or("")
                 .to_owned(),
         );
-        add("提交作者", field(commit, &["/author"], 200));
+        add(
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.commitAuthorLabel"),
+            ),
+            field(commit, &["/author"], 200),
+        );
     }
     add(
-        "标签说明",
+        &crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.tagNoteLabel"),
+        ),
         message(detail, &["/tag_message", "/message"], 500),
     );
     // One link to open the change: the comparison, else the newest commit.
     add(
-        "链接",
+        &crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.linkLabel"),
+        ),
         field(
             detail,
             &["/compare_url", "/commits/0/url", "/commit/url"],
             1000,
         ),
     );
-    add("说明", field(detail, &["/note"], 300));
+    add(
+        &crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("repository.monitor.noteLabel"),
+        ),
+        field(detail, &["/note"], 300),
+    );
     lines
 }
 
@@ -592,7 +719,11 @@ pub(super) fn view(detail: &Value) -> Map<String, Value> {
     if detail["commits_truncated"] == true {
         map.insert(
             "commits_truncated".into(),
-            Value::from(format!("仅显示最新的 {COMMITS} 条提交")),
+            Value::from(crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.truncatedCommits")
+                    .with("count", COMMITS.to_string()),
+            )),
         );
     }
     if let Some(commits) = detail["commits"].as_array() {
@@ -731,7 +862,7 @@ body"}],"note":"n"});
         let view = view(&push);
         assert_eq!(
             view["commits_truncated"],
-            format!("仅显示最新的 {COMMITS} 条提交")
+            format!("Only the latest {COMMITS} commits are shown")
         );
         assert_eq!(view["total_commits"], 3);
         assert_eq!(view["note"], "n");
@@ -758,24 +889,28 @@ notes"})),
     fn notification_lines_summarise_requests_and_commits() {
         let detail = json!({"total_commits":7,"commits":[{"short_id":"a1","message":"one\nbody","author":"Ann"},{"short_id":"a2","message":"two"}],"compare_url":"https://x/c"});
         let summary = lines(&detail);
-        assert!(summary.contains(&("提交数".into(), "7".into())));
-        assert!(summary.contains(&("提交".into(), "a1".into())));
-        assert!(summary.contains(&("提交信息".into(), "one".into())));
-        assert!(summary.contains(&("提交作者".into(), "Ann".into())));
-        assert!(summary.contains(&("提交信息".into(), "two".into())));
+        assert!(summary.contains(&("Commit count".into(), "7".into())));
+        assert!(summary.contains(&("Commit".into(), "a1".into())));
+        assert!(summary.contains(&("Commit message".into(), "one".into())));
+        assert!(summary.contains(&("Commit author".into(), "Ann".into())));
+        assert!(summary.contains(&("Commit message".into(), "two".into())));
         assert!(!summary.iter().any(|(_, value)| value.contains(" — ")));
-        assert!(summary.contains(&("链接".into(), "https://x/c".into())));
+        assert!(summary.contains(&("Link".into(), "https://x/c".into())));
         let polled =
             lines(&json!({"commits":[{"short_id":"b1","message":"m","url":"https://code/c/b1"}]}));
-        assert!(polled.contains(&("链接".into(), "https://code/c/b1".into())));
+        assert!(polled.contains(&("Link".into(), "https://code/c/b1".into())));
         assert_eq!(
             (label("push"), label("tag.deleted"), label("custom")),
-            ("代码推送", "删除标签", "custom")
+            (
+                "Code pushed".to_owned(),
+                "Tag deleted".to_owned(),
+                "custom".to_owned()
+            )
         );
         let request = lines(
             &json!({"request":{"number":"5","title":"Fix","source":"f","target":"main","author":"u","merged_by":"m","url":"https://x/5"}}),
         );
-        assert!(request.contains(&("合并请求".into(), "#5 Fix".into())));
-        assert!(request.contains(&("分支".into(), "f → main".into())));
+        assert!(request.contains(&("Merge request".into(), "#5 Fix".into())));
+        assert!(request.contains(&("Branch".into(), "f → main".into())));
     }
 }

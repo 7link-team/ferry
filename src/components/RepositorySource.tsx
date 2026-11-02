@@ -1,12 +1,15 @@
-import { AutoField } from "./auto-form";
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
+import { AutoField, selectDisplay } from "./auto-form";
+import { named } from "../resource";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, errorText } from "../api";
-import { navigate } from "../router";
+import { href, navigate } from "../router";
 import type { Credential } from "../resources";
 
-const platforms = [["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"], ["codeup", "Codeup"], ["git", "普通 Git"]] as const;
+const platforms = [["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"], ["codeup", "Codeup"], ["git", "Git"]] as const;
+export const repositoryProviderLabel = (value: string) => selectDisplay(value, { options: platforms.map(([value, label]) => ({ value, label: value === "git" ? hostRepositoryText("repository.001") : label })) });
 type PlatformAuthorization = { id: string; web_available: boolean; setup?: string };
 const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
 
@@ -15,6 +18,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
   workspace: string; draft: Record<string, unknown>; readOnly: boolean;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void;
 }) {
+  useCommonTranslation();
   const provider = String(draft.provider ?? "git");
   const credentialId = String(draft.credential_id ?? "0");
   const existingOAuth = !!draft.id && draft.authorization === "oauth";
@@ -80,7 +84,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
     closeAuthorization(); setWaiting(false);
     if (data.status === "connected" && data.connection_id) {
       navigate({ workspace, group: "build", item: "repositories", id: encodeURIComponent(String(data.connection_id)), mode: "view" }, {});
-    } else setAuthorizationError(data.status === "connected" ? "授权回调缺少连接标识，请刷新连接列表确认结果。" : "已取消网页授权，可重新授权或选择已有凭据。");
+    } else setAuthorizationError(data.status === "connected" ? hostRepositoryText("repository.034") : hostRepositoryText("repository.035"));
   }
   useEffect(() => {
     const receive = (event: MessageEvent) => {
@@ -94,7 +98,7 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
   async function authorize() {
     if (!String(draft.name ?? "").trim() || !platform?.web_available) return;
     const opened = window.open("about:blank", "_blank", "popup,width=720,height=780");
-    if (!opened) { setAuthorizationError("浏览器阻止了授权窗口，请允许弹窗后重试。"); return; }
+    if (!opened) { setAuthorizationError(hostRepositoryText("repository.036")); return; }
     closeAuthorization(); popup.current = opened;
     const request = authorizationRequest.current;
     setWaiting(true); setAuthorizationError("");
@@ -116,38 +120,38 @@ export function RepositorySource({ workspace, draft, readOnly, onChange, onValid
   }
 
   if (readOnly) return <dl className="space-y-3 text-sm">
-    <div><dt className="text-muted-foreground">代码平台</dt><dd>{platforms.find(([key]) => key === provider)?.[1] ?? provider}</dd></div>
-    <div><dt className="text-muted-foreground">凭据</dt><dd>{draft.authorization === "oauth" ? "网页授权" : hasCredential ? `已绑定凭据 · ${credentialId}` : "无需授权（公开仓库）"}</dd></div>
-    {([["base_url", "平台网站地址"], ["api_url", "平台 API 地址"], ["organization", "组织 ID"], ...(provider === "git" ? [["url", "Git 仓库地址"]] : [])]).map(([key, label]) => draft[key!] ? <div key={key}><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{String(draft[key!])}</dd></div> : null)}
+    <div><dt className="text-muted-foreground">{hostRepositoryText("repository.037")}</dt><dd>{repositoryProviderLabel(provider)}</dd></div>
+    <div><dt className="text-muted-foreground">{hostRepositoryText("repository.038")}</dt><dd>{draft.authorization === "oauth" ? hostRepositoryText("repository.039") : hasCredential ? named(typeof draft.credential_name === "string" ? draft.credential_name : undefined, credentialId) : hostRepositoryText("repository.040")}</dd></div>
+    {([["base_url", hostRepositoryText("repository.041")], ["api_url", hostRepositoryText("repository.042")], ["organization", hostRepositoryText("repository.043")], ...(provider === "git" ? [["url", hostRepositoryText("repository.023")]] : [])]).map(([key, label]) => draft[key!] ? <div key={key}><dt className="text-muted-foreground">{label}</dt><dd className="break-all">{String(draft[key!])}</dd></div> : null)}
   </dl>;
 
   return <div className="space-y-4">
-    <AutoField label={<span className="text-sm font-medium">代码平台</span>} className="block space-y-2"><select aria-label="代码平台" className={selectClass} value={provider} disabled={waiting || existingOAuth} onChange={event => {
+    <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.037")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.037")} className={selectClass} value={provider} disabled={waiting || existingOAuth} onChange={event => {
       setMethod("token");
       onChange({ provider: event.target.value, credential_id: "0", base_url: "", api_url: "", organization: "", url: "" });
-    }}><option value="">请选择平台或普通 Git</option>{platforms.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></AutoField>
-    {provider && provider !== "git" && <AutoField label={<span className="text-sm font-medium">平台授权方式</span>} className="block space-y-2"><select aria-label="平台授权方式" className={selectClass} value={method} disabled={waiting || !!draft.id} onChange={event => { closeAuthorization(); setWaiting(false); setMethod(event.target.value); setAuthorizationError(""); }}><option value="token">已有凭据（个人访问令牌）</option>{provider !== "codeup" && <option value="web" disabled={!platform?.web_available && !existingOAuth}>网页授权</option>}</select></AutoField>}
+    }}><option value="">{hostRepositoryText("repository.044")}</option>{provider && !platforms.some(([key]) => key === provider) && <option value={provider}>{repositoryProviderLabel(provider)}</option>}{platforms.map(([key]) => <option key={key} value={key}>{repositoryProviderLabel(key)}</option>)}</select></AutoField>
+    {provider && provider !== "git" && <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.045")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.045")} className={selectClass} value={method} disabled={waiting || !!draft.id} onChange={event => { closeAuthorization(); setWaiting(false); setMethod(event.target.value); setAuthorizationError(""); }}><option value="token">{hostRepositoryText("repository.046")}</option>{provider !== "codeup" && <option value="web" disabled={!platform?.web_available && !existingOAuth}>{hostRepositoryText("repository.039")}</option>}</select></AutoField>}
     {provider && (provider === "git" || method === "token") && <>
-      <AutoField label={<span className="text-sm font-medium">凭据</span>} className="block space-y-2"><select aria-label="凭据" className={selectClass} value={credentialId} disabled={loadingCredentials} onChange={event => onChange({ credential_id: event.target.value })}><option value="0">{provider === "git" ? "无需授权（公开仓库）" : "请选择个人访问令牌"}</option>{hasCredential && !availableCredentials.some(row => row.id === credentialId) && <option value={credentialId}>保留已绑定的凭据 · {credentialId}</option>}{availableCredentials.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></AutoField>
-      {loadingCredentials ? <p role="status" className="text-sm text-muted-foreground">正在读取凭据…</p> : !availableCredentials.length && !credentialError && <p role="status" className="text-sm text-muted-foreground">没有可用的凭据，请先新建后刷新列表。</p>}
-      <div className="flex flex-wrap items-center gap-3"><a className="text-sm text-primary underline underline-offset-4" href={`/workspaces/${encodeURIComponent(workspace)}/credentials/new?scope=build`} target="_blank" rel="noopener noreferrer">新建凭据</a><Button type="button" variant="outline" disabled={loadingCredentials} onClick={() => setRefresh(value => value + 1)}>刷新凭据</Button></div>
-      <p className="text-xs text-muted-foreground">{provider === "git" ? "可复用访问令牌、账号密码或 SSH 私钥。" : "选择已保存的个人访问令牌；连接只引用凭据，不复制密钥。"}</p>
-      {provider === "git" ? <AutoField label={<span className="text-sm font-medium">Git 仓库地址（可选）</span>} className="block space-y-2"><Input aria-label="Git 仓库地址（可选）" value={String(draft.url ?? "")} placeholder="可在流水线拉取代码步骤中填写" onChange={event => onChange({ url: event.target.value })} /></AutoField> : <>
-        {provider === "codeup" && <AutoField label={<span className="text-sm font-medium">Codeup 组织 ID</span>} className="block space-y-2"><Input aria-label="Codeup 组织 ID" value={String(draft.organization ?? "")} onChange={event => onChange({ organization: event.target.value })} /><span className="block text-xs text-muted-foreground">中心版必填组织 ID；Region 版可留空，并在下方填写实例的网站和 API 地址。凭据需填写 Git 用户名，令牌需具备代码仓库、分支只读权限和 Git 拉取权限。</span></AutoField>}
-        <details open={provider === "gitea" || !!draft.base_url || !!draft.api_url}><summary className="cursor-pointer text-sm">平台接入地址{provider === "gitea" ? "（网站地址必填）" : "（自建平台时填写）"}</summary><div className="mt-3 grid gap-4 sm:grid-cols-2">
-          <AutoField label={<span className="text-sm">平台网站地址</span>} className="space-y-2"><Input aria-label="平台网站地址" required={provider === "gitea"} placeholder="留空使用官方地址" value={String(draft.base_url ?? "")} onChange={event => onChange({ base_url: event.target.value })} /></AutoField>
-          <AutoField label={<span className="text-sm">平台 API 地址</span>} className="space-y-2"><Input aria-label="平台 API 地址" placeholder="留空自动推导" value={String(draft.api_url ?? "")} onChange={event => onChange({ api_url: event.target.value })} /></AutoField>
+      <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.038")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.038")} className={selectClass} value={credentialId} disabled={loadingCredentials} onChange={event => onChange({ credential_id: event.target.value })}><option value="0">{provider === "git" ? hostRepositoryText("repository.040") : hostRepositoryText("repository.047")}</option>{hasCredential && !availableCredentials.some(row => row.id === credentialId) && <option value={credentialId}>{hostRepositoryText("repository.048")}{credentialId}</option>}{availableCredentials.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></AutoField>
+      {loadingCredentials ? <p role="status" className="text-sm text-muted-foreground">{hostRepositoryText("repository.049")}</p> : !availableCredentials.length && !credentialError && <p role="status" className="text-sm text-muted-foreground">{hostRepositoryText("repository.050")}</p>}
+      <div className="flex flex-wrap items-center gap-3"><a className="text-sm text-primary underline underline-offset-4" href={href({ workspace, group: "build", item: "credentials", mode: "new" }, { scope: "build" })} target="_blank" rel="noopener noreferrer">{hostRepositoryText("repository.051")}</a><Button type="button" variant="outline" disabled={loadingCredentials} onClick={() => setRefresh(value => value + 1)}>{hostRepositoryText("repository.052")}</Button></div>
+      <p className="text-xs text-muted-foreground">{provider === "git" ? hostRepositoryText("repository.053") : hostRepositoryText("repository.054")}</p>
+      {provider === "git" ? <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.055")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.055")} value={String(draft.url ?? "")} placeholder={hostRepositoryText("repository.056")} onChange={event => onChange({ url: event.target.value })} /></AutoField> : <>
+        {provider === "codeup" && <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.057")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.057")} value={String(draft.organization ?? "")} onChange={event => onChange({ organization: event.target.value })} /><span className="block text-xs text-muted-foreground">{hostRepositoryText("repository.058")}</span></AutoField>}
+        <details open={provider === "gitea" || !!draft.base_url || !!draft.api_url}><summary className="cursor-pointer text-sm">{hostRepositoryText("repository.059")}{provider === "gitea" ? hostRepositoryText("repository.060") : hostRepositoryText("repository.061")}</summary><div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <AutoField label={<span className="text-sm">{hostRepositoryText("repository.041")}</span>} className="space-y-2"><Input aria-label={hostRepositoryText("repository.041")} required={provider === "gitea"} placeholder={hostRepositoryText("repository.062")} value={String(draft.base_url ?? "")} onChange={event => onChange({ base_url: event.target.value })} /></AutoField>
+          <AutoField label={<span className="text-sm">{hostRepositoryText("repository.042")}</span>} className="space-y-2"><Input aria-label={hostRepositoryText("repository.042")} placeholder={hostRepositoryText("repository.063")} value={String(draft.api_url ?? "")} onChange={event => onChange({ api_url: event.target.value })} /></AutoField>
         </div></details>
       </>}
     </>}
     {provider && provider !== "git" && method === "web" && <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">授权成功后会保存此命名连接，并打开连接详情。</p>
-      {!String(draft.name ?? "").trim() && <p className="text-sm text-muted-foreground">请先填写连接名称。</p>}
-      <Button type="button" variant="outline" disabled={loadingPlatform || waiting || !platform?.web_available || !String(draft.name ?? "").trim()} onClick={() => void authorize()}>{waiting ? "等待网页授权…" : existingOAuth ? "重新网页授权" : "打开网页授权"}</Button>
-      {waiting && <Button type="button" variant="ghost" onClick={() => { closeAuthorization(); setWaiting(false); }}>取消授权</Button>}
+      <p className="text-sm text-muted-foreground">{hostRepositoryText("repository.064")}</p>
+      {!String(draft.name ?? "").trim() && <p className="text-sm text-muted-foreground">{hostRepositoryText("repository.065")}</p>}
+      <Button type="button" variant="outline" disabled={loadingPlatform || waiting || !platform?.web_available || !String(draft.name ?? "").trim()} onClick={() => void authorize()}>{waiting ? hostRepositoryText("repository.066") : existingOAuth ? hostRepositoryText("repository.067") : hostRepositoryText("repository.068")}</Button>
+      {waiting && <Button type="button" variant="ghost" onClick={() => { closeAuthorization(); setWaiting(false); }}>{hostRepositoryText("repository.069")}</Button>}
     </div>}
-    {provider && provider !== "git" && loadingPlatform && <p role="status" className="text-sm text-muted-foreground">正在读取平台授权配置…</p>}
-    {provider && provider !== "git" && !loadingPlatform && !platform?.web_available && !platformError && <p className="text-xs text-muted-foreground">{platform?.setup || "此平台尚未配置网页授权，可选择已有凭据。"}</p>}
+    {provider && provider !== "git" && loadingPlatform && <p role="status" className="text-sm text-muted-foreground">{hostRepositoryText("repository.070")}</p>}
+    {provider && provider !== "git" && !loadingPlatform && !platform?.web_available && !platformError && <p className="text-xs text-muted-foreground">{platform?.setup || hostRepositoryText("repository.071")}</p>}
     {[credentialError, platformError, authorizationError].filter(Boolean).map((error, index) => <p key={index} role="alert" className="text-sm text-destructive">{error}</p>)}
   </div>;
 }

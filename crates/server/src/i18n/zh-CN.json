@@ -1,0 +1,20 @@
+{
+  "activity.systemActor": "系统",
+  "vault.encryptionFailed": "加密失败，凭据未保存。",
+  "vault.decryptionFailed": "凭据无法解密。",
+  "state.idUnavailable": "暂时无法发号，请稍后重试。",
+  "host.monitorTimeout": "主机监控采集超时。",
+  "resource.referenceInvalid": "引用 ID 无效。",
+  "host.connectionUnknown": "未知的接入方式。",
+  "error.unauthorized": "请登录后继续操作。",
+  "error.forbidden": "当前账号没有此操作权限，请联系管理员。",
+  "error.missing": "记录不存在或已不可用。",
+  "error.database": "保存或读取数据失败，请稍后重试；已填写内容不会清空。",
+  "error.file": "文件操作失败，请检查磁盘空间和目录权限。",
+  "server.draining": "服务正在安全关闭，请稍后重试。",
+  "guard.host": "此主机地址未在允许列表中。",
+  "guard.request": "缺少操作校验标识。",
+  "guard.origin": "不允许此来源发起操作。",
+  "assets.not_built": "界面文件未构建，请先运行 npm run build。",
+  "terminal.heartbeatTimeout": "终端连接心跳超时，请重新连接。"
+}

@@ -33,9 +33,9 @@ const MAX_FRAME: usize = 256 * 1024;
 const MAX_MESSAGE: usize = 16 * 1024 * 1024;
 
 pub fn unavailable() -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::SERVICE_UNAVAILABLE,
-        "节点连接所属服务不可用，请等待代理重连后重新打开会话。".into(),
+        crate::i18n::Message::new("runner.clusterUnavailable"),
     )
 }
 fn failed(_: impl std::fmt::Display) -> ApiError {
@@ -100,6 +100,21 @@ struct Reply {
     value: Option<Value>,
     status: u16,
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    message: Option<crate::i18n::Message>,
+}
+
+impl Reply {
+    fn into_value(self) -> Result<Value> {
+        if let Some(error) = self.error {
+            return Err(ApiError(
+                StatusCode::from_u16(self.status).unwrap_or(StatusCode::BAD_GATEWAY),
+                error,
+                self.message,
+            ));
+        }
+        Ok(self.value.unwrap_or(Value::Null))
+    }
 }
 #[derive(Serialize, Deserialize)]
 struct Envelope<T> {
@@ -564,13 +579,7 @@ impl Cluster {
         .await
         .map_err(failed)??;
         let reply: Reply = serde_json::from_slice(&bytes).map_err(failed)?;
-        if let Some(error) = reply.error {
-            return Err(ApiError(
-                StatusCode::from_u16(reply.status).unwrap_or(StatusCode::BAD_GATEWAY),
-                error,
-            ));
-        }
-        serde_json::from_value(reply.value.unwrap_or(Value::Null)).map_err(failed)
+        serde_json::from_value(reply.into_value()?).map_err(failed)
     }
 
     pub async fn serve(
@@ -597,14 +606,14 @@ impl Cluster {
                         let answer = match serde_json::from_slice::<Envelope<Request>>(&message.payload) {
                             Ok(envelope) if envelope.expires_at>=crate::db::now()=>this.dispatch(&s,envelope.request).await,
                             Ok(_)=>Err(unavailable()),
-                            Err(_) => Err(ApiError::bad("集群请求无效。")),
+                            Err(_) => Err(ApiError::localized(StatusCode::BAD_REQUEST, crate::i18n::Message::new("runner.clusterRequest"))),
                         };
                         let reply_body = match answer {
-                            Ok(value) => Reply { value: Some(value), status: 200, error: None },
-                            Err(error) => Reply { value: None, status: error.0.as_u16(), error: Some(error.1) },
+                            Ok(value) => Reply { value: Some(value), status: 200, error: None, message: None },
+                            Err(error) => Reply { value: None, status: error.0.as_u16(), error: Some(error.1), message: error.2 },
                         };
                         if let Ok(bytes) = serde_json::to_vec(&reply_body) {
-                            if bytes.len()>MAX_MESSAGE {let reply_body=Reply {value:None,status:502,error:Some("集群查询响应超过 16 MiB，请缩小查询范围。".into())};if let Ok(bytes)=serde_json::to_vec(&reply_body){let _=this.client.publish(reply,packet(&bytes,true)).await;}}
+                            if bytes.len()>MAX_MESSAGE {let error=ApiError::localized(StatusCode::BAD_GATEWAY,crate::i18n::Message::new("runner.clusterResponse"));let reply_body=Reply {value:None,status:502,error:Some(error.1),message:error.2};if let Ok(bytes)=serde_json::to_vec(&reply_body){let _=this.client.publish(reply,packet(&bytes,true)).await;}}
                             else {let chunks=bytes.chunks(MAX_FRAME);let count=chunks.len();for(index,chunk)in chunks.enumerate(){if this.client.publish(reply.clone(),packet(chunk,index+1==count)).await.is_err(){break;}}}
                         }
                     });
@@ -667,11 +676,11 @@ impl Cluster {
                 body,
             } => {
                 let scope = crate::workspace::Scope::for_actor(s, workspace, actor).await?;
-                let (_, axum::Json(value)) = crate::runner::start_update(
+                let (_, crate::error::Json(value)) = crate::runner::start_update(
                     axum::extract::State(s.clone()),
                     scope,
-                    axum::extract::Path((workspace.to_string(), host)),
-                    axum::Json(body),
+                    crate::error::Path((workspace.to_string(), host)),
+                    crate::error::Json(body),
                 )
                 .await?;
                 Ok(value)
@@ -984,7 +993,10 @@ fn encode(message: Message) -> Result<Bytes> {
         Message::Pong(value) => (4, value),
     };
     if data.len() > MAX_MESSAGE - 1 {
-        return Err(ApiError::bad("集群会话数据帧超过 16 MiB。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.clusterFrame"),
+        ));
     }
     let mut output = Vec::with_capacity(data.len() + 1);
     output.push(tag);
@@ -1034,6 +1046,38 @@ fn append_packet(output: &mut Vec<u8>, bytes: &[u8]) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rpc_error_identity_survives_wire_and_legacy_replies_stay_raw() {
+        let identity =
+            crate::i18n::Message::new("runner.offline").with("name", "literal {runner.timeout}");
+        let original = ApiError::localized(StatusCode::SERVICE_UNAVAILABLE, identity.clone());
+        let reply = Reply {
+            value: None,
+            status: original.0.as_u16(),
+            error: Some(original.1),
+            message: original.2,
+        };
+        let error = serde_json::from_slice::<Reply>(&serde_json::to_vec(&reply).unwrap())
+            .unwrap()
+            .into_value()
+            .unwrap_err();
+        for locale in crate::i18n::Locale::ALL {
+            assert_eq!(error.render(locale), crate::i18n::render(locale, &identity));
+            assert!(error.render(locale).contains("literal {runner.timeout}"));
+        }
+        let legacy: Reply = serde_json::from_value(
+            serde_json::json!({"value":null,"status":502,"error":"raw upstream {runner.offline}"}),
+        )
+        .unwrap();
+        assert_eq!(
+            legacy
+                .into_value()
+                .unwrap_err()
+                .render(crate::i18n::Locale::JaJp),
+            "raw upstream {runner.offline}"
+        );
+    }
 
     #[test]
     fn fragmented_metadata_preserves_bytes_and_rejects_oversize_or_invalid_packets() {

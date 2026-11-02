@@ -5,6 +5,7 @@
 use crate::entities::{activity, host_groups, host_tags, hosts, pipelines, tags};
 use crate::snowflake::Id;
 
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     error::{ApiError, Result},
@@ -12,11 +13,7 @@ use crate::{
     state::AppState,
     workspace::Scope,
 };
-use axum::{
-    Json,
-    extract::{Path, Query, State},
-    http::StatusCode,
-};
+use axum::{extract::State, http::StatusCode};
 use ferry_protocol::HostMonitor;
 use sea_orm::{
     ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set,
@@ -99,7 +96,10 @@ pub async fn get_group(
 fn check_name(name: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.nameRequired"),
+        ));
     }
     Ok(name.to_owned())
 }
@@ -199,7 +199,10 @@ pub async fn update_group(
             .await?
             .is_some();
         return Err(if exists {
-            ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
+            ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("hosts.recordChanged"),
+            )
         } else {
             ApiError::missing()
         });
@@ -245,7 +248,10 @@ pub async fn reorder_groups(
     let expected: HashSet<i64> = siblings.iter().map(|group| group.id).collect();
     let actual: HashSet<i64> = ids.iter().map(|id| i64::from(*id)).collect();
     if actual != expected || ids.len() != siblings.len() {
-        return Err(ApiError::bad("分组顺序已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.groupOrderChanged"),
+        ));
     }
     for (position, id) in ids.iter().enumerate() {
         host_groups::Entity::update_many()
@@ -290,7 +296,10 @@ pub async fn delete_group(
         .await?
         > 0
     {
-        return Err(ApiError::conflict("主机组仍被应用部署引用。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.groupDeploymentReference"),
+        ));
     }
 
     crate::pipeline_contexts::ensure_unreferenced(&tx, scope.workspace_id, "host-group", &[id])
@@ -304,8 +313,9 @@ pub async fn delete_group(
         .await?
         > 0
     {
-        return Err(ApiError::conflict(
-            "主机组仍被流水线引用，请先修改流水线目标。",
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.groupPipelineReference"),
         ));
     }
     // Refuse rather than orphan: a host pointing at a deleted group would
@@ -316,9 +326,10 @@ pub async fn delete_group(
         .count(&tx)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "该主机组下还有 {used} 台主机，请先移出再删除。"
-        )));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.groupHostsRemain").with("count", used.to_string()),
+        ));
     }
     if host_groups::Entity::find()
         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
@@ -327,7 +338,10 @@ pub async fn delete_group(
         .await?
         > 0
     {
-        return Err(ApiError::conflict("主机组下还有子组，请先移动或删除子组。"));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.groupChildrenRemain"),
+        ));
     }
     let affected = host_groups::Entity::delete_many()
         .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
@@ -449,6 +463,7 @@ fn host_json(row: &hosts::Model) -> Value {
         "connection": row.connection,
         "os": row.os,
         "agent_version": row.agent_version,
+        "runner_auto_update": row.runner_auto_update,
         "state": row.state,
         "group_id": Id::from(row.group_id),
         "credential_id": Id::from(row.credential_id),
@@ -464,6 +479,8 @@ fn host_json(row: &hosts::Model) -> Value {
 #[derive(Deserialize)]
 pub struct HostBody {
     name: String,
+    #[serde(default)]
+    runner_auto_update: Option<String>,
     #[serde(default)]
     tag_ids: Option<Vec<Id>>,
     #[serde(default)]
@@ -489,21 +506,43 @@ pub struct HostBody {
 /// SSH needs somewhere to dial; a runner host reports its own address when it
 /// enrolls, so requiring one up front would block the one-command flow.
 fn check_host(body: &HostBody, creating: bool) -> Result<(String, String)> {
+    if body
+        .runner_auto_update
+        .as_deref()
+        .is_some_and(|value| !["inherit", "on", "off"].contains(&value))
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.autoUpdateInvalid"),
+        ));
+    }
     let name = check_name(&body.name)?;
     let connection = if creating { body.connection.trim() } else { "" };
     if creating {
         if !CONNECTIONS.contains(&connection) {
-            return Err(ApiError::bad("请选择接入方式：代理或 SSH。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("hosts.connectionRequired"),
+            ));
         }
         if connection == "ssh" {
             if body.address.trim().is_empty() {
-                return Err(ApiError::bad("SSH 接入需要填写主机地址。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("hosts.addressRequired"),
+                ));
             }
             if !(1..=65535).contains(&body.port) {
-                return Err(ApiError::bad("端口需要在 1–65535 之间。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("hosts.portInvalid"),
+                ));
             }
             if body.username.trim().is_empty() {
-                return Err(ApiError::bad("SSH 接入需要填写登录账号。"));
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("hosts.usernameRequired"),
+                ));
             }
         }
     }
@@ -522,7 +561,10 @@ async fn validate_jump(
         return Ok(jump);
     }
     if connection != "ssh" || jump == host {
-        return Err(ApiError::bad("只能为 SSH 主机选择另一台跳板主机。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.jumpSelfInvalid"),
+        ));
     }
     hosts::Entity::find_by_id(i64::from(jump))
         .filter(hosts::Column::WorkspaceId.eq(workspace))
@@ -530,7 +572,12 @@ async fn validate_jump(
         .filter(hosts::Column::JumpHostId.eq(0))
         .one(db)
         .await?
-        .ok_or_else(|| ApiError::bad("跳板主机必须是当前工作空间中可直连的 SSH 主机。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("hosts.jumpInvalid"),
+            )
+        })?;
     Ok(jump)
 }
 
@@ -603,7 +650,12 @@ async fn validate_membership(
             .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
             .one(tx)
             .await?
-            .ok_or_else(|| ApiError::bad("主机组不存在于当前工作空间。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("hosts.groupMissing"),
+                )
+            })?;
     }
     Ok(())
 }
@@ -637,6 +689,10 @@ pub(crate) async fn create_host_in(
         port: Set(body.port),
         username: Set(body.username.trim().to_owned()),
         connection: Set(connection.clone()),
+        runner_auto_update: Set(body
+            .runner_auto_update
+            .clone()
+            .unwrap_or_else(|| "inherit".into())),
         state: Set("unknown".to_owned()),
         group_id: Set(i64::from(Id::reference(&body.group_id)?)),
         credential_id: Set(i64::from(Id::reference(&body.credential_id)?)),
@@ -697,11 +753,20 @@ pub async fn update_host(
             .await?
             > 0
     {
-        return Err(ApiError::conflict(
-            "这台主机正作为其他主机的跳板，不能再配置跳板主机。",
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.jumpInUseCannotChain"),
         ));
     }
     let mut update = hosts::Entity::update_many()
+        .col_expr(
+            hosts::Column::RunnerAutoUpdate,
+            Expr::value(
+                body.runner_auto_update
+                    .as_deref()
+                    .unwrap_or(&existing.runner_auto_update),
+            ),
+        )
         .col_expr(hosts::Column::Name, Expr::value(name.clone()))
         .col_expr(hosts::Column::Port, Expr::value(body.port))
         .col_expr(hosts::Column::Username, Expr::value(body.username.trim()))
@@ -740,7 +805,10 @@ pub async fn update_host(
             .await?
             .is_some();
         return Err(if exists {
-            ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
+            ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("hosts.recordChanged"),
+            )
         } else {
             ApiError::missing()
         });
@@ -777,8 +845,9 @@ async fn host_is_free(
         .await?
         > 0
     {
-        return Err(ApiError::conflict(
-            "这台主机正作为跳板主机使用，请先调整引用它的目标主机。",
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.jumpInUseCannotDelete"),
         ));
     }
     crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
@@ -809,8 +878,9 @@ async fn host_is_free(
             .await?
             > 0
     {
-        return Err(ApiError::conflict(
-            "主机仍被应用或待执行/未确认的部署目标引用。",
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.deploymentReference"),
         ));
     }
 
@@ -823,9 +893,10 @@ async fn host_is_free(
         .count(conn)
         .await?;
     if used > 0 {
-        return Err(ApiError::conflict(format!(
-            "还有 {used} 条流水线以这台主机为目标，请先改掉再删除。"
-        )));
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.pipelineReference").with("count", used.to_string()),
+        ));
     }
     Ok(())
 }
@@ -871,7 +942,10 @@ pub async fn bulk_delete_hosts(
 ) -> Result<Json<Value>> {
     scope.require("hosts.delete")?;
     if body.ids.is_empty() || body.ids.len() > 200 {
-        return Err(ApiError::bad("一次最多删除 200 项，且至少选择一项。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.deleteLimit"),
+        ));
     }
     let transaction = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut deleted = 0;
@@ -1064,8 +1138,9 @@ pub async fn delete_tag(
         .await?
         > 0
     {
-        return Err(ApiError::conflict(
-            "标签仍被主机引用，请先在主机中移除标签。",
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.tagReferenced"),
         ));
     }
     let affected = tags::Entity::delete_many()
@@ -1092,7 +1167,10 @@ where
 {
     let exists = query.count(&s.db).await? > 0;
     Ok(if exists {
-        ApiError::conflict("这条记录已被他人修改，请刷新后重试。")
+        ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.recordChanged"),
+        )
     } else {
         ApiError::missing()
     })
@@ -1158,6 +1236,36 @@ pub(crate) async fn activity_record(
     Ok(())
 }
 
+fn activity_actor_name(actor_id: i64, name: &str) -> String {
+    if actor_id == 0 {
+        crate::i18n::render(
+            crate::i18n::current_locale(),
+            &crate::i18n::Message::new("activity.systemActor"),
+        )
+    } else {
+        name.to_owned()
+    }
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn activity_translates_only_system_actor_and_preserves_user_names() {
+    use crate::i18n::{Locale, with_locale};
+    for (locale, expected) in
+        Locale::ALL
+            .into_iter()
+            .zip(["System", "系统", "系統", "システム", "시스템", "Sistem"])
+    {
+        with_locale(locale, async {
+            assert_eq!(activity_actor_name(0, "系统"), expected);
+            assert_eq!(activity_actor_name(0, ""), expected);
+            assert_eq!(activity_actor_name(17, "系统"), "系统");
+            assert_eq!(activity_actor_name(18, "Jane / 李"), "Jane / 李");
+        })
+        .await;
+    }
+}
+
 pub async fn list_activity(
     State(s): State<AppState>,
     scope: Scope,
@@ -1184,7 +1292,7 @@ pub async fn list_activity(
         .map(|row| {
             json!({
                 "id": Id::from(row.id),
-                "actor_name": row.actor_name,
+                "actor_name": activity_actor_name(row.actor_id, &row.actor_name),
                 "action": row.action,
                 "resource": row.resource,
                 "resource_id": Id::from(row.resource_id),
@@ -1302,7 +1410,7 @@ pub async fn dashboard(State(s): State<AppState>, scope: Scope) -> Result<Json<V
     let recent = if scope.permissions.contains("activity.read") {
         Some(activity::Entity::find().filter(activity::Column::WorkspaceId.eq(scope.workspace_id))
             .order_by_desc(activity::Column::CreatedAt).order_by_desc(activity::Column::Id).limit(10).all(&s.db).await?
-            .into_iter().map(|a| json!({"id":Id::from(a.id),"actor_name":a.actor_name,"action":a.action,"resource":a.resource,"created_at":a.created_at})).collect::<Vec<_>>())
+            .into_iter().map(|a| json!({"id":Id::from(a.id),"actor_name":activity_actor_name(a.actor_id, &a.actor_name),"action":a.action,"resource":a.resource,"created_at":a.created_at})).collect::<Vec<_>>())
     } else {
         None
     };
@@ -1321,13 +1429,21 @@ async fn validate_parent(
     let mut seen = HashSet::new();
     while cursor != Id::from(0) {
         if cursor == id || !seen.insert(i64::from(cursor)) {
-            return Err(ApiError::bad("上级主机组不能是自己或自己的子组。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("hosts.parentCycle"),
+            ));
         }
         let row = host_groups::Entity::find_by_id(i64::from(cursor))
             .filter(host_groups::Column::WorkspaceId.eq(scope.workspace_id))
             .one(conn)
             .await?
-            .ok_or_else(|| ApiError::bad("上级主机组不存在于当前工作空间。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("hosts.parentMissing"),
+                )
+            })?;
         cursor = row.parent_id.into();
     }
     Ok(())
@@ -1343,7 +1459,10 @@ async fn replace_tags(
     };
     let ids: HashSet<i64> = values.iter().map(|id| i64::from(*id)).collect();
     if ids.len() != values.len() {
-        return Err(ApiError::bad("标签不能重复。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.tagsDuplicate"),
+        ));
     }
     if !ids.is_empty()
         && tags::Entity::find()
@@ -1353,7 +1472,10 @@ async fn replace_tags(
             .await?
             != ids.len() as u64
     {
-        return Err(ApiError::bad("所选标签不存在于当前工作空间。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("hosts.tagsMissing"),
+        ));
     }
     host_tags::Entity::delete_many()
         .filter(host_tags::Column::HostId.eq(host))

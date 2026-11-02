@@ -21,6 +21,7 @@
 use crate::cluster::Socket;
 use crate::snowflake::Id;
 
+use crate::error::{Json, Path};
 use crate::{
     channel::{ByteStream, DirEntry, FileMeta, HostChannel, Output, Pty, PtySize},
     db,
@@ -31,9 +32,8 @@ use crate::{
     workspace::Scope,
 };
 use axum::{
-    Json,
     extract::{
-        Path, State,
+        State,
         ws::{Message, WebSocketUpgrade},
     },
     http::{HeaderMap, StatusCode, header},
@@ -94,7 +94,7 @@ struct Live {
 /// second runner claiming someone else's session id.
 struct Pending {
     host_id: String,
-    socket: oneshot::Sender<std::result::Result<Socket, String>>,
+    socket: oneshot::Sender<Result<Socket>>,
 }
 
 // ponytail: process-global, so this is one server process's view of its own
@@ -145,31 +145,62 @@ pub fn secret() -> String {
 // ------------------------------------------------------------------ 报错
 
 fn offline(name: &str) -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::SERVICE_UNAVAILABLE,
-        format!("主机「{name}」的代理未连接，请确认该主机上的 ferry-runner 正在运行。"),
+        crate::i18n::Message::new("runner.offline").with("name", name),
     )
 }
 
 fn remote_failed(error: impl std::fmt::Display) -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::BAD_GATEWAY,
-        format!("主机代理执行失败：{error}"),
+        crate::i18n::Message::new("runner.remoteFailed").with("detail", error.to_string()),
     )
 }
 
 fn garbled() -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::BAD_GATEWAY,
-        "主机代理返回了无法识别的响应，请确认代理版本与服务一致。".into(),
+        crate::i18n::Message::new("runner.garbled"),
     )
 }
 
 fn timed_out() -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::GATEWAY_TIMEOUT,
-        "主机代理没有在超时时间内响应。".into(),
+        crate::i18n::Message::new("runner.timeout"),
     )
+}
+
+fn runner_extra(key: &str) -> ApiError {
+    ApiError::localized(StatusCode::BAD_GATEWAY, crate::i18n::Message::new(key))
+}
+
+fn session_failed(error: String, identity: Option<wire::SystemMessage>) -> ApiError {
+    if identity.is_some_and(|message| {
+        message.key == "runnerExtra.preparingUpgrade" && message.params.is_empty()
+    }) {
+        runner_extra("runnerExtra.preparingUpgrade")
+    } else {
+        remote_failed(error)
+    }
+}
+
+fn stored_update_failure(error: &str, identity: Option<wire::SystemMessage>) -> String {
+    let message = identity
+        .filter(|message| {
+            message.params.is_empty()
+                && matches!(
+                    message.key.as_str(),
+                    "runner.updateUnavailable" | "runner.failedTarget" | "runner.updateFailed"
+                )
+        })
+        .map(|message| crate::i18n::Message::new(message.key))
+        .unwrap_or_else(|| {
+            crate::i18n::Message::new("runner.updateRejected")
+                .with("detail", error.chars().take(512).collect::<String>())
+        });
+    crate::i18n::store_message(&message)
 }
 
 // -------------------------------------------------------------- 帧读写
@@ -202,15 +233,10 @@ async fn handshake<T: serde::de::DeserializeOwned>(socket: &mut Socket) -> Resul
 }
 
 /// Says no in a way the other end can log, instead of just closing the socket.
-async fn reject(socket: &mut Socket, reason: &str) {
+async fn reject(socket: &mut Socket, error: &ApiError) {
+    let reason = error.render(crate::i18n::current_locale());
     tracing::warn!(%reason, "拒绝 runner 连接");
-    let _ = send_frame(
-        socket,
-        &wire::Control::Rejected {
-            reason: reason.to_owned(),
-        },
-    )
-    .await;
+    let _ = send_frame(socket, &wire::Control::Rejected { reason }).await;
     let _ = socket.send(Message::Close(None)).await;
 }
 
@@ -218,9 +244,9 @@ async fn reject(socket: &mut Socket, reason: &str) {
 
 pub(crate) async fn bootstrap_token(db: &sea_orm::DatabaseConnection, token: &str) -> Result<()> {
     if token.len() != 64 {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::UNAUTHORIZED,
-            "接入令牌无效，请重新生成安装命令。".into(),
+            crate::i18n::Message::new("runner.invalidToken"),
         ));
     }
     let valid = runner_tokens::Entity::find()
@@ -235,9 +261,9 @@ pub(crate) async fn bootstrap_token(db: &sea_orm::DatabaseConnection, token: &st
         .one(db)
         .await?;
     if valid.is_none() && persistent.is_none() {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::UNAUTHORIZED,
-            "接入令牌已过期或已使用，请重新生成安装命令。".into(),
+            crate::i18n::Message::new("runner.expiredToken"),
         ));
     }
     Ok(())
@@ -406,7 +432,10 @@ pub async fn create_token(
     } else if TOKEN_MINUTES_RANGE.contains(&body.ttl_minutes) {
         body.ttl_minutes
     } else {
-        return Err(ApiError::bad("有效期需要在 5 分钟到 24 小时之间。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.tokenDuration"),
+        ));
     };
     let host_id = Id::reference(&body.host_id)?;
     if host_id != Id::from(0) {
@@ -416,7 +445,12 @@ pub async fn create_token(
             .filter(hosts::Column::Connection.eq("runner"))
             .one(&s.db)
             .await?
-            .ok_or_else(|| ApiError::bad("该主机不存在，或接入方式不是代理。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.hostMissing"),
+                )
+            })?;
     }
 
     let (id, now, token) = (s.next_id()?, db::now(), secret());
@@ -484,9 +518,9 @@ async fn consume_token(db: &impl sea_orm::ConnectionTrait, token: &str) -> Resul
         .await?
         .rows_affected;
     if claimed == 0 {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::UNAUTHORIZED,
-            "注册令牌无效、已过期或已被使用，请在主机页重新生成。".into(),
+            crate::i18n::Message::new("runner.registrationToken"),
         ));
     }
     let row = runner_tokens::Entity::find()
@@ -597,8 +631,9 @@ async fn enrol(s: &AppState, hello: &wire::Hello, token: &str) -> Result<(String
         if affected == 0 {
             // The token is spent either way: a token that survives a failed
             // binding would be a token that can be retried.
-            return Err(ApiError::bad(
-                "注册令牌绑定的主机已不存在，或接入方式不是代理，请重新生成令牌。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.registrationHost"),
             ));
         }
         bound_host
@@ -623,9 +658,9 @@ async fn verify_key(s: &AppState, host_id: &str, key: &str) -> Result<()> {
         .one(&s.db)
         .await?
         .ok_or_else(|| {
-            ApiError(
+            ApiError::localized(
                 StatusCode::UNAUTHORIZED,
-                "代理凭据无效，请在主机页重新生成接入命令。".into(),
+                crate::i18n::Message::new("runner.credentials"),
             )
         })
         .map(|_| ())
@@ -637,21 +672,23 @@ async fn verify_key(s: &AppState, host_id: &str, key: &str) -> Result<()> {
 /// not behind the session cookie: a runner is not a browser, and it proves
 /// itself with the `Hello` frame instead.
 pub async fn connect(State(s): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
-    upgrade.on_upgrade(move |socket| control(s, socket.into()))
+    let locale = crate::i18n::current_locale();
+    upgrade.on_upgrade(move |socket| crate::i18n::with_locale(locale, control(s, socket.into())))
 }
 
 async fn control(s: AppState, mut socket: Socket) {
     let hello: wire::Hello = match handshake(&mut socket).await {
         Ok(hello) => hello,
-        Err(error) => return reject(&mut socket, &error.1).await,
+        Err(error) => return reject(&mut socket, &error).await,
     };
     if hello.version != wire::VERSION {
         return reject(
             &mut socket,
-            &format!(
-                "协议版本不匹配：服务要求 {}，代理为 {}。请升级 ferry-runner。",
-                wire::VERSION,
-                hello.version
+            &ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runnerExtra.protocolMismatch")
+                    .with("expected", wire::VERSION.to_string())
+                    .with("actual", hello.version.to_string()),
             ),
         )
         .await;
@@ -667,24 +704,24 @@ async fn control(s: AppState, mut socket: Socket) {
     };
     let (host_id, key) = match authenticated {
         Ok(value) => value,
-        Err(error) => return reject(&mut socket, &error.1).await,
+        Err(error) => return reject(&mut socket, &error).await,
     };
     if let Some(key) = key.as_deref() {
         if let Err(error) = verify_key(&s, &host_id, key).await {
-            return reject(&mut socket, &error.1).await;
+            return reject(&mut socket, &error).await;
         }
     }
 
     let row_id = match host_id.parse::<Id>() {
         Ok(id) => id,
-        Err(_) => return reject(&mut socket, "代理主机 ID 无效。").await,
+        Err(_) => return reject(&mut socket, &runner_extra("runnerExtra.hostIdInvalid")).await,
     };
     let row = match hosts::Entity::find_by_id(i64::from(row_id))
         .one(&s.db)
         .await
     {
         Ok(Some(row)) => row,
-        _ => return reject(&mut socket, "Host unavailable").await,
+        _ => return reject(&mut socket, &runner_extra("runnerExtra.hostUnavailable")).await,
     };
     // Deliver the newly issued key before attempting a transient cluster lease.
     // A closed socket is retryable by existing Runners; Rejected is permanent.
@@ -929,8 +966,9 @@ async fn pump_control(
                                 registration.ready.store(true, std::sync::atomic::Ordering::Release);
                             }
                         }
-                        Ok(wire::Report::UpdateFailed { request, error }) => {
-                            *registration.update_error.lock().unwrap_or_else(|e|e.into_inner()) = Some((request, error.chars().take(512).collect()));
+                        Ok(wire::Report::UpdateFailed { request, error, message }) => {
+                            let stored = stored_update_failure(&error, message);
+                            *registration.update_error.lock().unwrap_or_else(|e|e.into_inner()) = Some((request, stored));
                         }
                         Ok(wire::Report::Metrics { load1, cpu_percent, memory_used, memory_total, disk_used, disk_total }) => {
                             // No version bump: a heartbeat is not an edit, and
@@ -945,9 +983,9 @@ async fn pump_control(
                             if let Some(owner)=&registration.owner {update=update.filter(crate::cluster::fence_condition(host_id,&owner.fence));}
                             let _=update.exec(&s.db).await;
                         }
-                        Ok(wire::Report::SessionFailed { session, error }) => {
+                        Ok(wire::Report::SessionFailed { session, error, message }) => {
                             if let Some(waiting) = claim_pending(&session, host_id) {
-                                let _ = waiting.socket.send(Err(error));
+                                let _ = waiting.socket.send(Err(session_failed(error, message)));
                             }
                         }
                         Err(error) => tracing::warn!(%host_id, %error, "无法解析 runner 上报帧"),
@@ -989,35 +1027,42 @@ pub async fn session(
     Path(session): Path<String>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
-    upgrade.on_upgrade(move |socket| hand_over(s, session, socket.into()))
+    let locale = crate::i18n::current_locale();
+    upgrade.on_upgrade(move |socket| {
+        crate::i18n::with_locale(locale, hand_over(s, session, socket.into()))
+    })
 }
 
 async fn hand_over(s: AppState, session: String, mut socket: Socket) {
     let hello: wire::SessionHello = match handshake(&mut socket).await {
         Ok(hello) => hello,
-        Err(error) => return reject(&mut socket, &error.1).await,
+        Err(error) => return reject(&mut socket, &error).await,
     };
     if hello.version != wire::VERSION {
-        return reject(&mut socket, "协议版本不匹配，请升级 ferry-runner。").await;
+        return reject(
+            &mut socket,
+            &runner_extra("runnerExtra.sessionProtocolMismatch"),
+        )
+        .await;
     }
     if let Err(error) = verify_key(&s, &hello.host_id, &hello.key).await {
-        return reject(&mut socket, &error.1).await;
+        return reject(&mut socket, &error).await;
     }
     if let Some(cluster) = &s.cluster {
         let route = match cluster.claim_session(&session, &hello.host_id).await {
             Ok(route) => route,
-            Err(error) => return reject(&mut socket, &error.1).await,
+            Err(error) => return reject(&mut socket, &error).await,
         };
         match cluster.socket(&session, true, &route).await {
             Ok(forwarded) => crate::cluster::bridge(socket, forwarded).await,
-            Err(error) => reject(&mut socket, &error.1).await,
+            Err(error) => reject(&mut socket, &error).await,
         }
         return;
     }
     // The session id is only ever sent to one runner, and this is the check
     // that makes that binding enforced rather than merely true.
     let Some(waiting) = claim_pending(&session, &hello.host_id) else {
-        return reject(&mut socket, "该会话不存在、已超时，或不属于这台主机。").await;
+        return reject(&mut socket, &runner_extra("runnerExtra.sessionUnavailable")).await;
     };
     // The socket now lives in the request that asked for it; this task is done.
     if let Err(Ok(mut socket)) = waiting.socket.send(Ok(socket)) {
@@ -1047,9 +1092,9 @@ pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionK
         return Err(crate::cluster::unavailable());
     }
     if kind == wire::SessionKind::Monitor && !registration.supports_monitor {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::CONFLICT,
-            "当前 Agent 尚不支持详细监控，请升级后重试。".into(),
+            crate::i18n::Message::new("runner.monitorUnsupported"),
         ));
     }
     registration
@@ -1129,9 +1174,9 @@ impl RunnerChannel {
             .cloned()
             .ok_or_else(|| offline(&self.name))?;
         if kind == wire::SessionKind::Monitor && !registration.supports_monitor {
-            return Err(ApiError(
+            return Err(ApiError::localized(
                 StatusCode::CONFLICT,
-                "当前 Agent 尚不支持详细监控，请升级 ferry-runner 后重试。".into(),
+                crate::i18n::Message::new("runner.monitorUpgrade"),
             ));
         }
         let id = secret();
@@ -1158,7 +1203,7 @@ impl RunnerChannel {
             Ok(Ok(Ok(socket))) => Ok(socket),
             Ok(Ok(Err(error))) => {
                 pending().remove(&id);
-                Err(remote_failed(error))
+                Err(error)
             }
             // Dropped sender or timeout: either way nothing will arrive.
             Ok(Err(_)) | Err(_) => {
@@ -1262,7 +1307,7 @@ impl HostChannel for RunnerChannel {
                 }
                 _ = &mut deadline => {
                     let _ = socket.send(Message::Close(None)).await;
-                    return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "执行主机未在超时后完成清理。".into()));
+                    return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout")));
                 }
                 frame = next_frame(&mut socket) => match frame? {
                     wire::Session::ExecOutput {stream, data} => {
@@ -1271,7 +1316,7 @@ impl HostChannel for RunnerChannel {
                             let should_stop = tokio::select! {
                                 sent = output.send((stream, data)) => sent.is_err(),
                                 _ = cancel.changed() => true,
-                                _ = &mut deadline => return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "执行主机未在超时后完成清理。".into())),
+                                _ = &mut deadline => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
                             };
                             if should_stop {
                                 send_frame(&mut socket, &wire::Session::ExecCancel).await?;
@@ -1414,9 +1459,9 @@ impl HostChannel for RunnerChannel {
                         // download and a silently short one.
                         Some(Err(_)) | None => {
                             return Some((
-                                Err(ApiError(
+                                Err(ApiError::localized(
                                     StatusCode::BAD_GATEWAY,
-                                    "下载中断：主机代理连接提前关闭。".into(),
+                                    crate::i18n::Message::new("runner.downloadClosed"),
                                 )),
                                 None,
                             ));
@@ -1502,7 +1547,7 @@ impl Pty for RunnerPty {
         self.input
             .send(Keystrokes::Data(Bytes::copy_from_slice(data)))
             .await
-            .map_err(|_| remote_failed("终端会话已结束"))
+            .map_err(|_| runner_extra("runnerExtra.terminalEnded"))
     }
 
     async fn read(&mut self) -> Result<Option<Bytes>> {
@@ -1521,7 +1566,7 @@ impl Pty for RunnerPty {
                 rows: size.rows,
             }))
             .await
-            .map_err(|_| remote_failed("终端会话已结束"))
+            .map_err(|_| runner_extra("runnerExtra.terminalEnded"))
     }
 }
 
@@ -1567,6 +1612,260 @@ async fn pump_pty(
 mod tests {
     use super::*;
     use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+
+    #[test]
+    fn session_failure_identity_is_allowlisted_and_preserves_unknown_raw_reasons() {
+        let raw = "provider 原文 {runnerExtra.preparingUpgrade}";
+        let known = session_failed(
+            raw.into(),
+            Some(wire::SystemMessage::new("runnerExtra.preparingUpgrade")),
+        );
+        for locale in crate::i18n::Locale::ALL {
+            assert_eq!(
+                known.render(locale),
+                crate::i18n::render(
+                    locale,
+                    &crate::i18n::Message::new("runnerExtra.preparingUpgrade")
+                )
+            );
+            for identity in [
+                None,
+                Some(wire::SystemMessage::new("error.forbidden")),
+                Some(wire::SystemMessage {
+                    key: "runnerExtra.preparingUpgrade".into(),
+                    params: std::collections::BTreeMap::from([(
+                        "unexpected".into(),
+                        "value".into(),
+                    )]),
+                }),
+            ] {
+                let error = session_failed(raw.into(), identity);
+                assert!(error.render(locale).contains(raw));
+                assert_eq!(error.2.unwrap().key, "runner.remoteFailed");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_rejections_and_terminal_errors_follow_each_readers_locale() {
+        use crate::i18n::{Locale, render};
+        use axum::{Router, middleware, routing::get};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Exercise the actual HTTP upgrade and masked WebSocket text frames.
+        async fn rejected(
+            address: std::net::SocketAddr,
+            path: &str,
+            locale: Locale,
+            payload: Value,
+        ) -> String {
+            let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+            let request = format!(
+                "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAccept-Language: {}\r\n\r\n",
+                locale.tag()
+            );
+            socket.write_all(request.as_bytes()).await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(socket.read_u8().await.unwrap());
+                assert!(headers.len() < 8192);
+            }
+            assert!(
+                headers.starts_with(b"HTTP/1.1 101"),
+                "{}",
+                String::from_utf8_lossy(&headers)
+            );
+            let payload = serde_json::to_vec(&payload).unwrap();
+            assert!(payload.len() < 65536);
+            let mut frame = vec![0x81];
+            if payload.len() < 126 {
+                frame.push(0x80 | payload.len() as u8);
+            } else {
+                frame.push(0x80 | 126);
+                frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+            }
+            let mask = [1, 2, 3, 4];
+            frame.extend_from_slice(&mask);
+            frame.extend(
+                payload
+                    .iter()
+                    .enumerate()
+                    .map(|(index, byte)| byte ^ mask[index % 4]),
+            );
+            socket.write_all(&frame).await.unwrap();
+            assert_eq!(socket.read_u8().await.unwrap(), 0x81);
+            let length = socket.read_u8().await.unwrap();
+            assert_eq!(length & 0x80, 0);
+            let length = match length {
+                126 => socket.read_u16().await.unwrap() as usize,
+                127 => socket.read_u64().await.unwrap() as usize,
+                n => n as usize,
+            };
+            assert!(length < 65536);
+            let mut message = vec![0; length];
+            socket.read_exact(&mut message).await.unwrap();
+            let message: Value = serde_json::from_slice(&message).unwrap();
+            assert_eq!(message["type"], "rejected");
+            assert_eq!(
+                socket.read_u8().await.unwrap() & 0x0f,
+                8,
+                "rejection still closes the connection"
+            );
+            message["reason"].as_str().unwrap().to_owned()
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let scratch = scratch_db().await;
+        let s = Arc::new(crate::state::State {
+            host_monitor: Default::default(),
+            cluster: None,
+            ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
+            db: scratch.db.clone(),
+            data_dir: dir.path().into(),
+            instance_id: "runner-locale-test".into(),
+            server_mode: true,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
+        });
+        let key = secret();
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(7),
+            workspace_id: Set(1),
+            name: Set("host".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(fingerprint(&key)),
+            enroll_token: Set(String::new()),
+            enroll_token_hash: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let app = Router::new()
+            .route("/connect", get(connect))
+            .route("/sessions/{session}", get(session))
+            .route(
+                "/raw",
+                get(|upgrade: WebSocketUpgrade| async move {
+                    let locale = crate::i18n::current_locale();
+                    upgrade.on_upgrade(move |socket| {
+                        crate::i18n::with_locale(locale, async move {
+                            let mut socket: Socket = socket.into();
+                            let _: Value = next_frame(&mut socket).await.unwrap();
+                            reject(
+                                &mut socket,
+                                &ApiError::bad("provider 原文 {runnerExtra.hostIdInvalid}"),
+                            )
+                            .await;
+                        })
+                    })
+                }),
+            )
+            .layer(middleware::from_fn(crate::i18n::middleware))
+            .with_state(s);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        for locale in Locale::ALL {
+            // Serializing the actual protocol type keeps this fixture aligned with its auth tag.
+            let hello: Value = serde_json::to_value(wire::Hello {
+                version: wire::VERSION + 1,
+                auth: wire::Auth::Enroll {
+                    token: "unused".into(),
+                },
+                hostname: "literal hostname".into(),
+                ip_address: String::new(),
+                os: "linux".into(),
+                arch: "amd64".into(),
+                agent_version: "fixture".into(),
+                managed_updates: false,
+                supports_monitor: false,
+            })
+            .unwrap();
+            let expected = crate::i18n::Message::new("runnerExtra.protocolMismatch")
+                .with("expected", wire::VERSION.to_string())
+                .with("actual", (wire::VERSION + 1).to_string());
+            assert_eq!(
+                rejected(address, "/connect", locale, hello.clone()).await,
+                render(locale, &expected)
+            );
+            let session_hello = json!({"version":wire::VERSION,"host_id":"7","key":key});
+            assert_eq!(
+                rejected(address, "/sessions/unknown", locale, session_hello.clone()).await,
+                render(
+                    locale,
+                    &crate::i18n::Message::new("runnerExtra.sessionUnavailable")
+                )
+            );
+            let mut wrong_version = session_hello;
+            wrong_version["version"] = json!(wire::VERSION + 1);
+            assert_eq!(
+                rejected(address, "/sessions/unknown", locale, wrong_version).await,
+                render(
+                    locale,
+                    &crate::i18n::Message::new("runnerExtra.sessionProtocolMismatch")
+                )
+            );
+            let mut invalid_credentials = hello;
+            invalid_credentials["version"] = json!(wire::VERSION);
+            invalid_credentials["auth"] = serde_json::to_value(wire::Auth::Key {
+                host_id: "7".into(),
+                key: "wrong-secret".into(),
+            })
+            .unwrap();
+            assert_eq!(
+                rejected(address, "/connect", locale, invalid_credentials).await,
+                render(locale, &crate::i18n::Message::new("runner.credentials"))
+            );
+            assert_eq!(
+                rejected(address, "/raw", locale, json!({})).await,
+                "provider 原文 {runnerExtra.hostIdInvalid}"
+            );
+            let (input, receiver) = mpsc::channel(1);
+            drop(receiver);
+            let (_, output) = mpsc::channel(1);
+            let mut pty = RunnerPty { input, output };
+            for error in [
+                pty.write(b"literal input").await.unwrap_err(),
+                pty.resize(PtySize { cols: 80, rows: 24 })
+                    .await
+                    .unwrap_err(),
+            ] {
+                assert_eq!(error.0, StatusCode::BAD_GATEWAY);
+                assert_eq!(
+                    error.render(locale),
+                    render(
+                        locale,
+                        &crate::i18n::Message::new("runnerExtra.terminalEnded")
+                    )
+                );
+            }
+            let provider = remote_failed("provider 原文 {runnerExtra.terminalEnded}");
+            assert!(
+                provider
+                    .render(locale)
+                    .contains("provider 原文 {runnerExtra.terminalEnded}")
+            );
+        }
+        server.abort();
+    }
 
     #[test]
     fn a_secret_is_hashed_before_it_is_stored() {
@@ -1638,7 +1937,11 @@ mod tests {
         };
         let error = channel.monitor().await.unwrap_err();
         assert_eq!(error.0, StatusCode::CONFLICT);
-        assert!(error.1.contains("升级 ferry-runner"));
+        assert!(
+            error
+                .render(crate::i18n::Locale::ZhCn)
+                .contains("升级 ferry-runner")
+        );
         assert!(matches!(
             receiver.try_recv(),
             Err(mpsc::error::TryRecvError::Empty)
@@ -2082,6 +2385,7 @@ mod tests {
             vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
         });
         let job = UpdateJob {
+            auto: None,
             owner: None,
             request: "recovery".into(),
             version: "2.0.0".into(),
@@ -2220,6 +2524,7 @@ mod tests {
         .await
         .unwrap();
         let mut old = UpdateJob {
+            auto: None,
             owner: Some(a.node.clone()),
             request: secret(),
             version: "2.0.0".into(),
@@ -2283,7 +2588,228 @@ mod tests {
 // Upgrade tasks outlive their HTTP request so closing the page cannot release
 // the exclusive host reservation while a remote version switch is in flight.
 #[derive(Clone, Serialize, Deserialize)]
+struct AutoRetry {
+    attempts: u32,
+    next_retry_at: i64,
+}
+
+fn retry_delay(attempts: u32) -> i64 {
+    (30_000_i64 * (1_i64 << attempts.saturating_sub(1).min(7))).min(3_600_000)
+}
+
+fn previous_auto(host: &hosts::Model, version: &str) -> Option<AutoRetry> {
+    let job: UpdateJob = serde_json::from_str(host.agent_update.as_deref()?).ok()?;
+    (job.version == version).then_some(job.auto).flatten()
+}
+
+fn policy_enabled(global: bool, policy: &str) -> bool {
+    match policy {
+        "on" => true,
+        "off" => false,
+        "inherit" => global,
+        _ => false,
+    }
+}
+
+async fn global_auto_update(s: &AppState) -> Result<bool> {
+    Ok(crate::entities::platform_state::Entity::find_by_id(1)
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?
+        .runner_auto_update
+        != 0)
+}
+
+async fn automatic_allowed(s: &AppState, id: Id) -> Result<bool> {
+    let host = hosts::Entity::find_by_id(i64::from(id))
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    Ok(host.connection == "runner"
+        && policy_enabled(global_auto_update(s).await?, &host.runner_auto_update))
+}
+
+fn older_version(current: &str, target: &str) -> bool {
+    match (
+        semver::Version::parse(current),
+        semver::Version::parse(target),
+    ) {
+        (Ok(current), Ok(target)) => current.cmp_precedence(&target).is_lt(),
+        _ => false,
+    }
+}
+
+fn auto_due(host: &hosts::Model, peer: &Live, global: bool, target: &str, now: i64) -> bool {
+    if host.connection != "runner"
+        || !peer.managed
+        || !peer.ready.load(std::sync::atomic::Ordering::Acquire)
+        || !policy_enabled(global, &host.runner_auto_update)
+        || !older_version(&peer.version, target)
+        || peer
+            .failed_version
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref()
+            == Some(target)
+    {
+        return false;
+    }
+    match host
+        .agent_update
+        .as_deref()
+        .map(serde_json::from_str::<UpdateJob>)
+    {
+        Some(Ok(job)) => {
+            !matches!(job.state.as_str(), "draining" | "updating" | "unknown")
+                && !(job.version == target && job.state == "rolled_back")
+                && (job.version != target
+                    || job.auto.is_none_or(|retry| retry.next_retry_at <= now))
+        }
+        Some(Err(_)) => false,
+        None => true,
+    }
+}
+
+fn runner_target(host: &hosts::Model) -> Result<String> {
+    let suffix = match host.os.as_str() {
+        "linux" => "unknown-linux-gnu",
+        "macos" => "apple-darwin",
+        "windows" => "pc-windows-msvc",
+        _ => {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.autoUnsupported"),
+            ));
+        }
+    };
+    Ok(format!("{}-{suffix}", host.arch))
+}
+
+/// Network discovery runs outside control/heartbeat handling. A failed attempt
+/// is persisted per target, so reconnects and server restarts cannot reset backoff.
+pub(crate) async fn automatic_updates(s: AppState, mut stopped: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_secs(20));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut catalog = None;
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            _ = tick.tick() => {
+                tokio::select! {
+                    _ = stopped.changed() => break,
+                    result = automatic_update_cycle(&s, &mut catalog) => {
+                        if let Err(error) = result { tracing::warn!(error=%error.1,"Runner automatic update check failed"); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn automatic_update_cycle(
+    s: &AppState,
+    catalog: &mut Option<crate::runner_install::SignedCatalog>,
+) -> Result<()> {
+    let global = global_auto_update(s).await?;
+    let peers: Vec<_> = live()
+        .iter()
+        .map(|(id, peer)| (id.clone(), peer.clone()))
+        .collect();
+    let target = env!("CARGO_PKG_VERSION");
+    // One discovery result per cycle prevents an unavailable release endpoint
+    // causing one network timeout for every connected host.
+    let mut discovery_error = None;
+    for (id, peer) in peers {
+        let Ok(id) = id.parse::<Id>() else { continue };
+        let Some(host) = hosts::Entity::find_by_id(i64::from(id)).one(&s.db).await? else {
+            continue;
+        };
+        if !auto_due(&host, &peer, global, target, db::now()) {
+            continue;
+        }
+        if let Some(cluster) = &s.cluster {
+            if !cluster
+                .owner(&id.to_string())
+                .await?
+                .is_some_and(|owner| owner.node == cluster.node)
+            {
+                continue;
+            }
+        }
+        if catalog.is_none() && discovery_error.is_none() {
+            match crate::runner_install::catalog().await {
+                Ok(value) => *catalog = Some(value),
+                Err(error) => discovery_error = Some(error),
+            }
+        }
+        let body: Result<UpdateBody> = (|| {
+            let catalog = catalog.as_ref().ok_or_else(|| {
+                discovery_error
+                    .as_ref()
+                    .map(|error| ApiError(error.0, error.1.clone(), error.2.clone()))
+                    .unwrap_or_else(|| {
+                        ApiError::localized(
+                            StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("runner.releaseUnavailableFallback"),
+                        )
+                    })
+            })?;
+            ferry_protocol::release::verify_catalog(
+                &catalog.bytes,
+                &catalog.signature,
+                &catalog.key,
+                &runner_target(&host)?,
+                &peer.version,
+                target,
+            )
+            .map_err(|error| crate::runner_install::verification_error(&error))?;
+            Ok(UpdateBody {
+                version: target.into(),
+                manifest: String::from_utf8(catalog.bytes.clone()).map_err(|_| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("runner.manifestEncoding"),
+                    )
+                })?,
+                signature: catalog.signature.clone(),
+            })
+        })();
+        match body {
+            Ok(body) => {
+                // Re-read policy/readiness and persisted state inside admission.
+                if let Err(error) =
+                    begin_update(s.clone(), host, body, (Id::from(0), "系统".into()), true).await
+                {
+                    tracing::debug!(host=%id,error=%error.1,"Runner automatic update admission deferred");
+                }
+            }
+            Err(error) => {
+                *catalog = None;
+                discovery_error = Some(ApiError(error.0, error.1.clone(), error.2.clone()));
+                let attempts = previous_auto(&host, target)
+                    .map_or(1, |retry| retry.attempts.saturating_add(1));
+                let job = UpdateJob {
+                    auto: Some(AutoRetry {
+                        attempts,
+                        next_retry_at: db::now() + retry_delay(attempts),
+                    }),
+                    owner: s.cluster.as_ref().map(|cluster| cluster.node.clone()),
+                    request: secret(),
+                    version: target.into(),
+                    state: "retrying".into(),
+                    message: error.stored(),
+                };
+                persist_update(s, id, &job).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct UpdateJob {
+    #[serde(default)]
+    auto: Option<AutoRetry>,
     request: String,
     version: String,
     state: String,
@@ -2291,6 +2817,10 @@ struct UpdateJob {
     #[serde(default)]
     owner: Option<String>,
 }
+
+#[cfg(test)]
+#[path = "runner_auto_tests.rs"]
+mod auto_tests;
 static UPDATES: LazyLock<Mutex<HashMap<String, UpdateJob>>> = LazyLock::new(Default::default);
 
 #[derive(Serialize, Deserialize)]
@@ -2324,14 +2854,23 @@ pub async fn update_status(
             .and_then(|owner| owner.info),
         None => None,
     };
-    let status = host
+    let mut status = host
         .agent_update
         .as_deref()
         .map(serde_json::from_str::<UpdateJob>)
         .transpose()
-        .map_err(|_| ApiError::bad("代理升级状态无法读取"))?;
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.statusRead"),
+            )
+        })?;
+    if let Some(job) = &mut status {
+        job.message = crate::i18n::render_stored(crate::i18n::current_locale(), &job.message);
+    }
+    let global = global_auto_update(&s).await?;
     Ok(Json(
-        json!({"agent_version":host.agent_version,"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
+        json!({"agent_version":host.agent_version,"target_version":env!("CARGO_PKG_VERSION"),"global_auto_update":global,"auto_update":host.runner_auto_update,"enabled":policy_enabled(global,&host.runner_auto_update),"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
     ))
 }
 
@@ -2349,9 +2888,9 @@ pub async fn start_update(
         .and_then(|value| serde_json::from_str::<UpdateJob>(value).ok())
         .is_some_and(|job| matches!(job.state.as_str(), "draining" | "updating" | "unknown"))
     {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::CONFLICT,
-            "已有代理升级进行中。".into(),
+            crate::i18n::Message::new("runner.activeUpdate"),
         ));
     }
     if body.version.len() > 128
@@ -2359,7 +2898,10 @@ pub async fn start_update(
         || body.signature.len() > 8192
         || body.version.is_empty()
     {
-        return Err(ApiError::bad("升级清单或版本无效。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.invalidUpdate"),
+        ));
     }
     if let Some(cluster) = &s.cluster {
         let owner = cluster
@@ -2378,27 +2920,99 @@ pub async fn start_update(
                     },
                 )
                 .await?;
-            return Ok((StatusCode::ACCEPTED, Json(value)));
+            return Ok((StatusCode::ACCEPTED, Json(render_update_response(value))));
         }
     }
-    let registration = live()
-        .get(&id.to_string())
-        .cloned()
-        .ok_or_else(|| ApiError::bad("代理离线，不能升级。"))?;
+    let (status, Json(value)) = begin_update(
+        s,
+        host,
+        body,
+        (scope.user.id.into(), scope.user.name),
+        false,
+    )
+    .await?;
+    Ok((status, Json(render_update_response(value))))
+}
+
+fn render_update_response(mut value: Value) -> Value {
+    if let Some(message) = value.get_mut("message") {
+        if let Some(stored) = message.as_str() {
+            *message = Value::String(crate::i18n::render_stored(
+                crate::i18n::current_locale(),
+                stored,
+            ));
+        }
+    }
+    value
+}
+
+async fn begin_update(
+    s: AppState,
+    host: hosts::Model,
+    body: UpdateBody,
+    actor: (Id, String),
+    automatic: bool,
+) -> Result<(StatusCode, Json<Value>)> {
+    let id = Id::from(host.id);
+    let host = hosts::Entity::find_by_id(host.id)
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if host
+        .agent_update
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<UpdateJob>(value).ok())
+        .is_some_and(|job| matches!(job.state.as_str(), "draining" | "updating" | "unknown"))
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.activeUpdate"),
+        ));
+    }
+    let registration = live().get(&id.to_string()).cloned().ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.updateOffline"),
+        )
+    })?;
     if !registration.managed {
-        return Err(ApiError::bad(
-            "当前代理不支持服务升级，请先安装为新版托管服务。",
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.managedRequired"),
         ));
     }
     if registration.version == body.version {
-        return Err(ApiError::bad("代理已是该版本。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.alreadyVersion"),
+        ));
+    }
+    if automatic
+        && (body.version != env!("CARGO_PKG_VERSION")
+            || !auto_due(
+                &host,
+                &registration,
+                global_auto_update(&s).await?,
+                &body.version,
+                db::now(),
+            ))
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.conditionsChanged"),
+        ));
     }
     let job = UpdateJob {
+        auto: automatic.then(|| AutoRetry {
+            attempts: previous_auto(&host, &body.version)
+                .map_or(1, |retry| retry.attempts.saturating_add(1)),
+            next_retry_at: 0,
+        }),
         owner: s.cluster.as_ref().map(|cluster| cluster.node.clone()),
         request: secret(),
         version: body.version.clone(),
         state: "draining".into(),
-        message: "等待进行中的完整任务结束".into(),
+        message: crate::i18n::store_message(&crate::i18n::Message::new("runner.waiting")),
     };
     {
         let mut jobs = UPDATES.lock().unwrap_or_else(|e| e.into_inner());
@@ -2406,9 +3020,9 @@ pub async fn start_update(
             .get(&id.to_string())
             .is_some_and(|j| matches!(j.state.as_str(), "draining" | "updating" | "unknown"))
         {
-            return Err(ApiError(
+            return Err(ApiError::localized(
                 StatusCode::CONFLICT,
-                "已有代理升级进行中。".into(),
+                crate::i18n::Message::new("runner.activeUpdate"),
             ));
         }
         jobs.insert(id.to_string(), job.clone());
@@ -2422,13 +3036,15 @@ pub async fn start_update(
                 .remove(&id.to_string());
             return Err(error);
         }
-        if let Err(error) = crate::hosts::activity(
+        if let Err(error) = crate::hosts::activity_record(
             &s,
-            &scope,
+            &s.db,
+            host.workspace_id.into(),
+            (actor.0, &actor.1),
             "runner-update",
             "hosts",
-            &id,
-            json!({"version":body.version,"request":job.request}),
+            id,
+            json!({"version":body.version,"request":job.request,"automatic":automatic}),
         )
         .await
         {
@@ -2438,7 +3054,7 @@ pub async fn start_update(
                 id,
                 &mut failed,
                 "failed",
-                "升级审计写入失败，未发送更新",
+                crate::i18n::store_message(&crate::i18n::Message::new("runner.auditFailed")),
             )
             .await;
             UPDATES
@@ -2447,47 +3063,176 @@ pub async fn start_update(
                 .remove(&id.to_string());
             return Err(error);
         }
-        let response = serde_json::to_value(&job).map_err(|_| ApiError::bad("升级状态编码失败"))?;
+        let response = serde_json::to_value(&job).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.statusEncode"),
+            )
+        })?;
         tokio::spawn(async move {
             let host = id.to_string();
-            let _exclusive = crate::runner_updates::exclusive(&host).await;
-            let distributed = match &s.cluster {
-                Some(cluster) => match cluster.reserve(&host, true).await {
-                    Ok(lease) => Some(lease),
-                    Err(_) => {
+            let mut job = job;
+            let _exclusive =
+                match await_drain(&s, id, automatic, crate::runner_updates::exclusive(&host)).await
+                {
+                    Ok(Some(guard)) => guard,
+                    Ok(None) => {
                         transition_update(
                             &s,
                             id,
-                            &mut job.clone(),
-                            "failed",
-                            "Cluster reservation unavailable",
+                            &mut job,
+                            "cancelled",
+                            crate::i18n::store_message(&crate::i18n::Message::new(
+                                "runner.autoDisabled",
+                            )),
                         )
                         .await;
                         return;
                     }
-                },
+                    Err(_) => {
+                        transition_update(
+                            &s,
+                            id,
+                            &mut job,
+                            "failed",
+                            "无法读取自动升级策略，未发送更新",
+                        )
+                        .await;
+                        return;
+                    }
+                };
+            let distributed = match &s.cluster {
+                Some(cluster) => {
+                    match await_drain(&s, id, automatic, cluster.reserve(&host, true)).await {
+                        Ok(None) => {
+                            transition_update(
+                                &s,
+                                id,
+                                &mut job,
+                                "cancelled",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.autoDisabled",
+                                )),
+                            )
+                            .await;
+                            return;
+                        }
+                        Ok(Some(Ok(lease))) => Some(lease),
+                        _ => {
+                            transition_update(
+                                &s,
+                                id,
+                                &mut job,
+                                "failed",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.reservationUnavailable",
+                                )),
+                            )
+                            .await;
+                            return;
+                        }
+                    }
+                }
                 None => None,
             };
-            let mut job = job;
             if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
                 orphan_update(&s, id, &mut job).await;
                 return;
             }
             let peer = live().get(&host).cloned();
             let Some(peer) = peer else {
-                transition_update(&s, id, &mut job, "failed", "等待任务结束期间代理离线").await;
+                transition_update(
+                    &s,
+                    id,
+                    &mut job,
+                    "failed",
+                    crate::i18n::store_message(&crate::i18n::Message::new(
+                        "runner.offlineDuringDrain",
+                    )),
+                )
+                .await;
                 return;
             };
             if !peer.managed {
-                transition_update(&s, id, &mut job, "failed", "重连后的代理不支持托管升级").await;
+                transition_update(
+                    &s,
+                    id,
+                    &mut job,
+                    "failed",
+                    crate::i18n::store_message(&crate::i18n::Message::new(
+                        "runner.reconnectedUnmanaged",
+                    )),
+                )
+                .await;
                 return;
             }
-            if !transition_update(&s, id, &mut job, "updating", "正在验证更新并切换版本").await
+            if automatic {
+                let allowed = automatic_allowed(&s, id).await;
+                if !matches!(allowed, Ok(true)) {
+                    let state = if allowed.is_ok() {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    transition_update(
+                        &s,
+                        id,
+                        &mut job,
+                        state,
+                        crate::i18n::store_message(&crate::i18n::Message::new(
+                            "runner.policyChanged",
+                        )),
+                    )
+                    .await;
+                    return;
+                }
+                let failed_target = peer
+                    .failed_version
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_deref()
+                    == Some(body.version.as_str());
+                if !peer.ready.load(std::sync::atomic::Ordering::Acquire)
+                    || !older_version(&peer.version, &body.version)
+                    || failed_target
+                {
+                    transition_update(
+                        &s,
+                        id,
+                        &mut job,
+                        "cancelled",
+                        crate::i18n::store_message(&crate::i18n::Message::new(
+                            "runner.noLongerNeeded",
+                        )),
+                    )
+                    .await;
+                    return;
+                }
+            }
+            if !transition_update(
+                &s,
+                id,
+                &mut job,
+                "updating",
+                crate::i18n::store_message(&crate::i18n::Message::new("runner.verifying")),
+            )
+            .await
             {
                 return;
             }
             if distributed.as_ref().is_some_and(|lease| !lease.valid()) {
                 orphan_update(&s, id, &mut job).await;
+                return;
+            }
+            if automatic && !matches!(automatic_allowed(&s, id).await, Ok(true)) {
+                transition_update(
+                    &s,
+                    id,
+                    &mut job,
+                    "cancelled",
+                    crate::i18n::store_message(&crate::i18n::Message::new("runner.policyChanged")),
+                )
+                .await;
                 return;
             }
             if peer
@@ -2501,7 +3246,14 @@ pub async fn start_update(
                 .await
                 .is_err()
             {
-                transition_update(&s, id, &mut job, "failed", "无法发送升级请求").await;
+                transition_update(
+                    &s,
+                    id,
+                    &mut job,
+                    "failed",
+                    crate::i18n::store_message(&crate::i18n::Message::new("runner.sendFailed")),
+                )
+                .await;
                 return;
             }
             let started = std::time::Instant::now();
@@ -2529,11 +3281,18 @@ pub async fn start_update(
                                 || info.failed_version.as_deref() == Some(body.version.as_str()))
                         {
                             let (state, message) = if info.version == body.version {
-                                ("succeeded", "Runner update confirmed by connection owner")
+                                (
+                                    "succeeded",
+                                    crate::i18n::store_message(&crate::i18n::Message::new(
+                                        "runner.ownerConfirmed",
+                                    )),
+                                )
                             } else {
                                 (
                                     "rolled_back",
-                                    "Runner rollback confirmed by connection owner",
+                                    crate::i18n::store_message(&crate::i18n::Message::new(
+                                        "runner.ownerRollback",
+                                    )),
                                 )
                             };
                             transition_update(&s, id, &mut job, state, message).await;
@@ -2552,7 +3311,9 @@ pub async fn start_update(
                                 id,
                                 &mut job,
                                 "succeeded",
-                                "代理升级完成，已通过连接健康检查",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.confirmed",
+                                )),
                             )
                             .await;
                         } else {
@@ -2561,7 +3322,9 @@ pub async fn start_update(
                                 id,
                                 &mut job,
                                 "rolled_back",
-                                "新版本未完成激活，已恢复原版本",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.rolledBack",
+                                )),
                             )
                             .await;
                         }
@@ -2576,7 +3339,9 @@ pub async fn start_update(
                             id,
                             &mut job,
                             "unknown",
-                            "等待代理重新连接确认，继续暂停向该主机派发新任务",
+                            crate::i18n::store_message(&crate::i18n::Message::new(
+                                "runner.unknown",
+                            )),
                         )
                         .await;
                     }
@@ -2586,31 +3351,65 @@ pub async fn start_update(
         });
         Ok((StatusCode::ACCEPTED, Json(response)))
     });
-    admission
-        .await
-        .map_err(|_| ApiError::bad("升级任务初始化失败"))?
+    admission.await.map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.initFailed"),
+        )
+    })?
+}
+
+/// A disabled policy cancels an unsent automatic drain, including a distributed
+/// reservation waiter. Dropping the pending future releases its partial locks.
+async fn await_drain<F: std::future::Future>(
+    s: &AppState,
+    id: Id,
+    automatic: bool,
+    future: F,
+) -> Result<Option<F::Output>> {
+    tokio::pin!(future);
+    loop {
+        if automatic && !automatic_allowed(s, id).await? {
+            return Ok(None);
+        }
+        tokio::select! {
+            value = &mut future => return Ok(Some(value)),
+            _ = tokio::time::sleep(Duration::from_secs(1)), if automatic => {},
+        }
+    }
 }
 
 async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
-    let value = serde_json::to_string(job).map_err(|_| ApiError::bad("升级状态编码失败"))?;
+    let value = serde_json::to_string(job).map_err(|_| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("runner.statusEncode"),
+        )
+    })?;
     let mut update = hosts::Entity::update_many()
         .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
         .filter(hosts::Column::Id.eq(id));
-    if let Some(cluster) = &s.cluster {
+    {
         let row = hosts::Entity::find_by_id(i64::from(id))
             .one(&s.db)
             .await?
             .ok_or_else(ApiError::missing)?;
         if let Some(previous) = row.agent_update {
-            let old: UpdateJob = serde_json::from_str(&previous)
-                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            let old: UpdateJob = serde_json::from_str(&previous).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.invalidState"),
+                )
+            })?;
             if matches!(old.state.as_str(), "draining" | "updating" | "unknown")
                 && (old.request != job.request
-                    || old.owner.as_deref() != Some(cluster.node.as_str()))
+                    || s.cluster
+                        .as_ref()
+                        .is_some_and(|cluster| old.owner.as_deref() != Some(cluster.node.as_str())))
             {
-                return Err(ApiError(
+                return Err(ApiError::localized(
                     StatusCode::CONFLICT,
-                    "Update ownership changed".into(),
+                    crate::i18n::Message::new("runner.ownershipChanged"),
                 ));
             }
             update = update.filter(hosts::Column::AgentUpdate.eq(previous));
@@ -2619,9 +3418,9 @@ async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
         }
     }
     if update.exec(&s.db).await?.rows_affected != 1 {
-        return Err(ApiError(
+        return Err(ApiError::localized(
             StatusCode::CONFLICT,
-            "Update ownership changed".into(),
+            crate::i18n::Message::new("runner.ownershipChanged"),
         ));
     }
     Ok(())
@@ -2629,7 +3428,7 @@ async fn persist_update(s: &AppState, id: Id, job: &UpdateJob) -> Result<()> {
 
 async fn orphan_update(s: &AppState, id: Id, job: &mut UpdateJob) {
     job.state = "unknown".into();
-    job.message = "集群升级锁已失效，等待连接所属服务核实代理状态".into();
+    job.message = crate::i18n::store_message(&crate::i18n::Message::new("runner.lockLost"));
     // Keep admission closed, but permit the current connection owner to recover.
     loop {
         let result: Result<()> = async {
@@ -2638,18 +3437,26 @@ async fn orphan_update(s: &AppState, id: Id, job: &mut UpdateJob) {
                 .await?
                 .ok_or_else(ApiError::missing)?;
             let previous = row.agent_update.ok_or_else(ApiError::missing)?;
-            let old: UpdateJob = serde_json::from_str(&previous)
-                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            let old: UpdateJob = serde_json::from_str(&previous).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.invalidState"),
+                )
+            })?;
             if old.request != job.request || old.owner != job.owner {
-                return Err(ApiError(
+                return Err(ApiError::localized(
                     StatusCode::CONFLICT,
-                    "Update ownership changed".into(),
+                    crate::i18n::Message::new("runner.ownershipChanged"),
                 ));
             }
             let mut orphan = job.clone();
             orphan.owner = None;
-            let value = serde_json::to_string(&orphan)
-                .map_err(|_| ApiError::bad("Invalid update state"))?;
+            let value = serde_json::to_string(&orphan).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.invalidState"),
+                )
+            })?;
             if hosts::Entity::update_many()
                 .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
                 .filter(hosts::Column::Id.eq(id))
@@ -2659,9 +3466,9 @@ async fn orphan_update(s: &AppState, id: Id, job: &mut UpdateJob) {
                 .rows_affected
                 != 1
             {
-                return Err(ApiError(
+                return Err(ApiError::localized(
                     StatusCode::CONFLICT,
-                    "Update ownership changed".into(),
+                    crate::i18n::Message::new("runner.ownershipChanged"),
                 ));
             }
             Ok(())
@@ -2687,10 +3494,17 @@ async fn transition_update(
     id: Id,
     job: &mut UpdateJob,
     state: &str,
-    message: &str,
+    message: impl AsRef<str>,
 ) -> bool {
     job.state = state.into();
-    job.message = message.into();
+    job.message = message.as_ref().to_owned();
+    if let Some(retry) = &mut job.auto {
+        retry.next_retry_at = if state == "failed" {
+            db::now() + retry_delay(retry.attempts)
+        } else {
+            0
+        };
+    }
     loop {
         match persist_update(s, id, job).await {
             Ok(()) => break,
@@ -2718,7 +3532,12 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
         .await?;
     for row in rows {
         let mut job: UpdateJob = serde_json::from_str(row.agent_update.as_deref().unwrap())
-            .map_err(|_| ApiError::bad("持久化的代理升级状态无法读取"))?;
+            .map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.persistedRead"),
+                )
+            })?;
         let id = Id::from(row.id);
         if !matches!(job.state.as_str(), "draining" | "updating" | "unknown") {
             continue;
@@ -2738,8 +3557,12 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
             }
             // Only the current connection owner recovers an orphaned update.
             job.owner = Some(cluster.node.clone());
-            let value =
-                serde_json::to_string(&job).map_err(|_| ApiError::bad("Invalid update state"))?;
+            let value = serde_json::to_string(&job).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.invalidState"),
+                )
+            })?;
             if hosts::Entity::update_many()
                 .col_expr(hosts::Column::AgentUpdate, Expr::value(value))
                 .filter(hosts::Column::Id.eq(id))
@@ -2754,7 +3577,11 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
         }
         if job.state == "draining" {
             job.state = "failed".into();
-            job.message = "服务重启中断了等待，尚未发送升级请求".into();
+            if let Some(retry) = &mut job.auto {
+                retry.next_retry_at = db::now() + retry_delay(retry.attempts);
+            }
+            job.message =
+                crate::i18n::store_message(&crate::i18n::Message::new("runner.restartDrain"));
             persist_update(s, id, &job).await?;
         }
         UPDATES
@@ -2801,11 +3628,26 @@ pub(crate) async fn recover_updates(s: &AppState) -> Result<()> {
                             .unwrap_or_else(|e| e.into_inner())
                             .clone();
                         let (state, message) = if peer.version == job.version {
-                            ("succeeded", "代理升级完成，重启后已确认连接健康")
+                            (
+                                "succeeded",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.restartConfirmed",
+                                )),
+                            )
                         } else if failed.as_deref() == Some(job.version.as_str()) {
-                            ("rolled_back", "新版本未完成激活，重启后已确认回退")
+                            (
+                                "rolled_back",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.restartRollback",
+                                )),
+                            )
                         } else {
-                            ("failed", "升级准备被服务中断，代理已恢复健康连接")
+                            (
+                                "failed",
+                                crate::i18n::store_message(&crate::i18n::Message::new(
+                                    "runner.restartRecovered",
+                                )),
+                            )
                         };
                         transition_update(&s, id, &mut job, state, message).await;
                         break;

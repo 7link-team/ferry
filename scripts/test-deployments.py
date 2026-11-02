@@ -97,7 +97,7 @@ def main():
 
     def api(path, body=None, method=None, status=200, client=None):
         req = urllib.request.Request(origin + '/api' + path, data=None if body is None else json.dumps(body).encode(),
-            headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'}, method=method or ('POST' if body is not None else 'GET'))
+            headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'}, method=method or ('POST' if body is not None else 'GET'))
         try:
             with (client or opener).open(req, timeout=150) as r:
                 code, data = r.status, r.read()

@@ -176,6 +176,12 @@ with tempfile.TemporaryDirectory(prefix='runner-bootstrap-',
         wait(ready, 'backend startup')
         api('/setup', {'name':'Bootstrap Test','email':'bootstrap@example.invalid',
                       'password':'temporary-bootstrap-password','token':(root/'server/setup-token').read_text().strip()})
+        # This fixture validates bootstrap, not automatic upgrade discovery.
+        settings = api('/platform/settings/1')
+        request = urllib.request.Request(origin+'/api/platform/settings/1',
+            data=json.dumps({'version':settings['version'], 'registration_enabled':settings['registration_enabled'], 'runner_auto_update':False}).encode(),
+            method='PATCH', headers={'Content-Type':'application/json','X-Ferry-Request':'1'})
+        with client.open(request, timeout=10) as response: json.load(response)
         workspace_bootstrap = api('/workspaces', {'name':'Bootstrap','slug':'bootstrap'})['id']
         host = api(f'/workspaces/{workspace_bootstrap}/nodes', {'name':'Bootstrap runner','connection':'runner'})['id']
         enrollment = api(f'/workspaces/{workspace_bootstrap}/runner-tokens', {'host_id':host})

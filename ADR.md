@@ -1,5 +1,28 @@
 # Architecture Decision Records
 
+## Localized mixed execution output (2026-11-02, confirmed)
+- Context: execution outputs mix product summaries with literal command logs. A single Message has a 256 KiB metadata limit, while existing logs allow 1 MiB of raw bytes.
+- Decision: reuse i18n.rs with StoredText, an explicitly versioned `$system_text` collection of Raw and Message segments. Store message identity; render once for each reader. Keep raw logs, provider diagnostics, and user notes literal.
+- Bounds: 1 MiB raw bytes, 256 KiB message metadata, 4096 segments, and 8 MiB encoded input. Truncate only raw UTF-8 prefixes; never encoded envelopes. Render a translated limit notice when bounded.
+- Compatibility: log readers recognize only the new text envelope; legacy single-message-shaped log JSON remains literal. Existing error readers retain single Message compatibility. Escape reserved raw namespaces and decode exactly once. No schema or module added.
+- Verification: 18 message-foundation tests passed, including large mixed logs, six reader locales, byte/metadata/segment limits, malformed envelopes, collisions, and SQLite reads without rewrites. Integration and release remain owned by the main agent.
+
+## Post-alpha.34 integration and execution order (2026-11-02, user confirmed)
+- Latest user clarification: finish ALL confirmed functionality and release first; structure/code-quality cleanup is a separate commit after that release. This supersedes starting module moves alongside features. Frontend never moved; initial backend entity extraction restored without losing preexisting dirty functionality.
+- Approved Runner policy: global default automatic updates enabled; host inherit/on/off; exact server-version target, no downgrade, managed agents only; complete-task draining, signature/health/rollback preservation, bounded retry and visible state.
+- Multilingual first release explicitly narrowed by user to en-US, zh-CN, zh-TW, ja-JP, ko-KR, ms-MY; remaining mainstream languages follow later. API uses standard Accept-Language, default English absent; app locale prefix/browser detection, validated browser-WebSocket locale query exception accepted. All selected locales require actual domain translations, not just selector infrastructure.
+- Following user's certificate question, native upgrade test fixtures use process-scoped embedded test CA in throwaway source copies. Normal Runner installation needs no extra certificate. Do not mutate the user's trust store for subsequent fixtures; earlier temporary CurrentUser CA was removed and absence verified.
+- Finish CI coverage for integrated insights, source themes and typed dictionaries/settings first; then UTC audit/fixes, Runner idle upgrade, actual cloudflared verification and multilingual support. Improve CI timing based on measurements. Present concrete designs before substantial behavior changes and perform unified acceptance before publication.
+- Reuse current workflow jobs, existing three-database maintenance/transfer tests, production Vite preview and Chromium scripts. Run SQL contribution invariants on separate fresh databases; verify additive typed-data upgrade from released alpha.34 without replacing the existing historical alpha.1 upgrade gate.
+- Released alpha.34 and local service upgrade are complete according to the user's release handoff; unfinished feature source and unrelated PRD edits are not part of that release.
+
+## Typed dictionaries/configuration and source theme migration (2026-11-02, implemented and verified locally)
+- Decision: use 7link-mall-web sys/dicts as the reference for both existing menus, sharing 12 value types, category, JSON values/schema and dynamic editors. Allow custom settings CRUD; preserve fixed operational keys/types/ranges, existing dictionary consumers, workspace isolation, audit and optimistic version checks.
+- Reason: explicitly confirmed by user. Source repository remains read-only; source Next/i18n integration is adapted to Ferry shared resource components.
+- Tradeoffs: additive migration retains old items/numeric projections; uploaded attachments are workspace/resource scoped in server data storage and require authenticated access. They remain retained when removed from a value to avoid invalidating other references.
+- Scope: all six source themes including custom editing; ERP removed with saved-preference fallback. User also approved integrating existing code insights work into main; no publication implied.
+- Verification: SQLite/MySQL8.4.10/PostgreSQL17.6 API, transfer and actual old-version upgrade suites passed; final production browser covered all12 value types, actual editors/uploads and responsive layout. Existing desktop-updater Windows named-pipe access test remains an unrelated environment failure; not modified or skipped.
+
 ## Unified list and form migration (2026-10-31, implemented and verified)
 - Decision: user explicitly requested migrating all Ferry pages to the unified components in 7link-mall-prd/apps/7link-mall-web/ui/components/auto-table and auto-form. Port AutoTable contracts/state/hook/sticky helpers, and adapt the AutoForm configuration/renderer/field layout to Ferry's existing React/Radix controls. Keep the source repository read-only and retain Ferry's resource DSL as the API/permissions/business adapter.
 - Reason: one renderer for resource lists, file tables and import previews; one form/field framework for resource forms, authentication, dialogs and specialized editors. Extend configuration/composition for rich flows instead of retaining page-specific table/form implementations.

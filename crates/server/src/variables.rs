@@ -1,4 +1,5 @@
 //! Shared scoped variables. Stored values use the same vault as credentials.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{deployments, pipelines, variables},
@@ -10,8 +11,7 @@ use crate::{
     workspace::Scope,
 };
 use axum::{
-    Json,
-    extract::{Path, Query, State},
+    extract::State,
     http::{StatusCode, header},
 };
 use sea_orm::{
@@ -118,7 +118,10 @@ pub fn valid_name(name: &str) -> bool {
 }
 fn check_value(value: &str) -> Result<()> {
     if value.len() > 64 * 1024 || value.contains('\0') {
-        return Err(ApiError::bad("变量值不得超过64KB或包含空字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.valueInvalid"),
+        ));
     }
     Ok(())
 }
@@ -133,7 +136,10 @@ async fn check_scope(
         || (layer == "global" && i64::from(reference) != 0)
         || (layer == "environment" && i64::from(reference) == 0)
     {
-        return Err(ApiError::bad("变量作用域或对象引用无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.scopeInvalid"),
+        ));
     }
     if i64::from(reference) == 0 {
         return Ok(());
@@ -158,7 +164,10 @@ async fn check_scope(
         _ => false,
     };
     if !exists {
-        return Err(ApiError::bad("作用域对象不存在或不属于当前工作空间。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.scopeObjectMissing"),
+        ));
     }
     Ok(())
 }
@@ -216,18 +225,26 @@ pub(crate) async fn create_in(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("variables.create")?;
     if !valid_name(&body.name) {
-        return Err(ApiError::bad("变量名限96个字母、数字、下划线或连字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.nameInvalid"),
+        ));
     }
     let layer = body.scope.as_deref().unwrap_or("global");
     let reference = Id::reference(body.scope_ref.as_deref().unwrap_or("0"))?;
     let kind = body.kind.as_deref().unwrap_or("secret");
     if !["plain", "secret"].contains(&kind) {
-        return Err(ApiError::bad("变量类型必须为普通或密钥。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.kindInvalid"),
+        ));
     }
-    let value = body
-        .value
-        .as_deref()
-        .ok_or_else(|| ApiError::bad("请提供变量值，允许明确设置为空字符串。"))?;
+    let value = body.value.as_deref().ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.valueRequired"),
+        )
+    })?;
     check_value(value)?;
     let (id, now) = (s.next_id()?, db::now());
     let sealed = s.vault.seal(
@@ -259,7 +276,10 @@ pub(crate) async fn create_in(
             error.sql_err(),
             Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
         ) {
-            return Err(ApiError::conflict("当前作用域已存在同名变量。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("variables.duplicate"),
+            ));
         }
         return Err(error.into());
     }
@@ -298,10 +318,16 @@ pub async fn update(
             .transpose()?
             .is_some_and(|v| i64::from(v) != old.scope_ref)
     {
-        return Err(ApiError::bad("变量名称、类型与作用域创建后不可修改。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("variables.identityImmutable"),
+        ));
     }
     if old.version != body.version {
-        return Err(ApiError::conflict("记录已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("variables.changed"),
+        ));
     }
     let mut update = variables::Entity::update_many()
         .col_expr(
@@ -328,7 +354,10 @@ pub async fn update(
         update = update.col_expr(variables::Column::Value, Expr::value(sealed));
     }
     if update.exec(&tx).await?.rows_affected != 1 {
-        return Err(ApiError::conflict("记录已变化，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("variables.changed"),
+        ));
     }
     tx.commit().await?;
     crate::hosts::activity(
@@ -399,7 +428,10 @@ pub async fn resolve_for_environment(
     let chosen = scoped_rows(db, workspace, layer, reference, environment, Some(names)).await?;
     for name in names {
         if !chosen.contains_key(name) {
-            return Err(ApiError::bad(format!("变量 {name} 未定义，请检查作用域。")));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("variables.undefined").with("name", name),
+            ));
         }
     }
     Ok(chosen)
@@ -515,8 +547,9 @@ pub(crate) async fn snapshot_for_actions(
             let requested = references.names.contains(name);
             if namespace == "vars" && row.kind == "secret" {
                 if requested {
-                    return Err(ApiError::bad(
-                        "密钥变量必须通过 secrets 引用，不能通过 vars 公开。",
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("variables.secretReference"),
                     ));
                 }
                 continue;
@@ -564,8 +597,9 @@ pub async fn remove(
                 continue;
             }
             if crate::deployments::references_variable(&tx, &app, row.id).await? {
-                return Err(ApiError::conflict(
-                    "应用配置仍引用此变量，请先修改引用再删除。",
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::CONFLICT,
+                    crate::i18n::Message::new("variables.applicationReference"),
                 ));
             }
         }
@@ -603,8 +637,9 @@ pub async fn remove(
                         .get(&row.name)
                         .is_some_and(|selected| selected.id == row.id)
                     {
-                        return Err(ApiError::conflict(
-                            "流水线仍引用此变量，请先修改引用再删除。",
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::CONFLICT,
+                            crate::i18n::Message::new("variables.pipelineReference"),
                         ));
                     }
                 }
@@ -646,8 +681,9 @@ pub async fn check_object_removal(
         .one(db)
         .await?;
     if found.is_some() {
-        return Err(ApiError::conflict(
-            "对象仍有专属变量，请先删除这些变量再删除对象。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("variables.objectReference"),
         ));
     }
     Ok(())
@@ -830,11 +866,16 @@ mod tests {
         assert_eq!(snapshot.secrets["UNKNOWN"], "");
         assert!(snapshot.vars.is_empty());
         static_refs.vars.names.insert("TOKEN".into());
+        let error = snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &static_refs)
+            .await
+            .unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, "variables.secretReference");
         assert_eq!(
-            snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &static_refs)
-                .await
-                .unwrap_err()
-                .1,
+            error.1,
+            "Secret variables must be referenced through secrets and must not be exposed through vars."
+        );
+        assert_eq!(
+            error.render(crate::i18n::Locale::ZhCn),
             "密钥变量必须通过 secrets 引用，不能通过 vars 公开。"
         );
     }

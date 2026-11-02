@@ -27,7 +27,7 @@ pub async fn serve(uri: Uri) -> Response {
         }
         None => (
             StatusCode::NOT_FOUND,
-            "界面文件未构建，请先运行 npm run build。",
+            crate::i18n::message("assets.not_built"),
         )
             .into_response(),
     }

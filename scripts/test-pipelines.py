@@ -70,7 +70,7 @@ def main():
 
     def api(path, body=None, method=None, status=200):
         req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
-                                     headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'},
+                                     headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'},
                                      method=method or ('POST' if body is not None else 'GET'))
         try:
             with opener.open(req, timeout=15) as response:

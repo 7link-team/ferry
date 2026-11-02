@@ -43,6 +43,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Git contribution collector regression
+        run: python3 -I scripts/test-collect-contributions.py
       # /bin/sh is dash here, so this also rejects bash-only syntax.
       - name: Compose quickstart script
         run: sh scripts/test-quickstart.sh
@@ -111,6 +113,21 @@ jobs:
       # build.rs's empty placeholder is enough and the npm build is skipped.
       - run: cargo build --locked -p ferry-server
       - run: ./scripts/test-backends.sh
+      - name: Contribution collection, independent insights and attachment persistence
+        run: |
+          python3 -I scripts/test-contribution-analysis.py
+          python3 -I scripts/test-code-insights.py target/debug/ferry-server
+          python3 -I scripts/test-value-files.py
+          python3 -I scripts/test-i18n-http.py target/debug/ferry-server
+      - name: Contribution reports, identity and cluster queue on real SQL backends
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE ferry_contribution_test_ci;'
+          createdb -h 127.0.0.1 -U postgres ferry_contribution_test_ci
+          FERRY_CONTRIBUTION_TEST_DATABASE_URL='mysql://root:integration-only-password@127.0.0.1:3306/ferry_contribution_test_ci?timezone=%2B08%3A00' cargo test --locked -p ferry-server real_database_migrations_identity_reports_and_cluster_queue -- --ignored
+          FERRY_CONTRIBUTION_TEST_DATABASE_URL='postgres://postgres:integration-only-password@127.0.0.1:5432/ferry_contribution_test_ci?options=-c%20timezone%3DAsia%2FShanghai' cargo test --locked -p ferry-server real_database_migrations_identity_reports_and_cluster_queue -- --ignored
       - name: CSV and XLSX import/export on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -200,6 +217,23 @@ jobs:
           python3 -I scripts/test-repository-auth.py
           FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/oauth_test python3 -I scripts/test-repository-auth.py
           FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/oauth_test python3 -I scripts/test-repository-auth.py
+      - name: Upgrade typed maintenance data from alpha.34 on all three databases
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          cp target/debug/ferry-server "$RUNNER_TEMP/current-server"
+          git fetch origin tag v0.1.0-alpha.34 --depth=1
+          mkdir -p "$RUNNER_TEMP/typed-previous-source"
+          git archive v0.1.0-alpha.34 | tar -x -C "$RUNNER_TEMP/typed-previous-source"
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --manifest-path "$RUNNER_TEMP/typed-previous-source/Cargo.toml" -p ferry-server
+          cp target/debug/ferry-server "$RUNNER_TEMP/typed-old-server"
+          cp "$RUNNER_TEMP/current-server" target/debug/ferry-server
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE typed_upgrade_test;'
+          createdb -h 127.0.0.1 -U postgres typed_upgrade_test
+          python3 -I scripts/test-typed-maintenance-upgrade.py "$RUNNER_TEMP/typed-old-server" "$RUNNER_TEMP/current-server"
+          FERRY_TEST_DATABASE_URL=mysql://root:integration-only-password@127.0.0.1:3306/typed_upgrade_test python3 -I scripts/test-typed-maintenance-upgrade.py "$RUNNER_TEMP/typed-old-server" "$RUNNER_TEMP/current-server"
+          FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/typed_upgrade_test python3 -I scripts/test-typed-maintenance-upgrade.py "$RUNNER_TEMP/typed-old-server" "$RUNNER_TEMP/current-server"
       - name: Upgrade existing data from the previous prerelease on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -300,6 +334,29 @@ jobs:
       - name: Preferences, dictionaries and heartbeat browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-maintenance-ui.mjs
+      - name: Production insights, themes and all typed value editors in Chromium
+        if: matrix.harness == 'build-ui'
+        env:
+          CONTRIBUTION_UI_URL: http://127.0.0.1:5193
+          THEME_UI_URL: http://127.0.0.1:5193
+          TYPED_VALUES_UI_URL: http://127.0.0.1:5193
+        run: |
+          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5193 --strictPort > "$RUNNER_TEMP/insights-preview.log" 2>&1 &
+          preview=$!
+          trap 'kill "$preview" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 100); do
+            if curl --fail --silent "$CONTRIBUTION_UI_URL" > /dev/null; then ready=true; break; fi
+            kill -0 "$preview" || { cat "$RUNNER_TEMP/insights-preview.log"; exit 1; }
+            sleep 0.2
+          done
+          if [ "$ready" != true ]; then cat "$RUNNER_TEMP/insights-preview.log"; exit 1; fi
+          node scripts/test-contribution-ui.mjs
+          node scripts/test-theme-ui.mjs
+          node scripts/test-typed-values-ui.mjs
+          REFERENCE_UI_URL=http://127.0.0.1:5193 node scripts/test-reference-display-ui.mjs
+          EXECUTION_UI_URL=http://127.0.0.1:5193 node scripts/test-execution-locale-ui.mjs
+          node scripts/test-locale-ui.mjs
       - name: Scheduled task browser acceptance
         if: matrix.harness == 'build-ui'
         run: node scripts/test-cron-ui.mjs

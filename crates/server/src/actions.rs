@@ -109,6 +109,9 @@ pub struct JobStep {
     pub key: String,
     pub name: String,
     pub index: i64,
+    /// Only generated fallback labels are localized; user/engine names stay literal.
+    #[serde(default)]
+    pub default_name: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -166,7 +169,10 @@ pub(crate) fn expression_end(text: &str, start: usize) -> Result<usize> {
                 '(' | '[' => nesting.push(ch),
                 ')' | ']' => {
                     if nesting.pop() != Some(if ch == ')' { '(' } else { '[' }) {
-                        return Err(ApiError::bad("Actions 表达式括号不匹配。"));
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("actions.parenthesesInvalid"),
+                        ));
                     }
                 }
                 '}' if nesting.is_empty() && chars.peek().is_some_and(|(_, c)| *c == '}') => {
@@ -176,7 +182,10 @@ pub(crate) fn expression_end(text: &str, start: usize) -> Result<usize> {
             }
         }
     }
-    Err(ApiError::bad("Actions 表达式或字符串未闭合。"))
+    Err(ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("actions.expressionUnclosed"),
+    ))
 }
 
 fn expression_tokens(expression: &str) -> Result<Vec<ExpressionToken>> {
@@ -196,7 +205,12 @@ fn expression_tokens(expression: &str) -> Result<Vec<ExpressionToken>> {
                     }
                     Some('\'') => break,
                     Some(ch) => value.push(ch),
-                    None => return Err(ApiError::bad("Actions 表达式字符串未闭合。")),
+                    None => {
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("actions.stringUnclosed"),
+                        ));
+                    }
                 }
             }
             tokens.push(ExpressionToken::String(value));
@@ -305,8 +319,12 @@ fn discover_references(value: &Value) -> Result<References> {
 /// only static references for the existing definition summary; S2 must use this
 /// result with `variables::snapshot_for_actions` to prepare worker contexts.
 pub(crate) fn references(document: &Document) -> Result<References> {
-    let value = serde_yaml_ng::from_str(&document.workflow)
-        .map_err(|e| ApiError::bad(format!("Actions YAML 格式错误：{e}。")))?;
+    let value = serde_yaml_ng::from_str(&document.workflow).map_err(|e| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.yamlParseFailed").with("detail", e.to_string()),
+        )
+    })?;
     discover_references(&value)
 }
 
@@ -426,25 +444,43 @@ fn string_list(value: Option<&Value>, noun: &str) -> Result<Vec<String>> {
         Some(Value::Array(values)) => values
             .iter()
             .map(|v| {
-                v.as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| ApiError::bad(format!("{noun}必须是字符串或字符串数组。")))
+                v.as_str().map(str::to_owned).ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("actions.stringListRequired").with("field", noun),
+                    )
+                })
             })
             .collect(),
-        _ => Err(ApiError::bad(format!("{noun}必须是字符串或字符串数组。"))),
+        _ => Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.stringListRequired").with("field", noun),
+        )),
     }
 }
 pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
     if document.engine != ENGINE || document.workflow.contains('\0') {
-        return Err(ApiError::bad("Actions YAML 无效或包含空字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.yamlInvalid"),
+        ));
     }
-    let value: Value = serde_yaml_ng::from_str(&document.workflow)
-        .map_err(|e| ApiError::bad(format!("Actions YAML 格式错误：{e}。")))?;
+    let value: Value = serde_yaml_ng::from_str(&document.workflow).map_err(|e| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.yamlParseFailed").with("detail", e.to_string()),
+        )
+    })?;
     let jobs = value
         .get("jobs")
         .and_then(Value::as_object)
         .filter(|m| !m.is_empty())
-        .ok_or_else(|| ApiError::bad("Actions 工作流至少需要一个任务。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.jobsRequired"),
+            )
+        })?;
     let mut index = 0i64;
     let mut result = Vec::new();
     for (key, raw) in jobs {
@@ -452,9 +488,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             None => false,
             Some(Value::Bool(true)) => true,
             _ => {
-                return Err(ApiError::bad(format!(
-                    "任务 {key} 的 ferry-approval 必须为 true。"
-                )));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.approvalTrueRequired").with("job", key),
+                ));
             }
         };
         if manual
@@ -462,9 +499,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 || raw.get("uses").is_some()
                 || raw.get("runs-on").is_some())
         {
-            return Err(ApiError::bad(format!(
-                "人工卡点 {key} 不能配置执行步骤或主机。"
-            )));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.approvalExecutionForbidden").with("job", key),
+            ));
         }
         if manual
             && raw.as_object().is_some_and(|fields| {
@@ -473,9 +511,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                     .any(|field| !matches!(field.as_str(), "name" | "needs" | "ferry-approval"))
             })
         {
-            return Err(ApiError::bad(format!(
-                "人工卡点 {key} 仅支持名称和前置任务。"
-            )));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.approvalFieldsUnsupported").with("job", key),
+            ));
         }
         if !key
             .bytes()
@@ -485,7 +524,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
         {
-            return Err(ApiError::bad("Actions 任务标识无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.jobIdInvalid"),
+            ));
         }
         if let Some(uses) = raw.get("uses") {
             let valid = uses.as_str().is_some_and(|uses| {
@@ -506,8 +548,9 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                     }
             });
             if !valid || raw.get("steps").is_some() || raw.get("runs-on").is_some() {
-                return Err(ApiError::bad(
-                    "复用工作流必须使用 ./本地路径或 owner/repo/path@ref，且不能配置 steps 或 runs-on。",
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.reusableInvalid"),
                 ));
             }
         }
@@ -519,8 +562,9 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             .unwrap_or_else(|| raw.get("container").is_some());
         let mut step_ids = BTreeSet::new();
         if raw.get("services").is_some() && !container {
-            return Err(ApiError::bad(
-                "services 需要容器执行，请把该任务绑定到容器镜像",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.servicesContainerRequired"),
             ));
         }
         // runs-on is descriptive; the executor binding always selects the actual host/image,
@@ -536,7 +580,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             other => string_list(other, "runs-on")?,
         };
         if labels.is_empty() && !manual && raw.get("uses").is_none() {
-            return Err(ApiError::bad(format!("任务 {key} 缺少 runs-on。")));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.runsOnRequired").with("job", key),
+            ));
         }
         let needs = string_list(raw.get("needs"), "needs")?;
         let steps = match raw.get("steps") {
@@ -545,21 +592,29 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .enumerate()
                 .map(|(n, step)| {
                     if step.get("run").is_some() == step.get("uses").is_some() {
-                        return Err(ApiError::bad(format!(
-                            "任务 {key} 第 {} 步必须且只能填写 run 或 uses。",
-                            n + 1
-                        )));
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("actions.stepActionRequired")
+                                .with("job", key)
+                                .with("step", (n + 1).to_string()),
+                        ));
                     }
                     let command = step
                         .get("run")
                         .or_else(|| step.get("uses"))
                         .and_then(Value::as_str)
                         .filter(|value| !value.trim().is_empty() && !value.contains('\0'))
-                        .ok_or_else(|| ApiError::bad("run 或 uses 必须是非空字符串。"))?;
+                        .ok_or_else(|| {
+                            ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("actions.runUsesRequired"),
+                            )
+                        })?;
                     if step.get("uses").is_some() {
                         if command.starts_with("docker://") && !container {
-                            return Err(ApiError::bad(
-                                "Docker Action 需要在任务配置中选择容器执行。",
+                            return Err(ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("actions.dockerContainerRequired"),
                             ));
                         }
                     }
@@ -573,9 +628,17 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                                         byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
                                     })
                                 })
-                                .ok_or_else(|| ApiError::bad("步骤 id 无效。"))?;
+                                .ok_or_else(|| {
+                                    ApiError::localized(
+                                        axum::http::StatusCode::BAD_REQUEST,
+                                        crate::i18n::Message::new("actions.stepIdInvalid"),
+                                    )
+                                })?;
                         if !step_ids.insert(id.to_owned()) {
-                            return Err(ApiError::bad("同一任务的步骤 id 不能重复。"));
+                            return Err(ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("actions.stepIdDuplicate"),
+                            ));
                         }
                     }
                     if let Some(timeout) = step.get("timeout-minutes") {
@@ -585,17 +648,17 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                             .as_u64()
                             .or_else(|| timeout.as_str().and_then(|value| value.parse().ok()));
                         if !expression && !number.is_some_and(|value| value > 0) {
-                            return Err(ApiError::bad(
-                                "步骤 timeout-minutes 必须为正整数分钟或 Actions 表达式。",
+                            return Err(ApiError::localized(
+                                axum::http::StatusCode::BAD_REQUEST,
+                                crate::i18n::Message::new("actions.timeoutInvalid"),
                             ));
                         }
                     }
-                    let name = step
+                    let explicit_name = step
                         .get("name")
                         .or(step.get("uses"))
-                        .and_then(Value::as_str)
-                        .unwrap_or("执行命令")
-                        .to_owned();
+                        .and_then(Value::as_str);
+                    let name = explicit_name.unwrap_or("Run command").to_owned();
                     let item = JobStep {
                         key: step
                             .get("id")
@@ -604,6 +667,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                             .unwrap_or_else(|| n.to_string()),
                         name,
                         index,
+                        default_name: explicit_name.is_none(),
                     };
                     index += 1;
                     Ok(item)
@@ -611,7 +675,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .collect::<Result<Vec<_>>>()?,
             None if manual || raw.get("uses").is_some() => vec![],
             _ => {
-                return Err(ApiError::bad(format!("任务 {key} 至少需要一个执行步骤。")));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.stepsRequired").with("job", key),
+                ));
             }
         };
         result.push(Job {
@@ -640,12 +707,17 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             return Ok(());
         }
         if !path.insert(key.into()) {
-            return Err(ApiError::bad("任务依赖存在循环。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.dependencyCycle"),
+            ));
         }
-        let job = jobs
-            .iter()
-            .find(|j| j.key == key)
-            .ok_or_else(|| ApiError::bad(format!("依赖任务 {key} 不存在。")))?;
+        let job = jobs.iter().find(|j| j.key == key).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.dependencyMissing").with("job", key),
+            )
+        })?;
         for dep in &job.needs {
             visit(dep, jobs, done, path)?;
         }
@@ -660,13 +732,19 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
     let mut bindings = BTreeSet::new();
     for binding in &document.executor_bindings {
         if !jobs.contains_key(&binding.job_id) || !bindings.insert(&binding.job_id) {
-            return Err(ApiError::bad("执行器绑定包含未知或重复的任务。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.bindingInvalid"),
+            ));
         }
         if binding.image.trim().is_empty()
             || binding.image.len() > 255
             || binding.image.contains('\0')
         {
-            return Err(ApiError::bad("请填写有效的执行镜像。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.imageRequired"),
+            ));
         }
     }
     let mut checkout_ids = BTreeSet::new();
@@ -686,27 +764,37 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             .is_some_and(|action| action.starts_with("actions/checkout@"))
             || !checkout_ids.insert((&binding.job_id, &binding.step_id))
         {
-            return Err(ApiError::bad("代码源绑定必须引用唯一的 checkout 步骤 id。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.checkoutBindingInvalid"),
+            ));
         }
         if let Some(options) = step.and_then(|step| step.get("with")) {
-            let options = options
-                .as_object()
-                .ok_or_else(|| ApiError::bad("绑定代码源步骤的 with 必须是对象。"))?;
+            let options = options.as_object().ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.checkoutWithInvalid"),
+                )
+            })?;
             for (key, value) in options {
                 let expected = match key.as_str() {
                     "repository" => &binding.repository_url,
                     "ref" => &binding.git_ref,
                     "path" => &binding.path,
                     _ => {
-                        return Err(ApiError::bad(format!(
-                            "绑定代码源步骤暂不支持 checkout 参数 {key}，请移除该参数或使用未绑定的原生 Action。"
-                        )));
+                        return Err(ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("actions.checkoutParameterUnsupported")
+                                .with("parameter", key),
+                        ));
                     }
                 };
                 if value.as_str() != Some(expected.as_str()) {
-                    return Err(ApiError::bad(format!(
-                        "checkout 参数 {key} 与代码源节点配置不一致。"
-                    )));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("actions.checkoutParameterMismatch")
+                            .with("parameter", key),
+                    ));
                 }
             }
         }
@@ -731,7 +819,10 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .contains("${{"))
             || binding.path.split('/').any(|part| part == "..")
         {
-            return Err(ApiError::bad("代码源连接、引用或工作区路径无效。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.sourceInvalid"),
+            ));
         }
     }
     let references = discover_references(&value)?;
@@ -791,7 +882,10 @@ pub async fn host(
                 .await?
                 .is_none()
             {
-                return Err(ApiError::bad("执行主机组不存在于当前工作空间。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.groupMissing"),
+                ));
             }
             query
                 .filter(hosts::Column::GroupId.eq(reference))
@@ -800,9 +894,19 @@ pub async fn host(
                 .one(conn)
                 .await?
         }
-        _ => return Err(ApiError::bad("执行器类型无效。")),
+        _ => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("actions.executorInvalid"),
+            ));
+        }
     }
-    .ok_or_else(|| ApiError::bad("当前工作空间没有可用的执行主机。"))?;
+    .ok_or_else(|| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.hostMissing"),
+        )
+    })?;
     Ok(row.id)
 }
 pub async fn check_bindings(
@@ -835,7 +939,10 @@ pub async fn check_bindings(
                     .await?
                     .is_none()
                 {
-                    return Err(ApiError::bad("执行主机组不存在于当前工作空间。"));
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("actions.groupMissing"),
+                    ));
                 }
             } else {
                 host(conn, scope.workspace_id, &binding.target_kind, reference).await?;
@@ -874,8 +981,9 @@ pub async fn resolve(
         }
     }
     if jobs.iter().any(|job| !job.manual && job.host_id == 0) {
-        return Err(ApiError::bad(
-            "每个任务需要执行器绑定或所选环境的执行主机。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("actions.bindingRequired"),
         ));
     }
     let mut checkouts = Vec::new();
@@ -925,6 +1033,51 @@ pub fn display(row: &mut Value, definition: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_step_label_identity_survives_snapshots_and_user_names_stay_literal() {
+        let document = doc(
+            "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo first\n      - name: Run command\n        run: echo second\n      - name: 用户 {name} 原文\n        run: echo third\n",
+        );
+        let (jobs, _) = parse(&document).unwrap();
+        assert!(jobs[0].steps[0].default_name);
+        assert_eq!(jobs[0].steps[0].name, "Run command");
+        assert!(!jobs[0].steps[1].default_name);
+        assert_eq!(jobs[0].steps[1].name, "Run command");
+        assert!(!jobs[0].steps[2].default_name);
+        assert_eq!(jobs[0].steps[2].name, "用户 {name} 原文");
+        let stored = serde_json::to_string(&Snapshot {
+            engine: ENGINE.into(),
+            document,
+            jobs,
+            checkouts: Vec::new(),
+        })
+        .unwrap();
+        let saved = snapshot(&stored).unwrap();
+        assert!(saved.jobs[0].steps[0].default_name);
+        assert!(!saved.jobs[0].steps[1].default_name);
+        let legacy: JobStep =
+            serde_json::from_value(json!({"key":"0","name":"执行命令","index":0})).unwrap();
+        assert!(!legacy.default_name);
+        assert_eq!(legacy.name, "执行命令");
+    }
+
+    #[test]
+    fn diagnostic_messages_localize_around_literal_yaml_and_field_details() {
+        use crate::i18n::{Locale, render_stored};
+        let field = r#"runs-on.labels {"$system_message":{"key":"error.forbidden"}}"#;
+        let error = string_list(Some(&json!(42)), field).unwrap_err();
+        assert_eq!(error.2.as_ref().unwrap().key, "actions.stringListRequired");
+        let yaml_error = parse(&doc("jobs: [")).unwrap_err();
+        let diagnostic = &yaml_error.2.as_ref().unwrap().params["detail"];
+        for locale in Locale::ALL {
+            assert!(render_stored(locale, &error.stored()).contains(field));
+            assert!(yaml_error.render(locale).contains(diagnostic));
+            if locale != Locale::EnUs {
+                assert_ne!(error.render(locale), error.1);
+            }
+        }
+    }
     fn doc(workflow: &str) -> Document {
         Document {
             engine: ENGINE.into(),
@@ -1162,7 +1315,9 @@ mod tests {
             "jobs: {build: {runs-on: {group: '${{ vars.GROUP }}', labels: [self-hosted, '${{ matrix.os }}']}, services: {db: {image: postgres}}, steps: [{uses: 'actions/cache@v4'}]}}",
         );
         assert_eq!(
-            parse(&document).unwrap_err().1,
+            parse(&document)
+                .unwrap_err()
+                .render(crate::i18n::Locale::ZhCn),
             "services 需要容器执行，请把该任务绑定到容器镜像"
         );
         document.executor_bindings.push(Binding {
@@ -1298,8 +1453,9 @@ pub async fn ensure_target_unreferenced(
                     && Id::reference(&binding.target_ref).is_ok_and(|reference| reference == id)
             })
         {
-            return Err(ApiError::conflict(
-                "执行器仍被 Actions 任务引用，请先修改任务绑定。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("actions.executorReferenced"),
             ));
         }
     }
@@ -1313,7 +1469,10 @@ pub async fn ensure_target_unreferenced(
             if let Some(snapshot) = snapshot(&run.definition)
                 && snapshot.jobs.iter().any(|job| job.host_id == i64::from(id))
             {
-                return Err(ApiError::conflict("执行器仍有 Actions 任务尚未结束。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::CONFLICT,
+                    crate::i18n::Message::new("actions.executorBusy"),
+                ));
             }
         }
     }

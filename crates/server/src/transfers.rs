@@ -1,4 +1,5 @@
 //! CSV/XLSX transfer reuses resource projections and transactional creation.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::resource_imports as imports,
@@ -8,9 +9,9 @@ use crate::{
     workspace::Scope,
 };
 use axum::{
-    Extension, Json, Router,
+    Extension, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
+    extract::{DefaultBodyLimit, Multipart, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -25,12 +26,64 @@ use std::{
 use tokio::io::AsyncReadExt;
 const MAX_UPLOAD: usize = 8 * 1024 * 1024;
 const MAX_ROWS: usize = 1000;
+
+#[cfg(test)]
+mod locale_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn spreadsheet_template_keeps_request_locale_across_blocking_generation() {
+        for (locale, guide) in [
+            (crate::i18n::Locale::EnUs, "Field guide"),
+            (crate::i18n::Locale::ZhCn, "字段说明"),
+            (crate::i18n::Locale::ZhTw, "欄位說明"),
+            (crate::i18n::Locale::JaJp, "フィールドの説明"),
+            (crate::i18n::Locale::KoKr, "필드 안내"),
+            (crate::i18n::Locale::MsMy, "Panduan medan"),
+        ] {
+            let scope = Scope {
+                workspace_id: 1.into(),
+                user: crate::auth::User {
+                    id: 1.into(),
+                    email: "test@example.invalid".into(),
+                    name: "Test".into(),
+                    is_superadmin: false,
+                },
+                permissions: HashSet::from(["credentials.create".into()]),
+            };
+            let response = crate::i18n::with_locale(
+                locale,
+                template(
+                    scope,
+                    Extension(Resource("credentials")),
+                    Query(HashMap::from([("format".into(), "xlsx".into())])),
+                ),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), MAX_UPLOAD)
+                .await
+                .unwrap();
+            let mut book = Xlsx::new(Cursor::new(bytes)).unwrap();
+            assert_eq!(book.sheet_names(), ["data", guide]);
+            let help = book.worksheet_range(guide).unwrap();
+            assert_eq!(
+                help.get((0, 0)).unwrap().to_string(),
+                crate::i18n::render(locale, &crate::i18n::Message::new("transfers.templateNote"))
+            );
+            let data = book.worksheet_range("data").unwrap();
+            assert_eq!(data.get((0, 0)).unwrap().to_string(), "name");
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Resource(&'static str);
 fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
     let spec = match resource {
         "hosts" => {
-            "name connection address port:number username group_id credential_id description tag_ids:json"
+            "name connection address port:number username group_id credential_id description tag_ids:json runner_auto_update"
         }
         "host-groups" => "name description parent_id",
         "pipeline-groups" => "name description",
@@ -49,7 +102,8 @@ fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
         "alert-rules" => {
             "name description target_kind target_ref metric threshold:number enabled:bool webhook:secret"
         }
-        "dictionaries" => "key name description items",
+        "dictionaries" => "key name description items category value_type value_json schema_json",
+        "settings" => "key name description category value_type value_json schema_json",
         "roles" => "name permissions:json",
         "marketplace-sources" => {
             "name repository_id provider api_base project organization branch index_path"
@@ -57,7 +111,12 @@ fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
         "app-templates" => "name description content parameters",
         "pipeline-templates" => "name description content parameters",
         "config-templates" => "name description content parameters",
-        _ => return Err(ApiError::bad("此资源不支持导入。")),
+        _ => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("transfers.resourceUnsupported"),
+            ));
+        }
     };
     Ok(spec
         .split_whitespace()
@@ -179,7 +238,16 @@ async fn create(
     r: &str,
     body: Value,
 ) -> Result<Value> {
-    macro_rules! decode { () => {serde_json::from_value(body).map_err(|_|ApiError::bad("字段缺失或类型不正确，请按模板填写。"))?} }
+    macro_rules! decode {
+        () => {
+            serde_json::from_value(body).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("transfers.fieldsInvalid"),
+                )
+            })?
+        };
+    }
     let Json(value) = match r {
         "hosts" => {
             crate::hosts::create_host_in(s, tx, scope, decode!())
@@ -237,6 +305,11 @@ async fn create(
                 .1
         }
         "alert-rules" => crate::alerts::create_in(s, tx, scope, decode!()).await?.1,
+        "settings" => {
+            crate::maintenance::create_setting_in(s, tx, scope, decode!())
+                .await?
+                .1
+        }
         "dictionaries" => {
             crate::maintenance::create_dictionary_in(s, tx, scope, decode!())
                 .await?
@@ -269,7 +342,10 @@ async fn create(
 }
 
 fn invalid_file() -> ApiError {
-    ApiError::bad("文件格式无效，请使用下载的 CSV/XLSX 模板。")
+    ApiError::localized(
+        axum::http::StatusCode::BAD_REQUEST,
+        crate::i18n::Message::new("transfers.fileInvalid"),
+    )
 }
 fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>> {
     let fields = fields(r)?;
@@ -285,7 +361,10 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
             let mut entry = archive.by_index(i).map_err(|_| invalid_file())?;
             total = total.checked_add(entry.size()).ok_or_else(invalid_file)?;
             if total > 32 * 1024 * 1024 {
-                return Err(ApiError::bad("XLSX 解压内容超过32MB。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("transfers.archiveTooLarge"),
+                ));
             }
             let mut content = Vec::new();
             (&mut entry)
@@ -302,7 +381,10 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
                     match reader.read_event().map_err(|_| invalid_file())? {
                         Event::Start(e) | Event::Empty(e) => {
                             if e.local_name().as_ref() == "f" {
-                                return Err(ApiError::bad("导入文件不能包含公式，请先粘贴为值。"));
+                                return Err(ApiError::localized(
+                                    axum::http::StatusCode::BAD_REQUEST,
+                                    crate::i18n::Message::new("transfers.pasteValues"),
+                                ));
                             }
                             for attr in e.attributes() {
                                 let attr = attr.map_err(|_| invalid_file())?;
@@ -318,8 +400,11 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
                                         });
                                         if let Ok(row) = digits.parse::<usize>() {
                                             if row > MAX_ROWS + 1 {
-                                                return Err(ApiError::bad(
-                                                    "每次最多导入1000行，表格不得包含远端空白单元格。",
+                                                return Err(ApiError::localized(
+                                                    axum::http::StatusCode::BAD_REQUEST,
+                                                    crate::i18n::Message::new(
+                                                        "transfers.distantCells",
+                                                    ),
                                                 ));
                                             }
                                         }
@@ -330,7 +415,10 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
                                             );
                                         }
                                         if col > 64 {
-                                            return Err(ApiError::bad("表格最多64列。"));
+                                            return Err(ApiError::localized(
+                                                axum::http::StatusCode::BAD_REQUEST,
+                                                crate::i18n::Message::new("transfers.columnsLimit"),
+                                            ));
                                         }
                                     }
                                 }
@@ -351,7 +439,10 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
             .ok_or_else(invalid_file)?;
         let formulas = book.worksheet_formula(&name).map_err(|_| invalid_file())?;
         if formulas.cells().any(|(_, _, v)| !v.is_empty()) {
-            return Err(ApiError::bad("导入文件不能包含公式。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("transfers.formulasForbidden"),
+            ));
         }
         let range = book.worksheet_range(&name).map_err(|_| invalid_file())?;
         let start = range.start().map_or(0, |p| p.0) as usize;
@@ -398,25 +489,39 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
             previous_offset = offset;
             records.push((line, row.iter().map(str::to_owned).collect()));
             if records.len() > MAX_ROWS + 1 {
-                return Err(ApiError::bad("每次最多导入1000行。"));
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("transfers.rowsLimit"),
+                ));
             }
         }
     }
     if records.is_empty() {
-        return Err(ApiError::bad("文件为空。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("transfers.fileEmpty"),
+        ));
     }
     let (_, headers) = records.remove(0);
     let mut used = HashSet::new();
     let mut kinds = Vec::new();
     for header in &headers {
         if !used.insert(header.as_str()) {
-            return Err(ApiError::bad("表头重复。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("transfers.headersDuplicate"),
+            ));
         }
         let kind = fields
             .iter()
             .find(|(name, _)| name == header)
             .map(|(_, k)| *k)
-            .ok_or_else(|| ApiError::bad("存在未知表头，请使用当前模板。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("transfers.headersUnknown"),
+                )
+            })?;
         kinds.push(kind);
     }
     if headers.is_empty() || headers.len() > 64 {
@@ -445,7 +550,10 @@ fn parse_rows(bytes: Vec<u8>, xlsx: bool, r: &str) -> Result<Vec<(usize, Value)>
         output.push((line, Value::Object(body)));
     }
     if output.is_empty() || output.len() > MAX_ROWS {
-        return Err(ApiError::bad("请填写1–1000行数据。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("transfers.rowsRequired"),
+        ));
     }
     Ok(output)
 }
@@ -475,7 +583,10 @@ async fn preview(
     };
     let bytes = field.bytes().await.map_err(|_| invalid_file())?;
     if bytes.len() > MAX_UPLOAD {
-        return Err(ApiError::bad("文件不能超过8MB。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("transfers.uploadTooLarge"),
+        ));
     }
     if upload
         .next_field()
@@ -483,7 +594,10 @@ async fn preview(
         .map_err(|_| invalid_file())?
         .is_some()
     {
-        return Err(ApiError::bad("每次只上传一个文件。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("transfers.singleUpload"),
+        ));
     }
     let rows = tokio::task::spawn_blocking(move || parse_rows(bytes.to_vec(), xlsx, r))
         .await
@@ -507,7 +621,7 @@ async fn preview(
             Err(e) => {
                 savepoint.rollback().await?;
                 valid = false;
-                Some(e.1)
+                Some(e.render(crate::i18n::current_locale()))
             }
         };
         let mut masked = body.clone();
@@ -592,11 +706,15 @@ async fn commit(
     let rows: Vec<(usize, Value)> = serde_json::from_str(&plaintext).map_err(|_| invalid_file())?;
     let mut results = Vec::new();
     for (line, body) in rows {
-        results.push(
-            create(&s, &tx, &scope, r, body)
-                .await
-                .map_err(|e| ApiError(e.0, format!("第{line}行：{}；整批未导入。", e.1)))?,
-        );
+        results.push(create(&s, &tx, &scope, r, body).await.map_err(|e| {
+            let message =
+                crate::i18n::Message::new("transfers.rowFailed").with("row", line.to_string());
+            let message = match e.2 {
+                Some(cause) => message.with_message("error", cause),
+                None => message.with("error", e.1),
+            };
+            ApiError::localized(e.0, message)
+        })?);
     }
     use sea_orm::sea_query::Expr;
     imports::Entity::update_many()
@@ -631,7 +749,10 @@ async fn cancel(
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let row = owned(&tx, &scope, r, id).await?;
     if row.committed_at != 0 {
-        return Err(ApiError::conflict("已经导入，不能取消。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("transfers.alreadyImported"),
+        ));
     }
     imports::Entity::delete_by_id(i64::from(id))
         .exec(&tx)
@@ -644,7 +765,10 @@ fn format(q: &HashMap<String, String>) -> Result<bool> {
     match q.get("format").map(String::as_str).unwrap_or("xlsx") {
         "xlsx" => Ok(true),
         "csv" => Ok(false),
-        _ => Err(ApiError::bad("格式必须为 csv 或 xlsx。")),
+        _ => Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("transfers.formatInvalid"),
+        )),
     }
 }
 fn cell(value: &Value) -> String {
@@ -678,8 +802,9 @@ fn write_file(
             for values in batch {
                 for (col, value) in values.iter().enumerate() {
                     sheet.write_string(row, col as u16, value).map_err(|_| {
-                        ApiError::bad(
-                            "导出内容超过 XLSX 单元格或行数限制，请缩小筛选范围或使用 CSV。",
+                        ApiError::localized(
+                            axum::http::StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("transfers.exportTooLarge"),
                         )
                     })?;
                 }
@@ -753,22 +878,81 @@ async fn template(
     ))?;
     let xlsx = format(&q)?;
     let columns = fields(r)?;
-    let file=tokio::task::spawn_blocking(move||->Result<_>{
-        let mut file=tempfile::tempfile()?;
+    let locale = crate::i18n::current_locale();
+    let file = tokio::task::spawn_blocking(move || -> Result<_> {
+        let mut file = tempfile::tempfile()?;
         if xlsx {
-            let mut book=rust_xlsxwriter::Workbook::new();
-            let sheet=book.add_worksheet();sheet.set_name("data").map_err(|_|invalid_file())?;
-            for (i,(name,_)) in columns.iter().enumerate(){sheet.write_string(0,i as u16,*name).map_err(|_|invalid_file())?;}
-            let sheet=book.add_worksheet();sheet.set_name("字段说明").map_err(|_|invalid_file())?;
-            sheet.write_string(0,0,"仅新增，不覆盖现有记录。引用字段填写当前空间的 ID。空白字段使用创建默认值；密钥不会导出。").map_err(|_|invalid_file())?;
-            for (i,(name,kind)) in columns.iter().enumerate(){sheet.write_string(i as u32+1,0,*name).map_err(|_|invalid_file())?;sheet.write_string(i as u32+1,1,match *kind{"number"=>"数字","bool"=>"true 或 false","json"=>"JSON 数组","secret"=>"敏感文本，仅用于导入，不回显",_=>"文本；定义/参数/字典项遵循创建表单格式"}).map_err(|_|invalid_file())?;}
-            book.save_to_writer(&mut file).map_err(|_|invalid_file())?;
+            let mut book = rust_xlsxwriter::Workbook::new();
+            let sheet = book.add_worksheet();
+            sheet.set_name("data").map_err(|_| invalid_file())?;
+            for (i, (name, _)) in columns.iter().enumerate() {
+                sheet
+                    .write_string(0, i as u16, *name)
+                    .map_err(|_| invalid_file())?;
+            }
+            let sheet = book.add_worksheet();
+            sheet
+                .set_name(crate::i18n::render(
+                    locale,
+                    &crate::i18n::Message::new("transfers.fieldGuide"),
+                ))
+                .map_err(|_| invalid_file())?;
+            sheet
+                .write_string(
+                    0,
+                    0,
+                    crate::i18n::render(
+                        locale,
+                        &crate::i18n::Message::new("transfers.templateNote"),
+                    ),
+                )
+                .map_err(|_| invalid_file())?;
+            for (i, (name, kind)) in columns.iter().enumerate() {
+                sheet
+                    .write_string(i as u32 + 1, 0, *name)
+                    .map_err(|_| invalid_file())?;
+                sheet
+                    .write_string(
+                        i as u32 + 1,
+                        1,
+                        match *kind {
+                            "number" => crate::i18n::render(
+                                locale,
+                                &crate::i18n::Message::new("transfers.numberHint"),
+                            ),
+                            "bool" => crate::i18n::render(
+                                locale,
+                                &crate::i18n::Message::new("transfers.booleanHint"),
+                            ),
+                            "json" => crate::i18n::render(
+                                locale,
+                                &crate::i18n::Message::new("transfers.jsonHint"),
+                            ),
+                            "secret" => crate::i18n::render(
+                                locale,
+                                &crate::i18n::Message::new("transfers.secretHint"),
+                            ),
+                            _ => crate::i18n::render(
+                                locale,
+                                &crate::i18n::Message::new("transfers.textHint"),
+                            ),
+                        },
+                    )
+                    .map_err(|_| invalid_file())?;
+            }
+            book.save_to_writer(&mut file).map_err(|_| invalid_file())?;
         } else {
-            let mut writer=csv::Writer::from_writer(&mut file);
-            writer.write_record(columns.iter().map(|(name,_)|*name)).map_err(|_|invalid_file())?;writer.flush()?;
+            let mut writer = csv::Writer::from_writer(&mut file);
+            writer
+                .write_record(columns.iter().map(|(name, _)| *name))
+                .map_err(|_| invalid_file())?;
+            writer.flush()?;
         }
-        file.seek(SeekFrom::Start(0))?;Ok(file)
-    }).await.map_err(|_|invalid_file())??;
+        file.seek(SeekFrom::Start(0))?;
+        Ok(file)
+    })
+    .await
+    .map_err(|_| invalid_file())??;
     download(file, &format!("{r}-template"), xlsx)
 }
 async fn export(
@@ -794,6 +978,12 @@ async fn export(
                 .map(|(name, _)| name.to_owned())
                 .collect()
         });
+    if matches!(r, "settings" | "dictionaries") {
+        columns = fields(r)?
+            .into_iter()
+            .map(|(name, _)| name.to_owned())
+            .collect();
+    }
     // Secret variables omit `value`; a first secret row must not hide later plain values.
     if r == "variables" && !columns.iter().any(|key| key == "value") {
         columns.push("value".into());

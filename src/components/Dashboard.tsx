@@ -1,3 +1,5 @@
+import { currentLocale } from "../locale";
+import { commonText, useCommonTranslation } from "../i18n";
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api";
 import { Button } from "@/components/ui/button";
@@ -26,44 +28,45 @@ interface Summary {
   as_of: number;
 }
 const labels: Record<string, string> = {
-  "alert-rules": "告警规则",
-  "alert-events": "告警事件",
-  "cron-jobs": "定时任务",
-  "cron-runs": "定时任务执行",
-  firing: "未恢复",
-  recovered: "已恢复",
-  "alert-triggered": "告警触发",
-  "alert-recovered": "告警恢复",
-  "needs-review": "需核实",
-  skipped: "已跳过",
-  hosts: "主机",
-  "host-groups": "主机组",
-  tags: "标签",
-  credentials: "凭据",
-  repositories: "仓库",
-  pipelines: "流水线",
-  deployments: "应用部署",
-  members: "成员",
-  roles: "角色",
-  "pipeline-runs": "流水线运行",
-  "deployment-revisions": "部署执行",
-  online: "在线",
-  offline: "离线",
-  unknown: "未知",
-  pending: "待执行",
-  queued: "排队中",
-  running: "运行中",
-  succeeded: "成功",
-  failed: "失败",
-  cancelled: "已取消",
-  idle: "未部署",
-  create: "创建",
-  update: "修改",
-  delete: "删除",
-  "rotate-invitation": "更新邀请码",
+  "alert-rules": "shell.rules",
+  "alert-events": "nav.alertEvents",
+  "cron-jobs": "nav.cronJobs",
+  "cron-runs": "dashboard.cronRuns",
+  firing: "dashboard.firing",
+  recovered: "dashboard.recovered",
+  "alert-triggered": "dashboard.triggered",
+  "alert-recovered": "dashboard.alertRecovered",
+  "needs-review": "dashboard.review",
+  skipped: "dashboard.skipped",
+  hosts: "nav.hosts",
+  "host-groups": "nav.hostGroups",
+  tags: "nav.tags",
+  credentials: "nav.credentials",
+  repositories: "dashboard.repositories",
+  pipelines: "shell.pipeline",
+  deployments: "nav.deployments",
+  members: "dashboard.members",
+  roles: "dashboard.roles",
+  "pipeline-runs": "dashboard.pipelineRuns",
+  "deployment-revisions": "dashboard.revisions",
+  online: "dashboard.online",
+  offline: "dashboard.offline",
+  unknown: "dashboard.unknown",
+  pending: "dashboard.pending",
+  queued: "dashboard.queued",
+  running: "dashboard.running",
+  succeeded: "dashboard.succeeded",
+  failed: "dashboard.failed",
+  cancelled: "dashboard.cancelled",
+  idle: "dashboard.idle",
+  create: "common.create",
+  update: "dashboard.updatedAction",
+  delete: "common.delete",
+  "rotate-invitation": "dashboard.rotateInvitation",
 };
-const label = (key: string) => labels[key] ?? key;
+const label = (key: string) => labels[key] ? commonText(labels[key]) : key;
 export function Dashboard({ workspace }: { workspace: string }) {
+  useCommonTranslation();
   const [data, setData] = useState<Summary>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
@@ -92,11 +95,11 @@ export function Dashboard({ workspace }: { workspace: string }) {
           disabled={busy}
           onClick={() => setAttempt((n) => n + 1)}
         >
-          {busy ? "载入中…" : "刷新"}
+          {busy ? commonText("common.loading") : commonText("common.refresh")}
         </Button>
         {data && (
           <span className="text-xs text-muted-foreground">
-            更新于 {new Date(data.as_of).toLocaleString()}
+            {commonText("dashboard.updated", { time: new Date(data.as_of).toLocaleString(currentLocale()) })}
           </span>
         )}
       </div>
@@ -109,11 +112,10 @@ export function Dashboard({ workspace }: { workspace: string }) {
         <>
           {!Object.keys(data.counts).length && (
             <p className="text-sm text-muted-foreground">
-              当前角色没有可查看的资源统计。
-            </p>
+              {commonText("dashboard.noPermission")}</p>
           )}
           <section
-            aria-label="资源概览"
+            aria-label={commonText("dashboard.overview")}
             className="grid grid-cols-2 gap-3 lg:grid-cols-4"
           >
             {Object.entries(data.counts).map(([key, count]) => (
@@ -126,7 +128,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
           <div className="grid gap-4 lg:grid-cols-2">
             {Object.entries(data.states).map(([key, states]) => (
               <section key={key} className="rounded-md border p-4">
-                <h2 className="mb-3 font-medium">{label(key)}状态</h2>
+                <h2 className="mb-3 font-medium">{commonText("dashboard.states", { name: label(key) })}</h2>
                 {Object.keys(states).length ? (
                   <dl className="flex flex-wrap gap-5">
                     {Object.entries(states).map(([state, count]) => (
@@ -139,14 +141,14 @@ export function Dashboard({ workspace }: { workspace: string }) {
                     ))}
                   </dl>
                 ) : (
-                  <p className="text-sm text-muted-foreground">暂无记录</p>
+                  <p className="text-sm text-muted-foreground">{commonText("common.noRecords")}</p>
                 )}
               </section>
             ))}
           </div>
           {!!Object.keys(data.failures_24h).length && (
             <section className="rounded-md border p-4">
-              <h2 className="mb-3 font-medium">最近 24 小时创建且失败的执行</h2>
+              <h2 className="mb-3 font-medium">{commonText("dashboard.failures")}</h2>
               <dl className="flex gap-6">
                 {Object.entries(data.failures_24h).map(([key, value]) => (
                   <div key={key}>
@@ -162,8 +164,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
           {data.runners && (
             <section className="rounded-md border p-4">
               <h2 className="mb-3 font-medium">
-                Runner 心跳 · 最久未上报的 10 台
-              </h2>
+                {commonText("dashboard.heartbeat")}</h2>
               {data.runners.length ? (
                 <ul className="space-y-2">
                   {data.runners.map((r) => (
@@ -174,22 +175,21 @@ export function Dashboard({ workspace }: { workspace: string }) {
                       <span>{r.name}</span>
                       <span className="text-muted-foreground">
                         {r.lag_ms === null
-                          ? "尚未上报"
-                          : `${Math.floor(r.lag_ms / 1000)} 秒前`}
+                          ? commonText("dashboard.unreported")
+                          : commonText("dashboard.secondsAgo", { count: Math.floor(r.lag_ms / 1000) })}
                       </span>
                     </li>
                   ))}
                 </ul>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  暂无 Runner 主机
-                </p>
+                  {commonText("dashboard.noRunners")}</p>
               )}
             </section>
           )}
           {data.recent && (
             <section className="rounded-md border p-4">
-              <h2 className="mb-3 font-medium">近期操作</h2>
+              <h2 className="mb-3 font-medium">{commonText("dashboard.recent")}</h2>
               {data.recent.length ? (
                 <ul className="space-y-2">
                   {data.recent.map((a) => (
@@ -201,13 +201,13 @@ export function Dashboard({ workspace }: { workspace: string }) {
                         {a.actor_name} · {label(a.action)} · {label(a.resource)}
                       </span>
                       <time className="text-muted-foreground">
-                        {new Date(a.created_at).toLocaleString()}
+                        {new Date(a.created_at).toLocaleString(currentLocale())}
                       </time>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-muted-foreground">暂无操作记录</p>
+                <p className="text-sm text-muted-foreground">{commonText("dashboard.noActivity")}</p>
               )}
             </section>
           )}

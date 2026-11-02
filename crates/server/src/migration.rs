@@ -102,6 +102,13 @@ impl MigratorTrait for Migrator {
             Box::new(PipelineRunInputs),
             Box::new(EnvironmentApproval),
             Box::new(LegacyPipelineRemoval),
+            Box::new(TypedMaintenanceValues),
+            Box::new(RepositoryAnalysis),
+            Box::new(RepositoryAnalysisIdentity),
+            Box::new(CodeInsights),
+            Box::new(CodeInsightSchedules),
+            Box::new(RunnerAutoUpdates),
+            Box::new(RepositoryEventDeliveryMessages),
         ]
     }
 }
@@ -1202,6 +1209,9 @@ mod schema_tests {
             variables,
             pipeline_classification,
             repository_event_detail,
+            repository_analysis_identity,
+            code_insights,
+            code_insight_schedules,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
@@ -3307,6 +3317,108 @@ mod credential_scope_tests {
     use sea_orm::{ConnectionTrait, Database, EntityTrait, QueryOrder};
 
     #[tokio::test]
+    async fn contribution_upgrade_preserves_existing_monitor_and_artifact_state() {
+        use crate::entities::{pipeline_artifacts, repository_monitors, repository_poll_states};
+        use sea_orm::IntoActiveModel;
+
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let before = Migrator::migrations()
+            .iter()
+            .position(|migration| migration.name() == RepositoryAnalysis.name())
+            .unwrap();
+        Migrator::up(&db, Some(before as u32)).await.unwrap();
+        let manager = SchemaManager::new(&db);
+        assert!(
+            manager
+                .has_column("pipelines", "legacy_definition_backup")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .has_table("repository_analysis_configs")
+                .await
+                .unwrap()
+        );
+        let monitor = repository_monitors::Model {
+            id: 91,
+            workspace_id: 11,
+            config: "opaque-existing-config".into(),
+            version: 7,
+            created_at: 10,
+            updated_at: 20,
+        };
+        let baseline = repository_poll_states::Model {
+            id: 91,
+            workspace_id: 11,
+            config_version: 7,
+            snapshot: "opaque-existing-baseline".into(),
+            last_polled_at: 30,
+            next_poll_at: 40,
+            last_error: "previous status".into(),
+        };
+        let artifact = pipeline_artifacts::Model {
+            id: 92,
+            workspace_id: 11,
+            pipeline_id: 93,
+            run_id: 94,
+            path: "artifacts/existing.zip".into(),
+            sha256: "a".repeat(64),
+            size: 123,
+            mode: 0o644,
+            created_at: 10,
+            expires_at: 999,
+        };
+        repository_monitors::Entity::insert(monitor.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        repository_poll_states::Entity::insert(baseline.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        pipeline_artifacts::Entity::insert(artifact.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        assert!(
+            manager
+                .has_table("repository_analysis_configs")
+                .await
+                .unwrap()
+        );
+        assert!(
+            manager
+                .has_table("repository_analysis_commit_authors")
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            repository_monitors::Entity::find_by_id(91)
+                .one(&db)
+                .await
+                .unwrap(),
+            Some(monitor)
+        );
+        assert_eq!(
+            repository_poll_states::Entity::find_by_id(91)
+                .one(&db)
+                .await
+                .unwrap(),
+            Some(baseline)
+        );
+        assert_eq!(
+            pipeline_artifacts::Entity::find_by_id(92)
+                .one(&db)
+                .await
+                .unwrap(),
+            Some(artifact)
+        );
+    }
+
+    #[tokio::test]
     async fn legacy_pipeline_upgrade_keeps_backups_and_history_and_is_idempotent() {
         use sea_orm::{ActiveModelTrait, Set};
         let db = Database::connect("sqlite::memory:").await.unwrap();
@@ -3439,5 +3551,1258 @@ mod credential_scope_tests {
                 .credential_id,
             1
         );
+    }
+}
+
+struct RepositoryAnalysis;
+impl MigrationName for RepositoryAnalysis {
+    fn name(&self) -> &str {
+        "repository_analysis_v1"
+    }
+}
+
+fn repository_analysis_identity(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut statements = Vec::new();
+    let mut people = create_table("repository_analysis_people", backend);
+    for column in ["id", "workspace_id", "user_id", "version"] {
+        let mut definition = ColumnDef::new(Alias::new(column));
+        definition.big_integer().not_null();
+        if column == "id" {
+            definition.primary_key();
+        }
+        people.col(definition);
+    }
+    people.col(
+        ColumnDef::new(Alias::new("display_name"))
+            .string_len(255)
+            .not_null(),
+    );
+    people.col(ColumnDef::new(Alias::new("raw_identity_id")).big_integer());
+    statements.push(SchemaStatement::Table(people));
+    let mut identities = create_table("repository_analysis_identities", backend);
+    identities.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    identities.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    identities.col(
+        ColumnDef::new(Alias::new("fingerprint"))
+            .string_len(64)
+            .not_null(),
+    );
+    identities.col(
+        ColumnDef::new(Alias::new("raw_name"))
+            .string_len(255)
+            .not_null(),
+    );
+    identities.col(
+        ColumnDef::new(Alias::new("raw_email"))
+            .string_len(255)
+            .not_null(),
+    );
+    statements.push(SchemaStatement::Table(identities));
+    let mut authors = create_table("repository_analysis_commit_authors", backend);
+    for column in [
+        "commit_id",
+        "user_id",
+        "workspace_id",
+        "repository_id",
+        "identity_id",
+        "contributor_id",
+    ] {
+        authors.col(ColumnDef::new(Alias::new(column)).big_integer().not_null());
+    }
+    authors.primary_key(
+        Index::create()
+            .col(Alias::new("commit_id"))
+            .col(Alias::new("user_id")),
+    );
+    statements.push(SchemaStatement::Table(authors));
+    for (table, name, columns, unique) in [
+        (
+            "repository_analysis_people",
+            "analysis_person_raw",
+            &["workspace_id", "user_id", "raw_identity_id"][..],
+            true,
+        ),
+        (
+            "repository_analysis_identities",
+            "analysis_identity_fingerprint",
+            &["workspace_id", "fingerprint"][..],
+            true,
+        ),
+        (
+            "repository_analysis_commit_authors",
+            "analysis_author_repository",
+            &[
+                "workspace_id",
+                "user_id",
+                "repository_id",
+                "contributor_id",
+                "commit_id",
+            ][..],
+            false,
+        ),
+        (
+            "repository_analysis_commit_authors",
+            "analysis_author_identity",
+            &["workspace_id", "user_id", "identity_id"][..],
+            false,
+        ),
+    ] {
+        let mut index = Index::create();
+        index.name(name).table(Alias::new(table));
+        for column in columns {
+            index.col(Alias::new(*column));
+        }
+        if unique {
+            index.unique();
+        }
+        statements.push(SchemaStatement::Index(table, name, index));
+    }
+    statements
+}
+
+struct RepositoryAnalysisIdentity;
+impl MigrationName for RepositoryAnalysisIdentity {
+    fn name(&self) -> &str {
+        "repository_analysis_identity_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryAnalysisIdentity {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in repository_analysis_identity(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryAnalysis {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        let mut table = create_table("repository_analysis_configs", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(long_text("config", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("coverage_start"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("next_reconcile_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(long_text("last_error", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("created_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("updated_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_configs",
+                "analysis_0_0",
+                Index::create()
+                    .name("analysis_0_0")
+                    .table(Alias::new("repository_analysis_configs"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("id"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_repositories", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("identity"))
+                .string_len(64)
+                .not_null(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("provider"))
+                .string_len(32)
+                .not_null(),
+        );
+        table.col(long_text("path", backend).not_null());
+        table.col(long_text("url", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("created_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_repositories",
+                "analysis_1_0",
+                Index::create()
+                    .name("analysis_1_0")
+                    .table(Alias::new("repository_analysis_repositories"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("identity"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_sources", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("connection_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("repository_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(long_text("remote_path", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("coverage_start"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("config_version"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("state"))
+                .string_len(32)
+                .not_null(),
+        );
+        table.col(long_text("last_error", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("synced_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_sources",
+                "analysis_2_0",
+                Index::create()
+                    .name("analysis_2_0")
+                    .table(Alias::new("repository_analysis_sources"))
+                    .col(Alias::new("connection_id"))
+                    .col(Alias::new("repository_id"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_sources",
+                "analysis_2_1",
+                Index::create()
+                    .name("analysis_2_1")
+                    .table(Alias::new("repository_analysis_sources"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("repository_id"))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_refs", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("source_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("name"))
+                .string_len(255)
+                .not_null(),
+        );
+        table.col(ColumnDef::new(Alias::new("head")).string_len(64).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("present"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("generation"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("updated_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_refs",
+                "analysis_3_0",
+                Index::create()
+                    .name("analysis_3_0")
+                    .table(Alias::new("repository_analysis_refs"))
+                    .col(Alias::new("source_id"))
+                    .col(Alias::new("name"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_commits", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("repository_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(ColumnDef::new(Alias::new("sha")).string_len(64).not_null());
+        table.col(long_text("parents", backend).not_null());
+        table.col(long_text("message", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("message_type"))
+                .string_len(64)
+                .not_null(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("author_name"))
+                .string_len(255)
+                .not_null(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("author_email"))
+                .string_len(255)
+                .not_null(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("author_date"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("committer_date"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("is_merge"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("additions"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("deletions"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("effectives"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(long_text("language_stats", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("analysis_version"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("complete"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_commits",
+                "analysis_4_0",
+                Index::create()
+                    .name("analysis_4_0")
+                    .table(Alias::new("repository_analysis_commits"))
+                    .col(Alias::new("workspace_id"))
+                    .col(Alias::new("repository_id"))
+                    .col(Alias::new("sha"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_commits",
+                "analysis_4_1",
+                Index::create()
+                    .name("analysis_4_1")
+                    .table(Alias::new("repository_analysis_commits"))
+                    .col(Alias::new("repository_id"))
+                    .col(Alias::new("committer_date"))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_commits",
+                "analysis_4_2",
+                Index::create()
+                    .name("analysis_4_2")
+                    .table(Alias::new("repository_analysis_commits"))
+                    .col(Alias::new("repository_id"))
+                    .col(Alias::new("author_email"))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_ref_commits", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("source_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("ref_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("commit_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("generation"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("current"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_ref_commits",
+                "analysis_5_0",
+                Index::create()
+                    .name("analysis_5_0")
+                    .table(Alias::new("repository_analysis_ref_commits"))
+                    .col(Alias::new("ref_id"))
+                    .col(Alias::new("commit_id"))
+                    .unique()
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_ref_commits",
+                "analysis_5_1",
+                Index::create()
+                    .name("analysis_5_1")
+                    .table(Alias::new("repository_analysis_ref_commits"))
+                    .col(Alias::new("source_id"))
+                    .col(Alias::new("commit_id"))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        let mut table = create_table("repository_analysis_jobs", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("workspace_id"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("generation"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("completed_generation"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("state"))
+                .string_len(32)
+                .not_null(),
+        );
+        table.col(long_text("cursor", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("retry_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("lease_owner"))
+                .string_len(64)
+                .not_null(),
+        );
+        table.col(
+            ColumnDef::new(Alias::new("lease_until"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        table.col(long_text("last_error", backend).not_null());
+        table.col(
+            ColumnDef::new(Alias::new("updated_at"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+        m.create_table(table.to_owned()).await?;
+        execute_schema(
+            m,
+            SchemaStatement::Index(
+                "repository_analysis_jobs",
+                "analysis_6_0",
+                Index::create()
+                    .name("analysis_6_0")
+                    .table(Alias::new("repository_analysis_jobs"))
+                    .col(Alias::new("state"))
+                    .col(Alias::new("retry_at"))
+                    .to_owned(),
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+struct CodeInsightSchedules;
+impl MigrationName for CodeInsightSchedules {
+    fn name(&self) -> &str {
+        "code_insight_schedules_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for CodeInsightSchedules {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in code_insight_schedules(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+fn code_insight_schedules(_: DbBackend) -> Vec<SchemaStatement> {
+    vec![
+        SchemaStatement::Column(
+            "code_insights",
+            "next_run_at",
+            Table::alter()
+                .table(Alias::new("code_insights"))
+                .add_column(
+                    ColumnDef::new(Alias::new("next_run_at"))
+                        .big_integer()
+                        .not_null()
+                        .default(0),
+                )
+                .to_owned(),
+        ),
+        SchemaStatement::Index(
+            "code_insights",
+            "code_insight_schedule_due",
+            Index::create()
+                .name("code_insight_schedule_due")
+                .table(Alias::new("code_insights"))
+                .col(Alias::new("next_run_at"))
+                .to_owned(),
+        ),
+    ]
+}
+
+struct CodeInsights;
+impl MigrationName for CodeInsights {
+    fn name(&self) -> &str {
+        "code_insights_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for CodeInsights {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in code_insights(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+fn code_insights(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut statements = Vec::new();
+    let mut table = create_table("code_insights", backend);
+    table.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("user_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("name"))
+            .string_len(255)
+            .not_null(),
+    );
+    table.col(long_text("description", backend).not_null());
+    table.col(long_text("config", backend).not_null());
+    table.col(
+        ColumnDef::new(Alias::new("coverage_start"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("version"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("created_at"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("updated_at"))
+            .big_integer()
+            .not_null(),
+    );
+    statements.push(SchemaStatement::Table(table.to_owned()));
+    let mut table = create_table("code_insight_repositories", backend);
+    table.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("insight_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("connection_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(long_text("repository", backend).not_null());
+    table.col(
+        ColumnDef::new(Alias::new("all_repositories"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("pipeline_id"))
+            .string_len(255)
+            .not_null(),
+    );
+    statements.push(SchemaStatement::Table(table.to_owned()));
+    let mut table = create_table("repository_analysis_commit_identities", backend);
+    table.col(
+        ColumnDef::new(Alias::new("commit_id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("identity_id"))
+            .big_integer()
+            .not_null(),
+    );
+    statements.push(SchemaStatement::Table(table.to_owned()));
+    let mut table = create_table("code_insight_people", backend);
+    table.col(
+        ColumnDef::new(Alias::new("insight_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(ColumnDef::new(Alias::new("id")).big_integer().not_null());
+    table.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("display_name"))
+            .string_len(255)
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("version"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("raw_identity_id"))
+            .big_integer()
+            .null(),
+    );
+    table.primary_key(
+        Index::create()
+            .col(Alias::new("insight_id"))
+            .col(Alias::new("id")),
+    );
+    statements.push(SchemaStatement::Table(table.to_owned()));
+    let mut table = create_table("code_insight_identity_links", backend);
+    table.col(
+        ColumnDef::new(Alias::new("insight_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("identity_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("workspace_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.col(
+        ColumnDef::new(Alias::new("contributor_id"))
+            .big_integer()
+            .not_null(),
+    );
+    table.primary_key(
+        Index::create()
+            .col(Alias::new("insight_id"))
+            .col(Alias::new("identity_id")),
+    );
+    statements.push(SchemaStatement::Table(table.to_owned()));
+    statements.push(SchemaStatement::Index(
+        "code_insights",
+        "insights_owner",
+        Index::create()
+            .name("insights_owner")
+            .table(Alias::new("code_insights"))
+            .col(Alias::new("workspace_id"))
+            .col(Alias::new("user_id"))
+            .to_owned(),
+    ));
+    statements.push(SchemaStatement::Index(
+        "code_insight_repositories",
+        "insight_members",
+        Index::create()
+            .name("insight_members")
+            .table(Alias::new("code_insight_repositories"))
+            .col(Alias::new("insight_id"))
+            .col(Alias::new("connection_id"))
+            .to_owned(),
+    ));
+    statements.push(SchemaStatement::Index(
+        "code_insight_repositories",
+        "insight_connection",
+        Index::create()
+            .name("insight_connection")
+            .table(Alias::new("code_insight_repositories"))
+            .col(Alias::new("workspace_id"))
+            .col(Alias::new("connection_id"))
+            .to_owned(),
+    ));
+    statements.push(SchemaStatement::Index(
+        "repository_analysis_commit_identities",
+        "insight_raw_identity",
+        Index::create()
+            .name("insight_raw_identity")
+            .table(Alias::new("repository_analysis_commit_identities"))
+            .col(Alias::new("workspace_id"))
+            .col(Alias::new("identity_id"))
+            .to_owned(),
+    ));
+    statements.push(SchemaStatement::Index(
+        "code_insight_people",
+        "insight_default_person",
+        Index::create()
+            .name("insight_default_person")
+            .table(Alias::new("code_insight_people"))
+            .col(Alias::new("insight_id"))
+            .col(Alias::new("raw_identity_id"))
+            .unique()
+            .to_owned(),
+    ));
+    statements.push(SchemaStatement::Index(
+        "code_insight_identity_links",
+        "insight_person",
+        Index::create()
+            .name("insight_person")
+            .table(Alias::new("code_insight_identity_links"))
+            .col(Alias::new("insight_id"))
+            .col(Alias::new("contributor_id"))
+            .to_owned(),
+    ));
+    statements
+}
+
+struct TypedMaintenanceValues;
+impl MigrationName for TypedMaintenanceValues {
+    fn name(&self) -> &str {
+        "typed_maintenance_values_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for TypedMaintenanceValues {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for table in ["settings", "dictionaries"] {
+            for (column, fallback) in [
+                ("category", "general"),
+                (
+                    "value_type",
+                    if table == "settings" {
+                        "num"
+                    } else {
+                        "selection"
+                    },
+                ),
+            ] {
+                execute_schema(
+                    m,
+                    SchemaStatement::Column(
+                        table,
+                        column,
+                        Table::alter()
+                            .table(Alias::new(table))
+                            .add_column(
+                                ColumnDef::new(Alias::new(column))
+                                    .string_len(100)
+                                    .not_null()
+                                    .default(fallback),
+                            )
+                            .to_owned(),
+                    ),
+                )
+                .await?;
+            }
+            for column in ["value_json", "schema_json"] {
+                execute_schema(
+                    m,
+                    SchemaStatement::Column(
+                        table,
+                        column,
+                        Table::alter()
+                            .table(Alias::new(table))
+                            .add_column(long_text(column, m.get_database_backend()))
+                            .to_owned(),
+                    ),
+                )
+                .await?;
+            }
+            let index = if table == "settings" {
+                "settings_typed_filter_idx"
+            } else {
+                "dictionaries_typed_filter_idx"
+            };
+            execute_schema(
+                m,
+                SchemaStatement::Index(
+                    table,
+                    index,
+                    Index::create()
+                        .name(index)
+                        .table(Alias::new(table))
+                        .col(Alias::new("workspace_id"))
+                        .col(Alias::new("category"))
+                        .col(Alias::new("value_type"))
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        for column in ["name", "description"] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    "settings",
+                    column,
+                    Table::alter()
+                        .table(Alias::new("settings"))
+                        .add_column(
+                            ColumnDef::new(Alias::new(column))
+                                .string_len(if column == "name" { 100 } else { 10000 })
+                                .not_null()
+                                .default(""),
+                        )
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Typed maintenance data cannot be automatically removed".into(),
+        ))
+    }
+}
+
+struct RepositoryEventDeliveryMessages;
+impl MigrationName for RepositoryEventDeliveryMessages {
+    fn name(&self) -> &str {
+        "repository_event_delivery_messages_v1"
+    }
+}
+
+fn repository_event_delivery_messages(backend: DbBackend) -> Option<TableAlterStatement> {
+    // SQLite does not enforce the old VARCHAR length and cannot alter a type
+    // without rebuilding the table. Its existing text affinity already suffices.
+    (backend != DbBackend::Sqlite).then(|| {
+        Table::alter()
+            .table(Alias::new("repository_events"))
+            .modify_column(long_text("delivery", backend).not_null())
+            .to_owned()
+    })
+}
+
+#[async_trait::async_trait]
+impl MigrationTrait for RepositoryEventDeliveryMessages {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        if let Some(statement) = repository_event_delivery_messages(m.get_database_backend()) {
+            // Repeating the same widening is safe after interrupted MySQL DDL.
+            m.alter_table(statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Delivery message storage cannot be narrowed without data loss".into(),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod delivery_message_tests {
+    use super::*;
+    use crate::{
+        entities::repository_events,
+        i18n::{self, Locale, Message},
+    };
+    use sea_orm::{Database, EntityTrait, IntoActiveModel};
+
+    #[test]
+    fn delivery_storage_widens_without_rewriting_existing_values() {
+        let mysql = repository_event_delivery_messages(DbBackend::MySql)
+            .unwrap()
+            .to_string(MysqlQueryBuilder);
+        assert!(
+            mysql.contains("MODIFY COLUMN `delivery` longtext NOT NULL"),
+            "{mysql}"
+        );
+        let postgres = repository_event_delivery_messages(DbBackend::Postgres)
+            .unwrap()
+            .to_string(PostgresQueryBuilder);
+        assert!(
+            postgres.contains("ALTER COLUMN \"delivery\" TYPE text"),
+            "{postgres}"
+        );
+        assert!(repository_event_delivery_messages(DbBackend::Sqlite).is_none());
+    }
+
+    #[tokio::test]
+    async fn upgraded_event_delivery_roundtrips_quoted_unicode_diagnostics_for_each_reader() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let before = Migrator::migrations()
+            .iter()
+            .position(|migration| migration.name() == RepositoryEventDeliveryMessages.name())
+            .unwrap();
+        Migrator::up(&db, Some(before as u32)).await.unwrap();
+        let legacy = repository_events::Model {
+            id: 1,
+            workspace_id: 1,
+            connection_id: 1,
+            delivery_key: "legacy".into(),
+            event: "push".into(),
+            repository: "user/repository".into(),
+            reference: "main".into(),
+            actor: String::new(),
+            action: "user action".into(),
+            delivery: "旧状态 raw \"quoted\"".into(),
+            created_at: 0,
+            detail: None,
+        };
+        repository_events::Entity::insert(legacy.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        RepositoryEventDeliveryMessages
+            .up(&SchemaManager::new(&db))
+            .await
+            .unwrap();
+        assert_eq!(
+            repository_events::Entity::find_by_id(1)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap(),
+            legacy
+        );
+        let diagnostic = format!("{}{}", "\"".repeat(150), "漢".repeat(50));
+        let message = Message::new("webhook.failed")
+            .with("provider", "Google Chat")
+            .with_message(
+                "reason",
+                Message::new("webhook.code")
+                    .with("code", i64::MIN.to_string())
+                    .with("detail", &diagnostic),
+            );
+        let stored = i18n::store_message(&message);
+        // JSON escaping is part of the column's character count.
+        assert!(
+            stored.chars().count() > 512,
+            "{} characters",
+            stored.chars().count()
+        );
+        let mut updated = legacy.clone();
+        updated.id = 2;
+        updated.delivery_key = "typed".into();
+        updated.delivery = stored.clone();
+        repository_events::Entity::insert(updated.into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        let read = repository_events::Entity::find_by_id(2)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.delivery, stored);
+        for locale in Locale::ALL {
+            let text = i18n::render_stored(locale, &read.delivery);
+            assert!(text.contains(&diagnostic));
+            assert!(!text.contains("$system_message"));
+            assert_eq!(text, i18n::render(locale, &message));
+        }
+        assert_ne!(
+            i18n::render_stored(Locale::EnUs, &stored),
+            i18n::render_stored(Locale::JaJp, &stored)
+        );
+    }
+}
+
+struct RunnerAutoUpdates;
+impl MigrationName for RunnerAutoUpdates {
+    fn name(&self) -> &str {
+        "runner_auto_updates_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for RunnerAutoUpdates {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for (table, column) in [
+            (
+                "platform_state",
+                ColumnDef::new(Alias::new("runner_auto_update"))
+                    .big_integer()
+                    .not_null()
+                    .default(1_i64)
+                    .to_owned(),
+            ),
+            (
+                "hosts",
+                ColumnDef::new(Alias::new("runner_auto_update"))
+                    .string()
+                    .not_null()
+                    .default("inherit")
+                    .to_owned(),
+            ),
+        ] {
+            execute_schema(
+                m,
+                SchemaStatement::Column(
+                    table,
+                    "runner_auto_update",
+                    Table::alter()
+                        .table(Alias::new(table))
+                        .add_column(column)
+                        .to_owned(),
+                ),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
     }
 }

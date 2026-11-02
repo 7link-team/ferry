@@ -1,4 +1,5 @@
-import { AutoForm, AutoFields, AutoField, FieldControl } from "./auto-form";
+import { commonText, configText, useCommonTranslation } from "../i18n";
+import { AutoForm, AutoFields, AutoField, FieldControl, selectDisplay } from "./auto-form";
 /**
  * The one form implementation, in three modes driven by the route:
  *
@@ -12,11 +13,12 @@ import { AutoForm, AutoFields, AutoField, FieldControl } from "./auto-form";
  * `secret` field never shows a stored value in any mode, only whether one is
  * set (§8 of the design doc).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Dialog } from "radix-ui";
 import { ActionsEditor } from "./ActionsEditor";
 import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
+import { CodeInsightAliases, CodeInsightRepositories } from "./CodeInsightFields";
 import { RunnerConnection } from "./RunnerConnection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
@@ -74,6 +76,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   onCancel,
   pipelineWorkspace = false,
   showViewNavigation = true,
+  headerActions,
 }: {
   config: FormConfig<T>;
   workspace: string;
@@ -83,7 +86,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
   onCancel?: () => void;
   pipelineWorkspace?: boolean;
   showViewNavigation?: boolean;
+  headerActions?: ReactNode;
 }) {
+  useCommonTranslation();
   const pageRoute = useRoute();
   const route = createInPlace ? { ...pageRoute, mode: "new" as const } : pageRoute;
   const creating = route.mode === "new";
@@ -126,7 +131,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     setLoading(true);
     getResource<T>(workspace, config.resource, id, config.endpoint)
       .then((row) => {
-        if (config.resource === "credentials" && row.scope !== config.blank.scope) throw new Error("此凭据属于其他模块，请从对应模块进入。");
+        if (config.resource === "credentials" && row.scope !== config.blank.scope) throw new Error(commonText("form.wrongScope"));
         if (live) { setDraft(creating && config.copy ? config.copy(row) : row); setError(""); }
       })
       .catch((cause: unknown) => live && setError(errorText(cause)))
@@ -164,14 +169,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
       creating={creating}
       draft={draft}
       permissions={permissions}
-      readOnly={readOnly || (!creating && !!field.immutable)}
+      readOnly={readOnly || (!creating && !!field.immutable) || !!field.disabled?.(draft)}
       asText={readOnly}
       fillHeight={workspaceEditor && field.type === "actions-editor"}
       {...(workspaceEditor ? { editorMode, onEditorModeChange: setEditorMode } : {})}
       onChange={(value) => setDraft((d) => ({
         ...d,
         ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-        ...(["repository-source", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+        ...(["repository-source", "marketplace-repository", "actions-editor", "custom"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
       }) as Partial<T>)}
     />
   );
@@ -210,7 +215,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       navigate({ ...route, mode: "list" }, {});
     } catch (cause) {
       if (creating && savedId) {
-        toast.error(`流水线已保存，但执行失败：${errorText(cause)}`);
+        toast.error(commonText("form.savedRunFailed", { error: errorText(cause) }));
         navigate({ ...route, id: savedId, mode: "edit" }, {});
       } else setError(errorText(cause));
     } finally {
@@ -222,26 +227,25 @@ export function ResourceForm<T extends Record<string, unknown>>({
     return (
       <p className="text-muted-foreground">
         <Loader2 className="mr-2 inline size-4 animate-spin" />
-        载入中…
-      </p>
+        {commonText("common.loading")}</p>
     );
 
   const visibleViewActions = (config.viewActions ?? []).filter(action => (!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T)));
-  const renderViewAction = (action: NonNullable<FormConfig<T>["viewActions"]>[number]) => action.to ? <Button key={action.label} variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={action.label} title={action.iconOnly ? action.label : undefined} asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.iconOnly ? action.icon : action.label}</a></Button> : <Button key={action.label} type="button" variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={action.label} title={action.iconOnly ? action.label : undefined} disabled={saving} onClick={async()=>{
+  const renderViewAction = (action: NonNullable<FormConfig<T>["viewActions"]>[number]) => action.to ? <Button key={action.label} variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={configText(action.label, action.labelKey)} title={action.iconOnly ? configText(action.label, action.labelKey) : undefined} asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.iconOnly ? action.icon : configText(action.label, action.labelKey)}</a></Button> : <Button key={action.label} type="button" variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={configText(action.label, action.labelKey)} title={action.iconOnly ? configText(action.label, action.labelKey) : undefined} disabled={saving} onClick={async()=>{
         if(action.destructive){setPendingDelete(action);return;}
         if(action.parameters?.(draft as T).length){setPendingAction(action);return;}
         setSaving(true);setError("");
         try {await action.action?.(draft as T);if(route.id)setDraft(await getResource<T>(workspace,config.resource,route.id,config.endpoint));}
         catch(cause){setError(errorText(cause));}finally{setSaving(false);}
-      }}>{action.iconOnly ? action.icon : action.label}</Button>;
+      }}>{action.iconOnly ? action.icon : configText(action.label, action.labelKey)}</Button>;
 
-  const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background py-2" role="tablist" aria-label="接入方式">
-    {([ ["runner", "代理 Runner"], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
+  const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background py-2" role="tablist" aria-label={commonText("form.connection")}>
+    {([ ["runner", commonText("form.runner")], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
   </div>;
 
   if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="w-full space-y-4 pb-8">
     {hostConnectionTabs}
-    {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">当前角色没有代理接入权限。</p>}
+    {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">{commonText("form.noRunnerPermission")}</p>}
   </div>;
 
   if (workspaceEditor) {
@@ -255,18 +259,19 @@ export function ResourceForm<T extends Record<string, unknown>>({
     };
     return <AutoForm className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
       <header className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-2 sm:min-h-14 sm:px-4">
-        <Button type="button" variant="ghost" size="icon" aria-label="返回流水线" title="返回流水线" onClick={() => navigate({ ...route, mode: "list" }, {})}><ArrowLeft /></Button>
-        <AutoField label="流水线名称" name="name" hideLabel className="shrink-0"><Input aria-label="流水线名称" placeholder="流水线名称" required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} /></AutoField>
-        <Button type="button" variant="ghost" size="sm" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(open => !open)}><SlidersHorizontal className="size-4" />流水线设置</Button>
-        {editor?.type === "actions-editor" && <div className="flex gap-1" role="tablist" aria-label="流水线编辑模式">
-          <Button type="button" role="tab" aria-selected={editorMode === "visual"} variant={editorMode === "visual" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("visual")}>可视化</Button>
+        <Button type="button" variant="ghost" size="icon" aria-label={commonText("form.backPipeline")} title={commonText("form.backPipeline")} onClick={() => navigate({ ...route, mode: "list" }, {})}><ArrowLeft /></Button>
+        <AutoField label={commonText("form.pipelineName")} name="name" hideLabel className="shrink-0"><Input aria-label={commonText("form.pipelineName")} placeholder={commonText("form.pipelineName")} required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} /></AutoField>
+        <Button type="button" variant="ghost" size="sm" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(open => !open)}><SlidersHorizontal className="size-4" />{commonText("form.pipelineSettings")}</Button>
+        {editor?.type === "actions-editor" && <div className="flex gap-1" role="tablist" aria-label={commonText("form.editorMode")}>
+          <Button type="button" role="tab" aria-selected={editorMode === "visual"} variant={editorMode === "visual" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("visual")}>{commonText("form.visual")}</Button>
           <Button type="button" role="tab" aria-selected={editorMode === "yaml"} variant={editorMode === "yaml" ? "secondary" : "ghost"} size="sm" onClick={() => setEditorMode("yaml")}>YAML</Button>
         </div>}
-        {config.generator && <Button type="button" variant="ghost" size="sm" onClick={() => setTemplateDialog("import")}><Download />从模板导入</Button>}
-        {permissions.has("pipeline-templates.create") && <Button type="button" variant="ghost" size="sm" onClick={() => { setTemplateError(""); setTemplateDialog("export"); }}><Upload />保存为模板</Button>}
+        {config.generator && <Button type="button" variant="ghost" size="sm" onClick={() => setTemplateDialog("import")}><Download />{commonText("form.importTemplate")}</Button>}
+        {permissions.has("pipeline-templates.create") && <Button type="button" variant="ghost" size="sm" onClick={() => { setTemplateError(""); setTemplateDialog("export"); }}><Upload />{commonText("form.saveAsTemplate")}</Button>}
         <div className="ml-auto flex gap-2">
-          <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />保存</Button>
-          {permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />保存并执行</Button>}
+          {headerActions}
+          <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />{commonText("common.save")}</Button>
+          {permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />{commonText("form.saveAndRun")}</Button>}
         </div>
       </header>
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3 sm:px-4">
@@ -280,23 +285,23 @@ export function ResourceForm<T extends Record<string, unknown>>({
       <Dialog.Root open={templateDialog !== null} onOpenChange={open => { if (!open && !templateBusy) setTemplateDialog(null); }}><Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
-          <Dialog.Title className="text-lg font-semibold">{templateDialog === "import" ? "从模板导入" : "保存为模板"}</Dialog.Title>
-          <Dialog.Description className="mt-2 text-sm text-muted-foreground">{templateDialog === "import" ? "选择模板并生成配置到当前流水线。" : "将当前流水线配置保存为可复用模板。"}</Dialog.Description>
+          <Dialog.Title className="text-lg font-semibold">{templateDialog === "import" ? commonText("form.importTemplate") : commonText("form.saveAsTemplate")}</Dialog.Title>
+          <Dialog.Description className="mt-2 text-sm text-muted-foreground">{templateDialog === "import" ? commonText("form.importTemplateHelp") : commonText("form.saveTemplateHelp")}</Dialog.Description>
           {templateDialog === "import" && config.generator && <div className="mt-4"><FormGenerator config={config.generator} compactWhenUnused={false} listMode report={reportOptions} onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }} /></div>}
           {templateDialog === "export" && <div className="mt-4 space-y-4">
-            <AutoField label="模板名称" className="block space-y-2 text-sm"><Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></AutoField>
-            <AutoField label="说明" className="block space-y-2 text-sm"><Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></AutoField>
+            <AutoField label={commonText("form.templateName")} className="block space-y-2 text-sm"><Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></AutoField>
+            <AutoField label={commonText("common.description")} className="block space-y-2 text-sm"><Input value={templateDescription} onChange={event => setTemplateDescription(event.target.value)} /></AutoField>
             {templateError && <p role="alert" className="text-sm text-destructive">{templateError}</p>}
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>取消</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>{commonText("common.cancel")}</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
               setTemplateBusy(true); setTemplateError("");
               try {
                 const content = JSON.stringify({ engine: "github-actions", workflow: draft.definition, executor_bindings: draft.executor_bindings ?? [], checkout_bindings: draft.checkout_bindings ?? [], graph_layout: draft.graph_layout ?? {} });
                 await createResource(workspace, "pipeline-templates", { name: templateName.trim(), description: templateDescription, content, parameters: "[]" });
-                setTemplateDialog(null); toast.success("模板已保存");
+                setTemplateDialog(null); toast.success(commonText("form.templateSaved"));
               }
               catch (cause) { setTemplateError(errorText(cause)); }
               finally { setTemplateBusy(false); }
-            }}>{templateBusy ? "保存中…" : "保存模板"}</Button></div>
+            }}>{templateBusy ? commonText("common.saving") : commonText("form.saveTemplate")}</Button></div>
           </div>}
         </Dialog.Content>
       </Dialog.Portal></Dialog.Root>
@@ -313,11 +318,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
       )}
 
       {readOnly && showViewNavigation && <div className="flex flex-wrap items-center gap-2 border-b pb-4">
-        {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <Button asChild size="sm"><a href={href({ ...route, mode: "edit" }, {})}>编辑</a></Button>}
+        {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <Button asChild size="sm"><a href={href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button>}
       </div>}
 
       {pendingAction && <ResourceActionDialog action={pendingAction} row={draft as T} workspace={workspace} permissions={permissions} onClose={() => setPendingAction(undefined)} onDone={() => { setPendingAction(undefined); if(route.id) void getResource<T>(workspace,config.resource,route.id,config.endpoint).then(setDraft).catch(cause=>setError(errorText(cause))); }} />}
-      {pendingDelete && <DeleteConfirmDialog action={pendingDelete.label} target={String(draft.name ?? draft.title ?? draft.email ?? route.id ?? "当前记录")} onClose={() => setPendingDelete(undefined)} onConfirm={async () => {
+      {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.label, pendingDelete.labelKey)} target={String(draft.name ?? draft.title ?? draft.email ?? route.id ?? commonText("common.record"))} onClose={() => setPendingDelete(undefined)} onConfirm={async () => {
         if (pendingDelete.parameters?.(draft as T).length) { setPendingAction(pendingDelete); return; }
         setSaving(true); setError("");
         try { await pendingDelete.action?.(draft as T); if (route.id) setDraft(await getResource<T>(workspace, config.resource, route.id, config.endpoint)); }
@@ -331,13 +336,13 @@ export function ResourceForm<T extends Record<string, unknown>>({
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
-          <section key={section.title ?? index} aria-label={section.title ?? (readOnly ? index === 0 ? "基本信息" : "其他信息" : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : "space-y-4"}>
+          <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : "space-y-4"}>
             {(section.title || readOnly) && (
               <div className={readOnly ? "detail-section-title" : "mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground"}><h2 className="min-w-0 flex-1">
-                {section.title ?? (index === 0 ? "基本信息" : "其他信息")}
+                {configText(section.title, section.titleKey) || (index === 0 ? commonText("common.basic") : commonText("common.other"))}
               </h2>{readOnly && section.title && visibleViewActions.filter(action => action.section === section.title).map(renderViewAction)}</div>
             )}
-            <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: field.label, type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
+            <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: configText(field.label, field.labelKey), type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
           </section>
         );
       };
@@ -347,14 +352,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
       const sections = config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === active);
       const tabs = sections.filter(({ section }) => section.tab);
       return <div className="flex flex-col gap-6 md:flex-row">
-        <nav aria-label="配置分类" className="flex shrink-0 gap-1 md:w-40 md:flex-col">
+        <nav aria-label={commonText("form.categories")} className="flex shrink-0 gap-1 md:w-40 md:flex-col">
           {groups.map(name => <button key={name} type="button" aria-current={name === active ? "page" : undefined} onClick={() => setGroup(name)}
-            className={cn("rounded px-3 py-2 text-left text-sm", name === active ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50")}>{name}</button>)}
+            className={cn("rounded px-3 py-2 text-left text-sm", name === active ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50")}>{configText(name, config.sections.find(section => section.group === name)?.groupKey)}</button>)}
         </nav>
         <div className="min-w-0 flex-1 space-y-6">
           {sections.filter(({ section }) => !section.tab).map(({ section, index }) => renderSection(section, index))}
           {tabs.length > 0 && <Tabs key={active} defaultValue={tabs[0]!.section.tab}>
-            <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{section.tab}</TabsTrigger>)}</TabsList>
+            <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{configText(section.tab, section.tabKey)}</TabsTrigger>)}</TabsList>
             {tabs.map(({ section, index }) => <TabsContent key={section.tab} value={section.tab!} className="pt-2">{renderSection(section, index)}</TabsContent>)}
           </Tabs>}
         </div>
@@ -364,10 +369,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
       {!readOnly && <div className="flex gap-2">
             <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
-              {creating ? config.resource === "hosts" ? "添加主机" : "创建" : "保存"}
+              {creating ? config.resource === "hosts" ? commonText("form.addHost") : commonText("common.create") : commonText("common.save")}
             </Button>
-            {onCancel ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>取消</Button> : <Button type="button" variant="outline" asChild>
-              <a href={backToList}>取消</a>
+            {onCancel ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>{commonText("common.cancel")}</Button> : <Button type="button" variant="outline" asChild>
+              <a href={backToList}>{commonText("common.cancel")}</a>
             </Button>}
       </div>}
     </AutoForm>
@@ -381,6 +386,7 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
   report: (key: string, blocked: boolean) => void;
   onGenerated: (value: Partial<T>) => void;
 }) {
+  useCommonTranslation();
   const [id, setId] = useState(() => new URLSearchParams(location.search).get("template") ?? "");
   const [attempt, setAttempt] = useState(0);
   const [template, setTemplate] = useState<Awaited<ReturnType<typeof config.load>>>();
@@ -402,21 +408,21 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
   }, [id, attempt, config]);
   useEffect(() => { report("$generator", !!id && (!generated || busy)); return () => report("$generator", false); }, [id, generated, busy, report]);
   const compact = compactWhenUnused && !id;
-  return <section aria-label="从模板生成" className={cn(compact ? "flex flex-wrap items-center gap-3" : listMode ? "space-y-4" : "space-y-4 rounded-md border p-4")}>
-    {!listMode && <h2 className={cn("font-medium", compact && "text-sm")}>从模板生成配置</h2>}
-    {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label="模板列表">
-      {optionsLoading && <p className="py-3 text-sm text-muted-foreground">正在加载模板…</p>}
-      {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">暂无模板</p>}
-      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{option.label}</button>)}
-    </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>模板</span>} className="flex min-w-0 flex-col gap-2 text-sm">
+  return <section aria-label={commonText("form.fromTemplate")} className={cn(compact ? "flex flex-wrap items-center gap-3" : listMode ? "space-y-4" : "space-y-4 rounded-md border p-4")}>
+    {!listMode && <h2 className={cn("font-medium", compact && "text-sm")}>{commonText("form.fromTemplateHeading")}</h2>}
+    {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label={commonText("form.templateList")}>
+      {optionsLoading && <p className="py-3 text-sm text-muted-foreground">{commonText("form.loadingTemplates")}</p>}
+      {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
+      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{configText(option.label, option.labelKey)}</button>)}
+    </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>{commonText("common.template")}</span>} className="flex min-w-0 flex-col gap-2 text-sm">
       <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
-        <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder="选择模板" /></SelectTrigger>
-        <SelectContent><SelectItem value="__none">不使用模板</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+        <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder={commonText("form.selectTemplate")} /></SelectTrigger>
+        <SelectContent><SelectItem value="__none">{commonText("form.noTemplate")}</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
       </Select>
     </AutoField>}
     {(error || optionsError) && <p role="alert" className="text-sm text-destructive">{error || optionsError}</p>}
     {id && <>
-      {template && <><p className="text-sm text-muted-foreground">{template.name} · 版本 {template.version}</p>
+      {template && <><p className="text-sm text-muted-foreground">{template.name} · {commonText("common.version")} {template.version}</p>
         <div className="grid gap-4 sm:grid-cols-2">{template.fields.map(field => <Field key={`${id}/${template.version}/${field.key}`} field={field} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={new Set<string>()} reportOptions={ignoreOptions} onChange={value => { setGenerated(false); setValues(current => ({ ...current, [field.key]: value })); }} />)}</div>
       </>}
       <div className="flex gap-2"><Button type="button" disabled={busy || !template} onClick={async () => {
@@ -424,8 +430,8 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
         try { const result = await config.generate(id, template.version, values); onGenerated(result); setGenerated(true); }
         catch (cause) { setError(errorText(cause)); setGenerated(false); }
         finally { setBusy(false); }
-      }}>{busy ? "处理中…" : "生成配置"}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>重新载入模板</Button></div>
-      <p role="status" className="text-sm text-muted-foreground">{generated ? "配置已填入下方编辑器，请检查并确认创建。后续修改模板不会影响已创建对象。" : "填写参数并生成配置后，再确认创建。"}</p>
+      }}>{busy ? commonText("common.processing") : commonText("form.generate")}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button></div>
+      <p role="status" className="text-sm text-muted-foreground">{generated ? commonText("form.generatedHelp") : commonText("form.generateHelp")}</p>
     </>}
   </section>;
 }
@@ -434,36 +440,37 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
   field: FormField<T>; value: unknown; stored: boolean; creating: boolean; asText: boolean;
   readOnly: boolean; draft: Partial<T>; permissions: Set<string>; onChange: (value: unknown) => void;
 }) {
+  useCommonTranslation();
+  field = { ...field, label: configText(field.label, field.labelKey), ...(field.helpKey ? { help: commonText(field.helpKey) } : {}), ...(field.placeholderKey ? { placeholder: commonText(field.placeholderKey) } : {}) };
   const [revealed, setRevealed] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const canReveal = !!field.reveal && permissions.has(field.reveal.permission);
   if (asText) return <Wrapper field={field}>
     <span className="text-sm font-medium">{field.label}</span>
-    <p className="text-sm text-muted-foreground">{stored ? "已设置" : "未设置"}</p>
+    <p className="text-sm text-muted-foreground">{stored ? commonText("common.set") : commonText("common.notSet")}</p>
     {canReveal && stored && <Button type="button" variant="outline" disabled={busy} onClick={async () => {
       if (revealed !== undefined) { setRevealed(undefined); return; }
       setBusy(true); setError("");
       try { setRevealed(await field.reveal!.action(draft)); }
       catch (cause) { setError(errorText(cause)); }
       finally { setBusy(false); }
-    }}>{busy ? "正在读取…" : revealed === undefined ? "查看明文（记录审计）" : "隐藏明文"}</Button>}
-    {canReveal && revealed !== undefined && <pre aria-label="变量明文" className="whitespace-pre-wrap break-all rounded-md border p-3 font-mono text-sm">{revealed === "" ? "（空字符串）" : revealed}</pre>}
+    }}>{busy ? commonText("form.reading") : revealed === undefined ? commonText("form.reveal") : commonText("form.hidePlaintext")}</Button>}
+    {canReveal && revealed !== undefined && <pre aria-label={commonText("form.plaintext")} className="whitespace-pre-wrap break-all rounded-md border p-3 font-mono text-sm">{revealed === "" ? commonText("form.emptyString") : revealed}</pre>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </Wrapper>;
   const replacing = creating || value !== undefined;
   return <Wrapper field={field}>
     {!creating && <label className="flex items-center gap-2 text-sm">
       <Checkbox checked={replacing} disabled={readOnly} onCheckedChange={(checked) => onChange(checked ? "" : undefined)} />
-      替换{field.label}（不勾选则保留原值）
-    </label>}
-    {!creating && <p className="text-xs text-muted-foreground">{stored ? "已设置密钥" : "尚未设置密钥"}</p>}
+      {commonText("form.replace")}{field.label}{commonText("form.retainValue")}</label>}
+    {!creating && <p className="text-xs text-muted-foreground">{stored ? commonText("form.secretSet") : commonText("form.secretMissing")}</p>}
     {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     {replacing && <AutoField label={<>{field.label}</>} className="flex flex-col gap-1.5 text-sm font-medium">
 
       <textarea className="min-h-24 rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} readOnly={readOnly}
-        autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? "允许留空；空白和换行会原样保存"} />
+        autoComplete="off" spellCheck={false} placeholder={field.placeholder ?? commonText("form.allowEmpty")} />
     </AutoField>}
   </Wrapper>;
 }
@@ -499,7 +506,16 @@ function Field<T>({
   editorMode?: "visual" | "yaml";
   onEditorModeChange?: (mode: "visual" | "yaml") => void;
 }) {
-  const { options, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
+  useCommonTranslation();
+  const { options: rawOptions, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
+  const options = rawOptions.map(option => ({ ...option, label: configText(option.label, option.labelKey), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
+  if (field.type === "multiselect" && Array.isArray(value)) {
+    for (const selected of value.map(String)) {
+      if (!options.some(option => option.value === selected))
+        options.push({ value: selected, label: selectDisplay(selected, { options: [] }) });
+    }
+  }
+  field = { ...field, label: configText(field.label, field.labelKey), ...(field.helpKey ? { help: commonText(field.helpKey) } : {}), ...(field.placeholderKey ? { placeholder: commonText(field.placeholderKey) } : {}), ...(field.createOption ? { createOption: { ...field.createOption, label: configText(field.createOption.label, field.createOption.labelKey) } } : {}) };
   const [creatingOption, setCreatingOption] = useState(false);
   const [optionSearch, setOptionSearch] = useState("");
   useEffect(() => {
@@ -509,7 +525,7 @@ function Field<T>({
   const reportManifest = useCallback((blocked: boolean) => reportOptions(`$manifest:${field.key}`, blocked), [field.key, reportOptions]);
   const reportCheckout = useCallback((blocked: boolean) => reportOptions(`$checkout:${field.key}`, blocked), [field.key, reportOptions]);
   const text = String(value ?? "");
-  if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}，请刷新页面重试。</p></Wrapper>;
+  if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}{commonText("form.refreshRetry")}</p></Wrapper>;
 
   const label = (
     <span className="text-sm font-medium">
@@ -522,18 +538,22 @@ function Field<T>({
     return <SecretField field={field} value={value} stored={stored} creating={creating}
       asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
-  if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">正在载入{field.label}选项…</p></Wrapper>;
+  if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">{commonText("form.loadingOptions", { name: field.label })}</p></Wrapper>;
+
+  if (field.type === "custom" && field.render) return <Wrapper field={field}>{field.render({ workspace, draft, readOnly, onPatch: onChange, onValidityChange: reportManifest })}</Wrapper>;
 
   if (field.type === "actions-editor") return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={draft} options={options} readOnly={readOnly} fillHeight={fillHeight} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
   if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
+  if (field.type === "connection-repositories") return <CodeInsightRepositories workspace={workspace} value={value} enabled={(draft as Record<string, unknown>).enabled !== false} readOnly={readOnly} permissions={permissions} onChange={onChange} onValidityChange={reportManifest} />;
+  if (field.type === "author-aliases") return <CodeInsightAliases value={value} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />;
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "manifest") return <Wrapper field={field}><ManifestEditor value={text} mode={String((draft as Record<string, unknown>).mode ?? "compose")} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} workspace={workspace} /></Wrapper>;
   if (field.type === "cron") return <Wrapper field={field}><CronEditor value={text} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />{field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}</Wrapper>;
 
   if (field.type === "multiselect") {
-    const selected = new Set(Array.isArray(value) ? value as string[] : []);
+    const selected = new Set(Array.isArray(value) ? value.map(String) : []);
     if (asText) return <Wrapper field={field}>{label}<p className="text-sm">{options.filter(option => selected.has(option.value)).map(option => option.label).join("、") || "—"}</p></Wrapper>;
     const toggle = (key: string, checked: boolean) => {
       const next = new Set(selected);
@@ -548,11 +568,11 @@ function Field<T>({
       onChange([...next]);
     };
     return <Wrapper field={field}><fieldset className="space-y-3"><legend>{label}</legend>
-      {field.createOption && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={`搜索${field.label}`} placeholder={`搜索${field.label}`} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
-      {!options.length && <p className="text-sm text-muted-foreground">暂无可选{field.label}{field.createOption && permissions.has(field.createOption.permission) ? "，可在此新建。" : "，请联系有权限的成员创建。"}</p>}
-      {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
-      {[...new Set(options.filter(o => o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? "选项"))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
-        {options.filter(o => (o.group ?? "选项") === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.label}</label>)}
+      {field.createOption && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={commonText("form.searchField", { name: field.label })} placeholder={commonText("form.searchField", { name: field.label })} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
+      {!options.length && <p className="text-sm text-muted-foreground">{commonText("form.noOptions")}{field.label}{field.createOption && permissions.has(field.createOption.permission) ? commonText("form.canCreate") : commonText("form.askCreator")}</p>}
+      {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, labelKey:field.createOption.labelKey, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
+      {[...new Set(options.filter(o => o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
+        {options.filter(o => (o.group ?? commonText("common.option")) === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{configText(option.label, option.labelKey)}</label>)}
       </div></div>)}
       {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     </fieldset></Wrapper>;
@@ -570,7 +590,7 @@ function Field<T>({
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-mono font-medium">{record.title(item) || "—"}</span>
             {record.meta && <span className="text-xs text-muted-foreground">{record.meta(item)}</span>}
-            {href && <a className="text-xs text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">打开</a>}
+            {href && <a className="text-xs text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">{commonText("common.open")}</a>}
           </div>
           {body && <p className="mt-2 whitespace-pre-wrap break-words">{body}</p>}
         </li>;
@@ -588,9 +608,9 @@ function Field<T>({
           {href ? (
             <a className="text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">{href}</a>
           ) : field.type === "switch" ? (
-            value ? "是" : "否"
+            value ? commonText("common.yes") : commonText("common.no")
           ) : field.type === "select" ? (
-            (options.find((option) => option.value === text)?.label ?? (text || "—"))
+            field.display ? shown || "—" : selectDisplay(value, { options, ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}) })
           ) : (
             shown || "—"
           )}
@@ -601,11 +621,11 @@ function Field<T>({
 
   return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
     <div className="flex min-w-0 items-start gap-2">
-      <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type, config: { options, ...(field.min === undefined ? {} : { min: field.min }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
+      <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type === "custom" ? "text" : field.type, config: { options, ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}), ...(field.min === undefined ? {} : { min: field.min }), ...(field.max === undefined ? {} : { max: field.max }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
       {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}
     </div>
-    {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">暂无可选{field.label}，可在此添加。</p>}
-    {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{ label: field.createOption.label, parameters: () => field.createOption!.fields, action: async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange(added.value); } }} />}
+    {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">{commonText("form.noOptions")}{field.label}{commonText("form.canAdd")}</p>}
+    {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{ label: field.createOption.label, labelKey: field.createOption.labelKey, parameters: () => field.createOption!.fields, action: async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange(added.value); } }} />}
   </AutoField>;
 
 }
@@ -624,6 +644,7 @@ const Wrapper = <T,>({
 export function ResourceActionDialog<T>({ action, row, workspace, permissions, onClose, onDone }: {
  action: RowAction<T>; row: T; workspace: string; permissions: Set<string>; onClose: () => void; onDone: () => void;
 }) {
+  useCommonTranslation();
  const [values,setValues]=useState<Record<string,unknown>>(() => action.initialValues?.(row) ?? {});
  const [blocked,setBlocked]=useState<Record<string,boolean>>({});
  const [busy,setBusy]=useState(false),[error,setError]=useState("");
@@ -633,15 +654,15 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
  return <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)onClose();}}><Dialog.Portal>
   <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
   <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
-   <Dialog.Title className="text-lg font-semibold">{action.label}</Dialog.Title>
-   <Dialog.Description className="mt-2 text-sm text-muted-foreground">{action.description ?? "确认以下执行参数后开始操作。"}</Dialog.Description>
+   <Dialog.Title className="text-lg font-semibold">{configText(action.label, action.labelKey)}</Dialog.Title>
+   <Dialog.Description className="mt-2 text-sm text-muted-foreground">{configText(action.description, action.descriptionKey) || commonText("form.actionHelp")}</Dialog.Description>
    <AutoForm className="mt-4 space-y-4" onSubmit={async event=>{
     event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
    }}>
     {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),[field.key]:value}))} />)}
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
-    <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>取消</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?"处理中…":"确认"+action.label}</Button></div>
+    <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?commonText("common.processing"):commonText("form.confirmAction", { action: configText(action.label, action.labelKey) })}</Button></div>
    </AutoForm>
   </Dialog.Content>
  </Dialog.Portal></Dialog.Root>;

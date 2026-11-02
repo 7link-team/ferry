@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
     def request(c, path, body=None, method=None, expected=200):
         req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
         raw = response.read()
@@ -66,6 +66,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(guest,'/workspace-memberships',{'code':invitation})
         settings=request(owner,root+'/settings')['items']
         check(len(settings)==5,'five typed settings seeded')
+        import urllib.parse
+        check(request(owner,root+'/settings?q='+urllib.parse.quote('默认每页条数'))['total']==1,
+            'builtin settings searchable by displayed names')
         concurrent=next(r for r in settings if r['key']=='pipeline_concurrent_runs')
         check((concurrent['value'],concurrent['default'],concurrent['min'])==(10,10,0),'pipeline concurrency defaults to 10 runs, 0 meaning unlimited')
         event_retention=next(r for r in settings if r['key']=='repository_event_retention_days')
@@ -104,6 +107,56 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(True,'builtin machine states protected and custom dictionaries deletable')
         events=request(owner,root+'/activity?resource=dictionaries')['items']
         check(len(events)==4,'dictionary writes audited')
+        typed_samples = {
+            'text': 'A typed value', 'num': 0, 'tab': [{'key':'a','label':'Alpha'}],
+            'selection': [{'value':'a','label':'Alpha'}], 'image': [], 'video': [], 'file': [],
+            'code': 'print(1)', 'markdown': '# Heading', 'html': '<p>HTML</p>',
+            'richtext': '<p>Rich text</p>', 'json': {'enabled':True,'count':2},
+        }
+        typed_ids = {}
+        for resource in ['dictionaries', 'settings']:
+            for kind, value in typed_samples.items():
+                typed_body = {'key':'typed_'+kind,'name':'Typed '+kind,'description':'Typed acceptance',
+                    'category':'acceptance','value_type':kind,'value_json':json.dumps(value),
+                    'schema_json':json.dumps({'min':0,'max':0,'decimals':0} if kind=='num' else {})}
+                typed_id=request(owner,root+'/'+resource,typed_body,expected=201)['id']
+                typed_url=root+'/'+resource+'/'+typed_id
+                typed_ids[(resource,kind)]=typed_id
+                row=request(owner,typed_url)
+                check(row['value_type']==kind and row['category']=='acceptance'
+                    and json.loads(row['value_json'])==value,resource+' '+kind+' typed value round trip')
+                request(guest,typed_url,dict(typed_body,version=1),'PATCH',403)
+                request(outsider,f'/workspaces/{workspace_other}/'+resource+'/'+typed_id,expected=404)
+                request(owner,typed_url,dict(typed_body,version=1,description='Updated'),'PATCH')
+                request(owner,typed_url,dict(typed_body,version=1),'PATCH',409)
+            filtered=request(owner,root+'/'+resource+'?category=acceptance&value_type=json')
+            check(filtered['total']==1 and filtered['items'][0]['key']=='typed_json',resource+' filters category and type')
+            for sort_field in ['key','name','category']:
+                for direction in ['','-']:
+                    request(owner,root+'/'+resource+'?sort='+direction+sort_field)
+            check(True,resource+' supports every frontend ascending/descending sort')
+            invalid={'key':'invalid_typed','name':'Invalid','category':'acceptance','value_type':'num',
+                'value_json':'-1','schema_json':'{"min":0}'}
+            request(owner,root+'/'+resource,invalid,expected=400)
+            request(owner,root+'/'+resource,dict(invalid,value_json='1',schema_json='{"max":0}'),expected=400)
+            request(owner,root+'/'+resource,dict(invalid,value_json='1.25',schema_json='{"decimals":1}'),expected=400)
+            request(owner,root+'/'+resource,dict(invalid,value_type='json',value_json='{broken'),expected=400)
+            request(owner,root+'/'+resource,dict(invalid,value_type='image',value_json='[{"url":"javascript:alert(1)"}]',schema_json='{}'),expected=400)
+            request(owner,root+'/'+resource,dict(invalid,value_type='file',value_json='[{"id":"fake","url":"/api/fake","size":1}]',schema_json='{}'),expected=400)
+            check(True,resource+' validates zero bounds, decimals, JSON and media references')
+            remove_url=root+'/'+resource+'/'+typed_ids[(resource,'text')]
+            request(guest,remove_url,method='DELETE',expected=403)
+            request(owner,remove_url,method='DELETE',expected=204)
+            request(owner,remove_url,expected=404)
+        current_setting=request(owner,root+'/settings/'+sid)
+        request(owner,root+'/settings/'+sid,dict(current_setting,value_type='text',value_json='"unsafe"'),'PATCH',400)
+        request(owner,root+'/settings/'+sid,dict(current_setting,value_json='999',schema_json='{}'),'PATCH',400)
+        request(owner,root+'/settings/'+sid,dict(current_setting,name='Changed'),'PATCH',400)
+        request(owner,root+'/settings/'+sid,dict(current_setting,category='Changed'),'PATCH',400)
+        request(owner,root+'/settings/'+sid,dict(current_setting,value_json='37',schema_json='{}'),'PATCH',400)
+        request(owner,root+'/settings/'+sid,method='DELETE',expected=400)
+        check(request(guest,root+'/preferences')['default_page_size']==37,'builtin setting values and constraints remain authoritative')
+        check('typed_json' not in request(guest,root+'/preferences')['dictionaries'],'custom typed contents not exposed in member preferences')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             import sqlite3
             host=request(owner,root+'/nodes',{'name':'Offline','connection':'runner'},expected=201)['id']
@@ -131,6 +184,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 conn.execute('UPDATE deployments SET state=?,current_revision=? WHERE id=?',('succeeded',102,app))
                 conn.execute('UPDATE deployments SET state=? WHERE id=?',('needs-review',uncertain))
             proc=launch()
+            for resource in ['settings','dictionaries']:
+                persisted=request(owner,root+'/'+resource+'/'+typed_ids[(resource,'json')])
+                check(json.loads(persisted['value_json'])==typed_samples['json'],resource+' typed contents persist across restart')
             check(request(owner,root+'/pipeline-runs/'+rid)['state']=='failed','default retention keeps old history across restart')
             retention=next(r for r in request(owner,root+'/settings')['items'] if r['key']=='history_retention_days')
             request(owner,root+'/settings/'+retention['id'],{'version':1,'value':1},'PATCH')

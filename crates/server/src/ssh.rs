@@ -68,8 +68,9 @@ impl Credential {
     /// written anywhere.
     pub async fn load(s: &AppState, workspace_id: &Id, credential_id: &Id) -> Result<Self> {
         if *credential_id == Id::from(0) {
-            return Err(ApiError::bad(
-                "这台主机还没有选择登录凭据，请在「凭据」里新建一条，再到主机上选用。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.credentialRequired"),
             ));
         }
         let (kind, _username, secret) =
@@ -80,9 +81,10 @@ impl Credential {
                 pem: secret,
                 passphrase: None,
             }),
-            other => Err(ApiError::bad(format!(
-                "凭据类型「{other}」不能用于 SSH 登录，请改用密码或 SSH 私钥。"
-            ))),
+            other => Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.credentialKind").with("kind", other),
+            )),
         }
     }
 }
@@ -162,7 +164,12 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
             .filter(hosts::Column::JumpHostId.eq(0))
             .one(&s.db)
             .await?
-            .ok_or_else(|| ApiError::bad("跳板主机不存在或不再可直连。"))?;
+            .ok_or_else(|| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("ssh.jumpUnavailable"),
+                )
+            })?;
         let jump_host = Host {
             id: Id::from(jump.id),
             workspace_id: host.workspace_id,
@@ -183,12 +190,12 @@ pub async fn open(s: &AppState, host: &Host) -> Result<Box<dyn HostChannel>> {
             .channel_open_direct_tcpip(host.address.clone(), u32::from(host.port), "127.0.0.1", 0)
             .await
             .map_err(|error| {
-                ApiError(
+                ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    format!(
-                        "跳板主机无法连接目标 {}:{}：{error}",
-                        host.address, host.port
-                    ),
+                    crate::i18n::Message::new("ssh.jumpConnect")
+                        .with("address", &host.address)
+                        .with("port", host.port.to_string())
+                        .with("error", error.to_string()),
                 )
             })?
             .into_stream();
@@ -230,7 +237,17 @@ impl SshChannel {
         let stream =
             tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(&address))
                 .await
-                .map_err(|_| unreachable(&address, "连接超时"))?
+                .map_err(|_| {
+                    ApiError::localized(
+                        StatusCode::BAD_GATEWAY,
+                        crate::i18n::Message::new("ssh.unreachable")
+                            .with("address", &address)
+                            .with_message(
+                                "detail",
+                                crate::i18n::Message::new("ssh.connectTimeout"),
+                            ),
+                    )
+                })?
                 .map_err(|error| unreachable(&address, &error.to_string()))?;
 
         Self::connect_stream(host, credential, stream, None).await
@@ -261,17 +278,18 @@ impl SshChannel {
         )
         .await
         .map_err(|error| match error {
-            Handshake::HostKeyChanged { expected, actual } => ApiError(
+            Handshake::HostKeyChanged { expected, actual } => ApiError::localized(
                 StatusCode::CONFLICT,
-                format!(
-                    "主机 {address} 的密钥指纹已改变（记录为 {expected}，实际为 {actual}），\
-                     为防止中间人攻击已拒绝连接。若确认该主机重装过系统或更换过机器，\
-                     请先清空主机记录里的指纹再重新连接。"
-                ),
+                crate::i18n::Message::new("ssh.hostKeyChanged")
+                    .with("address", &address)
+                    .with("expected", expected)
+                    .with("actual", actual),
             ),
-            Handshake::Ssh(error) => ApiError(
+            Handshake::Ssh(error) => ApiError::localized(
                 StatusCode::BAD_GATEWAY,
-                format!("与 {address} 的 SSH 握手失败：{error}。请确认该端口上运行的是 SSH 服务。"),
+                crate::i18n::Message::new("ssh.handshakeFailed")
+                    .with("address", &address)
+                    .with("error", error.to_string()),
             ),
         })?;
 
@@ -287,9 +305,11 @@ impl SshChannel {
                     None => PrivateKey::from_openssh(pem),
                 }
                 .map_err(|error| {
-                    ApiError::bad(format!(
-                        "私钥无法解析（{error}），请确认是 OpenSSH 格式且口令正确。"
-                    ))
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("ssh.privateKeyInvalid")
+                            .with("error", error.to_string()),
+                    )
                 })?;
                 // RSA 私钥要挑签名哈希，不挑就落回 SHA-1，而现在多数 sshd
                 // 已经不接受 ssh-rsa 了。非 RSA 的密钥这里会被忽略。
@@ -308,18 +328,19 @@ impl SshChannel {
             }
         }
         .map_err(|error| {
-            ApiError(
+            ApiError::localized(
                 StatusCode::BAD_GATEWAY,
-                format!("向 {address} 提交登录凭据时连接中断：{error}。"),
+                crate::i18n::Message::new("ssh.authenticationInterrupted")
+                    .with("address", &address)
+                    .with("error", error.to_string()),
             )
         })?;
         if !result.success() {
-            return Err(ApiError(
+            return Err(ApiError::localized(
                 StatusCode::BAD_GATEWAY,
-                format!(
-                    "主机 {address} 拒绝了账号 {} 的登录凭据，请检查用户名、密码或私钥。",
-                    host.username
-                ),
+                crate::i18n::Message::new("ssh.authenticationRejected")
+                    .with("address", &address)
+                    .with("username", &host.username),
             ));
         }
 
@@ -334,9 +355,9 @@ impl SshChannel {
 
     async fn session_channel(&self) -> Result<Channel<client::Msg>> {
         self.session.channel_open_session().await.map_err(|error| {
-            ApiError(
+            ApiError::localized(
                 StatusCode::BAD_GATEWAY,
-                format!("无法在该连接上打开会话：{error}。"),
+                crate::i18n::Message::new("ssh.sessionOpen").with("error", error.to_string()),
             )
         })
     }
@@ -349,17 +370,17 @@ impl SshChannel {
             .request_subsystem(true, "sftp")
             .await
             .map_err(|error| {
-                ApiError(
+                ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    format!("无法请求 SFTP 子系统：{error}。"),
+                    crate::i18n::Message::new("ssh.sftpRequest").with("error", error.to_string()),
                 )
             })?;
         SftpSession::new(channel.into_stream())
             .await
             .map_err(|error| {
-                ApiError(
+                ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    format!("主机未能启动 SFTP 子系统（{error}），请确认 sshd 已启用 sftp。"),
+                    crate::i18n::Message::new("ssh.sftpStart").with("error", error.to_string()),
                 )
             })
     }
@@ -379,7 +400,12 @@ fn parse_linux_monitor(output: &str) -> Result<HostMonitor> {
                     .iter()
                     .map(|v| v.parse())
                     .collect::<std::result::Result<_, _>>()
-                    .map_err(|_| ApiError::bad("无法读取主机 CPU 数据。"))?;
+                    .map_err(|_| {
+                        ApiError::localized(
+                            StatusCode::BAD_REQUEST,
+                            crate::i18n::Message::new("ssh.cpuRead"),
+                        )
+                    })?;
                 cpu.push((
                     values.iter().sum::<u64>(),
                     values[3] + values.get(4).copied().unwrap_or(0),
@@ -411,7 +437,10 @@ fn parse_linux_monitor(output: &str) -> Result<HostMonitor> {
     }
     let (Some((Ok(memory_used), Ok(memory_total))), [first, second]) = (memory, cpu.as_slice())
     else {
-        return Err(ApiError::bad("无法读取主机 CPU 或内存数据。"));
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("ssh.metricsRead"),
+        ));
     };
     let elapsed = second.0.saturating_sub(first.0);
     let idle = second.1.saturating_sub(first.1);
@@ -442,27 +471,36 @@ impl HostChannel for SshChannel {
         const WINDOWS: &str = "powershell.exe -NoProfile -Command \"$cpu=(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average; $os=Get-CimInstance Win32_OperatingSystem; $disks=@(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{name=$_.DeviceID;mount=$_.DeviceID;total=[uint64]$_.Size;used=[uint64]($_.Size-$_.FreeSpace)} }); $networks=@(Get-NetAdapter -Physical | Get-NetAdapterStatistics | ForEach-Object { @{name=$_.Name;received=[uint64]$_.ReceivedBytes;transmitted=[uint64]$_.SentBytes} }); @{cpu_percent=[double]$cpu;load1=0.0;memory_used=[uint64](($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)*1024);memory_total=[uint64]($os.TotalVisibleMemorySize*1024);disks=$disks;networks=$networks} | ConvertTo-Json -Compress -Depth 4\"";
         let output = self.exec(WINDOWS, Duration::from_secs(10)).await?;
         if output.code != 0 {
-            return Err(ApiError::bad(
-                "主机监控采集失败，请检查 Linux /proc 或 Windows PowerShell 是否可用。",
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.metricsCollect"),
             ));
         }
-        serde_json::from_str(&output.stdout)
-            .map_err(|_| ApiError::bad("无法解析 Windows 主机监控数据。"))
+        serde_json::from_str(&output.stdout).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.windowsMetricsInvalid"),
+            )
+        })
     }
 
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output> {
         let mut channel = self.session_channel().await?;
         channel.exec(true, command).await.map_err(|error| {
-            ApiError(StatusCode::BAD_GATEWAY, format!("下发命令失败：{error}。"))
+            ApiError::localized(
+                StatusCode::BAD_GATEWAY,
+                crate::i18n::Message::new("ssh.commandSend").with("error", error.to_string()),
+            )
         })?;
         match tokio::time::timeout(timeout, capture(&mut channel)).await {
             Ok(output) => output,
             Err(_) => {
                 // 远端进程还在跑，关掉 channel 让 sshd 回收它。
                 let _ = channel.close().await;
-                Err(ApiError(
+                Err(ApiError::localized(
                     StatusCode::GATEWAY_TIMEOUT,
-                    format!("命令在 {} 秒内没有结束，已中断。", timeout.as_secs()),
+                    crate::i18n::Message::new("ssh.commandTimeout")
+                        .with("seconds", timeout.as_secs().to_string()),
                 ))
             }
         }
@@ -476,10 +514,12 @@ impl HostChannel for SshChannel {
         mut cancel: tokio::sync::watch::Receiver<bool>,
     ) -> Result<i32> {
         let mut channel = self.session_channel().await?;
-        channel
-            .exec(true, command)
-            .await
-            .map_err(|_| ApiError::bad("下发流水线命令失败。"))?;
+        channel.exec(true, command).await.map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.pipelineCommand"),
+            )
+        })?;
         let deadline = tokio::time::sleep(timeout);
         tokio::pin!(deadline);
         let mut stopping = None;
@@ -549,12 +589,16 @@ impl HostChannel for SshChannel {
             )
             .await
             .map_err(|error| {
-                ApiError(StatusCode::BAD_GATEWAY, format!("申请终端失败：{error}。"))
+                ApiError::localized(
+                    StatusCode::BAD_GATEWAY,
+                    crate::i18n::Message::new("ssh.terminalRequest")
+                        .with("error", error.to_string()),
+                )
             })?;
         channel.request_shell(true).await.map_err(|error| {
-            ApiError(
+            ApiError::localized(
                 StatusCode::BAD_GATEWAY,
-                format!("启动远端 shell 失败：{error}。"),
+                crate::i18n::Message::new("ssh.shellStart").with("error", error.to_string()),
             )
         })?;
         Ok(Box::new(SshPty {
@@ -622,7 +666,10 @@ impl HostChannel for SshChannel {
             .await
             .map_err(|error| sftp_failed(path, error))?;
         if meta.file_type().is_dir() {
-            return Err(ApiError::bad("这是一个目录，不能直接下载。"));
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("ssh.directoryDownload"),
+            ));
         }
         let file = sftp
             .open(path)
@@ -706,9 +753,9 @@ impl Pty for SshPty {
             .data_bytes(Bytes::copy_from_slice(data))
             .await
             .map_err(|error| {
-                ApiError(
+                ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    format!("向终端写入失败：{error}。"),
+                    crate::i18n::Message::new("ssh.terminalWrite").with("error", error.to_string()),
                 )
             })
     }
@@ -734,9 +781,10 @@ impl Pty for SshPty {
             .window_change(size.cols as u32, size.rows as u32, 0, 0)
             .await
             .map_err(|error| {
-                ApiError(
+                ApiError::localized(
                     StatusCode::BAD_GATEWAY,
-                    format!("调整终端大小失败：{error}。"),
+                    crate::i18n::Message::new("ssh.terminalResize")
+                        .with("error", error.to_string()),
                 )
             })
     }
@@ -797,9 +845,11 @@ fn kind_of(file_type: FileType) -> String {
 }
 
 fn unreachable(address: &str, detail: &str) -> ApiError {
-    ApiError(
+    ApiError::localized(
         StatusCode::BAD_GATEWAY,
-        format!("无法连接到 {address}（{detail}），请检查网络、地址和端口。"),
+        crate::i18n::Message::new("ssh.unreachable")
+            .with("address", address)
+            .with("detail", detail),
     )
 }
 
@@ -808,17 +858,22 @@ fn unreachable(address: &str, detail: &str) -> ApiError {
 fn sftp_failed(path: &str, error: SftpError) -> ApiError {
     match &error {
         SftpError::Status(status) if status.status_code == SftpStatus::NoSuchFile => {
-            ApiError(StatusCode::NOT_FOUND, format!("路径 {path} 不存在。"))
-        }
-        SftpError::Status(status) if status.status_code == SftpStatus::PermissionDenied => {
-            ApiError(
-                StatusCode::FORBIDDEN,
-                format!("没有权限访问 {path}，请检查登录账号在该路径上的权限。"),
+            ApiError::localized(
+                StatusCode::NOT_FOUND,
+                crate::i18n::Message::new("ssh.pathMissing").with("path", path),
             )
         }
-        _ => ApiError(
+        SftpError::Status(status) if status.status_code == SftpStatus::PermissionDenied => {
+            ApiError::localized(
+                StatusCode::FORBIDDEN,
+                crate::i18n::Message::new("ssh.pathForbidden").with("path", path),
+            )
+        }
+        _ => ApiError::localized(
             StatusCode::BAD_GATEWAY,
-            format!("对 {path} 的文件操作失败：{error}。"),
+            crate::i18n::Message::new("ssh.fileOperation")
+                .with("path", path)
+                .with("error", error.to_string()),
         ),
     }
 }
@@ -826,6 +881,25 @@ fn sftp_failed(path: &str, error: SftpError) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_errors_keep_raw_diagnostics_literal_for_every_reader() {
+        let diagnostic =
+            crate::i18n::store_message(&crate::i18n::Message::new("error.unauthorized"));
+        let error = unreachable("host 原文:22", &diagnostic);
+        assert_eq!(error.0, StatusCode::BAD_GATEWAY);
+        assert_eq!(error.2.as_ref().unwrap().key, "ssh.unreachable");
+        for locale in crate::i18n::Locale::ALL {
+            let displayed = crate::i18n::render_stored(locale, &error.stored());
+            assert!(displayed.contains("host 原文:22"));
+            assert!(displayed.contains(&diagnostic));
+            assert_eq!(displayed, error.render(locale));
+        }
+        assert_ne!(
+            error.render(crate::i18n::Locale::EnUs),
+            error.render(crate::i18n::Locale::JaJp)
+        );
+    }
 
     #[test]
     fn linux_monitor_reads_cpu_memory_disks_and_nics() {
@@ -1265,7 +1339,9 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            rejected.1.contains("拒绝了账号"),
+            rejected
+                .render(crate::i18n::Locale::ZhCn)
+                .contains("拒绝了账号"),
             "认证失败的提示应说明是凭据问题，实际：{}",
             rejected.1
         );
@@ -1283,7 +1359,9 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            unreachable.1.contains("无法连接到"),
+            unreachable
+                .render(crate::i18n::Locale::ZhCn)
+                .contains("无法连接到"),
             "连不上的提示应说明是网络问题，实际：{}",
             unreachable.1
         );
@@ -1324,7 +1402,13 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(error.0, StatusCode::CONFLICT);
-        assert!(error.1.contains("密钥指纹已改变"), "{}", error.1);
+        assert!(
+            error
+                .render(crate::i18n::Locale::ZhCn)
+                .contains("密钥指纹已改变"),
+            "{}",
+            error.1
+        );
         assert!(
             error.1.contains(&learned),
             "提示里要带上实际指纹：{}",

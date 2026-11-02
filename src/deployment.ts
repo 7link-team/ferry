@@ -1,3 +1,4 @@
+import { commonText } from "./i18n";
 export interface Deployment {
   id: string; name: string; manifest: string; mode: string; target_kind: string;
   target_ref: string; workdir: string; description: string; state: string;
@@ -12,15 +13,15 @@ export interface Revision {
 export interface VariableBinding { kind?: string; path?: string; template_version?: number; service: string; environment: string; name: string; id: string; version: number; scope: string; scope_ref: string; secret: boolean }
 export interface Preview { target_hashes?: Record<string, string>; variables?: VariableBinding[]; desired: string; current: string; expected_hash: string; preview_token: string; version: number; notice: string }
 export const deploymentActive = (state: string) => state === "queued" || state === "running";
-export const deploymentState = (state: string) => ({ pending: "未开始", skipped: "已跳过", idle: "未部署", queued: "排队中", running: "执行中", succeeded: "成功", failed: "失败", "needs-review": "需核实" }[state] ?? state);
+export const deploymentState = (state: string) => ({ pending: commonText("state.notStarted"), skipped: commonText("state.skipped"), idle: commonText("state.undeployed"), queued: commonText("state.queued"), running: commonText("state.executing"), succeeded: commonText("state.succeeded"), failed: commonText("state.failed"), "needs-review": commonText("state.needsReview") }[state] ?? (state ? commonText("state.unknown", { value: state }) : "—"));
 /** A deterministic, contiguous change hunk. No claim of a minimal multi-hunk diff. */
 export function artifactDiff(before: string, after: string): string {
-  if (before === after) return "产物内容一致。";
+  if (before === after) return commonText("artifact.identical");
   const a = before.split("\n"), b = after.split("\n");
   let start = 0, end = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
   while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
-  return ["--- 目标主机保存的产物", "+++ 待执行产物",
+  return [commonText("artifact.saved"), commonText("artifact.desired"),
     ...a.slice(Math.max(0, start - 2), start).map((s) => `  ${s}`),
     ...a.slice(start, a.length - end).map((s) => `- ${s}`),
     ...b.slice(start, b.length - end).map((s) => `+ ${s}`),

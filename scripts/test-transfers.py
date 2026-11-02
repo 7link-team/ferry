@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     binary = os.environ.get('FERRY_BINARY', 'target/debug/ferry-server')
     def request(c, path, body=None, method=None, expected=200):
         req = urllib.request.Request(base + path, data=json.dumps(body).encode() if body is not None else None,
-            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1'})
+            method=method, headers={'Content-Type': 'application/json', 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN'})
         try: response = c.open(req, timeout=30)
         except urllib.error.HTTPError as e: response = e
         raw = response.read()
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 out=io.StringIO(); writer=csv.DictWriter(out,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows);raw=out.getvalue().encode()
             boundary='transfer-test-boundary'
             body=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="data.{ext}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode()+raw+f'\r\n--{boundary}--\r\n'.encode())
-            req=urllib.request.Request(base+root+'/'+resource+'/imports',data=body,headers={'Content-Type':'multipart/form-data; boundary='+boundary,'X-Ferry-Request':'1'})
+            req=urllib.request.Request(base+root+'/'+resource+'/imports',data=body,headers={'Content-Type':'multipart/form-data; boundary='+boundary,'X-Ferry-Request':'1', 'Accept-Language': 'zh-CN'})
             try: response=c.open(req,timeout=90)
             except urllib.error.HTTPError as e: response=e
             data=json.loads(response.read());assert response.code==status,(response.code,data)
@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         def download(resource,kind='export',fmt='csv',query='',c=owner,status=200):
             resource = {'hosts':'nodes', 'host-groups':'node-groups'}.get(resource, resource)
             kind = {'export':'exports', 'template':'import-template'}.get(kind, kind)
-            req=urllib.request.Request(base+root+'/'+resource+'/'+kind+'?format='+fmt+query,headers={'X-Ferry-Request':'1'})
+            req=urllib.request.Request(base+root+'/'+resource+'/'+kind+'?format='+fmt+query,headers={'X-Ferry-Request':'1', 'Accept-Language': 'zh-CN'})
             try:response=c.open(req,timeout=90)
             except urllib.error.HTTPError as e:response=e
             data=response.read();assert response.code==status,(response.code,data)
@@ -194,6 +194,22 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 check(json.loads(imported['content'])['engine']=='github-actions','legacy CSV pipeline templates convert to Actions')
         source_url='https://example.invalid/team/source.git'
         connection=request(owner,root+'/code-connections',{'name':'Transfer source','provider':'git','url':source_url},expected=201)['id']
+        for resource in ['settings','dictionaries']:
+            for kind, value in [('json',{'enabled':True,'nested':[1,'value']}),('selection',[{'value':'a','label':'Alpha'}])]:
+                typed_body={'key':'typed_export_'+kind,'name':'Typed export '+kind,'description':'Typed transfer',
+                    'category':'transfer_'+kind,'value_type':kind,'value_json':json.dumps(value),'schema_json':'{}'}
+                request(owner,root+'/'+resource,typed_body,expected=201)
+                exported_rows=list(csv.DictReader(io.StringIO(download(resource,query='&category=transfer_'+kind).decode('utf-8-sig'))))
+                check(len(exported_rows)==1 and json.loads(exported_rows[0]['value_json'])==value,
+                    resource+' '+kind+' export retains complete typed value')
+                exported_rows[0]['key']='typed_import_'+kind
+                preview=upload(resource,exported_rows)
+                check(preview['valid'],resource+' '+kind+' typed export can be reimported without stripping columns')
+                imported=commit(resource,preview)['items'][0]['id']
+                actual=request(owner,root+'/'+resource+'/'+imported)
+                check(actual['category']==typed_body['category'] and actual['value_type']==kind
+                    and json.loads(actual['value_json'])==value and json.loads(actual['schema_json'])=={},
+                    resource+' '+kind+' import preserves typed value and metadata')
         actions_yaml='# retained comment\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n      - run: echo imported\n'
         actions_body={'name':'Actions export','definition_format':'github-actions','definition':actions_yaml,'target_kind':'host','target_ref':host,'executor_bindings':[{'job_id':'build','target_kind':'host','target_ref':host,'image':'host'}],'graph_layout':{'build':{'x':12,'y':34}},'checkout_bindings':[{'job_id':'build','step_id':'source','connection_id':connection,'repository_url':source_url,'ref':'release/non-default','path':'source'}]}
         classification_group=request(owner,root+'/pipeline-groups')['items'][0]['id']

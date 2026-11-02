@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { href, parse } from "./router";
+import { setLocale } from "./locale";
+
+beforeEach(() => { localStorage.clear(); history.replaceState({}, "", "/en-US/"); setLocale("en-US", false); });
 
 const workspace = "109124796398174208";
 it("preserves each module through credential list, create, detail and edit links", () => {
@@ -8,7 +11,7 @@ it("preserves each module through credential list, create, detail and edit links
       const path = `/workspaces/${workspace}/credentials${suffix}`;
       const route = parse(path, `?scope=${scope}`);
       expect(route.group).toBe(scope);
-      expect(href(route, {})).toBe(`${path}?scope=${scope}`);
+      expect(href(route, {})).toBe(`/en-US${path}?scope=${scope}`);
     }
   }
   expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("build");
@@ -16,11 +19,11 @@ it("preserves each module through credential list, create, detail and edit links
 it("round trips node workspace URLs without changing snowflake precision", () => {
   const path = `/workspaces/${workspace}/nodes/109174082875949056/workspace`;
   expect(parse(path)).toMatchObject({ workspace, group: "host", item: "hosts", id: "109174082875949056", mode: "workspace" });
-  expect(href(parse(path), {})).toBe(path);
+  expect(href(parse(path), {})).toBe(`/en-US${path}`);
 });
 it("resolves legacy host bookmarks into canonical resource paths", () => {
   for (const path of [`/${workspace}/host/hosts/123/workspace`, `/${workspace}/host/nodes/123/workspace`, `/${workspace}/infrastructure/hosts/123/workspace`]) {
-    expect(href(parse(path), {})).toBe(`/workspaces/${workspace}/nodes/123/workspace`);
+    expect(href(parse(path), {})).toBe(`/en-US/workspaces/${workspace}/nodes/123/workspace`);
   }
 });
 describe("platform route boundary", () => {
@@ -30,8 +33,8 @@ describe("platform route boundary", () => {
   });
   it("round trips list, create, detail and edit pages", () => {
     for (const path of ["/platform/users", "/platform/workspaces/new", "/platform/users/123", "/platform/users/123/edit", "/platform/settings/1/edit"]) {
-      expect(href(parse(path), {})).toBe(path);
-      expect(href(parse(path.replace('/platform/', '/_platform/')), {})).toBe(path);
+      expect(href(parse(path), {})).toBe(`/en-US${path}`);
+      expect(href(parse(path.replace('/platform/', '/_platform/')), {})).toBe(`/en-US${path}`);
     }
   });
 });
@@ -39,16 +42,24 @@ it("uses resource names for pipeline groups and preserves legacy group IDs", () 
   for (const suffix of ['', '/new', '/123', '/123/edit']) {
     const path = `/workspaces/${workspace}/pipeline-groups${suffix}`;
     expect(parse(path)).toMatchObject({ workspace, group: 'build', item: 'pipeline-groups' });
-    expect(href(parse(path), {})).toBe(path);
-    expect(href(parse(`/${workspace}/build/pipelines/groups${suffix}`), {})).toBe(path);
+    expect(href(parse(path), {})).toBe(`/en-US${path}`);
+    expect(href(parse(`/${workspace}/build/pipelines/groups${suffix}`), {})).toBe(`/en-US${path}`);
   }
 });
 it("keeps shared resource menu contexts in query parameters", () => {
   for (const group of ['host', 'build', 'deploy']) {
     const path = href({ workspace, group, item: 'cron-jobs', mode: 'list' }, {});
     const url = new URL(path, 'http://localhost');
-    expect(url.pathname).toBe(`/workspaces/${workspace}/cron-jobs`);
+    expect(url.pathname).toBe(`/en-US/workspaces/${workspace}/cron-jobs`);
     expect(url.searchParams.get('scope')).toBe(group);
     expect(parse(url.pathname, url.search)).toMatchObject({ group, item: 'cron-jobs' });
   }
+});
+
+it("round trips explicit locale deep links and account routes", () => {
+  const route = parse(`/ja-JP/workspaces/${workspace}/nodes/123/edit`, "?page=2");
+  expect(route).toMatchObject({ locale: "ja-JP", workspace, item: "hosts", id: "123", mode: "edit" });
+  expect(href(route, { page: "2" })).toBe(`/ja-JP/workspaces/${workspace}/nodes/123/edit?page=2`);
+  expect(href(parse("/ko-KR/account"), {})).toBe("/ko-KR/account");
+  expect(href(parse("/zh-TW/platform/settings/1/edit"), {})).toBe("/zh-TW/platform/settings/1/edit");
 });

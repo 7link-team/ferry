@@ -34,6 +34,8 @@ export interface FieldConfig {
   config?: {
     placeholder?: string;
     options?: SelectOption[];
+    emptyValues?: readonly (string | number)[];
+    emptyLabel?: string;
     min?: number;
     max?: number;
     minLength?: number;

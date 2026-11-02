@@ -1,4 +1,5 @@
 //! Authenticated provider events and per-connection notification settings.
+use crate::error::{Json, Path, Query};
 use crate::{
     db,
     entities::{
@@ -13,9 +14,8 @@ use crate::{
     workspace::Scope,
 };
 use axum::{
-    Json,
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::State,
     http::{HeaderMap, StatusCode},
 };
 use hmac::{Hmac, Mac};
@@ -30,6 +30,7 @@ use std::{collections::HashMap, time::Duration};
 use subtle::ConstantTimeEq;
 
 mod detail;
+mod git;
 mod polling;
 pub use polling::scheduler;
 
@@ -54,6 +55,7 @@ const KINDS: &[&str] = &[
     "merge",
     "tag.created",
     "tag.deleted",
+    "tag.updated",
 ];
 const HISTORY: Spec = Spec {
     search: &["repository", "reference", "actor"],
@@ -66,8 +68,23 @@ fn supported_events(provider: &str, mode: Mode) -> Vec<&'static str> {
         .iter()
         .copied()
         .filter(|kind| {
-            provider != "git"
-                && (mode == Mode::Poll || provider != "codeup" || !kind.starts_with("repository."))
+            if provider == "git" {
+                mode == Mode::Poll
+                    && matches!(
+                        *kind,
+                        "push"
+                            | "branch.created"
+                            | "branch.deleted"
+                            | "tag.created"
+                            | "tag.deleted"
+                            | "tag.updated"
+                    )
+            } else {
+                *kind != "tag.updated"
+                    && (mode == Mode::Poll
+                        || provider != "codeup"
+                        || !kind.starts_with("repository."))
+            }
         })
         .collect()
 }
@@ -78,6 +95,8 @@ struct Config {
     mode: Mode,
     #[serde(default = "default_poll_minutes")]
     poll_interval_minutes: u32,
+    #[serde(default)]
+    runner_id: String,
     enabled: bool,
     provider: String,
     all_repositories: bool,
@@ -92,6 +111,8 @@ pub struct Body {
     mode: Mode,
     #[serde(default = "default_poll_minutes")]
     poll_interval_minutes: u32,
+    #[serde(default)]
+    runner_id: String,
     version: i64,
     enabled: bool,
     all_repositories: bool,
@@ -112,10 +133,15 @@ fn decode(s: &AppState, row: &monitors::Model) -> Result<Config> {
         &s.vault
             .open_secret(&row.config, &aad(row.workspace_id, row.id))?,
     )
-    .map_err(|_| ApiError::bad("监控配置无法读取。"))
+    .map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.configRead"),
+        )
+    })
 }
 fn view(row: Option<&monitors::Model>, config: &Config, connection: &connections::Model) -> Value {
-    json!({"id":Id::from(connection.id),"name":"监控通知","provider":connection.provider,"mode":config.mode,"poll_interval_minutes":config.poll_interval_minutes.max(1),"enabled":config.enabled && config.provider==connection.provider,"all_repositories":config.all_repositories,"repositories":config.repositories.join("\n"),"events":config.events,"has_secret":!config.secret.is_empty(),"has_webhook":!config.webhook.is_empty(),"version":row.map_or(0,|r|r.version),"callback_path":format!("/api/repository-events/{}",connection.id),"provider_changed":row.is_some() && config.provider!=connection.provider,"capability_note":if config.mode == Mode::Poll {"使用当前连接凭据比较完整快照。首次检查只建立基线；间隔内发生后又撤销的操作可能无法捕获。仓库移除也可能由权限变化引起；操作人无法可靠确定时不显示。"} else if connection.provider=="codeup"{"Codeup 仓库 Webhook 支持推送、标签和合并请求，暂不提供仓库新增/删除事件。全部仓库表示接收范围，仍需在各仓库配置 Webhook。"}else{"仓库新增/删除需要平台提供组织级或系统级事件订阅；普通 Git 不提供平台事件。"}})
+    json!({"id":Id::from(connection.id),"name":crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.notificationName")),"provider":connection.provider,"mode":config.mode,"poll_interval_minutes":config.poll_interval_minutes.max(1),"runner_id":config.runner_id,"enabled":config.enabled && config.provider==connection.provider,"all_repositories":config.all_repositories,"repositories":config.repositories.join("\n"),"events":config.events,"has_secret":!config.secret.is_empty(),"has_webhook":!config.webhook.is_empty(),"version":row.map_or(0,|r|r.version),"callback_path":format!("/api/repository-events/{}",connection.id),"provider_changed":row.is_some() && config.provider!=connection.provider,"capability_note":if connection.provider == "git" {crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.gitCapability"))} else if config.mode == Mode::Poll {crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.pollCapability"))} else if connection.provider=="codeup"{crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.codeupCapability"))}else{crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.platformCapability"))}})
 }
 pub async fn get(
     State(s): State<AppState>,
@@ -130,16 +156,37 @@ pub async fn get(
     let config = match &row {
         Some(row) => decode(&s, row)?,
         None => Config {
-            all_repositories: true,
+            mode: if connection.provider == "git" {
+                Mode::Poll
+            } else {
+                Mode::Push
+            },
+            all_repositories: connection.provider != "git",
             poll_interval_minutes: default_poll_minutes(),
-            events: supported_events(&connection.provider, Mode::Push)
-                .iter()
-                .map(|v| v.to_string())
-                .collect(),
+            events: supported_events(
+                &connection.provider,
+                if connection.provider == "git" {
+                    Mode::Poll
+                } else {
+                    Mode::Push
+                },
+            )
+            .iter()
+            .map(|v| v.to_string())
+            .collect(),
             ..Default::default()
         },
     };
     let mut result = view(row.as_ref(), &config, &connection);
+    result["runner_name"] = json!(match config.runner_id.parse::<Id>() {
+        Ok(id) => crate::entities::hosts::Entity::find_by_id(i64::from(id))
+            .filter(crate::entities::hosts::Column::WorkspaceId.eq(connection.workspace_id))
+            .one(&s.db)
+            .await?
+            .map(|host| host.name)
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    });
     let poll = polls::Entity::find_by_id(connection.id).one(&s.db).await?;
     result["last_polled_at"] = json!(
         poll.as_ref()
@@ -151,16 +198,22 @@ pub async fn get(
             .filter(|_| config.enabled && config.mode == Mode::Poll)
             .map(|p| p.next_poll_at)
     );
-    result["last_poll_error"] = json!(poll.as_ref().map(|p| p.last_error.as_str()).unwrap_or(""));
-    result["poll_status"] = json!(if !config.enabled {
-        "未启用"
+    result["last_poll_error"] = json!(crate::i18n::display_stored(
+        poll.as_ref().map(|p| p.last_error.as_str()).unwrap_or("")
+    ));
+    let status_key = if !config.enabled {
+        "repository.monitor.disabled"
     } else if poll.as_ref().is_some_and(|p| !p.last_error.is_empty()) {
-        "检查失败，保留上次基线"
+        "repository.monitor.failed"
     } else if poll.as_ref().is_some_and(|p| !p.snapshot.is_empty()) {
-        "已建立基线"
+        "repository.monitor.ready"
     } else {
-        "等待首次检查"
-    });
+        "repository.monitor.waiting"
+    };
+    result["poll_status"] = json!(crate::i18n::render(
+        crate::i18n::current_locale(),
+        &crate::i18n::Message::new(status_key)
+    ));
     Ok(Json(result))
 }
 pub async fn update(
@@ -171,7 +224,10 @@ pub async fn update(
 ) -> Result<Json<Value>> {
     scope.require("repositories.update")?;
     if body.poll_interval_minutes < 1 {
-        return Err(ApiError::bad("主动轮询间隔不得小于 1 分钟。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.intervalInvalid"),
+        ));
     }
     if body.enabled && body.mode == Mode::Poll {
         scope.require("credentials.read")?;
@@ -180,15 +236,49 @@ pub async fn update(
     let connection = owned_connection(&tx, &scope, id).await?;
     if !matches!(
         connection.provider.as_str(),
-        "github" | "gitlab" | "gitea" | "gitee" | "codeup"
+        "github" | "gitlab" | "gitea" | "gitee" | "codeup" | "git"
     ) {
-        return Err(ApiError::bad(
-            "普通 Git 连接不提供平台事件；请使用代码平台连接。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.platformRequired"),
         ));
+    }
+    let mut runner_name = String::new();
+    if connection.provider == "git" {
+        if body.mode != Mode::Poll || body.all_repositories {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.gitPollOnly"),
+            ));
+        }
+        if body.enabled {
+            scope.require("hosts.terminal")?;
+            let runner: Id = body.runner_id.parse().map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.monitor.runnerRequired"),
+                )
+            })?;
+            let host = crate::entities::hosts::Entity::find_by_id(i64::from(runner))
+                .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(crate::entities::hosts::Column::Connection.eq("runner"))
+                .one(&tx)
+                .await?
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.monitor.runnerMissing"),
+                    )
+                })?;
+            runner_name = host.name;
+        }
     }
     let old = monitors::Entity::find_by_id(i64::from(id)).one(&tx).await?;
     if old.as_ref().map_or(0, |r| r.version) != body.version {
-        return Err(ApiError::conflict("监控配置已变更，请刷新后重试。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repository.monitor.configChanged"),
+        ));
     }
     let previous = match &old {
         Some(row) => decode(&s, row)?,
@@ -204,13 +294,21 @@ pub async fn update(
     repositories.sort();
     repositories.dedup();
     if repositories.len() > 1000
-        || repositories
-            .iter()
-            .any(|v| v.len() > 400 || !v.contains('/') || v.chars().any(char::is_control))
+        || repositories.iter().any(|v| {
+            v.len() > 400
+                || (connection.provider != "git" && !v.contains('/'))
+                || v.chars().any(char::is_control)
+        })
     {
-        return Err(ApiError::bad(
-            "指定仓库须为完整命名空间/仓库路径，每行一个，最多 1000 个。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.repositoriesInvalid"),
         ));
+    }
+    if connection.provider == "git" {
+        for address in &repositories {
+            crate::repository_auth::resolve_connection(&s, &tx, &scope, id, address).await?;
+        }
     }
     if body.events.len() > KINDS.len()
         || body
@@ -218,7 +316,10 @@ pub async fn update(
             .iter()
             .any(|v| !supported_events(&connection.provider, body.mode).contains(&v.as_str()))
     {
-        return Err(ApiError::bad("监控事件类型无效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.eventInvalid"),
+        ));
     }
     let secret = if body.secret.is_empty() {
         previous.secret
@@ -231,7 +332,10 @@ pub async fn update(
             || !secret.is_ascii()
             || secret.chars().any(char::is_control))
     {
-        return Err(ApiError::bad("事件密钥须为 16–256 位 ASCII 字符。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.secretInvalid"),
+        ));
     }
     let webhook = if body.clear_webhook {
         String::new()
@@ -241,7 +345,12 @@ pub async fn update(
         body.webhook
     };
     if !webhook.is_empty() {
-        let url = reqwest::Url::parse(&webhook).map_err(|_| ApiError::bad("Webhook 地址无效。"))?;
+        let url = reqwest::Url::parse(&webhook).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.webhookInvalid"),
+            )
+        })?;
         if !matches!(url.scheme(), "http" | "https")
             || url.host_str().is_none()
             || !url.username().is_empty()
@@ -249,8 +358,9 @@ pub async fn update(
             || url.fragment().is_some()
             || webhook.len() > 4096
         {
-            return Err(ApiError::bad(
-                "Webhook 须为不带用户凭据或片段的 HTTP(S) 地址。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.webhookFormat"),
             ));
         }
     }
@@ -259,13 +369,19 @@ pub async fn update(
             || body.events.is_empty()
             || (!body.all_repositories && repositories.is_empty()))
     {
-        return Err(ApiError::bad(
-            "启用监控前请设置事件类型和仓库范围；事件推送还需设置验证密钥。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.configurationRequired"),
         ));
     }
     let config = Config {
         mode: body.mode,
         poll_interval_minutes: body.poll_interval_minutes,
+        runner_id: if connection.provider == "git" {
+            body.runner_id
+        } else {
+            String::new()
+        },
         enabled: body.enabled,
         provider: connection.provider.clone(),
         all_repositories: body.all_repositories,
@@ -274,7 +390,12 @@ pub async fn update(
         secret,
         webhook,
     };
-    let encoded = serde_json::to_string(&config).map_err(|_| ApiError::bad("监控配置无效。"))?;
+    let encoded = serde_json::to_string(&config).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.configInvalid"),
+        )
+    })?;
     let row = monitors::Model {
         id: i64::from(id),
         workspace_id: i64::from(scope.workspace_id),
@@ -323,7 +444,9 @@ pub async fn update(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(view(Some(&row), &config, &connection)))
+    let mut result = view(Some(&row), &config, &connection);
+    result["runner_name"] = json!(runner_name);
+    Ok(Json(result))
 }
 
 fn header<'a>(headers: &'a HeaderMap, key: &str) -> &'a str {
@@ -506,7 +629,7 @@ fn normalize(provider: &str, headers: &HeaderMap, payload: &Value) -> Option<Eve
         repository,
         reference,
         actor: detail::webhook_actor(payload),
-        action,
+        action: crate::i18n::store_raw(&action),
         detail: detail::webhook(event, payload),
     })
 }
@@ -516,7 +639,8 @@ fn event_json(row: events::Model) -> Value {
         .as_deref()
         .and_then(|text| serde_json::from_str::<Value>(text).ok())
         .unwrap_or(Value::Null);
-    json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":row.action,"delivery":row.delivery,"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
+    let detail = detail::display(&detail);
+    json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":crate::i18n::display_stored(&row.action),"delivery":crate::i18n::display_stored(&row.delivery),"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
 }
 /// Events of every connection the caller owns in this workspace, newest first.
 pub async fn workspace_history(
@@ -627,8 +751,12 @@ pub async fn receive(
     )
     .await?
     .require("repositories.read")?;
-    let payload: Value =
-        serde_json::from_slice(&bytes).map_err(|_| ApiError::bad("事件须为有效 JSON。"))?;
+    let payload: Value = serde_json::from_slice(&bytes).map_err(|_| {
+        ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.eventJsonInvalid"),
+        )
+    })?;
     let Some(event) = normalize(&connection.provider, &headers, &payload) else {
         return Ok(StatusCode::NO_CONTENT);
     };
@@ -639,9 +767,8 @@ pub async fn receive(
             "branch.created" | "branch.deleted" | "tag.created" | "tag.deleted"
         ) && payload.get("before").is_some()
             && config.events.iter().any(|kind| kind == "push"));
-    if !selected || (!config.all_repositories && !config.repositories.contains(&event.repository)) {
-        return Ok(StatusCode::NO_CONTENT);
-    }
+    let selected =
+        selected && (config.all_repositories || config.repositories.contains(&event.repository));
     // Delivery headers are not covered by provider payload signatures. Hash the
     // authenticated body so changing a delivery ID cannot replay a notification.
     let mut digest = Sha256::new();
@@ -657,9 +784,29 @@ pub async fn receive(
         || connections::Entity::find_by_id(connection.id)
             .one(&tx)
             .await?
-            .is_none()
+            .is_none_or(|v| v.version != connection.version)
     {
-        return Err(ApiError::conflict("监控配置已变更，请重新发送事件。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("repository.monitor.eventConfigChanged"),
+        ));
+    }
+    // Admit the independent analysis subscription and selected notification in
+    // one version-fenced transaction, even when push notifications are disabled.
+    if matches!(
+        event.event.as_str(),
+        "push"
+            | "branch.created"
+            | "branch.deleted"
+            | "repository.created"
+            | "repository.deleted"
+            | "merge"
+    ) {
+        crate::repository_analysis::event(&s, &tx, &connection, &event.repository).await?;
+    }
+    if !selected {
+        tx.commit().await?;
+        return Ok(StatusCode::NO_CONTENT);
     }
     let event_id = record(&s, &tx, &connection, &config, &event, &delivery_key).await?;
     tx.commit().await?;
@@ -691,9 +838,13 @@ async fn record(
     }
     let event_id = s.next_id()?;
     let delivery = if config.webhook.is_empty() {
-        "未配置通知地址"
+        crate::i18n::store_message(&crate::i18n::Message::new(
+            "repository.monitor.unconfiguredDelivery",
+        ))
     } else {
-        "投递中；服务中断不会自动重发"
+        crate::i18n::store_message(&crate::i18n::Message::new(
+            "repository.monitor.pendingDelivery",
+        ))
     };
     events::Entity::insert(events::ActiveModel {
         id: Set(event_id.into()),
@@ -726,23 +877,63 @@ async fn deliver(
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|_| ApiError::bad("通知客户端不可用。"))?;
+            .map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("repository.monitor.notificationClient"),
+                )
+            })?;
         let title = format!("{}：{}", detail::label(&event.event), event.repository);
+        let action = crate::i18n::display_stored(&event.action);
+        let detail = detail::display(&event.detail);
         let mut fields: Vec<(String, String)> = [
-            ("仓库", &event.repository),
-            ("分支 / 标签", &event.reference),
-            ("操作人", &event.actor),
-            ("动作", &event.action),
-            ("平台", &connection.provider),
+            (
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
+                ),
+                &event.repository,
+            ),
+            (
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.referenceLabel"),
+                ),
+                &event.reference,
+            ),
+            (
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.actorLabel"),
+                ),
+                &event.actor,
+            ),
+            (
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.actionLabel"),
+                ),
+                &action,
+            ),
+            (
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.providerLabel"),
+                ),
+                &connection.provider,
+            ),
         ]
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value.clone()))
         .collect();
-        fields.extend(detail::lines(&event.detail));
+        fields.extend(detail::lines(&detail));
+        let mut data = json!(event);
+        data["action"] = json!(action);
+        data["detail"] = detail;
         let notice = crate::webhook::Notice {
             title: &title,
             fields,
-            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":event}),
+            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data}),
         };
         let delivery = crate::webhook::deliver(&client, &config.webhook, &notice).await;
         events::Entity::update_many()
@@ -757,6 +948,50 @@ async fn deliver(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn event_readers_localize_owned_fields_once_and_preserve_provider_data() {
+        use crate::i18n::{self, Locale, Message};
+        let raw = i18n::store_message(&Message::new("error.unauthorized"));
+        let action = Message::new("repository.monitor.detectedPush");
+        let note = Message::new("repository.monitor.commitsFailed")
+            .with_message("error", Message::new("error.unauthorized"));
+        let delivery = Message::new("webhook.failed")
+            .with("provider", "Provider 原文")
+            .with_message(
+                "reason",
+                Message::new("webhook.httpDetail")
+                    .with("status", "403")
+                    .with("detail", &raw),
+            );
+        let row = events::Model {
+            id: 1, workspace_id: 1, connection_id: 1, delivery_key: "test".into(),
+            event: "push".into(), repository: "原文/repository".into(), reference: "main".into(),
+            actor: "用户原文".into(), action: i18n::store_message(&action),
+            delivery: i18n::store_message(&delivery), created_at: 0,
+            detail: Some(json!({"note":i18n::store_message(&note),"commits":[{"message":raw,"author":"用户原文"}]}).to_string()),
+        };
+        for locale in Locale::ALL {
+            i18n::with_locale(locale, async {
+                let value = event_json(row.clone());
+                assert_eq!(value["action"], i18n::render(locale, &action));
+                assert_eq!(value["delivery"], i18n::render(locale, &delivery));
+                assert_eq!(value["detail"]["note"], i18n::render(locale, &note));
+                assert_eq!(value["detail"]["commits"][0]["message"], raw);
+                assert_eq!(value["actor"], "用户原文");
+                assert!(value["delivery"].as_str().unwrap().contains(&raw));
+            })
+            .await;
+        }
+        let mut provider = row;
+        provider.action = i18n::store_raw(&raw);
+        provider.detail = Some(json!({"note":i18n::store_raw(&raw)}).to_string());
+        let value = event_json(provider);
+        assert_eq!(value["action"], raw);
+        assert_eq!(value["detail"]["note"], raw);
+        assert_eq!(detail::view(&value["detail"])["note"], raw);
+    }
+
     fn headers(name: &str, value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(

@@ -1,0 +1,31 @@
+{
+  "app": {
+    "title": "運用管理プラットフォーム",
+    "modules": "モジュール",
+    "platform": "プラットフォーム管理",
+    "account": "プロフィール",
+    "signOut": "ログアウト",
+    "workspaces": "ワークスペースを作成または参加"
+  },
+  "language": {
+    "label": "言語",
+    "changed": "言語を{{language}}に変更しました"
+  },
+  "common": {
+    "loading": "読み込み中…",
+    "back": "戻る",
+    "close": "閉じる",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "edit": "編集",
+    "delete": "削除",
+    "create": "新規作成",
+    "search": "検索",
+    "refresh": "更新",
+    "retry": "再試行"
+  },
+  "errors": {
+    "network": "サービスに接続できません。ネットワークを確認して再試行してください。",
+    "operation": "操作に失敗しました。再試行してください。"
+  }
+}

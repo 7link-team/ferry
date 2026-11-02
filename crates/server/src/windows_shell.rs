@@ -41,16 +41,18 @@ fn sid_from_whoami(text: &str) -> Option<String> {
 impl GitShell {
     pub async fn open(inner: Box<dyn HostChannel>) -> Result<Self> {
         let missing = || {
-            ApiError::bad(
-                "Windows 主机需要安装 Git for Windows，用于拉取代码和执行流水线辅助脚本。",
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("windows.gitRequired"),
             )
         };
         // Runners before alpha.32 escaped quotes so cmd.exe saw \"…\"; every
         // command below quotes a path, so check the runner passes them intact.
         let echoed = inner.exec("echo \"ferry\"", SETUP).await?;
         if echoed.stdout.trim() != "\"ferry\"" {
-            return Err(ApiError::bad(
-                "该 Windows 主机的 Runner 版本过旧，请升级 Runner 后重试。",
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("windows.runnerTooOld"),
             ));
         }
         let found = inner.exec("git --exec-path", SETUP).await?;
@@ -71,7 +73,10 @@ impl GitShell {
         let temp = inner.exec("echo %TEMP%", SETUP).await?;
         let temp = temp.stdout.trim().replace('\\', "/");
         if temp.len() < 3 || temp.contains('%') {
-            return Err(ApiError::bad("无法确定 Windows 主机的临时目录。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("windows.tempUnknown"),
+            ));
         }
         // System tools by full path: Git's optional Unix tools on PATH
         // provide a `whoami` that rejects Windows switches.
@@ -81,8 +86,12 @@ impl GitShell {
                 SETUP,
             )
             .await?;
-        let sid = sid_from_whoami(&user.stdout)
-            .ok_or_else(|| ApiError::bad("无法确定 Windows 主机的执行账号。"))?;
+        let sid = sid_from_whoami(&user.stdout).ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("windows.accountUnknown"),
+            )
+        })?;
         Ok(Self {
             inner,
             sh: format!("\"{sh}\""),
@@ -106,7 +115,10 @@ impl GitShell {
             )
             .await?;
         if made.code != 0 {
-            return Err(ApiError::bad("无法创建流水线临时目录。"));
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("windows.tempCreateFailed"),
+            ));
         }
         Ok(path)
     }

@@ -8,7 +8,7 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   // Discovering the YAML worker after the editor opens triggers a dependency
   // optimization reload, losing the active editor and pending diagnostics.
-  optimizeDeps: { include: ["monaco-yaml/yaml.worker.js"] },
+  optimizeDeps: { entries: ["index.html"], include: ["monaco-yaml/yaml.worker.js", "@monaco-editor/react", "monaco-editor", "monaco-yaml", "@wangeditor-next/editor", "react-markdown", "remark-gfm"] },
   server: { proxy: { "/api": {
     target: process.env.FERRY_DEV_API_TARGET || "http://127.0.0.1:4290",
     ws: true,

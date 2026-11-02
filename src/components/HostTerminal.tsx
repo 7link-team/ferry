@@ -1,3 +1,4 @@
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
 /**
  * Remote terminal over the host channel. Identical for a runner host and an
  * SSH host — the server hides which one it is, which is the whole point of
@@ -8,6 +9,7 @@
  *   server -> browser  binary = output,     text = {"type":"closed"|"error"}
  */
 import { useEffect, useRef, useState } from "react";
+import { currentLocale } from "../locale";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -16,7 +18,7 @@ import { TerminalMetrics } from "./HostTelemetry";
 import { api, ApiError } from "../api";
 
 export function terminalStartCommand(os: string, directory?: string, agentVersion?: string) {
-  if (directory && /[\x00-\x1f\x7f]/.test(directory)) throw new Error("目录路径包含控制字符。");
+  if (directory && /[\x00-\x1f\x7f]/.test(directory)) throw new Error(hostRepositoryText("host.061"));
   const windows = os.toLowerCase() === "windows" || !!directory && /^(?:[a-z]:[\\/]|\\\\)/i.test(directory);
   if (!windows) return directory ? `cd '${directory.replaceAll("'", "'\\''")}'\r` : "";
   const legacy = /^0\.1\.0-alpha\.(\d+)$/.exec(agentVersion ?? "");
@@ -51,6 +53,7 @@ function paletteFrom(element: HTMLElement) {
 }
 
 export function HostTerminal({ workspace, hostId, directory }: { workspace: string; hostId: string; directory?: string }) {
+  useCommonTranslation();
   const mount = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal>(null);
   const [status, setStatus] = useState<Status>("connecting");
@@ -79,7 +82,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
     const scheme = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
       `${scheme}//${location.host}/api/workspaces/${encodeURIComponent(workspace)}` +
-        `/nodes/${encodeURIComponent(hostId)}/terminal-sessions?cols=${term.cols}&rows=${term.rows}`,
+        `/nodes/${encodeURIComponent(hostId)}/terminal-sessions?cols=${term.cols}&rows=${term.rows}&locale=${encodeURIComponent(currentLocale())}`,
     );
     socket.binaryType = "arraybuffer";
 
@@ -97,7 +100,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
         setStatus("open");
       } catch (cause) {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : "无法读取节点终端信息。");
+        setError(cause instanceof Error ? cause.message : hostRepositoryText("host.062"));
         setStatus("error"); socket.close();
       }
     };
@@ -105,7 +108,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
       if (typeof event.data === "string") {
         const message = JSON.parse(event.data) as { type: string; error?: string };
         if (message.type === "error") {
-          setError(message.error ?? "连接出错。");
+          setError(message.error ?? hostRepositoryText("host.063"));
           setStatus("error");
         } else {
           setStatus("closed");
@@ -171,10 +174,10 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
                 : "text-muted-foreground"
           }
         >
-          {status === "connecting" && "连接中…"}
-          {status === "open" && "已连接"}
-          {status === "closed" && "会话已结束"}
-          {status === "error" && (error || "连接失败")}
+          {status === "connecting" && hostRepositoryText("host.064")}
+          {status === "open" && hostRepositoryText("host.065")}
+          {status === "closed" && hostRepositoryText("host.066")}
+          {status === "error" && (error || hostRepositoryText("host.067"))}
         </span>
         {status === "open" && <TerminalMetrics />}
       </div>

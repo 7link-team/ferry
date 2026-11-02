@@ -1,4 +1,6 @@
-import { AutoField, FieldControl } from "./auto-form";
+import { hostRepositoryText, useCommonTranslation } from "../i18n";
+import { currentLocale } from "../locale";
+import { AutoField, FieldControl, selectDisplay } from "./auto-form";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { parseDocument, visit } from "yaml";
 import { Button } from "./ui/button";
@@ -6,7 +8,7 @@ import { Trash2 } from "lucide-react";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
-import { listResource } from "../resource";
+import { listResource, named } from "../resource";
 
 type Path = (string | number)[];
 type Row = Record<string, unknown>;
@@ -30,7 +32,7 @@ export function readManifest(source: string) {
   });
   if (alias)
     throw new Error(
-      "此配置使用 YAML 别名，请在源码模式编辑，或展开别名后使用表单。",
+      hostRepositoryText("manifest.001"),
     );
   const value: unknown = doc.toJS({ maxAliasCount: 50 });
   if (
@@ -40,11 +42,11 @@ export function readManifest(source: string) {
     !value.services.every(object)
   )
     throw new Error(
-      "配置需要 metadata 对象和 services 服务数组，请先在源码中修正结构。",
+      hostRepositoryText("manifest.002"),
     );
   const optionalObject = (parent: Row, key: string) => {
     if (parent[key] != null && !object(parent[key]))
-      throw new Error(`${key} 必须是对象，请在源码中修正。`);
+      throw new Error(hostRepositoryText("manifest.003", {value1: key}));
   };
   optionalObject(value, "strategy");
   optionalObject(value, "overrides");
@@ -54,7 +56,7 @@ export function readManifest(source: string) {
     for (const name of ["ports", "env", "volumes", "files"]) {
       const rows = service[name];
       if (rows !== undefined && (!Array.isArray(rows) || !rows.every(object)))
-        throw new Error(`${name} 必须是对象数组，请在源码中修正。`);
+        throw new Error(hostRepositoryText("manifest.004", {value1: name}));
     }
     for (const name of ["command", "dependsOn"]) {
       const rows = service[name];
@@ -62,7 +64,7 @@ export function readManifest(source: string) {
         rows != null &&
         (!Array.isArray(rows) || !rows.every((v) => typeof v === "string"))
       )
-        throw new Error(`${name} 必须是字符串数组，请在源码中修正。`);
+        throw new Error(hostRepositoryText("manifest.005", {value1: name}));
     }
     for (const name of ["artifact", "resources", "health"])
       optionalObject(service, name);
@@ -88,6 +90,7 @@ function ReferencePicker({ label, value, empty, required, hint, readOnly, load, 
   label: string; value: string; empty: string; required?: boolean; hint?: string; readOnly: boolean;
   load: () => Promise<Choice[]>; onChange: (value: string) => void;
 }) {
+  useCommonTranslation();
   const [choices, setChoices] = useState<Choice[]>();
   useEffect(() => {
     let live = true;
@@ -96,33 +99,35 @@ function ReferencePicker({ label, value, empty, required, hint, readOnly, load, 
     return () => { live = false; };
   }, [load]);
   const known = choices ?? [];
-  const options = [{ value: "", label: choices ? empty : "载入中…" }, ...known,
-    ...(value && !known.some(choice => choice.value === value) ? [{ value, label: choices ? `已删除或不可用（ID ${value}）` : value }] : [])];
+  const selected = value === "0" ? "" : value;
+  const options = [{ value: "", label: choices ? empty : hostRepositoryText("manifest.006") }, ...known,
+    ...(selected && !known.some(choice => choice.value === selected) ? [{ value: selected, label: named(undefined, selected) }] : [])];
   return <AutoField label={label} required={required} help={hint}>
-    <FieldControl name={label} field={{ name: label, type: "select", config: { options } }} value={value} required={required} disabled={readOnly || !choices} onChange={next => onChange(String(next))} />
+    <FieldControl name={label} field={{ name: label, type: "select", config: { options } }} value={selected} required={required} disabled={readOnly || !choices} onChange={next => onChange(String(next))} />
   </AutoField>;
 }
 
 function RunPicker({ workspace, pipeline, value, readOnly, onChange }: { workspace: string; pipeline: string; value: string; readOnly: boolean; onChange: (value: string) => void }) {
-  const load = useCallback(() => runChoices(workspace, pipeline), [workspace, pipeline]);
-  return <ReferencePicker label="固定构建" value={value} empty="最新成功构建" readOnly={readOnly} load={load} onChange={onChange}
-    hint="留空使用可用的最新成功构建；也可固定为某次成功的执行。" />;
+  const { i18n } = useCommonTranslation();
+  const load = useCallback(() => runChoices(workspace, pipeline), [workspace, pipeline, i18n.resolvedLanguage]);
+  return <ReferencePicker label={hostRepositoryText("manifest.007")} value={value} empty={hostRepositoryText("manifest.008")} readOnly={readOnly} load={load} onChange={onChange}
+    hint={hostRepositoryText("manifest.009")} />;
 }
 
 async function pipelineChoices(workspace: string): Promise<Choice[]> {
   const choices: Choice[] = [];
   for (let page = 1; ; page += 1) {
     const result = await listResource<{ id: string; name: string }>(workspace, "pipelines", { page, page_size: 200 });
-    choices.push(...result.items.map(row => ({ value: row.id, label: row.name })));
+    choices.push(...result.items.map(row => ({ value: row.id, label: named(row.name, row.id) })));
     if (!result.items.length || page * result.page_size >= result.total) return choices;
   }
 }
 
 async function runChoices(workspace: string, pipeline: string): Promise<Choice[]> {
-  if (!pipeline) return [];
+  if (!pipeline || pipeline === "0") return [];
   const result = await listResource<{ id: string; number: number; finished_at: number }>(workspace, "pipeline-runs",
     { pipeline_id: pipeline, state: "succeeded", sort: "-number", page_size: 50 });
-  return result.items.map(run => ({ value: run.id, label: `#${run.number} · ${new Date(run.finished_at).toLocaleString("zh-CN")}` }));
+  return result.items.map(run => ({ value: run.id, label: `#${run.number} · ${run.finished_at > 0 && Number.isFinite(run.finished_at) ? new Date(run.finished_at).toLocaleString(currentLocale()) : "—"}` }));
 }
 
 export function ManifestEditor({
@@ -141,6 +146,7 @@ export function ManifestEditor({
   /** When known, artifact sources choose the pipeline and build run by name. */
   workspace?: string;
 }) {
+  const { i18n } = useCommonTranslation();
   const loadPipelines = useCallback(() => workspace ? pipelineChoices(workspace) : Promise.resolve([]), [workspace]);
   const [sourceMode, setSourceMode] = useState(false);
   const [notice, setNotice] = useState("");
@@ -165,7 +171,7 @@ export function ManifestEditor({
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }, [value]);
+  }, [value, i18n.resolvedLanguage]);
   // Syntax errors block saving. Valid YAML that needs source-only editing remains saveable;
   // the existing server validator remains authoritative for capability/business validation.
   const syntaxError = useMemo(
@@ -255,7 +261,7 @@ export function ManifestEditor({
     </AutoField>;
   };
   const select = (label: string, path: Path, choices: string[], fallback: string) => <AutoField label={label}>
-    <FieldControl name={label} field={{ name: label, type: "select", config: { options: [...new Set([...choices, String(get(path) ?? fallback)])].map(value => ({ value, label: value })) } }} value={String(get(path) ?? fallback)} disabled={readOnly} onChange={value => set(path, value)} />
+    <FieldControl name={label} field={{ name: label, type: "select", config: { options: [...new Set([...choices, String(get(path) ?? fallback)])].map(value => ({ value, label: !choices.includes(value) ? selectDisplay(value, {options: []}) : value === "recreate" ? hostRepositoryText("manifest-extra.001") : value === "rolling" ? hostRepositoryText("manifest-extra.002") : value })) } }} value={String(get(path) ?? fallback)} disabled={readOnly} onChange={value => set(path, value)} />
   </AutoField>;
 
   const rows = (
@@ -277,12 +283,12 @@ export function ManifestEditor({
               disabled={invalidJson}
               onClick={() => append(path, initial)}
             >
-              添加{title}
+              {hostRepositoryText("manifest-extra.003", {value1: title})}
             </Button>
           )}
         </div>
         {items.length === 0 && (
-          <p className="text-sm text-muted-foreground">未设置</p>
+          <p className="text-sm text-muted-foreground">{hostRepositoryText("manifest.011")}</p>
         )}
         {items.map((row, index) => (
           <fieldset key={index} className="space-y-3 border-l-2 pl-3">
@@ -295,10 +301,10 @@ export function ManifestEditor({
                 type="button"
                 variant="ghost"
                 size="icon"
-                aria-label={`删除${title} ${index + 1}`}
-                title={`删除${title} ${index + 1}`}
+                aria-label={hostRepositoryText("manifest.012", {value1: title, value2: index + 1})}
+                title={hostRepositoryText("manifest.012", {value1: title, value2: index + 1})}
                 disabled={invalidJson}
-                onClick={() => setPendingRemoval({ path, index, action: `删除${title}`, target: String(row.name ?? row.key ?? index + 1) })}
+                onClick={() => setPendingRemoval({ path, index, action: hostRepositoryText("manifest.013", {value1: title}), target: String(row.name ?? row.key ?? index + 1) })}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -309,19 +315,18 @@ export function ManifestEditor({
     );
   };
   return (
-    <section aria-label="应用配置编辑器" className="min-w-0 space-y-4">
-      {pendingRemoval && <DeleteConfirmDialog action={pendingRemoval.action} target={pendingRemoval.target} description="将从当前配置草稿移除，保存配置后生效。" onClose={() => setPendingRemoval(undefined)} onConfirm={() => remove(pendingRemoval.path, pendingRemoval.index)} />}
+    <section aria-label={hostRepositoryText("manifest.014")} className="min-w-0 space-y-4">
+      {pendingRemoval && <DeleteConfirmDialog action={pendingRemoval.action} target={pendingRemoval.target} description={hostRepositoryText("manifest.015")} onClose={() => setPendingRemoval(undefined)} onConfirm={() => remove(pendingRemoval.path, pendingRemoval.index)} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-medium">应用配置</h2>
-        <div className="flex gap-2" role="group" aria-label="编辑方式">
+        <h2 className="font-medium">{hostRepositoryText("manifest.016")}</h2>
+        <div className="flex gap-2" role="group" aria-label={hostRepositoryText("manifest.017")}>
           <Button
             type="button"
             variant={!sourceMode ? "secondary" : "outline"}
             aria-pressed={!sourceMode}
             onClick={() => setSourceMode(false)}
           >
-            表单编辑
-          </Button>
+            {hostRepositoryText("manifest.018")}</Button>
           <Button
             type="button"
             variant={sourceMode ? "secondary" : "outline"}
@@ -329,13 +334,12 @@ export function ManifestEditor({
             disabled={invalidJson}
             onClick={() => setSourceMode(true)}
           >
-            源码编辑
-          </Button>
+            {hostRepositoryText("manifest.019")}</Button>
         </div>
       </div>
       {sourceMode || !parsed.data ? (
         <>
-          <AutoField label="应用配置源码（YAML / JSON）" className="flex flex-col gap-2 text-sm">
+          <AutoField label={hostRepositoryText("manifest.020")} className="flex flex-col gap-2 text-sm">
             <textarea
               className={`${area} min-h-80`}
               value={value}
@@ -354,22 +358,18 @@ export function ManifestEditor({
             </p>
           )}
           <p className="text-sm text-muted-foreground">
-            切换不会覆盖源码。表单修改会输出 YAML
-            并保留未修改字段；保存时校验当前部署模式支持的配置，并统一为
-            JSON（不保留注释）。
-          </p>
+            {hostRepositoryText("manifest.021")}</p>
         </>
       ) : (
         <>
           <div className={grid}>
-            {text("应用标识", ["metadata", "name"], {
+            {text(hostRepositoryText("manifest.022"), ["metadata", "name"], {
               required: true,
-              hint: "小写字母开头，可使用数字、短横线和下划线。",
+              hint: hostRepositoryText("manifest.023"),
             })}
           </div>
           <p className="text-sm text-muted-foreground">
-            逐项配置服务。敏感值请引用变量；启动先后通过“依赖服务”设置。
-          </p>
+            {hostRepositoryText("manifest.024")}</p>
           {services.map((service, index) => {
             const path: Path = ["services", index];
             const p = (...keys: Path) => [...path, ...keys];
@@ -378,12 +378,12 @@ export function ManifestEditor({
             return (
               <section
                 key={index}
-                aria-label={`服务 ${index + 1}`}
+                aria-label={hostRepositoryText("manifest.025", {value1: index + 1})}
                 className="space-y-5 rounded-md border p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-medium">
-                    {index + 1}. {String(service.name || "未命名服务")}
+                    {index + 1}. {String(service.name || hostRepositoryText("manifest.026"))}
                   </h3>
                   {!readOnly && (
                     <div className="flex flex-wrap gap-1">
@@ -391,8 +391,8 @@ export function ManifestEditor({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        aria-label={`删除服务 ${String(service.name || index + 1)}`}
-                        title={`删除服务 ${String(service.name || index + 1)}`}
+                        aria-label={hostRepositoryText("manifest.027", {value1: String(service.name || index + 1)})}
+                        title={hostRepositoryText("manifest.027", {value1: String(service.name || index + 1)})}
                         disabled={invalidJson || services.length <= 1}
                         onClick={() => {
                           if (
@@ -405,11 +405,11 @@ export function ManifestEditor({
                             )
                           ) {
                             setNotice(
-                              "其他服务仍依赖此服务，请先取消依赖再删除。",
+                              hostRepositoryText("manifest.028"),
                             );
                             return;
                           }
-                          setPendingRemoval({ path: ["services"], index, action: "删除服务", target: String(service.name || index + 1) });
+                          setPendingRemoval({ path: ["services"], index, action: hostRepositoryText("manifest.029"), target: String(service.name || index + 1) });
                         }}
                       >
                         <Trash2 className="size-4" />
@@ -418,7 +418,7 @@ export function ManifestEditor({
                   )}
                 </div>
                 <div className={grid}>
-                  <AutoField label="服务名称" className="flex flex-col gap-1.5 text-sm">
+                  <AutoField label={hostRepositoryText("manifest.030")} className="flex flex-col gap-1.5 text-sm">
                     <Input
                       value={String(service.name ?? "")}
                       required
@@ -431,7 +431,7 @@ export function ManifestEditor({
                               other.name === e.target.value,
                           )
                         ) {
-                          setNotice("服务名称不能重复，请使用不同名称。");
+                          setNotice(hostRepositoryText("manifest.031"));
                           return;
                         }
                         const changes = [
@@ -451,15 +451,15 @@ export function ManifestEditor({
                       }}
                     />
                   </AutoField>
-                  {text("副本数", p("replicas"), {
+                  {text(hostRepositoryText("manifest.032"), p("replicas"), {
                     number: true,
                     min: 1,
                     max: 100,
                     fallback: 1,
                   })}
-                  <AutoField label="运行来源" className="flex flex-col gap-1.5 text-sm">
+                  <AutoField label={hostRepositoryText("manifest.033")} className="flex flex-col gap-1.5 text-sm">
                     <select
-                      aria-label="运行来源"
+                      aria-label={hostRepositoryText("manifest.033")}
                       className="h-9 rounded-md border border-input bg-background px-2"
                       value={artifact ? "artifact" : "image"}
                       disabled={readOnly}
@@ -481,64 +481,64 @@ export function ManifestEditor({
                         ]);
                       }}
                     >
-                      <option value="image">容器镜像</option>
-                      <option value="artifact">流水线构建产物（Native）</option>
+                      <option value="image">{hostRepositoryText("manifest.034")}</option>
+                      <option value="artifact">{hostRepositoryText("manifest.035")}</option>
                     </select>
                   </AutoField>
                   {!artifact &&
-                    text("镜像", p("image"), {
+                    text(hostRepositoryText("manifest.036"), p("image"), {
                       required: true,
-                      hint: "例如 nginx:alpine 或带 sha256 摘要的镜像地址。",
+                      hint: hostRepositoryText("manifest.037"),
                     })}
                 </div>
                 {(mode === "native") !== artifact && (
                   <p role="status" className="text-sm text-destructive">
                     {mode === "native"
-                      ? "Native 模式需要选择流水线构建产物。"
-                      : "当前容器模式需要选择容器镜像。"}
+                      ? hostRepositoryText("manifest.038")
+                      : hostRepositoryText("manifest.039")}
                   </p>
                 )}
                 {artifact && (
                   <div className={grid}>
                     {workspace ? (
-                      <ReferencePicker label="流水线" required readOnly={readOnly} empty="请选择流水线"
+                      <ReferencePicker label={hostRepositoryText("manifest.040")} required readOnly={readOnly} empty={hostRepositoryText("manifest.041")}
                         value={String(get(p("artifact", "pipeline")) ?? "")} load={loadPipelines}
                         // A pinned run belongs to the previous pipeline.
                         onChange={next => change([{ path: p("artifact", "pipeline"), value: next || undefined }, { path: p("artifact", "run"), value: undefined }])} />
-                    ) : text("流水线 ID", p("artifact", "pipeline"), {
+                    ) : text(hostRepositoryText("manifest.042"), p("artifact", "pipeline"), {
                       required: true,
                     })}
-                    {text("产物相对路径", p("artifact", "path"), {
+                    {text(hostRepositoryText("manifest.043"), p("artifact", "path"), {
                       required: true,
                     })}
                     {workspace ? (
                       <RunPicker workspace={workspace} pipeline={String(get(p("artifact", "pipeline")) ?? "")} readOnly={readOnly}
                         value={String(get(p("artifact", "run")) ?? "")} onChange={next => set(p("artifact", "run"), next || undefined)} />
-                    ) : text("固定构建执行 ID", p("artifact", "run"), {
-                      hint: "留空使用可用的最新成功构建。",
+                    ) : text(hostRepositoryText("manifest.044"), p("artifact", "run"), {
+                      hint: hostRepositoryText("manifest.045"),
                     })}
                   </div>
                 )}
                 {rows(
-                  "端口",
+                  hostRepositoryText("manifest.046"),
                   p("ports"),
                   { container: 80, protocol: "tcp" },
                   (row) => (
                     <>
-                      {text("容器／服务端口", [...row, "container"], {
+                      {text(hostRepositoryText("manifest.047"), [...row, "container"], {
                         number: true,
                         min: 1,
                         max: 65535,
                         required: true,
                       })}
-                      {text("主机发布端口", [...row, "published"], {
+                      {text(hostRepositoryText("manifest.048"), [...row, "published"], {
                         number: true,
                         min: 1,
                         max: 65535,
                       })}
-                      {text("端口名称", [...row, "name"])}
+                      {text(hostRepositoryText("manifest.049"), [...row, "name"])}
                       {select(
-                        "协议",
+                        hostRepositoryText("manifest.050"),
                         [...row, "protocol"],
                         ["tcp", "udp"],
                         "tcp",
@@ -547,15 +547,15 @@ export function ManifestEditor({
                   ),
                 )}
                 {rows(
-                  "环境变量",
+                  hostRepositoryText("manifest.051"),
                   p("env"),
                   { name: "", value: "" },
                   (row, environment) => (
                     <>
-                      {text("变量名称", [...row, "name"], { required: true })}
-                      <AutoField label="取值方式" className="flex flex-col gap-1.5 text-sm">
+                      {text(hostRepositoryText("manifest.052"), [...row, "name"], { required: true })}
+                      <AutoField label={hostRepositoryText("manifest.053")} className="flex flex-col gap-1.5 text-sm">
                         <select
-                          aria-label="取值方式"
+                          aria-label={hostRepositoryText("manifest.053")}
                           className="h-9 rounded-md border border-input bg-background px-2"
                           disabled={readOnly}
                           value={
@@ -580,46 +580,46 @@ export function ManifestEditor({
                             ])
                           }
                         >
-                          <option value="literal">普通文本</option>
-                          <option value="reference">引用已保存变量</option>
+                          <option value="literal">{hostRepositoryText("manifest.054")}</option>
+                          <option value="reference">{hostRepositoryText("manifest.055")}</option>
                         </select>
                       </AutoField>
                       {environment.valueFrom !== undefined
-                        ? text("变量引用", [...row, "valueFrom"], {
+                        ? text(hostRepositoryText("manifest.056"), [...row, "valueFrom"], {
                             required: true,
-                            hint: "格式 variable/变量名，不在此填写密钥明文。",
+                            hint: hostRepositoryText("manifest.057"),
                           })
-                        : text("变量值", [...row, "value"], {
+                        : text(hostRepositoryText("manifest.058"), [...row, "value"], {
                             required: true,
                             multiline: true,
                           })}
                     </>
                   ),
                 )}
-                {rows("数据卷", p("volumes"), { name: "", path: "" }, (row) => (
+                {rows(hostRepositoryText("manifest.059"), p("volumes"), { name: "", path: "" }, (row) => (
                   <>
-                    {text("卷名称", [...row, "name"], { required: true })}
-                    {text("挂载绝对路径", [...row, "path"], { required: true })}
+                    {text(hostRepositoryText("manifest.060"), [...row, "name"], { required: true })}
+                    {text(hostRepositoryText("manifest.061"), [...row, "path"], { required: true })}
                   </>
                 ))}
                 {rows(
-                  "配置文件",
+                  hostRepositoryText("manifest.062"),
                   p("files"),
                   { path: "", fromTemplate: "" },
                   (row, file) => (
                     <>
-                      {text("文件绝对路径", [...row, "path"], {
+                      {text(hostRepositoryText("manifest.063"), [...row, "path"], {
                         required: true,
                       })}
                       {text(
-                        "配置文件模板 ID 或名称",
+                        hostRepositoryText("manifest.064"),
                         [...row, "fromTemplate"],
                         { required: true },
                       )}
                       <JsonField
                         fieldId={JSON.stringify(row)}
                         report={reportJson}
-                        label="配置文件参数"
+                        label={hostRepositoryText("manifest.065")}
                         value={file.values ?? {}}
                         readOnly={readOnly}
                         onChange={(value) => set([...row, "values"], value)}
@@ -629,17 +629,15 @@ export function ManifestEditor({
                 )}
                 <details className="space-y-4">
                   <summary className="cursor-pointer text-sm font-medium">
-                    高级配置：命令、依赖、健康检查与资源限制
-                  </summary>
-                  <section aria-label="启动命令" className="space-y-2">
-                    <h4 className="text-sm font-medium">启动命令和参数</h4>
+                    {hostRepositoryText("manifest.066")}</summary>
+                  <section aria-label={hostRepositoryText("manifest.067")} className="space-y-2">
+                    <h4 className="text-sm font-medium">{hostRepositoryText("manifest.068")}</h4>
                     <p className="text-xs text-muted-foreground">
-                      每项是一个参数，空格和换行原样保留。
-                    </p>
+                      {hostRepositoryText("manifest.069")}</p>
                     {((service.command ?? []) as string[]).map((_, i) => (
                       <div key={i} className="flex items-end gap-2">
                         <div className="min-w-0 flex-1">
-                          {text(`命令参数 ${i + 1}`, p("command", i), {
+                          {text(hostRepositoryText("manifest.070", {value1: i + 1}), p("command", i), {
                             required: true,
                           })}
                         </div>
@@ -648,9 +646,9 @@ export function ManifestEditor({
                             type="button"
                             variant="ghost"
                             size="icon"
-                            aria-label={`删除参数 ${i + 1}`}
-                            title={`删除参数 ${i + 1}`}
-                            onClick={() => setPendingRemoval({ path: p("command"), index: i, action: "删除参数", target: `${String(service.name || "未命名服务")} / 参数 ${i + 1}` })}
+                            aria-label={hostRepositoryText("manifest.071", {value1: i + 1})}
+                            title={hostRepositoryText("manifest.071", {value1: i + 1})}
+                            onClick={() => setPendingRemoval({ path: p("command"), index: i, action: hostRepositoryText("manifest.072"), target: hostRepositoryText("manifest.073", {value1: String(service.name || hostRepositoryText("manifest.026")), value2: i + 1}) })}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -666,16 +664,14 @@ export function ManifestEditor({
                           else append(p("command"), "");
                         }}
                       >
-                        添加命令参数
-                      </Button>
+                        {hostRepositoryText("manifest.074")}</Button>
                     )}
                   </section>
                   <fieldset className="space-y-2">
-                    <legend className="text-sm font-medium">依赖服务</legend>
+                    <legend className="text-sm font-medium">{hostRepositoryText("manifest.075")}</legend>
                     {mode === "stack" && (
                       <p className="text-xs text-muted-foreground">
-                        Swarm 不支持启动依赖，请让应用自身处理重连。
-                      </p>
+                        {hostRepositoryText("manifest.076")}</p>
                     )}
                     {[
                       ...new Set([
@@ -707,8 +703,8 @@ export function ManifestEditor({
                   </fieldset>
                   {(
                     [
-                      ["readiness", "就绪检查"],
-                      ["liveness", "存活检查"],
+                      ["readiness", hostRepositoryText("manifest.077")],
+                      ["liveness", hostRepositoryText("manifest.078")],
                     ] as const
                   ).map(([key, label]) => {
                     const healthPath = p("health", key);
@@ -738,12 +734,11 @@ export function ManifestEditor({
                         {enabled && (
                           <div className={grid}>
                             {text(
-                              `${label}路径`,
+                              hostRepositoryText("manifest.079", {value1: label}),
                               [...healthPath, "httpGet", "path"],
                               { required: true },
                             )}
-                            <AutoField label={<>{label}端口
-                              </>} className="flex flex-col gap-1.5 text-sm">
+                            <AutoField label={hostRepositoryText("manifest-extra.004", {value1: label})} className="flex flex-col gap-1.5 text-sm">
                               <Input
                                 disabled={readOnly}
                                 value={String(
@@ -760,17 +755,17 @@ export function ManifestEditor({
                               />
                             </AutoField>
                             {text(
-                              `${label}周期（秒）`,
+                              hostRepositoryText("manifest.081", {value1: label}),
                               [...healthPath, "periodSeconds"],
                               { number: true, min: 1, max: 3600, fallback: 10 },
                             )}
                             {text(
-                              `${label}超时（秒）`,
+                              hostRepositoryText("manifest.082", {value1: label}),
                               [...healthPath, "timeoutSeconds"],
                               { number: true, min: 1, max: 600, fallback: 1 },
                             )}
                             {text(
-                              `${label}失败阈值`,
+                              hostRepositoryText("manifest.083", {value1: label}),
                               [...healthPath, "failureThreshold"],
                               { number: true, min: 1, max: 100, fallback: 3 },
                             )}
@@ -780,20 +775,20 @@ export function ManifestEditor({
                     );
                   })}
                   <section className="space-y-3">
-                    <h4 className="text-sm font-medium">资源限制</h4>
+                    <h4 className="text-sm font-medium">{hostRepositoryText("manifest.084")}</h4>
                     <div className={grid}>
                       {(
                         [
-                          ["requests", "预留"],
-                          ["limits", "上限"],
+                          ["requests", hostRepositoryText("manifest.085")],
+                          ["limits", hostRepositoryText("manifest.086")],
                         ] as const
                       ).map(([key, label]) => (
                         <div key={key} className="space-y-3">
                           {text(`CPU ${label}`, p("resources", key, "cpu"), {
-                            hint: "例如 0.5 或 500m",
+                            hint: hostRepositoryText("manifest.087"),
                           })}
-                          {text(`内存${label}`, p("resources", key, "memory"), {
-                            hint: "例如 256Mi 或 1Gi",
+                          {text(hostRepositoryText("manifest.088", {value1: label}), p("resources", key, "memory"), {
+                            hint: hostRepositoryText("manifest.089"),
                           })}
                         </div>
                       ))}
@@ -826,28 +821,26 @@ export function ManifestEditor({
                 });
               }}
             >
-              添加服务
-            </Button>
+              {hostRepositoryText("manifest.090")}</Button>
           )}
           <details className="space-y-3">
             <summary className="cursor-pointer text-sm font-medium">
-              应用高级配置：更新策略、标签与模式覆盖
-            </summary>
+              {hostRepositoryText("manifest.091")}</summary>
             <div className={grid}>
               {select(
-                "更新策略",
+                hostRepositoryText("manifest.092"),
                 ["strategy", "type"],
                 mode === "stack" ? ["recreate", "rolling"] : ["recreate"],
                 "recreate",
               )}
-              {text("等待健康检查（秒）", ["strategy", "healthTimeout"], {
+              {text(hostRepositoryText("manifest.093"), ["strategy", "healthTimeout"], {
                 number: true,
                 min: 1,
                 max: 600,
                 fallback: 120,
               })}
               {mode === "stack" &&
-                text("最大不可用副本数", ["strategy", "maxUnavailable"], {
+                text(hostRepositoryText("manifest.094"), ["strategy", "maxUnavailable"], {
                   number: true,
                   min: 0,
                   max: 100,
@@ -856,18 +849,17 @@ export function ManifestEditor({
             <JsonField
               fieldId="labels"
               report={reportJson}
-              label="应用标签"
+              label={hostRepositoryText("manifest.095")}
               value={plain(["metadata", "labels"]) ?? {}}
               readOnly={readOnly}
               onChange={(value) => set(["metadata", "labels"], value)}
             />
             <p className="text-xs text-muted-foreground">
-              模式覆盖是高级 JSON 对象，会覆盖生成的部署配置；普通部署无需填写。
-            </p>
+              {hostRepositoryText("manifest.096")}</p>
             <JsonField
               fieldId="overrides"
               report={reportJson}
-              label="模式覆盖"
+              label={hostRepositoryText("manifest.097")}
               value={plain(["overrides"]) ?? {}}
               readOnly={readOnly}
               onChange={(value) => set(["overrides"], value)}
@@ -899,6 +891,7 @@ function JsonField({
   onChange: (value: Row) => void;
   report: (key: string, invalid: boolean) => void;
 }) {
+  useCommonTranslation();
   const serialized = JSON.stringify(value, null, 2);
   const [text, setText] = useState(serialized);
   const [error, setError] = useState("");
@@ -915,11 +908,10 @@ function JsonField({
     return () => report(fieldId, false);
   }, [fieldId, error, report]);
   return (
-    <AutoField label={<>{label}（JSON 对象）
-      </>} className="flex min-w-0 flex-col gap-1.5 text-sm sm:col-span-2">
+    <AutoField label={<>{label}{hostRepositoryText("manifest.099")}</>} className="flex min-w-0 flex-col gap-1.5 text-sm sm:col-span-2">
       <textarea
         className={area}
-        aria-label={`${label}（JSON 对象）`}
+        aria-label={hostRepositoryText("manifest.098", {value1: label})}
         value={text}
         readOnly={readOnly}
         aria-invalid={!!error}
@@ -928,12 +920,12 @@ function JsonField({
           setText(e.target.value);
           try {
             const result: unknown = JSON.parse(e.target.value);
-            if (!object(result)) throw new Error("请填写 JSON 对象。");
+            if (!object(result)) throw new Error(hostRepositoryText("manifest.100"));
             setError("");
             sent.current = JSON.stringify(result, null, 2);
             onChange(result);
           } catch {
-            setError("请填写有效的 JSON 对象；修正前无法保存或切换源码。");
+            setError(hostRepositoryText("manifest.101"));
           }
         }}
       />

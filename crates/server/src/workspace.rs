@@ -8,6 +8,7 @@
 
 use crate::snowflake::Id;
 
+use crate::error::{Json, Path};
 use crate::{
     auth::Account,
     db,
@@ -16,8 +17,7 @@ use crate::{
     state::AppState,
 };
 use axum::{
-    Json,
-    extract::{FromRequestParts, Path, State},
+    extract::{FromRequestParts, State},
     http::request::Parts,
 };
 use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QuerySelect, Set};
@@ -25,101 +25,504 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-/// Every permission in the product, with the labels the role editor shows.
+/// Every permission in the product, with translation keys for the role editor.
 /// `{resource}.{action}` where the resource is the REST resource name.
 pub const PERMISSIONS: &[(&str, &str, &str)] = &[
-    ("dashboard.read", "仪表盘", "查看"),
-    ("host-groups.read", "主机组", "查看"),
-    ("host-groups.create", "主机组", "新增"),
-    ("host-groups.update", "主机组", "修改"),
-    ("host-groups.delete", "主机组", "删除"),
-    ("hosts.read", "主机", "查看"),
-    ("hosts.create", "主机", "新增"),
-    ("hosts.update", "主机", "修改"),
-    ("hosts.delete", "主机", "删除"),
-    ("hosts.enroll", "主机", "生成接入命令"),
-    ("hosts.terminal", "主机", "远程终端"),
-    ("hosts.files", "主机", "文件传输"),
-    ("tags.read", "标签", "查看"),
-    ("tags.create", "标签", "新增"),
-    ("tags.update", "标签", "修改"),
-    ("tags.delete", "标签", "删除"),
-    ("repositories.read", "仓库", "查看"),
-    ("repositories.create", "仓库", "新增"),
-    ("repositories.update", "仓库", "修改"),
-    ("repositories.delete", "仓库", "删除"),
-    ("pipeline-groups.read", "流水线分组", "查看"),
-    ("pipeline-groups.create", "流水线分组", "新增"),
-    ("pipeline-groups.update", "流水线分组", "修改"),
-    ("pipeline-groups.delete", "流水线分组", "删除"),
-    ("pipeline-environments.read", "执行环境", "查看"),
-    ("pipeline-environments.create", "执行环境", "新增"),
-    ("pipeline-environments.update", "执行环境", "修改"),
-    ("pipeline-environments.delete", "执行环境", "删除"),
-    ("pipelines.read", "流水线", "查看"),
-    ("pipelines.create", "流水线", "新增"),
-    ("pipelines.update", "流水线", "修改"),
-    ("pipelines.delete", "流水线", "删除"),
-    ("pipelines.run", "流水线", "执行"),
-    ("pipeline-templates.read", "流水线模版", "查看"),
-    ("pipeline-templates.create", "流水线模版", "新增"),
-    ("pipeline-templates.update", "流水线模版", "修改"),
-    ("pipeline-templates.delete", "流水线模版", "删除"),
-    ("credentials.read", "凭据", "查看"),
-    ("credentials.create", "凭据", "新增"),
-    ("credentials.update", "凭据", "修改"),
-    ("credentials.delete", "凭据", "删除"),
-    ("deployments.read", "应用部署", "查看"),
-    ("deployments.create", "应用部署", "新增"),
-    ("deployments.update", "应用部署", "修改"),
-    ("deployments.delete", "应用部署", "删除"),
-    ("deployments.apply", "应用部署", "执行部署"),
-    ("deployments.rollback", "应用部署", "回滚"),
-    ("config-templates.read", "配置模板", "查看"),
-    ("config-templates.create", "配置模板", "新增"),
-    ("config-templates.update", "配置模板", "修改"),
-    ("config-templates.delete", "配置模板", "删除"),
-    ("app-templates.read", "应用模版", "查看"),
-    ("app-templates.create", "应用模版", "新增"),
-    ("app-templates.update", "应用模版", "修改"),
-    ("app-templates.delete", "应用模版", "删除"),
-    ("marketplace.read", "应用市场", "查看"),
-    ("marketplace.install", "应用市场", "安装"),
-    ("marketplace-sources.read", "市场来源", "查看"),
-    ("marketplace-sources.create", "市场来源", "新增"),
-    ("marketplace-sources.update", "市场来源", "修改"),
-    ("marketplace-sources.delete", "市场来源", "删除"),
-    ("marketplace-sources.sync", "市场来源", "同步"),
-    ("alerts.read", "报警监控", "查看"),
-    ("alerts.create", "报警监控", "新增"),
-    ("alerts.update", "报警监控", "修改"),
-    ("alerts.delete", "报警监控", "删除"),
-    ("cron-jobs.read", "定时任务", "查看"),
-    ("cron-jobs.create", "定时任务", "新增"),
-    ("cron-jobs.update", "定时任务", "修改"),
-    ("cron-jobs.delete", "定时任务", "删除"),
-    ("cron-jobs.run", "定时任务", "立即执行"),
-    ("variables.read", "密钥变量", "查看"),
-    ("variables.create", "密钥变量", "新增"),
-    ("variables.update", "密钥变量", "修改"),
-    ("variables.delete", "密钥变量", "删除"),
-    ("variables.reveal", "密钥变量", "查看明文"),
-    ("members.read", "成员管理", "查看"),
-    ("members.create", "成员管理", "邀请"),
-    ("members.update", "成员管理", "改角色"),
-    ("members.delete", "成员管理", "移除"),
-    ("roles.read", "角色管理", "查看"),
-    ("roles.create", "角色管理", "新增"),
-    ("roles.update", "角色管理", "修改"),
-    ("roles.delete", "角色管理", "删除"),
-    ("settings.read", "配置项", "查看"),
-    ("settings.update", "配置项", "修改"),
-    ("dictionaries.read", "字典", "查看"),
-    ("dictionaries.create", "字典", "新增"),
-    ("dictionaries.update", "字典", "修改"),
-    ("dictionaries.delete", "字典", "删除"),
-    ("activity.read", "操作记录", "查看"),
-    ("workspace.manage", "工作空间", "改名/邀请码/转让"),
+    (
+        "dashboard.read",
+        "permission.group.dashboard",
+        "permission.action.read",
+    ),
+    (
+        "host-groups.read",
+        "permission.group.host-groups",
+        "permission.action.read",
+    ),
+    (
+        "host-groups.create",
+        "permission.group.host-groups",
+        "permission.action.create",
+    ),
+    (
+        "host-groups.update",
+        "permission.group.host-groups",
+        "permission.action.update",
+    ),
+    (
+        "host-groups.delete",
+        "permission.group.host-groups",
+        "permission.action.delete",
+    ),
+    (
+        "hosts.read",
+        "permission.group.hosts",
+        "permission.action.read",
+    ),
+    (
+        "hosts.create",
+        "permission.group.hosts",
+        "permission.action.create",
+    ),
+    (
+        "hosts.update",
+        "permission.group.hosts",
+        "permission.action.update",
+    ),
+    (
+        "hosts.delete",
+        "permission.group.hosts",
+        "permission.action.delete",
+    ),
+    (
+        "hosts.enroll",
+        "permission.group.hosts",
+        "permission.action.enroll",
+    ),
+    (
+        "hosts.terminal",
+        "permission.group.hosts",
+        "permission.action.terminal",
+    ),
+    (
+        "hosts.files",
+        "permission.group.hosts",
+        "permission.action.files",
+    ),
+    (
+        "tags.read",
+        "permission.group.tags",
+        "permission.action.read",
+    ),
+    (
+        "tags.create",
+        "permission.group.tags",
+        "permission.action.create",
+    ),
+    (
+        "tags.update",
+        "permission.group.tags",
+        "permission.action.update",
+    ),
+    (
+        "tags.delete",
+        "permission.group.tags",
+        "permission.action.delete",
+    ),
+    (
+        "repositories.read",
+        "permission.group.repositories",
+        "permission.action.read",
+    ),
+    (
+        "repositories.create",
+        "permission.group.repositories",
+        "permission.action.create",
+    ),
+    (
+        "repositories.update",
+        "permission.group.repositories",
+        "permission.action.update",
+    ),
+    (
+        "repositories.delete",
+        "permission.group.repositories",
+        "permission.action.delete",
+    ),
+    (
+        "code-insights.read",
+        "permission.group.code-insights",
+        "permission.action.read",
+    ),
+    (
+        "code-insights.create",
+        "permission.group.code-insights",
+        "permission.action.create",
+    ),
+    (
+        "code-insights.update",
+        "permission.group.code-insights",
+        "permission.action.update",
+    ),
+    (
+        "code-insights.delete",
+        "permission.group.code-insights",
+        "permission.action.delete",
+    ),
+    (
+        "code-insights.sync",
+        "permission.group.code-insights",
+        "permission.action.sync",
+    ),
+    (
+        "pipeline-groups.read",
+        "permission.group.pipeline-groups",
+        "permission.action.read",
+    ),
+    (
+        "pipeline-groups.create",
+        "permission.group.pipeline-groups",
+        "permission.action.create",
+    ),
+    (
+        "pipeline-groups.update",
+        "permission.group.pipeline-groups",
+        "permission.action.update",
+    ),
+    (
+        "pipeline-groups.delete",
+        "permission.group.pipeline-groups",
+        "permission.action.delete",
+    ),
+    (
+        "pipeline-environments.read",
+        "permission.group.pipeline-environments",
+        "permission.action.read",
+    ),
+    (
+        "pipeline-environments.create",
+        "permission.group.pipeline-environments",
+        "permission.action.create",
+    ),
+    (
+        "pipeline-environments.update",
+        "permission.group.pipeline-environments",
+        "permission.action.update",
+    ),
+    (
+        "pipeline-environments.delete",
+        "permission.group.pipeline-environments",
+        "permission.action.delete",
+    ),
+    (
+        "pipelines.read",
+        "permission.group.pipelines",
+        "permission.action.read",
+    ),
+    (
+        "pipelines.create",
+        "permission.group.pipelines",
+        "permission.action.create",
+    ),
+    (
+        "pipelines.update",
+        "permission.group.pipelines",
+        "permission.action.update",
+    ),
+    (
+        "pipelines.delete",
+        "permission.group.pipelines",
+        "permission.action.delete",
+    ),
+    (
+        "pipelines.run",
+        "permission.group.pipelines",
+        "permission.action.run",
+    ),
+    (
+        "pipeline-templates.read",
+        "permission.group.pipeline-templates",
+        "permission.action.read",
+    ),
+    (
+        "pipeline-templates.create",
+        "permission.group.pipeline-templates",
+        "permission.action.create",
+    ),
+    (
+        "pipeline-templates.update",
+        "permission.group.pipeline-templates",
+        "permission.action.update",
+    ),
+    (
+        "pipeline-templates.delete",
+        "permission.group.pipeline-templates",
+        "permission.action.delete",
+    ),
+    (
+        "credentials.read",
+        "permission.group.credentials",
+        "permission.action.read",
+    ),
+    (
+        "credentials.create",
+        "permission.group.credentials",
+        "permission.action.create",
+    ),
+    (
+        "credentials.update",
+        "permission.group.credentials",
+        "permission.action.update",
+    ),
+    (
+        "credentials.delete",
+        "permission.group.credentials",
+        "permission.action.delete",
+    ),
+    (
+        "deployments.read",
+        "permission.group.deployments",
+        "permission.action.read",
+    ),
+    (
+        "deployments.create",
+        "permission.group.deployments",
+        "permission.action.create",
+    ),
+    (
+        "deployments.update",
+        "permission.group.deployments",
+        "permission.action.update",
+    ),
+    (
+        "deployments.delete",
+        "permission.group.deployments",
+        "permission.action.delete",
+    ),
+    (
+        "deployments.apply",
+        "permission.group.deployments",
+        "permission.action.apply",
+    ),
+    (
+        "deployments.rollback",
+        "permission.group.deployments",
+        "permission.action.rollback",
+    ),
+    (
+        "config-templates.read",
+        "permission.group.config-templates",
+        "permission.action.read",
+    ),
+    (
+        "config-templates.create",
+        "permission.group.config-templates",
+        "permission.action.create",
+    ),
+    (
+        "config-templates.update",
+        "permission.group.config-templates",
+        "permission.action.update",
+    ),
+    (
+        "config-templates.delete",
+        "permission.group.config-templates",
+        "permission.action.delete",
+    ),
+    (
+        "app-templates.read",
+        "permission.group.app-templates",
+        "permission.action.read",
+    ),
+    (
+        "app-templates.create",
+        "permission.group.app-templates",
+        "permission.action.create",
+    ),
+    (
+        "app-templates.update",
+        "permission.group.app-templates",
+        "permission.action.update",
+    ),
+    (
+        "app-templates.delete",
+        "permission.group.app-templates",
+        "permission.action.delete",
+    ),
+    (
+        "marketplace.read",
+        "permission.group.marketplace",
+        "permission.action.read",
+    ),
+    (
+        "marketplace.install",
+        "permission.group.marketplace",
+        "permission.action.install",
+    ),
+    (
+        "marketplace-sources.read",
+        "permission.group.marketplace-sources",
+        "permission.action.read",
+    ),
+    (
+        "marketplace-sources.create",
+        "permission.group.marketplace-sources",
+        "permission.action.create",
+    ),
+    (
+        "marketplace-sources.update",
+        "permission.group.marketplace-sources",
+        "permission.action.update",
+    ),
+    (
+        "marketplace-sources.delete",
+        "permission.group.marketplace-sources",
+        "permission.action.delete",
+    ),
+    (
+        "marketplace-sources.sync",
+        "permission.group.marketplace-sources",
+        "permission.action.sync",
+    ),
+    (
+        "alerts.read",
+        "permission.group.alerts",
+        "permission.action.read",
+    ),
+    (
+        "alerts.create",
+        "permission.group.alerts",
+        "permission.action.create",
+    ),
+    (
+        "alerts.update",
+        "permission.group.alerts",
+        "permission.action.update",
+    ),
+    (
+        "alerts.delete",
+        "permission.group.alerts",
+        "permission.action.delete",
+    ),
+    (
+        "cron-jobs.read",
+        "permission.group.cron-jobs",
+        "permission.action.read",
+    ),
+    (
+        "cron-jobs.create",
+        "permission.group.cron-jobs",
+        "permission.action.create",
+    ),
+    (
+        "cron-jobs.update",
+        "permission.group.cron-jobs",
+        "permission.action.update",
+    ),
+    (
+        "cron-jobs.delete",
+        "permission.group.cron-jobs",
+        "permission.action.delete",
+    ),
+    (
+        "cron-jobs.run",
+        "permission.group.cron-jobs",
+        "permission.action.run_now",
+    ),
+    (
+        "variables.read",
+        "permission.group.variables",
+        "permission.action.read",
+    ),
+    (
+        "variables.create",
+        "permission.group.variables",
+        "permission.action.create",
+    ),
+    (
+        "variables.update",
+        "permission.group.variables",
+        "permission.action.update",
+    ),
+    (
+        "variables.delete",
+        "permission.group.variables",
+        "permission.action.delete",
+    ),
+    (
+        "variables.reveal",
+        "permission.group.variables",
+        "permission.action.reveal",
+    ),
+    (
+        "members.read",
+        "permission.group.members",
+        "permission.action.read",
+    ),
+    (
+        "members.create",
+        "permission.group.members",
+        "permission.action.invite",
+    ),
+    (
+        "members.update",
+        "permission.group.members",
+        "permission.action.change_role",
+    ),
+    (
+        "members.delete",
+        "permission.group.members",
+        "permission.action.remove",
+    ),
+    (
+        "roles.read",
+        "permission.group.roles",
+        "permission.action.read",
+    ),
+    (
+        "roles.create",
+        "permission.group.roles",
+        "permission.action.create",
+    ),
+    (
+        "roles.update",
+        "permission.group.roles",
+        "permission.action.update",
+    ),
+    (
+        "roles.delete",
+        "permission.group.roles",
+        "permission.action.delete",
+    ),
+    (
+        "settings.create",
+        "permission.group.settings",
+        "permission.action.create",
+    ),
+    (
+        "settings.delete",
+        "permission.group.settings",
+        "permission.action.delete",
+    ),
+    (
+        "settings.read",
+        "permission.group.settings",
+        "permission.action.read",
+    ),
+    (
+        "settings.update",
+        "permission.group.settings",
+        "permission.action.update",
+    ),
+    (
+        "dictionaries.read",
+        "permission.group.dictionaries",
+        "permission.action.read",
+    ),
+    (
+        "dictionaries.create",
+        "permission.group.dictionaries",
+        "permission.action.create",
+    ),
+    (
+        "dictionaries.update",
+        "permission.group.dictionaries",
+        "permission.action.update",
+    ),
+    (
+        "dictionaries.delete",
+        "permission.group.dictionaries",
+        "permission.action.delete",
+    ),
+    (
+        "activity.read",
+        "permission.group.activity",
+        "permission.action.read",
+    ),
+    (
+        "workspace.manage",
+        "permission.group.workspace",
+        "permission.action.manage",
+    ),
 ];
 
 /// Permissions a chosen permission cannot work without. The role editor adds
@@ -134,6 +537,12 @@ pub fn dependencies(permission: &str) -> Vec<String> {
         }
     }
     let extra: &[&str] = match permission {
+        "code-insights.read" => &["repositories.read"],
+        "code-insights.sync" => &[
+            "code-insights.read",
+            "repositories.read",
+            "credentials.read",
+        ],
         "hosts.terminal" | "hosts.files" | "hosts.enroll" => &["hosts.read"],
         "pipelines.run" => &["repositories.read"],
         "deployments.apply" | "deployments.rollback" => &["hosts.read", "app-templates.read"],
@@ -178,6 +587,24 @@ const BUILTIN: &[(&str, &str)] = &[
     ("viewer", "只读"),
 ];
 
+/// Built-in names remain stable in storage; custom role names are user data.
+pub(crate) fn role_name(name: &str, builtin: bool) -> String {
+    if builtin {
+        let key = match name {
+            "拥有者" => Some("workspace.role.owner"),
+            "管理员" => Some("workspace.role.admin"),
+            "开发" => Some("workspace.role.developer"),
+            "运维" => Some("workspace.role.operator"),
+            "只读" => Some("workspace.role.viewer"),
+            _ => None,
+        };
+        if let Some(key) = key {
+            return crate::i18n::message(key);
+        }
+    }
+    name.to_owned()
+}
+
 fn builtin_permissions(role: &str) -> Vec<String> {
     let all = || {
         PERMISSIONS
@@ -203,6 +630,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
         "developer" => expand(
             &[
                 "repositories",
+                "code-insights",
                 "pipelines",
                 "pipeline-templates",
                 "credentials",
@@ -222,6 +650,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
             })
             .chain([
                 "pipelines.run".into(),
+                "code-insights.sync".into(),
                 "deployments.apply".into(),
                 "dashboard.read".into(),
             ])
@@ -281,8 +710,13 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .one(&tx)
             .await?
             .ok_or_else(ApiError::missing)?;
-        let mut permissions: Vec<String> = serde_json::from_str(&current.permissions)
-            .map_err(|_| ApiError::bad("内置角色权限记录损坏。"))?;
+        let mut permissions: Vec<String> =
+            serde_json::from_str(&current.permissions).map_err(|_| {
+                ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("workspace.error.builtin_corrupt"),
+                )
+            })?;
         let previous = permissions.len();
         for permission in additions {
             if !permissions.contains(&permission) {
@@ -482,12 +916,16 @@ pub(crate) async fn create_in(
     let slug = body.slug.trim().to_lowercase();
     let name = body.name.trim().to_owned();
     if !valid_slug(&slug) {
-        return Err(ApiError::bad(
-            "标识只能用小写字母、数字和中划线，2–40 个字符，且不能用保留词。",
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.slug_invalid"),
         ));
     }
     if name.is_empty() || name.chars().count() > 60 {
-        return Err(ApiError::bad("请填写工作空间名称（60 字以内）。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.name_invalid"),
+        ));
     }
     if workspaces::Entity::find()
         .filter(workspaces::Column::Slug.eq(slug.clone()))
@@ -495,7 +933,10 @@ pub(crate) async fn create_in(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("该标识已被占用，请换一个。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.slug_used"),
+        ));
     }
     let (id, now, code) = (s.next_id()?, db::now(), join_code());
     workspaces::Entity::insert(workspaces::ActiveModel {
@@ -563,12 +1004,20 @@ pub async fn join(
         .filter(workspaces::Column::JoinCode.ne(""))
         .one(&s.db)
         .await?
-        .ok_or_else(|| ApiError::bad("邀请码无效或已失效。"))?;
+        .ok_or_else(|| {
+            ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("workspace.error.invite_invalid"),
+            )
+        })?;
     use sea_orm::TransactionTrait;
     let tx = s.db.begin().await?;
     let row = crate::workspace_admin::lock_workspace(&tx, Id::from(row.id)).await?;
     if row.join_code != code {
-        return Err(ApiError::bad("邀请码无效或已失效。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workspace.error.invite_invalid"),
+        ));
     }
     let workspace_id = Id::from(row.id);
     if workspace_members::Entity::find()
@@ -578,7 +1027,10 @@ pub async fn join(
         .await?
         .is_some()
     {
-        return Err(ApiError::conflict("你已经是该工作空间的成员。"));
+        return Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("workspace.error.already_member"),
+        ));
     }
     // New members land on the read-only role; an admin promotes them.
     let viewer = workspace_roles::Entity::find()
@@ -613,7 +1065,7 @@ pub async fn permission_catalogue() -> Json<Value> {
     let items: Vec<Value> = PERMISSIONS
         .iter()
         .map(|(key, group, action)| {
-            json!({"key": key, "group": group, "action": action, "requires": dependencies(key)})
+            json!({"key": key, "group": crate::i18n::message(group), "action": crate::i18n::message(action), "requires": dependencies(key)})
         })
         .collect();
     Json(json!({"items": items}))

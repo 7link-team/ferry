@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             path = path.replace('/hosts/', '/nodes/').replace('/host-groups/', '/node-groups/')
             path = path.replace('/repository-auth', '/repository-providers').replace('/actions/render', '/renderings')
         request = urllib.request.Request(origin+path, data=json.dumps(body).encode() if body is not None else None,
-            headers={'Content-Type':'application/json','X-Ferry-Request':'1'})
+            headers={'Content-Type':'application/json','X-Ferry-Request':'1', 'Accept-Language': 'zh-CN'})
         with client.open(request, timeout=10) as response:
             return json.load(response)
     def wait(fn):
