@@ -1,0 +1,22 @@
+﻿name: Recover alpha35 macOS hosted capacity cancellation
+on:
+  push:
+    branches: [feat/alpha35-release-dispatch]
+    paths: [.github/workflows/retry-macos.yml]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  retry:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const repo=context.repo;
+            const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id:41496968222});
+            if(run.head_sha!=='b50b9933502385542ecb4e4ebeafd9eb51914ea5')throw Error('Unexpected source');
+            const {data:job}=await github.rest.actions.getJobForWorkflowRun({...repo,job_id:125455177657});
+            if(job.conclusion!=='cancelled')throw Error('Unexpected job state');
+            await github.rest.actions.reRunJobForWorkflowRun({...repo,job_id:job.id});
+            core.notice('Retry only the macOS ARM desktop task cancelled by hosted runner capacity');
