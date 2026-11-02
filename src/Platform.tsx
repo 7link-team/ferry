@@ -14,7 +14,7 @@ type Row = Record<string, unknown> & { id: string; name: string; email: string; 
 /** Whether the user created the workspace, joined it, or only reaches it as a platform administrator. */
 export const myRole = (relation: string | undefined, role: string | undefined) =>
   relation === "owner" ? "拥有者（我创建的）" : relation === "member" ? `${role}（已加入）` : "未加入（平台超级管理员）";
-const labels: Record<string, string> = { users: "平台用户", workspaces: "工作空间", settings: "平台设置" };
+const labels: Record<string, string> = { workspaces: "工作空间", users: "平台用户", settings: "平台设置" };
 const permissions = new Set(["users.update", "workspaces.create", "workspaces.update", "settings.update"]);
 const edit = { label: "编辑", to: (r: Row) => ({ id: r.id, mode: "edit" as const }) };
 const lists: Record<string, ListConfig<Row>> = {
