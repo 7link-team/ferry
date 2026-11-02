@@ -103,6 +103,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: backends
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
       # rust-embed needs dist/ to exist, but these checks never load a page, so
       # build.rs's empty placeholder is enough and the npm build is skipped.
       - run: cargo build --locked -p ferry-server
@@ -165,6 +169,8 @@ jobs:
           PGPASSWORD: integration-only-password
         run: |
           cargo build --locked -p ferry-runner
+          # Scheduled pipelines run as Actions jobs, which need the worker.
+          ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh
           mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE cron_test;'
           createdb -h 127.0.0.1 -U postgres cron_test
           python3 -I scripts/test-cron.py
