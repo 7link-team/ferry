@@ -49,6 +49,9 @@ func generate() error {
 	if err := patchWindowsHost(moduleDir); err != nil {
 		return err
 	}
+	if err := patchCompatibility(moduleDir); err != nil {
+		return err
+	}
 	source := filepath.Join(moduleDir, "pkg", "container", "host_environment.go")
 	data, err := os.ReadFile(source)
 	if err != nil {
@@ -69,28 +72,6 @@ func generate() error {
 	if err := os.WriteFile(source, []byte(patched), 0600); err != nil {
 		return err
 	}
-	// act expands matrices but ignores fail-fast. Ferry uses one matrix slot;
-	// the existing sequential executor stops before scheduling later branches.
-	runnerSource := filepath.Join(moduleDir, "pkg", "runner", "runner.go")
-	runnerData, err := os.ReadFile(runnerSource)
-	if err != nil {
-		return err
-	}
-	original := "pipeline = append(pipeline, common.NewParallelExecutor(maxParallel, stageExecutor...))"
-	replacement := `if maxParallel == 1 && job.Strategy != nil && job.Strategy.FailFast {
-                    for i, executor := range stageExecutor {
-                        stageExecutor[i] = executor.Then(handleFailure(plan))
-                    }
-                    pipeline = append(pipeline, common.NewPipelineExecutor(stageExecutor...))
-                } else {
-                    pipeline = append(pipeline, common.NewParallelExecutor(maxParallel, stageExecutor...))
-                }`
-	if strings.Count(string(runnerData), original) != 1 {
-		return fmt.Errorf("act matrix fail-fast patch no longer applies")
-	}
-	if err := os.WriteFile(runnerSource, []byte(strings.Replace(string(runnerData), original, replacement, 1)), 0600); err != nil {
-		return err
-	}
 	// Display names are not execution identities. Every server job invocation
 	// has a private action-cache directory, so use it to namespace Docker
 	// containers, volumes and service networks without changing user contexts.
@@ -99,8 +80,8 @@ func generate() error {
 	if err != nil {
 		return err
 	}
-	original = `return createContainerName("act", rc.String())`
-	replacement = `return createContainerName("act", rc.Config.ActionCacheDir, rc.Run.JobID, rc.String())`
+	original := `return createContainerName("act", rc.String())`
+	replacement := `return createContainerName("act", rc.Config.ActionCacheDir, rc.Run.JobID, rc.String())`
 	if strings.Count(string(contextData), original) != 1 {
 		return fmt.Errorf("act invocation namespace patch no longer applies")
 	}

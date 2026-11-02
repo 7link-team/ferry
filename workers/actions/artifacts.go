@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
+	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +36,14 @@ type artifactRuntime struct {
 	server     *http.Server
 	listener   net.Listener
 	root       *os.Root
+	mutex      sync.Mutex
+	retention  map[string]int
+}
+
+func (r *artifactRuntime) Retention() map[string]int {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	return maps.Clone(r.retention)
 }
 
 func (r *artifactRuntime) Close() {
@@ -111,7 +122,7 @@ func startArtifacts(ctx context.Context, directory, run string, container bool) 
 		root.Close()
 		return nil, err
 	}
-	runtime := &artifactRuntime{Token: token, capability: capability, listener: listener, root: root}
+	runtime := &artifactRuntime{Token: token, capability: capability, listener: listener, root: root, retention: map[string]int{}}
 	advertised := "127.0.0.1"
 	if container {
 		advertised = "host.docker.internal"
@@ -120,7 +131,6 @@ func startArtifacts(ctx context.Context, directory, run string, container bool) 
 	router := httprouter.New()
 	filesystem := artifactFS{base: directory, root: root}
 	artifacts.RoutesV4(router, directory, filesystem, filesystem)
-	var mutex sync.Mutex // upstream route state includes a mutable AppURL
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
@@ -143,22 +153,47 @@ func startArtifacts(ctx context.Context, directory, run string, container bool) 
 					return
 				}
 			}
-			mutex.Lock()
-			defer mutex.Unlock()
-			if strings.HasSuffix(r.URL.Path, "/DeleteArtifact") {
-				http.Error(w, "Run artifacts are immutable; use a distinct artifact name", http.StatusNotImplemented)
-				return
-			}
-			if strings.HasSuffix(r.URL.Path, "/CreateArtifact") {
+			runtime.mutex.Lock()
+			defer runtime.mutex.Unlock()
+			creating := strings.HasSuffix(r.URL.Path, "/CreateArtifact")
+			deleting := strings.HasSuffix(r.URL.Path, "/DeleteArtifact")
+			if creating || deleting {
 				name, ok := request["name"].(string)
 				if !ok || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 					http.Error(w, "Invalid artifact name", http.StatusBadRequest)
 					return
 				}
-				if _, err := root.Stat(filepath.Join(run, name, name+".zip")); err == nil {
+				archive := filepath.Join(run, name, name+".zip")
+				if deleting {
+					// Use the confined root, unlike act's os.RemoveAll route.
+					if err := root.Remove(archive); err != nil && !os.IsNotExist(err) {
+						http.Error(w, "Cannot delete artifact", http.StatusInternalServerError)
+						return
+					}
+					_ = root.Remove(filepath.Join(run, name))
+					delete(runtime.retention, filepath.ToSlash(archive))
+					w.Header().Set("Content-Type", "application/json")
+					id := fnv.New32a()
+					_, _ = id.Write([]byte(name))
+					_, _ = fmt.Fprintf(w, `{"ok":true,"artifactId":"%d"}`, id.Sum32())
+					return
+				}
+				if _, err := root.Stat(archive); err == nil {
 					http.Error(w, "Artifact already exists; use a distinct name", http.StatusConflict)
 					return
 				}
+				days := 0
+				for _, key := range []string{"expiresAt", "expires_at"} {
+					if raw, ok := request[key].(string); ok && raw != "" {
+						expires, err := time.Parse(time.RFC3339Nano, raw)
+						if err != nil {
+							http.Error(w, "Invalid artifact expiry", http.StatusBadRequest)
+							return
+						}
+						days = max(0, int(math.Round(time.Until(expires).Hours()/24)))
+					}
+				}
+				runtime.retention[filepath.ToSlash(archive)] = days
 			}
 			r.Body = io.NopCloser(strings.NewReader(string(body)))
 			// The returned URLs must refer to this listener, never an arbitrary Host.
@@ -194,8 +229,8 @@ func startArtifacts(ctx context.Context, directory, run string, container bool) 
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		mutex.Lock()
-		defer mutex.Unlock()
+		runtime.mutex.Lock()
+		defer runtime.mutex.Unlock()
 		router.ServeHTTP(w, r)
 	})
 	runtime.server = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}

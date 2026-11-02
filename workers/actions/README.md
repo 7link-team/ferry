@@ -26,21 +26,91 @@ mapping, variable snapshot, repository work directory and timeout bound.
 Stdout contains JSON log records followed by a `kind: result` record. Both the
 message and structured fields are masked before output. Results carry outputs
 and artifact paths, never the request secrets. SIGTERM/SIGINT cancel execution;
-post steps and engine cleanup run before the result is returned.
+remaining `cancelled()`/`always()` steps, post steps and engine cleanup share a
+30-second cancellation grace before the result is returned. A cleanup script
+that hangs is killed when that grace expires. Artifact HTTP shutdown has a
+separate maximum of five seconds. The launcher must allow these bounds before
+forcibly terminating the worker.
+
+## Worker protocol
+
+`Request` also accepts `actor`, `run_number` (int64), `run_attempt` (int), `ref`,
+`sha`, `repository` (`owner/repository`) and `server_url`, alongside the existing
+`event_name`, `event_path`, `inputs`, `vars`, `secrets` and resolved `needs`.
+These populate the GitHub context; the event JSON remains the trigger payload.
+`run_cancelled: true` enables cleanup jobs before their first step, with
+`cancelled() == true`, `success() == false` and `always() == true`.
+
+`mode: "plan"` evaluates the selected job's matrix using the supplied dependency
+outputs, inputs and variables. It returns `instances: [{name, matrix}, ...]` in
+declared axis/product order (then unmatched includes). It starts no steps,
+action fetches, cache/artifact listener or Docker connection. An empty/omitted
+`mode` executes normally. Supplying a non-null `matrix` object, including `{}`,
+executes exactly that instance without fan-out. Omit `matrix` to execute all
+instances inside this worker. Distributed dispatch must retain the original
+workflow and dependency/input snapshots so strategy totals remain available.
+
+Every instance owns its workflow model, steps, output expressions and action
+cache namespace. `strategy.max-parallel` controls scheduling; fail-fast cancels
+running and queued siblings only for failures without job-level tolerance.
+`strategy.job-total`, `strategy.job-index` and `strategy.max-parallel` describe
+the original strategy. Job `timeout-minutes` is evaluated per instance, defaults
+to 360 minutes and has no additional policy ceiling. `timeout_seconds` is the
+outer invocation bound and can therefore expire across several serial legs.
+
+The final stdout record retains `kind: "result"`, `state`, `outputs`, `steps`
+and `artifacts`, and adds `continue_on_error` and `artifact_retention`. The raw
+failed state is preserved when tolerated: the server must use
+`continue_on_error: true` to apply successful dependency/run semantics, rather
+than treating the worker's nonzero exit alone as authoritative. `steps` includes
+skipped steps. Matrix outputs merge in completion order; a later explicitly
+empty output replaces an earlier value, while a reference to an un-emitted step
+output contributes no key. Secret-bearing outputs are omitted before merging.
 
 Artifacts use the upstream v4 protocol with a per-worker capability check.
 Bearer tokens are required for metadata requests; returned blob URLs carry a
 separate random capability. The filesystem is confined using `os.Root`.
 Archives are transferred back through `HostChannel` into the existing service
 artifact store and restored before subsequent jobs, including jobs on other
-hosts. Run archives remain immutable: use distinct names; overwrite/delete is
-rejected. Retention follows the platform's build-history policy.
+hosts. A duplicate create conflicts unless the action first calls
+`DeleteArtifact`, as `upload-artifact@v4` does for `overwrite: true`. Deletes
+use the confined filesystem root and remove retention metadata. The result's
+`artifact_retention` maps archive-relative paths (for example
+`41/proof/proof.zip`) to requested days; zero means platform policy default.
+The v4 wire protocol supplies an expiry timestamp, from which requested whole
+days are recovered. The server owns persistence, replacement/deletion of
+previously published archives and expiry enforcement. `artifacts` is the final
+archive manifest, including restored archives that still exist.
+
+`actions/cache` uses act's `pkg/artifactcache` service, bound to `127.0.0.1` on
+an ephemeral port. `cache_dir` selects persistent storage; the default is
+`os.UserCacheDir()/ferry/actions-cache`. `ACTIONS_CACHE_URL` and a runtime token
+are supplied even without artifacts. The service uses its private URL
+capability and the v1 cache API supported by `cache@v4`; the v2 service flag is
+disabled for this backend. Cache contents survive separate worker invocations.
+Container reachability of this loopback service is not verified on this machine.
+
+Remote actions and reusable workflows use act's go-git fetching. Private
+repositories receive `secrets.GITHUB_TOKEN` as the Git authentication token;
+the same value populates `github.token`. Fetching requires connectivity to the
+Git server and failures propagate. No public network is required by default
+tests: local actions, reusable workflows and an authenticated loopback Git
+server exercise those paths. Opt-in remote tests fetch upstream action refs.
 
 Tests:
 
 ```sh
 cd workers/actions
-bash go.sh test ./...
+# In the Windows worktree sandbox, keep tool/test state within the worktree.
+worker_root=$(cd ../.. && pwd -W)
+mkdir -p "$worker_root/.gocache" "$worker_root/.tmp"
+export GOCACHE="$worker_root/.gocache"
+export TMP="$worker_root/.tmp" TEMP="$worker_root/.tmp" GOTMPDIR="$worker_root/.tmp"
+export GOMODCACHE="$worker_root/.tmp/gomodcache" GOPATH="$worker_root/.tmp/gopath"
+export LOCALAPPDATA="$worker_root/.tmp/user-cache" XDG_CACHE_HOME="$worker_root/.tmp/user-cache"
+bash ./go.sh test -count=1 ./...
+GOOS=linux GOARCH=amd64 bash ./go.sh vet ./...
+GOOS=darwin GOARCH=arm64 bash ./go.sh vet ./...
 ACTIONS_TEST_REMOTE=1 bash go.sh test -run TestArtifactActions -count=1
 ACTIONS_TEST_REMOTE=1 ACTIONS_TEST_DOCKER_IMAGE=<local-node-image> bash go.sh test -run TestArtifactActions -count=1
 ```
@@ -53,11 +123,14 @@ Worker builds and tests use `go.sh` to apply the pinned act PTY synchronization
 fix in a disposable source tree. The pinned module is downloaded on cache
 misses; the shared Go module cache is never modified. A stable relative module
 replacement keeps independently staged binaries reproducible.
-The patches make the cross-thread stop flag atomic and enforce matrix
-`fail-fast` using the engine’s existing job result and sequential executor.
+The patches make cross-thread PTY/cancellation flags atomic and expose the
+strategy context to the worker. Reusable workflows enter act's planner, whose
+matrix scheduling seam is patched to snapshot models, run isolated legs and
+publish their results under a lock. That patch is larger than the host fixes;
+local reusable-workflow tests cover concurrent output merging and tolerated
+failures, and exact matching deliberately blocks an unreviewed engine upgrade.
 Source matching fails closed if upstream changes. Run `bash go.sh test -race ./...`
-to include the native execution race regression. Matrix branches currently
-execute serially because the pinned engine shares mutable step models.
+to include the native execution race regression.
 
 ## Windows host mode
 
@@ -108,7 +181,7 @@ still removed from job outputs and masked in structured logs.
 
 Act already handles CRLF and UTF-8 BOM command files. It did not decode the
 UTF-16 files produced by PowerShell 5.1's `>>`/`Out-File`. On Windows, command
-files (`GITHUB_OUTPUT`, `GITHUB_ENV`, and action state) now decode BOM-marked
+files (`GITHUB_OUTPUT`, `GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_STEP_SUMMARY`, and action state) now decode BOM-marked
 UTF-16 LE/BE before parsing or secret checks. UTF-8 with/without BOM remains
 supported; Unix readers are unchanged. Use a consistent encoding within each
 file; mixing UTF-8 and UTF-16 in a single append stream is not supported.

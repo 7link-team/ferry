@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"maps"
 	"os"
 	"os/signal"
@@ -30,12 +29,26 @@ import (
 const engineVersion = "nektos/act v0.2.89"
 
 type JobResult struct {
-	Steps     map[string]string `json:"steps,omitempty"`
-	Artifacts []string          `json:"artifacts,omitempty"`
-	State     string            `json:"state"`
-	Outputs   map[string]string `json:"outputs"`
+	ContinueOnError   bool              `json:"continue_on_error"`
+	Instances         []JobInstance     `json:"instances,omitempty"`
+	ArtifactRetention map[string]int    `json:"artifact_retention,omitempty"`
+	Steps             map[string]string `json:"steps,omitempty"`
+	Artifacts         []string          `json:"artifacts,omitempty"`
+	State             string            `json:"state"`
+	Outputs           map[string]string `json:"outputs"`
 }
 type Request struct {
+	Actor          string               `json:"actor"`
+	RunNumber      int64                `json:"run_number"`
+	RunAttempt     int                  `json:"run_attempt"`
+	Ref            string               `json:"ref"`
+	SHA            string               `json:"sha"`
+	Repository     string               `json:"repository"`
+	ServerURL      string               `json:"server_url"`
+	RunCancelled   bool                 `json:"run_cancelled"`
+	Mode           string               `json:"mode"`
+	Matrix         map[string]any       `json:"matrix"`
+	CacheDir       string               `json:"cache_dir"`
 	ArtifactDir    string               `json:"artifact_dir"`
 	RunID          string               `json:"run_id"`
 	Workflow       string               `json:"workflow"`
@@ -172,7 +185,7 @@ func (f loggerFactory) WithJobLogger() *logrus.Logger {
 	return logger
 }
 
-func execute(ctx context.Context, request Request, output io.Writer) (JobResult, error) {
+func executeInstance(ctx context.Context, request Request, output io.Writer, index, total, parallel int, failFast bool) (JobResult, error) {
 	result := JobResult{State: "failure", Outputs: map[string]string{}, Artifacts: []string{}, Steps: map[string]string{}}
 	workflow, err := model.ReadWorkflow(strings.NewReader(request.Workflow), false)
 	if err != nil {
@@ -182,30 +195,14 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 	if job == nil {
 		return result, fmt.Errorf("unknown job %q", request.Job)
 	}
-	pending := slices.Clone(job.Needs())
-	hydrated := map[string]bool{}
-	for len(pending) > 0 {
-		id := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-		if hydrated[id] {
-			continue
-		}
-		needed, ok := request.Needs[id]
-		dependency := workflow.GetJob(id)
-		if !ok || dependency == nil {
-			return result, fmt.Errorf("missing completed dependency %q", id)
-		}
-		dependency.Outputs = needed.Outputs
-		dependency.Result = needed.State
-		hydrated[id] = true
-		pending = append(pending, dependency.Needs()...)
+	if err := hydrate(request, workflow); err != nil {
+		return result, err
 	}
 
-	// This worker has one execution slot. The pinned engine mutates shared
-	// step models across parallel matrix branches; serialize them until each
-	// branch can be hosted by an isolated worker process.
+	// Each instance reparses the workflow: act mutates steps and outputs.
 	if job.Strategy != nil {
-		job.Strategy.MaxParallelString = "1"
+		job.Strategy.MaxParallel = parallel
+		job.Strategy.FailFast = failFast
 	}
 	if request.EventName == "" {
 		request.EventName = "workflow_dispatch"
@@ -217,7 +214,6 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 			containerJob = true
 		}
 	}
-	var artifact *artifactRuntime
 	request.Env = maps.Clone(request.Env)
 	if request.Env == nil {
 		request.Env = map[string]string{}
@@ -226,43 +222,17 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 	if request.Secrets == nil {
 		request.Secrets = map[string]string{}
 	}
-	if request.ArtifactDir != "" {
-		if request.RunID == "" {
-			request.RunID = "1"
-		}
-		artifact, err = startArtifacts(ctx, request.ArtifactDir, request.RunID, containerJob)
-		if err != nil {
-			return result, err
-		}
-		defer artifact.Close()
-		for key, value := range map[string]string{"ACTIONS_RUNTIME_TOKEN": artifact.Token, "ACTIONS_RUNTIME_URL": artifact.URL + "/"} {
-			previous, exists := os.LookupEnv(key)
-			if err = os.Setenv(key, value); err != nil {
-				return result, err
-			}
-			defer func() {
-				if exists {
-					_ = os.Setenv(key, previous)
-				} else {
-					_ = os.Unsetenv(key)
-				}
-			}()
-		}
-		request.Secrets["_RUNTIME_TOKEN"] = artifact.Token
-		request.Secrets["_ARTIFACT_CAPABILITY"] = artifact.capability
-		request.Env["GITHUB_RUN_ID"] = request.RunID
-	}
 	recorder := &stepRecorder{states: map[string]string{}, masks: map[string]bool{}}
 	factory := loggerFactory{output: &lockedWriter{output: output}, secrets: request.Secrets, recorder: recorder}
 	logger := factory.WithJobLogger()
 	ctx = common.WithLogger(ctx, logger.WithContext(ctx))
 	ctx = runner.WithJobLoggerFactory(ctx, factory)
-	config := &runner.Config{Workdir: request.Workdir, ActionCacheDir: filepath.Join(filepath.Dir(request.Workdir), "action-cache"), EventName: request.EventName, EventPath: request.EventPath, Platforms: request.Platforms,
+	config := &runner.Config{Actor: request.Actor, Token: request.Secrets["GITHUB_TOKEN"], Workdir: request.Workdir, ActionCacheDir: filepath.Join(filepath.Dir(request.Workdir), "action-cache", strconv.Itoa(index)), EventName: request.EventName, EventPath: request.EventPath, Platforms: request.Platforms,
 		Env: request.Env, Secrets: request.Secrets, Vars: request.Vars, Inputs: request.Inputs, LogOutput: true, JSONLogger: true, AutoRemove: true,
 		GitHubInstance: "github.com", RemoteName: "origin", ConcurrentJobs: 4}
-	if artifact != nil {
+	if request.ArtifactDir != "" {
 		config.ArtifactServerPath = request.ArtifactDir
-		if strings.Contains(artifact.URL, "host.docker.internal") {
+		if strings.Contains(request.Env["ACTIONS_RUNTIME_URL"], "host.docker.internal") {
 			config.ContainerOptions = "--add-host=host.docker.internal:host-gateway"
 		}
 	}
@@ -271,52 +241,64 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 		if err != nil {
 			return result, err
 		}
-		previous, exists := os.LookupEnv("DOCKER_HOST")
-		if err = os.Setenv("DOCKER_HOST", socket.Host); err != nil {
-			return result, err
-		}
-		defer func() {
-			if exists {
-				_ = os.Setenv("DOCKER_HOST", previous)
-			} else {
-				_ = os.Unsetenv("DOCKER_HOST")
-			}
-		}()
 		config.ContainerDaemonSocket = socket.Socket
 	}
-	minutes := job.TimeoutMinutes
-	if minutes != "" {
-		rc := &runner.RunContext{Config: config, Run: &model.Run{Workflow: workflow, JobID: request.Job}, StepResults: map[string]*model.StepResult{}}
-		minutes = rc.NewExpressionEvaluator(ctx).Interpolate(ctx, minutes)
+	rc, err := evaluationContext(ctx, request, workflow, config)
+	if err != nil {
+		return result, err
+	}
+	rc.Matrix = request.Matrix
+	rc.StrategyJobTotal = total
+	rc.StrategyJobIndex = index
+	rc.Cancelled.Store(request.RunCancelled)
+	rc.ExprEval = rc.NewExpressionEvaluator(ctx)
+	result.ContinueOnError, err = jobContinueOnError(ctx, request.Workflow, request.Job, rc)
+	if err != nil {
+		return result, err
+	}
+	minutes := rc.ExprEval.Interpolate(ctx, job.TimeoutMinutes)
+	if job.TimeoutMinutes != "" && minutes == "" {
+		return result, fmt.Errorf("job timeout-minutes must resolve to a positive duration")
 	}
 	seconds, err := jobTimeBudget(request.TimeoutSeconds, minutes)
 	if err != nil {
 		return result, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
+	jobCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
-	engine, err := runner.New(config)
+	execCtx, finish := cleanupContext(jobCtx, request.RunCancelled)
+	defer finish()
+	execCtx = common.WithJobErrorContainer(runner.WithJobLogger(execCtx, request.Job, request.Job, config, &rc.Masks, request.Matrix))
+	rc.Name = rc.ExprEval.Interpolate(execCtx, rc.Run.String())
+	rc.JobName = rc.Name
+	executor, err := rc.Executor()
 	if err != nil {
 		return result, err
 	}
-	plan := &model.Plan{Stages: []*model.Stage{{Runs: []*model.Run{{Workflow: workflow, JobID: request.Job}}}}}
-	err = engine.NewPlanExecutor(plan)(ctx)
+	err = executor(execCtx)
 	result.Steps = maps.Clone(recorder.states)
 	result.State = job.Result
 	if result.State == "" {
 		result.State = "failure"
 	}
 	result.Outputs = job.Outputs
-	if result.Outputs == nil {
+	if result.Outputs == nil || result.State == "skipped" {
 		result.Outputs = map[string]string{}
 	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		result.State = "timed_out"
-		err = ctx.Err()
+	if result.State == "failure" && err == nil {
+		err = fmt.Errorf("job %q failed", request.Job)
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
+	if errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
+		result.State = "timed_out"
+		err = jobCtx.Err()
+	}
+	if errors.Is(jobCtx.Err(), context.Canceled) {
 		result.State = "cancelled"
-		err = ctx.Err()
+		err = jobCtx.Err()
+	}
+	if jobCtx.Err() == nil && execCtx.Err() != nil {
+		result.State = "cancelled"
+		err = execCtx.Err()
 	}
 	outputMasks := maps.Clone(recorder.masks)
 	for _, secret := range request.Secrets {
@@ -335,40 +317,19 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 			}
 		}
 	}
-	if artifact != nil {
-		walkErr := filepath.WalkDir(request.ArtifactDir, func(path string, entry fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".zip") {
-				relative, err := filepath.Rel(request.ArtifactDir, path)
-				if err != nil {
-					return err
-				}
-				result.Artifacts = append(result.Artifacts, filepath.ToSlash(relative))
-			}
-			return nil
-		})
-		if walkErr != nil {
-			return result, walkErr
-		}
-	}
 	return result, err
 }
 
 func jobTimeBudget(limit int, minutes string) (int, error) {
-	if limit <= 0 || limit > 86400 {
-		limit = 86400
-	}
-	seconds := 1800
+	seconds := 360 * 60
 	if minutes != "" {
 		value, err := strconv.Atoi(minutes)
-		if err != nil || value < 1 || value > 1440 {
-			return 0, fmt.Errorf("job timeout-minutes must resolve to 1..1440")
+		if err != nil || value < 1 || value > int((1<<63-1)/int64(time.Minute)) {
+			return 0, fmt.Errorf("job timeout-minutes must resolve to a positive duration")
 		}
 		seconds = value * 60
 	}
-	if seconds > limit {
+	if limit > 0 && seconds > limit {
 		seconds = limit
 	}
 	return seconds, nil
@@ -394,7 +355,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	result, err := execute(ctx, request, os.Stdout)
-	_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"kind": "result", "state": result.State, "outputs": result.Outputs, "artifacts": result.Artifacts, "steps": result.Steps})
+	_ = json.NewEncoder(os.Stdout).Encode(struct {
+		Kind string `json:"kind"`
+		JobResult
+	}{"result", result})
 	if err != nil || result.State == "failure" || result.State == "cancelled" || result.State == "timed_out" {
 		os.Exit(1)
 	}

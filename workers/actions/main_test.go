@@ -264,13 +264,13 @@ func TestJobTimeBudgetHonorsExplicitTimeoutAndDefault(t *testing.T) {
 		limit   int
 		minutes string
 		want    int
-	}{{0, "", 1800}, {86400, "", 1800}, {86400, "60", 3600}, {1, "60", 1}, {86400, "1440", 86400}} {
+	}{{0, "", 21600}, {86400, "", 21600}, {86400, "60", 3600}, {1, "60", 1}, {86400, "1440", 86400}, {0, "1441", 86460}, {200000, "2000", 120000}} {
 		seconds, err := jobTimeBudget(test.limit, test.minutes)
 		if err != nil || seconds != test.want {
 			t.Fatalf("budget(%d,%q)=%d,%v want %d", test.limit, test.minutes, seconds, err, test.want)
 		}
 	}
-	for _, minutes := range []string{"0", "-1", "1441", "bad"} {
+	for _, minutes := range []string{"0", "-1", "bad", "9999999999999999999"} {
 		if _, err := jobTimeBudget(86400, minutes); err == nil {
 			t.Fatalf("accepted invalid timeout %q", minutes)
 		}
@@ -283,6 +283,9 @@ func TestMatrixFailFastStopsLaterBranch(t *testing.T) {
 			root := repository(t)
 			marker := filepath.Join(root, "later-branch")
 			workflow := "name: matrix\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    strategy:\n" + failFast + "      matrix:\n        value: [bad, good]\n    steps:\n      - id: command\n        run: |\n" + platformScript("          if [ '${{ matrix.value }}' = bad ]; then exit 7; fi\n          touch '"+marker+"'\n", "          if ('${{ matrix.value }}' -eq 'bad') { exit 7 }\n          New-Item -ItemType File -Path '"+marker+"'\n")
+			// This case proves queued-leg fail-fast. Running legs may complete
+			// before another leg fails when parallelism is greater than one.
+			workflow = strings.Replace(workflow, "    strategy:\n", "    strategy:\n      max-parallel: 1\n", 1)
 			var logs bytes.Buffer
 			result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: root, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
 			if err == nil || result.State != "failure" || result.Steps["command"] != "failure" {
