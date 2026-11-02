@@ -61,7 +61,7 @@ pub async fn run(
     let (mut stdout, mut stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
     let (mut outbuf, mut errbuf) = ([0u8; 8192], [0u8; 8192]);
     let (mut out_open, mut err_open) = (true, true);
-    let deadline = tokio::time::sleep(Duration::from_secs(seconds.clamp(1, 86400)));
+    let deadline = tokio::time::sleep(Duration::from_secs(seconds.clamp(1, 5 * 24 * 3600)));
     tokio::pin!(deadline);
     let mut status = None;
     let stopped = loop {

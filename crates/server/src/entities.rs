@@ -907,6 +907,7 @@ pub mod pipeline_artifacts {
         pub size: i64,
         pub mode: i64,
         pub created_at: i64,
+        pub expires_at: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

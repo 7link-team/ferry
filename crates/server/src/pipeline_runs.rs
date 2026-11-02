@@ -996,6 +996,9 @@ pub async fn scheduler(
             if let Err(error) = crate::maintenance::prune_history(&s, false).await {
                 tracing::error!(%error,"历史清理失败");
             }
+            if let Err(error) = crate::artifacts::prune_expired(&s).await {
+                tracing::error!(%error, "过期产物清理失败");
+            }
             next_cleanup = std::time::Instant::now() + Duration::from_secs(60);
         }
         match claim(&s, &busy).await {
@@ -1424,7 +1427,16 @@ async fn execute_private(
     if !active(s, r.id).await? || *stop.borrow() {
         return Ok("cancelled");
     }
-    crate::artifacts::collect(s, r, ch, &expand(&def.workdir, r), &def.artifacts, stop).await?;
+    crate::artifacts::collect(
+        s,
+        r,
+        ch,
+        &expand(&def.workdir, r),
+        &def.artifacts,
+        &BTreeMap::new(),
+        stop,
+    )
+    .await?;
     Ok("succeeded")
 }
 pub(crate) fn redact(

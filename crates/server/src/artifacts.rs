@@ -67,7 +67,7 @@ pub fn file_path(s: &ServerState, row: &artifacts::Model) -> PathBuf {
     directory(s, row.run_id).join(row.id.to_string())
 }
 fn public(r: &artifacts::Model) -> Value {
-    json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"run_id":Id::from(r.run_id),"path":r.path,"sha256":r.sha256,"size":r.size,"mode":r.mode,"created_at":r.created_at})
+    json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"run_id":Id::from(r.run_id),"path":r.path,"sha256":r.sha256,"size":r.size,"mode":r.mode,"created_at":r.created_at,"expires_at":r.expires_at})
 }
 pub async fn for_run(s: &ServerState, workspace: i64, run: i64) -> Result<Value> {
     let rows = artifacts::Entity::find()
@@ -150,6 +150,7 @@ pub async fn collect(
     ch: &dyn HostChannel,
     workdir: &str,
     paths: &[String],
+    retention: &std::collections::BTreeMap<String, i64>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     if paths.is_empty() {
@@ -214,6 +215,13 @@ pub async fn collect(
                 size: i64::try_from(size).map_err(|_| ApiError::bad("产物过大。"))?,
                 mode: i64::from(meta.mode & 0o777),
                 created_at: db::now(),
+                // upload-artifact retention-days; 0 leaves it to the history policy.
+                expires_at: match retention.get(path) {
+                    Some(days) if *days > 0 => {
+                        db::now().saturating_add(days.saturating_mul(86_400_000))
+                    }
+                    _ => 0,
+                },
             });
         }
         // Bytes are staged under globally unique artifact IDs, never the
@@ -232,9 +240,11 @@ pub async fn collect(
                 "同一执行中的产物名称已被其他任务使用，请为并行任务选择不同的产物名称。",
             ));
         }
-        // Cancellation must not publish a completed-looking archive.
+        // A cancelled run publishes only what finished jobs and its cleanup
+        // jobs (`if: always()`/`cancelled()`) uploaded; interrupted workers
+        // return before collection.
         if pipeline_runs::Entity::find_by_id(run.id)
-            .filter(pipeline_runs::Column::State.eq("running"))
+            .filter(pipeline_runs::Column::State.is_in(["running", "cancelling"]))
             .one(&tx)
             .await?
             .is_none()
@@ -256,6 +266,73 @@ pub async fn collect(
         }
     }
     result
+}
+
+/// Remove artifacts a job replaced (`overwrite: true`) or deleted. Archives
+/// a deployment references stay: deployments must remain reproducible.
+pub(crate) async fn remove(
+    s: &AppState,
+    run: &pipeline_runs::Model,
+    paths: &[String],
+) -> Result<()> {
+    use crate::entities::deployment_artifact_refs as refs;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let rows = artifacts::Entity::find()
+        .filter(artifacts::Column::RunId.eq(run.id))
+        .filter(artifacts::Column::WorkspaceId.eq(run.workspace_id))
+        .filter(artifacts::Column::Path.is_in(paths.iter().cloned()))
+        .filter(
+            artifacts::Column::Id.not_in_subquery(
+                refs::Entity::find()
+                    .select_only()
+                    .column(refs::Column::ArtifactId)
+                    .filter(refs::Column::RunId.eq(run.id))
+                    .into_query(),
+            ),
+        )
+        .all(&s.db)
+        .await?;
+    delete_rows(s, rows).await
+}
+
+/// Prune archives whose upload-artifact retention has passed.
+pub async fn prune_expired(s: &AppState) -> Result<()> {
+    use crate::entities::deployment_artifact_refs as refs;
+    let rows = artifacts::Entity::find()
+        .filter(artifacts::Column::ExpiresAt.gt(0))
+        .filter(artifacts::Column::ExpiresAt.lt(db::now()))
+        .filter(
+            artifacts::Column::Id.not_in_subquery(
+                refs::Entity::find()
+                    .select_only()
+                    .column(refs::Column::ArtifactId)
+                    .into_query(),
+            ),
+        )
+        .limit(200)
+        .all(&s.db)
+        .await?;
+    delete_rows(s, rows).await
+}
+
+async fn delete_rows(s: &AppState, rows: Vec<artifacts::Model>) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    artifacts::Entity::delete_many()
+        .filter(artifacts::Column::Id.is_in(rows.iter().map(|row| row.id)))
+        .exec(&s.db)
+        .await?;
+    for row in &rows {
+        if let Err(error) = tokio::fs::remove_file(file_path(s, row)).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %row.path, %error, "无法删除过期或被替换的产物");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

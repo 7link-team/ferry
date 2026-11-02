@@ -3001,6 +3001,25 @@ impl MigrationTrait for PipelineRunInputs {
                     .to_owned(),
             ),
         )
+        .await?;
+        // 0 means the history policy decides; otherwise upload-artifact's
+        // retention-days expiry in milliseconds.
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_artifacts",
+                "expires_at",
+                Table::alter()
+                    .table(Alias::new("pipeline_artifacts"))
+                    .add_column(
+                        ColumnDef::new(Alias::new("expires_at"))
+                            .big_integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .to_owned(),
+            ),
+        )
         .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {

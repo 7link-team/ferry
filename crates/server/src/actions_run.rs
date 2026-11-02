@@ -32,6 +32,10 @@ struct Outcome {
     /// Job-level continue-on-error as evaluated by the worker.
     #[serde(default)]
     continue_on_error: bool,
+    /// Archives this job created (incl. `overwrite: true` replacements), with
+    /// upload-artifact retention-days; 0 means the history policy.
+    #[serde(default)]
+    artifact_retention: BTreeMap<String, i64>,
 }
 
 impl Outcome {
@@ -41,6 +45,10 @@ impl Outcome {
         self.continue_on_error && matches!(self.state.as_str(), "failure" | "timed_out")
     }
 }
+
+/// GitHub's execution limit for a job on a self-hosted runner (5 days); the
+/// job's own timeout-minutes (default 360) applies inside the worker.
+const WORKER_SECONDS: u64 = 5 * 24 * 3600;
 
 pub async fn execute(
     s: &AppState,
@@ -154,7 +162,8 @@ async fn execute_reserved(
         &snapshot.jobs,
         stop,
         || history::active(s, run.id),
-        |job, completed, mut stop| {
+        |job| cleanup_job(&snapshot.document, &job.key),
+        |job, completed, mut stop, run_cancelled| {
             let snapshot = &snapshot;
             let variables = &variables;
             let delivered = &delivered;
@@ -163,23 +172,34 @@ async fn execute_reserved(
             let credential = credential.as_ref();
             let seq = &seq;
             async move {
+                // A person cannot approve a gate of a run being cancelled.
+                if run_cancelled && (job.manual || approvals.contains(&job.key)) {
+                    job_state(s, run.id, &job.key, "cancelled", None).await?;
+                    return Ok(Outcome {
+                        state: "cancelled".into(), steps: BTreeMap::new(),
+                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
+                    });
+                }
                 if job.manual {
                     return wait_for_approval(s, run.id, &job.key, &mut stop).await;
                 }
                 if approvals.contains(&job.key) && !wait_for_environment(s, run.id, &job.key, &mut stop).await? {
                     return Ok(Outcome {
                         state: "cancelled".into(), steps: BTreeMap::new(),
-                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
+                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
                     });
                 }
-                let grouped = job_cancel_in_progress.get(&job.key).copied();
+                let grouped = job_cancel_in_progress
+                    .get(&job.key)
+                    .copied()
+                    .filter(|_| !run_cancelled);
                 if let Some(cancel) = grouped
                     && !acquire_job_group(s, run.id, &job.key, cancel, &mut stop).await?
                 {
                     job_state(s, run.id, &job.key, "cancelled", None).await?;
                     return Ok(Outcome {
                         state: "cancelled".into(), steps: BTreeMap::new(),
-                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
+                        artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
                     });
                 }
                 // A grouped job can be cancelled alone by a newer job of its
@@ -213,16 +233,16 @@ async fn execute_reserved(
                     tokio::pin!(reserve);
                     tokio::select! {
                         guards = &mut reserve => guards?.run(execute_job(
-                            s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq,
+                            s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq, run_cancelled,
                         )).await,
                         _ = stop.changed() => Ok(Outcome {
                             state: "cancelled".into(), steps: BTreeMap::new(),
-                            artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
+                            artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
                         }),
                     }
                 } else {
                     execute_job(
-                        s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq,
+                        s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq, run_cancelled,
                     )
                     .await
                 };
@@ -248,7 +268,7 @@ async fn execute_reserved(
                         Outcome {
                             state: "failure".into(),
                             outputs: BTreeMap::new(),
-                            continue_on_error: false,
+                            continue_on_error: false, artifact_retention: BTreeMap::new(),
                             artifacts: Vec::new(),
                             steps: BTreeMap::new(),
                         }
@@ -321,24 +341,49 @@ async fn execute_reserved(
         .await?;
     history::finish(s, run.id, final_state).await
 }
+/// Whether a job may still run once its run is cancelled: GitHub evaluates a
+/// pending job's `if` with cancelled() true, so only a condition calling
+/// always() or cancelled() can pass. The worker evaluates the condition.
+fn cleanup_job(document: &crate::actions::Document, key: &str) -> bool {
+    crate::actions::job_policies(document, key)
+        .and_then(|policies| policies.condition)
+        .is_some_and(|condition| {
+            let condition = condition
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            condition.contains("always()") || condition.contains("cancelled()")
+        })
+}
+
 /// Run all ready jobs concurrently; retain every future until termination and
 /// cleanup finish, including when scheduling or persistence encounters errors.
-async fn schedule_jobs<F, Fut, A, Active>(
+/// After the run is cancelled, ready jobs that `cleanup` admits still start
+/// (with `run_cancelled`), as GitHub runs `if: always()` jobs of a cancelled
+/// run; the others are skipped so their dependants can be evaluated.
+async fn schedule_jobs<F, Fut, A, Active, C>(
     jobs: &[Job],
     stop: &mut tokio::sync::watch::Receiver<bool>,
     mut active: A,
+    cleanup: C,
     mut execute: F,
 ) -> Result<BTreeMap<String, Outcome>>
 where
-    F: FnMut(Job, BTreeMap<String, Outcome>, tokio::sync::watch::Receiver<bool>) -> Fut,
+    F: FnMut(Job, BTreeMap<String, Outcome>, tokio::sync::watch::Receiver<bool>, bool) -> Fut,
     Fut: std::future::Future<Output = Result<Outcome>>,
     A: FnMut() -> Active,
     Active: std::future::Future<Output = Result<bool>>,
+    C: Fn(&Job) -> bool,
 {
     let mut completed = BTreeMap::new();
     let mut started = BTreeSet::new();
     let mut running = FuturesUnordered::new();
+    // `cancel` stops ordinary jobs; `halt` (service stop or an internal
+    // failure) also stops cleanup jobs.
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
+    let (halt, halted) = tokio::sync::watch::channel(false);
+    let mut run_cancelled = false;
     let mut failure = None;
     let mut poll = tokio::time::interval(Duration::from_millis(100));
     // No jobs exist yet, so this initial check cannot wait for a resource
@@ -349,16 +394,46 @@ where
     loop {
         if *stop.borrow() {
             cancel.send_replace(true);
+            halt.send_replace(true);
         }
-        if !*cancelled.borrow() {
+        let mut progressed = true;
+        while progressed && !*halted.borrow() {
+            progressed = false;
             for job in jobs {
                 if started.contains(&job.key)
                     || !job.needs.iter().all(|key| completed.contains_key(key))
                 {
                     continue;
                 }
+                let receiver = if !*cancelled.borrow() {
+                    cancelled.clone()
+                } else if run_cancelled && cleanup(job) {
+                    halted.clone()
+                } else if run_cancelled {
+                    started.insert(job.key.clone());
+                    completed.insert(
+                        job.key.clone(),
+                        Outcome {
+                            state: "skipped".into(),
+                            steps: BTreeMap::new(),
+                            artifacts: vec![],
+                            outputs: BTreeMap::new(),
+                            continue_on_error: false,
+                            artifact_retention: BTreeMap::new(),
+                        },
+                    );
+                    progressed = true;
+                    continue;
+                } else {
+                    continue;
+                };
                 started.insert(job.key.clone());
-                let future = execute(job.clone(), completed.clone(), cancelled.clone());
+                let future = execute(
+                    job.clone(),
+                    completed.clone(),
+                    receiver,
+                    *cancelled.borrow(),
+                );
                 let key = job.key.clone();
                 running.push(async move { (key, future.await) });
             }
@@ -371,19 +446,30 @@ where
                 if let Some((key, result)) = result {
                     match result {
                         Ok(outcome) => { completed.insert(key, outcome); },
-                        Err(error) => { failure.get_or_insert(error); cancel.send_replace(true); },
+                        Err(error) => {
+                            failure.get_or_insert(error);
+                            cancel.send_replace(true);
+                            halt.send_replace(true);
+                        },
                     }
                 }
             }
-            _ = stop.changed(), if !*cancelled.borrow() => { cancel.send_replace(true); }
+            _ = stop.changed(), if !*halted.borrow() => {
+                cancel.send_replace(true);
+                halt.send_replace(true);
+            }
             // SQLite has one pooled connection by default. A pending job can
             // own that connection, so keep polling jobs while this read waits;
             // awaiting it outside select would deadlock the entire server.
             status = async { poll.tick().await; active().await }, if !*cancelled.borrow() => {
                 match status {
                     Ok(true) => {},
-                    Ok(false) => { cancel.send_replace(true); },
-                    Err(error) => { failure.get_or_insert(error); cancel.send_replace(true); },
+                    Ok(false) => { run_cancelled = true; cancel.send_replace(true); },
+                    Err(error) => {
+                        failure.get_or_insert(error);
+                        cancel.send_replace(true);
+                        halt.send_replace(true);
+                    },
                 }
             }
         }
@@ -668,6 +754,7 @@ async fn wait_for_approval(
                 artifacts: vec![],
                 outputs: BTreeMap::new(),
                 continue_on_error: false,
+                artifact_retention: BTreeMap::new(),
             });
         }
         let row = jobs::Entity::find()
@@ -684,6 +771,7 @@ async fn wait_for_approval(
                 artifacts: vec![],
                 outputs: BTreeMap::new(),
                 continue_on_error: false,
+                artifact_retention: BTreeMap::new(),
             });
         }
         tokio::select! {
@@ -726,6 +814,7 @@ async fn execute_job(
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     seq: &tokio::sync::Mutex<i64>,
+    run_cancelled: bool,
 ) -> Result<Outcome> {
     let host = hosts::Entity::find_by_id(job.host_id)
         .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
@@ -781,6 +870,7 @@ async fn execute_job(
         seq,
         ch.as_ref(),
         &private,
+        run_cancelled,
     )
     .await;
     let cleanup = ch
@@ -807,6 +897,7 @@ async fn execute_private(
     seq: &tokio::sync::Mutex<i64>,
     ch: &dyn HostChannel,
     private: &str,
+    run_cancelled: bool,
 ) -> Result<Outcome> {
     let platform = ch
         .exec("uname -s; uname -m", Duration::from_secs(15))
@@ -874,7 +965,18 @@ async fn execute_private(
     .await?;
     let command = format!("sh {}", quote(&format!("{private}/checkout")));
     let (code, _, cancelled) = stream_events(
-        s, run, job, seq, credential, variables, stop, ch, &command, 1800, false,
+        s,
+        run,
+        job,
+        seq,
+        credential,
+        variables,
+        stop,
+        ch,
+        &command,
+        1800,
+        false,
+        !run_cancelled,
     )
     .await?;
     if cancelled {
@@ -882,6 +984,7 @@ async fn execute_private(
             state: "cancelled".into(),
             outputs: BTreeMap::new(),
             continue_on_error: false,
+            artifact_retention: BTreeMap::new(),
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
@@ -978,7 +1081,8 @@ async fn execute_private(
         "actor":context.actor,"run_number":run.number,"run_attempt":1,"ref":context.git_ref,
         "sha":run.commit,"repository":context.repository,"server_url":context.server_url,
         "inputs":context.inputs,"needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,
-        "timeout_seconds":86400,"run_id":run.id.to_string(),"artifact_dir":artifact_dir});
+        "run_cancelled":run_cancelled,"timeout_seconds":WORKER_SECONDS,
+        "run_id":run.id.to_string(),"artifact_dir":artifact_dir});
     upload(
         ch,
         &format!("{private}/request"),
@@ -992,7 +1096,19 @@ async fn execute_private(
         quote(&format!("{private}/request"))
     );
     let (code, outcome, cancelled) = stream_events(
-        s, run, job, seq, credential, variables, stop, ch, &command, 86415, true,
+        s,
+        run,
+        job,
+        seq,
+        credential,
+        variables,
+        stop,
+        ch,
+        &command,
+        // The worker's cancellation cleanup grace (35 s) plus the runner's.
+        WORKER_SECONDS + 75,
+        true,
+        !run_cancelled,
     )
     .await?;
     if cancelled {
@@ -1000,6 +1116,7 @@ async fn execute_private(
             state: "cancelled".into(),
             outputs: BTreeMap::new(),
             continue_on_error: false,
+            artifact_retention: BTreeMap::new(),
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
@@ -1020,11 +1137,28 @@ async fn execute_private(
     {
         return Err(ApiError::bad("Actions worker 返回了无效产物路径。"));
     }
+    let retention: BTreeMap<_, _> = result
+        .artifact_retention
+        .iter()
+        .map(|(path, days)| (format!("artifacts/{path}"), *days))
+        .collect();
+    // A restored archive missing from the final manifest was deleted by the job;
+    // one the job created again was overwritten. Both drop the stored copy.
+    let replaced: Vec<_> = existing
+        .iter()
+        .filter(|artifact| {
+            !paths.contains(&artifact.path) || retention.contains_key(&artifact.path)
+        })
+        .map(|artifact| artifact.path.clone())
+        .collect();
+    crate::artifacts::remove(s, run, &replaced).await?;
     let fresh: Vec<_> = paths
         .into_iter()
-        .filter(|path| !existing.iter().any(|artifact| artifact.path == *path))
+        .filter(|path| {
+            retention.contains_key(path) || !existing.iter().any(|artifact| artifact.path == *path)
+        })
         .collect();
-    crate::artifacts::collect(s, run, ch, private, &fresh, stop).await?;
+    crate::artifacts::collect(s, run, ch, private, &fresh, &retention, stop).await?;
     Ok(result)
 }
 
@@ -1162,6 +1296,8 @@ async fn stream_events(
     command: &str,
     seconds: u64,
     worker: bool,
+    // Cleanup jobs of a cancelled run stop only with the service.
+    watch_run: bool,
 ) -> Result<(i32, Option<Outcome>, bool)> {
     let (output, mut receiver) = tokio::sync::mpsc::channel(64);
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
@@ -1199,7 +1335,7 @@ async fn stream_events(
                 }
             },
             _=poll.tick()=>{
-                match history::active(s,run.id).await {
+                match if watch_run { history::active(s,run.id).await } else { Ok(true) } {
                     Ok(active)=>{if !active || *stop.borrow(){cancel.send_replace(true);}},
                     Err(error)=>{failure=Some(error);cancel.send_replace(true);},
                 }
@@ -1358,6 +1494,7 @@ mod tests {
             state: "success".into(),
             outputs: BTreeMap::new(),
             continue_on_error: false,
+            artifact_retention: BTreeMap::new(),
             artifacts: vec![],
             steps: BTreeMap::new(),
         }
@@ -1406,7 +1543,8 @@ mod tests {
             &jobs,
             &mut stop,
             || async { Ok(true) },
-            |job, completed, _| {
+            |_| false,
+            |job, completed, _, _| {
                 let barrier = barrier.clone();
                 let finished = finished.clone();
                 async move {
@@ -1456,7 +1594,8 @@ mod tests {
                 db.execute_unprepared("SELECT 1").await?;
                 Ok(true)
             },
-            |_, _, _| async {
+            |_| false,
+            |_, _, _, _| async {
                 let tx = db.begin().await?;
                 connection_owned.notify_one();
                 // Release only after the scheduler starts a competing status
@@ -1475,6 +1614,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_run_still_runs_cleanup_jobs_and_skips_the_rest() {
+        let jobs = vec![
+            test_job("build", &[]),
+            test_job("notify", &["build"]),
+            test_job("deploy", &["build"]),
+            test_job("report", &["deploy"]),
+        ];
+        let cancelled_run = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (_stop, mut stop) = tokio::sync::watch::channel(false);
+        let execution = schedule_jobs(
+            &jobs,
+            &mut stop,
+            || {
+                let cancelled_run = cancelled_run.clone();
+                async move { Ok(!cancelled_run.load(std::sync::atomic::Ordering::SeqCst)) }
+            },
+            |job| ["notify", "report"].contains(&job.key.as_str()),
+            |job, completed, mut cancel, run_cancelled| {
+                let cancelled_run = cancelled_run.clone();
+                let started = started.clone();
+                async move {
+                    started
+                        .lock()
+                        .unwrap()
+                        .push((job.key.clone(), run_cancelled));
+                    if job.key == "build" {
+                        // The user cancels while the first job runs.
+                        cancelled_run.store(true, std::sync::atomic::Ordering::SeqCst);
+                        while !*cancel.borrow() {
+                            cancel.changed().await.unwrap();
+                        }
+                        return Ok(Outcome {
+                            state: "cancelled".into(),
+                            ..success()
+                        });
+                    }
+                    // Cleanup jobs see their needs, including the skipped ones.
+                    if job.key == "report" {
+                        assert_eq!(completed["deploy"].state, "skipped");
+                    }
+                    assert!(!*cancel.borrow(), "cleanup jobs are not cancelled by the run");
+                    Ok(success())
+                }
+            },
+        );
+        let completed = tokio::time::timeout(Duration::from_secs(5), execution)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed["build"].state, "cancelled");
+        assert_eq!(completed["notify"].state, "success");
+        assert_eq!(completed["deploy"].state, "skipped");
+        assert_eq!(completed["report"].state, "success");
+        let mut started = started.lock().unwrap().clone();
+        started.sort();
+        assert_eq!(
+            started,
+            vec![
+                ("build".to_owned(), false),
+                ("notify".to_owned(), true),
+                ("report".to_owned(), true)
+            ]
+        );
+    }
+
+    #[test]
+    fn cleanup_jobs_are_those_whose_condition_calls_always_or_cancelled() {
+        let document = |condition: &str| crate::actions::Document {
+            engine: "actions".into(),
+            workflow: format!(
+                "on: workflow_dispatch\njobs:\n  a:\n    runs-on: self-hosted\n    if: {condition}\n    steps:\n      - run: echo\n"
+            ),
+            ..serde_json::from_value(json!({"engine":"actions","workflow":""})).unwrap()
+        };
+        assert!(cleanup_job(&document("${{ always() }}"), "a"));
+        assert!(cleanup_job(&document("cancelled ( )"), "a"));
+        assert!(cleanup_job(&document("${{ !cancelled() }}"), "a"));
+        assert!(!cleanup_job(&document("success()"), "a"));
+        assert!(!cleanup_job(&document("github.ref == 'refs/heads/main'"), "a"));
+    }
+
+    #[tokio::test]
     async fn scheduler_failure_cancels_and_drains_other_running_jobs() {
         let jobs = vec![
             test_job("broken", &[]),
@@ -1488,7 +1710,8 @@ mod tests {
             &jobs,
             &mut stop,
             || async { Ok(true) },
-            |job, _, mut cancelled| {
+            |_| false,
+            |job, _, mut cancelled, _| {
                 let barrier = barrier.clone();
                 let cleaned = cleaned.clone();
                 async move {

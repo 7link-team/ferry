@@ -324,6 +324,8 @@ pub(crate) struct JobPolicies {
     pub(crate) concurrency: Option<Value>,
     pub(crate) environment: Option<Value>,
     pub(crate) reusable_workflow: Option<String>,
+    /// The job's `if`, as written.
+    pub(crate) condition: Option<String>,
 }
 pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies> {
     let value: Value = serde_yaml_ng::from_str(&document.workflow).ok()?;
@@ -332,6 +334,10 @@ pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies
         concurrency: job.get("concurrency").cloned(),
         environment: job.get("environment").cloned(),
         reusable_workflow: job.get("uses").and_then(Value::as_str).map(str::to_owned),
+        condition: job.get("if").map(|value| match value {
+            Value::String(text) => text.clone(),
+            other => other.to_string(),
+        }),
     })
 }
 #[derive(Clone, Debug, PartialEq)]
