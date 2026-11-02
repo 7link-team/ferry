@@ -856,7 +856,7 @@ GET /api/workspaces/{workspaceId}/variables?scope=global|deploy|build&scope_ref=
 | 主机 | `hosts` | `connection` ∈ runner/ssh；`state` `seen_at` `host_key` `runner_key_hash` `metrics` |
 | 主机 | `host_groups` `tags` `host_tags` | 组是树（`parent_id`），标签是多对多 |
 | 主机 | `runner_tokens` | 一次性注册令牌，带 TTL 与使用痕迹 |
-| 构建 | `repositories` `pipelines` `pipeline_templates` `pipeline_runs` `pipeline_steps` | 流水线定义存 JSON，运行实例拆行便于查询 |
+| 构建 | `repositories` `pipelines` `pipeline_templates` `pipeline_runs` `pipeline_steps` | 流水线定义存 Actions 文档，运行实例拆行便于查询 |
 | 分模块管理 | `credentials` | `scope` ∈ host/build/deploy，创建后固定；各模块独立列表及选择器，底层统一加密；`kind` ∈ password/ssh-key/token |
 | 部署 | `deployments` `app_templates` `deployment_revisions` | `target_kind`/`target_ref` 指向主机、主机组或集群；revision 存**渲染产物**而非 manifest（§10.5） |
 | 部署 | `clusters` | k8s/helm 的目标；kubeconfig 走 §9.6 的保管机制 |
@@ -951,7 +951,7 @@ GET /api/workspaces/{workspaceId}/dashboard
 | 表 | 作用 | 要点 |
 |---|---|---|
 | `repositories` | Git 仓库登记 | `url`、`default_branch`、`credential_id`（复用 §9.6 的凭据保管） |
-| `pipelines` | 流水线定义 | `definition` 存 JSON；`target_kind`/`target_ref` 指向主机或主机组 |
+| `pipelines` | 流水线定义 | `definition` 存 Actions 文档；任务通过执行器绑定指向主机或主机组 |
 | `pipeline_runs` | 一次执行 | 工作空间内自增 `number`、`state`、触发方式与触发人 |
 | `pipeline_run_steps` | 每步的结果 | `index`、`state`、`exit_code`、起止时间 |
 | `pipeline_run_logs` | 日志分片 | `seq` 单调递增，前端按 `seq` 增量拉取 |
@@ -967,42 +967,41 @@ T4 落地字段：
 
 ### 17.2 流水线定义
 
-```json
-{
-  "workdir": "/tmp/ferry/{{run}}",
-  "env": [{ "name": "LOG_LEVEL", "value": "info" }],
-  "steps": [
-    { "name": "拉取代码", "run": "git clone --depth 1 -b {{branch}} {{repo_url}} ." },
-    { "name": "构建",     "run": "cargo build --release", "timeout_seconds": 1800 }
-  ]
-}
+流水线统一使用 GitHub Actions YAML；编辑器支持源码及可视化任务／步骤编辑。执行器、仓库检出和触发规则保存在 YAML 外的 Ferry 绑定中。
+
+```yaml
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: self-hosted
+    env:
+      LOG_LEVEL: info
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建
+        run: cargo build --release
+        timeout-minutes: 30
 ```
 
-- `workdir` **必填**。不给默认值是有意的：默认一个目录意味着两条流水线可能悄悄写到同一处，而「构建产物莫名被另一条流水线覆盖」极难排查。让运维人员明确写出来。
-- **第一版只有线性步骤**，没有并行、条件、矩阵。主机组目标在触发时从本组直接成员中按 ID 选第一台在线主机，固定为 run.host_id；不展开成多机执行，空组或没有在线成员时拒绝触发。
-- 模板变量只有 `{{run}}`、`{{branch}}`、`{{repo_url}}`、`{{commit}}` 这几个，由服务端替换；**不做通用模板引擎**。
-- 仓库凭据在执行时由服务端解密，通过 `GIT_ASKPASS` 或临时 `~/.git-credentials` 注入，**不拼进命令行**——命令行会出现在目标主机的进程列表里。
+- 每个任务绑定主机或主机组。主机模式执行镜像为 `host`；绑定决定实际执行位置，`runs-on` 标签不取代绑定。
+- 工作目录可通过 `defaults.run.working-directory` 指定；迁移保留原有绝对目录，并将检出绑定到该目录。
+- 普通变量使用 `${{ vars.NAME }}`，秘密变量使用 `${{ secrets.NAME }}`。运行信息使用 `github.run_number`、`github.ref_name`、`github.sha`，仓库地址由 `env.FERRY_REPOSITORY_URL` 提供。
+- 旧版 JSON 在升级及写入时自动转换，保留原始定义备份；API 返回 Actions 文档。历史运行继续保留原步骤、日志和产物。
+- 仓库凭据在执行时由服务端解密，经私有凭据环境供检出和运行步骤使用，不拼进命令行；日志入库前脱敏。
 
 ### 17.3 执行引擎
 
-执行只经过 §9.1 的 `HostChannel`，所以 runner 主机和 SSH 主机跑同一套逻辑：
+服务端使用 §9.1 的 `HostChannel` 在 Runner 或 SSH 主机启动 Actions worker。服务端负责队列、依赖调度、执行器与检出绑定、变量快照和日志归档；worker 执行 Actions 工作流及步骤。
 
 ```
-排队 → 取一条 run → 打开通道 → 逐步 exec → 每步写 steps 与 logs
-     → 任一步非零退出即停止，后续步骤标记 skipped → 标记 run 结束
+排队 → 固定运行快照 → 按依赖调度任务 → 绑定主机执行 Actions worker
+     → 保存任务／步骤状态、日志及 ZIP 产物 → 汇总运行结果
 ```
 
-- **失败即停**，不自动重试：构建失败重跑一次通常只是把问题推迟。
-- 每步有超时（默认 1800 秒），超时步骤记 `timed_out`、run 记 `failed`，不是普通非零退出的 `failed` 步骤。
-- **取消只停止服务端等待并标记 cancelled，不保证远端命令立即停止。** HostChannel 捕获完整输出后返回，远端进程可能继续运行直到自身退出。取消后的临时凭据清理由执行器继续等待完成，因此 cancelled 状态可能先于清理完成；界面不可将其表述为“远端已停止”。
-- 凭据通过 HostChannel 文件传输写入随机的 0700 临时目录；密码/令牌文件权限 0600，GIT_ASKPASS 脚本 0700。私钥同样写入 0600 文件。步骤脚本也上传为文件，exec 参数仅引用路径。成功、失败、超时、取消均清理临时目录，日志在分片前脱敏，activity 只记录 run ID/序号。
-- 单进程每次领取一条 queued run；条件更新防止重复领取。服务重启时将遗留 running 标记失败，不自动重试远端可能已执行的命令。
-- `HostChannel::exec` 捕获完整输出后才返回，所以第一版的日志是**按步落库**，不是边跑边流。实时性由 17.4 的轮询提供。真正的流式需要 `HostChannel` 增加一个流式 exec，等这条路通了再说。
-
-```
-// ponytail: 单进程调度器 + 数据库乐观锁取任务，和定时任务用同一套思路。
-// 一个服务实例够用；要多实例了再换成带租约的抢占。
-```
+- 步骤条件、依赖、矩阵及超时采用 Actions 语义；旧 `timeout_seconds` 自动向上取整为分钟，至少一分钟。
+- 取消向执行器传递取消信号；执行器仍可能需要时间停止远端命令和清理凭据。历史运行状态和日志继续使用原有读取接口。
+- 凭据和变量通过私有文件或环境传递，日志入库前脱敏；不将秘密拼进启动命令参数。
+- 上传产物使用 `actions/upload-artifact@v4`，服务端归档 ZIP；部署仍可引用历史原始文件。
 
 ### 17.4 接口
 

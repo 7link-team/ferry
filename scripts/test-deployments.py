@@ -55,6 +55,16 @@ def eventually(fn, seconds=90):
     raise AssertionError('condition timed out')
 
 
+def artifact_workflow(workdir, command, path='app'):
+    """Native Actions fixture: publish a ZIP while deployments keep logical paths."""
+    workdir=workdir.replace('{{run}}', '${{ github.run_number }}')
+    return {'jobs': {'build': {'runs-on': 'self-hosted', 'steps': [
+        {'name':'Prepare directory','run':'mkdir -p "'+workdir+'"','shell':'sh'},
+        {'name':'build','run':command,'shell':'sh','working-directory':workdir},
+        {'name':'Publish executable','uses':'actions/upload-artifact@v4','if':'success()',
+         'with':{'name':'executable','path':workdir+'/'+path,'if-no-files-found':'error'}}]}}}
+
+
 def main():
     work = Path(tempfile.mkdtemp(prefix='compose-acceptance-'))
     name = 'compose-check-' + uuid.uuid4().hex[:10]
@@ -102,7 +112,7 @@ def main():
         if os.environ.get('FERRY_TEST_DATABASE_URL'):
             env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
         log = open(work / f'server-{len(processes)}.log', 'wb'); files.append(log)
-        p = subprocess.Popen(['target/debug/ferry-server'], env=env, stdout=log, stderr=log); processes.append(p)
+        p = subprocess.Popen(['target/debug/ferry-server'], env=env, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0); processes.append(p)
         def ready():
             assert p.poll() is None, (work / f'server-{len(processes)-1}.log').read_text()
             try: return api('/status')['ok']
@@ -261,10 +271,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             def remote(index,script):return command(['docker','exec',nodes[index][1],'sh','-c',script]).decode()
             def executable(version):
                 return '#!/usr/bin/python3\nimport http.server,os,time,sys\nwhile os.path.exists("/tmp/group-pause"): time.sleep(.1)\nif os.path.exists("/tmp/group-fail"): sys.exit(3)\nopen("/tmp/group-env","w").write(os.environ["TOKEN"])\nopen("/tmp/group-config","w").write(open("/etc/group.conf").read())\nclass Handler(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200); self.end_headers(); self.wfile.write('+repr(version)+'.encode())\nhttp.server.HTTPServer.allow_reuse_address=True\nhttp.server.HTTPServer(("0.0.0.0",18081),Handler).serve_forever()\n'
-            definition={'workdir':'/tmp/group-build/{{run}}','steps':[{'name':'build','run':'printf %s '+shlex.quote(executable('group-v1'))+' > app; chmod 755 app'}],'artifacts':['app']}
-            pipeline=create('pipelines',{'name':'group-build','target_kind':'host','target_ref':runner_id,'definition':json.dumps(definition)})
+            definition=artifact_workflow('/tmp/group-build/{{run}}','printf %s '+shlex.quote(executable('group-v1'))+' > app; chmod 755 app')
+            pipeline=create('pipelines',{'name':'group-build','target_kind':'host','target_ref':runner_id,'definition_format':'github-actions','definition':json.dumps(definition)})
             def build(version):
-                definition['steps'][0]['run']='printf %s '+shlex.quote(executable(version))+' > app; chmod 755 app'
+                definition['jobs']['build']['steps'][1]['run']='printf %s '+shlex.quote(executable(version))+' > app; chmod 755 app'
                 row=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline)
                 api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline,dict(row,definition=json.dumps(definition)),method='PATCH')
                 rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline+'/runs',{},status=201)['id']
@@ -435,8 +445,8 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 repo=create('repositories',{'name':'native-'+kind,'url':'http://127.0.0.1:9418/native-repo-'+kind+'/.git','branch':'main'})
                 def executable(version):
                     return '#!/usr/bin/python3\nimport http.server,os\nclass Handler(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path == "/" else 404); self.end_headers(); self.wfile.write('+repr(version)+'.encode())\nopen("/tmp/native-env-'+kind+'","w").write(os.environ["TOKEN"])\nopen("/tmp/native-config-'+kind+'","w").write(open("/etc/native-runtime.conf").read())\nhttp.server.HTTPServer(("0.0.0.0",18081),Handler).serve_forever()\n'
-                definition={'workdir':'/tmp/native-build-'+kind+'/{{run}}','steps':[{'name':'build','run':'printf %s '+shlex.quote(executable('native-v1'))+' > app; chmod 755 app'}],'artifacts':['app']}
-                pipeline=create('pipelines',{'name':'native-build-'+kind,'target_kind':'host','target_ref':host,'repository_id':repo,'definition':json.dumps(definition)})
+                definition=artifact_workflow('/tmp/native-build-'+kind+'/{{run}}','printf %s '+shlex.quote(executable('native-v1'))+' > app; chmod 755 app')
+                pipeline=create('pipelines',{'name':'native-build-'+kind,'target_kind':'host','target_ref':host,'repository_id':repo,'definition_format':'github-actions','definition':json.dumps(definition)})
                 def build():
                     rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline+'/runs',{},status=201)['id']
                     def finished():
@@ -461,7 +471,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 check(kind+' native actual resource limits',remote('systemctl show '+project+'-web.service -p MemoryMax --value').strip()=='67108864' and remote('systemctl show '+project+'-web.service -p CPUQuotaPerSecUSec --value').strip()=='500ms')
                 check(kind+' native exact unit retained',bool(json.loads(row['latest_revision']['artifact'])['x-native-units']))
                 remote('rm -rf /tmp/native-build-'+kind)
-                definition['steps'][0]['run']='printf %s '+shlex.quote(executable('native-v2'))+' > app; chmod 755 app'
+                definition['jobs']['build']['steps'][1]['run']='printf %s '+shlex.quote(executable('native-v2'))+' > app; chmod 755 app'
                 pipe=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline);api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline,dict(pipe,definition=json.dumps(definition)),method='PATCH')
                 build2=build();start(id);row=done(id)
                 check(kind+' native update uses latest successful archive',row['state']=='succeeded' and eventually(lambda:response(web_port)=='native-v2'))

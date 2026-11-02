@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     anonymous = client()
     log = open(data / 'server.log', 'wb')
     def launch():
-        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log)
+        proc = subprocess.Popen([binary], env=env, stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
         for _ in range(150):
             if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
             try:
@@ -186,6 +186,12 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             previous=count(resource);p=upload(resource,[body]);assert p['valid'],(resource,p)
             assert count(resource)==previous
             commit(resource,p);check(count(resource)==previous+1,resource+' import preserves normal creation contract')
+            if resource=='pipelines':
+                imported=request(owner,root+'/pipelines?q=Imported%20pipeline')['items'][0]
+                check(imported['definition_format']=='github-actions' and 'run:' in imported['definition'],'legacy CSV pipeline imports convert to Actions')
+            if resource=='pipeline-templates':
+                imported=request(owner,root+'/pipeline-templates?q=Imported%20pipeline%20template')['items'][0]
+                check(json.loads(imported['content'])['engine']=='github-actions','legacy CSV pipeline templates convert to Actions')
         source_url='https://example.invalid/team/source.git'
         connection=request(owner,root+'/code-connections',{'name':'Transfer source','provider':'git','url':source_url},expected=201)['id']
         actions_yaml='# retained comment\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n      - run: echo imported\n'

@@ -39,6 +39,13 @@ pub struct CheckoutBinding {
     #[serde(default)]
     pub path: String,
 }
+impl CheckoutBinding {
+    /// Empty source selects the pipeline repository snapshotted on the run.
+    pub(crate) fn pipeline_repository(&self) -> bool {
+        (self.connection_id.is_empty() || self.connection_id == "0")
+            && self.repository_url.is_empty()
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolvedCheckout {
     pub binding: CheckoutBinding,
@@ -691,15 +698,25 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 }
             }
         }
-        if Id::reference(&binding.connection_id)? == Id::from(0)
-            || binding.repository_url.trim().is_empty()
-            || [&binding.repository_url, &binding.git_ref, &binding.path]
+        if (!binding.pipeline_repository()
+            && (Id::reference(&binding.connection_id)? == Id::from(0)
+                || binding.repository_url.trim().is_empty()))
+            || [&binding.repository_url, &binding.git_ref]
                 .iter()
                 .any(|value| value.contains("${{"))
             || binding.git_ref.len() > 255
             || binding.git_ref.contains(['\0', '\n', '\r'])
             || binding.path.contains(['\0', '\n', '\r', '\\'])
-            || binding.path.starts_with('/')
+            || (binding.path.contains("${{")
+                && [
+                    "${{ github.run_number }}",
+                    "${{ github.ref_name }}",
+                    "${{ github.sha }}",
+                    "${{ env.FERRY_REPOSITORY_URL }}",
+                ]
+                .iter()
+                .fold(binding.path.clone(), |path, token| path.replace(token, ""))
+                .contains("${{"))
             || binding.path.split('/').any(|part| part == "..")
         {
             return Err(ApiError::bad("代码源连接、引用或工作区路径无效。"));
@@ -784,6 +801,9 @@ pub async fn check_bindings(
 ) -> Result<()> {
     parse(document)?;
     for binding in &document.checkout_bindings {
+        if binding.pipeline_repository() {
+            continue;
+        }
         crate::repository_auth::resolve_connection(
             s,
             conn,
@@ -848,6 +868,13 @@ pub async fn resolve(
     }
     let mut checkouts = Vec::new();
     for binding in &document.checkout_bindings {
+        if binding.pipeline_repository() {
+            checkouts.push(ResolvedCheckout {
+                binding: binding.clone(),
+                credential_id: 0,
+            });
+            continue;
+        }
         let (_, credential_id) = crate::repository_auth::resolve_saved_connection(
             s,
             conn,
@@ -948,12 +975,7 @@ mod tests {
         };
         document.checkout_bindings = vec![binding.clone()];
         assert!(parse(&document).is_ok());
-        for path in [
-            "../outside",
-            "/outside",
-            "src/../../outside",
-            "${{ github.workspace }}",
-        ] {
+        for path in ["../outside", "src/../../outside", "${{ unknown }}"] {
             document.checkout_bindings[0].path = path.into();
             assert!(parse(&document).is_err(), "accepted {path}");
         }

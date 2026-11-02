@@ -17,17 +17,24 @@
 
 ## 构建产物与配置文件
 
-流水线定义的 `artifacts` 填写构建工作目录下的相对文件路径，例如：
+流水线只使用 GitHub Actions 工作流。在构建步骤之后使用上传步骤发布产物：
 
-```json
-{
-  "workdir": "/tmp/build/{{run}}",
-  "steps": [{ "name": "build", "run": "make" }],
-  "artifacts": ["dist/service"]
-}
+```yaml
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: build
+        run: make
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: service
+          path: dist/service
+          if-no-files-found: error
 ```
 
-成功执行后服务端流式归档文件，记录 SHA-256、大小和文件模式。声明文件缺失会使构建失败。构建产物可下载；native 模式使用归档的可执行文件，不从之后可能改变的构建目录取文件。
+每个任务在编辑器中绑定主机或主机组；直接使用主机工具链时，执行镜像填写 `host`。上传的产物以 ZIP 保存，可在运行详情下载；部署引用按逻辑路径选择归档中的文件。历史构建的原始文件产物仍可下载和部署。
 
 ```yaml
 services:
@@ -78,17 +85,25 @@ services:
 
 ## 流水线引用构建变量
 
-在“构建 → 密钥变量”管理普通／秘密变量，流水线定义通过环境项引用：
+在“构建 → 密钥变量”管理普通／秘密变量，Actions 工作流通过表达式引用：
 
-```json
-{
-  "workdir": "/tmp/build/{{run}}",
-  "env": [{"name": "PACKAGE_TOKEN", "valueFrom": "variable/package-token"}],
-  "steps": [{"name": "build", "run": "./build.sh"}]
-}
+```yaml
+env:
+  PACKAGE_TOKEN: ${{ secrets.PACKAGE_TOKEN }}
+  BUILD_MODE: ${{ vars.BUILD_MODE }}
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: build
+        run: ./build.sh
 ```
 
-每个环境项的 `value` 和 `valueFrom` 二选一。变量按全局、构建模块、当前流水线依次覆盖；找不到引用时拒绝触发。触发成功即固定加密快照，后续排队期间轮换变量不会改变该次执行。变量值不再解释 `{{run}}` 等占位符，保留原始内容。流水线模板的秘密参数也只能生成 `env[].valueFrom` 引用，不能将明文插入命令。
+普通变量使用 `vars`，秘密变量使用 `secrets`。变量按全局、构建模块、当前流水线依次覆盖，选定执行环境的变量覆盖默认变量。触发时保存加密快照，排队期间轮换变量不会改变该次执行。GitHub Actions 中未定义的变量引用为空字符串。
+
+流水线模板使用 `{{ .Values.command }}` 创建参数，同时保留 `${{ ... }}` Actions 表达式。秘密参数填写已有变量名，放在 Actions 环境项的完整值处，生成秘密引用；不要填写秘密明文。
+
+旧版 JSON 定义和模板在升级时自动转换并保留原始备份。创建、更新和导入接口仍接受旧定义，响应和编辑器统一使用 Actions。旧运行的日志、步骤和产物继续可读。
 
 执行详情显示变量来源和版本，不返回值。远端环境写入私有脚本，不拼入启动命令参数；标准输出和错误输出在入库前脱敏。加密快照随执行历史一并清理，默认保留规则不变。正在被流水线选择的变量不能直接删除，需先调整引用。
 

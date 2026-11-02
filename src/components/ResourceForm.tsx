@@ -161,7 +161,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       onChange={(value) => setDraft((d) => ({
         ...d,
         ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
-        ...(["repository-source", "pipeline-repository", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
+        ...(["repository-source", "marketplace-repository", "actions-editor"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
       }) as Partial<T>)}
     />
   );
@@ -280,7 +280,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setTemplateDialog(null)}>取消</Button><Button type="button" disabled={templateBusy || !templateName.trim()} onClick={async () => {
               setTemplateBusy(true); setTemplateError("");
               try {
-                const content = draft.definition_format === "github-actions" ? JSON.stringify({ engine: "github-actions", workflow: draft.definition, executor_bindings: draft.executor_bindings ?? [], checkout_bindings: draft.checkout_bindings ?? [], graph_layout: draft.graph_layout ?? {} }) : String(draft.definition ?? "");
+                const content = JSON.stringify({ engine: "github-actions", workflow: draft.definition, executor_bindings: draft.executor_bindings ?? [], checkout_bindings: draft.checkout_bindings ?? [], graph_layout: draft.graph_layout ?? {} });
                 await createResource(workspace, "pipeline-templates", { name: templateName.trim(), description: templateDescription, content, parameters: "[]" });
                 setTemplateDialog(null); toast.success("模板已保存");
               }
@@ -496,7 +496,6 @@ function Field<T>({
 
   if (field.type === "actions-editor") return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={draft} options={options} readOnly={readOnly} fillHeight={fillHeight} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={onChange} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={draft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={onChange} onValidityChange={reportCheckout}/>}/></div>;
   if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
-  if (field.type === "pipeline-repository") return <div className="min-w-0 sm:col-span-2"><PipelineRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "repository-source") return <div className="min-w-0 sm:col-span-2"><RepositorySource workspace={workspace} draft={draft} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
