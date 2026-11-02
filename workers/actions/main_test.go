@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -432,5 +434,21 @@ func TestTransitiveDependencyStatusWithoutRerunningAncestors(t *testing.T) {
 				t.Fatalf("transitive status lost: %v %v", result, err)
 			}
 		})
+	}
+}
+
+func TestUnreportedErrorsAreLoggedMasked(t *testing.T) {
+	var output bytes.Buffer
+	reportError(&output, map[string]string{"TOKEN": "hush"}, context.Background(), errors.New("open /w/hush/child.yml: missing"))
+	if !strings.Contains(output.String(), `"level":"error"`) || !strings.Contains(output.String(), "child.yml") || strings.Contains(output.String(), "hush") {
+		t.Fatalf("error line: %s", output.String())
+	}
+	output.Reset()
+	reportError(&output, nil, context.Background(), fmt.Errorf("job %q: %w", "a", errJobFailed))
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	reportError(&output, nil, cancelled, errors.New("interrupted"))
+	if output.Len() != 0 {
+		t.Fatalf("already reported or cancelled errors must stay quiet: %s", output.String())
 	}
 }

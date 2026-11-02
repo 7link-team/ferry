@@ -28,6 +28,9 @@ import (
 
 const engineVersion = "nektos/act v0.2.89"
 
+// errJobFailed marks a failure the engine already reported through its step logs.
+var errJobFailed = errors.New("job failed")
+
 type JobResult struct {
 	ContinueOnError bool          `json:"continue_on_error"`
 	Instances       []JobInstance `json:"instances,omitempty"`
@@ -290,7 +293,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 		result.Outputs = map[string]string{}
 	}
 	if result.State == "failure" && err == nil {
-		err = fmt.Errorf("job %q failed", request.Job)
+		err = fmt.Errorf("job %q: %w", request.Job, errJobFailed)
 	}
 	if errors.Is(jobCtx.Err(), context.DeadlineExceeded) {
 		result.State = "timed_out"
@@ -359,11 +362,27 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	result, err := execute(ctx, request, os.Stdout)
+	reportError(os.Stdout, request.Secrets, ctx, err)
 	_ = json.NewEncoder(os.Stdout).Encode(struct {
 		Kind string `json:"kind"`
 		JobResult
 	}{"result", result})
 	if err != nil || result.State == "failure" || result.State == "cancelled" || result.State == "timed_out" {
 		os.Exit(1)
+	}
+}
+
+// reportError logs an error the engine did not report itself (for example a
+// reusable workflow file that does not exist), masked like every log line.
+func reportError(output io.Writer, secrets map[string]string, ctx context.Context, err error) {
+	if err == nil || ctx.Err() != nil || errors.Is(err, errJobFailed) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return
+	}
+	entry := logrus.NewEntry(logrus.New())
+	entry.Level = logrus.ErrorLevel
+	entry.Time = time.Now()
+	entry.Message = "Error: " + err.Error()
+	if line, e := (safeFormatter{secrets: secrets}).Format(entry); e == nil {
+		_, _ = output.Write(line)
 	}
 }
