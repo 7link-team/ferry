@@ -14,9 +14,17 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='232ad639cd440d1e2ec2fa0fc24b8776fdf8e8d9';
+            const sha='332d284beeb5d148f65ae0461a78dd8f9ddbac22';
             const tag='v0.1.0-alpha.35';
             const repo=context.repo;
+            // Superseded runs failed explicit date-locale assertions; source tests are now fixed.
+            for (const run_id of [41468482152, 41469069064, 41468285291]) {
+              const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
+              if(data.status!=='completed') {
+                try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
+                catch(error) { if(![409,422].includes(error.status)) throw error; }
+              }
+            }
             async function requireMain() {
               const {data}=await github.rest.repos.getCommit({...repo,ref:'main'});
               if(data.sha!==sha)throw Error('Main changed; refusing publication');
