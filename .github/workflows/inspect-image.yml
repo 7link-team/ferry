@@ -1,0 +1,23 @@
+﻿name: Inspect exact failed alpha35 image build
+on:
+  push:
+    branches: [feat/alpha35-release-dispatch]
+    paths: [.github/workflows/inspect-image.yml]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download failed job diagnostics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p diagnostics
+          gh api repos/7link-team/ferry/actions/jobs/125454173440/logs > diagnostics/image-amd64.log
+          tail -100 diagnostics/image-amd64.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha35-image-diagnostics
+          path: diagnostics/*
