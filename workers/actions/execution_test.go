@@ -51,6 +51,9 @@ jobs:
 			t.Fatalf("instance %d: %+v", index, plan.Instances[index])
 		}
 	}
+	if plan.MaxParallel != 2 || plan.FailFast == nil || !*plan.FailFast {
+		t.Fatalf("plan strategy: max_parallel=%d fail_fast=%v", plan.MaxParallel, plan.FailFast)
+	}
 	if _, err := os.Stat(r.CacheDir); !os.IsNotExist(err) {
 		t.Fatal("plan mode started cache or steps")
 	}

@@ -12,7 +12,7 @@ use crate::{
     state::AppState,
 };
 use futures::{StreamExt, stream::FuturesUnordered};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct Outcome {
     #[serde(default)]
     steps: BTreeMap<String, String>,
@@ -36,6 +36,29 @@ struct Outcome {
     /// upload-artifact retention-days; 0 means the history policy.
     #[serde(default)]
     artifact_retention: BTreeMap<String, i64>,
+    /// Plan mode only.
+    #[serde(flatten, default)]
+    plan: Plan,
+}
+
+/// A worker's matrix plan: the instances in GitHub's expansion order and the
+/// strategy that governs them.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct Plan {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    instances: Vec<Instance>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    max_parallel: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fail_fast: Option<bool>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Instance {
+    name: String,
+    matrix: Value,
+}
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 impl Outcome {
@@ -178,6 +201,7 @@ async fn execute_reserved(
                     return Ok(Outcome {
                         state: "cancelled".into(), steps: BTreeMap::new(),
                         artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
+ plan: Plan::default(),
                     });
                 }
                 if job.manual {
@@ -187,6 +211,7 @@ async fn execute_reserved(
                     return Ok(Outcome {
                         state: "cancelled".into(), steps: BTreeMap::new(),
                         artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
+ plan: Plan::default(),
                     });
                 }
                 let grouped = job_cancel_in_progress
@@ -200,6 +225,7 @@ async fn execute_reserved(
                     return Ok(Outcome {
                         state: "cancelled".into(), steps: BTreeMap::new(),
                         artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
+ plan: Plan::default(),
                     });
                 }
                 // A grouped job can be cancelled alone by a newer job of its
@@ -232,16 +258,17 @@ async fn execute_reserved(
                     let reserve = crate::runner_updates::reserve_with(s.cluster.as_ref(),vec![job.host_id.to_string()]);
                     tokio::pin!(reserve);
                     tokio::select! {
-                        guards = &mut reserve => guards?.run(execute_job(
+                        guards = &mut reserve => guards?.run(execute_legs(
                             s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq, run_cancelled,
                         )).await,
                         _ = stop.changed() => Ok(Outcome {
                             state: "cancelled".into(), steps: BTreeMap::new(),
                             artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false, artifact_retention: BTreeMap::new(),
+ plan: Plan::default(),
                         }),
                     }
                 } else {
-                    execute_job(
+                    execute_legs(
                         s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq, run_cancelled,
                     )
                     .await
@@ -269,6 +296,7 @@ async fn execute_reserved(
                             state: "failure".into(),
                             outputs: BTreeMap::new(),
                             continue_on_error: false, artifact_retention: BTreeMap::new(),
+ plan: Plan::default(),
                             artifacts: Vec::new(),
                             steps: BTreeMap::new(),
                         }
@@ -420,6 +448,7 @@ where
                             outputs: BTreeMap::new(),
                             continue_on_error: false,
                             artifact_retention: BTreeMap::new(),
+                            plan: Plan::default(),
                         },
                     );
                     progressed = true;
@@ -755,6 +784,7 @@ async fn wait_for_approval(
                 outputs: BTreeMap::new(),
                 continue_on_error: false,
                 artifact_retention: BTreeMap::new(),
+                plan: Plan::default(),
             });
         }
         let row = jobs::Entity::find()
@@ -772,6 +802,7 @@ async fn wait_for_approval(
                 outputs: BTreeMap::new(),
                 continue_on_error: false,
                 artifact_retention: BTreeMap::new(),
+                plan: Plan::default(),
             });
         }
         tokio::select! {
@@ -814,7 +845,7 @@ async fn execute_job(
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     seq: &tokio::sync::Mutex<i64>,
-    run_cancelled: bool,
+    leg: &Leg,
 ) -> Result<Outcome> {
     let host = hosts::Entity::find_by_id(job.host_id)
         .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
@@ -870,7 +901,7 @@ async fn execute_job(
         seq,
         ch.as_ref(),
         &private,
-        run_cancelled,
+        leg,
     )
     .await;
     let cleanup = ch
@@ -897,8 +928,9 @@ async fn execute_private(
     seq: &tokio::sync::Mutex<i64>,
     ch: &dyn HostChannel,
     private: &str,
-    run_cancelled: bool,
+    leg: &Leg,
 ) -> Result<Outcome> {
+    let run_cancelled = leg.run_cancelled;
     let platform = ch
         .exec("uname -s; uname -m", Duration::from_secs(15))
         .await?;
@@ -942,7 +974,9 @@ async fn execute_private(
     .await?;
     let environment = history::credential_environment(ch, private, credential).await?;
     let workdir = format!("{private}/source");
-    let checkout = if run.repo_url.is_empty()
+    // Planning only evaluates the strategy; it needs no sources.
+    let checkout = if leg.plan
+        || run.repo_url.is_empty()
         || snapshot
             .checkouts
             .iter()
@@ -985,6 +1019,7 @@ async fn execute_private(
             outputs: BTreeMap::new(),
             continue_on_error: false,
             artifact_retention: BTreeMap::new(),
+            plan: Plan::default(),
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
@@ -1028,11 +1063,15 @@ async fn execute_private(
     // download-artifact can consume them on a different execution host.
     use crate::entities::pipeline_artifacts as artifacts;
     use tokio::io::AsyncReadExt;
-    let existing = artifacts::Entity::find()
-        .filter(artifacts::Column::RunId.eq(run.id))
-        .filter(artifacts::Column::WorkspaceId.eq(run.workspace_id))
-        .all(&s.db)
-        .await?;
+    let existing = if leg.plan {
+        Vec::new()
+    } else {
+        artifacts::Entity::find()
+            .filter(artifacts::Column::RunId.eq(run.id))
+            .filter(artifacts::Column::WorkspaceId.eq(run.workspace_id))
+            .all(&s.db)
+            .await?
+    };
     let artifact_dir = format!("{private}/artifacts");
     for artifact in &existing {
         crate::artifacts::validate_paths(&[artifact.path.clone()])?;
@@ -1082,7 +1121,8 @@ async fn execute_private(
         "sha":run.commit,"repository":context.repository,"server_url":context.server_url,
         "inputs":context.inputs,"needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,
         "run_cancelled":run_cancelled,"timeout_seconds":WORKER_SECONDS,
-        "run_id":run.id.to_string(),"artifact_dir":artifact_dir});
+        "run_id":run.id.to_string(),"artifact_dir":artifact_dir,
+        "mode":if leg.plan { "plan" } else { "" },"matrix":leg.matrix});
     upload(
         ch,
         &format!("{private}/request"),
@@ -1117,11 +1157,18 @@ async fn execute_private(
             outputs: BTreeMap::new(),
             continue_on_error: false,
             artifact_retention: BTreeMap::new(),
+            plan: Plan::default(),
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
     }
     let result = outcome.ok_or_else(|| ApiError::bad("Actions worker 没有返回执行结果。"))?;
+    if leg.plan {
+        if code != 0 {
+            return Err(ApiError::bad("Actions 矩阵展开失败。"));
+        }
+        return Ok(result);
+    }
     if code != 0 && result.state == "success" {
         return Err(ApiError::bad("Actions worker 异常退出。"));
     }
@@ -1160,6 +1207,240 @@ async fn execute_private(
         .collect();
     crate::artifacts::collect(s, run, ch, private, &fresh, &retention, stop).await?;
     Ok(result)
+}
+
+/// One worker invocation of a job: the whole job, its matrix plan, or one
+/// matrix instance placed on a host-group member.
+#[derive(Clone, Debug, Default)]
+struct Leg {
+    run_cancelled: bool,
+    plan: bool,
+    matrix: Option<Value>,
+}
+
+/// Run a job. A matrix job bound to a host group with several online members
+/// is planned once, then its instances are spread over the members (fewest
+/// running instances first) under the strategy's max-parallel and fail-fast,
+/// as GitHub spreads them over runners. Otherwise one worker runs the job and
+/// expands its matrix itself.
+#[allow(clippy::too_many_arguments)]
+async fn execute_legs(
+    s: &AppState,
+    run: &runs::Model,
+    snapshot: &Snapshot,
+    job: &Job,
+    completed: &BTreeMap<String, Outcome>,
+    variables: &BTreeMap<String, String>,
+    delivered: &Delivered,
+    credential: Option<&(String, String, String)>,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+    seq: &tokio::sync::Mutex<i64>,
+    run_cancelled: bool,
+) -> Result<Outcome> {
+    let whole = Leg {
+        run_cancelled,
+        ..Leg::default()
+    };
+    let strategy = crate::actions::job_policies(&snapshot.document, &job.key)
+        .is_some_and(|policies| policies.strategy);
+    let members: Vec<i64> = if job.host_group_id != 0 && strategy {
+        hosts::Entity::find()
+            .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
+            .filter(hosts::Column::GroupId.eq(job.host_group_id))
+            .filter(hosts::Column::State.eq("online"))
+            .order_by_asc(hosts::Column::Id)
+            .all(&s.db)
+            .await?
+            .into_iter()
+            .map(|host| host.id)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if members.len() < 2 {
+        return execute_job(
+            s, run, snapshot, job, completed, variables, delivered, credential, stop, seq, &whole,
+        )
+        .await;
+    }
+    let planned = execute_job(
+        s,
+        run,
+        snapshot,
+        job,
+        completed,
+        variables,
+        delivered,
+        credential,
+        stop,
+        seq,
+        &Leg {
+            plan: true,
+            ..whole.clone()
+        },
+    )
+    .await?;
+    if planned.state != "success" {
+        return Ok(planned);
+    }
+    let Plan {
+        instances,
+        max_parallel,
+        fail_fast,
+    } = planned.plan;
+    if instances.len() < 2 {
+        return execute_job(
+            s, run, snapshot, job, completed, variables, delivered, credential, stop, seq, &whole,
+        )
+        .await;
+    }
+    let limit = if max_parallel == 0 {
+        instances.len()
+    } else {
+        max_parallel.min(instances.len())
+    };
+    let fail_fast = fail_fast.unwrap_or(true);
+    // Legs stop with the job, and the others stop when fail-fast trips.
+    let (abort, aborted) = tokio::sync::watch::channel(*stop.borrow());
+    let mut load: BTreeMap<i64, usize> = members.iter().map(|id| (*id, 0)).collect();
+    let mut pending = instances.into_iter();
+    let mut running = FuturesUnordered::new();
+    let mut merged = Outcome {
+        state: "success".into(),
+        ..Outcome::default()
+    };
+    let (mut failed, mut tolerated, mut cancelled, mut ran) = (false, true, false, false);
+    loop {
+        while running.len() < limit && !*aborted.borrow() {
+            let Some(instance) = pending.next() else {
+                break;
+            };
+            let host = *load
+                .iter()
+                .min_by_key(|(id, count)| (**count, **id))
+                .map(|(id, _)| id)
+                .expect("members");
+            *load.get_mut(&host).unwrap() += 1;
+            let mut leg_job = job.clone();
+            leg_job.host_id = host;
+            let leg = Leg {
+                matrix: Some(instance.matrix.clone()),
+                ..whole.clone()
+            };
+            let mut leg_stop = aborted.clone();
+            append(
+                s,
+                run.id,
+                -1,
+                &mut *seq.lock().await,
+                "stdout",
+                &format!(
+                    "任务 {} 的矩阵实例 {} 分配到主机 {host}\n",
+                    job.key, instance.name
+                ),
+            )
+            .await?;
+            running.push(async move {
+                let reserve =
+                    crate::runner_updates::reserve_with(s.cluster.as_ref(), vec![host.to_string()]);
+                let result = match reserve.await {
+                    Ok(guards) => {
+                        guards
+                            .run(execute_job(
+                                s,
+                                run,
+                                snapshot,
+                                &leg_job,
+                                completed,
+                                variables,
+                                delivered,
+                                credential,
+                                &mut leg_stop,
+                                seq,
+                                &leg,
+                            ))
+                            .await
+                    }
+                    Err(error) => Err(error),
+                };
+                (host, instance.name, result)
+            });
+        }
+        if running.is_empty() {
+            break;
+        }
+        tokio::select! {
+            next = running.next() => {
+                let Some((host, name, result)) = next else { break };
+                *load.get_mut(&host).unwrap() -= 1;
+                let outcome = match result {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        append(
+                            s,
+                            run.id,
+                            -1,
+                            &mut *seq.lock().await,
+                            "stderr",
+                            &history::redact(
+                                format!("任务 {} 的矩阵实例 {name} 执行失败：{}\n", job.key, error.1),
+                                credential,
+                                variables,
+                            ),
+                        )
+                        .await?;
+                        Outcome {
+                            state: "failure".into(),
+                            ..Outcome::default()
+                        }
+                    }
+                };
+                ran |= outcome.state != "skipped";
+                // Later-completed instances win for the same output, as on GitHub.
+                merged.outputs.extend(outcome.outputs);
+                for (key, state) in outcome.steps {
+                    let rank = |state: &str| match state {
+                        "skipped" => 1,
+                        "success" => 2,
+                        "failure" => 3,
+                        "cancelled" => 4,
+                        "timed_out" => 5,
+                        _ => 0,
+                    };
+                    if rank(&state) > rank(merged.steps.get(&key).map_or("", String::as_str)) {
+                        merged.steps.insert(key, state);
+                    }
+                }
+                match outcome.state.as_str() {
+                    "failure" | "timed_out" => {
+                        failed = true;
+                        tolerated &= outcome.continue_on_error;
+                        if fail_fast && !outcome.continue_on_error {
+                            abort.send_replace(true);
+                        }
+                    }
+                    "cancelled" => cancelled = true,
+                    _ => {}
+                }
+            }
+            changed = stop.changed(), if !*aborted.borrow() => {
+                if changed.is_err() || *stop.borrow() {
+                    abort.send_replace(true);
+                }
+            }
+        }
+    }
+    merged.state = if failed {
+        merged.continue_on_error = tolerated;
+        "failure".into()
+    } else if cancelled || *stop.borrow() {
+        "cancelled".into()
+    } else if !ran {
+        "skipped".into()
+    } else {
+        "success".into()
+    };
+    Ok(merged)
 }
 
 /// Replace bound checkout nodes only; act still evaluates their conditions,
@@ -1487,6 +1768,7 @@ mod tests {
             host_id: 1,
             image: "host".into(),
             manual: false,
+            host_group_id: 0,
         }
     }
     fn success() -> Outcome {
@@ -1495,6 +1777,7 @@ mod tests {
             outputs: BTreeMap::new(),
             continue_on_error: false,
             artifact_retention: BTreeMap::new(),
+            plan: Plan::default(),
             artifacts: vec![],
             steps: BTreeMap::new(),
         }
@@ -1655,7 +1938,10 @@ mod tests {
                     if job.key == "report" {
                         assert_eq!(completed["deploy"].state, "skipped");
                     }
-                    assert!(!*cancel.borrow(), "cleanup jobs are not cancelled by the run");
+                    assert!(
+                        !*cancel.borrow(),
+                        "cleanup jobs are not cancelled by the run"
+                    );
                     Ok(success())
                 }
             },
@@ -1681,6 +1967,23 @@ mod tests {
     }
 
     #[test]
+    fn worker_plan_results_carry_instances_and_strategy() {
+        let plan: Outcome = serde_json::from_value(json!({"kind":"result","state":"success","continue_on_error":false,"outputs":{},"instances":[{"name":"build (a)","matrix":{"os":"a"}},{"name":"build (b)","matrix":{"os":"b"}}],"max_parallel":1,"fail_fast":false})).unwrap();
+        assert_eq!(plan.plan.instances.len(), 2);
+        assert_eq!(plan.plan.instances[1].matrix, json!({"os":"b"}));
+        assert_eq!(
+            (plan.plan.max_parallel, plan.plan.fail_fast),
+            (1, Some(false))
+        );
+        let run: Outcome = serde_json::from_value(json!({"kind":"result","state":"failure","continue_on_error":true,"outputs":{},"artifact_retention":{"1/a/a.zip":3}})).unwrap();
+        assert!(run.tolerated());
+        assert_eq!(run.artifact_retention["1/a/a.zip"], 3);
+        // Dependants receive needs without plan fields.
+        let encoded = serde_json::to_value(&run).unwrap();
+        assert!(encoded.get("instances").is_none() && encoded.get("max_parallel").is_none());
+    }
+
+    #[test]
     fn cleanup_jobs_are_those_whose_condition_calls_always_or_cancelled() {
         let document = |condition: &str| crate::actions::Document {
             engine: "actions".into(),
@@ -1693,7 +1996,10 @@ mod tests {
         assert!(cleanup_job(&document("cancelled ( )"), "a"));
         assert!(cleanup_job(&document("${{ !cancelled() }}"), "a"));
         assert!(!cleanup_job(&document("success()"), "a"));
-        assert!(!cleanup_job(&document("github.ref == 'refs/heads/main'"), "a"));
+        assert!(!cleanup_job(
+            &document("github.ref == 'refs/heads/main'"),
+            "a"
+        ));
     }
 
     #[tokio::test]
@@ -1935,6 +2241,7 @@ mod tests {
                     host_id,
                     image: "host".into(),
                     manual: false,
+                    host_group_id: 0,
                 })
                 .collect(),
         };

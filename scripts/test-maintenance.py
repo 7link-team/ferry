@@ -65,7 +65,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         settings=request(owner,root+'/settings')['items']
-        check(len(settings)==4,'four typed settings seeded')
+        check(len(settings)==5,'five typed settings seeded')
+        concurrent=next(r for r in settings if r['key']=='pipeline_concurrent_runs')
+        check((concurrent['value'],concurrent['default'],concurrent['min'])==(10,10,0),'pipeline concurrency defaults to 10 runs, 0 meaning unlimited')
         event_retention=next(r for r in settings if r['key']=='repository_event_retention_days')
         check((event_retention['value'],event_retention['default'],event_retention['min'],event_retention['max'])==(0,0,0,36500),'repository event retention defaults to permanent with a bounded range')
         prefs=request(guest,root+'/preferences')

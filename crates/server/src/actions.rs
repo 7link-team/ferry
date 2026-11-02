@@ -67,6 +67,10 @@ pub struct Job {
     pub image: String,
     #[serde(default)]
     pub manual: bool,
+    /// The bound host group, if any: matrix instances spread over its online
+    /// members; `host_id` is the member chosen when the run was queued.
+    #[serde(default)]
+    pub host_group_id: i64,
 }
 impl Job {
     pub(crate) fn reusable(&self) -> bool {
@@ -79,7 +83,7 @@ impl Serialize for Job {
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("Job", 9)?;
+        let mut state = serializer.serialize_struct("Job", 10)?;
         state.serialize_field("key", &self.key)?;
         state.serialize_field("name", &self.name)?;
         state.serialize_field("needs", &self.needs)?;
@@ -88,6 +92,7 @@ impl Serialize for Job {
         state.serialize_field("host_id", &self.host_id)?;
         state.serialize_field("image", &self.image)?;
         state.serialize_field("manual", &self.manual)?;
+        state.serialize_field("host_group_id", &self.host_group_id)?;
         state.serialize_field("reusable", &self.reusable())?;
         state.end()
     }
@@ -326,6 +331,8 @@ pub(crate) struct JobPolicies {
     pub(crate) reusable_workflow: Option<String>,
     /// The job's `if`, as written.
     pub(crate) condition: Option<String>,
+    /// Whether the job declares `strategy` (a matrix).
+    pub(crate) strategy: bool,
 }
 pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies> {
     let value: Value = serde_yaml_ng::from_str(&document.workflow).ok()?;
@@ -334,6 +341,7 @@ pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies
         concurrency: job.get("concurrency").cloned(),
         environment: job.get("environment").cloned(),
         reusable_workflow: job.get("uses").and_then(Value::as_str).map(str::to_owned),
+        strategy: job.get("strategy").is_some(),
         condition: job.get("if").map(|value| match value {
             Value::String(text) => text.clone(),
             other => other.to_string(),
@@ -600,6 +608,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             host_id: 0,
             image: "host".into(),
             manual,
+            host_group_id: 0,
         });
     }
     fn visit(
@@ -823,13 +832,12 @@ pub async fn resolve(
         {
             job.image = binding.image.clone();
             if !binding.target_ref.is_empty() {
-                job.host_id = host(
-                    conn,
-                    scope.workspace_id,
-                    &binding.target_kind,
-                    Id::reference(&binding.target_ref)?,
-                )
-                .await?;
+                let reference = Id::reference(&binding.target_ref)?;
+                job.host_id =
+                    host(conn, scope.workspace_id, &binding.target_kind, reference).await?;
+                if binding.target_kind == "host-group" {
+                    job.host_group_id = reference.into();
+                }
             }
         }
     }

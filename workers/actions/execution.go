@@ -214,6 +214,10 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 	if request.Mode == "plan" {
 		result.State = "success"
 		result.Instances = instances
+		result.FailFast = &failFast
+		if job.Strategy != nil && job.Strategy.MaxParallelString != "" {
+			result.MaxParallel = parallel
+		}
 		return result, nil
 	}
 	total := len(instances)

@@ -29,8 +29,12 @@ import (
 const engineVersion = "nektos/act v0.2.89"
 
 type JobResult struct {
-	ContinueOnError   bool              `json:"continue_on_error"`
-	Instances         []JobInstance     `json:"instances,omitempty"`
+	ContinueOnError bool          `json:"continue_on_error"`
+	Instances       []JobInstance `json:"instances,omitempty"`
+	// Plan mode: strategy max-parallel (0 = unbounded) and fail-fast, so a
+	// caller distributing instances applies the same strategy.
+	MaxParallel       int               `json:"max_parallel,omitempty"`
+	FailFast          *bool             `json:"fail_fast,omitempty"`
 	ArtifactRetention map[string]int    `json:"artifact_retention,omitempty"`
 	Steps             map[string]string `json:"steps,omitempty"`
 	Artifacts         []string          `json:"artifacts,omitempty"`

@@ -622,7 +622,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
     };
     for (path, current) in new {
         let Some(previous) = old.get(path) else {
-            let mut detail = json!({ "repository": current.info });
+            let detail = json!({ "repository": current.info });
             add(
                 "repository.created",
                 path,
@@ -672,7 +672,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             .iter()
             .filter(|(name, _)| !current.branches.contains_key(*name))
         {
-            let mut detail = json!({ "before": revision });
+            let detail = json!({ "before": revision });
             add(
                 "branch.deleted",
                 path,
@@ -687,7 +687,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             .keys()
             .filter(|name| !previous.tags.contains_key(*name))
         {
-            let mut detail = current
+            let detail = current
                 .tag_detail
                 .get(name)
                 .cloned()
@@ -712,7 +712,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             .iter()
             .filter(|(name, _)| !current.tags.contains_key(*name))
         {
-            let mut detail = json!({ "target": target });
+            let detail = json!({ "target": target });
             add(
                 "tag.deleted",
                 path,
@@ -726,7 +726,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
             let prior = previous.requests.get(identity);
             if prior.is_none_or(|p| p.fingerprint != request.fingerprint) {
                 let merged = request.merged && prior.is_none_or(|p| !p.merged);
-                let mut detail = json!({ "request": request.detail });
+                let detail = json!({ "request": request.detail });
                 // Polling sees the author and the merger; other editors are unknown.
                 let actor = if merged {
                     detail::field(&request.detail, &["/merged_by"], 200)
@@ -753,7 +753,7 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
         }
     }
     for path in old.keys().filter(|path| !new.contains_key(*path)) {
-        let mut detail = json!({});
+        let detail = json!({});
         add(
             "repository.deleted",
             path,
