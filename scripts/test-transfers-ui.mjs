@@ -1,12 +1,21 @@
 /** Real Chromium acceptance for template management and generated resources. */
 import assert from 'node:assert/strict';
-import { nav } from '../src/nav.ts';
+import ts from 'typescript';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+// Read the real navigation tree without loading browser-only label rendering in Node.
+// This acceptance loop uses resource/params only; translated label getters stay lazy.
+const navSource = await readFile(new URL('../src/nav.ts', import.meta.url), 'utf8');
+const labelImport = 'import { commonText } from "./i18n";';
+assert(navSource.includes(labelImport), 'navigation label import is explicitly isolated');
+const navModule = ts.transpileModule(navSource.replace(labelImport, 'const commonText = (key: string) => key;'), {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+const { nav } = await import(`data:text/javascript;base64,${Buffer.from(navModule).toString('base64')}`);
 const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
 const listener = createServer();
 await new Promise(r => listener.listen(0, '127.0.0.1', r));
@@ -49,14 +58,14 @@ try {
   await dialog.getByRole('heading',{name:'导入数据'}).waitFor();
   assert(await dialog.getByRole('button',{name:'预览导入'}).isDisabled());
   const templateDownload=p.waitForEvent('download');
-  await dialog.getByRole('button',{name:'下载 XLSX 模板'}).click();
+  await dialog.getByRole('button',{name:'下载 XLSX 模版'}).click();
   assert.equal((await templateDownload).suggestedFilename(),'tags-template.xlsx');
   const file=dialog.getByLabel('选择导入文件');
   await file.setInputFiles({name:'tags.csv',mimeType:'text/csv',buffer:Buffer.from('name,color\r\n"UI imported",#123456\r\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
-  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  await dialog.getByText('校验通过，将创建 1 条记录。').waitFor();
   assert.equal((await get(root+'/tags')).total,0);
-  await dialog.getByRole('button',{name:'确认新增 1 项'}).click();
+  await dialog.getByRole('button',{name:'确认创建 1 条记录'}).click();
   await dialog.waitFor({state:'hidden'});
   await p.getByRole('row').filter({hasText:'UI imported'}).waitFor();
   assert.equal((await get(root+'/tags')).total,1);
@@ -64,12 +73,12 @@ try {
   await p.getByRole('button',{name:'导入',exact:true}).click();
   await file.setInputFiles({name:'invalid.csv',mimeType:'text/csv',buffer:Buffer.from('name,color\n,#123456\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
-  await dialog.getByText(/校验未通过/).waitFor();
-  assert.equal(await dialog.getByRole('button',{name:/确认新增/}).count(),0);
+  await dialog.getByText(/校验失败/).waitFor();
+  assert.equal(await dialog.getByRole('button',{name:/确认创建/}).count(),0);
   await dialog.getByRole('button',{name:'重新选择文件'}).click();
   await file.setInputFiles({name:'cancel.csv',mimeType:'text/csv',buffer:Buffer.from('name\nCancelled via keyboard\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
-  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  await dialog.getByText('校验通过，将创建 1 条记录。').waitFor();
   await p.keyboard.press('Escape');
   await dialog.waitFor({state:'hidden'});
   assert.equal((await get(root+'/tags')).total,1);
@@ -77,7 +86,7 @@ try {
   console.log('PASS invalid rows prevent confirmation; Escape cancels pending import and restores focus');
   await p.getByRole('button',{name:'导出',exact:true}).click();
   const exported=p.waitForEvent('download');
-  await p.getByRole('menuitem',{name:'导出 CSV（当前筛选全部记录）'}).click();
+  await p.getByRole('menuitem',{name:'导出 CSV（当前筛选条件下的全部记录）'}).click();
   const csv=await exported;
   assert.equal(csv.suggestedFilename(),'tags.csv');
   assert((await readFile(await csv.path(),'utf8')).includes('UI imported'));
@@ -86,9 +95,9 @@ try {
   await p.getByRole('button',{name:'导入',exact:true}).click();
   await file.setInputFiles({name:'secret.csv',mimeType:'text/csv',buffer:Buffer.from('name,kind,secret\nPrivate token,token,never-visible-secret\n')});
   await dialog.getByRole('button',{name:'预览导入'}).click();
-  await dialog.getByText('校验通过，将新增 1 项。').waitFor();
+  await dialog.getByText('校验通过，将创建 1 条记录。').waitFor();
   assert(!(await dialog.innerText()).includes('never-visible-secret'));
-  await dialog.getByRole('button',{name:'确认新增 1 项'}).click();
+  await dialog.getByRole('button',{name:'确认创建 1 条记录'}).click();
   await dialog.waitFor({state:'hidden'});
   assert.equal((await get(root+'/credentials')).total,1);
   const hostBody=await post(owner,root+'/nodes',{name:'Tagged in browser',connection:'runner'});

@@ -109,9 +109,25 @@ jobs:
         if: runner.os == 'Linux'
         run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh
       - name: Signed service upgrade and rollback
+        shell: bash
         env:
           RUNNER_TEST_ACTIONS: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: python scripts/test-runner-upgrade.py
+        run: |
+          mkdir -p harness-logs
+          set +e
+          python scripts/test-runner-upgrade.py 2>&1 | tee harness-logs/runner-upgrade.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python .github/scripts/annotate-failures.py harness-logs/runner-upgrade.log || true
+          fi
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runner-upgrade-${{ matrix.os }}-${{ github.run_attempt }}
+          path: harness-logs/runner-upgrade.log
+          if-no-files-found: ignore
 
   # Independent of the service lifecycle above; run alongside it.
   actions-worker-windows:

@@ -1159,6 +1159,29 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tracing::instrument::WithSubscriber;
 
+        // Tracing caches callsite interest process-wide. Other parallel tests emit
+        // through this same callsite without a subscriber, so capture in an isolated
+        // test process while retaining every real WebSocket and privacy assertion.
+        if std::env::var_os("FERRY_TEST_TRANSPORT_LOG_CHILD").is_none() {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["--exact", "cluster::tests::local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs", "--nocapture"])
+                .env("FERRY_TEST_TRANSPORT_LOG_CHILD", "1");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                command.creation_flags(0x08000000);
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+            return;
+        }
         let capture = Capture::default();
         let writer = capture.clone();
         let subscriber = tracing_subscriber::fmt()
