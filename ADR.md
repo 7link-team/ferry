@@ -350,3 +350,50 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Worker (done by Codex CLI in a separate worktree, reviewed and re-verified): builds windows/amd64 and windows/arm64 (`.exe`); every host process is created hidden (CREATE_NO_WINDOW/HideWindow, via the fail-closed actpatch); unspecified shells prefer `pwsh`, else Windows PowerShell 5.1, invoked with UTF-8 output and a BOM'd script; command files written as UTF-16 by PowerShell 5.1 are decoded before parsing and masking. Two real masking defects were found and fixed this way (code-page output corrupting Unicode secrets; UTF-16 GITHUB_OUTPUT).
 - Limitation: Windows cancellation is taskkill (forced), so post steps may not run.
 - Verification: worker `go test` on Windows 19 PASS/2 SKIP, linux+darwin vet; `scripts/test-actions-windows.py` real server + current-user runner + worker on this Windows machine 9 PASS; CI runner-services (Windows) runs both and gates releases.
+
+## Pipeline v2 decisions D1–D17 — confirmed as recommended (2026-11-02)
+- Decision: user accepted all recommendations in docs/ferry-流水线全功能设计.md §27 (D1–D13) and docs/ferry-流水线对标功能清单.md §3.1 (D14–D17): worker evaluate subcommand for server-side expressions; S3-compatible artifact store for clusters; YAML on.schedule rejected in favour of cron jobs; trigger_run_as rebinding to last definition editor; legacy JSON frozen with converter; Windows native shell jobs in P3; robot-webhook notifications without email; phase order P0→P1→P2; reruns create new runs with copied artifacts; concurrency in envelope settings with queue_latest default for event triggers; fork MRs never auto-run; environment protection gates; trigger_environments mapping; pipeline-level permissions in P2; admin bypass off by default with per-environment switch; draft/publish where event and schedule triggers use the published revision (P1); generic secret webhook trigger (P1).
+- Scope: design only; development not started (user waiting on another session). Checklist §3.2 items still need folding into the design before T18 task breakdown.
+- Status: CONFIRMED.
+
+## Product scope expansion to a three-plane workflow platform — confirmed (2026-11-02)
+- Decision: user requires that everything Aliyun Flow, n8n and ComfyUI can do is available in Ferry. Ferry expands from an ops platform to "研发交付 + 通用自动化 + AI 内容生产". Three execution planes share one shell (triggers, credentials, queue, approvals, versions/publish, runs, artifacts, canvas): (1) host job plane = pipeline v2 (Actions YAML, Flow parity); (2) dataflow node plane = self-built n8n-style engine (item dataflow, control nodes, sandboxed code, HTTP/webhook response, LLM/agent, integrations added in batches); (3) AI engine plane = **self-built** ComfyUI-style capability (typed node graph, input-signature caching, queue/progress/preview, model management, generation nodes); full ComfyUI ecosystem compatibility NOT required, functional coverage is.
+- Constraints: n8n source must not be embedded (Sustainable Use License forbids commercial redistribution) — behaviour reference only. ComfyUI is GPL-3.0 — no code copying; self-implementation only. Supersedes general spec §1 positioning and the v2 "single definition format" principle (dataflow graphs need a second graph format); v3 overall design must state both.
+- Order: v2 P0 (leases/concurrency/revisions, shared by all planes) first, then v3 shared shell and data model, then v2 P1 and new planes in parallel.
+- Status: CONFIRMED; v3 overall design not yet written.
+
+## v3 decisions V13–V14 confirmed; PRD before development (2026-11-02)
+- V13: JS code/expressions run in a separate low-privilege sandbox process (ferry-sandbox), no vault key or DB access; S1 starts with a technical spike.
+- V14: Not built: hosted build clusters, package-protocol artifact repository, Go-template YAML pre-rendering. K8s batch/blue-green/canary ships with the application module's K8s plan. Other Flow gaps handled per v3 §18.2.
+- V15 CONFIRMED 2026-11-02 after explanation: public pages (form trigger, chat trigger, external review, read-only run share) recommend a separate FERRY_PUBLIC_ORIGIN; without it fall back to same origin with strict CSP and no session access; public access per workspace stays default-off (V9). V1–V12 recommended, not yet explicitly confirmed.
+- User direction: no development task breakdown now; produce the capability inventory (v3 §18.5) and a complete PRD first.
+
+## D5/D6 superseded by implemented decisions (2026-11-02)
+- D6 (Windows native PowerShell executor in P3, recommended 2026-10-31) is superseded by the 2026-11-01 user decision to make the existing act engine support Windows host mode, which is implemented and verified ("GitHub Actions pipelines on Windows hosts — 2026-11-01"). The blanket D1–D17 confirmation on 2026-11-02 approved a stale recommendation; the specific, earlier, implemented user choice prevails.
+- D5 (freeze legacy JSON + converter) is superseded by commits c32c4ee/02df78a, which removed the legacy pipeline format (convert on write and by migration) so all pipelines run as Actions workflows.
+- v2 design header, PRD (FR-PIPE-01, NFR-COMP-02, §12, Q02) and capability inventory are annotated accordingly. Found by the PRD drafting review (Q02).
+
+## v3 V1–V12 and PRD open items Q03–Q15 confirmed as recommended (2026-11-02)
+- V1–V12 confirmed as recommended in docs/ferry-工作流平台v3总体设计.md §16 (V6/V7 concrete model families and providers still chosen before S4/S3).
+- Q03 permissions: workspace permission is the ceiling; object roles (owner/all/run/view) granted within it; group grants inherited by members and unioned with object grants; no explicit deny; ownership transferable to members with edit permission.
+- Q04 skip failed job: requires the object's "all" permission; only failed/timed-out host jobs; approvals, deploy tasks and environment gates cannot be skipped; downstream continues; audited.
+- Q05 merged MR runs check out the exact merge commit from the event, never the target branch head.
+- Q06 problem severities: block save (syntax errors, expression interpolation in host commands); block publish (missing credentials, host bindings, models); block execution (budget enabled and price missing; model not ready on target host); everything else warns.
+- Q07 publish version name required, 1–64 chars, unique per definition; change note optional ≤200 chars.
+- Q08 non-approval human tasks: assignees follow approval rules; default timeout 7 days → fail; external review links valid 72 h and revocable; edit tasks autosave drafts every 30 s.
+- Q09 public form defaults: 20 MB per file, max 5 files, 10 submissions per IP per minute; captcha off by default, switchable.
+- Q10 queue view shows cluster-wide aggregate with concrete reasons (concurrency group/host/GPU); members see their workspace only.
+- Q11 statistics: success rate = succeeded/(succeeded+failed); duration excludes queueing, waiting shown separately; costs summed per credential currency, no FX conversion; unpriced shows "—".
+- Q12 archive auto-unpublishes (triggers and public entries stop), history kept, restorable as draft; only archived definitions can be deleted.
+- Q13 routes/REST follow general spec §6 (no DELETE bodies; noun sub-resources); new pages /workspaces/{id}/workflows, /executions, /assets, /models, /human-tasks.
+- Q14 pipeline execution identity binds at publish (aligned with workflows and D16); saving drafts does not rebind. This amends D4's save-time rebinding.
+- Q15 inventory rows with evidence gaps stay "未开始" until V6/V7 selection; no early commitment.
+- Precedence: where these conflict with v2/v3 technical docs, the PRD and this entry prevail; technical docs are aligned at task breakdown.
+- User also approved committing and pushing the finalized documents after the PRD review.
+
+## PRD review follow-up defaults (2026-11-02, under the user's "按推荐" approval)
+- Skip failed job (Q04) ships in P2 together with D14 object permissions; no interim substitute for the "all" permission. Skipping creates no new attempt: the job becomes skipped with skipped_by/reason, the failed attempt's logs stay in history.
+- Human "return for changes" (Q08): reviewer returns with a required comment (≤500 chars); the task ends with decision=returned and the graph decides what follows (e.g. a redo loop). Same for external review.
+- Public uploads (Q09): allowed types come from each form field's declaration; configurable upper bounds 200 MB per file and 20 files; chat: 20 messages per minute per session, uploads follow form rules.
+- Statistics (Q11/M1): time buckets use the workspace timezone (default server timezone); waiting time is excluded from duration and shown separately; zero denominator shows "—"; recovery time = time from a failed run to the next succeeded run of the same definition, averaged over the window; per-job failure rate is included.
+
