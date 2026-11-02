@@ -1,0 +1,75 @@
+name: Publish recovered and fully verified alpha35
+on:
+  push:
+    branches: [feat/alpha35-release-dispatch]
+    paths: [.github/workflows/finalize-alpha35.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sha='b50b9933502385542ecb4e4ebeafd9eb51914ea5';
+            const tag='v0.1.0-alpha.35';
+            const repo=context.repo;
+            // Stop the superseded orchestrator; let completed desktop builds save reusable caches.
+            for (const run_id of [41496945538]) {
+              const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
+              if(data.status!=='completed') {
+                try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
+                catch(error) { if(![409,422].includes(error.status)) throw error; }
+              }
+            }
+            async function requireMain() {
+              const {data}=await github.rest.repos.getCommit({...repo,ref:'main'});
+              if(data.sha!==sha)throw Error('Main changed; refusing publication');
+            }
+            async function runs(workflow,event) {
+              return (await github.rest.actions.listWorkflowRuns({...repo,workflow_id:workflow,event,head_sha:sha})).data.workflow_runs;
+            }
+            async function waitFor(workflow,event) {
+              for(let attempt=0;attempt<360;attempt++) {
+                const matching=await runs(workflow,event);
+                if(matching.length>1)throw Error('Ambiguous source runs '+workflow);
+                const run=matching[0];
+                if(run) {
+                  if(run.head_sha!==sha || run.head_branch!=='main')throw Error('Unexpected source');
+                  if(attempt%6===0)core.info(`${workflow} ${run.id}: ${run.status}`);
+                  if(run.status==='completed') {
+                    if(run.conclusion!=='success')throw Error(`Required ${workflow} ${run.id} ${run.conclusion}`);
+                    return run;
+                  }
+                }
+                await new Promise(resolve=>setTimeout(resolve,10000));
+              }
+              throw Error('Timed out; inspect existing run before retry');
+            }
+            await requireMain();
+            let build;
+            for(let attempt=0;attempt<720;attempt++) {
+              const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id:41496968222});
+              if(run.head_sha!==sha || run.head_branch!=='main' || run.event!=='workflow_dispatch')throw Error('Unexpected build source');
+              if(attempt%6===0)core.info(`Build ${run.id} attempt ${run.run_attempt}: ${run.status} ${run.conclusion}`);
+              if(run.status==='completed' && run.conclusion==='success') { build=run; break; }
+              if(run.status==='completed' && run.run_attempt>=2)throw Error('Recovered build failed; inspect actual diagnostics');
+              await new Promise(resolve=>setTimeout(resolve,10000));
+            }
+            if(!build)throw Error('Timed out waiting for recovered exact build');
+            const image=await waitFor('server-image.yml','push');
+            core.notice(`Verified build ${build.id} and source image ${image.id}`);
+            await requireMain();
+            if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Already published/dispatched; inspect first');
+            const notes = "代码洞察、主题与系统配置改造，并补齐时间、多语言及 Runner 自动升级能力。\n\n- 修复编辑器构建资源被统一禁止缓存的问题，带哈希的脚本、样式和 Worker 可跨页面复用；保留 YAML 校验、补全、查找和六语言草稿，并加入生产浏览器回归。\n- Runner 连接诊断区分普通 WebSocket 失败与集群转发不可用，记录安全的阶段及节点信息，保留读取者语言；正常会话关闭不产生多余告警。此前线上偶发失败未复现，不据此宣称根因已经修复。\n\n- 新增独立“代码洞察”：按洞察选择仓库，支持同一仓库加入多个洞察、各自配置作者映射和仪表盘；保留全部分支、可配置的初始历史范围和可选完整历史，支持贡献者、提交、语言、排行、趋势、热力图及过滤分析。\n- 贡献采集与查询分离，优先使用平台 API；纯 Git 及 API 无法完整覆盖的情况通过 Runner / Actions 采集，不在服务端长期 clone。事实幂等去重、增量更新、持久化任务与仓库变化合并，支持定时 cron、事件触发和手动同步。\n- 迁入参考项目主题，移除 ERP 主题；支持明暗模式、自定义与持久化。字典和配置项共用 12 种值类型、分类、编辑器及校验，支持自定义配置项，并兼容旧数据和引用；系统运维项保持受控。\n- 支持 English、简体中文、繁體中文、日本語、한국어、Bahasa Melayu。页面地址带语言前缀，旧链接保留查询参数与锚点后跳转；切换语言保留编辑草稿。API 使用 Accept-Language，无该请求头时默认英文；系统状态和错误按读取者语言显示，用户姓名、脚本及命令输出保留原文。\n- 修正主机组、跳板主机等可选关联字段的展示：显示“未分组”“顶级分组”“不使用跳板主机”或关联名称；正常数值 0 保留。\n- 统一 UTC 数据库会话与存储，前端按浏览器时区显示；MySQL、PostgreSQL 在非 UTC 环境也执行真实迁移、统计与队列回归。\n- 受管 Runner 默认在空闲时自动升级到当前服务端版本，支持全局开关、逐主机继承/启用/禁用，保留签名验证、排空、失败退避与回退，不降级。\n\n验证范围包括独立 HTTP/SQLite、真实 MySQL/PostgreSQL、Windows Runner/Actions、私有 HTTP/SSH Git、公开开源 Git 仓库，以及生产构建的六语言浏览器交互。代码平台 API 使用本地契约服务覆盖受支持平台，不代表已实接所有私有平台账户。\n\nCloudflare Tunnel 已通过真实 HTTP/2 HTTPS/WSS、Runner 接入与重连验证；当前验证环境的 QUIC 出站受阻，未据此宣称 QUIC 或账号专属 named tunnel 的实测结果。\n\n本版本为 alpha 预发布。代码目录结构治理按约定留在发版后的独立提交。\n";
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
+            const publication=await waitFor('publish-verified.yml','workflow_dispatch');
+            const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
+            if(release.draft || !release.prerelease)throw Error('Unexpected release state');
+            core.notice(`Published ${tag}: ${publication.id}`);
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'server-image.yml',ref:'main',inputs:{release_tag:tag}});
+            const versioned=await waitFor('server-image.yml','workflow_dispatch');
+            core.notice(`Versioned image: ${versioned.id}`);
