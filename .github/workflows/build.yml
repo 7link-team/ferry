@@ -354,6 +354,8 @@ jobs:
           if [ "$ready" != true ]; then cat "$RUNNER_TEMP/insights-preview.log"; exit 1; fi
           python3 .github/scripts/annotate-failures.py --run node scripts/test-contribution-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-theme-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-code-insights-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-language-switcher-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-typed-values-ui.mjs
           YAML_EDITOR_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-yaml-editor-performance.mjs
           REFERENCE_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-reference-display-ui.mjs

@@ -697,6 +697,7 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .into_iter()
             .filter(|p| {
                 p.starts_with("marketplace-sources.")
+                    || p.starts_with("code-insights.")
                     || p.starts_with("config-templates.")
                     || p.starts_with("pipeline-groups.")
                     || p.starts_with("pipeline-environments.")
@@ -1074,6 +1075,137 @@ pub async fn permission_catalogue() -> Json<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn legacy_builtin_roles_receive_insight_permissions_once_without_changing_custom_roles() {
+        use sea_orm::ActiveModelTrait;
+
+        let (dir, db) = crate::lock::tests::database().await;
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "legacy-role-permissions-test".into(),
+            server_mode: false,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+            host_monitor: Default::default(),
+            cluster: None,
+        });
+        workspaces::Entity::insert(workspaces::ActiveModel {
+            id: Set(10),
+            slug: Set("legacy-permissions".into()),
+            name: Set("Legacy workspace".into()),
+            owner_id: Set(1),
+            join_code: Set("legacy-permissions-code".into()),
+            pipeline_run_number: Set(0),
+            created_at: Set(1234),
+            updated_at: Set(1234),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+
+        let mut legacy = Vec::new();
+        for (index, (key, label)) in BUILTIN.iter().enumerate() {
+            let mut permissions = builtin_permissions(key);
+            permissions.retain(|permission| !permission.starts_with("code-insights."));
+            permissions.push("legacy.existing.read".into());
+            let role = workspace_roles::ActiveModel {
+                id: Set(100 + index as i64),
+                workspace_id: Set(10),
+                name: Set((*label).into()),
+                permissions: Set(serde_json::to_string(&permissions).unwrap()),
+                builtin: Set(1),
+                created_at: Set(1234),
+                updated_at: Set(1234),
+                version: Set(17),
+            }
+            .insert(&s.db)
+            .await
+            .unwrap();
+            legacy.push((*key, role, permissions));
+        }
+        let custom = workspace_roles::ActiveModel {
+            id: Set(200),
+            workspace_id: Set(10),
+            name: Set("Custom role".into()),
+            permissions: Set(r#"["dashboard.read","code-insights.sync","legacy.custom"]"#.into()),
+            builtin: Set(0),
+            created_at: Set(1234),
+            updated_at: Set(1234),
+            version: Set(23),
+        }
+        .insert(&s.db)
+        .await
+        .unwrap();
+
+        prepare_permissions(&s).await.unwrap();
+
+        let mut upgraded = Vec::new();
+        for (key, previous, old_permissions) in &legacy {
+            let row = workspace_roles::Entity::find_by_id(previous.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let permissions: Vec<String> = serde_json::from_str(&row.permissions).unwrap();
+            let mut expected = old_permissions.clone();
+            match *key {
+                "owner" | "admin" | "developer" => expected.extend(
+                    ["read", "create", "update", "delete", "sync"]
+                        .map(|action| format!("code-insights.{action}")),
+                ),
+                "viewer" => expected.push("code-insights.read".into()),
+                "operator" => {}
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                permissions.iter().collect::<HashSet<_>>(),
+                expected.iter().collect::<HashSet<_>>(),
+                "unexpected grants for {key}"
+            );
+            assert_eq!(
+                permissions.len(),
+                expected.len(),
+                "duplicate grants for {key}"
+            );
+            assert_eq!(
+                row.version,
+                previous.version + i64::from(*key != "operator")
+            );
+            assert_eq!(row.created_at, previous.created_at);
+            if *key == "operator" {
+                assert_eq!(&row, previous);
+            } else {
+                assert!(row.updated_at > previous.updated_at);
+            }
+            upgraded.push(row);
+        }
+        assert_eq!(
+            workspace_roles::Entity::find_by_id(custom.id)
+                .one(&s.db)
+                .await
+                .unwrap(),
+            Some(custom.clone())
+        );
+
+        prepare_permissions(&s).await.unwrap();
+
+        for previous in upgraded.into_iter().chain([custom]) {
+            assert_eq!(
+                workspace_roles::Entity::find_by_id(previous.id)
+                    .one(&s.db)
+                    .await
+                    .unwrap(),
+                Some(previous),
+                "a repeated upgrade changed the role"
+            );
+        }
+    }
 
     #[test]
     fn dependencies_are_transitively_expanded() {

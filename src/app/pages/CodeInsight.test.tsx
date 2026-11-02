@@ -101,18 +101,23 @@ it("adds repositories from paginated named connections, remote pages and explici
   expect(requests.filter(request => request.url.includes("code-connections?")).length).toBe(2);
 });
 
-it("preserves author contributor IDs and blocks malformed JSON", async () => {
+it("edits author mappings without JSON and preserves contributor IDs across locales", async () => {
   let value: unknown = settings.aliases, blocked = false;
-  await act(async () => root.render(<CodeInsightAliases value={value} readOnly={false} onChange={next => { value = next; }} onValidityChange={next => { blocked = next; }} />));
-  const input = host.querySelector<HTMLTextAreaElement>("textarea")!;
-  await setInput(input, "invalid-json"); expect(blocked).toBe(true); expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  function Editor() {
+    const [aliases, setAliases] = useState<unknown>(settings.aliases);
+    return <CodeInsightAliases value={aliases} readOnly={false} onChange={next => { value = next; setAliases(next); }} onValidityChange={next => { blocked = next; }} />;
+  }
+  await act(async () => root.render(<Editor />));
+  expect(host.querySelector('textarea')).toBeNull();
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="统一昵称 1"]')!;
+  await setInput(input, ""); expect(blocked).toBe(true); expect(host.querySelector('[role="alert"]')).not.toBeNull();
   for (const locale of ["en-US", "ja-JP", "zh-CN"]) {
     await act(async () => { await i18n.changeLanguage(locale); });
-    expect(input.value).toBe("invalid-json");
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe(insightText("作者昵称映射须为有效的 JSON 数组。"));
+    expect(input.value).toBe("");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(insightText("每条作者映射须填写姓名或邮箱，以及显示昵称。"));
     expect(blocked).toBe(true);
   }
-  await setInput(input, '[{"email":"alice@example.invalid","nickname":"New name","contributor_id":"123"}]');
+  await setInput(input, 'New name');
   expect(blocked).toBe(false); expect(value).toEqual([{ email: "alice@example.invalid", nickname: "New name", contributor_id: "123" }]);
 });
 
@@ -166,4 +171,32 @@ it("defaults new insights to four-hour schedules and switches event reconciliati
   await choose(mode, "event");
   await act(async () => host.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(requests.find(request => request.method === "PATCH")?.body).toMatchObject({ update_mode: "event", schedule: "0 */4 * * *", timezone: "", reconcile_minutes: 1440, version: 5, aliases: settings.aliases, repositories: settings.repositories });
+});
+
+it("allows API-backed repository URLs without requiring a Git analysis pipeline", async () => {
+  let blocked = true;
+  await act(async () => root.render(<CodeInsightRepositories workspace="ws"
+    value={[{ connection_id: "11", provider: "github", repository: "https://git.example.invalid/team/project.git", pipeline_id: "" }]}
+    readOnly={false} permissions={new Set(["repositories.read"])} onChange={() => {}}
+    onValidityChange={value => { blocked = value; }} />));
+  expect(blocked).toBe(false);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("keeps author mapping out of the insight creation form", () => {
+  const config = codeInsightForm("ws");
+  expect(config.sections.flatMap(section => section.fields).some(field => field.key === "aliases")).toBe(false);
+  expect(config.blank.aliases).toEqual([]);
+});
+
+it("does not leave Git selection disabled when a previous platform request is still pending", async () => {
+  const originalFetch = fetch;
+  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => url.includes('/code-connections/11/repositories?') ? new Promise(() => {}) : originalFetch(url, init)));
+  await act(async () => root.render(<CodeInsightRepositories workspace="ws" value={[]} readOnly={false} permissions={new Set(["repositories.read"])} onChange={() => {}} onValidityChange={() => {}} />));
+  const connection = host.querySelector<HTMLSelectElement>('select[aria-label="仓库连接"]')!;
+  await choose(connection, '11');
+  expect(host.querySelector<HTMLSelectElement>('select[aria-label="添加洞察仓库"]')?.disabled).toBe(true);
+  await choose(connection, '12');
+  await setInput(host.querySelector<HTMLInputElement>('input[aria-label="Git 仓库地址"]')!, 'https://git.example.invalid/team/repo.git');
+  expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('加入洞察'))!.disabled).toBe(false);
 });

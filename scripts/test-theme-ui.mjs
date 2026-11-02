@@ -7,20 +7,21 @@ const installedChrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const executablePath = process.env.PLAYWRIGHT_CHROME_PATH || (process.platform === 'win32' && existsSync(installedChrome) ? installedChrome : undefined);
 const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
 try {
-  const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1366, height: 900 } });
+  const context = await browser.newContext({ locale: 'zh-CN', reducedMotion: 'reduce', viewport: { width: 1366, height: 900 } });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
     let value = { items: [], total: 0, page: 1, page_size: 20 };
-    if (path === '/api/me') value = { user: { id: '1', name: 'Theme reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions: ['hosts.read'] }] };
+    if (path === '/api/me') value = { user: { id: '1', name: 'Theme reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions: ['hosts.read', 'hosts.create', 'hosts.update', 'hosts.delete'] }] };
+    if (path.endsWith('/nodes')) value = { items: [{ id: '101', name: 'Theme test host', address: '192.0.2.1', port: 22, username: 'ops', connection: 'ssh', state: 'online', group_id: '', tag_ids: [], tags: [], credential_id: '', jump_host_id: '', description: '', seen_at: Date.now(), version: 1 }], total: 1, page: 1, page_size: 20 };
     if (path === '/api/setup') value = { required: false, has_users: true };
     if (path.endsWith('/preferences')) value = { default_page_size: 20, dictionaries: {} };
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
   });
   await page.addInitScript(() => { if (!localStorage.getItem('ferry.theme')) localStorage.setItem('ferry.theme', JSON.stringify({ palette: 'erp', mode: 'dark' })); });
-  await page.goto(`${url}/workspaces/2/nodes`);
+  await page.goto(`${url}/zh-CN/workspaces/2/nodes`);
   const themeButton = page.getByRole('button', { name: '主题', exact: true });
   await themeButton.waitFor();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'modern');
@@ -30,7 +31,19 @@ try {
     { value: 'eyeCare', label: '护眼模式' }, { value: 'pinkKawaii', label: '粉色可爱' },
     { value: 'neoBrutalism', label: '新粗野主义' }, { value: 'custom', label: '自定义' },
   ];
+  mkdirSync('data/maintenance', { recursive: true });
   const source = readFileSync(new URL('../src/shared/theme/themes.css', import.meta.url), 'utf8');
+  const buttonSource = readFileSync(new URL('../src/shared/ui/button.tsx', import.meta.url), 'utf8');
+  const buttonBase = /cva\(\s*"([^"]+)"/.exec(buttonSource)[1];
+  const buttonVariants = Object.fromEntries([...buttonSource.split('variant: {')[1].split('size: {')[0].matchAll(/(\w+):\s*"([^"]+)"/g)].map(([, key, value]) => [key, value]));
+  // Utilities used by native pickers and editor controls must override theme defaults.
+  await page.evaluate(() => {
+    const fixture = document.createElement('div');
+    fixture.id = 'theme-utilities';
+    fixture.hidden = true;
+    fixture.innerHTML = '<input class="rounded-none border-0 bg-transparent"><input type="color" class="border-0"><h3 class="font-mono">Code</h3><span class="border"></span>';
+    document.body.append(fixture);
+  });
   const choose = async name => { await themeButton.click(); await page.getByRole('menuitem', { name, exact: false }).click(); };
   for (const palette of palettes) {
     await choose(palette.label);
@@ -38,14 +51,72 @@ try {
     for (const mode of ['light', 'dark']) {
       await choose(mode === 'light' ? '浅色' : '深色');
       const selector = `[data-theme="${palette.value}"]${mode === 'dark' ? '.dark' : ''} {`;
-      const block = source.split(selector)[1].split('}')[0];
+      const block = source.split(selector).slice(1).map(part => part.split('}')[0]).find(part => part.includes('--background:'));
       const expected = /--background:\s*([^;]+);/.exec(block)[1];
       await page.waitForFunction(expected => getComputedStyle(document.documentElement).getPropertyValue('--background').trim() === expected, expected);
+      const styles = await page.locator('#theme-utilities').evaluate(fixture => [...fixture.children].map(node => {
+        const css = getComputedStyle(node);
+        return { border: css.borderTopWidth, radius: css.borderRadius, background: css.backgroundColor, font: css.fontFamily };
+      }));
+      assert.equal(styles[0].border, '0px');
+      assert.equal(styles[0].radius, '0px');
+      assert.equal(styles[0].background, 'rgba(0, 0, 0, 0)');
+      assert.equal(styles[1].border, '0px');
+      assert.match(styles[2].font, /Geist Mono Variable/);
+      assert.equal(styles[3].border, palette.value === 'neoBrutalism' ? '3px' : '1px');
+      const radius = await themeButton.evaluate(node => getComputedStyle(node).borderRadius);
+      if (palette.value !== 'custom') assert.equal(radius, { modern: '9999px', business: '10px', eyeCare: '8px', pinkKawaii: '9999px', neoBrutalism: '0px' }[palette.value]);
+      await page.mouse.move(0, 0);
+      await page.evaluate(({ base, variants }) => {
+        const panel = document.createElement('div');
+        panel.id = 'theme-buttons';
+        panel.style.cssText = 'position:fixed;bottom:80px;right:40px;z-index:40;display:flex;gap:12px;padding:24px;border:1px solid var(--border);background:var(--card)';
+        for (const [variant, classes] of Object.entries(variants)) {
+          const button = document.createElement('button');
+          button.type = variant === 'destructive' ? 'submit' : 'button';
+          button.dataset.slot = 'button'; button.dataset.variant = variant;
+          button.className = `${base} ${classes} h-9 px-4 py-2`;
+          button.textContent = variant; panel.append(button);
+        }
+        document.body.append(panel);
+      }, { base: buttonBase, variants: buttonVariants });
+      assert.equal(await page.locator('#theme-buttons button').count(), 6);
+      const destructiveImage = await page.locator('#theme-buttons [data-variant="destructive"]').evaluate(node => getComputedStyle(node).backgroundImage);
+      if (palette.value === 'business' || palette.value === 'pinkKawaii') {
+        const primaryImage = await page.locator('#theme-buttons [data-variant="default"]').evaluate(node => getComputedStyle(node).backgroundImage);
+        assert.match(primaryImage, /gradient/);
+        assert.notEqual(destructiveImage, primaryImage, 'destructive submit must not acquire the primary gradient');
+      }
+      await page.screenshot({ path: `data/maintenance/theme-buttons-${palette.value}-${mode}.png` });
+      await page.locator('#theme-buttons').evaluate(node => node.remove());
+      await page.screenshot({ path: `data/maintenance/theme-${palette.value}-${mode}.png` });
     }
   }
   await themeButton.click();
+  assert.equal(await page.getByRole('menuitem').filter({ has: page.locator('[aria-hidden="true"]') }).count(), 6);
+  await page.screenshot({ path: 'data/maintenance/theme-menu.png' });
   assert.equal(await page.getByRole('menuitem', { name: /ERP/i }).count(), 0);
   await page.keyboard.press('Escape');
+  // Exercise the shared resource form with each theme, not just token values.
+  for (const palette of palettes) {
+    await choose(palette.label);
+    if (palette.value === 'custom') await page.getByRole('button', { name: '关闭', exact: true }).click();
+    for (const mode of ['light', 'dark']) {
+      await choose(mode === 'light' ? '浅色' : '深色');
+      await page.goto(`${url}/zh-CN/workspaces/2/nodes/new`);
+      await page.getByRole('tab', { name: 'SSH', exact: true }).click();
+      await page.locator('form').waitFor();
+      await page.locator('form input').first().fill('Theme test host');
+      await page.screenshot({ path: `data/maintenance/theme-form-${palette.value}-${mode}.png`, fullPage: true });
+    }
+  }
+  await page.goto(`${url}/zh-CN/workspaces/2/nodes`);
+  await themeButton.waitFor();
+  await page.evaluate(async () => {
+    await document.fonts.load('14px "Inter Variable"');
+    await document.fonts.load('14px "Geist Mono Variable"');
+  });
+  assert.equal(await page.evaluate(() => document.fonts.check('14px "Inter Variable"') && document.fonts.check('14px "Geist Mono Variable"')), true);
   await choose('自定义');
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('tab', { name: '浅色', exact: true }).click();
@@ -88,5 +159,5 @@ try {
     await localizedDialog.getByRole('button', { name: catalog.close, exact: true }).click();
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: 6 palettes x light/dark, ERP migration/removal, custom editing/persistence/import/random/reset, mobile dialog, all six translated theme dialogs, no page errors');
+  console.log('PASS: 6 palettes x light/dark, real tables/forms, six button variants, utility precedence, bundled fonts, ERP migration/removal, custom editing/persistence/import/random/reset, mobile dialog, all six translated theme dialogs, no page errors');
 } finally { await browser.close(); }

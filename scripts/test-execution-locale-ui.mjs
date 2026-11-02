@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
+const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ });
+const switchLanguage = async (page, locale) => {
+  await languageTrigger(page).click();
+  await page.locator('[role="menuitemradio"][lang="' + locale + '"]').click();
+};
+
 const catalog = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/execution-domain.json', import.meta.url), 'utf8'));
 const server = process.env.EXECUTION_UI_URL ? null : await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.EXECUTION_UI_URL || server.resolvedUrls.local[0].replace(/\/$/, '');
@@ -35,7 +41,7 @@ try {
   const name = page.getByRole('textbox', { name: catalog['en-US']['editor.jobName'], exact: true });
   await name.fill('Unsaved job name');
   for (const locale of Object.keys(catalog)) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.getByRole('heading', { name: catalog[locale]['editor.jobSettings'], exact: true }).waitFor();
     assert.equal(await page.getByRole('textbox', { name: catalog[locale]['editor.jobName'], exact: true }).inputValue(), 'Unsaved job name');
     assert.equal(await page.getByRole('combobox', { name: catalog[locale]['editor.executor'], exact: true }).inputValue(), '7');
@@ -43,14 +49,14 @@ try {
   }
   for (const width of [1366, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    const selector = page.locator('header select').first();
+    const selector = languageTrigger(page);
     const box = await selector.boundingBox();
     assert(box && box.x >= 0 && box.x + box.width <= width + 1, `${width}px pipeline locale selector outside viewport`);
     const overlaps = await selector.evaluate(element => {
       const own = element.getBoundingClientRect();
       return [...element.closest('header').querySelectorAll('button, a')].some(other => {
         const rect = other.getBoundingClientRect();
-        return rect.width && rect.height && Math.min(own.right, rect.right) > Math.max(own.left, rect.left) && Math.min(own.bottom, rect.bottom) > Math.max(own.top, rect.top);
+        return other !== element && rect.width && rect.height && Math.min(own.right, rect.right) > Math.max(own.left, rect.left) && Math.min(own.bottom, rect.bottom) > Math.max(own.top, rect.top);
       });
     });
     assert.equal(overlaps, false, `${width}px pipeline locale selector overlaps an action`);
@@ -60,7 +66,7 @@ try {
   await page.getByText(rawLog, { exact: false }).waitFor();
   const runLoads = requests.filter(request => request.path.includes('/pipeline-runs/51')).length;
   for (const locale of Object.keys(catalog)) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.getByText(catalog[locale]['run.logsLoaded'], { exact: true }).waitFor();
     assert((await page.locator('body').innerText()).includes(rawLog));
   }
@@ -69,7 +75,7 @@ try {
   await page.locator('#review-note').fill('Unsaved review note');
   const deploymentLoads = requests.filter(request => request.path === '/workspaces/2/deployments/61').length;
   for (const locale of Object.keys(catalog)) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.getByText(catalog[locale]['deployment.reviewHelp'], { exact: true }).waitFor();
     assert.equal(await page.locator('#review-note').inputValue(), 'Unsaved review note');
     assert((await page.locator('body').innerText()).includes(rawLog));

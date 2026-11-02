@@ -116,6 +116,11 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
   return {
     resource: "code-insights",
     width: "full",
+    presentation: "sections",
+    incompleteMessage: "请先加入至少一个仓库，并完成仓库所需的分析流水线配置。",
+    incompleteMessageKey: "insight-domain:请先加入至少一个仓库，并完成仓库所需的分析流水线配置。",
+    description: "先选择需要分析的仓库和采集方式。创建后，可在作者映射页签合并提交身份。",
+    descriptionKey: "insight-domain:先选择需要分析的仓库和采集方式。创建后，可在作者映射页签合并提交身份。",
     heading: (row) => String(row.name ?? insightText("代码洞察")),
     blank: {
       name: "",
@@ -135,6 +140,8 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
       {
         title: "基本信息",
         titleKey: "insight-domain:基本信息",
+        description: "为这组仓库的分析命名，方便与其他洞察区分。",
+        descriptionKey: "insight-domain:为这组仓库的分析命名，方便与其他洞察区分。",
         fields: [
           {
             key: "name",
@@ -142,6 +149,7 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
             labelKey: "insight-domain:洞察名称",
             type: "text",
             required: true,
+            span: 2,
           },
           {
             key: "description",
@@ -170,6 +178,8 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
       {
         title: "采集策略",
         titleKey: "insight-domain:采集策略",
+        description: "默认每 4 小时增量更新，按需选择事件更新或完整历史。",
+        descriptionKey: "insight-domain:默认每 4 小时增量更新，按需选择事件更新或完整历史。",
         fields: [
           {
             key: "update_mode",
@@ -246,20 +256,6 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
             when: (row) => row.update_mode === "event",
             help: "事件更新的兜底核对，默认每天一次。",
             helpKey: "insight-domain:事件更新的兜底核对，默认每天一次。",
-          },
-        ],
-      },
-      {
-        title: "作者映射",
-        titleKey: "insight-domain:作者映射",
-        fullWidth: true,
-        fields: [
-          {
-            key: "aliases",
-            label: "作者昵称映射",
-            labelKey: "insight-domain:作者昵称映射",
-            type: "author-aliases",
-            span: 2,
           },
         ],
       },

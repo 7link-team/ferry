@@ -1,5 +1,7 @@
 {
   "zh-CN": {
+    "repository.loadingConnections": "正在加载仓库连接…",
+    "repository.noVisibleRepositories": "此连接没有可访问的仓库。请检查授权范围，或更换连接后重试。",
     "repository.001": "普通 Git",
     "repository.002": "仓库连接",
     "repository.003": "沿用原有 YAML / 旧版仓库配置",
@@ -428,6 +430,8 @@
     "manifest-extra.004": "{{value1}}端口"
   },
   "en-US": {
+    "repository.loadingConnections": "Loading repository connections…",
+    "repository.noVisibleRepositories": "No accessible repositories for this connection. Check its authorization scope or choose another connection.",
     "repository.001": "Generic Git",
     "repository.002": "Repository connection",
     "repository.003": "Use existing YAML / legacy repository settings",
@@ -856,6 +860,8 @@
     "manifest-extra.004": "{{value1}} port"
   },
   "zh-TW": {
+    "repository.loadingConnections": "正在載入倉庫連線…",
+    "repository.noVisibleRepositories": "此連線沒有可存取的倉庫。請檢查授權範圍，或更換連線後重試。",
     "repository.001": "一般 Git",
     "repository.002": "儲存庫連線",
     "repository.003": "沿用原有 YAML / 舊版儲存庫設定",
@@ -1284,6 +1290,8 @@
     "manifest-extra.004": "{{value1}}連接埠"
   },
   "ja-JP": {
+    "repository.loadingConnections": "リポジトリ接続を読み込み中…",
+    "repository.noVisibleRepositories": "この接続でアクセスできるリポジトリはありません。権限範囲を確認するか、別の接続を選択してください。",
     "repository.001": "汎用 Git",
     "repository.002": "リポジトリ接続",
     "repository.003": "既存の YAML／旧リポジトリ設定を使用",
@@ -1712,6 +1720,8 @@
     "manifest-extra.004": "{{value1}}のポート"
   },
   "ko-KR": {
+    "repository.loadingConnections": "저장소 연결을 불러오는 중…",
+    "repository.noVisibleRepositories": "이 연결로 접근할 수 있는 저장소가 없습니다. 권한 범위를 확인하거나 다른 연결을 선택하세요.",
     "repository.001": "일반 Git",
     "repository.002": "저장소 연결",
     "repository.003": "기존 YAML / 이전 저장소 설정 사용",
@@ -2140,6 +2150,8 @@
     "manifest-extra.004": "{{value1}} 포트"
   },
   "ms-MY": {
+    "repository.loadingConnections": "Memuatkan sambungan repositori…",
+    "repository.noVisibleRepositories": "Tiada repositori yang boleh diakses untuk sambungan ini. Semak skop kebenaran atau pilih sambungan lain.",
     "repository.001": "Git biasa",
     "repository.002": "Sambungan repositori",
     "repository.003": "Guna YAML / tetapan repositori lama",

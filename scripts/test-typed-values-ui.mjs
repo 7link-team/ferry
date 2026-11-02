@@ -2,6 +2,12 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ });
+const switchLanguage = async (page, locale) => {
+  await languageTrigger(page).click();
+  await page.locator('[role="menuitemradio"][lang="' + locale + '"]').click();
+};
+
 
 const origin = process.env.TYPED_VALUES_UI_URL || 'http://127.0.0.1:5193';
 const installedChrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
@@ -82,7 +88,7 @@ try {
       await page.locator('[data-slate-editor]').evaluate(element => { window.__richEditorNode = element; });
       const count = requests.length;
       for (const [locale, bold] of [['en-US', 'Bold'], ['zh-TW', '粗體'], ['ja-JP', '太字'], ['ko-KR', '굵게'], ['ms-MY', 'Tebal'], ['zh-CN', '粗体']]) {
-        await page.locator('header select').first().selectOption(locale);
+        await switchLanguage(page, locale);
         await page.waitForFunction(expected => document.querySelector('.w-e-toolbar [data-menu-key="bold"]')?.getAttribute('data-tooltip')?.split('\n')[0] === expected, bold);
         assert.equal(await page.locator('[data-slate-editor]').innerText(), 'Rich content');
         assert(await page.locator('[data-slate-editor]').evaluate(element => element === window.__richEditorNode));
@@ -143,7 +149,7 @@ try {
   const typed = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/typed-domain.json', import.meta.url), 'utf8'));
   const locales = ['en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY'];
   for (const [index, locale] of locales.entries()) {
-    await page.locator('select').filter({ has: page.locator('option[value="en-US"]') }).selectOption(locale);
+    await switchLanguage(page, locale);
     await page.waitForURL(url => url.pathname.startsWith(`/${locale}/`));
     const label = typed.optionLabel[index].replace('{{index}}', '1');
     assert.equal(await page.getByLabel(label, { exact: true }).inputValue(), 'User-owned label');

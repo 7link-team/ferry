@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
+const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ });
+const switchLanguage = async (page, locale) => {
+  await languageTrigger(page).click();
+  await page.locator('[role="menuitemradio"][lang="' + locale + '"]').click();
+};
+
 
 const server = process.env.YAML_EDITOR_UI_URL ? null : await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.YAML_EDITOR_UI_URL || server.resolvedUrls.local[0].replace(/\/$/, '');
@@ -54,7 +60,7 @@ try {
   await page.evaluate(() => navigator.clipboard.writeText('# unsaved locale draft\n'));
   await page.keyboard.press('ControlOrMeta+V');
   for (const locale of ['zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY', 'en-US']) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.waitForFunction(() => document.querySelector('.monaco-editor .view-lines')?.textContent.replaceAll('\u00a0', ' ').includes('unsaved locale draft'));
   }
   await page.locator('.monaco-editor .view-lines').click();

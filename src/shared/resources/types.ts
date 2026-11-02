@@ -186,13 +186,20 @@ export interface FormField<T> {
 
 export interface FormConfig<T> {
   width?: "full";
+  /** Numbered, framed sections for forms with distinct setup responsibilities. */
+  presentation?: "sections";
+  description?: string;
+  descriptionKey?: string;
+  /** Explanation beside a disabled submit button when a custom field is incomplete. */
+  incompleteMessage?: string;
+  incompleteMessageKey?: string;
   permissionResource?: string;
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
   /** `group` places a section under a side menu entry of that name; sections of
    *  one group that set `tab` are shown as tabs. One save covers every group. */
-  sections: { title?: string; titleKey?: string; fullWidth?: boolean; group?: string; groupKey?: string; tab?: string; tabKey?: string; fields: FormField<T>[] }[];
+  sections: { title?: string; titleKey?: string; description?: string; descriptionKey?: string; fullWidth?: boolean; group?: string; groupKey?: string; tab?: string; tabKey?: string; fields: FormField<T>[] }[];
   /** Heading for the detail and edit pages. */
   heading: (row: T) => string;
   /** Values a create form starts from. */

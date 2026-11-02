@@ -5,6 +5,12 @@ const common = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/commo
 const resources = JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/resource-domain.json', import.meta.url), 'utf8'));
 import { preview } from 'vite';
 import { chromium } from 'playwright';
+const languageTrigger = page => page.getByRole('button', { name: /^(Language|语言|語言|言語|언어|Bahasa)$/ });
+const switchLanguage = async (page, locale) => {
+  await languageTrigger(page).click();
+  await page.locator('[role="menuitemradio"][lang="' + locale + '"]').click();
+};
+
 
 // Run npm run build first; verify the same output that ships.
 const server = await preview({ preview: { host: '127.0.0.1', port: 0 } });
@@ -39,14 +45,16 @@ try {
   await page.waitForURL('**/ja-JP/workspaces/2/nodes/42/edit?tab=details#anchor', { waitUntil: 'commit' });
   const name = page.locator('input[name="name"]');
   await name.fill('Unsaved local draft');
-  await page.locator('header select').first().selectOption('ko-KR');
+  await switchLanguage(page, 'ko-KR');
   await page.waitForURL('**/ko-KR/workspaces/2/nodes/42/edit?tab=details#anchor', { waitUntil: 'commit' });
   assert.equal(await name.inputValue(), 'Unsaved local draft');
   assert.equal(await page.locator('html').getAttribute('lang'), 'ko-KR');
-  assert.equal(await page.locator('header select').first().locator('option').count(), 6);
+  await languageTrigger(page).click();
+  assert.equal(await page.getByRole('menuitemradio').count(), 6);
+  await page.keyboard.press('Escape');
   assert(requests.some(request => request.path === '/me' && request.language === 'ja-JP'));
   for (const locale of Object.keys(resources)) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.getByText(resources[locale]['host.port'], { exact: true }).waitFor();
     await page.getByText(resources[locale]['host.jumpHelp'], { exact: true }).waitFor();
     assert.equal(await name.inputValue(), 'Unsaved local draft');
@@ -58,7 +66,7 @@ try {
   // Actual translated profile labels, not just language options or URL changes.
   await page.locator('input[name="name"]').fill('Unsaved profile draft');
   for (const locale of ['en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY']) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.waitForURL(`**/${locale}/account`, { waitUntil: 'commit' });
     await page.getByRole('heading', { name: common[locale]['account.title'], exact: true }).waitFor();
     await page.getByText(common[locale]['account.verifyHelp'], { exact: true }).waitFor();
@@ -71,7 +79,7 @@ try {
   await policy.click();
   const policyLoads = requests.filter(request => request.path === '/platform/settings/1').length;
   for (const locale of Object.keys(resources)) {
-    await page.locator('header select').first().selectOption(locale);
+    await switchLanguage(page, locale);
     await page.getByText(resources[locale]['runner.defaultAutoHelp'], { exact: true }).waitFor();
     assert.equal(await policy.getAttribute('aria-checked'), 'true');
   }
@@ -82,7 +90,7 @@ try {
     await page.setViewportSize({ width, height: 768 });
     for (const path of ['/en-US/account', '/zh-CN/platform/users', '/ms-MY/workspaces/2/nodes', '/ja-JP/workspaces/2/nodes/42/workspace?tool=files']) {
       await page.goto(origin + path, { waitUntil: 'commit' });
-      const select = page.locator('header select').first();
+      const select = languageTrigger(page);
       await select.waitFor({ state: 'visible' });
       const box = await select.boundingBox();
       assert(box && box.x >= 0 && box.x + box.width <= width + 1, `${width}px selector outside viewport: ${path}`);
@@ -90,7 +98,7 @@ try {
         const own = element.getBoundingClientRect();
         return [...element.closest('header').querySelectorAll('button, a')].some(other => {
           const rect = other.getBoundingClientRect();
-          return rect.width && rect.height && Math.min(own.right, rect.right) > Math.max(own.left, rect.left) && Math.min(own.bottom, rect.bottom) > Math.max(own.top, rect.top);
+          return other !== element && rect.width && rect.height && Math.min(own.right, rect.right) > Math.max(own.left, rect.left) && Math.min(own.bottom, rect.bottom) > Math.max(own.top, rect.top);
         });
       });
       assert.equal(overlap, false, `${width}px selector overlaps header action: ${path}`);

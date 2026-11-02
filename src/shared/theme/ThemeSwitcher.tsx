@@ -8,6 +8,13 @@ import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger }
 import { CustomThemePanel } from "./CustomThemePanel";
 import { PALETTES,useTheme,type Mode } from "./theme";
 
+// Same palette previews as the reference theme picker.
+const previews = {
+  modern: ["#fafafa", "#171717"], business: ["#fafaf9", "#6366f1"],
+  eyeCare: ["#f5f0e6", "#5a7c5a"], pinkKawaii: ["#fff0f6", "#e8388a"],
+  neoBrutalism: ["#fef08a", "#ff006e"], custom: ["#fafafa", "#6366f1"],
+} as const;
+
 export function ThemeSwitcher() {
   const { t } = useTranslation("theme", { keyPrefix: "" });
   const label = (key: string) => t(key, { keySeparator: false });
@@ -16,8 +23,11 @@ export function ThemeSwitcher() {
   return <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={label("label")}><Palette />{label(theme.palette)}</Button></DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {PALETTES.map(palette => <DropdownMenuItem key={palette.value} onClick={() => { theme.set({ palette: palette.value }); if (palette.value === "custom") setEditing(true); }}>{label(palette.value)}{palette.value === theme.palette && " ✓"}</DropdownMenuItem>)}
+      <DropdownMenuContent align="end" className="min-w-56">
+        {PALETTES.map(palette => <DropdownMenuItem key={palette.value} onClick={() => { theme.set({ palette: palette.value }); if (palette.value === "custom") setEditing(true); }}>
+          <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center border" style={{ background: previews[palette.value][0], borderRadius: palette.value === "neoBrutalism" ? 0 : 5 }}><span className="size-2.5" style={{ background: previews[palette.value][1], borderRadius: palette.value === "neoBrutalism" ? 0 : 3 }} /></span>
+          <span className="flex-1">{label(palette.value)}</span>{palette.value === theme.palette && " ✓"}
+        </DropdownMenuItem>)}
         <div className="my-1 border-t" />
         {(["light", "dark", "system"] as Mode[]).map(mode => <DropdownMenuItem key={mode} onClick={() => theme.set({ mode })}>{label(mode === "system" ? "followSystem" : `mode.${mode}`)}{mode === theme.mode && " ✓"}</DropdownMenuItem>)}
       </DropdownMenuContent>

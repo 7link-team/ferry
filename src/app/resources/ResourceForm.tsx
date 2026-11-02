@@ -73,6 +73,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   permissions,
   onSaved,
   createInPlace = false,
+  editInPlace = false,
   onCancel,
   pipelineWorkspace = false,
   showViewNavigation = true,
@@ -83,6 +84,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   permissions: Set<string>;
   onSaved?: () => void;
   createInPlace?: boolean;
+  editInPlace?: boolean;
   onCancel?: () => void;
   pipelineWorkspace?: boolean;
   showViewNavigation?: boolean;
@@ -90,7 +92,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
 }) {
   useCommonTranslation();
   const pageRoute = useRoute();
-  const route = createInPlace ? { ...pageRoute, mode: "new" as const } : pageRoute;
+  const route = createInPlace ? { ...pageRoute, mode: "new" as const } : editInPlace ? { ...pageRoute, mode: "edit" as const } : pageRoute;
   const creating = route.mode === "new";
   const copyId = creating && !createInPlace ? new URLSearchParams(location.search).get("copy") : null;
   const blankDraft = creating && !createInPlace && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
@@ -199,6 +201,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
       }
       onSaved?.();
       if (createInPlace) return;
+      if (editInPlace) {
+        setDraft(await getResource<T>(workspace, config.resource, route.id!, config.endpoint));
+        toast.success(commonText("common.save"));
+        return;
+      }
       if (runAfterSave && savedId) {
         const action = config.viewActions?.find(candidate => candidate.permission === "pipelines.run");
         if (action && permissions.has("pipelines.run")) {
@@ -309,8 +316,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
+    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6", !readOnly && config.presentation === "sections" && "mx-auto max-w-5xl")} onSubmit={submit}>
       {hostConnectionTabs}
+      {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
       {error && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {error}
@@ -336,11 +344,13 @@ export function ResourceForm<T extends Record<string, unknown>>({
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
-          <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : "space-y-4"}>
+          <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : config.presentation === "sections" ? "min-w-0 space-y-5 rounded-xl border bg-card p-4 text-card-foreground sm:p-6" : "space-y-4"}>
             {(section.title || readOnly) && (
-              <div className={readOnly ? "detail-section-title" : "mb-2 flex items-center gap-2 text-sm font-medium text-muted-foreground"}><h2 className="min-w-0 flex-1">
+              <div className={readOnly ? "detail-section-title" : "flex items-start gap-3 text-sm font-medium"}>
+                {!readOnly && config.presentation === "sections" && <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-semibold tabular-nums text-secondary-foreground">{String(index + 1).padStart(2, "0")}</span>}
+                <div className="min-w-0 flex-1"><h2 className={config.presentation === "sections" && !readOnly ? "leading-7" : undefined}>
                 {configText(section.title, section.titleKey) || (index === 0 ? commonText("common.basic") : commonText("common.other"))}
-              </h2>{readOnly && section.title && visibleViewActions.filter(action => action.section === section.title).map(renderViewAction)}</div>
+              </h2>{!readOnly && section.description && <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">{configText(section.description, section.descriptionKey)}</p>}</div>{readOnly && section.title && visibleViewActions.filter(action => action.section === section.title).map(renderViewAction)}</div>
             )}
             <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: configText(field.label, field.labelKey), type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
           </section>
@@ -366,7 +376,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </div>;
       })()}
 
-      {!readOnly && <div className="flex gap-2">
+      {!readOnly && <div className={cn("flex flex-wrap gap-2", config.presentation === "sections" && "sticky bottom-0 z-10 items-center border-t bg-background/95 py-4 backdrop-blur-sm")}>
             <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
               {creating ? config.resource === "hosts" ? commonText("form.addHost") : commonText("common.create") : commonText("common.save")}
@@ -374,6 +384,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
             {onCancel ? <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>{commonText("common.cancel")}</Button> : <Button type="button" variant="outline" asChild>
               <a href={backToList}>{commonText("common.cancel")}</a>
             </Button>}
+            {optionsBlocked && config.incompleteMessage && <p role="status" className="w-full text-sm text-muted-foreground sm:ml-3 sm:w-auto sm:flex-1">{configText(config.incompleteMessage, config.incompleteMessageKey)}</p>}
       </div>}
     </AutoForm>
   );
