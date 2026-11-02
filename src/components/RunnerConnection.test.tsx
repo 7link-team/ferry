@@ -533,7 +533,7 @@ it("shows automatic upgrade policy, drain and persisted retry status", async () 
   value.update = { state: "retrying", version: "0.2.0", message: "下载失败", auto: { attempts: 2, next_retry_at: 1800000000000 } };
   await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(host.textContent).toContain("等待重试");
-  expect(host.textContent).toContain(new Date(1800000000000).toLocaleString());
+  expect(host.textContent).toContain(new Date(1800000000000).toLocaleString("zh-CN"));
   value.update.state = "rolled_back"; value.update.auto.next_retry_at = 0;
   await act(async () => vi.advanceTimersByTimeAsync(5000));
   expect(host.textContent).toContain("已回退");

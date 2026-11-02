@@ -89,7 +89,7 @@ it("shows a repository event's commits, links and times, and omits an unknown op
   expect(formConfigs("ops", permissions)["repository-events"]!.heading(stored)).toBe("代码推送 · team/app");
   expect(host.textContent).not.toContain("操作人");
   expect(host.textContent).not.toContain("未知");
-  expect(host.textContent).toContain(new Date(Number(stored.created_at)).toLocaleString());
+  expect(host.textContent).toContain(new Date(Number(stored.created_at)).toLocaleString("zh-CN"));
   const list = host.querySelector('ol[aria-label="提交列表"]')!;
   expect(list.querySelectorAll("li")).toHaveLength(2);
   expect(list.textContent).toContain("a1b2c3d4");
