@@ -47,13 +47,13 @@ const forms: Record<string, FormConfig<Row>> = {
     { key: "name", label: "名称", type: "text", required: true },
     { key: "slug", label: "标识", type: "text", required: true, immutable: true, help: "2–40 位小写字母、数字、中划线；创建后不可修改。" },
   ] }] },
-  settings: { resource: "settings", endpoint: "/platform/settings", heading: () => "平台设置", blank: {}, sections: [{ title: "账号注册", fields: [
+  settings: { resource: "settings", endpoint: "/platform/settings", heading: () => "平台设置", blank: {}, sections: [{ title: "账号注册", group: "账号注册", fields: [
     { key: "registration_enabled", label: "允许注册新账号", type: "switch", help: "关闭后已有账号仍可登录，公开注册入口将关闭。" },
-  ] }, { title: "仓库网页授权 · 公共配置", fields: [
+  ] }, { title: "公共配置", group: "仓库关联", fields: [
     { key: "oauth_public_url", label: "平台公开访问地址", type: "text", placeholder: "https://ops.example.com", span: 2, help: "填写用户浏览器可访问的平台地址。保存后立即生效，无需重启；各工作空间仍分别授权自己的账号。" },
     { key: "oauth_callback_url", label: "当前回调地址", type: "text", immutable: true, span: 2, help: "将此地址登记到代码平台的 OAuth 应用。修改公开访问地址并保存后，这里会显示新的回调地址。" },
     { key: "oauth_source", label: "配置来源", type: "text", immutable: true, span: 2 },
-  ] }, ...([ ["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"] ] as const).map(([key, label]) => ({ title: `${label} OAuth 应用`, fields: [
+  ] }, ...([ ["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"] ] as const).map(([key, label]) => ({ title: `${label} OAuth 应用`, group: "仓库关联", tab: label, fields: [
     { key: `oauth_${key}_enabled`, label: `启用 ${label} 网页授权`, type: "switch" as const, span: 2 as const, help: "关闭后不再使用该平台的网页授权凭据；已保存的应用配置保留。Codeup 使用个人访问令牌，无需配置 OAuth 应用。" },
     { key: `oauth_${key}_client_id`, label: `${label} 应用 ID`, type: "text" as const },
     { key: `oauth_${key}_client_secret`, label: `${label} 应用密钥`, type: "secret" as const, stored: `oauth_${key}_has_client_secret`, replaceOnEdit: true, placeholder: "留空保留已有应用密钥", help: "加密保存，不回显；留空保留已有密钥。修改应用 ID 或接入点后，原账号需重新授权。" },

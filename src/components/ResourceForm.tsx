@@ -18,6 +18,7 @@ import { ActionsEditor } from "./ActionsEditor";
 import { MarketplaceRepository, PipelineRepository } from "./PipelineRepository";
 import { RepositorySource } from "./RepositorySource";
 import { RunnerConnection } from "./RunnerConnection";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { ManifestEditor } from "./ManifestEditor";
 import { CronEditor } from "./CronEditor";
@@ -38,6 +39,9 @@ import { errorText } from "../api";
 import { createResource, getResource, patchResource } from "../resource";
 import { href, navigate, useRoute } from "../router";
 import type { FormConfig, FormField, Option, Options, RowAction } from "./dsl";
+
+/** The side-menu group last opened in each grouped form during this session. */
+const openGroups = new Map<string, string>();
 
 function useOptions(source: Options | undefined) {
   const [revision, setRevision] = useState(0);
@@ -96,6 +100,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const [pendingDelete, setPendingDelete] = useState<RowAction<T>>();
   const [pendingActionRow, setPendingActionRow] = useState<T>();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Remembered per form, so a save that remounts the form keeps the open group.
+  const [group, setGroupState] = useState(() => openGroups.get(config.resource) ?? "");
+  const setGroup = (name: string) => {
+    openGroups.set(config.resource, name);
+    setGroupState(name);
+  };
   const [templateDialog, setTemplateDialog] = useState<"import" | "export" | null>(() => new URLSearchParams(location.search).has("template") && pipelineWorkspace ? "import" : null);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
@@ -316,7 +326,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
       {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
       {readOnly && visibleViewActions.some(action => !action.section) && <div className="flex flex-wrap gap-2">{visibleViewActions.filter(action => !action.section).map(renderViewAction)}</div>}
-      {config.sections.map((section, index) => {
+      {(() => {
+      const renderSection = (section: FormConfig<T>["sections"][number], index: number) => {
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
@@ -329,7 +340,26 @@ export function ResourceForm<T extends Record<string, unknown>>({
             <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: field.label, type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
           </section>
         );
-      })}
+      };
+      const groups = [...new Set(config.sections.map(section => section.group).filter((group): group is string => !!group))];
+      if (!groups.length) return config.sections.map(renderSection);
+      const active = groups.includes(group) ? group : groups[0]!;
+      const sections = config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === active);
+      const tabs = sections.filter(({ section }) => section.tab);
+      return <div className="flex flex-col gap-6 md:flex-row">
+        <nav aria-label="配置分类" className="flex shrink-0 gap-1 md:w-40 md:flex-col">
+          {groups.map(name => <button key={name} type="button" aria-current={name === active ? "page" : undefined} onClick={() => setGroup(name)}
+            className={cn("rounded px-3 py-2 text-left text-sm", name === active ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50")}>{name}</button>)}
+        </nav>
+        <div className="min-w-0 flex-1 space-y-6">
+          {sections.filter(({ section }) => !section.tab).map(({ section, index }) => renderSection(section, index))}
+          {tabs.length > 0 && <Tabs key={active} defaultValue={tabs[0]!.section.tab}>
+            <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{section.tab}</TabsTrigger>)}</TabsList>
+            {tabs.map(({ section, index }) => <TabsContent key={section.tab} value={section.tab!} className="pt-2">{renderSection(section, index)}</TabsContent>)}
+          </Tabs>}
+        </div>
+      </div>;
+      })()}
 
       {!readOnly && <div className="flex gap-2">
             <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>

@@ -113,6 +113,10 @@ try {
   const root=`/workspaces/${workspace_tenant}`;
   const platform=await context.newPage();platform.on('pageerror',e=>errors.push(e.message));
   await platform.goto(`${origin}/_platform/settings/1/edit`);
+  // Settings are grouped: repository sign-in sits under its own menu entry, one tab per platform.
+  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'仓库关联',exact:true}).click();
+  for (const tab of ['GitHub','GitLab','Gitee','Gitea']) assert.equal(await platform.getByRole('tab',{name:tab,exact:true}).count(),1,`${tab} tab`);
+  assert.equal(await platform.getByLabel('允许注册新账号',{exact:true}).count(),0,'other groups stay hidden');
   await platform.getByLabel('平台公开访问地址',{exact:true}).fill(origin);
   await platform.getByLabel('启用 GitHub 网页授权',{exact:true}).check();
   await platform.getByLabel('GitHub 应用 ID',{exact:true}).fill('fixture-client-id');

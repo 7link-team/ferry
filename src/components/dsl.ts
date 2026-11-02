@@ -157,7 +157,9 @@ export interface FormConfig<T> {
   resource: string;
   /** Explicit API path for global resources (without /api). */
   endpoint?: string;
-  sections: { title?: string; fullWidth?: boolean; fields: FormField<T>[] }[];
+  /** `group` places a section under a side menu entry of that name; sections of
+   *  one group that set `tab` are shown as tabs. One save covers every group. */
+  sections: { title?: string; fullWidth?: boolean; group?: string; tab?: string; fields: FormField<T>[] }[];
   /** Heading for the detail and edit pages. */
   heading: (row: T) => string;
   /** Values a create form starts from. */
