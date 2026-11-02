@@ -95,12 +95,27 @@ func TestRequestGithubContext(t *testing.T) {
 }
 
 func TestAlreadyCancelledCleanupJob(t *testing.T) {
+	// GitHub: a pending job's `if` sees the run cancelled; a job it admits then
+	// runs its own steps normally, and other jobs are skipped.
 	script := platformScript("echo cleanup", "Write-Output cleanup")
-	wf := "name: cancellation\non: workflow_dispatch\njobs:\n  build:\n    if: cancelled() && !success() && always()\n    runs-on: self-hosted\n    steps:\n      - id: ordinary\n        run: exit 99\n      - id: cleanup\n        if: cancelled() && !success() && always()\n        run: " + script + "\n"
-	var logs bytes.Buffer
-	value, err := execute(context.Background(), Request{Workflow: wf, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), RunCancelled: true, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
-	if err != nil || value.Steps["ordinary"] != "skipped" || value.Steps["cleanup"] != "success" {
-		t.Fatalf("cleanup=%+v err=%v logs=%s", value, err, logs.String())
+	run := func(condition string) (JobResult, error, string) {
+		// The dependency was cancelled with the run, as in a real cleanup job.
+		wf := "name: cancellation\non: workflow_dispatch\njobs:\n  hold:\n    runs-on: self-hosted\n    steps:\n      - run: exit 1\n  build:\n    needs: hold\n" + condition + "    runs-on: self-hosted\n    steps:\n      - id: ordinary\n        run: " + script + "\n      - id: only-if-cancelled\n        if: cancelled()\n        run: exit 99\n"
+		var logs bytes.Buffer
+		value, err := execute(context.Background(), Request{Workflow: wf, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), RunCancelled: true, Needs: map[string]JobResult{"hold": {State: "cancelled"}}, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
+		return value, err, logs.String()
+	}
+	for _, condition := range []string{"    if: always()\n", "    if: cancelled() && !success()\n"} {
+		value, err, logs := run(condition)
+		if err != nil || value.State != "success" || value.Steps["ordinary"] != "success" || value.Steps["only-if-cancelled"] != "skipped" {
+			t.Fatalf("%q cleanup=%+v err=%v logs=%s", condition, value, err, logs)
+		}
+	}
+	for _, condition := range []string{"", "    if: ${{ !cancelled() }}\n"} {
+		value, err, logs := run(condition)
+		if err != nil || value.State != "skipped" || value.Steps["ordinary"] != "" {
+			t.Fatalf("%q must be skipped: %+v err=%v logs=%s", condition, value, err, logs)
+		}
 	}
 }
 
@@ -149,12 +164,17 @@ async function request(url, method='GET', body, headers={}) {
 }
 
 func TestCleanupContextBound(t *testing.T) {
-	workflow := "on: workflow_dispatch\njobs:\n  build:\n    if: always()\n    runs-on: self-hosted\n    steps:\n      - id: hung\n        if: always()\n        run: " + platformScript("sleep 70", "Start-Sleep -Seconds 70") + "\n"
+	sleep := platformScript("sleep 70", "Start-Sleep -Seconds 70")
+	workflow := "on: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: work\n        run: " + sleep + "\n      - id: hung\n        if: always()\n        run: " + sleep + "\n"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const cancelAfter = 3 * time.Second
+	time.AfterFunc(cancelAfter, cancel)
 	start := time.Now()
 	var logs bytes.Buffer
-	value, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), RunCancelled: true, TimeoutSeconds: 60, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
+	value, err := execute(ctx, Request{Workflow: workflow, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), TimeoutSeconds: 120, Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
 	elapsed := time.Since(start)
-	if err == nil || value.State != "cancelled" || elapsed < cancellationGrace-time.Second || elapsed > cancellationGrace+4*time.Second {
+	if err == nil || value.State != "cancelled" || elapsed < cancelAfter+cancellationGrace-time.Second || elapsed > cancelAfter+cancellationGrace+6*time.Second {
 		t.Fatalf("hung cleanup=%+v err=%v elapsed=%s bound=%s logs=%s", value, err, elapsed, cancellationGrace, logs.String())
 	}
 }

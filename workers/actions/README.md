@@ -38,8 +38,12 @@ forcibly terminating the worker.
 `sha`, `repository` (`owner/repository`) and `server_url`, alongside the existing
 `event_name`, `event_path`, `inputs`, `vars`, `secrets` and resolved `needs`.
 These populate the GitHub context; the event JSON remains the trigger payload.
-`run_cancelled: true` enables cleanup jobs before their first step, with
-`cancelled() == true`, `success() == false` and `always() == true`.
+`run_cancelled: true` means the run was cancelled before this job started. As
+on GitHub, only the job-level `if` sees it (`cancelled() == true`,
+`success() == false`, `always() == true`): a job it rejects (including the
+default `success()`) reports `skipped`; a job it admits runs its steps
+normally. `mode: "plan"` results also carry `max_parallel` (0 = unbounded) and
+`fail_fast`, so a caller spreading instances applies the same strategy.
 
 `mode: "plan"` evaluates the selected job's matrix using the supplied dependency
 outputs, inputs and variables. It returns `instances: [{name, matrix}, ...]` in

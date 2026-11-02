@@ -21,6 +21,7 @@ import (
 
 	"github.com/nektos/act/pkg/common"
 	"github.com/nektos/act/pkg/container"
+	"github.com/nektos/act/pkg/exprparser"
 	"github.com/nektos/act/pkg/model"
 	"github.com/nektos/act/pkg/runner"
 	"github.com/sirupsen/logrus"
@@ -257,7 +258,24 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 	rc.Matrix = request.Matrix
 	rc.StrategyJobTotal = total
 	rc.StrategyJobIndex = index
-	rc.Cancelled.Store(request.RunCancelled)
+	if request.RunCancelled {
+		// GitHub evaluates a pending job's `if` with the run cancelled; a job it
+		// admits (always(), cancelled()) then runs its steps normally.
+		rc.Cancelled.Store(true)
+		rc.ExprEval = rc.NewExpressionEvaluator(ctx)
+		admitted, e := runner.EvalBool(ctx, rc.ExprEval, job.If.Value, exprparser.DefaultStatusCheckSuccess)
+		if e != nil {
+			return result, fmt.Errorf("job if: %w", e)
+		}
+		if !admitted {
+			result.State = "skipped"
+			return result, nil
+		}
+		// act re-evaluates the condition; bare "true" would become
+		// success() && true, which a cancelled dependency fails.
+		job.If.Value = "always()"
+		rc.Cancelled.Store(false)
+	}
 	rc.ExprEval = rc.NewExpressionEvaluator(ctx)
 	result.ContinueOnError, err = jobContinueOnError(ctx, request.Workflow, request.Job, rc)
 	if err != nil {
@@ -273,7 +291,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 	}
 	jobCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
-	execCtx, finish := cleanupContext(jobCtx, request.RunCancelled)
+	execCtx, finish := cleanupContext(jobCtx, false)
 	defer finish()
 	execCtx = common.WithJobErrorContainer(runner.WithJobLogger(execCtx, request.Job, request.Job, config, &rc.Masks, request.Matrix))
 	rc.Name = rc.ExprEval.Interpolate(execCtx, rc.Run.String())
