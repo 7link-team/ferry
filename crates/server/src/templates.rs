@@ -199,6 +199,12 @@ fn expand(
             let mut offset = 0;
             while let Some(relative) = text[offset..].find("{{") {
                 let start = offset + relative;
+                if kind == Kind::Pipeline && start > 0 && text.as_bytes()[start - 1] == b'$' {
+                    let end = crate::actions::expression_end(text, start + 2)?;
+                    output.push_str(&text[offset..end + 2]);
+                    offset = end + 2;
+                    continue;
+                }
                 let end = text[start + 2..]
                     .find("}}")
                     .map(|n| start + 2 + n)
@@ -501,6 +507,44 @@ mod tests {
     fn application() -> Value {
         json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"web"},"services":[{"name":"web","image":"nginx:{{ .Values.image.tag }}","ports":[{"container":"{{ .Values.port }}"}]}]})
     }
+    #[test]
+    fn actions_expressions_survive_template_validation_and_rendering() {
+        let workflow = r#"concurrency: ${{ github.ref }}
+jobs:
+  build:
+    runs-on: self-hosted
+    if: ${{ vars.ENABLED == 'yes' }}
+    env:
+      TOKEN: ${{ secrets.TOKEN }}
+      QUOTED: ${{ format('it''s }} {{ .Values.not_a_parameter }}', vars.NAME) }}
+    steps:
+      - run: echo {{ .Values.message }} ${{ secrets[inputs.key] }}
+"#;
+        let content = json!({"engine":crate::actions::ENGINE, "workflow":workflow}).to_string();
+        let parameters = r#"[{"name":"message","type":"string","default":"hello"}]"#;
+        validate_template(&content, parameters, Kind::Pipeline).unwrap();
+        let rendered =
+            render_content(&content, parameters, &BTreeMap::new(), Kind::Pipeline).unwrap();
+        let document = crate::actions::document(&rendered).unwrap();
+        assert_eq!(
+            document.workflow,
+            workflow.replace("{{ .Values.message }}", "hello")
+        );
+        assert!(document.workflow.contains("{{ .Values.not_a_parameter }}"));
+        assert_eq!(
+            crate::actions::references(&document).unwrap().secrets.names,
+            BTreeSet::from(["TOKEN".into()])
+        );
+        assert!(
+            crate::actions::references(&document)
+                .unwrap()
+                .secrets
+                .deliver_all
+        );
+        let unknown = content.replace("{{ .Values.message }}", "{{ unsupported }}");
+        assert!(validate_template(&unknown, "[]", Kind::Pipeline).is_err());
+    }
+
     #[test]
     fn typed_expansion_defaults_and_json_escaping() {
         let defs=json!([{"name":"image.tag","type":"string","default":"alpine","enum":["alpine","latest"]},{"name":"port","type":"integer","default":8080,"min":1,"max":65535}]).to_string();

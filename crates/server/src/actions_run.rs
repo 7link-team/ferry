@@ -29,6 +29,17 @@ struct Outcome {
     state: String,
     #[serde(default)]
     outputs: BTreeMap<String, String>,
+    /// Job-level continue-on-error as evaluated by the worker.
+    #[serde(default)]
+    continue_on_error: bool,
+}
+
+impl Outcome {
+    /// GitHub semantics: a failure the job tolerates counts as success for
+    /// dependants and for the run.
+    fn tolerated(&self) -> bool {
+        self.continue_on_error && matches!(self.state.as_str(), "failure" | "timed_out")
+    }
 }
 
 pub async fn execute(
@@ -76,7 +87,9 @@ async fn execute_reserved(
     snapshot: Snapshot,
     stop: &mut tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
-    let mut variables = history::open_variables(s, run)?.values;
+    let opened = history::open_variables(s, run)?;
+    let delivered = Delivered::new(&opened, &snapshot)?;
+    let mut variables = opened.values;
     // Include every source credential in server-side redaction, even if a later
     // job fails before its worker can install its own log masks.
     for (index, checkout) in snapshot.checkouts.iter().enumerate() {
@@ -131,6 +144,7 @@ async fn execute_reserved(
         |job, completed, mut stop| {
             let snapshot = &snapshot;
             let variables = &variables;
+            let delivered = &delivered;
             let credential = credential.as_ref();
             let seq = &seq;
             async move {
@@ -143,16 +157,16 @@ async fn execute_reserved(
                     tokio::pin!(reserve);
                     tokio::select! {
                         guards = &mut reserve => guards?.run(execute_job(
-                            s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
+                            s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq,
                         )).await,
                         _ = stop.changed() => Ok(Outcome {
                             state: "cancelled".into(), steps: BTreeMap::new(),
-                            artifacts: vec![], outputs: BTreeMap::new(),
+                            artifacts: vec![], outputs: BTreeMap::new(), continue_on_error: false,
                         }),
                     }
                 } else {
                     execute_job(
-                        s, run, snapshot, &job, &completed, variables, credential, &mut stop, seq,
+                        s, run, snapshot, &job, &completed, variables, delivered, credential, &mut stop, seq,
                     )
                     .await
                 };
@@ -175,6 +189,7 @@ async fn execute_reserved(
                         Outcome {
                             state: "failure".into(),
                             outputs: BTreeMap::new(),
+                            continue_on_error: false,
                             artifacts: Vec::new(),
                             steps: BTreeMap::new(),
                         }
@@ -224,10 +239,9 @@ async fn execute_reserved(
     .await?;
     let final_state = if *stop.borrow() || !history::active(s, run.id).await? {
         "cancelled"
-    } else if completed
-        .values()
-        .any(|outcome| !matches!(outcome.state.as_str(), "success" | "skipped"))
-    {
+    } else if completed.values().any(|outcome| {
+        !outcome.tolerated() && !matches!(outcome.state.as_str(), "success" | "skipped")
+    }) {
         "failed"
     } else {
         "succeeded"
@@ -317,6 +331,125 @@ where
     Ok(completed)
 }
 
+/// The secrets and vars contexts every job of a run receives.
+struct Delivered {
+    secrets: BTreeMap<String, String>,
+    vars: BTreeMap<String, String>,
+}
+
+impl Delivered {
+    fn new(opened: &history::VariableSnapshot, snapshot: &Snapshot) -> Result<Self> {
+        if let (Some(secrets), Some(vars)) = (&opened.secrets, &opened.vars) {
+            return Ok(Self {
+                secrets: secrets.clone(),
+                vars: vars.clone(),
+            });
+        }
+        // Runs queued before contexts were snapshotted: static references only.
+        let (_, references) = crate::actions::parse(&snapshot.document)?;
+        let mut delivered = Self {
+            secrets: BTreeMap::new(),
+            vars: BTreeMap::new(),
+        };
+        for reference in references {
+            let (namespace, name) = reference
+                .name
+                .split_once(':')
+                .ok_or_else(|| ApiError::bad("变量引用无效。"))?;
+            let value = opened
+                .values
+                .get(name)
+                .ok_or_else(|| ApiError::bad("缺少变量快照。"))?
+                .clone();
+            if namespace == "secrets" {
+                delivered.secrets.insert(name.to_owned(), value);
+            } else {
+                delivered.vars.insert(name.to_owned(), value);
+            }
+        }
+        Ok(delivered)
+    }
+}
+
+struct GithubContext {
+    event_name: &'static str,
+    payload: Value,
+    actor: String,
+    git_ref: String,
+    repository: String,
+    server_url: String,
+    inputs: BTreeMap<String, String>,
+}
+
+/// The github context GitHub would give this run: its trigger as the event,
+/// the person who started it, and the repository and ref it builds.
+fn github_context(run: &runs::Model) -> GithubContext {
+    let inputs: BTreeMap<String, Value> = run
+        .inputs
+        .as_deref()
+        .and_then(|text| serde_json::from_str(text).ok())
+        .unwrap_or_default();
+    // The inputs context is typed; github.event.inputs carries strings.
+    let inputs: BTreeMap<String, String> = inputs
+        .into_iter()
+        .map(|(name, value)| {
+            let text = match value {
+                Value::String(text) => text,
+                other => other.to_string(),
+            };
+            (name, text)
+        })
+        .collect();
+    let (server_url, repository) = repository_parts(&run.repo_url);
+    let git_ref = if run.branch.is_empty() {
+        String::new()
+    } else {
+        format!("refs/heads/{}", run.branch)
+    };
+    let event_name = if run.trigger_kind == "schedule" {
+        "schedule"
+    } else {
+        "workflow_dispatch"
+    };
+    let mut payload = json!({
+        "repository": {"full_name": repository, "html_url": if repository.is_empty() { String::new() } else { format!("{server_url}/{repository}") }},
+        "sender": {"login": run.triggered_by_name},
+    });
+    if event_name == "workflow_dispatch" {
+        payload["inputs"] = json!(inputs);
+        payload["ref"] = json!(git_ref);
+    }
+    GithubContext {
+        event_name,
+        payload,
+        actor: run.triggered_by_name.clone(),
+        git_ref,
+        repository,
+        server_url,
+        inputs,
+    }
+}
+
+/// (`https://host`, `owner/repo`) from an HTTP(S), ssh:// or scp-style Git URL,
+/// without any credentials it may contain.
+fn repository_parts(url: &str) -> (String, String) {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    if let Some((scheme, rest)) = url.split_once("://") {
+        let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+        let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+        let scheme = if scheme == "http" { "http" } else { "https" };
+        return (format!("{scheme}://{host}"), path.to_owned());
+    }
+    if let Some((authority, path)) = url.split_once(':')
+        && !authority.contains('/')
+    {
+        let host = authority.rsplit_once('@').map_or(authority, |(_, host)| host);
+        return (format!("https://{host}"), path.to_owned());
+    }
+    (String::new(), String::new())
+}
+
 fn state(value: &str) -> &str {
     match value {
         "success" => "succeeded",
@@ -342,6 +475,7 @@ async fn wait_for_approval(
                 steps: BTreeMap::new(),
                 artifacts: vec![],
                 outputs: BTreeMap::new(),
+                continue_on_error: false,
             });
         }
         let row = jobs::Entity::find()
@@ -357,6 +491,7 @@ async fn wait_for_approval(
                 steps: BTreeMap::new(),
                 artifacts: vec![],
                 outputs: BTreeMap::new(),
+                continue_on_error: false,
             });
         }
         tokio::select! {
@@ -395,6 +530,7 @@ async fn execute_job(
     job: &Job,
     completed: &BTreeMap<String, Outcome>,
     variables: &BTreeMap<String, String>,
+    delivered: &Delivered,
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     seq: &tokio::sync::Mutex<i64>,
@@ -447,6 +583,7 @@ async fn execute_job(
         job,
         completed,
         variables,
+        delivered,
         credential,
         stop,
         seq,
@@ -472,6 +609,7 @@ async fn execute_private(
     job: &Job,
     completed: &BTreeMap<String, Outcome>,
     variables: &BTreeMap<String, String>,
+    delivered: &Delivered,
     credential: Option<&(String, String, String)>,
     stop: &mut tokio::sync::watch::Receiver<bool>,
     seq: &tokio::sync::Mutex<i64>,
@@ -551,6 +689,7 @@ async fn execute_private(
         return Ok(Outcome {
             state: "cancelled".into(),
             outputs: BTreeMap::new(),
+            continue_on_error: false,
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
@@ -558,24 +697,8 @@ async fn execute_private(
     if code != 0 {
         return Err(ApiError::bad("仓库拉取失败。"));
     }
-    let (_, references) = crate::actions::parse(&snapshot.document)?;
-    let mut secrets = BTreeMap::new();
-    let mut vars = BTreeMap::new();
-    for reference in references {
-        let (namespace, name) = reference
-            .name
-            .split_once(':')
-            .ok_or_else(|| ApiError::bad("变量引用无效。"))?;
-        let value = variables
-            .get(name)
-            .ok_or_else(|| ApiError::bad("缺少变量快照。"))?
-            .clone();
-        if namespace == "secrets" {
-            secrets.insert(name.to_owned(), value);
-        } else {
-            vars.insert(name.to_owned(), value);
-        }
-    }
+    let mut secrets = delivered.secrets.clone();
+    let vars = delivered.vars.clone();
     let image = if job.image == "host" {
         "-self-hosted"
     } else {
@@ -599,6 +722,10 @@ async fn execute_private(
             .get(&key)
             .ok_or_else(|| ApiError::bad("Actions 依赖尚未完成。"))?;
         ancestors.extend(ancestor.needs.iter().cloned());
+        let mut outcome = outcome.clone();
+        if outcome.tolerated() {
+            outcome.state = "success".into();
+        }
         needs.insert(key, outcome);
     }
     // Restore prior job archives through the existing host transport, so
@@ -645,7 +772,20 @@ async fn execute_private(
         ch.write_file(&path, 0o600, Box::pin(stream)).await?;
     }
     let workflow = checkout_workflow(snapshot, job, variables, &mut secrets)?;
-    let request = json!({"workflow":workflow,"job":job.key,"workdir":workdir,"event_name":"workflow_dispatch","needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,"timeout_seconds":86400,"run_id":run.id.to_string(),"artifact_dir":artifact_dir});
+    let context = github_context(run);
+    upload(
+        ch,
+        &format!("{private}/event.json"),
+        context.payload.to_string(),
+        0o600,
+    )
+    .await?;
+    let request = json!({"workflow":workflow,"job":job.key,"workdir":workdir,
+        "event_name":context.event_name,"event_path":format!("{private}/event.json"),
+        "actor":context.actor,"run_number":run.number,"run_attempt":1,"ref":context.git_ref,
+        "sha":run.commit,"repository":context.repository,"server_url":context.server_url,
+        "inputs":context.inputs,"needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,
+        "timeout_seconds":86400,"run_id":run.id.to_string(),"artifact_dir":artifact_dir});
     upload(
         ch,
         &format!("{private}/request"),
@@ -666,6 +806,7 @@ async fn execute_private(
         return Ok(Outcome {
             state: "cancelled".into(),
             outputs: BTreeMap::new(),
+            continue_on_error: false,
             artifacts: Vec::new(),
             steps: BTreeMap::new(),
         });
@@ -993,6 +1134,7 @@ mod tests {
         Outcome {
             state: "success".into(),
             outputs: BTreeMap::new(),
+            continue_on_error: false,
             artifacts: vec![],
             steps: BTreeMap::new(),
         }
@@ -1301,6 +1443,7 @@ mod tests {
             pipeline_id: 1,
             environment_id: 0,
             environment_name: String::new(),
+            inputs: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),
@@ -1442,6 +1585,7 @@ mod tests {
             pipeline_id: 1,
             environment_id: 0,
             environment_name: String::new(),
+            inputs: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

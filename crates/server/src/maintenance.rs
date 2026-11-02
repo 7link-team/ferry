@@ -44,6 +44,13 @@ const SETTINGS: &[(&str, &str, i64, i64, i64)] = &[
         0,
         36500,
     ),
+    (
+        "pipeline_concurrent_runs",
+        "同时执行的流水线数（0 为不限）",
+        10,
+        0,
+        10000,
+    ),
 ];
 const SPEC: Spec = Spec {
     search: &["key"],

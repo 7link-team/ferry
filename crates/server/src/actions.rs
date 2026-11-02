@@ -10,7 +10,7 @@ use crate::{
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 pub const ENGINE: &str = "github-actions";
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ pub struct Document {
     #[serde(default)]
     pub graph_layout: Value,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Job {
     pub key: String,
     pub name: String,
@@ -67,6 +67,30 @@ pub struct Job {
     pub image: String,
     #[serde(default)]
     pub manual: bool,
+}
+impl Job {
+    pub(crate) fn reusable(&self) -> bool {
+        !self.manual && self.steps.is_empty()
+    }
+}
+impl Serialize for Job {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("Job", 9)?;
+        state.serialize_field("key", &self.key)?;
+        state.serialize_field("name", &self.name)?;
+        state.serialize_field("needs", &self.needs)?;
+        state.serialize_field("labels", &self.labels)?;
+        state.serialize_field("steps", &self.steps)?;
+        state.serialize_field("host_id", &self.host_id)?;
+        state.serialize_field("image", &self.image)?;
+        state.serialize_field("manual", &self.manual)?;
+        state.serialize_field("reusable", &self.reusable())?;
+        state.end()
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JobStep {
@@ -95,6 +119,273 @@ pub fn snapshot(input: &str) -> Option<Snapshot> {
         .ok()
         .filter(|s| s.engine == ENGINE)
 }
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ContextReferences {
+    pub(crate) names: BTreeSet<String>,
+    pub(crate) deliver_all: bool,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct References {
+    pub(crate) secrets: ContextReferences,
+    pub(crate) vars: ContextReferences,
+}
+#[derive(Debug, PartialEq)]
+enum ExpressionToken {
+    Name(String),
+    String(String),
+    Symbol(char),
+}
+
+/// Return the closing delimiter's offset, ignoring delimiters inside quoted strings.
+pub(crate) fn expression_end(text: &str, start: usize) -> Result<usize> {
+    let mut chars = text[start..].char_indices().peekable();
+    let mut quoted = false;
+    let mut nesting = Vec::new();
+    while let Some((offset, ch)) = chars.next() {
+        if ch == '\'' {
+            if quoted && chars.peek().is_some_and(|(_, c)| *c == '\'') {
+                chars.next();
+            } else {
+                quoted = !quoted;
+            }
+        } else if !quoted {
+            match ch {
+                '(' | '[' => nesting.push(ch),
+                ')' | ']' => {
+                    if nesting.pop() != Some(if ch == ')' { '(' } else { '[' }) {
+                        return Err(ApiError::bad("Actions 表达式括号不匹配。"));
+                    }
+                }
+                '}' if nesting.is_empty() && chars.peek().is_some_and(|(_, c)| *c == '}') => {
+                    return Ok(start + offset);
+                }
+                _ => {}
+            }
+        }
+    }
+    Err(ApiError::bad("Actions 表达式或字符串未闭合。"))
+}
+
+fn expression_tokens(expression: &str) -> Result<Vec<ExpressionToken>> {
+    let mut chars = expression.chars().peekable();
+    let mut tokens = Vec::new();
+    while let Some(ch) = chars.next() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if ch == '\'' {
+            let mut value = String::new();
+            loop {
+                match chars.next() {
+                    Some('\'') if chars.peek() == Some(&'\'') => {
+                        chars.next();
+                        value.push('\'');
+                    }
+                    Some('\'') => break,
+                    Some(ch) => value.push(ch),
+                    None => return Err(ApiError::bad("Actions 表达式字符串未闭合。")),
+                }
+            }
+            tokens.push(ExpressionToken::String(value));
+        } else if ch.is_ascii_alphanumeric() || ch == '_' {
+            let mut name = ch.to_string();
+            while chars
+                .peek()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            {
+                name.push(chars.next().unwrap());
+            }
+            tokens.push(ExpressionToken::Name(name));
+        } else {
+            tokens.push(ExpressionToken::Symbol(ch));
+        }
+    }
+    Ok(tokens)
+}
+
+fn expression_references(expression: &str, references: &mut References) -> Result<()> {
+    let tokens = expression_tokens(expression)?;
+    for (index, token) in tokens.iter().enumerate() {
+        let ExpressionToken::Name(name) = token else {
+            continue;
+        };
+        if index > 0 && tokens[index - 1] == ExpressionToken::Symbol('.') {
+            continue;
+        }
+        let context = if name.eq_ignore_ascii_case("secrets") {
+            &mut references.secrets
+        } else if name.eq_ignore_ascii_case("vars") {
+            &mut references.vars
+        } else {
+            continue;
+        };
+        let name = match tokens.get(index + 1) {
+            Some(ExpressionToken::Symbol('.')) => match tokens.get(index + 2) {
+                Some(ExpressionToken::Name(name)) => Some(name),
+                _ => None,
+            },
+            Some(ExpressionToken::Symbol('[')) => {
+                match (tokens.get(index + 2), tokens.get(index + 3)) {
+                    (Some(ExpressionToken::String(name)), Some(ExpressionToken::Symbol(']'))) => {
+                        Some(name)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let Some(name) = name {
+            context.names.insert(name.clone());
+        } else {
+            context.deliver_all = true;
+        }
+    }
+    Ok(())
+}
+
+fn discover_references(value: &Value) -> Result<References> {
+    fn visit(value: &Value, implicit: bool, references: &mut References) -> Result<()> {
+        match value {
+            Value::String(text) => {
+                if implicit && !text.contains("${{") {
+                    expression_references(text, references)?;
+                } else {
+                    let mut offset = 0;
+                    while let Some(relative) = text[offset..].find("${{") {
+                        let start = offset + relative + 3;
+                        let end = expression_end(text, start)?;
+                        expression_references(&text[start..end], references)?;
+                        offset = end + 2;
+                    }
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    visit(item, false, references)?;
+                }
+            }
+            Value::Object(items) => {
+                for (key, item) in items {
+                    visit(item, key == "if", references)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    let mut references = References::default();
+    references.secrets.deliver_all =
+        value
+            .get("jobs")
+            .and_then(Value::as_object)
+            .is_some_and(|jobs| {
+                jobs.values().any(|job| {
+                    job.get("uses").is_some()
+                        && job.get("secrets").and_then(Value::as_str) == Some("inherit")
+                })
+            });
+    visit(value, false, &mut references)?;
+    Ok(references)
+}
+
+/// Runtime snapshot discovery, including dynamic/whole contexts. `parse` returns
+/// only static references for the existing definition summary; S2 must use this
+/// result with `variables::snapshot_for_actions` to prepare worker contexts.
+pub(crate) fn references(document: &Document) -> Result<References> {
+    let value = serde_yaml_ng::from_str(&document.workflow)
+        .map_err(|e| ApiError::bad(format!("Actions YAML 格式错误：{e}。")))?;
+    discover_references(&value)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Concurrency {
+    pub(crate) group: String,
+    pub(crate) cancel_in_progress: Value,
+}
+fn concurrency_value(value: &Value) -> Option<Concurrency> {
+    Some(Concurrency {
+        group: value
+            .as_str()
+            .or_else(|| value.get("group")?.as_str())?
+            .into(),
+        cancel_in_progress: value
+            .get("cancel-in-progress")
+            .cloned()
+            .unwrap_or(json!(false)),
+    })
+}
+pub(crate) fn concurrency(document: &Document) -> Option<Concurrency> {
+    let value: Value = serde_yaml_ng::from_str(&document.workflow).ok()?;
+    concurrency_value(value.get("concurrency")?)
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JobPolicies {
+    pub(crate) concurrency: Option<Value>,
+    pub(crate) environment: Option<Value>,
+    pub(crate) reusable_workflow: Option<String>,
+}
+pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies> {
+    let value: Value = serde_yaml_ng::from_str(&document.workflow).ok()?;
+    let job = value.get("jobs")?.get(key)?;
+    Some(JobPolicies {
+        concurrency: job.get("concurrency").cloned(),
+        environment: job.get("environment").cloned(),
+        reusable_workflow: job.get("uses").and_then(Value::as_str).map(str::to_owned),
+    })
+}
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct InputSpec {
+    pub(crate) name: String,
+    pub(crate) r#type: String,
+    pub(crate) required: bool,
+    pub(crate) default: Option<Value>,
+    pub(crate) options: Vec<String>,
+    pub(crate) description: String,
+}
+pub(crate) fn dispatch_inputs(document: &Document) -> Vec<InputSpec> {
+    let Ok(value) = serde_yaml_ng::from_str::<Value>(&document.workflow) else {
+        return vec![];
+    };
+    let Some(inputs) = value
+        .pointer("/on/workflow_dispatch/inputs")
+        .and_then(Value::as_object)
+    else {
+        return vec![];
+    };
+    inputs
+        .iter()
+        .map(|(name, input)| InputSpec {
+            name: name.clone(),
+            r#type: input
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("string")
+                .into(),
+            required: input
+                .get("required")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            default: input.get("default").cloned(),
+            options: input
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            description: input
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .into(),
+        })
+        .collect()
+}
 fn string_list(value: Option<&Value>, noun: &str) -> Result<Vec<String>> {
     match value {
         None => Ok(vec![]),
@@ -111,22 +402,16 @@ fn string_list(value: Option<&Value>, noun: &str) -> Result<Vec<String>> {
     }
 }
 pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
-    if document.engine != ENGINE || document.workflow.len() > 128 * 1024 {
-        return Err(ApiError::bad("Actions YAML 无效或超过 128KB。"));
+    if document.engine != ENGINE || document.workflow.contains('\0') {
+        return Err(ApiError::bad("Actions YAML 无效或包含空字符。"));
     }
     let value: Value = serde_yaml_ng::from_str(&document.workflow)
         .map_err(|e| ApiError::bad(format!("Actions YAML 格式错误：{e}。")))?;
     let jobs = value
         .get("jobs")
         .and_then(Value::as_object)
-        .filter(|m| !m.is_empty() && m.len() <= 50)
-        .ok_or_else(|| ApiError::bad("Actions 工作流需要 1 到 50 个任务。"))?;
-    // These service-level policies cannot be silently ignored by an independent engine.
-    if value.get("concurrency").is_some() {
-        return Err(ApiError::bad(
-            "当前尚不支持 Actions concurrency 策略，请移除后执行。",
-        ));
-    }
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| ApiError::bad("Actions 工作流至少需要一个任务。"))?;
     let mut index = 0i64;
     let mut result = Vec::new();
     for (key, raw) in jobs {
@@ -163,41 +448,66 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             .bytes()
             .next()
             .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-            || key.len() > 100
             || !key
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
         {
             return Err(ApiError::bad("Actions 任务标识无效。"));
         }
-        if raw.get("concurrency").is_some() || raw.get("environment").is_some() {
-            return Err(ApiError::bad(format!(
-                "任务 {key} 的 concurrency / environment 策略尚未支持，不能静默忽略。"
-            )));
+        if let Some(uses) = raw.get("uses") {
+            let valid = uses.as_str().is_some_and(|uses| {
+                !uses.contains(['\0', '\r', '\n'])
+                    && !uses.contains("${{")
+                    && if let Some(path) = uses.strip_prefix("./") {
+                        !path.is_empty()
+                            && !path.contains(['@', '\\'])
+                            && !path.split('/').any(|s| s.is_empty() || s == "..")
+                    } else {
+                        uses.rsplit_once('@').is_some_and(|(path, reference)| {
+                            let parts: Vec<_> = path.split('/').collect();
+                            parts.len() >= 3
+                                && parts.iter().all(|p| !p.is_empty() && *p != "..")
+                                && !reference.trim().is_empty()
+                                && !path.contains(['@', ':', '\\'])
+                        })
+                    }
+            });
+            if !valid || raw.get("steps").is_some() || raw.get("runs-on").is_some() {
+                return Err(ApiError::bad(
+                    "复用工作流必须使用 ./本地路径或 owner/repo/path@ref，且不能配置 steps 或 runs-on。",
+                ));
+            }
         }
-        if raw.get("uses").is_some() {
+        let container = document
+            .executor_bindings
+            .iter()
+            .find(|binding| binding.job_id == *key)
+            .map(|binding| binding.image != "host")
+            .unwrap_or_else(|| raw.get("container").is_some());
+        let mut step_ids = BTreeSet::new();
+        if raw.get("services").is_some() && !container {
             return Err(ApiError::bad(
-                "当前任务调度不支持复用工作流，请将任务展开为 jobs/steps。",
+                "services 需要容器执行，请把该任务绑定到容器镜像",
             ));
         }
-        let container = raw.get("container").is_some()
-            || document
-                .executor_bindings
-                .iter()
-                .any(|binding| binding.job_id == *key && binding.image != "host");
-        let mut step_ids = BTreeSet::new();
-        let labels = string_list(raw.get("runs-on"), "runs-on")?;
+        // runs-on is descriptive; the executor binding always selects the actual host/image,
+        // including when the labels or runner group contain expressions.
+        let labels = match raw.get("runs-on") {
+            Some(Value::Object(runner)) => {
+                let mut labels = string_list(runner.get("labels"), "runs-on.labels")?;
+                if let Some(group) = runner.get("group") {
+                    labels.extend(string_list(Some(group), "runs-on.group")?);
+                }
+                labels
+            }
+            other => string_list(other, "runs-on")?,
+        };
         if labels.is_empty() && !manual && raw.get("uses").is_none() {
             return Err(ApiError::bad(format!("任务 {key} 缺少 runs-on。")));
         }
-        if labels.iter().any(|label| label.contains("${{")) {
-            return Err(ApiError::bad(
-                "当前执行器绑定需要静态 runs-on 标签，暂不支持动态切换执行主机。",
-            ));
-        }
         let needs = string_list(raw.get("needs"), "needs")?;
         let steps = match raw.get("steps") {
-            Some(Value::Array(steps)) if !steps.is_empty() && steps.len() <= 50 => steps
+            Some(Value::Array(steps)) if !steps.is_empty() => steps
                 .iter()
                 .enumerate()
                 .map(|(n, step)| {
@@ -214,13 +524,6 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                         .filter(|value| !value.trim().is_empty() && !value.contains('\0'))
                         .ok_or_else(|| ApiError::bad("run 或 uses 必须是非空字符串。"))?;
                     if step.get("uses").is_some() {
-                        if command.starts_with("actions/cache@")
-                            || command.starts_with("actions/cache/")
-                        {
-                            return Err(ApiError::bad(
-                                "当前尚未提供 Actions 缓存服务，不能执行 actions/cache。",
-                            ));
-                        }
                         if command.starts_with("docker://") && !container {
                             return Err(ApiError::bad(
                                 "Docker Action 需要在任务配置中选择容器执行。",
@@ -248,9 +551,9 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                         let number = timeout
                             .as_u64()
                             .or_else(|| timeout.as_str().and_then(|value| value.parse().ok()));
-                        if !expression && !number.is_some_and(|value| (1..=1440).contains(&value)) {
+                        if !expression && !number.is_some_and(|value| value > 0) {
                             return Err(ApiError::bad(
-                                "步骤 timeout-minutes 必须为 1–1440 分钟或 Actions 表达式。",
+                                "步骤 timeout-minutes 必须为正整数分钟或 Actions 表达式。",
                             ));
                         }
                     }
@@ -275,9 +578,7 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 .collect::<Result<Vec<_>>>()?,
             None if manual || raw.get("uses").is_some() => vec![],
             _ => {
-                return Err(ApiError::bad(format!(
-                    "任务 {key} 需要 1 到 50 个执行步骤。"
-                )));
+                return Err(ApiError::bad(format!("任务 {key} 至少需要一个执行步骤。")));
             }
         };
         result.push(Job {
@@ -389,100 +690,20 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
             return Err(ApiError::bad("代码源连接、引用或工作区路径无效。"));
         }
     }
-    let mut variables = BTreeMap::new();
-    fn references(value: &Value, variables: &mut BTreeMap<String, Environment>) -> Result<()> {
-        match value {
-            Value::String(s) => {
-                for tail in s.split("${{").skip(1) {
-                    let expr = tail.split("}}").next().unwrap_or("");
-                    let mut rest = expr;
-                    while !rest.is_empty() {
-                        if rest.starts_with('\'') {
-                            rest = &rest[1..];
-                            loop {
-                                let Some(end) = rest.find('\'') else {
-                                    return Err(ApiError::bad("Actions 表达式字符串未闭合。"));
-                                };
-                                rest = &rest[end + 1..];
-                                if rest.starts_with('\'') {
-                                    rest = &rest[1..];
-                                } else {
-                                    break;
-                                }
-                            }
-                            continue;
-                        }
-                        let length = rest
-                            .chars()
-                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-                            .count();
-                        if length == 0 {
-                            rest = &rest[rest.chars().next().unwrap().len_utf8()..];
-                            continue;
-                        }
-                        let member = expr[..expr.len() - rest.len()].trim_end().ends_with('.');
-                        let token = &rest[..length];
-                        rest = &rest[length..];
-                        if member || !["secrets", "vars"].contains(&token) {
-                            continue;
-                        }
-                        rest = rest.trim_start();
-                        let name;
-                        if let Some(tail) = rest.strip_prefix('.') {
-                            rest = tail.trim_start();
-                            let end = rest
-                                .chars()
-                                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                                .count();
-                            name = &rest[..end];
-                            rest = &rest[end..];
-                        } else if let Some(tail) = rest.strip_prefix('[') {
-                            let tail = tail.trim_start().strip_prefix('\'').ok_or_else(|| {
-                                ApiError::bad("密钥及变量引用必须使用静态名称，暂不支持动态索引。")
-                            })?;
-                            let end = tail
-                                .find('\'')
-                                .ok_or_else(|| ApiError::bad("变量引用缺少结束引号。"))?;
-                            name = &tail[..end];
-                            rest = tail[end + 1..]
-                                .trim_start()
-                                .strip_prefix(']')
-                                .ok_or_else(|| ApiError::bad("变量引用缺少结束括号。"))?;
-                        } else {
-                            return Err(ApiError::bad("密钥及变量引用必须指定静态名称。"));
-                        }
-                        if !crate::variables::valid_name(name) {
-                            return Err(ApiError::bad("变量名称无效。"));
-                        }
-                        let key = format!("{token}:{name}");
-                        variables.insert(
-                            key.clone(),
-                            Environment {
-                                name: key,
-                                value: None,
-                                value_from: Some(format!("variable/{name}")),
-                            },
-                        );
-                    }
-                }
-            }
-            Value::Array(items) => {
-                for item in items {
-                    references(item, variables)?;
-                }
-            }
-            Value::Object(items) => {
-                for item in items.values() {
-                    references(item, variables)?;
-                }
-            }
-            _ => {}
+    let references = discover_references(&value)?;
+    let mut variables = Vec::new();
+    for (namespace, references) in [("secrets", references.secrets), ("vars", references.vars)] {
+        for name in references.names {
+            variables.push(Environment {
+                name: format!("{namespace}:{name}"),
+                value: None,
+                value_from: Some(format!("variable/{name}")),
+            });
         }
-        Ok(())
     }
-    references(&value, &mut variables)?;
-    Ok((result, variables.into_values().collect()))
+    Ok((result, variables))
 }
+
 pub fn summary(document: &Document) -> Result<Definition> {
     let (jobs, env) = parse(document)?;
     Ok(Definition {
@@ -688,9 +909,9 @@ mod tests {
     fn rejects_unexecutable_actions_before_enqueue() {
         for workflow in [
             "jobs: {123bad: {runs-on: self-hosted, steps: [{run: echo ok}]}}",
-            "jobs: {build: {uses: './.github/workflows/shared.yml'}}",
+            "jobs: {build: {uses: 'owner/repo/path'}}",
             "jobs: {build: {runs-on: self-hosted, steps: [{run: echo ok, timeout-minutes: 0}]}}",
-            "jobs: {build: {runs-on: self-hosted, steps: [{uses: 'actions/cache@v4'}]}}",
+            "jobs: {build: {runs-on: self-hosted, steps: [{run: \"bad\\0command\"}]}}",
             "jobs: {build: {runs-on: self-hosted, steps: [{uses: 'docker://alpine:3.21'}]}}",
             "jobs: {build: {runs-on: self-hosted, steps: [{id: same, run: one}, {id: same, run: two}]}}",
         ] {
@@ -764,7 +985,7 @@ mod tests {
             ))
             .is_err()
         );
-        assert!(parse(&doc(&format!("concurrency: production\n{base}"))).is_err());
+        assert!(parse(&doc(&format!("concurrency: production\n{base}"))).is_ok());
         let mut document = doc(base);
         document.executor_bindings.push(Binding {
             job_id: "missing".into(),
@@ -784,18 +1005,228 @@ mod tests {
         assert_eq!(api["definition_format"], ENGINE);
     }
     #[test]
-    fn static_secret_references_are_snapshotted_but_dynamic_ones_fail() {
+    fn static_secret_references_and_dynamic_contexts_are_discovered() {
         let workflow = "jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - run: echo '${{ secrets.TOKEN }}'\n";
         let (_, env) = parse(&doc(workflow)).unwrap();
         assert_eq!(env[0].value_from.as_deref(), Some("variable/TOKEN"));
         let (_, env) = parse(&doc(&workflow.replace("secrets.TOKEN", "secrets['TOKEN']"))).unwrap();
         assert_eq!(env.len(), 1);
-        assert!(
-            parse(&doc(
-                &workflow.replace("secrets.TOKEN", "secrets[matrix.key]")
-            ))
-            .is_err()
+        let dynamic = doc(&workflow.replace("secrets.TOKEN", "secrets[matrix.key]"));
+        assert!(parse(&dynamic).is_ok());
+        let discovered = references(&dynamic).unwrap();
+        assert!(discovered.secrets.deliver_all);
+        assert!(discovered.secrets.names.is_empty());
+        assert!(!discovered.vars.deliver_all);
+    }
+
+    #[test]
+    fn compatibility_caps_are_removed_but_positive_timeouts_are_required() {
+        let key = "j".repeat(200);
+        let mut workflow = format!(
+            "# {}\njobs:\n  {key}:\n    runs-on: self-hosted\n    steps:\n",
+            "x".repeat(140 * 1024)
         );
+        for _ in 0..60 {
+            workflow.push_str("      - run: echo ok\n        timeout-minutes: 2000\n");
+        }
+        for n in 0..60 {
+            workflow.push_str(&format!(
+                "  job{n}: {{runs-on: self-hosted, steps: [{{run: echo ok}}]}}\n"
+            ));
+        }
+        let (jobs, _) = parse(&doc(&workflow)).unwrap();
+        assert_eq!(jobs.len(), 61);
+        assert_eq!(jobs.iter().find(|j| j.key == key).unwrap().steps.len(), 60);
+        for timeout in ["0", "-1", "1.5", "false", "invalid"] {
+            assert!(
+                parse(&doc(&workflow.replace("2000", timeout))).is_err(),
+                "{timeout}"
+            );
+        }
+        assert!(parse(&doc(&workflow.replace("2000", "'${{ inputs.timeout }}'"))).is_ok());
+        assert!(parse(&doc("jobs: [malformed")).is_err());
+        assert!(parse(&doc(&workflow.replace("echo ok", "echo \0"))).is_err());
+    }
+
+    #[test]
+    fn reusable_jobs_keep_graph_binding_and_snapshot_metadata() {
+        let workflow = "jobs:\n  local:\n    uses: ./.github/workflows/shared.yml\n    with: {flag: true}\n    secrets: inherit\n  remote:\n    needs: local\n    uses: owner/repo/.github/workflows/shared.yml@feature/ref\n    secrets: {token: '${{ secrets.TOKEN }}'}\n";
+        let mut document = doc(workflow);
+        document.executor_bindings.push(Binding {
+            job_id: "remote".into(),
+            image: "alpine".into(),
+            ..Default::default()
+        });
+        let (jobs, _) = parse(&document).unwrap();
+        assert!(jobs.iter().all(Job::reusable));
+        assert!(jobs.iter().all(|j| j.steps.is_empty()));
+        assert_eq!(jobs[1].needs, ["local"]);
+        let snapshot = Snapshot {
+            engine: ENGINE.into(),
+            document: document.clone(),
+            jobs,
+            checkouts: vec![],
+        };
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        let value: Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(value["jobs"][0]["reusable"], true);
+        assert!(super::snapshot(&serialized).unwrap().jobs[0].reusable());
+        assert!(references(&document).unwrap().secrets.deliver_all);
+        assert_eq!(
+            job_policies(&document, "remote")
+                .unwrap()
+                .reusable_workflow
+                .as_deref(),
+            Some("owner/repo/.github/workflows/shared.yml@feature/ref")
+        );
+        for invalid in [
+            "owner/repo/path",
+            "repo@v1",
+            "owner//path@v1",
+            "owner/repo/path@",
+            "https://example/repo/path@v1",
+            "./../escape.yml",
+        ] {
+            assert!(
+                parse(&doc(&format!("jobs: {{call: {{uses: '{invalid}'}}}}"))).is_err(),
+                "{invalid}"
+            );
+        }
+        for field in ["steps: [{run: echo bad}]", "runs-on: self-hosted"] {
+            assert!(
+                parse(&doc(&format!(
+                    "jobs: {{call: {{uses: './shared.yml', {field}}}}}"
+                )))
+                .is_err()
+            );
+        }
+        assert!(parse(&doc(&workflow.replace("needs: local", "needs: remote"))).is_err());
+        assert!(parse(&doc(&workflow.replace("needs: local", "needs: missing"))).is_err());
+        document
+            .executor_bindings
+            .push(document.executor_bindings[0].clone());
+        assert!(parse(&document).is_err());
+    }
+
+    #[test]
+    fn runner_objects_dynamic_labels_and_services_respect_bindings() {
+        let mut document = doc(
+            "jobs: {build: {runs-on: {group: '${{ vars.GROUP }}', labels: [self-hosted, '${{ matrix.os }}']}, services: {db: {image: postgres}}, steps: [{uses: 'actions/cache@v4'}]}}",
+        );
+        assert_eq!(
+            parse(&document).unwrap_err().1,
+            "services 需要容器执行，请把该任务绑定到容器镜像"
+        );
+        document.executor_bindings.push(Binding {
+            job_id: "build".into(),
+            image: "ubuntu".into(),
+            ..Default::default()
+        });
+        let (jobs, _) = parse(&document).unwrap();
+        assert_eq!(
+            jobs[0].labels,
+            ["self-hosted", "${{ matrix.os }}", "${{ vars.GROUP }}"]
+        );
+        document.executor_bindings[0].image = "host".into();
+        document.workflow = document
+            .workflow
+            .replace("services:", "container: ubuntu, services:");
+        assert!(parse(&document).is_err());
+        document.executor_bindings.clear();
+        assert!(parse(&document).is_ok());
+    }
+
+    #[test]
+    fn tokenizer_handles_quotes_implicit_conditions_and_nested_indexes() {
+        let value = json!({
+            "if": "contains('it''s }} secrets.FAKE', vars.FLAG) && secrets['TOKEN'] != ''",
+            "run": "${{ format('}} vars.FAKE {{', secrets.REAL) }} ${{ secrets[format('{0}', vars[inputs.key])] }}",
+            "env": {"ALL": "${{ toJSON(vars) }}", "NOT_ROOT": "${{ inputs.secrets.FAKE }}", "ESCAPED": "${{ secrets['it''s'] }}"}
+        });
+        let found = discover_references(&value).unwrap();
+        assert_eq!(
+            found.secrets.names,
+            BTreeSet::from(["TOKEN".into(), "REAL".into(), "it's".into()])
+        );
+        assert_eq!(found.vars.names, BTreeSet::from(["FLAG".into()]));
+        assert!(found.secrets.deliver_all);
+        assert!(found.vars.deliver_all);
+        for invalid in [
+            "${{ secrets['TOKEN' }}",
+            "${{ 'unclosed }}",
+            "${{ secrets.TOKEN",
+        ] {
+            assert!(discover_references(&json!(invalid)).is_err(), "{invalid}");
+        }
+        assert!(
+            !discover_references(&json!({"secrets":"inherit"}))
+                .unwrap()
+                .secrets
+                .deliver_all
+        );
+    }
+
+    #[test]
+    fn exposes_raw_policies_and_typed_dispatch_input_defaults() {
+        let document = doc(r#"
+on:
+  workflow_dispatch:
+    inputs:
+      flag: {type: boolean, required: true, default: false, description: Enable}
+      count: {type: number, default: 0}
+      target: {type: choice, options: [staging, production], default: staging}
+      text: {description: Optional}
+      env: {type: environment}
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: ${{ inputs.flag }}
+jobs:
+  build:
+    runs-on: ${{ inputs.target }}
+    concurrency: {group: '${{ vars.GROUP }}', cancel-in-progress: true}
+    environment: {name: '${{ inputs.env }}', url: '${{ steps.publish.outputs.url }}'}
+    steps: [{run: echo ok}]
+"#);
+        assert!(parse(&document).is_ok());
+        assert_eq!(
+            concurrency(&document),
+            Some(Concurrency {
+                group: "${{ github.ref }}".into(),
+                cancel_in_progress: json!("${{ inputs.flag }}")
+            })
+        );
+        let policies = job_policies(&document, "build").unwrap();
+        assert_eq!(policies.concurrency.unwrap()["cancel-in-progress"], true);
+        assert_eq!(policies.environment.unwrap()["name"], "${{ inputs.env }}");
+        let inputs = dispatch_inputs(&document);
+        assert_eq!(inputs.len(), 5);
+        let flag = inputs.iter().find(|i| i.name == "flag").unwrap();
+        assert_eq!(flag.r#type, "boolean");
+        assert!(flag.required);
+        assert_eq!(flag.default, Some(json!(false)));
+        assert_eq!(flag.description, "Enable");
+        assert_eq!(
+            inputs.iter().find(|i| i.name == "count").unwrap().default,
+            Some(json!(0))
+        );
+        assert_eq!(
+            inputs.iter().find(|i| i.name == "target").unwrap().options,
+            ["staging", "production"]
+        );
+        let text = inputs.iter().find(|i| i.name == "text").unwrap();
+        assert_eq!(text.r#type, "string");
+        assert!(!text.required);
+        assert_eq!(text.default, None);
+        assert!(dispatch_inputs(&doc("on: workflow_dispatch")).is_empty());
+        assert_eq!(
+            concurrency(&doc("concurrency: deploy")),
+            Some(Concurrency {
+                group: "deploy".into(),
+                cancel_in_progress: json!(false)
+            })
+        );
+        assert!(concurrency(&doc("jobs: {}")).is_none());
+        assert!(job_policies(&document, "missing").is_none());
     }
 }
 

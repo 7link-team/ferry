@@ -866,11 +866,12 @@ async fn once(
         };
     }
     let (id, kind) = if b.scope == "build" {
-        let (_, Json(value)) = crate::pipeline_runs::trigger(
-            State(s.clone()),
+        let (_, Json(value)) = crate::pipeline_runs::trigger_as(
+            s.clone(),
             scope,
-            Path((String::new(), b.target_ref.clone())),
+            b.target_ref.clone(),
             bytes::Bytes::from(json!({"environment_id":b.environment_id}).to_string()),
+            "schedule",
         )
         .await?;
         (

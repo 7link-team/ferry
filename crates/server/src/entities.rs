@@ -371,6 +371,8 @@ pub mod pipeline_runs {
         pub pipeline_name: String,
         pub host_name: String,
         pub triggered_by_name: String,
+        /// workflow_dispatch inputs as JSON; None when the run had none.
+        pub inputs: Option<String>,
         pub number: i64,
         pub state: String,
         pub trigger_kind: String,

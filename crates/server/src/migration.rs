@@ -99,6 +99,7 @@ impl MigratorTrait for Migrator {
             Box::new(RepositoryPolling),
             Box::new(RepositoryEventDetail),
             Box::new(PipelineRunNames),
+            Box::new(PipelineRunInputs),
         ]
     }
 }
@@ -2902,6 +2903,36 @@ impl MigrationTrait for CredentialScopes {
             "UPDATE credentials SET scope = 'host' WHERE EXISTS (SELECT 1 FROM hosts WHERE hosts.workspace_id = credentials.workspace_id AND hosts.credential_id = credentials.id)"
         ).await?;
         Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Business data is not automatically removed".into(),
+        ))
+    }
+}
+
+struct PipelineRunInputs;
+impl MigrationName for PipelineRunInputs {
+    fn name(&self) -> &str {
+        "pipeline_run_inputs_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineRunInputs {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        // Nullable: earlier runs had no inputs, and MySQL text cannot carry a default.
+        execute_schema(
+            m,
+            SchemaStatement::Column(
+                "pipeline_runs",
+                "inputs",
+                Table::alter()
+                    .table(Alias::new("pipeline_runs"))
+                    .add_column(long_text("inputs", m.get_database_backend()).null())
+                    .to_owned(),
+            ),
+        )
+        .await
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom(

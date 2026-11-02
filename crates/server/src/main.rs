@@ -611,13 +611,16 @@ async fn main() -> anyhow::Result<()> {
         )
         .route(
             "/{workspace}/pipelines",
-            get(pipelines::list).post(pipelines::create),
+            get(pipelines::list)
+                .post(pipelines::create)
+                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route(
             "/{workspace}/pipelines/{id}",
             get(pipelines::get)
                 .patch(pipelines::update)
-                .delete(pipelines::remove),
+                .delete(pipelines::remove)
+                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route(
             "/{workspace}/repositories",

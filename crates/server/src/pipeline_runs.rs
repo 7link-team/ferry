@@ -35,6 +35,13 @@ use std::{
 pub(crate) struct VariableSnapshot {
     pub(crate) values: BTreeMap<String, String>,
     pub(crate) sources: Vec<Value>,
+    /// Actions runs: the secrets and vars contexts every job receives,
+    /// including everything authorized when the workflow indexes them
+    /// dynamically. Absent in snapshots taken before this existed.
+    #[serde(default)]
+    pub(crate) secrets: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub(crate) vars: Option<BTreeMap<String, String>>,
 }
 fn snapshot_aad(workspace: i64, run: i64) -> String {
     crate::vault::aad(
@@ -76,6 +83,7 @@ fn run_json(r: &runs::Model) -> Value {
         "definition_format":if crate::actions::snapshot(&r.definition).is_some(){"github-actions"}else{"legacy"},
         "triggered_by":Id::from(r.triggered_by),"branch":r.branch,"commit":r.commit,
         "pipeline_name":r.pipeline_name,"host_name":r.host_name,"triggered_by_name":r.triggered_by_name,
+        "inputs":r.inputs.as_deref().and_then(|text| serde_json::from_str::<Value>(text).ok()).unwrap_or_else(|| json!({})),
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
 async fn scoped(s: &AppState, scope: &Scope, id: &str) -> Result<runs::Model> {
@@ -183,6 +191,9 @@ pub struct TriggerBody {
     branch: Option<String>,
     commit: Option<String>,
     environment_id: Option<String>,
+    /// workflow_dispatch inputs (strings, booleans or numbers).
+    #[serde(default)]
+    inputs: BTreeMap<String, Value>,
 }
 
 pub async fn trigger(
@@ -190,6 +201,18 @@ pub async fn trigger(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
     body: Bytes,
+) -> Result<(StatusCode, Json<Value>)> {
+    trigger_as(s, scope, id, body, "manual").await
+}
+
+/// `kind` is the run's trigger: "manual" (workflow_dispatch) or "schedule".
+/// Only server code chooses it; the public endpoint is always manual.
+pub(crate) async fn trigger_as(
+    s: AppState,
+    scope: Scope,
+    id: String,
+    body: Bytes,
+    kind: &str,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.run")?;
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
@@ -203,7 +226,7 @@ pub async fn trigger(
         TriggerBody::default()
     } else {
         serde_json::from_slice(&body).map_err(|_| {
-            ApiError::bad("执行参数必须是包含 branch/commit/environment_id 的 JSON 对象。")
+            ApiError::bad("执行参数必须是包含 branch/commit/environment_id/inputs 的 JSON 对象。")
         })?
     };
     let environment = crate::pipeline_contexts::selected(
@@ -271,6 +294,20 @@ pub async fn trigger(
         .unwrap_or_default();
     let branch = body.branch.unwrap_or(branch);
     let commit = body.commit.unwrap_or_default();
+    for (name, value) in &body.inputs {
+        if name.is_empty()
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            || !(value.is_string() || value.is_boolean() || value.is_number())
+        {
+            return Err(ApiError::bad(
+                "inputs 必须是名称到字符串、布尔值或数字的映射。",
+            ));
+        }
+    }
+    let inputs = (!body.inputs.is_empty())
+        .then(|| serde_json::to_string(&body.inputs))
+        .transpose()
+        .map_err(|_| ApiError::bad("无法保存 inputs。"))?;
     for value in [&branch, &commit] {
         if value.chars().count() > 255 || value.contains('\0') {
             return Err(ApiError::bad(
@@ -307,16 +344,40 @@ pub async fn trigger(
         ),
         None => None,
     };
-    let variable_rows = crate::variables::resolve_for_environment(
-        &tx,
-        scope.workspace_id,
-        "build",
-        id,
-        Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0)),
-        &crate::pipelines::variable_names(&definition),
-    )
-    .await?;
     let mut snapshot = VariableSnapshot::default();
+    let environment_id = Id::from(environment.as_ref().map(|e| e.id).unwrap_or(0));
+    // Actions: GitHub semantics (dynamic indexing delivers every authorized
+    // value; undefined names are ""). Legacy definitions keep strict names.
+    let variable_rows = if let Some(document) = crate::actions::document(&p.definition) {
+        let references = crate::actions::references(&document)?;
+        let contexts = crate::variables::snapshot_for_actions(
+            &s,
+            &tx,
+            scope.workspace_id,
+            id,
+            environment_id,
+            &references,
+        )
+        .await?;
+        // Server-side redaction masks every delivered secret.
+        for (name, value) in &contexts.secrets {
+            snapshot.values.insert(format!("secrets:{name}"), value.clone());
+        }
+        snapshot.sources = contexts.sources;
+        snapshot.secrets = Some(contexts.secrets);
+        snapshot.vars = Some(contexts.vars);
+        Default::default()
+    } else {
+        crate::variables::resolve_for_environment(
+            &tx,
+            scope.workspace_id,
+            "build",
+            id,
+            environment_id,
+            &crate::pipelines::variable_names(&definition),
+        )
+        .await?
+    };
     for (name, row) in variable_rows {
         if actions.is_some()
             && row.kind == "secret"
@@ -344,7 +405,7 @@ pub async fn trigger(
         }
         snapshot.values.insert(name, value);
     }
-    let variable_snapshot = if snapshot.values.is_empty() {
+    let variable_snapshot = if snapshot.values.is_empty() && snapshot.secrets.is_none() {
         None
     } else {
         Some(
@@ -387,8 +448,9 @@ pub async fn trigger(
             .unwrap_or_default(),
         number: number,
         state: "queued".into(),
-        trigger_kind: "manual".into(),
+        trigger_kind: kind.into(),
         triggered_by: i64::from(scope.user.id),
+        inputs,
         definition: match &actions {
             Some(snapshot) => serde_json::to_string(snapshot)
                 .map_err(|_| ApiError::bad("无法保存 Actions 执行快照。"))?,
@@ -610,9 +672,20 @@ pub async fn scheduler(
         }
     }
     let mut next_cleanup = std::time::Instant::now();
+    // Runs execute concurrently, at most `pipeline_concurrent_runs` per
+    // workspace (0 = unlimited); finished tasks report their workspace back.
+    let mut running = tokio::task::JoinSet::new();
+    let mut busy: HashMap<i64, i64> = HashMap::new();
     loop {
         if *stop.borrow() || *drain.borrow() {
             break;
+        }
+        while let Some(done) = running.try_join_next() {
+            if let Ok(workspace) = done
+                && let Some(count) = busy.get_mut(&workspace)
+            {
+                *count -= 1;
+            }
         }
         if std::time::Instant::now() >= next_cleanup {
             if let Err(error) = crate::maintenance::prune_history(&s, false).await {
@@ -620,34 +693,78 @@ pub async fn scheduler(
             }
             next_cleanup = std::time::Instant::now() + Duration::from_secs(60);
         }
-        let result = dispatch(&s, &mut stop).await;
-        if result.is_err() {
-            tracing::error!("流水线调度失败；稍后检查队列。");
+        match claim(&s, &busy).await {
+            Ok(Some(r)) => {
+                *busy.entry(r.workspace_id).or_default() += 1;
+                let (s, mut stop) = (s.clone(), stop.clone());
+                running.spawn(async move {
+                    let workspace = r.workspace_id;
+                    if dispatch(&s, r, &mut stop).await.is_err() {
+                        tracing::error!("流水线调度失败；稍后检查队列。");
+                    }
+                    workspace
+                });
+                // Claim the next eligible run without waiting.
+                continue;
+            }
+            Ok(None) => {}
+            Err(_) => tracing::error!("流水线调度失败；稍后检查队列。"),
         }
         tokio::select! { _=drain.changed()=>break, _=stop.changed()=>break, _=tokio::time::sleep(Duration::from_millis(100))=>{} }
     }
+    // Shutdown waits for in-flight runs, as the sequential scheduler did.
+    while running.join_next().await.is_some() {}
 }
-async fn dispatch(s: &AppState, stop: &mut tokio::sync::watch::Receiver<bool>) -> Result<()> {
-    let Some(r) = runs::Entity::find()
+
+/// The oldest queued run whose workspace is below its concurrency limit,
+/// atomically moved to running so other server instances cannot claim it.
+async fn claim(s: &AppState, busy: &HashMap<i64, i64>) -> Result<Option<runs::Model>> {
+    let queued = runs::Entity::find()
         .filter(runs::Column::State.eq("queued"))
         .order_by_asc(runs::Column::CreatedAt)
-        .one(&s.db)
-        .await?
-    else {
-        return Ok(());
-    };
-    let claimed = runs::Entity::update_many()
-        .col_expr(runs::Column::State, Expr::value("running"))
-        .col_expr(runs::Column::StartedAt, Expr::value(db::now()))
-        .filter(runs::Column::Id.eq(r.id))
-        .filter(runs::Column::State.eq("queued"))
-        .exec(&s.db)
-        .await?
-        .rows_affected;
-    if claimed == 0 {
-        return Ok(());
+        .limit(500)
+        .all(&s.db)
+        .await?;
+    let mut limits: HashMap<i64, i64> = HashMap::new();
+    for r in queued {
+        let limit = match limits.get(&r.workspace_id) {
+            Some(limit) => *limit,
+            None => {
+                let limit = crate::maintenance::setting(
+                    &s.db,
+                    Id::from(r.workspace_id),
+                    "pipeline_concurrent_runs",
+                )
+                .await?;
+                limits.insert(r.workspace_id, limit);
+                limit
+            }
+        };
+        if limit > 0 && busy.get(&r.workspace_id).copied().unwrap_or(0) >= limit {
+            continue;
+        }
+        let claimed = runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("running"))
+            .col_expr(runs::Column::StartedAt, Expr::value(db::now()))
+            .filter(runs::Column::Id.eq(r.id))
+            .filter(runs::Column::State.eq("queued"))
+            .exec(&s.db)
+            .await?
+            .rows_affected;
+        if claimed == 1 {
+            return Ok(Some(r));
+        }
     }
-    if execute(s, &r, stop).await.is_err() {
+    Ok(None)
+}
+
+async fn dispatch(
+    s: &AppState,
+    r: runs::Model,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let r = &r;
+    if execute(s, r, stop).await.is_err() {
         // Never log arbitrary remote errors here: they may contain credentials.
         append(
             s,
@@ -1061,6 +1178,7 @@ mod tests {
             pipeline_id: 1,
             environment_id: 0,
             environment_name: String::new(),
+            inputs: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

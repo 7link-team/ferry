@@ -396,14 +396,33 @@ pub async fn resolve_for_environment(
     environment: Id,
     names: &std::collections::BTreeSet<String>,
 ) -> Result<std::collections::BTreeMap<String, variables::Model>> {
+    let chosen = scoped_rows(db, workspace, layer, reference, environment, Some(names)).await?;
+    for name in names {
+        if !chosen.contains_key(name) {
+            return Err(ApiError::bad(format!("变量 {name} 未定义，请检查作用域。")));
+        }
+    }
+    Ok(chosen)
+}
+
+async fn scoped_rows(
+    db: &impl ConnectionTrait,
+    workspace: Id,
+    layer: &str,
+    reference: Id,
+    environment: Id,
+    names: Option<&std::collections::BTreeSet<String>>,
+) -> Result<std::collections::BTreeMap<String, variables::Model>> {
     use sea_orm::Condition;
     use variables::Column as C;
-    if names.is_empty() {
+    if names.is_some_and(|names| names.is_empty()) {
         return Ok(Default::default());
     }
-    let rows = variables::Entity::find()
-        .filter(C::WorkspaceId.eq(workspace))
-        .filter(C::Name.is_in(names.iter().cloned()))
+    let mut query = variables::Entity::find().filter(C::WorkspaceId.eq(workspace));
+    if let Some(names) = names {
+        query = query.filter(C::Name.is_in(names.iter().cloned()));
+    }
+    let rows = query
         .filter(
             Condition::any()
                 .add(
@@ -445,12 +464,85 @@ pub async fn resolve_for_environment(
             chosen.insert(row.name.clone(), row);
         }
     }
-    for name in names {
-        if !chosen.contains_key(name) {
-            return Err(ApiError::bad(format!("变量 {name} 未定义，请检查作用域。")));
+    Ok(chosen)
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ActionsSnapshot {
+    pub(crate) secrets: std::collections::BTreeMap<String, String>,
+    pub(crate) vars: std::collections::BTreeMap<String, String>,
+    pub(crate) sources: Vec<Value>,
+}
+
+/// Snapshot GitHub contexts without broadening the existing workspace/scope rules.
+/// Missing properties are empty strings; whole vars contexts never disclose secrets.
+pub(crate) async fn snapshot_for_actions(
+    s: &AppState,
+    db: &impl ConnectionTrait,
+    workspace: Id,
+    pipeline: Id,
+    environment: Id,
+    references: &crate::actions::References,
+) -> Result<ActionsSnapshot> {
+    let names = references
+        .secrets
+        .names
+        .union(&references.vars.names)
+        .cloned()
+        .collect();
+    let rows = scoped_rows(
+        db,
+        workspace,
+        "build",
+        pipeline,
+        environment,
+        if references.secrets.deliver_all || references.vars.deliver_all {
+            None
+        } else {
+            Some(&names)
+        },
+    )
+    .await?;
+    let mut snapshot = ActionsSnapshot::default();
+    for (namespace, references, values) in [
+        ("secrets", &references.secrets, &mut snapshot.secrets),
+        ("vars", &references.vars, &mut snapshot.vars),
+    ] {
+        for name in &references.names {
+            values.insert(name.clone(), String::new());
+        }
+        for (name, row) in &rows {
+            let requested = references.names.contains(name);
+            if namespace == "vars" && row.kind == "secret" {
+                if requested {
+                    return Err(ApiError::bad(
+                        "密钥变量必须通过 secrets 引用，不能通过 vars 公开。",
+                    ));
+                }
+                continue;
+            }
+            if !requested
+                && !(references.deliver_all && (namespace == "vars" || row.kind == "secret"))
+            {
+                continue;
+            }
+            let value = s.vault.open_secret(
+                &row.value,
+                &vault::aad(
+                    &row.workspace_id.to_string(),
+                    "variables",
+                    &row.id.to_string(),
+                ),
+            )?;
+            values.insert(name.clone(), value);
+            snapshot.sources.push(json!({
+                "environment":format!("{namespace}:{name}"), "name":name,
+                "scope":row.scope, "scope_ref":Id::from(row.scope_ref),
+                "version":row.version, "secret":row.kind == "secret",
+            }));
         }
     }
-    Ok(chosen)
+    Ok(snapshot)
 }
 
 pub async fn remove(
@@ -661,6 +753,120 @@ mod tests {
         .await
         .unwrap();
     }
+    #[tokio::test]
+    async fn actions_snapshot_preserves_scopes_and_empty_undefined_properties() {
+        let (_dir, s) = fixture().await;
+        insert(&s, 1, 1, "global", 0, "TOKEN", "global").await;
+        insert(&s, 2, 1, "build", 0, "TOKEN", "module").await;
+        insert(&s, 3, 1, "build", 42, "TOKEN", "pipeline").await;
+        insert(&s, 4, 1, "environment", 7, "TOKEN", "environment").await;
+        insert(&s, 5, 2, "global", 0, "FOREIGN", "foreign").await;
+        insert(&s, 6, 1, "build", 43, "OTHER_PIPELINE", "other").await;
+        insert(&s, 7, 1, "deploy", 0, "DEPLOY", "deploy").await;
+        insert(&s, 8, 1, "environment", 8, "OTHER_ENV", "other").await;
+        insert(&s, 9, 1, "global", 0, "PLAIN", "visible").await;
+        variables::Entity::update_many()
+            .col_expr(variables::Column::Kind, Expr::value("plain"))
+            .filter(variables::Column::Id.eq(9))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let references = crate::actions::References {
+            secrets: crate::actions::ContextReferences {
+                names: BTreeSet::from(["MISSING".into()]),
+                deliver_all: true,
+            },
+            vars: crate::actions::ContextReferences {
+                names: BTreeSet::from(["MISSING_VAR".into()]),
+                deliver_all: true,
+            },
+        };
+        let snapshot = snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &references)
+            .await
+            .unwrap();
+        assert_eq!(
+            snapshot.secrets,
+            std::collections::BTreeMap::from([
+                ("MISSING".into(), "".into()),
+                ("TOKEN".into(), "environment".into()),
+            ])
+        );
+        assert_eq!(
+            snapshot.vars,
+            std::collections::BTreeMap::from([
+                ("MISSING_VAR".into(), "".into()),
+                ("PLAIN".into(), "visible".into()),
+            ])
+        );
+        assert_eq!(snapshot.sources.len(), 2);
+        let token = snapshot
+            .sources
+            .iter()
+            .find(|source| source["name"] == "TOKEN")
+            .unwrap();
+        assert_eq!(token["scope"], "environment");
+        assert_eq!(token["scope_ref"], "7");
+        assert_eq!(token["environment"], "secrets:TOKEN");
+        let snapshot = snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 0.into(), &references)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.secrets["TOKEN"], "pipeline");
+        let snapshot = snapshot_for_actions(&s, &s.db, 1.into(), 44.into(), 0.into(), &references)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.secrets["TOKEN"], "module");
+        let snapshot = snapshot_for_actions(&s, &s.db, 3.into(), 42.into(), 7.into(), &references)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.secrets.len(), 1);
+        assert_eq!(snapshot.secrets["MISSING"], "");
+        assert!(snapshot.sources.is_empty());
+        let mut static_refs = crate::actions::References::default();
+        static_refs.secrets.names = BTreeSet::from(["TOKEN".into(), "UNKNOWN".into()]);
+        let snapshot = snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &static_refs)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.secrets["TOKEN"], "environment");
+        assert_eq!(snapshot.secrets["UNKNOWN"], "");
+        assert!(snapshot.vars.is_empty());
+        static_refs.vars.names.insert("TOKEN".into());
+        assert_eq!(
+            snapshot_for_actions(&s, &s.db, 1.into(), 42.into(), 7.into(), &static_refs)
+                .await
+                .unwrap_err()
+                .1,
+            "密钥变量必须通过 secrets 引用，不能通过 vars 公开。"
+        );
+    }
+
+    #[tokio::test]
+    async fn reusable_jobs_resolve_on_their_executor_bindings() {
+        let (_dir, s) = fixture().await;
+        let document = crate::actions::Document {
+            engine: crate::actions::ENGINE.into(),
+            workflow: "jobs: {call: {uses: './.github/workflows/build.yml'}}".into(),
+            executor_bindings: vec![crate::actions::Binding {
+                job_id: "call".into(),
+                image: "ubuntu".into(),
+                ..Default::default()
+            }],
+            checkout_bindings: vec![],
+            graph_layout: json!({}),
+        };
+        let snapshot = crate::actions::resolve(&s, &s.db, &scope(1, ALL), document.clone(), 42)
+            .await
+            .unwrap();
+        assert_eq!(snapshot.jobs[0].host_id, 42);
+        assert_eq!(snapshot.jobs[0].image, "ubuntu");
+        assert!(snapshot.jobs[0].reusable());
+        assert!(snapshot.jobs[0].steps.is_empty());
+        assert!(
+            crate::actions::resolve(&s, &s.db, &scope(1, ALL), document, 0)
+                .await
+                .is_err()
+        );
+    }
+
     #[tokio::test]
     async fn secret_projection_reveal_audit_and_exact_values() {
         let (_dir, s) = fixture().await;
