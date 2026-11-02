@@ -384,8 +384,8 @@ jobs:
               sleep 0.1
             done
           done
-          cargo test --locked -p ferry-server cluster::tests -- --include-ignored
-          cargo test --locked -p ferry-server cluster_update_recovery -- --include-ignored
+          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server cluster::tests -- --include-ignored
+          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server cluster_update_recovery -- --include-ignored
           python3 .github/scripts/annotate-failures.py --run node scripts/test-cluster.mjs
       - name: Marketplace and browser repository authorization
         if: matrix.harness == 'build-ui'
@@ -507,10 +507,22 @@ jobs:
         shell: bash
         run: |
           # Go and Rust builds are independent; run them side by side.
-          bash scripts/build-actions-workers.sh desktop/resources/actions-workers > "$RUNNER_TEMP/workers.log" 2>&1 &
+          mkdir -p harness-logs
+          bash scripts/build-actions-workers.sh desktop/resources/actions-workers > harness-logs/workers.log 2>&1 &
           workers=$!
-          cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
-          if ! wait "$workers"; then cat "$RUNNER_TEMP/workers.log"; exit 1; fi
+          python .github/scripts/annotate-failures.py --run cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
+          if ! wait "$workers"; then
+            cat harness-logs/workers.log
+            python .github/scripts/annotate-failures.py harness-logs/workers.log
+            exit 1
+          fi
+      - name: Preserve sidecar build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-build-${{ matrix.target }}-${{ github.run_attempt }}
+          path: harness-logs/*
+          if-no-files-found: ignore
       - name: Stage the sidecar Tauri bundles
         shell: bash
         run: |

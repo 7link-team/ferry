@@ -1154,18 +1154,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tracing::instrument::WithSubscriber;
-
+    fn capture_logs_in_child(test: &str) -> bool {
         // Tracing caches callsite interest process-wide. Other parallel tests emit
         // through this same callsite without a subscriber, so capture in an isolated
         // test process while retaining every real WebSocket and privacy assertion.
         if std::env::var_os("FERRY_TEST_TRANSPORT_LOG_CHILD").is_none() {
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
-                .args(["--exact", "cluster::tests::local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs", "--nocapture"])
+                .args(["--exact", test, "--include-ignored", "--nocapture"])
                 .env("FERRY_TEST_TRANSPORT_LOG_CHILD", "1");
             #[cfg(windows)]
             {
@@ -1180,6 +1176,19 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
             assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+            return true;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tracing::instrument::WithSubscriber;
+
+        if capture_logs_in_child(
+            "cluster::tests::local_websocket_failures_keep_transport_identity_and_private_data_out_of_logs",
+        ) {
             return;
         }
         let capture = Capture::default();
@@ -1336,6 +1345,11 @@ mod tests {
     #[ignore = "requires NATS_TEST_URL pointing at an isolated JetStream server"]
     async fn broker_fences_old_owners_and_coordinates_reader_writer_reservations() {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
+        if capture_logs_in_child(
+            "cluster::tests::broker_fences_old_owners_and_coordinates_reader_writer_reservations",
+        ) {
+            return;
+        }
         let capture = Capture::default();
         let writer = capture.clone();
         let subscriber = tracing_subscriber::fmt()
