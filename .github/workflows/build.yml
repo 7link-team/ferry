@@ -218,13 +218,21 @@ jobs:
           FERRY_TEST_DATABASE_URL=postgres://postgres:integration-only-password@127.0.0.1:5432/upgrade_test python3 -I scripts/test-upgrade.py "$RUNNER_TEMP/old-server" "$RUNNER_TEMP/new-server"
 
   e2e:
-    name: e2e-${{ matrix.harness }}
+    name: e2e-${{ matrix.harness }}${{ matrix.round != 'all' && format(' (round {0})', matrix.round) || '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         harness: [ssh, runner, pipelines, build-ui, deployments, deployments-docker, deployments-native, deployments-stack, deployments-groups, variables-ui]
+        round: [all]
+        # The slowest harnesses run their three live rounds as parallel jobs
+        # (each round starts a fresh server); the others run them in sequence.
+        include:
+          - { harness: deployments, round: "2" }
+          - { harness: deployments, round: "3" }
+          - { harness: deployments-stack, round: "2" }
+          - { harness: deployments-stack, round: "3" }
     env:
       FERRY_REQUIRE_ALL: "1"
     steps:
@@ -234,9 +242,13 @@ jobs:
           go-version-file: workers/actions/go.mod
           cache-dependency-path: workers/actions/go.sum
       - uses: dtolnay/rust-toolchain@stable
+      # Every harness builds the same debug server and runner: share one cache,
+      # saved by a single job, so per-harness copies stop evicting the desktop
+      # caches from the repository's cache quota.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: e2e-${{ matrix.harness }}
+          shared-key: e2e
+          save-if: ${{ matrix.harness == 'build-ui' }}
       - name: Install harness dependencies
         run: |
           sudo apt-get update
@@ -338,8 +350,12 @@ jobs:
       - name: Three consecutive live runs (no retries)
         env:
           HARNESS: ${{ matrix.harness }}
+          ROUND: ${{ matrix.round }}
         shell: bash
         run: |
+          rounds="1 2 3"
+          if [ "$ROUND" != all ]; then rounds="$ROUND"
+          elif [ "$HARNESS" = deployments ] || [ "$HARNESS" = deployments-stack ]; then rounds=1; fi
           # SSH's strict flag is presence-based, even "0" would enable it.
           # Other jobs do not supply sshd coordinates to workspace unit tests.
           if [ "$HARNESS" = ssh ]; then export FERRY_REQUIRE_LIVE=1; fi
@@ -353,7 +369,7 @@ jobs:
           mkdir -p harness-logs
           echo '| Harness | Round | Result | Run ID | Commit |' >> "$GITHUB_STEP_SUMMARY"
           echo '| --- | --- | --- | --- | --- |' >> "$GITHUB_STEP_SUMMARY"
-          for round in 1 2 3; do
+          for round in $rounds; do
             echo "::group::$HARNESS round $round/3"
             if [ "$HARNESS" = build-ui ] || [ "$HARNESS" = variables-ui ]; then
               command=(node "scripts/test-$HARNESS.mjs")
@@ -373,7 +389,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: harness-${{ matrix.harness }}-${{ github.run_attempt }}
+          name: harness-${{ matrix.harness }}-${{ matrix.round }}-${{ github.run_attempt }}
           path: harness-logs/*
           if-no-files-found: warn
 
@@ -427,11 +443,14 @@ jobs:
       # ships that binary as its sidecar, so the real web build has to exist
       # before cargo runs — build.rs only creates an empty placeholder.
       - run: npm run build
-      - name: Build the server and the runner
-        run: cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
-      - name: Build bundled Actions workers
+      - name: Build the server, the runner and the bundled Actions workers
         shell: bash
-        run: bash scripts/build-actions-workers.sh desktop/resources/actions-workers
+        run: |
+          # Go and Rust builds are independent; run them side by side.
+          bash scripts/build-actions-workers.sh desktop/resources/actions-workers > "$RUNNER_TEMP/workers.log" 2>&1 &
+          workers=$!
+          cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
+          if ! wait "$workers"; then cat "$RUNNER_TEMP/workers.log"; exit 1; fi
       - name: Stage the sidecar Tauri bundles
         shell: bash
         run: |
