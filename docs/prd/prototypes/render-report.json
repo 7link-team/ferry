@@ -1,0 +1,598 @@
+[
+  {
+    "page": "01-workflow-list",
+    "layout": "Desktop",
+    "file": "01-workflow-list.png",
+    "bytes": 112004,
+    "size": "109.4 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 912",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "02-workflow-editor",
+    "layout": "Desktop",
+    "file": "02-workflow-editor.png",
+    "bytes": 151080,
+    "size": "147.5 KB",
+    "callouts": 5,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1066",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "03-node-detail",
+    "layout": "Desktop",
+    "file": "03-node-detail.png",
+    "bytes": 156927,
+    "size": "153.2 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1284",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "04-problems-panel",
+    "layout": "Desktop",
+    "file": "04-problems-panel.png",
+    "bytes": 119391,
+    "size": "116.6 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 996",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "05-execution-detail",
+    "layout": "Desktop",
+    "file": "05-execution-detail.png",
+    "bytes": 152428,
+    "size": "148.9 KB",
+    "callouts": 5,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1183",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "06-executions-queue",
+    "layout": "Desktop",
+    "file": "06-executions-queue.png",
+    "bytes": 124564,
+    "size": "121.6 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1134",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "07-human-pick",
+    "layout": "Desktop",
+    "file": "07-human-pick.png",
+    "bytes": 207121,
+    "size": "202.3 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1017",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "08-human-edit",
+    "layout": "Desktop",
+    "file": "08-human-edit.png",
+    "bytes": 112669,
+    "size": "110.0 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1025",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "09-assets-library",
+    "layout": "Desktop",
+    "file": "09-assets-library.png",
+    "bytes": 209409,
+    "size": "204.5 KB",
+    "callouts": 3,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 987",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "10-model-library",
+    "layout": "Desktop",
+    "file": "10-model-library.png",
+    "bytes": 126067,
+    "size": "123.1 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1015",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "11-public-form",
+    "layout": "Desktop",
+    "file": "11-public-form.png",
+    "bytes": 84391,
+    "size": "82.4 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 977",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "12-pipeline-editor",
+    "layout": "Desktop",
+    "file": "12-pipeline-editor.png",
+    "bytes": 146266,
+    "size": "142.8 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1190",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "13-pipeline-run-graph",
+    "layout": "Desktop",
+    "file": "13-pipeline-run-graph.png",
+    "bytes": 135082,
+    "size": "131.9 KB",
+    "callouts": 5,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1055",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "14-environment-protection",
+    "layout": "Desktop",
+    "file": "14-environment-protection.png",
+    "bytes": 128235,
+    "size": "125.2 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1069",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "15-publish-diff",
+    "layout": "Desktop",
+    "file": "15-publish-diff.png",
+    "bytes": 107830,
+    "size": "105.3 KB",
+    "callouts": 4,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 964",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "16-provider-credential",
+    "layout": "Desktop",
+    "file": "16-provider-credential.png",
+    "bytes": 134141,
+    "size": "131.0 KB",
+    "callouts": 5,
+    "viewport": "1440 × 900",
+    "dimensions": "1440 × 1252",
+    "scrollWidth": 1440,
+    "scrollRegions": []
+  },
+  {
+    "page": "01-workflow-list",
+    "layout": "Pad",
+    "file": "pad/01-workflow-list.png",
+    "bytes": 94613,
+    "size": "92.4 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1251",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "02-workflow-editor",
+    "layout": "Pad",
+    "file": "pad/02-workflow-editor.png",
+    "bytes": 103369,
+    "size": "100.9 KB",
+    "callouts": 5,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1181",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "canvas"
+    ]
+  },
+  {
+    "page": "03-node-detail",
+    "layout": "Pad",
+    "file": "pad/03-node-detail.png",
+    "bytes": 60096,
+    "size": "58.7 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1024",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "04-problems-panel",
+    "layout": "Pad",
+    "file": "pad/04-problems-panel.png",
+    "bytes": 68048,
+    "size": "66.5 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1072",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "canvas"
+    ]
+  },
+  {
+    "page": "05-execution-detail",
+    "layout": "Pad",
+    "file": "pad/05-execution-detail.png",
+    "bytes": 91975,
+    "size": "89.8 KB",
+    "callouts": 5,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1171",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "canvas execution-canvas"
+    ]
+  },
+  {
+    "page": "06-executions-queue",
+    "layout": "Pad",
+    "file": "pad/06-executions-queue.png",
+    "bytes": 108937,
+    "size": "106.4 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1676",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "07-human-pick",
+    "layout": "Pad",
+    "file": "pad/07-human-pick.png",
+    "bytes": 211901,
+    "size": "206.9 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1655",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "08-human-edit",
+    "layout": "Pad",
+    "file": "pad/08-human-edit.png",
+    "bytes": 95080,
+    "size": "92.9 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1818",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "09-assets-library",
+    "layout": "Pad",
+    "file": "pad/09-assets-library.png",
+    "bytes": 216266,
+    "size": "211.2 KB",
+    "callouts": 3,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1830",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "10-model-library",
+    "layout": "Pad",
+    "file": "pad/10-model-library.png",
+    "bytes": 106317,
+    "size": "103.8 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1310",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "11-public-form",
+    "layout": "Pad",
+    "file": "pad/11-public-form.png",
+    "bytes": 80263,
+    "size": "78.4 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1448",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "12-pipeline-editor",
+    "layout": "Pad",
+    "file": "pad/12-pipeline-editor.png",
+    "bytes": 95280,
+    "size": "93.0 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1068",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "canvas pipeline"
+    ]
+  },
+  {
+    "page": "13-pipeline-run-graph",
+    "layout": "Pad",
+    "file": "pad/13-pipeline-run-graph.png",
+    "bytes": 108996,
+    "size": "106.4 KB",
+    "callouts": 5,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1168",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "canvas pipeline"
+    ]
+  },
+  {
+    "page": "14-environment-protection",
+    "layout": "Pad",
+    "file": "pad/14-environment-protection.png",
+    "bytes": 109374,
+    "size": "106.8 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1740",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "15-publish-diff",
+    "layout": "Pad",
+    "file": "pad/15-publish-diff.png",
+    "bytes": 87505,
+    "size": "85.5 KB",
+    "callouts": 4,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 1557",
+    "scrollWidth": 768,
+    "scrollRegions": []
+  },
+  {
+    "page": "16-provider-credential",
+    "layout": "Pad",
+    "file": "pad/16-provider-credential.png",
+    "bytes": 119328,
+    "size": "116.5 KB",
+    "callouts": 5,
+    "viewport": "768 × 1024",
+    "dimensions": "768 × 2086",
+    "scrollWidth": 768,
+    "scrollRegions": [
+      "table-scroll"
+    ]
+  },
+  {
+    "page": "01-workflow-list",
+    "layout": "Phone",
+    "file": "phone/01-workflow-list.png",
+    "bytes": 79899,
+    "size": "78.0 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1542",
+    "scrollWidth": 390,
+    "scrollRegions": [
+      "table-scroll"
+    ]
+  },
+  {
+    "page": "02-workflow-editor",
+    "layout": "Phone",
+    "file": "phone/02-workflow-editor.png",
+    "bytes": 122697,
+    "size": "119.8 KB",
+    "callouts": 5,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2340",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "03-node-detail",
+    "layout": "Phone",
+    "file": "phone/03-node-detail.png",
+    "bytes": 59569,
+    "size": "58.2 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1186",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "04-problems-panel",
+    "layout": "Phone",
+    "file": "phone/04-problems-panel.png",
+    "bytes": 73415,
+    "size": "71.7 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1483",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "05-execution-detail",
+    "layout": "Phone",
+    "file": "phone/05-execution-detail.png",
+    "bytes": 104790,
+    "size": "102.3 KB",
+    "callouts": 5,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2071",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "06-executions-queue",
+    "layout": "Phone",
+    "file": "phone/06-executions-queue.png",
+    "bytes": 98798,
+    "size": "96.5 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2008",
+    "scrollWidth": 390,
+    "scrollRegions": [
+      "table-scroll"
+    ]
+  },
+  {
+    "page": "07-human-pick",
+    "layout": "Phone",
+    "file": "phone/07-human-pick.png",
+    "bytes": 241771,
+    "size": "236.1 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2512",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "08-human-edit",
+    "layout": "Phone",
+    "file": "phone/08-human-edit.png",
+    "bytes": 91942,
+    "size": "89.8 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2081",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "09-assets-library",
+    "layout": "Phone",
+    "file": "phone/09-assets-library.png",
+    "bytes": 247222,
+    "size": "241.4 KB",
+    "callouts": 3,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 3403",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "10-model-library",
+    "layout": "Phone",
+    "file": "phone/10-model-library.png",
+    "bytes": 93260,
+    "size": "91.1 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1611",
+    "scrollWidth": 390,
+    "scrollRegions": [
+      "table-scroll"
+    ]
+  },
+  {
+    "page": "11-public-form",
+    "layout": "Phone",
+    "file": "phone/11-public-form.png",
+    "bytes": 76130,
+    "size": "74.3 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1599",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "12-pipeline-editor",
+    "layout": "Phone",
+    "file": "phone/12-pipeline-editor.png",
+    "bytes": 98489,
+    "size": "96.2 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2149",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "13-pipeline-run-graph",
+    "layout": "Phone",
+    "file": "phone/13-pipeline-run-graph.png",
+    "bytes": 110843,
+    "size": "108.2 KB",
+    "callouts": 5,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2091",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "14-environment-protection",
+    "layout": "Phone",
+    "file": "phone/14-environment-protection.png",
+    "bytes": 106620,
+    "size": "104.1 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2098",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "15-publish-diff",
+    "layout": "Phone",
+    "file": "phone/15-publish-diff.png",
+    "bytes": 84906,
+    "size": "82.9 KB",
+    "callouts": 4,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 1771",
+    "scrollWidth": 390,
+    "scrollRegions": []
+  },
+  {
+    "page": "16-provider-credential",
+    "layout": "Phone",
+    "file": "phone/16-provider-credential.png",
+    "bytes": 113118,
+    "size": "110.5 KB",
+    "callouts": 5,
+    "viewport": "390 × 844",
+    "dimensions": "390 × 2556",
+    "scrollWidth": 390,
+    "scrollRegions": [
+      "table-scroll"
+    ]
+  }
+]
