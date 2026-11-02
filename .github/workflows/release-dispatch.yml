@@ -1,7 +1,7 @@
-name: Build and publish verified alpha35
+name: Build and publish verified alpha36
 on:
   push:
-    branches: [feat/alpha35-release-dispatch]
+    branches: [feat/alpha36-release-dispatch]
     paths: [.github/workflows/release-dispatch.yml]
 permissions:
   contents: read
@@ -14,17 +14,9 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='20fcdb02450bba2d11631987f5a9ef0bb512ab7a';
-            const tag='v0.1.0-alpha.35';
+            const sha='9e3d33187483903070bcafe38e58ce60ce9c3b5a';
+            const tag='v0.1.0-alpha.36';
             const repo=context.repo;
-            // Stop the superseded orchestrator; let completed desktop builds save reusable caches.
-            for (const run_id of [41507607466]) {
-              const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
-              if(data.status!=='completed') {
-                try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
-                catch(error) { if(![409,422].includes(error.status)) throw error; }
-              }
-            }
             async function requireMain() {
               const {data}=await github.rest.repos.getCommit({...repo,ref:'main'});
               if(data.sha!==sha)throw Error('Main changed; refusing publication');
@@ -60,7 +52,7 @@ jobs:
             core.notice(`Verified build ${build.id} and source image ${image.id}`);
             await requireMain();
             if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Already published/dispatched; inspect first');
-            const notes = "代码洞察、主题与系统配置改造，并补齐时间、多语言及 Runner 自动升级能力。\n\n- 修复编辑器构建资源被统一禁止缓存的问题，带哈希的脚本、样式和 Worker 可跨页面复用；保留 YAML 校验、补全、查找和六语言草稿，并加入生产浏览器回归。\n- Runner 连接诊断区分普通 WebSocket 失败与集群转发不可用，记录安全的阶段及节点信息，保留读取者语言；正常会话关闭不产生多余告警。此前线上偶发失败未复现，不据此宣称根因已经修复。\n\n- 新增独立“代码洞察”：按洞察选择仓库，支持同一仓库加入多个洞察、各自配置作者映射和仪表盘；保留全部分支、可配置的初始历史范围和可选完整历史，支持贡献者、提交、语言、排行、趋势、热力图及过滤分析。\n- 贡献采集与查询分离，优先使用平台 API；纯 Git 及 API 无法完整覆盖的情况通过 Runner / Actions 采集，不在服务端长期 clone。事实幂等去重、增量更新、持久化任务与仓库变化合并，支持定时 cron、事件触发和手动同步。\n- 迁入参考项目主题，移除 ERP 主题；支持明暗模式、自定义与持久化。字典和配置项共用 12 种值类型、分类、编辑器及校验，支持自定义配置项，并兼容旧数据和引用；系统运维项保持受控。\n- 支持 English、简体中文、繁體中文、日本語、한국어、Bahasa Melayu。页面地址带语言前缀，旧链接保留查询参数与锚点后跳转；切换语言保留编辑草稿。API 使用 Accept-Language，无该请求头时默认英文；系统状态和错误按读取者语言显示，用户姓名、脚本及命令输出保留原文。\n- 修正主机组、跳板主机等可选关联字段的展示：显示“未分组”“顶级分组”“不使用跳板主机”或关联名称；正常数值 0 保留。\n- 统一 UTC 数据库会话与存储，前端按浏览器时区显示；MySQL、PostgreSQL 在非 UTC 环境也执行真实迁移、统计与队列回归。\n- 受管 Runner 默认在空闲时自动升级到当前服务端版本，支持全局开关、逐主机继承/启用/禁用，保留签名验证、排空、失败退避与回退，不降级。\n\n验证范围包括独立 HTTP/SQLite、真实 MySQL/PostgreSQL、Windows Runner/Actions、私有 HTTP/SSH Git、公开开源 Git 仓库，以及生产构建的六语言浏览器交互。代码平台 API 使用本地契约服务覆盖受支持平台，不代表已实接所有私有平台账户。\n\nCloudflare Tunnel 已通过真实 HTTP/2 HTTPS/WSS、Runner 接入与重连验证；当前验证环境的 QUIC 出站受阻，未据此宣称 QUIC 或账号专属 named tunnel 的实测结果。\n\n本版本为 alpha 预发布。代码目录结构治理按约定留在发版后的独立提交。\n";
+            const notes = "\u4ee3\u7801\u7ed3\u6784\u4e0e\u53ef\u7ef4\u62a4\u6027\u6cbb\u7406\uff0c\u72ec\u7acb\u4e8e alpha.35 \u529f\u80fd\u7248\u672c\u4ea4\u4ed8\u3002\n\n- \u524d\u7aef\u6309 app\u3001features\u3001shared \u5206\u5c42\uff0c\u4e1a\u52a1\u914d\u7f6e\u5206\u522b\u5f52\u5c5e\u5bf9\u5e94\u6a21\u5757\uff1b\u7edf\u4e00\u516c\u5171\u8868\u5355\u3001\u8868\u683c\u3001API\u3001\u4e3b\u9898\u4e0e\u7f16\u8f91\u5668\u57fa\u7840\u8bbe\u65bd\u3002\n- \u62c6\u5206\u90e8\u7f72\u6e05\u5355\u7f16\u8f91\u5668\u548c\u9875\u9762\u7ec4\u5408\u804c\u8d23\uff0c\u4fdd\u7559 YAML \u6ce8\u91ca\u3001\u672a\u77e5\u5b57\u6bb5\u3001\u7c7b\u578b\u4e0e\u6e90\u7801\u7f16\u8f91\u80fd\u529b\uff0c\u4ee5\u53ca Monaco \u548c\u7ec8\u7aef\u61d2\u52a0\u8f7d\u3002\n- \u670d\u52a1\u7aef\u6309\u8d26\u6237\u3001\u4e3b\u673a\u3001\u6d41\u6c34\u7ebf\u3001\u4ed3\u5e93\u3001\u90e8\u7f72\u3001\u7ef4\u62a4\u3001\u901a\u77e5\u53ca\u8d44\u6e90\u7ec4\u7ec7\u6a21\u5757\uff1b\u62c6\u5206 Runner \u8fde\u63a5/\u5347\u7ea7\u3001Actions \u6267\u884c\u7f16\u6392\u53ca\u4ed3\u5e93\u6388\u6743\u5927\u6587\u4ef6\u3002\n- \u4fdd\u7559\u73b0\u6709 Cargo crate \u8fb9\u754c\u3001HTTP \u8def\u7531\u3001\u6570\u636e\u5e93\u7ed3\u6784\u548c\u534f\u8bae\uff1b\u66f4\u65b0\u811a\u672c\u53ca CI \u7684\u6e90\u7801\u8def\u5f84\u4e0e\u6d4b\u8bd5\u7b5b\u9009\uff0c\u5e76\u9632\u6b62\u7b5b\u9009\u4e3a\u7a7a\u65f6\u8bef\u62a5\u6210\u529f\u3002\n- \u65b0\u589e\u524d\u7aef\u5c42\u7ea7\u4e0e\u5faa\u73af\u4f9d\u8d56\u68c0\u6d4b\uff0c\u66f4\u65b0\u5f00\u53d1\u76ee\u5f55\u8bf4\u660e\uff1b\u4fee\u6b63\u6d4f\u89c8\u5668\u6d4b\u8bd5\u7684 Windows \u76ee\u5f55\u4e0e shell \u517c\u5bb9\u6027\u3002\n\n\u672c\u7248\u672c\u4e3a alpha \u9884\u53d1\u5e03\u3002\u7ed3\u6784\u6cbb\u7406\u4e0d\u6539\u53d8 alpha.35 \u7684\u4ea7\u54c1\u884c\u4e3a\uff1b\u53d7\u652f\u6301\u5e73\u53f0\u7684\u771f\u5b9e\u6388\u6743\u4e0e\u7f51\u7edc\u73af\u5883\u9a8c\u8bc1\u8fb9\u754c\u6cbf\u7528 alpha.35 \u8bf4\u660e\u3002";
             await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
             const publication=await waitFor('publish-verified.yml','workflow_dispatch');
             const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
