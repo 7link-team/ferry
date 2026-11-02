@@ -59,6 +59,8 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1`);
   const current = page.getByRole('textbox', { name: '当前连接命令' });
   await current.waitFor();
+  // Visibility precedes the credential response; wait for the ready command.
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label="当前连接命令"]')?.value.includes('fixture-current-token'));
   assert.match(await current.inputValue(), /fixture-current-token/);
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'host-detail-info.png'), fullPage: true });
   await page.getByRole('tab', { name: '监控', exact: true }).click();
