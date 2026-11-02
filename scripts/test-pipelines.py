@@ -505,7 +505,9 @@ jobs:
             row = done(rid,seconds=85)
             check(f'5 {kind} second timeout rounds up to one Actions minute',time.monotonic()-started>=55)
             check(f'5 {kind} timeout distinct from ordinary failure', row['state'] == 'failed' and
-                  [s['state'] for s in row['steps']] == ['timed_out', 'skipped'] and row['steps'][0]['exit_code'] is None,
+                  # As on GitHub, a step past timeout-minutes fails; unlike an
+                  # ordinary failure it has no exit status (the run lasted the full minute).
+                  [s['state'] for s in row['steps']] == ['failed', 'skipped'] and row['steps'][0]['exit_code'] is None,
                   f"state={row['state']}, step={row['steps'][0]['state']}, exit={row['steps'][0]['exit_code']}")
             rid = trigger(pipeline(host, [{'name': 'cancel', 'run': 'echo started; sleep 5'},
                                           {'name': 'skip', 'run': 'echo SHOULD_NOT_RUN'}]))['id']; all_runs.append(rid)

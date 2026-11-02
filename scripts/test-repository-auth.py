@@ -345,14 +345,15 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             # Newest polling event of each kind (earlier webhook events share the history).
             by_event={row['event']:row for row in reversed(rows) if str(row['action']).startswith('轮询')}
             pushed=by_event['push']
-            check(pushed['actor']=='Bob' and pushed['summary']=='fix: second' and pushed['detail']['total_commits']==1 and [c['id'] for c in pushed['detail']['commits']]==['b'] and pushed['detail']['commits'][0]['message']=='fix: second\n\nbody','polling push records the commit range, message and author since the previous revision')
+            # Polling cannot know who pushed: no operator; the author stays on the commit.
+            check(pushed['actor']=='' and pushed['detail']['commits'][0]['author']=='Bob' and pushed['summary']=='fix: second' and pushed['detail']['total_commits']==1 and [c['id'] for c in pushed['detail']['commits']]==['b'] and pushed['detail']['commits'][0]['message']=='fix: second\n\nbody','polling push records the commit range, message and author since the previous revision')
             check('bob@example.invalid' not in json.dumps(rows) and 'fay@example.invalid' not in json.dumps(rows),'event detail never stores author e-mail addresses')
-            check(by_event['branch.created']['actor']=='Fay' and by_event['branch.created']['detail']['commit']['message']=='feat: start feature','new branch records its head commit and author from the listing')
+            check(by_event['branch.created']['actor']=='' and by_event['branch.created']['detail']['commit']['author']=='Fay' and by_event['branch.created']['detail']['commit']['message']=='feat: start feature','new branch records its head commit and its author on the commit, not as operator')
             check(by_event['tag.created']['detail']['message']=='Release v1\n\nnotes','new tag records its annotation')
             requested=by_event['pull_request']
             check(requested['actor']=='ann' and requested['detail']['request']['title']=='Add login' and requested['detail']['request']['description']=='Implements SSO\nwith tests' and requested['detail']['request']['reviewers']==['rev'] and requested['summary']=='#1 Add login','merge request records title, description, author and reviewers')
             view=request(owner,root+'/repository-events/'+pushed['id'])
-            check(view['commits'][0]['short_id']=='b1' and view['total_commits']==1 and view['source']=='polling' and '推送人' in view['note'],'single event detail flattens commits and explains the inferred operator')
+            check(view['commits'][0]['short_id']=='b1' and view['total_commits']==1 and view['source']=='polling' and '推送人' not in str(view.get('note','')),'single event detail flattens commits without guessing the operator')
             request(outsider,f'/workspaces/{workspace_other}/repository-events/'+pushed['id'],expected=404)
             overview=request(owner,root+'/repository-events?event=push')
             check(any(row['id']==pushed['id'] and row['connection_name']=='Codeup central' for row in overview['items']) and overview['total']>=1,'workspace event list spans owned connections with their names')
@@ -367,7 +368,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             detected={row['event'] for row in later if str(row['action']).startswith('\u8f6e\u8be2')}
             check({'branch.deleted','tag.deleted','merge'}<=detected,'polling recovers from failure and detects removals and merge exactly from prior successful baseline')
             removed=next(row for row in later if row['event']=='branch.deleted')
-            check(removed['actor']=='' and '事件推送' in removed['detail']['note'] and removed['detail']['before']=='f','removals state that polling cannot know the operator instead of inventing one')
+            check(removed['actor']=='' and 'note' not in removed['detail'] and removed['detail']['before']=='f','removals leave the unknown operator empty without an explanatory note')
             count=request(owner,events_path)['total'];previous=poll_state()[1];due();await_poll(previous)
             check(request(owner,events_path)['total']==count,'unchanged complete snapshot creates no duplicate notifications')
             persisted=poll_state()

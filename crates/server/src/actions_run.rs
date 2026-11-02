@@ -1701,6 +1701,12 @@ for component in $relative; do
 done
 set +f
 IFS=$original_ifs
+# Never mix a checkout into unrelated files: an existing directory must be
+# empty or already a Git repository (a persistent workdir from earlier runs).
+if [ ! -d .git ] && [ -n "$(ls -A)" ]; then
+    echo 'Checkout directory is not empty and is not a Git repository; refusing to check out into it' >&2
+    exit 1
+fi
 umask 077
 credential_dir=$(mktemp -d "$workspace/.checkout-credentials.XXXXXX")
 trap 'rm -rf -- "$credential_dir"' EXIT HUP INT TERM
@@ -1888,9 +1894,23 @@ async fn event(
                 .col_expr(steps::Column::State, Expr::value(state(result)))
                 .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
         } else {
-            update
+            let update = update
                 .col_expr(steps::Column::State, Expr::value("running"))
-                .col_expr(steps::Column::StartedAt, Expr::value(db::now()))
+                .col_expr(steps::Column::StartedAt, Expr::value(db::now()));
+            // Show the step name as the engine evaluated it (`${{ ... }}`
+            // expanded), as GitHub does. Matrix legs share one row.
+            match value["step"].as_str() {
+                Some(evaluated) if !matrix && !evaluated.is_empty() => update.col_expr(
+                    steps::Column::Name,
+                    Expr::value(
+                        format!("{} / {}", job.name, evaluated)
+                            .chars()
+                            .take(255)
+                            .collect::<String>(),
+                    ),
+                ),
+                _ => update,
+            }
         };
         update
             .filter(steps::Column::RunId.eq(run.id))
@@ -2365,6 +2385,47 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(workspace.join("before-checkout")).unwrap(),
             "preserved"
+        );
+        // An absolute (persistent) directory holding unrelated files is refused
+        // and left untouched; once it is a checkout, later runs refresh it.
+        let persistent = root.path().join("persistent");
+        std::fs::create_dir(&persistent).unwrap();
+        std::fs::write(persistent.join("keep"), "preserved").unwrap();
+        let absolute = |path: &std::path::Path| crate::actions::CheckoutBinding {
+            repository_url: root.path().join("first").to_string_lossy().into(),
+            path: path.to_string_lossy().replace('\\', "/"),
+            ..Default::default()
+        };
+        let run = |binding: &crate::actions::CheckoutBinding| {
+            Command::new("sh")
+                .arg("-c")
+                .arg(checkout_node_script(binding))
+                .current_dir(&workspace)
+                .env("SOURCE_KIND", "")
+                .env("SOURCE_SECRET", "")
+                .output()
+                .unwrap()
+        };
+        let refused = run(&absolute(&persistent));
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("not empty"));
+        assert_eq!(
+            std::fs::read_to_string(persistent.join("keep")).unwrap(),
+            "preserved"
+        );
+        assert!(!persistent.join(".git").exists());
+        let reused = root.path().join("reused");
+        for _ in 0..2 {
+            let output = run(&absolute(&reused));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(reused.join("identity")).unwrap(),
+            "first"
         );
         #[cfg(unix)]
         {

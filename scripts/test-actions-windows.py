@@ -156,6 +156,9 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
               first_row['state'] == 'succeeded' and 'LEGACY_SHELL_OK' in first_output
               and f"LEGACY_RUN=context-{first_row['number']}" in first_output,
               f"{first_row} {first_output}")
+        check('step names show their expressions evaluated',
+              any(step['name'].endswith(f"Legacy shell {first_row['number']}") for step in first_row['steps']),
+              str([step['name'] for step in first_row['steps']]))
         check('converted legacy variable references stay masked',
               secret not in first_output and 'LEGACY_TOKEN=***' in first_output, first_output[-1000:])
         legacy_second = run(legacy)
