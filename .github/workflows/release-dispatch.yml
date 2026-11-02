@@ -14,11 +14,11 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='387c57db52721bde3eb252f19b682dfb126c65f8';
+            const sha='985b21718a0d1e103dcf06e5890a5f4e060f2466';
             const tag='v0.1.0-alpha.35';
             const repo=context.repo;
             // Superseded runs failed locale and upgrade fixtures; fixes and ordinary-user IPC regression are now verified.
-            for (const run_id of [41468482152, 41469069064, 41468285291, 41470172631]) {
+            for (const run_id of [41484198973, 41484761557]) {
               const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
               if(data.status!=='completed') {
                 try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
