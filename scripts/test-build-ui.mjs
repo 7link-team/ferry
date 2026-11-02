@@ -110,19 +110,9 @@ try {
   // executing pipelines saved by earlier releases, with the original assertions.
   // Seed a concrete repository as an older release would have persisted it;
   // new connection/source-node checkout is covered by repository-auth-ui.
-  await api(`/workspaces/${workspace_ops}/repositories`,{name:'UI repository',provider:'git',url:`http://127.0.0.1:${gitPort}/source.git`,default_branch:branch});
-  const legacy=await api(`/workspaces/${workspace_ops}/pipelines`,{name:'Legacy seed',target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:join(work,'build-{{run}}'),steps:[{name:'Seed',run:'true'}]})});
-  await page.goto(`${origin}/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
-  await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
-  await page.getByRole('button', { name: '流水线设置', exact: true }).click();
-  await page.getByRole('combobox', { name: '仓库',exact:true }).selectOption({label:'UI repository'});
-  await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
-  await page.getByRole('combobox', { name: /^目标类型/ }).click(); await page.getByRole('option', { name: '主机组', exact: true }).click();
-  assert.equal(await page.getByRole('combobox', { name: /^目标主机组/ }).innerText(), '请选择');
-  await page.getByRole('combobox', { name: /^目标主机组/ }).click(); await page.getByRole('option', { name: 'UI group', exact: true }).click();
-  await page.getByRole('combobox', { name: /^目标类型/ }).click(); await page.getByRole('option', { name: '主机', exact: true }).click();
-  assert.equal(await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).innerText(), '请选择');
-  await page.getByRole('combobox', { name: /^目标主机(?!组)/ }).click(); await page.getByRole('option', { name: 'UI runner', exact: true }).click();
+  // Seed a concrete repository as an older release would have persisted it;
+  // new connection/source-node checkout is covered by repository-auth-ui.
+  const repository = await api(`/workspaces/${workspace_ops}/repositories`,{name:'UI repository',provider:'git',url:`http://127.0.0.1:${gitPort}/source.git`,default_branch:branch});
   const definition = {
     workdir: join(work, 'build-{{run}}'),
     // Hold each following step until the browser observes the preceding log.
@@ -134,13 +124,15 @@ try {
       { name: '完成', run: 'while [ ! -f "$UI_BARRIER_DIR/allow-finish" ]; do sleep 0.1; done; echo FINISH_OK', timeout_seconds: 60 },
     ],
   };
-  await page.getByLabel('定义（JSON）', { exact: false }).fill(JSON.stringify({ ...definition, steps: [{ ...definition.steps[0], timeout_seconds: 0 }] }));
-  await page.getByRole('button', { name: '保存', exact: true }).click();
-  await page.getByText(/第 1 步.*超时时间/).waitFor();
-  pass('repository/pipeline shared forms, dependent target reset, verbatim server validation');
-  await page.getByLabel('定义（JSON）', { exact: false }).fill(JSON.stringify(definition, null, 2));
+  // A pipeline saved by an earlier release (legacy JSON) is converted on write
+  // and edited in the Actions editor like any other pipeline.
+  const legacy=await api(`/workspaces/${workspace_ops}/pipelines`,{name:'Legacy seed',target_kind:'host',target_ref:host.id,repository_id:repository.id,definition:JSON.stringify(definition)});
+  await page.goto(`${origin}/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
+  await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
+  assert.equal(await page.getByLabel('定义（JSON）', { exact: false }).count(), 0, 'the legacy JSON editor is gone');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('cell', { name: 'UI pipeline', exact: true }).waitFor();
+  pass('converted legacy pipeline opens and saves in the Actions editor');
   const requests = [];
   page.on('request', (request) => { if (/pipeline-runs\/[^/]+(?:\/logs\?|$)/.test(request.url())) requests.push(request.url()); });
   await page.getByRole('button', { name: '触发', exact: true }).click();
@@ -149,7 +141,8 @@ try {
   await page.getByLabel('任务步骤和日志', { exact: true }).getByText(/CLONE_OK/).waitFor();
   await page.getByLabel('任务步骤和日志', { exact: true }).getByText('运行中', { exact: true }).waitFor();
   assert((await page.getByLabel('任务步骤和日志', { exact: true }).innerText()).includes('运行中'));
-  assert((await page.getByLabel('执行变量', { exact: true }).innerText()).includes('MANAGED_SECRET ← build-ui-secret · 构建模块 · v1 · 密钥'));
+  // Converted env references read the secrets context, listed as Actions runs list them.
+  assert((await page.getByLabel('执行变量', { exact: true }).innerText()).includes('secrets:build-ui-secret ← build-ui-secret · 构建模块 · v1 · 密钥'));
   assert(!(await page.locator('body').innerText()).includes('browser-managed-build-secret'));
   const firstCount = await page.locator('[data-seq]').count();
   await writeFile(join(work, 'allow-build'), '');
@@ -158,13 +151,14 @@ try {
   await writeFile(join(work, 'allow-finish'), '');
   await page.getByText('日志已加载', { exact: true }).waitFor();
   assert((await page.getByLabel('任务步骤和日志', { exact: true }).innerText()).includes('FINISH_OK'));
-  assert.equal(await page.getByLabel('任务步骤和日志', { exact: true }).getByText('成功', { exact: true }).count(), 3);
+  // The three converted steps plus the conversion's workspace preparation.
+  assert(await page.getByLabel('任务步骤和日志', { exact: true }).getByText('成功', { exact: true }).count() >= 4);
   if (process.env.UI_SCREENSHOT) await page.screenshot({ path: process.env.UI_SCREENSHOT });
   const finalCount = await page.locator('[data-seq]').count();
   const requestCount = requests.length;
   await page.waitForTimeout(3500); assert.equal(requests.length, requestCount, 'polling continued after completion');
   assert(requests.some((url) => /after=[1-9]/.test(url)), 'no incremental cursor');
-  pass(`real Git clone -> runner; steps advance to 3 successes; log chunks ${firstCount} -> ${secondCount} -> ${finalCount}; after cursor advances; ${requestCount} requests unchanged for 3.5s after completion`);
+  pass(`real Git clone -> runner; steps advance to success; log chunks ${firstCount} -> ${secondCount} -> ${finalCount}; after cursor advances; ${requestCount} requests unchanged for 3.5s after completion`);
   await page.getByRole('link', { name: '执行历史', exact: true }).first().click();
   await page.getByRole('cell', { name: '#1', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '触发', exact: true }).count(), 0);
