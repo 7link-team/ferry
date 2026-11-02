@@ -694,9 +694,15 @@ mod tests {
         let again = convert_legacy_content(&wrapped.to_string()).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&again).unwrap(), wrapped);
         let legacy = r#"{"workdir":"/tmp/{{run}}","steps":[{"name":"Build","run":"{{ .Values.command }}"}]}"#;
-        let converted: Value = serde_json::from_str(&convert_legacy_content(legacy).unwrap()).unwrap();
+        let converted: Value =
+            serde_json::from_str(&convert_legacy_content(legacy).unwrap()).unwrap();
         assert_eq!(converted["engine"], crate::actions::ENGINE);
-        assert!(converted["workflow"].as_str().unwrap().contains("{{ .Values.command }}"));
+        assert!(
+            converted["workflow"]
+                .as_str()
+                .unwrap()
+                .contains("{{ .Values.command }}")
+        );
     }
     #[test]
     fn actions_expressions_survive_template_validation_and_rendering() {

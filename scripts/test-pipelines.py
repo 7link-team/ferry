@@ -399,6 +399,10 @@ jobs:
             row=api(f'/workspaces/{workspace_ops}/pipelines/'+build); row['definition']=json.dumps(definition)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,row,method='PATCH')
             marker=root_dir+'/variables-'+kind
+            # Runs execute concurrently (pipeline_concurrent_runs, default 10).
+            # Allow one at a time so the variable run really waits in the queue.
+            limit=next(r for r in api(f'/workspaces/{workspace_ops}/settings')['items'] if r['key']=='pipeline_concurrent_runs')
+            limit=api(f'/workspaces/{workspace_ops}/settings/'+limit['id'],{'version':limit['version'],'value':1},method='PATCH')
             blocker=pipeline(host,[{'name':'hold queue','run':f'mkdir -p {root_dir}; touch {marker}-entered; while [ ! -f {marker}-release ]; do sleep 0.1; done'}])
             blocked=trigger(blocker)['id']; all_runs.append(blocked)
             eventually(lambda: local_or_ssh(kind, f'if [ -f {marker}-entered ]; then echo yes; fi').strip()=='yes')
@@ -408,6 +412,7 @@ jobs:
             api(f'/workspaces/{workspace_ops}/variables/'+object_var,rotated,method='PATCH')
             local_or_ssh(kind,f'touch {marker}-release')
             done(blocked)
+            api(f'/workspaces/{workspace_ops}/settings/'+limit['id'],{'version':limit['version'],'value':10},method='PATCH')
             result=done(rid); output=''.join(v['chunk'] for v in logs(rid))
             check(kind+' managed variables prefer pipeline scope and preserve literal bytes',result['state']=='succeeded')
             # Secrets delivered to the worker are masked there as "***" (GitHub's
