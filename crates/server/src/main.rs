@@ -973,7 +973,9 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
             .parse()
             .unwrap(),
     );
-    headers.insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+    headers
+        .entry(header::CACHE_CONTROL)
+        .or_insert("no-store".parse().unwrap());
     response
 }
 
