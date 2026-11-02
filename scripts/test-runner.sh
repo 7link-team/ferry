@@ -246,12 +246,12 @@ for _ in $(seq 1 60); do
   sleep 0.5
 done
 EXEC_LOGS=$(c "$B/workspaces/$WORKSPACE_OPS/pipeline-runs/$EXEC_RUN/logs?after=0")
-EXEC_STREAMS=$(printf '%s' "$EXEC_LOGS" | python3 -I -c 'import json,sys
-items=json.load(sys.stdin)["items"]
-for stream in ("stdout", "stderr"):
- print(stream + ":" + "".join(i["chunk"] for i in items if i["stream"] == stream).strip())')
-ck "exec returns stdout" '^stdout:out$' "$EXEC_STREAMS"
-ck "exec returns stderr" '^stderr:err$' "$EXEC_STREAMS"
+# Pipelines run as Actions jobs: like GitHub, a step's stdout and stderr both
+# land in the job log, one line each, prefixed with the job.
+EXEC_OUTPUT=$(printf '%s' "$EXEC_LOGS" | python3 -I -c 'import json,sys
+print("".join(i["chunk"] for i in json.load(sys.stdin)["items"]))')
+ck "exec returns stdout" '^\[build\] out$' "$EXEC_OUTPUT"
+ck "exec returns stderr" '^\[build\] err$' "$EXEC_OUTPUT"
 ck "exec returns the code" '"exit_code":7' "$EXEC"
 
 # The runner's `Session::Failed` path, which is how every remote error reaches

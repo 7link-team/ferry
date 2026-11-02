@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/nektos/act/pkg/runner"
 )
 
 // A local authenticated Git HTTP fixture exercises the actual go-git fetch
@@ -86,7 +88,12 @@ jobs:
 				want = "remote-action-ok"
 				workflow += "    runs-on: self-hosted\n    outputs:\n      value: ${{ steps.probe.outputs.value }}\n    steps:\n      - id: probe\n        uses: owner/repo@main\n"
 			}
-			r := Request{Workflow: workflow, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), ServerURL: server.URL, Secrets: map[string]string{"GITHUB_TOKEN": token}, Platforms: map[string]string{"self-hosted": "-self-hosted"}, TimeoutSeconds: 20}
+			// Actions come from the action source even when the repository
+			// lives on another server (e.g. Codeup), whose URL is ServerURL.
+			previous := runner.FerryActionsURL
+			runner.FerryActionsURL = server.URL
+			defer func() { runner.FerryActionsURL = previous }()
+			r := Request{Workflow: workflow, Job: "build", Workdir: repository(t), CacheDir: t.TempDir(), ServerURL: "https://codeup.example.invalid", Secrets: map[string]string{"GITHUB_TOKEN": token}, Platforms: map[string]string{"self-hosted": "-self-hosted"}, TimeoutSeconds: 20}
 			var logs bytes.Buffer
 			before := authenticated.Load()
 			result, err := execute(context.Background(), r, &logs)

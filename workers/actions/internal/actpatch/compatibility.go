@@ -39,6 +39,11 @@ func patchCompatibility(moduleDir string) error {
 		// GetEnv wrote rc.Env on every call, racing the cancellation monitor's
 		// condition re-evaluation; after creation it is now read-only.
 		{"runner/run_context.go", "\trc.Env[\"ACT\"] = \"true\"\n\treturn rc.Env", "\tif rc.Env[\"ACT\"] != \"true\" {\n\t\trc.Env[\"ACT\"] = \"true\"\n\t}\n\treturn rc.Env"},
+		// github.server_url names where the repository lives (it may be Codeup or
+		// GitLab); remote actions and reusable workflows come from the GitHub instance.
+		{"runner/step_action_remote.go", "sar.remoteAction.URL = github.ServerURL", "sar.remoteAction.URL = FerryActionsURL"},
+		{"runner/reusable_workflow.go", "remoteReusableWorkflow.URL = ghctx.ServerURL", "remoteReusableWorkflow.URL = FerryActionsURL"},
+		{"runner/reusable_workflow.go", "remoteReusableWorkflow.URL = rc.getGithubContext(ctx).ServerURL", "remoteReusableWorkflow.URL = FerryActionsURL"},
 	} {
 		if err := replaceExact(moduleDir, patch.file, patch.before, patch.after); err != nil {
 			return err
@@ -47,8 +52,18 @@ func patchCompatibility(moduleDir string) error {
 	if err := os.WriteFile(filepath.Join(moduleDir, "pkg", "model", "ferry_matrix.go"), []byte(orderedMatrixSource), 0600); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "pkg", "runner", "ferry_actions_url.go"), []byte(actionsURLSource), 0600); err != nil {
+		return err
+	}
 	return patchReusableMatrices(moduleDir)
 }
+
+// Where remote actions and reusable workflows are fetched from. Tests point it
+// at a local fixture; it never follows the repository's server.
+const actionsURLSource = `package runner
+
+var FerryActionsURL = "https://github.com"
+`
 
 // Preserve the declared axis order; ranging over Go maps randomizes plans.
 const orderedMatrixSource = `package model
