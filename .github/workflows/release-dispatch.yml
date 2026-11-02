@@ -9,16 +9,16 @@ permissions:
 jobs:
   dispatch:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='b50b9933502385542ecb4e4ebeafd9eb51914ea5';
+            const sha='da7491425f35a48149ed96d6eb6562166f4e2967';
             const tag='v0.1.0-alpha.35';
             const repo=context.repo;
             // Stop the superseded orchestrator; let completed desktop builds save reusable caches.
-            for (const run_id of [41492828565]) {
+            for (const run_id of [41503527943]) {
               const {data}=await github.rest.actions.getWorkflowRun({...repo,run_id});
               if(data.status!=='completed') {
                 try { await github.rest.actions.cancelWorkflowRun({...repo,run_id}); }
@@ -33,7 +33,7 @@ jobs:
               return (await github.rest.actions.listWorkflowRuns({...repo,workflow_id:workflow,event,head_sha:sha})).data.workflow_runs;
             }
             async function waitFor(workflow,event) {
-              for(let attempt=0;attempt<360;attempt++) {
+              for(let attempt=0;attempt<900;attempt++) {
                 const matching=await runs(workflow,event);
                 if(matching.length>1)throw Error('Ambiguous source runs '+workflow);
                 const run=matching[0];
