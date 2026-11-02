@@ -14,9 +14,9 @@ jobs:
         with:
           script: |
             const repo=context.repo;
-            const run_id=41484761557;
+            const run_id=41492846042;
             const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id});
-            if(run.head_sha!=='387c57db52721bde3eb252f19b682dfb126c65f8')throw Error('Unexpected source; refusing cancellation');
+            if(run.head_sha!=='cfec1608bbf512ed40e630a83e4f453e9423807d')throw Error('Unexpected source; refusing cancellation');
             if(run.status==='completed')return core.info('Superseded run already finished');
             await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {...repo,run_id});
             core.notice('Cancelled only the known failed superseded run; corrected build and release orchestrator remain active');
