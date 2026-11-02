@@ -1,0 +1,22 @@
+name: Finish cancelling superseded alpha35 acceptance
+on:
+  push:
+    branches: [feat/alpha35-release-dispatch]
+    paths: [.github/workflows/cancel-superseded.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cancel:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const repo=context.repo;
+            const run_id=41484761557;
+            const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id});
+            if(run.head_sha!=='387c57db52721bde3eb252f19b682dfb126c65f8')throw Error('Unexpected source; refusing cancellation');
+            if(run.status==='completed')return core.info('Superseded run already finished');
+            await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {...repo,run_id});
+            core.notice('Cancelled only the known failed superseded run; corrected build and release orchestrator remain active');
