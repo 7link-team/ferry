@@ -198,8 +198,8 @@ print(json.dumps({
   'target_ref': sys.argv[1],
 }))" "$pinned_host")
   ck "pipeline pinning a host is created" '"id"' "$(c -X POST -d "$pipeline_payload" "$B/workspaces/$workspace_id/pipelines")"
-  ck "host used by a pipeline cannot be deleted"  "条流水线以这台主机为目标"  "$(c -X DELETE "$B/workspaces/$workspace_id/nodes/$pinned_host")"
-  ck "nor by the batch delete"                    "条流水线以这台主机为目标"  "$(c -X DELETE -d "{\"ids\":[\"$pinned_host\"]}" "$B/workspaces/$workspace_id/nodes")"
+  ck "host used by a pipeline cannot be deleted"  "执行器仍被 Actions 任务引用"  "$(c -X DELETE "$B/workspaces/$workspace_id/nodes/$pinned_host")"
+  ck "nor by the batch delete"                    "执行器仍被 Actions 任务引用"  "$(c -X DELETE -d "{\"ids\":[\"$pinned_host\"]}" "$B/workspaces/$workspace_id/nodes")"
 
   ck "credential used by a repository cannot be deleted"  "还有 1 个仓库"  "$(c -X DELETE "$B/workspaces/$workspace_id/credentials/$repo_cred")"
   # Repositories share credentials but never include credential data in audit details.
@@ -271,7 +271,7 @@ print(json.dumps({"name":"pipeline-build","repository_id":sys.argv[1],"target_ki
   ck "pipeline create" '"id"' "$pipeline_body"
   pipeline=$(printf '%s' "$pipeline_body" | python3 -I -c "import json,sys;print(json.load(sys.stdin).get('id',''))")
   ck "pipeline long definition round trip" '"LONG_VALUE"' "$(c "$B/workspaces/$workspace_id/pipelines/$pipeline" |
-    python3 -I -c 'import json,sys;v=json.load(sys.stdin);d=json.loads(v["definition"]);assert d["env"][0]["value"]=="x"*300;print(json.dumps(d))')"
+    python3 -I -c 'import sys,json;v=json.load(sys.stdin);d=v["definition"];assert v["definition_format"]=="github-actions" and "LONG_VALUE: "+"x"*300 in d, d;print(json.dumps("LONG_VALUE"))')"
   # Reuse the valid payload so each refusal exercises exactly one changed field.
   pipeline_variant() {
     printf '%s' "$pipeline_payload" | python3 -I -c 'import json,sys;v=json.load(sys.stdin);v[sys.argv[1]]=sys.argv[2];print(json.dumps(v))' "$1" "$2"

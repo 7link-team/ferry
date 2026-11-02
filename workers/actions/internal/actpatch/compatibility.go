@@ -36,6 +36,9 @@ func patchCompatibility(moduleDir string) error {
 		{"runner/step.go", "summary, err := io.ReadAll(reader)", "decoded, err := container.CommandFileReader(reader)\n\tif err != nil { return err }\n\tsummary, err := io.ReadAll(decoded)"},
 		{"container/ferry_command_file.go", "func commandFileReader(", "func CommandFileReader("},
 		{"container/parse_env_file.go", "commandFileReader(reader)", "CommandFileReader(reader)"},
+		// GetEnv wrote rc.Env on every call, racing the cancellation monitor's
+		// condition re-evaluation; after creation it is now read-only.
+		{"runner/run_context.go", "\trc.Env[\"ACT\"] = \"true\"\n\treturn rc.Env", "\tif rc.Env[\"ACT\"] != \"true\" {\n\t\trc.Env[\"ACT\"] = \"true\"\n\t}\n\treturn rc.Env"},
 	} {
 		if err := replaceExact(moduleDir, patch.file, patch.before, patch.after); err != nil {
 			return err

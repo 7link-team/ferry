@@ -152,6 +152,8 @@ try {
   });
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
   await page.getByRole('heading', { name: '平台设置', exact: true }).waitFor();
+  // Settings are grouped; the repository group is the long one.
+  await page.getByRole('navigation', { name: '配置分类' }).getByRole('button', { name: '仓库关联', exact: true }).click();
   await page.getByLabel('平台公开访问地址', { exact: true }).waitFor();
   const formScroll = await page.locator('main').evaluate(main => {
     const el = [...main.querySelectorAll('*'), main].find(el => el.scrollHeight > el.clientHeight && ['auto','scroll'].includes(getComputedStyle(el).overflowY));

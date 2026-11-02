@@ -248,11 +248,7 @@ func execute(ctx context.Context, request Request, output io.Writer) (JobResult,
 	// mutated: parallel legs receive their own config and runtime variables.
 	cacheDir := request.CacheDir
 	if cacheDir == "" {
-		base, e := os.UserCacheDir()
-		if e != nil {
-			return result, e
-		}
-		cacheDir = filepath.Join(base, "ferry", "actions-cache")
+		cacheDir = defaultCacheDir()
 	}
 	cache, err := artifactcache.StartHandler(cacheDir, "", "127.0.0.1", 0, nil)
 	if err != nil {
@@ -404,4 +400,14 @@ func containerJob(job *model.Job, platforms map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// defaultCacheDir keeps actions/cache data across jobs. A service account may
+// have no HOME (and so no user cache directory); the temp directory then holds it.
+func defaultCacheDir() string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "ferry", "actions-cache")
 }

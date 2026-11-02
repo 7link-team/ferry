@@ -281,7 +281,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 def finished():
                     run=api(f'/workspaces/{workspace_ops}/pipeline-runs/'+rid)
                     return run if run['state'] not in ('queued','running') else None
-                check('group executable archived',eventually(finished)['state']=='succeeded')
+                state=eventually(finished)['state']
+                if state!='succeeded':
+                    text=''.join(item['chunk'] for item in api(f'/workspaces/{workspace_ops}/pipeline-runs/'+rid+'/logs?after=0')['items'])
+                    print(chr(10).join('RUNLOG| '+line for line in text.splitlines() if 'unable to get git' not in line)[-8000:], flush=True)
+                check('group executable archived',state=='succeeded')
                 return rid
             run1=build('group-v1')
             group_secret='group secret \"quote\" $dollar\nline2'

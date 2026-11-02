@@ -363,3 +363,12 @@ func TestCancellationRunsRemainingStepsAndPostHooks(t *testing.T) {
 		t.Fatalf("post hook missing: %q %v logs=%s", data, err, logs.String())
 	}
 }
+
+func TestDefaultCacheDirWithoutHome(t *testing.T) {
+	for _, key := range []string{"HOME", "XDG_CACHE_HOME", "LocalAppData"} {
+		t.Setenv(key, "")
+	}
+	if dir := defaultCacheDir(); dir == "" || !filepath.IsAbs(dir) {
+		t.Fatalf("cache dir without HOME: %q", dir)
+	}
+}
