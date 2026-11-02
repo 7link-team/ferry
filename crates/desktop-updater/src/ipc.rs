@@ -20,8 +20,8 @@ use windows_sys::Win32::{
         TokenElevation, TokenSessionId, TokenUser,
     },
     Storage::FileSystem::{
-        CreateFileW, FILE_FLAG_OVERLAPPED, FILE_READ_DATA, FILE_WRITE_DATA, OPEN_EXISTING,
-        SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, SYNCHRONIZE,
+        CreateFileW, FILE_FLAG_OVERLAPPED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA,
+        OPEN_EXISTING, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, SYNCHRONIZE,
     },
     System::{
         Pipes::{GetNamedPipeClientProcessId, GetNamedPipeServerProcessId},
@@ -183,8 +183,9 @@ pub fn pipe_name() -> String {
 }
 fn create(name: &str) -> anyhow::Result<NamedPipeServer> {
     // Generic write includes FILE_CREATE_PIPE_INSTANCE. Ordinary clients get
-    // only data read/write + synchronization, never permission to host a pipe.
-    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00100003;;;AU)"
+    // only data read/write, read attributes and synchronization, never permission
+    // to host a pipe. Windows also checks FILE_READ_ATTRIBUTES when opening one.
+    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00100083;;;AU)"
         .encode_utf16()
         .chain(Some(0))
         .collect();
@@ -229,7 +230,7 @@ fn connect_peer(name: &str, expected: &Process) -> anyhow::Result<NamedPipeClien
     let handle = unsafe {
         CreateFileW(
             name.as_ptr(),
-            FILE_READ_DATA | FILE_WRITE_DATA | SYNCHRONIZE,
+            FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
             0,
             std::ptr::null(),
             OPEN_EXISTING,
