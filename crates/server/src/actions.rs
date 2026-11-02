@@ -340,6 +340,8 @@ pub(crate) struct JobPolicies {
     pub(crate) condition: Option<String>,
     /// Whether the job declares `strategy` (a matrix).
     pub(crate) strategy: bool,
+    /// Whether a step of the job uses actions/checkout.
+    pub(crate) checkout: bool,
 }
 pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies> {
     let value: Value = serde_yaml_ng::from_str(&document.workflow).ok()?;
@@ -349,6 +351,16 @@ pub(crate) fn job_policies(document: &Document, key: &str) -> Option<JobPolicies
         environment: job.get("environment").cloned(),
         reusable_workflow: job.get("uses").and_then(Value::as_str).map(str::to_owned),
         strategy: job.get("strategy").is_some(),
+        checkout: job
+            .get("steps")
+            .and_then(Value::as_array)
+            .is_some_and(|steps| {
+                steps.iter().any(|step| {
+                    step.get("uses")
+                        .and_then(Value::as_str)
+                        .is_some_and(|action| action.starts_with("actions/checkout@"))
+                })
+            }),
         condition: job.get("if").map(|value| match value {
             Value::String(text) => text.clone(),
             other => other.to_string(),

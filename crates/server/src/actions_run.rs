@@ -732,56 +732,6 @@ fn workflow_timeout(workflow: &str, job: &str) -> u64 {
         .unwrap_or(WORKER_SECONDS)
 }
 
-const LEGACY_SHELL: &str =
-    "sh \"$1\"\ncode=$?\nprintf '%s' \"$code\" > \"$__FERRY_EXIT_FILE\"\nexit \"$code\"\n";
-
-fn converted_legacy_job(workflow: &Value, job: &str) -> bool {
-    let raw = &workflow["jobs"][job];
-    raw["defaults"]["run"]["shell"] == "sh {0}"
-        && raw["steps"]
-            .as_array()
-            .is_some_and(|steps| steps.iter().any(|step| step["id"] == "prepare_workspace"))
-}
-
-fn legacy_exit_files(workflow: &mut Value, job: &Job, workdir: &str) -> Vec<(String, i64)> {
-    if !converted_legacy_job(workflow, &job.key) {
-        return Vec::new();
-    }
-    let raw = &mut workflow["jobs"][&job.key];
-    let Some(steps) = raw["steps"].as_array_mut() else {
-        return Vec::new();
-    };
-    let mut files = Vec::new();
-    for step in steps {
-        let Some(id) = step["id"].as_str().map(str::to_owned) else {
-            continue;
-        };
-        if !(id.starts_with("legacy_") || id.starts_with("checkout_")) || step.get("run").is_none()
-        {
-            continue;
-        }
-        let Some(index) = job
-            .steps
-            .iter()
-            .find(|item| item.key == id)
-            .map(|item| item.index)
-        else {
-            continue;
-        };
-        let file = format!(".ferry-step-exit-{id}");
-        let env = step
-            .as_object_mut()
-            .unwrap()
-            .entry("env")
-            .or_insert_with(|| json!({}));
-        env["__FERRY_EXIT_FILE"] = json!(format!("{workdir}/{file}"));
-        // Preserve the final command's status via the existing host file transport.
-        step["shell"] = json!(format!("sh \"{workdir}/.ferry-legacy-shell\" {{0}}"));
-        files.push((file, index));
-    }
-    files
-}
-
 fn state(value: &str) -> &str {
     match value {
         "success" => "succeeded",
@@ -1098,11 +1048,15 @@ async fn execute_private(
     .await?;
     let environment = history::credential_environment(ch, private, credential).await?;
     let workdir = format!("{private}/source");
-    // Planning only evaluates the strategy; it needs no sources.
+    // Planning only evaluates the strategy; it needs no sources. As on GitHub,
+    // a job gets the repository only through a checkout step (or a reusable
+    // workflow, whose file lives in the repository).
+    let fetches = job.reusable()
+        || crate::actions::job_policies(&snapshot.document, &job.key)
+            .is_some_and(|policies| policies.checkout);
     let checkout = if leg.plan
+        || !fetches
         || run.repo_url.is_empty()
-        || serde_yaml_ng::from_str::<Value>(&snapshot.document.workflow)
-            .is_ok_and(|workflow| converted_legacy_job(&workflow, &job.key))
         || snapshot
             .checkouts
             .iter()
@@ -1235,25 +1189,6 @@ async fn execute_private(
     let workflow = checkout_workflow(snapshot, job, variables, &mut secrets)?;
     let mut workflow: Value =
         serde_yaml_ng::from_str(&workflow).map_err(|_| ApiError::bad("Actions YAML 无效。"))?;
-    let exit_files = legacy_exit_files(&mut workflow, job, &workdir);
-    if !exit_files.is_empty() {
-        upload(
-            ch,
-            &format!("{workdir}/.ferry-legacy-shell"),
-            LEGACY_SHELL.into(),
-            0o600,
-        )
-        .await?;
-        for step in workflow["jobs"][&job.key]["steps"]
-            .as_array_mut()
-            .into_iter()
-            .flatten()
-        {
-            if let Some(name) = step["name"].as_str() {
-                step["name"] = json!(runtime_path(name, run));
-            }
-        }
-    }
     let container = job.image != "host" || workflow["jobs"][&job.key].get("container").is_some();
     let job_env = workflow["jobs"][&job.key]
         .as_object_mut()
@@ -1386,28 +1321,6 @@ async fn execute_private(
     }
     if code != 0 && result.state == "success" {
         return Err(ApiError::bad("Actions worker 异常退出。"));
-    }
-    for (file, index) in exit_files {
-        // Skipped, cancelled or timed-out steps may not have produced a file.
-        if let Ok((_, mut stream)) = ch.read_file(&format!("{workdir}/{file}")).await {
-            let mut bytes = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                bytes.extend_from_slice(&chunk?);
-                if bytes.len() > 16 {
-                    return Err(ApiError::bad("流水线步骤退出状态无效。"));
-                }
-            }
-            let code = std::str::from_utf8(&bytes)
-                .ok()
-                .and_then(|code| code.parse::<u8>().ok())
-                .ok_or_else(|| ApiError::bad("流水线步骤退出状态无效。"))?;
-            steps::Entity::update_many()
-                .col_expr(steps::Column::ExitCode, Expr::value(i32::from(code)))
-                .filter(steps::Column::RunId.eq(run.id))
-                .filter(steps::Column::StepIndex.eq(index))
-                .exec(&s.db)
-                .await?;
-        }
     }
     let paths: Vec<_> = result
         .artifacts
@@ -1949,6 +1862,17 @@ async fn event(
         &text,
     )
     .await?;
+    if let Some(step) = step
+        && value["level"] == "error"
+        && let Some(code) = step_exit_code(message)
+    {
+        steps::Entity::update_many()
+            .col_expr(steps::Column::ExitCode, Expr::value(code))
+            .filter(steps::Column::RunId.eq(run.id))
+            .filter(steps::Column::StepIndex.eq(step.index))
+            .exec(&s.db)
+            .await?;
+    }
     if let Some(step) = step {
         let matrix = value["matrix"]
             .as_object()
@@ -1982,8 +1906,31 @@ async fn event(
     Ok(())
 }
 
+/// A failed run step's exit status as the engine reports it: `exit status N`
+/// on hosts, `exitcode 'N': failure` in containers.
+fn step_exit_code(message: &str) -> Option<i32> {
+    let message = message.trim();
+    message
+        .strip_prefix("exit status ")
+        .or_else(|| {
+            message
+                .strip_prefix("exitcode '")
+                .and_then(|rest| rest.strip_suffix("': failure"))
+        })
+        .and_then(|code| code.parse().ok())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn step_exit_codes_come_from_engine_error_lines() {
+        use super::step_exit_code;
+        assert_eq!(step_exit_code("exit status 7"), Some(7));
+        assert_eq!(step_exit_code("exitcode '2': failure"), Some(2));
+        assert_eq!(step_exit_code("exit status seven"), None);
+        assert_eq!(step_exit_code("Error: exit status 7 happened"), None);
+    }
+
     #[test]
     fn github_repository_comes_from_the_url_without_credentials() {
         use super::repository_parts;
@@ -2036,68 +1983,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn converted_commands_preserve_final_shell_status_and_record_exact_exit_code() {
-        use std::process::Command;
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(".ferry-legacy-shell"), LEGACY_SHELL).unwrap();
-        let input = json!({"workdir":"/tmp/build", "steps":[
-            {"name":"last command wins", "run":"false; printf retained"},
-            {"name":"failure", "run":"exit 7"}]})
-        .to_string();
-        let doc = crate::actions::document(
-            &crate::pipelines::convert_legacy(&input, "host", "1").unwrap(),
-        )
-        .unwrap();
-        let (jobs, _) = crate::actions::parse(&doc).unwrap();
-        let mut workflow: Value = serde_yaml_ng::from_str(&doc.workflow).unwrap();
-        let files = legacy_exit_files(
-            &mut workflow,
-            &jobs[0],
-            &dir.path().to_string_lossy().replace('\\', "/"),
-        );
-        assert_eq!(files.len(), 2);
-        for (position, expected) in [(1, 0), (2, 7)] {
-            let step = &workflow["jobs"]["build"]["steps"][position];
-            let script = dir.path().join(format!("step{position}.sh"));
-            std::fs::write(&script, step["run"].as_str().unwrap()).unwrap();
-            let exit_file = dir.path().join(&files[position - 1].0);
-            assert_eq!(
-                step["env"]["__FERRY_EXIT_FILE"],
-                exit_file.to_string_lossy().replace('\\', "/")
-            );
-            let shell = step["shell"]
-                .as_str()
-                .unwrap()
-                .replace("{0}", &quote(&script.to_string_lossy()));
-            let mut command = Command::new("sh");
-            command.args(["-c", &shell]).env(
-                "__FERRY_EXIT_FILE",
-                step["env"]["__FERRY_EXIT_FILE"].as_str().unwrap(),
-            );
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                command.creation_flags(0x08000000);
-            }
-            let output = command.output().unwrap();
-            assert_eq!(
-                output.status.code(),
-                Some(expected),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            assert_eq!(
-                std::fs::read_to_string(exit_file).unwrap(),
-                expected.to_string()
-            );
-            if expected == 0 {
-                assert_eq!(output.stdout, b"retained");
-            }
-        }
-        let mut native = json!({"jobs":{"build":{"steps":[{"id":"legacy_1", "run":"exit 7"}]}}});
-        assert!(legacy_exit_files(&mut native, &jobs[0], "/tmp").is_empty());
-    }
     use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel, Schema};
 
     fn test_job(key: &str, needs: &[&str]) -> Job {
