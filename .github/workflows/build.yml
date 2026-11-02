@@ -315,26 +315,26 @@ jobs:
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-platform-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-ui.mjs
       - name: Workspace management browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-workspace-admin-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-workspace-admin-ui.mjs
       - name: Import/export browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-transfers-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-transfers-ui.mjs
       - name: Template browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-templates-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-templates-ui.mjs
       - name: Deployment form browser acceptance (three consecutive runs)
         if: matrix.harness == 'build-ui'
         run: |
           for round in 1 2 3; do
             echo "Deployment form acceptance round $round/3"
-            node scripts/test-manifest-ui.mjs
+            python3 .github/scripts/annotate-failures.py --run node scripts/test-manifest-ui.mjs
           done
       - name: Preferences, dictionaries and heartbeat browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-maintenance-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-maintenance-ui.mjs
       - name: Production insights, themes and all typed value editors in Chromium
         if: matrix.harness == 'build-ui'
         env:
@@ -352,19 +352,19 @@ jobs:
             sleep 0.2
           done
           if [ "$ready" != true ]; then cat "$RUNNER_TEMP/insights-preview.log"; exit 1; fi
-          node scripts/test-contribution-ui.mjs
-          node scripts/test-theme-ui.mjs
-          node scripts/test-typed-values-ui.mjs
-          YAML_EDITOR_UI_URL=http://127.0.0.1:5193 node scripts/test-yaml-editor-performance.mjs
-          REFERENCE_UI_URL=http://127.0.0.1:5193 node scripts/test-reference-display-ui.mjs
-          EXECUTION_UI_URL=http://127.0.0.1:5193 node scripts/test-execution-locale-ui.mjs
-          node scripts/test-locale-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-contribution-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-theme-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-typed-values-ui.mjs
+          YAML_EDITOR_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-yaml-editor-performance.mjs
+          REFERENCE_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-reference-display-ui.mjs
+          EXECUTION_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-execution-locale-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-locale-ui.mjs
       - name: Scheduled task browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-cron-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-cron-ui.mjs
       - name: Alert rules and event browser acceptance
         if: matrix.harness == 'build-ui'
-        run: node scripts/test-alerts-ui.mjs
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-alerts-ui.mjs
       - name: Cluster fencing and three-instance Runner acceptance
         if: matrix.harness == 'build-ui'
         run: |
@@ -386,23 +386,23 @@ jobs:
           done
           cargo test --locked -p ferry-server cluster::tests -- --include-ignored
           cargo test --locked -p ferry-server cluster_update_recovery -- --include-ignored
-          node scripts/test-cluster.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-cluster.mjs
       - name: Marketplace and browser repository authorization
         if: matrix.harness == 'build-ui'
         run: |
           trap 'echo "::error::Browser acceptance failed: $BASH_COMMAND"' ERR
-          node scripts/test-marketplace-ui.mjs
-          node scripts/test-repository-auth-ui.mjs
-          node scripts/test-actions-ui.mjs
-          node scripts/test-actions-canvas.mjs
-          node scripts/test-manual-approval.mjs
-          node scripts/test-named-connection-ui.mjs
-          node scripts/test-connection-monitor-ui.mjs
-          node scripts/test-runner-connection-ui.mjs
-          node scripts/test-host-workspace-ui.mjs
-          node scripts/test-host-workspace.mjs
-          node scripts/test-table-layout-ui.mjs
-          node scripts/test-resource-details-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-marketplace-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-repository-auth-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-actions-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-actions-canvas.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-manual-approval.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-named-connection-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-connection-monitor-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-runner-connection-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-host-workspace-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-host-workspace.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-table-layout-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-resource-details-ui.mjs
       - name: Pipeline environments and classification acceptance
         if: matrix.harness == 'pipelines'
         run: python3 scripts/test-pipeline-classification.py

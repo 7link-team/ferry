@@ -163,7 +163,7 @@ try {
     if(mode==='stack') {
       await editor.getByText('应用高级配置：更新策略、标签与模式覆盖',{exact:true}).click();
       await editor.getByRole('combobox',{name:'更新策略',exact:true}).click();
-      await p.getByRole('option',{name:'rolling',exact:true}).click();
+      await p.getByRole('option',{name:'滚动更新',exact:true}).click();
       await editor.getByLabel('最大不可用副本数',{exact:true}).fill('0');
     }
     const saving = p.waitForResponse(r=>r.url().endsWith('/deployments')&&r.request().method()==='POST');

@@ -173,7 +173,7 @@ try {
 
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await report.locator('svg[role="img"]').scrollIntoViewIfNeeded();
+    await report.locator('svg[role="img"]').evaluate(node => node.scrollIntoView({ block: 'center' }));
     const width = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: innerWidth }));
     assert(width.document <= width.viewport + 1, `page overflow at ${viewport.width}: ${JSON.stringify(width)}`);
     await page.screenshot({ path: resolve(output, `${viewport.width}-heatmap.png`) });

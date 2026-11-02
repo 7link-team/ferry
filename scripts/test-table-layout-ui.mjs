@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer as netServer } from 'node:net';
-import { createServer as viteServer } from 'vite';
+import { preview } from 'vite';
 import { chromium } from 'playwright';
 const work = await mkdtemp(join(tmpdir(), 'table-layout-'));
 const listener = netServer();
@@ -29,8 +29,8 @@ try {
   await new Promise(r => frontend.listen(0, '127.0.0.1', r));
   const frontendPort = frontend.address().port;
   await new Promise(r => frontend.close(r));
-  vite = await viteServer({ server: { host: '127.0.0.1', port: frontendPort, strictPort: true, proxy: { '/api': { target: backend, ws: true } } } });
-  await vite.listen();
+  // Exercise the shipped UI without development dependency scanning/HMR.
+  vite = await preview({ preview: { host: '127.0.0.1', port: frontendPort, strictPort: true, proxy: { '/api': { target: backend, ws: true } } } });
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
   const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
@@ -169,7 +169,7 @@ try {
   throw error;
 } finally {
   await browser?.close();
-  await vite?.close();
+  if (vite) await new Promise(resolve => vite.httpServer.close(resolve));
   server.kill('SIGTERM');
   await new Promise(r => { if (server.exitCode !== null) r(); else server.once('exit', r); });
   await log.close();

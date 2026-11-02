@@ -127,13 +127,8 @@ jobs:
 
  const result=await eventually(async()=>{const row=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id)).json();return ['queued','running','cancelling'].includes(row.state)?null:row});
  const logs=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id+'/logs')).json();
- if(process.platform==='win32') {
-  assert.equal(result.state,'failed',JSON.stringify(result));
-  assert(logs.items.some(row=>row.chunk.includes('需要 Linux 或 macOS 执行器')));
- } else {
-  assert.equal(result.state,'succeeded',JSON.stringify(result));
-  assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
- }
+ assert.equal(result.state,'succeeded',JSON.stringify(result));
+ assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id);
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();
  assert(await page.getByLabel('任务名称',{exact:true}).isDisabled());

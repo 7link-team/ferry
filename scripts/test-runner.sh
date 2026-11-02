@@ -75,14 +75,15 @@ bad()  { fail=$((fail + 1)); printf '  FAIL %s\n' "$1"; }
 
 
 ck() { # ck <label> <expected-regex> <actual>
-  if printf '%s' "$3" | grep -q "$2"; then
+  # Consume all input: grep -q can SIGPIPE printf and fail under pipefail.
+  if printf '%s' "$3" | grep "$2" >/dev/null; then
     ok "$1"
   else
     bad "$1: want /$2/ got: $(printf '%s' "$3" | head -c 300)"
   fi
 }
 ckn() { # ckn <label> <unwanted-regex> <actual>
-  if printf '%s' "$3" | grep -q "$2"; then
+  if printf '%s' "$3" | grep "$2" >/dev/null; then
     bad "$1: did not want /$2/ got: $(printf '%s' "$3" | head -c 300)"
   else
     ok "$1"
@@ -247,14 +248,29 @@ for _ in $(seq 1 60); do
   [ "$(printf '%s' "$EXEC" | field state)" = failed ] && break
   sleep 0.5
 done
-EXEC_LOGS=$(c "$B/workspaces/$WORKSPACE_OPS/pipeline-runs/$EXEC_RUN/logs?after=0")
 # Pipelines run as Actions jobs: like GitHub, a step's stdout and stderr both
 # land in the job log, one line each, prefixed with the job.
-EXEC_OUTPUT=$(printf '%s' "$EXEC_LOGS" | python3 -I -c 'import json,sys
-print("".join(i["chunk"] for i in json.load(sys.stdin)["items"]))')
+# The API caps each page at 200 records; warnings must not hide later output.
+EXEC_AFTER=0
+: >"$WORK/exec-output.log"
+while true; do
+  c "$B/workspaces/$WORKSPACE_OPS/pipeline-runs/$EXEC_RUN/logs?after=$EXEC_AFTER" >"$WORK/exec-page.json"
+  EXEC_NEXT=$(python3 -I -c 'import json,sys
+page=json.load(open(sys.argv[1],encoding="utf-8"))
+after=int(sys.argv[3]); items=page["items"]; next_seq=page["next_seq"]
+assert (not items and next_seq == after) or (items and next_seq == items[-1]["seq"] and all(after < item["seq"] <= next_seq for item in items)), page
+with open(sys.argv[2],"a",encoding="utf-8") as output:
+    output.write("".join(item["chunk"] for item in items))
+print(next_seq)' "$WORK/exec-page.json" "$WORK/exec-output.log" "$EXEC_AFTER") || die "could not read exec logs"
+  [ "$EXEC_NEXT" = "$EXEC_AFTER" ] && break
+  EXEC_AFTER=$EXEC_NEXT
+done
+EXEC_OUTPUT=$(cat "$WORK/exec-output.log")
+EXEC_FAILURES=$fail
 ck "exec returns stdout" '^\[build\] out$' "$EXEC_OUTPUT"
 ck "exec returns stderr" '^\[build\] err$' "$EXEC_OUTPUT"
 ck "exec returns the code" '"exit_code":7' "$EXEC"
+[ "$fail" = "$EXEC_FAILURES" ] || tail -30 "$WORK/exec-output.log"
 
 # The runner's `Session::Failed` path, which is how every remote error reaches
 # the operator. Reachable without adding a route.

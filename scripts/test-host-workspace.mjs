@@ -62,7 +62,7 @@ try {
   }
   console.log('PASS real mounted partitions and hidden-file filtering, including Windows attributes and quoted paths');
   browser = await chromium.launch({ headless: true, ...(process.env.CHROME_BINARY ? { executablePath: process.env.CHROME_BINARY } : {}) });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1440, height: 900 } });
   await context.addCookies(cookie.split('; ').map(value => { const at = value.indexOf('='); return { name: value.slice(0, at), value: value.slice(at + 1), url: origin }; }));
   const page = await context.newPage();
   // ConPTY asks for cursor position before node metadata may arrive.
@@ -79,14 +79,14 @@ try {
     ws.on('close', () => { item.closed = true; });
   });
   await page.goto(`${origin}/tools/host/hosts/${host.id}/workspace?tool=terminal`);
-  await page.waitForURL(`${origin}/workspaces/${workspace_tools}/nodes/${host.id}/workspace?tool=terminal`);
+  await page.waitForURL(`${origin}/zh-CN/workspaces/${workspace_tools}/nodes/${host.id}/workspace?tool=terminal`);
   await page.getByLabel('实时主机监控').waitFor({ timeout: 20_000 });
   await page.getByLabel(/主机连接延迟：\d+ ms/).waitFor({ timeout: 20_000 });
   await until(() => sessions.length === 1, 'original terminal session');
   const originalPane = page.locator('section[aria-label$="分屏"]').first();
   await originalPane.getByRole('tab', { name: '文件', exact: true }).click();
-  if (process.platform === 'win32') await originalPane.getByText('当前位置：此电脑', { exact: true }).waitFor();
-  else await originalPane.getByText('当前位置：/', { exact: true }).waitFor();
+  if (process.platform === 'win32') await originalPane.getByText('当前位置： 此电脑', { exact: true }).waitFor();
+  else await originalPane.getByText('当前位置： /', { exact: true }).waitFor();
   await originalPane.getByRole('textbox', { name: '目录路径', exact: true }).fill(fixtureDir.replaceAll('\\', '/'));
   await originalPane.getByRole('textbox', { name: '目录路径', exact: true }).press('Enter');
   await originalPane.getByRole('button', { name: '预览 visible.txt', exact: true }).waitFor();

@@ -93,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix='runner-service-',
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     origin = f'http://127.0.0.1:{port}'
     env = dict(os.environ, FERRY_DATA_DIR=str(root/'server'), FERRY_BIND=f'127.0.0.1:{port}')
+    if os.environ.get('RUNNER_TEST_ACTIONS') == '1':
+        # Upgrade fixtures copy the server away from its bundled workers.
+        env['ACTIONS_WORKER_DIR'] = str(Path(os.environ.get('ACTIONS_WORKER_DIR', 'target/debug/actions-workers')).resolve())
+        worker_os = {'Linux':'linux', 'Darwin':'darwin', 'Windows':'windows'}[system]
+        worker_arch = {'x86_64':'amd64', 'AMD64':'amd64', 'aarch64':'arm64', 'arm64':'arm64'}[platform.machine()]
+        worker = Path(env['ACTIONS_WORKER_DIR']) / f'actions-worker-{worker_os}-{worker_arch}{".exe" if os.name == "nt" else ""}'
+        assert worker.is_file(), f'Build the Actions worker before upgrade acceptance: {worker}'
     env.pop('FERRY_DATABASE_URL', None)
     log = (root/'server.log').open('w')
     server = subprocess.Popen([str(server_binary)], env=env, stdout=log, stderr=log,

@@ -1,15 +1,42 @@
 /** Focused real ReactFlow browser interactions, with no Rust/Go build required. */
 import assert from 'node:assert/strict';
-import { createServer } from 'vite';
+import { build } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath } from 'node:url';
+import { createServer as createHttpServer } from 'node:http';
 import { chromium } from 'playwright';
-const server = await createServer({ ...(process.env.FERRY_CANVAS_CACHE ? {cacheDir:process.env.FERRY_CANVAS_CACHE} : {}), server: { host: '127.0.0.1', port: 5174 }, plugins: [{ name: 'canvas-test', configureServer(server) {
- server.middlewares.use('/__canvas', (_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"/><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script></head><body><div id="root"></div><script type="module" src="/__canvas-entry.tsx"></script></body></html>`); });
- }, resolveId(id) { if(id==='/__canvas-entry.tsx') return id; }, load(id) { if(id==='/__canvas-entry.tsx') return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/components/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'},{value:'host-group:group',label:'Local group'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={()=>{}} renderCheckout={(job,index)=> <button onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></main>};createRoot(document.getElementById('root')).render(<App/>);`; } }] });
+const entryId = fileURLToPath(new URL('./__canvas-entry.tsx', import.meta.url));
+// Build the real component fixture without app-wide development scanning/HMR.
+const bundle = await build({
+ configFile: false,
+ logLevel: 'warn',
+ resolve: { alias: { '@': fileURLToPath(new URL('../src', import.meta.url)) } },
+ plugins: [react(), tailwindcss(), { name: 'canvas-test',
+  resolveId(id) { if(id === entryId) return id; },
+  load(id) { if(id === entryId) return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/components/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'},{value:'host-group:group',label:'Local group'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={()=>{}} renderCheckout={(job,index)=> <button onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></main>};createRoot(document.getElementById('root')).render(<App/>);`; }
+ }],
+ build: { write: false, rollupOptions: { input: entryId } },
+});
+const output = bundle.output;
+const scripts = output.filter(item => item.type === 'chunk' && item.isEntry);
+const styles = output.filter(item => item.fileName.endsWith('.css'));
+const server = createHttpServer((request, response) => {
+ const path = new URL(request.url, 'http://localhost').pathname.slice(1);
+ const asset = output.find(item => item.fileName === path);
+ if (asset) {
+  response.setHeader('Content-Type', asset.type === 'chunk' || path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'application/octet-stream');
+  response.end(asset.type === 'chunk' ? asset.code : asset.source);
+  return;
+ }
+ response.setHeader('Content-Type', 'text/html');
+ response.end(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"/>${styles.map(item => `<link rel="stylesheet" href="/${item.fileName}">`).join('')}</head><body><div id="root"></div>${scripts.map(item => `<script type="module" src="/${item.fileName}"></script>`).join('')}</body></html>`);
+});
 let browser;
 try {
- await server.listen();browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROME_PATH?{executablePath:process.env.PLAYWRIGHT_CHROME_PATH}:{})});
- const context=await browser.newContext({viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write']});
- const page=await context.newPage(),errors=[],workers=[],failed=[];page.on('pageerror',error=>errors.push(error.message));page.on('response',response=>{if(response.status()>=400)failed.push(`${response.status()} ${response.url()}`)});page.on('worker',worker=>workers.push(worker.url()));await page.goto(server.resolvedUrls.local[0]+'__canvas');
+ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROME_PATH?{executablePath:process.env.PLAYWRIGHT_CHROME_PATH}:{})});
+ const context=await browser.newContext({locale:'zh-CN',extraHTTPHeaders:{'Accept-Language':'zh-CN'},viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write']});
+ const page=await context.newPage(),errors=[],workers=[],failed=[];page.on('pageerror',error=>errors.push(error.message));page.on('response',response=>{if(response.status()>=400)failed.push(`${response.status()} ${response.url()}`)});page.on('worker',worker=>workers.push(worker.url()));await page.goto(`http://127.0.0.1:${server.address().port}/__canvas`);
  await page.locator('[aria-label="流水线画布"]').waitFor();
  const bottomGap=await page.evaluate(()=>{const main=document.querySelector('main').getBoundingClientRect(),canvas=document.querySelector('[aria-label="流水线画布"]').getBoundingClientRect();return main.bottom-canvas.bottom});
  assert(bottomGap<32,`canvas leaves excessive blank space: ${bottomGap}px`);
@@ -95,4 +122,4 @@ try {
  assert.deepEqual(errors,[]);
  assert.deepEqual(failed,[]);
  console.log('PASS: serial/parallel edges, dependency removal, cycle rejection, save/reload, checkout cleanup and 1280/900/390 layout');
-} finally {await browser?.close();await server.close();}
+} finally {await browser?.close();await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}

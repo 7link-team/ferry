@@ -43,23 +43,23 @@ try {
   const root=`/workspaces/${workspace_tenant}`;
   const host=await post(owner,root+'/nodes',{name:'Cron UI runner',connection:'runner'});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes/${host.id}?tab=alerts`);
-  await p.getByRole('tab',{name:'报警',exact:true}).waitFor();
+  await p.getByRole('tab',{name:'告警',exact:true}).waitFor();
   const [eventsResponse]=await Promise.all([
     p.waitForResponse(response=>response.url().includes('/alert-events?') && response.url().includes(`target_ref=${host.id}`) && response.ok()),
     p.getByRole('tab',{name:'告警事件'}).click(),
   ]);
   assert.equal((await eventsResponse.json()).total,0);
-  await p.getByRole('tab',{name:'报警规则'}).click();
+  await p.getByRole('tab',{name:'告警规则'}).click();
   const nodeAlertUrl=p.url();
-  await p.getByRole('button',{name:'新增报警规则'}).click();
-  let nodeAlertDialog=p.getByRole('dialog',{name:'新增报警规则'});
+  await p.getByRole('button',{name:'新增告警规则'}).click();
+  let nodeAlertDialog=p.getByRole('dialog',{name:'新增告警规则'});
   await nodeAlertDialog.waitFor();
   assert.equal(p.url(),nodeAlertUrl,'opening a node alert must preserve its route');
   await nodeAlertDialog.getByRole('button',{name:'取消',exact:true}).click();
   await nodeAlertDialog.waitFor({state:'hidden'});
   assert.equal(p.url(),nodeAlertUrl,'cancelling must stay on node monitoring');
-  await p.getByRole('button',{name:'新增报警规则'}).click();
-  nodeAlertDialog=p.getByRole('dialog',{name:'新增报警规则'});
+  await p.getByRole('button',{name:'新增告警规则'}).click();
+  nodeAlertDialog=p.getByRole('dialog',{name:'新增告警规则'});
   await nodeAlertDialog.getByRole('textbox',{name:/^名称/}).fill('Node scoped rule');
   const [nodeRuleResponse]=await Promise.all([
     p.waitForResponse(response=>new URL(response.url()).pathname===`/api${root}/alert-rules` && response.request().method()==='POST'),
@@ -70,7 +70,7 @@ try {
   await nodeAlertDialog.waitFor({state:'hidden'});
   await p.getByRole('row').filter({hasText:'Node scoped rule'}).waitFor();
   assert.equal(p.url(),nodeAlertUrl,'saved node alert must refresh in place');
-  assert.equal(await p.getByRole('tab',{name:'报警',exact:true}).getAttribute('aria-selected'),'true');
+  assert.equal(await p.getByRole('tab',{name:'告警',exact:true}).getAttribute('aria-selected'),'true');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/alert-rules`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
