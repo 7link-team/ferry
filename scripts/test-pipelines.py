@@ -528,7 +528,7 @@ jobs:
         selected = trigger(grouped); all_runs.append(selected['id'])
         row = done(selected['id'])
         check('group chooses one online host and snapshots it', row['state'] == 'succeeded' and row['host_id'] == runner
-              and row['steps'][0]['name'] == 'group ' + str(row['number']), 'selected runner; expanded step name')
+              and row['steps'][0]['name'].split(' / ', 1)[-1] == 'group ' + str(row['number']), 'selected runner; expanded step name')
         empty_group = create('host-groups', {'name': 'empty'})
         empty = pipeline(empty_group, [{'name': 'empty', 'run': 'true'}], target_kind='host-group')
         api(f'/workspaces/{workspace_ops}/pipelines/' + empty + '/runs', method='POST', status=400)
