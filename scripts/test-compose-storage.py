@@ -59,7 +59,7 @@ exec "$STORAGE_TEST_DOCKER" "$@"
                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             if check and result.returncode:
                 # Do not dump Compose configuration, env files or seeded secrets.
-                raise AssertionError(f'{args[0]} failed ({result.returncode}):\n{result.stdout[-6000:]}')
+                raise AssertionError(f'{args[0]} failed ({result.returncode}):\n{result.stdout[-1800:]}')
             return result
 
         def quick(*args, failure=None, check=True):
