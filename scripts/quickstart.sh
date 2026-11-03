@@ -468,7 +468,10 @@ if [ -n "$migrate_storage" ]; then
                 rm /backup/target-hashes
                 (cd /source && find . -exec stat -c "%N|%u|%g|%a|%Y|%F|%h" {} \; | LC_ALL=C sort) > /backup/source-metadata
                 (cd "/target/$name" && find . -exec stat -c "%N|%u|%g|%a|%Y|%F|%h" {} \; | LC_ALL=C sort) > /backup/target-metadata
-                cmp /backup/source-metadata /backup/target-metadata
+                if ! cmp /backup/source-metadata /backup/target-metadata; then
+                    diff -u /backup/source-metadata /backup/target-metadata | head -80 >&2 || true
+                    exit 1
+                fi
                 mv /backup/source-metadata "/backup/$name.metadata"
                 rm /backup/target-metadata
             ' sh "$item"
