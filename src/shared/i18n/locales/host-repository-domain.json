@@ -429,7 +429,8 @@
     "manifest-extra.003": "添加{{value1}}",
     "manifest-extra.004": "{{value1}}端口",
     "repository.group": "仓库分组",
-    "repository.allGroups": "全部分组"
+    "repository.allGroups": "全部分组",
+    "repository-monitor.notificationLanguage": "通知语言"
   },
   "en-US": {
     "repository.loadingConnections": "Loading repository connections…",
@@ -861,7 +862,8 @@
     "manifest-extra.003": "Add {{value1}}",
     "manifest-extra.004": "{{value1}} port",
     "repository.group": "Repository group",
-    "repository.allGroups": "All groups"
+    "repository.allGroups": "All groups",
+    "repository-monitor.notificationLanguage": "Notification language"
   },
   "zh-TW": {
     "repository.loadingConnections": "正在載入倉庫連線…",
@@ -1293,7 +1295,8 @@
     "manifest-extra.003": "新增{{value1}}",
     "manifest-extra.004": "{{value1}}連接埠",
     "repository.group": "倉庫分組",
-    "repository.allGroups": "全部分組"
+    "repository.allGroups": "全部分組",
+    "repository-monitor.notificationLanguage": "通知語言"
   },
   "ja-JP": {
     "repository.loadingConnections": "リポジトリ接続を読み込み中…",
@@ -1725,7 +1728,8 @@
     "manifest-extra.003": "{{value1}}を追加",
     "manifest-extra.004": "{{value1}}のポート",
     "repository.group": "リポジトリグループ",
-    "repository.allGroups": "すべてのグループ"
+    "repository.allGroups": "すべてのグループ",
+    "repository-monitor.notificationLanguage": "通知言語"
   },
   "ko-KR": {
     "repository.loadingConnections": "저장소 연결을 불러오는 중…",
@@ -2157,7 +2161,8 @@
     "manifest-extra.003": "{{value1}} 추가",
     "manifest-extra.004": "{{value1}} 포트",
     "repository.group": "저장소 그룹",
-    "repository.allGroups": "모든 그룹"
+    "repository.allGroups": "모든 그룹",
+    "repository-monitor.notificationLanguage": "알림 언어"
   },
   "ms-MY": {
     "repository.loadingConnections": "Memuatkan sambungan repositori…",
@@ -2589,6 +2594,7 @@
     "manifest-extra.003": "Tambah {{value1}}",
     "manifest-extra.004": "Port {{value1}}",
     "repository.group": "Kumpulan repositori",
-    "repository.allGroups": "Semua kumpulan"
+    "repository.allGroups": "Semua kumpulan",
+    "repository-monitor.notificationLanguage": "Bahasa pemberitahuan"
   }
 }

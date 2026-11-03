@@ -742,5 +742,6 @@
   "actions.bindingRequired": "每個工作需要執行器綁定或所選環境的執行主機。",
   "actions.executorReferenced": "執行器仍被 Actions 工作引用，請先修改工作綁定。",
   "actions.executorBusy": "執行器仍有 Actions 工作尚未結束。",
-  "actions.runCommand": "執行命令"
+  "actions.runCommand": "執行命令",
+  "repository.monitor.languageInvalid": "請選擇支援的通知語言。"
 }

@@ -742,5 +742,6 @@
   "actions.bindingRequired": "各ジョブには実行エンジンのバインド、または選択した環境の実行ホストが必要です。",
   "actions.executorReferenced": "この実行エンジンは Actions ジョブで参照されています。先にジョブのバインドを変更してください。",
   "actions.executorBusy": "この実行エンジンには未完了の Actions ジョブがあります。",
-  "actions.runCommand": "コマンドを実行"
+  "actions.runCommand": "コマンドを実行",
+  "repository.monitor.languageInvalid": "対応する通知言語を選択してください。"
 }

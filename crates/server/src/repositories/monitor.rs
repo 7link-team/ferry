@@ -44,6 +44,9 @@ enum Mode {
 fn default_poll_minutes() -> u32 {
     1
 }
+fn default_notification_language() -> String {
+    crate::i18n::Locale::EnUs.tag().into()
+}
 
 const KINDS: &[&str] = &[
     "repository.created",
@@ -104,6 +107,8 @@ struct Config {
     events: Vec<String>,
     secret: String,
     webhook: String,
+    #[serde(default = "default_notification_language")]
+    notification_language: String,
 }
 #[derive(Deserialize)]
 pub struct Body {
@@ -124,6 +129,8 @@ pub struct Body {
     webhook: String,
     #[serde(default)]
     clear_webhook: bool,
+    #[serde(default)]
+    notification_language: Option<String>,
 }
 fn aad(workspace: i64, id: i64) -> String {
     format!("repository-monitor:{workspace}:{id}")
@@ -156,6 +163,7 @@ pub async fn get(
     let config = match &row {
         Some(row) => decode(&s, row)?,
         None => Config {
+            notification_language: default_notification_language(),
             mode: if connection.provider == "git" {
                 Mode::Poll
             } else {
@@ -178,6 +186,7 @@ pub async fn get(
         },
     };
     let mut result = view(row.as_ref(), &config, &connection);
+    result["notification_language"] = json!(config.notification_language);
     // Notification URLs can contain credentials; only editors receive the value.
     if scope.permissions.contains("repositories.update") {
         result["webhook"] = json!(config.webhook);
@@ -378,6 +387,22 @@ pub async fn update(
             crate::i18n::Message::new("repository.monitor.configurationRequired"),
         ));
     }
+    let notification_language = body.notification_language.unwrap_or_else(|| {
+        if previous.notification_language.is_empty() {
+            default_notification_language()
+        } else {
+            previous.notification_language
+        }
+    });
+    if !crate::i18n::Locale::ALL
+        .iter()
+        .any(|locale| locale.tag() == notification_language)
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.languageInvalid"),
+        ));
+    }
     let config = Config {
         mode: body.mode,
         poll_interval_minutes: body.poll_interval_minutes,
@@ -393,6 +418,7 @@ pub async fn update(
         events: body.events,
         secret,
         webhook,
+        notification_language,
     };
     let encoded = serde_json::to_string(&config).map_err(|_| {
         ApiError::localized(
@@ -450,6 +476,7 @@ pub async fn update(
     tx.commit().await?;
     let mut result = view(Some(&row), &config, &connection);
     result["webhook"] = json!(config.webhook);
+    result["notification_language"] = json!(config.notification_language);
     result["runner_name"] = json!(runner_name);
     Ok(Json(result))
 }
@@ -877,6 +904,21 @@ async fn deliver(
     event_id: Id,
     event: &Event,
 ) -> Result<()> {
+    let locale = crate::i18n::Locale::from_tag(&config.notification_language).unwrap_or_default();
+    crate::i18n::with_locale(
+        locale,
+        deliver_notice(s, connection, config, event_id, event),
+    )
+    .await
+}
+
+async fn deliver_notice(
+    s: &AppState,
+    connection: &connections::Model,
+    config: &Config,
+    event_id: Id,
+    event: &Event,
+) -> Result<()> {
     if !config.webhook.is_empty() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
@@ -953,6 +995,17 @@ async fn deliver(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_notification_language_remains_english() {
+        let mut legacy = serde_json::to_value(super::Config::default()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("notification_language");
+        let decoded: super::Config = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decoded.notification_language, "en-US");
+    }
+
     use super::*;
 
     #[tokio::test]

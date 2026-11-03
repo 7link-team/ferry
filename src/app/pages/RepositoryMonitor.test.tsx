@@ -19,6 +19,22 @@ it("retains unknown saved subscription events when opening the edit form",async(
     expect(initial({provider:'codeup',events:['push','repository.future','repository.created']})).toMatchObject({events:['push','repository.future']});
   }finally{await act(async()=>root.unmount());}
 });
+it("shows webhook URLs as text and offers all six persisted notification languages",async()=>{
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
+  const host=document.createElement('div'),root=createRoot(host);
+  try{
+    await act(async()=>root.render(<RepositoryMonitor workspace="ops" connectionId="c1" permissions={new Set()}/>));
+    const action=capture.config!.viewActions![0]!;
+    for(const provider of ['git','codeup']){
+      const row={provider,webhook:'https://notify.example.invalid/token',notification_language:'ja-JP'};
+      expect(action.initialValues!(row)).toMatchObject({webhook:row.webhook,notification_language:'ja-JP'});
+      const fields=action.parameters!(row);
+      expect(fields.find(field=>field.key==='webhook')!.type).toBe('text');
+      expect(fields.find(field=>field.key==='notification_language')!.options).toHaveLength(6);
+    }
+    expect(action.initialValues!({provider:'codeup'}).notification_language).toBe('en-US');
+  }finally{await act(async()=>root.unmount());}
+});
 it("updates subscription labels and event options immediately in all six languages",async()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
   const host=document.createElement('div'),root=createRoot(host);

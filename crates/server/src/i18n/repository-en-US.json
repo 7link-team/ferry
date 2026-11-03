@@ -742,5 +742,6 @@
   "actions.bindingRequired": "Each job needs an executor binding or an execution host from the selected environment.",
   "actions.executorReferenced": "Actions jobs still reference this executor. Change their bindings first.",
   "actions.executorBusy": "This executor still has unfinished Actions jobs.",
-  "actions.runCommand": "Run command"
+  "actions.runCommand": "Run command",
+  "repository.monitor.languageInvalid": "Choose a supported notification language."
 }

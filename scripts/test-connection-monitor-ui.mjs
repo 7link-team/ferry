@@ -61,6 +61,9 @@ try {
   assert.equal(await dialog.locator('textarea').inputValue(), 'org/team/repo');
   const webhookInput = dialog.getByLabel('通知 Webhook 地址', { exact: true });
   assert.equal(await webhookInput.inputValue(), monitor.webhook, 'edit pre-fills the configured webhook');
+  assert.equal(await webhookInput.getAttribute('type'), 'text', 'notification URLs are readable');
+  await dialog.getByRole('combobox', { name: '通知语言', exact: true }).click();
+  await page.getByRole('option', { name: '日本語', exact: true }).click();
   assert.equal(await dialog.getByText('新增仓库', { exact: true }).count(), 0);
   await dialog.locator('button[type=submit]').click();
   await dialog.waitFor({ state: 'hidden' });
@@ -68,6 +71,7 @@ try {
   assert.deepEqual(saved.events, ['push']);
   assert.equal(saved.repositories, 'org/team/repo');
   assert.equal(saved.webhook, monitor.webhook, 'saving unrelated settings retains the configured URL');
+  assert.equal(saved.notification_language, 'ja-JP');
   assert.match(page.url(), /\/code-connections\/42\?/);
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   await webhookInput.fill('https://notify.example.invalid/hooks/replacement-token');
@@ -80,7 +84,7 @@ try {
   await dialog.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   assert.equal(await webhookInput.inputValue(), '', 'explicit clearing reopens as empty');
-  await dialog.getByRole('combobox').click();
+  await dialog.getByRole('combobox', { name: '监控类型', exact: true }).click();
   await page.getByRole('option', { name: '主动轮询', exact: true }).click();
   assert.equal(await dialog.getByText('Webhook 验证密钥', { exact: true }).count(), 0);
   assert.equal(await dialog.getByText('新增仓库', { exact: true }).count(), 1);

@@ -238,10 +238,14 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         secret='monitor-fixture-private-secret'
         initial=request(owner,monitor)
         check(initial['version']==0 and not initial['enabled'],'monitor starts disabled without pretending platform subscription exists')
+        check(initial['notification_language']=='en-US','legacy and new subscriptions have an explicit compatible notification language')
         request(guest,monitor,expected=404)
         request(outsider,f'/workspaces/{workspace_other}/code-connection-monitors/'+linked['id'],expected=404)
         settings={'version':0,'enabled':True,'all_repositories':False,'repositories':'owner/repository','events':['push','pull_request','repository.created','repository.deleted','branch.deleted'],'secret':secret,'webhook':api_base+'/notifications'}
+        settings['notification_language']='zh-CN'
         saved=request(owner,monitor,settings,method='PATCH')
+        check(saved['notification_language']=='zh-CN' and request(owner,monitor)['notification_language']=='zh-CN','notification language persists with the encrypted subscription')
+        request(owner,monitor,dict(settings,version=saved['version'],notification_language='fr-FR'),method='PATCH',expected=400)
         check(saved['has_secret'] and saved['has_webhook'] and secret not in json.dumps(saved),'monitor saves write-only encrypted callback credentials')
         request(owner,monitor,settings,method='PATCH',expected=409)
         def callback(payload, expected=204, valid=True, identity=None):
@@ -309,6 +313,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             poll_settings = dict(settings,version=1,mode='poll',poll_interval_minutes=1,secret='',webhook='',all_repositories=True,
                                  events=['repository.created','repository.deleted','push','branch.created','branch.deleted','tag.created','tag.deleted','pull_request','merge'])
             request(owner,codeup_monitor,dict(poll_settings,poll_interval_minutes=0),method='PATCH',expected=400)
+            poll_settings['notification_language']='ja-JP'
             polling=request(owner,codeup_monitor,poll_settings,method='PATCH')
             check(polling['mode']=='poll' and polling['poll_interval_minutes']==1,'poll mode accepts credentials without inbound event secret and enforces minimum interval')
             try: urllib.request.urlopen(req,timeout=20)
@@ -345,6 +350,9 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             # Newest polling event of each kind (earlier webhook events share the history).
             by_event={row['event']:row for row in reversed(rows) if str(row['action']).startswith('轮询')}
             pushed=by_event['push']
+            sent=next(item for item in notifications if item['connection_id']==codeup['id'] and item['event']=='push' and item['data']['reference']=='main')
+            japanese=json.loads(Path('crates/server/src/i18n/repository-ja-JP.json').read_text(encoding='utf-8'))
+            check(sent['data']['action']==japanese['repository.monitor.detectedPush'],'background polling sends the subscription language independently of the Chinese UI and request locale')
             # Polling cannot know who pushed: no operator; the author stays on the commit.
             check(pushed['actor']=='' and pushed['detail']['commits'][0]['author']=='Bob' and pushed['summary']=='fix: second' and pushed['detail']['total_commits']==1 and [c['id'] for c in pushed['detail']['commits']]==['b'] and pushed['detail']['commits'][0]['message']=='fix: second\n\nbody','polling push records the commit range, message and author since the previous revision')
             check('bob@example.invalid' not in json.dumps(rows) and 'fay@example.invalid' not in json.dumps(rows),'event detail never stores author e-mail addresses')

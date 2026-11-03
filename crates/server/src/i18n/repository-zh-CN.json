@@ -742,5 +742,6 @@
   "actions.bindingRequired": "每个任务需要执行器绑定或所选环境的执行主机。",
   "actions.executorReferenced": "执行器仍被 Actions 任务引用，请先修改任务绑定。",
   "actions.executorBusy": "执行器仍有 Actions 任务尚未结束。",
-  "actions.runCommand": "执行命令"
+  "actions.runCommand": "执行命令",
+  "repository.monitor.languageInvalid": "请选择支持的通知语言。"
 }

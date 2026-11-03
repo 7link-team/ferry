@@ -3,6 +3,7 @@ import { useCallback,useMemo } from "react";
 import { gitRepositoryEventOptions,repositoryEventList,repositoryEventOptions } from "../../features/repositories/event-config";
 import { listResource,named,patchResource } from "../../shared/api/resource";
 import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { localeNames,supportedLocales } from "../../shared/i18n/locale";
 import type { FormConfig } from "../../shared/resources/types";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
@@ -38,21 +39,23 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
       { key: "capability_note", label: hostRepositoryText("repository-monitor.068"), type: "text", span: 2 },
       { key: "callback_path", when: row => row.provider !== "git" && row.mode !== "poll", label: hostRepositoryText("repository-monitor.069"), type: "text", span: 2, help: hostRepositoryText("repository-monitor.070", { origin: location.origin }) },
       { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "secret", stored: "has_secret", when: row => row.provider !== "git" && row.mode !== "poll" },
-      { key: "webhook", label: hostRepositoryText("repository-monitor.072"), type: "secret", stored: "has_webhook" },
+      { key: "webhook", label: hostRepositoryText("repository-monitor.072"), type: "text" },
+      { key: "notification_language", label: hostRepositoryText("repository-monitor.notificationLanguage"), type: "select", options: supportedLocales.map(value => ({ value, label: localeNames[value] })) },
       { key: "provider_changed", label: hostRepositoryText("repository-monitor.073"), type: "switch", when: row => !!row.provider_changed },
     ] }],
     viewActions: [{
       label: hostRepositoryText("repository-monitor.074"), section: hostRepositoryText("repository-monitor.056"), iconOnly: true, icon: <Pencil className="size-4" />, permission: "repositories.update",
       when: row => row.provider !== "git" || canSelectRunner,
       description: hostRepositoryText("repository-monitor.075"),
-      initialValues: row => ({ webhook: row.webhook ?? "", clear_webhook: false, enabled: row.enabled, mode: row.provider === "git" ? "poll" : row.mode ?? "push", ...(row.provider === "git" ? { runner_id: row.runner_id ?? "" } : {}), poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.provider === "git" ? false : row.all_repositories, repositories: Array.isArray(row.repositories) ? row.repositories.join("\n") : row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => ![...repositoryEventOptions, ...gitRepositoryEventOptions].some(option => option.value === event) || (row.provider === "git" ? gitRepositoryEventOptions.some(option => option.value === event) : row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository."))) : [] }),
+      initialValues: row => ({ notification_language: row.notification_language || "en-US", webhook: row.webhook ?? "", clear_webhook: false, enabled: row.enabled, mode: row.provider === "git" ? "poll" : row.mode ?? "push", ...(row.provider === "git" ? { runner_id: row.runner_id ?? "" } : {}), poll_interval_minutes: row.poll_interval_minutes ?? 1, all_repositories: row.provider === "git" ? false : row.all_repositories, repositories: Array.isArray(row.repositories) ? row.repositories.join("\n") : row.repositories, events: Array.isArray(row.events) ? row.events.filter(event => ![...repositoryEventOptions, ...gitRepositoryEventOptions].some(option => option.value === event) || (row.provider === "git" ? gitRepositoryEventOptions.some(option => option.value === event) : row.mode === "poll" || row.provider !== "codeup" || !String(event).startsWith("repository."))) : [] }),
       parameters: row => row.provider === "git" ? [
         { key: "runner_id", label: hostRepositoryText("repository-monitor.062"), type: "select", required: true, options: runnerOptions, help: hostRepositoryText("repository-monitor.076") },
         { key: "poll_interval_minutes", label: hostRepositoryText("repository-monitor.058"), type: "number", min: 1, required: true, help: hostRepositoryText("repository-monitor.077") },
         { key: "enabled", label: hostRepositoryText("repository-monitor.061"), type: "switch" },
         { key: "repositories", label: hostRepositoryText("repository-monitor.078"), type: "textarea", required: true, help: hostRepositoryText("repository-monitor.079") },
         { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: gitRepositoryEventOptions, required: true },
-        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "password", help: hostRepositoryText("repository-monitor.081") },
+        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "text", help: hostRepositoryText("repository-monitor.081") },
+        { key: "notification_language", label: hostRepositoryText("repository-monitor.notificationLanguage"), type: "select", required: true, options: supportedLocales.map(value => ({ value, label: localeNames[value] })) },
         { key: "clear_webhook", label: hostRepositoryText("repository-monitor.082"), type: "switch", when: () => !!row.has_webhook },
       ] : [
         { key: "mode", label: hostRepositoryText("repository-monitor.057"), type: "select", required: true, options: [{ value: "push", label: hostRepositoryText("repository-monitor.020") }, { value: "poll", label: hostRepositoryText("repository-monitor.021") }], resetOnChange: ["events"], help: hostRepositoryText("repository-monitor.083") },
@@ -63,7 +66,8 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
         { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions.filter(option => row.provider !== "codeup" || !option.value.startsWith("repository.")), required: true, when: value => value.mode !== "poll" },
         { key: "events", label: hostRepositoryText("repository-monitor.067"), type: "multiselect", options: repositoryEventOptions, required: true, when: value => value.mode === "poll" },
         { key: "secret", label: hostRepositoryText("repository-monitor.071"), type: "password", when: value => value.mode !== "poll", required: !row.has_secret, help: hostRepositoryText("repository-monitor.087") },
-        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "password", help: hostRepositoryText("repository-monitor.088") },
+        { key: "webhook", label: hostRepositoryText("repository-monitor.080"), type: "text", help: hostRepositoryText("repository-monitor.088") },
+        { key: "notification_language", label: hostRepositoryText("repository-monitor.notificationLanguage"), type: "select", required: true, options: supportedLocales.map(value => ({ value, label: localeNames[value] })) },
         { key: "clear_webhook", label: hostRepositoryText("repository-monitor.082"), type: "switch", when: () => !!row.has_webhook },
       ],
       action: async (row, values) => { await patchResource(workspace, "code-connection-monitors", connectionId, { ...values, ...(row.provider === "git" ? { mode: "poll", all_repositories: false } : {}), version: row.version }); },

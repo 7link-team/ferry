@@ -742,5 +742,6 @@
   "actions.bindingRequired": "각 작업에는 실행기 연결 또는 선택한 환경의 실행 호스트가 필요합니다.",
   "actions.executorReferenced": "Actions 작업에서 이 실행기를 참조하고 있습니다. 먼저 작업 연결을 변경해 주세요.",
   "actions.executorBusy": "이 실행기에 완료되지 않은 Actions 작업이 있습니다.",
-  "actions.runCommand": "명령 실행"
+  "actions.runCommand": "명령 실행",
+  "repository.monitor.languageInvalid": "지원되는 알림 언어를 선택하세요."
 }

@@ -2,6 +2,9 @@
 
 async function chooseNative(control, value) {
   await control.waitFor();
+  await control.page().waitForFunction(({ element, expected }) =>
+    [...element.options].some(option => option.value === expected),
+  { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
   assert(index >= 0, `Missing option ${value}`);
   await control.click();
@@ -242,10 +245,9 @@ try {
   const createInsight=p.getByRole('button',{name:'创建',exact:true});
   assert(await createInsight.isDisabled(),'Repository membership is required');
   await chooseNative(p.getByLabel('仓库连接',{exact:true}),codeupConnection.id);
-  const insightRepository=p.getByLabel('添加洞察仓库',{exact:true});
-  await p.waitForFunction(expected=>[...document.querySelectorAll('select option')].some(option=>option.value===expected),providerOrigin+'/test-org/team/test-repo.git');
-  await chooseNative(insightRepository,providerOrigin+'/test-org/team/test-repo.git');
-  await p.getByRole('button',{name:'加入洞察',exact:true}).click();
+  await p.getByRole('button',{name:'选择仓库',exact:true}).click();
+  await p.getByRole('menuitemcheckbox',{name:'test-org/team/test-repo',exact:true}).click();
+  await p.keyboard.press('Escape');
   await p.getByRole('checkbox',{name:'持续采集',exact:true}).uncheck();
   await createInsight.click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-insights`);
@@ -257,7 +259,7 @@ try {
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-insights/${savedInsight.id}/edit`);
   await p.locator('input[name="name"]').waitFor();
   assert.equal(await p.locator('input[name="name"]').inputValue(),'Browser insight');
-  await p.getByText('已加入 1 个仓库',{exact:true}).waitFor();
+  await p.getByText('已加入 1 个仓库',{exact:true}).first().waitFor();
   console.log('PASS: insight native connection/repository selection, required membership, real backend create and edit reload');
 
   await p.setViewportSize({width:1280,height:900});

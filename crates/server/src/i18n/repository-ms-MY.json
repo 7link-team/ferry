@@ -742,5 +742,6 @@
   "actions.bindingRequired": "Setiap kerja memerlukan ikatan pelaksana atau hos pelaksanaan daripada persekitaran dipilih.",
   "actions.executorReferenced": "Kerja Actions masih merujuk pelaksana ini. Ubah ikatannya dahulu.",
   "actions.executorBusy": "Pelaksana ini masih mempunyai kerja Actions yang belum selesai.",
-  "actions.runCommand": "Jalankan arahan"
+  "actions.runCommand": "Jalankan arahan",
+  "repository.monitor.languageInvalid": "Pilih bahasa pemberitahuan yang disokong."
 }
