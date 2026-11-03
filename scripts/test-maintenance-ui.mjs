@@ -78,6 +78,10 @@ try {
   assert(await p.getByLabel('值类型',{exact:true}).isDisabled());
   await fillByKeyboard(valueInput,'1');
   await p.getByRole('alert').first().waitFor();
+  // The editor reports validity to the shared form in a React effect.
+  // Wait for that state to commit before asserting the submit guard.
+  await p.waitForFunction(button => button.disabled,
+    await p.getByRole('button',{name:'保存',exact:true}).elementHandle());
   assert(await p.getByRole('button',{name:'保存',exact:true}).isDisabled());
   assert.equal((await get(root+'/settings/'+initialHeartbeat.id)).value,initialHeartbeat.value,'Invalid number never saved');
   await fillByKeyboard(valueInput,'120');
