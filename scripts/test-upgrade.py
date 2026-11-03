@@ -166,6 +166,14 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # Existing hosts inherit the confirmed global update policy.
                     assert after['runner_auto_update'] == before[path].get('runner_auto_update', 'inherit')
                     before[path].setdefault('runner_auto_update', 'inherit')
+                    # Existing hosts stay private with one execution slot. These
+                    # additive fields must not alter any persisted host data.
+                    for key, default in {
+                        'execution': {'enabled': True, 'shared': False, 'capacity': 1},
+                        'execution_status': {'active': 0, 'capacity': 1, 'state': 'available', 'running_jobs': []},
+                    }.items():
+                        assert after[key] == before[path].get(key, default), (key, after[key])
+                        before[path].setdefault(key, default)
                 if '/pipelines/' in path:
                     assert after['definition_format']=='github-actions'
                     assert "run: 'true'" in after['definition'] or 'run: true' in after['definition']
@@ -231,7 +239,13 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             print('PASS: both template schemas can create and render after upgrade')
             assert api('/workspaces/upgrade/preferences')['default_page_size']==20
             assert api('/workspaces/upgrade/settings')['total']==5
-            assert api('/workspaces/upgrade/dictionaries')['total']==3
+            seeded_dictionaries = api('/workspaces/upgrade/dictionaries')
+            assert seeded_dictionaries['total'] == 9
+            assert {row['key'] for row in seeded_dictionaries['items']} == {
+                'environment', 'app-category', 'host-state',
+                'pipeline-state', 'deployment-state', 'cron-state',
+                'alert-state', 'repository-state', 'insight-state',
+            }
             print('PASS: existing workspace gets typed settings and dictionary defaults after upgrade')
             setup = api('/setup')
             if setup['required']:

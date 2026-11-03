@@ -54,7 +54,8 @@ try {
   const groupDetail = `${origin}/zh-CN/workspaces/2/nodes`;
   const openGroup = async () => {
     await page.goto(groupDetail);
-    await page.getByRole('button', { name: '编辑分组 Production group', exact: true }).click();
+    await page.getByRole('button', { name: '操作 · Production group', exact: true }).click();
+    await page.getByRole('menuitem', { name: '编辑分组', exact: true }).click();
     return page.getByRole('dialog').getByRole('combobox', { name: '上级分组', exact: true });
   };
   for (const parent of [0, '0', '', null]) {

@@ -311,7 +311,7 @@ jobs:
                 (fixtures/'invalid-auto-signature').touch()
                 automatic_updates(True)
                 wait(lambda: api(update_path)['update']['state']=='retrying', 'automatic invalid signature must be rejected before dispatch', seconds=60)
-                assert 'Runner release verification failed' in api(update_path)['update']['message'], 'must reject invalid signature after a complete HTTPS response'
+                assert 'HostAgent release verification failed' in api(update_path)['update']['message'], 'must reject invalid signature after a complete HTTPS response'
                 assert api(update_path)['agent_version'] == original_version
                 assert api(update_path)['ready']
                 terminal.send(ws_module['BINARY'], b'echo SIGNATURE-REJECTION-CONTINUES\r\n')

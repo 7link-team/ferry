@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AutoField } from "../../shared/forms/auto-form";
-import { executionText } from "../../shared/i18n/i18n";
+import { commonText, executionText } from "../../shared/i18n/i18n";
 import { Input } from "../../shared/ui/input";
 
 export type ExecutionPolicy = { enabled: boolean; shared: boolean; capacity: number };
@@ -21,6 +21,15 @@ export function ExecutionPolicyFields({ value = defaultExecutionPolicy, readOnly
     onValidityChange(!readOnly && invalid);
     return () => onValidityChange(false);
   }, [invalid, readOnly, onValidityChange]);
+  if (readOnly) return <dl className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
+    {[
+      [executionText("hostExecution.enabled"), commonText(value.enabled ? "common.yes" : "common.no")],
+      [executionText("hostExecution.shared"), commonText(value.shared ? "common.yes" : "common.no")],
+      [executionText("hostExecution.capacity"), value.capacity],
+    ].map(([label, content]) => <div key={label} className="space-y-1">
+      <dt className="text-muted-foreground">{label}</dt><dd>{content}</dd>
+    </div>)}
+  </dl>;
   return <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
     <label className="flex min-h-9 items-center gap-2 text-sm"><input type="checkbox" disabled={readOnly} checked={value.enabled} onChange={event => onChange({ ...value, enabled: event.target.checked })} />{executionText("hostExecution.enabled")}</label>
     <label className="flex min-h-9 items-center gap-2 text-sm"><input type="checkbox" disabled={readOnly} checked={value.shared} onChange={event => onChange({ ...value, shared: event.target.checked })} />{executionText("hostExecution.shared")}</label>

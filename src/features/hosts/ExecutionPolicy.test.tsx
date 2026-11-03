@@ -1,7 +1,7 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { executionText, i18n } from "../../shared/i18n/i18n";
+import { commonText, executionText, i18n } from "../../shared/i18n/i18n";
 import { defaultExecutionPolicy, ExecutionPolicyFields } from "./ExecutionPolicy";
 
 let root: Root, host: HTMLDivElement;
@@ -35,7 +35,17 @@ it("keeps shared execution opt-in and blocks invalid capacity before saving", as
   }
 });
 
-it("disables execution policy controls in the shared detail form", async () => {
-  await act(async () => root.render(<ExecutionPolicyFields readOnly onChange={vi.fn()} onValidityChange={vi.fn()} />));
-  expect([...host.querySelectorAll<HTMLInputElement>("input")].every(input => input.disabled)).toBe(true);
+it("renders execution policy as text in the shared detail form", async () => {
+  const onChange = vi.fn();
+  const validity = vi.fn();
+  await act(async () => root.render(<ExecutionPolicyFields value={{ enabled: true, shared: false, capacity: 4 }} readOnly onChange={onChange} onValidityChange={validity} />));
+  expect(host.querySelectorAll("input, select, textarea")).toHaveLength(0);
+  expect([...host.querySelectorAll("dt")].map(node => node.textContent)).toEqual([
+    executionText("hostExecution.enabled"), executionText("hostExecution.shared"), executionText("hostExecution.capacity"),
+  ]);
+  expect([...host.querySelectorAll("dd")].map(node => node.textContent)).toEqual([
+    commonText("common.yes"), commonText("common.no"), "4",
+  ]);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(validity).toHaveBeenLastCalledWith(false);
 });
