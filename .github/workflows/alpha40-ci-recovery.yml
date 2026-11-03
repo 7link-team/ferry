@@ -12,7 +12,7 @@ permissions:
 jobs:
   recheck:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 90
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_RUN_ID: "41646896763"
@@ -22,11 +22,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 120); do
+          for attempt in $(seq 1 320); do
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID" > run.json
             jq -e '.head_sha == env.EXPECTED_SHA and .path == ".github/workflows/build.yml" and .run_attempt == 1 and .head_repository.full_name == env.GITHUB_REPOSITORY' run.json
             if [ "$(jq -r .status run.json)" = completed ]; then break; fi
-            echo "Waiting for the original release checks ($attempt/120)."
+            echo "Waiting for the original release checks ($attempt/320)."
             sleep 15
           done
           jq -e '.status == "completed" and .conclusion == "failure"' run.json
