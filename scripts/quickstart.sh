@@ -355,7 +355,13 @@ if [ -n "$migrate_storage" ]; then
                     if [ -f "$backup/compose.storage.yaml" ]; then cp -p "$backup/compose.storage.yaml" compose.storage.yaml
                     else rm -f compose.storage.yaml; fi
                     for item in $copied; do
-                        [ ! -e "data/$item" ] || mv "data/$item" "$backup/partial-$item"
+                        if [ -e "data/$item" ]; then
+                            docker run --rm --network none \
+                                --mount "type=bind,src=$here/data,dst=/target" \
+                                --mount "type=bind,src=$here/$backup,dst=/backup" \
+                                alpine:3.22 sh -ec 'mv "/target/$1" "/backup/partial-$1"' sh "$item" \
+                                || printf 'ERROR: partial copy retained at data/%s; do not overwrite it.\n' "$item" >&2
+                        fi
                     done
                 fi
                 compose_for
@@ -452,7 +458,9 @@ if [ -n "$migrate_storage" ]; then
                 tar -C /source -cpf "/backup/$name.tar" .
                 (cd /backup && sha256sum "$name.tar" > "$name.tar.sha256")
                 mkdir -m 700 "/target/$name"
-                tar -C "/target/$name" -xpf "/backup/$name.tar"
+                # BusyBox tar restores directory timestamps before its children;
+                # cp -a applies directory metadata after the recursive copy.
+                cp -a /source/. "/target/$name/"
                 (cd /source && find . -type f -exec sha256sum {} \; | LC_ALL=C sort) > /backup/source-hashes
                 (cd "/target/$name" && find . -type f -exec sha256sum {} \; | LC_ALL=C sort) > /backup/target-hashes
                 cmp /backup/source-hashes /backup/target-hashes
