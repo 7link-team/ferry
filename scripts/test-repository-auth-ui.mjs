@@ -167,9 +167,9 @@ try {
   assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-providers/callback');
   await platform.getByRole('button',{name:'复制 当前回调地址',exact:true}).click();
   assert.equal(await platform.evaluate(()=>navigator.clipboard.readText()),origin+'/api/repository-providers/callback');
-  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'执行器',exact:true}).click();
-  assert.equal(await platform.getByRole('heading',{name:'执行器',exact:true}).count(),1,'runner is the settings category; auto-upgrade is a field');
-  await platform.getByLabel('执行器默认自动升级',{exact:true}).waitFor();
+  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'主机代理',exact:true}).click();
+  assert.equal(await platform.getByRole('heading',{name:'主机代理',exact:true}).count(),1,'HostAgent is the settings category; auto-upgrade is a field');
+  await platform.getByLabel('主机代理 默认自动升级',{exact:true}).waitFor();
   for (const theme of ['modern','business','eyeCare','pinkKawaii','neoBrutalism','custom']) {
     for (const dark of [false,true]) {
       await platform.evaluate(({theme,dark})=>{document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',dark);},{theme,dark});
