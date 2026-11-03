@@ -60,10 +60,10 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 HTTPS 由 cloudflared、Nginx 等外部代理提供时，用 `--proxy-domain`，不使用 `--domain`：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --dir "$HOME/ferry" --proxy-domain ops.example.com --bind 0.0.0.0
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --proxy-domain ops.example.com
 ```
 
-同一命令适用于已安装的部署：保留当前版本、数据库和密钥，更新访问白名单、监听地址与 HTTPS Cookie 设置，不启动 Caddy；原来配置了 Caddy 时会移除其入口。`--dir` 必须指向原部署目录。多个访问域名可重复传入 `--proxy-domain`，不能与 `--domain` 或 `--allow-host` 混用。
+在原来执行安装命令的目录中，同一命令适用于已安装的部署：保留当前版本、数据库和密钥，更新访问白名单、监听地址与 HTTPS Cookie 设置，不启动 Caddy；原来配置了 Caddy 时会移除其入口。`--dir` 必须指向原部署目录。多个访问域名可重复传入 `--proxy-domain`，不能与 `--domain` 或 `--allow-host` 混用。
 
 cloudflared 运行在宿主机时，源站填 `http://127.0.0.1:4290`；运行在独立容器时，填该容器能访问的宿主机地址。容器里的 `127.0.0.1` 指向容器自身。外部 HTTPS 在代理终止，代理到 Ferry 的连接使用 HTTP，并保留原始 Host 和 WebSocket Upgrade。
 

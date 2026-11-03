@@ -108,6 +108,11 @@ check 'printf "%s" "$output" | grep -q "https://ops.example.com" && [ "$tsecrets
 run --dir tunnel --domain old.example.com --init-only >/dev/null
 run --dir tunnel --proxy-domain new.example.com --bind 0.0.0.0 >/dev/null
 check 'has "$tenv" "FERRY_ALLOWED_HOSTS=new.example.com,localhost,127.0.0.1" && has "$tenv" "FERRY_SECURE_COOKIE=true" && [ ! -f "$work/tunnel/compose.https.yaml" ] && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'switching from Caddy to external HTTPS removes Caddy and preserves existing credentials'
+run --dir tunnel --bind 127.0.0.1 --init-only >/dev/null
+run --dir tunnel --proxy-domain new.example.com --init-only >/dev/null
+check 'has "$tenv" "FERRY_BIND_ADDRESS=0.0.0.0"' 'external proxy setup also replaces an old loopback default without requiring --bind'
+run --dir tunnel --proxy-domain new.example.com --bind 127.0.0.1 --init-only >/dev/null
+check 'has "$tenv" "FERRY_BIND_ADDRESS=127.0.0.1"' 'an explicit external proxy listener overrides the public default'
 refused --proxy-domain ops.example.com --domain other.example.com
 refused --proxy-domain ops.example.com --allow-host other.example.com
 refused --proxy-domain https://ops.example.com

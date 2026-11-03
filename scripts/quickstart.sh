@@ -76,6 +76,9 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# Configuring an external proxy uses the normal public listener unless overridden.
+if [ -n "$proxy_domains" ] && [ -z "$bind" ]; then bind=0.0.0.0; fi
+
 case "$database" in ''|postgres|mysql) ;; *) fail "--database must be postgres or mysql" ;; esac
 if [ -n "$port" ]; then
     case "$port" in *[!0-9]*) fail "--port must be a number" ;; esac
