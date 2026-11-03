@@ -257,7 +257,7 @@ Write-Output 'current-user command verified'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("current-user command verified");
-}, 30000);
+});
 
 it("accepts only HTTP(S) origins, without credentials, paths or query", () => {
   expect(runnerServerOrigin(" https://runner.example:8443/ ")).toBe("https://runner.example:8443");
@@ -492,7 +492,7 @@ Write-Output 'environment restored'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("environment restored");
-}, 30000);
+});
 
 it("requires HTTPS for remote installation but permits exact loopback HTTP origins", () => {
   for (const origin of ["http://localhost:4290", "http://127.0.0.1:4290", "http://[::1]:4290"])
