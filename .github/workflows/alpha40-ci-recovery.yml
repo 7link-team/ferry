@@ -1,0 +1,40 @@
+name: Recheck alpha.40 pipeline acceptance
+
+on:
+  push:
+    branches: [ops/alpha40-ci-recovery]
+    paths: [.github/workflows/alpha40-ci-recovery.yml]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  recheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_RUN_ID: "41646896763"
+      EXPECTED_SHA: bbc444d2b25372b6ac061010b0a30438f95b8eec
+    steps:
+      - name: Require the exact release run and preserve its first failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID" > run.json
+            jq -e '.head_sha == env.EXPECTED_SHA and .path == ".github/workflows/build.yml" and .run_attempt == 1 and .head_repository.full_name == env.GITHUB_REPOSITORY' run.json
+            if [ "$(jq -r .status run.json)" = completed ]; then break; fi
+            echo "Waiting for the original release checks ($attempt/120)."
+            sleep 15
+          done
+          jq -e '.status == "completed" and .conclusion == "failure"' run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID/jobs?per_page=100" > jobs.json
+          jq -e '[.jobs[] | select(.conclusion == "failure") | .name] == ["e2e-pipelines"]' jobs.json
+      - name: Recheck the failed harness and dependent publication on the same commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$TARGET_RUN_ID/rerun-failed-jobs" -F enable_debug_logging=true
+          echo "Requested one recheck; the release tag and product source are unchanged."
