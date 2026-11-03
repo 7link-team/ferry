@@ -133,7 +133,10 @@ exec "$STORAGE_TEST_DOCKER" "$@"
             set_value('FERRY_PORT', '0')  # Compose chooses a free published port.
             # Ephemeral, loopback-only test access to NATS; never part of the deployment defaults.
             file = deployment / 'compose.production.yaml'
-            file.write_text(file.read_text().replace('  nats:\n', '  nats:\n    ports: ["127.0.0.1:0:4222"]\n'))
+            before, nats_and_rest = file.read_text().split('  nats:\n', 1)
+            # Docker does not publish ports on an internal-only network.
+            nats_and_rest = nats_and_rest.replace('    networks: [backend]', '    networks: [backend, egress]', 1)
+            file.write_text(before + '  nats:\n    ports: ["127.0.0.1:0:4222"]\n' + nats_and_rest)
             quick()
             mounts = json.loads(run(docker, 'inspect', container('ferry')).stdout)[0]['Mounts']
             assert any(m['Type'] == 'bind' and m['Source'] == str(deployment / 'data/ferry') for m in mounts)
