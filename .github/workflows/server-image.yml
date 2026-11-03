@@ -123,11 +123,11 @@ jobs:
           SOURCE_SHA=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")
           source="$IMAGE:sha-$SOURCE_SHA"
           # A tag pushed right after its commit arrives while that commit's
-          # image is still being built and verified, so wait for it rather than
-          # failing a release that is seconds early.
-          for attempt in $(seq 1 30); do
+          # image is still being built and verified. Include Runner queue time
+          # and both native architecture builds in the bounded wait.
+          for attempt in $(seq 1 120); do
             if docker buildx imagetools inspect "$source" --raw > source.json 2>/dev/null; then break; fi
-            echo "waiting for $source ($attempt/30)"
+            echo "waiting for $source ($attempt/120)"
             sleep 30
           done
           if [ ! -s source.json ]; then
