@@ -2,6 +2,9 @@
 
 async function chooseNative(control, value) {
   await control.waitFor();
+  await control.page().waitForFunction(({ element, expected }) =>
+    [...element.options].some(option => option.value === expected),
+  { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
   assert(index >= 0, `Missing option ${value}`);
   await control.click();
