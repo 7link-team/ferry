@@ -106,11 +106,11 @@ it("adds repositories from paginated named connections, remote pages and explici
   await clickRepository("team/second");
   await closeRepositories();
   expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "", provider: "github" }]);
-  await choose(host.querySelector<HTMLSelectElement>('select[aria-label="分析流水线 team/second"]')!, "21");
   await choose(connectionSelect, "12");
   await setInput(host.querySelector<HTMLInputElement>('input[aria-label="Git 仓库地址"]')!, "git@git.example.invalid:other/repo.git");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "加入洞察")!.click());
-  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "21", provider: "github" }, { connection_id: "12", repository: "git@git.example.invalid:other/repo.git", pipeline_id: "" }]);
+  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "", provider: "github" }, { connection_id: "12", repository: "git@git.example.invalid:other/repo.git", pipeline_id: "" }]);
+  expect(requests.some(request => request.url.includes("/pipelines"))).toBe(false);
   expect(requests.filter(request => request.url.includes("code-connections?")).length).toBe(2);
 });
 
@@ -193,21 +193,19 @@ it("keeps existing platform pipeline bindings and other connections while toggli
   await closeRepositories();
 });
 
-it("requires a pipeline for enabled Git memberships and permits saving disabled ones", async () => {
+it("accepts enabled Git memberships without pipeline permissions or requests and preserves legacy IDs", async () => {
   let blocked = false;
   function Editor({ enabled }: { enabled: boolean }) {
-    const [value, setValue] = useState<InsightRepository[]>([{ connection_id: "12", repository: "git@git.example.invalid:team/repo.git", pipeline_id: "", provider: "git" }]);
-    return <CodeInsightRepositories workspace="ws" value={value} enabled={enabled} readOnly={false} permissions={new Set(["repositories.read", "pipelines.read", "pipelines.run"])} onChange={next => setValue(next as InsightRepository[])} onValidityChange={next => { blocked = next; }} />;
+    const [value, setValue] = useState<InsightRepository[]>([{ connection_id: "12", repository: "git@git.example.invalid:team/repo.git", pipeline_id: "", provider: "git" }, { connection_id: "11", repository: "team/legacy", pipeline_id: "21", pipeline_name: "Legacy workflow" }]);
+    return <CodeInsightRepositories workspace="ws" value={value} enabled={enabled} readOnly={false} permissions={new Set(["repositories.read"])} onChange={next => setValue(next as InsightRepository[])} onValidityChange={next => { blocked = next; }} />;
   }
   await act(async () => root.render(<Editor enabled />));
-  expect(blocked).toBe(true);
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain("请为此 Git 仓库选择分析流水线");
-  const pipeline = host.querySelector<HTMLSelectElement>('select[aria-label="分析流水线 git@git.example.invalid:team/repo.git"]')!;
-  expect(pipeline.required).toBe(true);
-  await choose(pipeline, "21"); expect(blocked).toBe(false);
-  await choose(pipeline, ""); expect(blocked).toBe(true);
+  expect(blocked).toBe(false);
+  expect(host.textContent).not.toContain("流水线");
+  expect(host.textContent).not.toContain("Legacy workflow");
+  expect(requests.some(request => request.url.includes("/pipelines"))).toBe(false);
   await act(async () => root.render(<Editor enabled={false} />));
-  expect(blocked).toBe(false); expect(pipeline.required).toBe(false);
+  expect(blocked).toBe(false);
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 

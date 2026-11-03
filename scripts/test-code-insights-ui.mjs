@@ -15,12 +15,14 @@ async function chooseNative(control, value) {
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { preview } from "vite";
+import { createServer, preview } from "vite";
 import { chromium } from "playwright";
 
 const output = "data/maintenance/code-insights-ui";
 await mkdir(output, { recursive: true });
-const server = await preview({ preview: { host: "127.0.0.1", port: 0 } });
+const sourceMode = process.env.CODE_INSIGHTS_UI_SOURCE === "1";
+const server = sourceMode ? await createServer({ server: { host: "127.0.0.1", port: 0, open: false } }) : await preview({ preview: { host: "127.0.0.1", port: 0 } });
+if (sourceMode) await server.listen();
 const origin = server.resolvedUrls.local[0].replace(/\/$/, "");
 const chrome =
   process.env.PLAYWRIGHT_CHROME_PATH ||
@@ -36,8 +38,6 @@ const permissions = [
   "code-insights.update",
   "code-insights.sync",
   "repositories.read",
-  "pipelines.read",
-  "pipelines.run",
 ];
 const errors = [];
 const writes = [];
@@ -128,8 +128,7 @@ await page.route("**/api/**", async (route) => {
       has_more: repositoryPage === 1,
     };
   }
-  if (path === "/workspaces/2/pipelines")
-    body = { items: [{ id: "21", name: "Git analysis" }], total: 1 };
+  if (path === "/workspaces/2/pipelines") assert.fail("Insight collection must not request business pipelines");
   if (path === "/workspaces/2/code-insights/31") body = insight;
   if (
     ["POST", "PATCH"].includes(req.method()) &&
@@ -210,8 +209,6 @@ try {
   await selectGroup.click();
   await page.getByText('已加入 3 个仓库', { exact: true }).first().waitFor();
   await page.keyboard.press('Escape');
-  await page.locator('summary').filter({hasText:'分析流水线'}).click();
-  await chooseNative(page.getByLabel('分析流水线 team/mobile/library',{exact:true}),'21');
   await chooseNative(group,'team');
   await repositoryPicker.click();
   await page.getByRole('menuitemcheckbox',{name:'team/project',exact:true}).click();
@@ -230,13 +227,12 @@ try {
     .getByLabel("Git 仓库地址", { exact: true })
     .fill("https://git.example.invalid/team/other.git");
   await page.getByRole("button", { name: "加入洞察", exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === true);
+  await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === false);
   assert.equal(
-    await submit.isDisabled(),
+    await submit.isEnabled(),
     true,
-    "Plain Git requires a pipeline when enabled",
+    "Plain Git saves without a business pipeline or host",
   );
-  await chooseNative(page.getByLabel("分析流水线 https://git.example.invalid/team/other.git", { exact: true }), "21");
   await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === false);
   assert.equal(await submit.isEnabled(), true);
   await chooseNative(connection,'11');
@@ -247,13 +243,8 @@ try {
   await page.getByRole('menuitemcheckbox',{name:'other/service',exact:true}).click();
   await page.keyboard.press('Escape');
   await page.getByText('已加入 4 个仓库',{exact:true}).first().waitFor();
-  assert.equal(await page.getByLabel('分析流水线 https://git.example.invalid/team/other.git',{exact:true}).inputValue(),'21','Toggling one connection preserves the other connection pipeline');
-  assert.equal(await page.getByLabel('分析流水线 team/mobile/library',{exact:true}).inputValue(),'21','Group bulk-add preserves existing analysis pipeline bindings');
-  const pipelineRefresh=page.getByRole('button',{name:'重试读取流水线',exact:true}).first();
-  if(!await pipelineRefresh.isVisible())await page.locator('summary').filter({hasText:'分析流水线'}).click();
-  assert.equal(await pipelineRefresh.evaluate(element=>!!element.closest('[data-slot="select-refresh"]')?.querySelector('select')),true);
-  await Promise.all([page.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/pipelines')),pipelineRefresh.click()]);
-  assert.equal(writes.length,0,'Pipeline refresh does not submit the insight');
+  assert.equal(await page.locator('[aria-label^="分析流水线"]').count(),0,'Repository selection has no business pipeline controls');
+  assert.equal(writes.length,0,'Repository selections do not submit the insight');
   for (const width of [1366, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     assert(
@@ -281,8 +272,8 @@ try {
   await page.waitForURL("**/code-insights");
   assert.equal(writes[0].data.repositories.length, 4);
   assert.deepEqual(writes[0].data.repositories.map(row => row.repository).sort(), ['team/project', 'team/mobile/library', 'team/mobile/app', 'https://git.example.invalid/team/other.git'].sort());
-  assert.equal(writes[0].data.repositories.find(row=>row.repository==='team/mobile/library').pipeline_id,'21');
-  assert.equal(writes[0].data.repositories.find(row=>row.connection_id==='12').pipeline_id,'21');
+  assert.equal(writes[0].data.repositories.find(row=>row.repository==='team/mobile/library').pipeline_id,'');
+  assert.equal(writes[0].data.repositories.find(row=>row.connection_id==='12').pipeline_id,'');
   assert.deepEqual(writes[0].data.aliases, []);
   assert.equal(writes[0].data.update_mode, "event");
 
@@ -369,9 +360,10 @@ try {
   assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: insight creation, automatic pagination, multi-select immediate add/uncheck/search/group select-all/dedup, other connection and pipeline retention, embedded refresh, later-page failure/retry, repository validation, six-locale intrinsic select width and320px layout, event schedule, author mapping and contributor ID preservation",
+    "PASS: insight creation without business pipelines or hosts, automatic pagination, multi-select immediate add/uncheck/search/group select-all/dedup, other connection retention, embedded refresh, later-page failure/retry, repository validation, six-locale intrinsic select width and320px layout, event schedule, author mapping and contributor ID preservation",
   );
 } finally {
   await browser.close();
-  await server.httpServer.close();
+  if (sourceMode) await server.close();
+  else await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
 }

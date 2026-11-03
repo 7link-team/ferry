@@ -8,7 +8,7 @@ use sea_orm::PaginatorTrait;
 use sync::tests::{claimed, commit, fixture, queued_repository};
 
 #[tokio::test]
-async fn insight_collection_status_distinguishes_pending_revisions_retries_and_blocked_fallback() {
+async fn insight_collection_status_distinguishes_pending_revisions_retries_and_native_fallback() {
     let (_dir, s) = fixture().await;
     grant(&s).await;
     let id = create_one(&s, body("Status", vec![member(4, "team/repo")])).await;
@@ -44,15 +44,14 @@ async fn insight_collection_status_distinguishes_pending_revisions_retries_and_b
         .unwrap();
     let detail = detail(&s, id).await;
     let status = &detail["sources"][0];
-    assert_eq!(status["pipeline_required"], true);
+    assert_eq!(status["pipeline_required"], false);
     assert_eq!(status["state"], "failed");
     assert_eq!(status["synced_at"], source.synced_at);
     assert_eq!(status["job"]["state"], "queued");
-    assert_eq!(status["job"]["effective_state"], "blocked");
+    assert_eq!(status["job"]["effective_state"], "retry_wait");
     assert_eq!(status["job"]["updated_at"], job.updated_at);
     assert_eq!(status["job"]["retry_at"], job.retry_at);
-    // Binding a fallback makes the pending retry actionable without hiding the
-    // previous error or falsely reporting that completed_generation is work done.
+    // Native fallback requires no pipeline binding and preserves the retry deadline.
     assert_eq!(
         source_status(&source, Some(&job), true, now)["job"]["effective_state"],
         "retry_wait"
@@ -98,7 +97,7 @@ async fn insight_collection_status_distinguishes_pending_revisions_retries_and_b
     );
     assert_eq!(
         source_status(&source, Some(&job), false, now)["pipeline_required"],
-        true
+        false
     );
 }
 

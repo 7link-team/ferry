@@ -408,40 +408,20 @@ pub async fn get(
 fn source_status(
     source: &sources::Model,
     job: Option<&jobs::Model>,
-    pipeline_configured: bool,
+    _pipeline_configured: bool,
     now: i64,
 ) -> Value {
-    let error = job
-        .filter(|job| !job.last_error.is_empty())
-        .map_or(source.last_error.as_str(), |job| job.last_error.as_str());
-    let pipeline_errors = [
-        "repository.collector.filesMissing",
-        "repository.collector.pipelineRequired",
-    ];
-    let pipeline_required = !pipeline_configured
-        && match crate::i18n::decode_stored(error) {
-            Some(message) => pipeline_errors.contains(&message.key.as_str()),
-            // Older installations persisted the rendered diagnostic. Recognize
-            // exact known messages, never infer setup requirements from substrings.
-            None => pipeline_errors.iter().any(|key| {
-                crate::i18n::Locale::ALL.iter().any(|locale| {
-                    error == crate::i18n::render(*locale, &crate::i18n::Message::new(*key))
-                })
-            }),
-        };
     json!({
         "id":Id::from(source.id), "connection_id":Id::from(source.connection_id),
         "repository":source.remote_path, "state":source.state,
         "last_error":crate::i18n::display_stored(&source.last_error),
         "coverage_start":source.coverage_start, "synced_at":source.synced_at,
-        "pipeline_required":pipeline_required,
+        "pipeline_required":false,
         "job":job.map(|job| {
             let effective_state = if job.state == "running" && job.lease_until > now {
                 "running"
             } else if source.state == "unavailable" {
                 "unavailable"
-            } else if pipeline_required {
-                "blocked"
             } else if job.generation > job.completed_generation {
                 if job.retry_at > now { "retry_wait" } else { "queued" }
             } else {
@@ -454,7 +434,7 @@ fn source_status(
                 "generation":job.generation,"completed_generation":job.completed_generation,
                 "last_error":crate::i18n::display_stored(&job.last_error),
                 "updated_at":job.updated_at,"retry_at":job.retry_at,
-                "lease_until":job.lease_until,"pipeline_run_id":pipeline_run_id})
+                "lease_until":job.lease_until,"pipeline_run_id":pipeline_run_id,"collector_phase":serde_json::from_str::<Value>(&job.cursor).ok().and_then(|v| v["collector_phase"].as_str().map(str::to_owned))})
         })
     })
 }
@@ -504,12 +484,6 @@ async fn validate(
                 return Err(ApiError::localized(
                     axum::http::StatusCode::BAD_REQUEST,
                     crate::i18n::Message::new("repository.analysis.gitUrlRequired"),
-                ));
-            }
-            if body.config.enabled && member.pipeline_id.is_empty() {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::BAD_REQUEST,
-                    crate::i18n::Message::new("repository.analysis.gitInsightPipeline"),
                 ));
             }
             crate::repositories::auth::resolve_connection(

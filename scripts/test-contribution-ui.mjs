@@ -78,7 +78,7 @@ try {
     if (path === '/api/workspaces/2/code-connections') return json(envelope([{id:'11',name:'Fixture connection',provider:'github',state:'connected'},{id:'12',name:'Generic Git',provider:'git',state:'connected'}],url.searchParams));
     if (path === '/api/workspaces/2/code-connections/11/repositories') return json({items:[{name:'repository',full_name:'team/repository',url:'https://example.invalid/team/repository.git',default_branch:'main'}],has_more:false});
     if (path === '/api/workspaces/2/code-insights/31/sync' && request.method() === 'POST') { retries++; return json({ id: '31', queued: true }); }
-    if (path === '/api/workspaces/2/pipelines') { assert(allowPipeline, 'limited role must not request pipelines'); return json(envelope([{ id: '21', name: 'Fixture analysis workflow' }], url.searchParams)); }
+    if (path === '/api/workspaces/2/pipelines') { assert.fail('Insight collection must never request business pipelines'); }
     if (path.includes('/code-insights/') && path.includes('/reports/')) {
       assert.equal(url.searchParams.has('connection_id'), false);
       const kind = path.split('/').at(-1);
@@ -182,14 +182,15 @@ try {
   await chooseNative(page.getByLabel('仓库连接',{exact:true}), '12');
   await page.getByLabel('Git 仓库地址',{exact:true}).fill('git@git.example.invalid:team/second.git');
   await page.getByRole('button',{name:'加入洞察',exact:true}).click();
-  await chooseNative(page.getByLabel('分析流水线 git@git.example.invalid:team/second.git',{exact:true}), '21');
+  assert.equal(await page.getByLabel('分析流水线 git@git.example.invalid:team/second.git',{exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),true,'Plain Git saves with its connection and URL alone');
   await page.getByLabel('初始化最近天数',{exact:false}).fill('120');
   await page.getByLabel('分支头核对间隔（分钟）',{exact:false}).fill('60');
   await page.getByRole('button',{name:'保存',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/zh-CN/workspaces/2/code-insights');
   assert.equal(config.initial_days,120);assert.equal(config.reconcile_minutes,60);
   assert.equal(config.update_mode,'event');
-  assert.equal(config.repositories.length,2);assert.equal(config.repositories[1].pipeline_id,'21');
+  assert.equal(config.repositories.length,2);assert.equal(config.repositories[1].pipeline_id,'');
   assert.equal(config.aliases[0].nickname,'Alice');assert.equal(config.aliases[0].contributor_id,'100');
   await page.goto(insightPath+'?tab=authors');
   await page.getByLabel('统一昵称 1', { exact: true }).fill('');
@@ -203,7 +204,7 @@ try {
   await page.getByRole('button',{name:'重新核对 / 重试同步',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('button[disabled][aria-label="重新核对 / 重试同步"]'));
   assert.equal(retries,1);
-  checks.push('shared settings form saves memberships/pipeline and optimistic version; separate author tab validates rows/preserves contributor IDs; sync retry works');
+  checks.push('shared settings saves plain Git without business pipelines or host permissions and preserves optimistic version; author mappings preserve contributor IDs; sync retry works');
 
   await page.goto(origin+'/workspaces/2/code-insights/new');
   await page.getByLabel('洞察名称',{exact:false}).waitFor();
@@ -342,8 +343,9 @@ try {
   source.job.effective_state = 'blocked';
   source.job.updated_at = now;
   await page.goto(insightPath);
-  await taskStatus.getByText('等待配置分析流水线', { exact: true }).waitFor();
-  assert((await taskStatus.getByRole('status').innerText()).includes('分析需要配置'));
+  await taskStatus.getByText('采集暂不可用', { exact: true }).waitFor();
+  assert((await taskStatus.getByRole('status').innerText()).includes('分析尚未完成'));
+  assert.equal((await taskStatus.innerText()).includes('流水线'),false,'Legacy blocked state must not require a business pipeline');
   for(const width of [1366,390]) {
     await page.setViewportSize({width,height:900});
     await taskStatus.evaluate(element=>element.scrollIntoView({block:'start'}));
@@ -365,13 +367,16 @@ try {
   assert.equal(await taskStatus.locator('.animate-spin').count(),0,'Retry backoff must not pretend to be running');
 
   source.job.effective_state = 'running';
+  source.job.collector_phase = 'git_fetch';
   await page.goto(insightPath);
   await taskStatus.getByText('同步中', { exact: true }).waitFor();
+  await taskStatus.getByText('获取仓库变更', { exact: true }).waitFor();
   assert.equal(await taskStatus.getByRole('status').locator('.animate-spin').count(),1,'Running work has a progress indicator');
   const reportsBeforePublish = requests.filter(request => request.path.includes('/reports/')).length;
   source.state = 'complete'; source.last_error = ''; source.job.effective_state = 'complete';
   source.job.completed_generation = 2; source.synced_at = now + 1000;
   await taskStatus.getByRole('status').filter({ hasText: '同步完成' }).waitFor({ timeout: 22000 });
+  assert.equal(await taskStatus.getByText('获取仓库变更',{exact:true}).count(),0,'Completed jobs hide stale collection phases');
   await page.waitForLoadState('networkidle');
   assert(requests.filter(request => request.path.includes('/reports/')).length >= reportsBeforePublish + 13, 'Published collection refreshes overview totals and all six branch/author pairs');
   assert.equal((await taskStatus.innerText()).includes('1970'), false);
@@ -379,7 +384,7 @@ try {
   await page.goto(insightPath);
   await taskStatus.getByRole('status').filter({ hasText: '分析已暂停' }).waitFor();
   config.enabled = true;
-  checks.push('queued/backoff states do not spin; unavailable repositories show localized expanded diagnostics; blocked pipeline has a configure action; retry backoff shows next attempt; running/complete/paused states; fifteen-second poll refreshes all reports after a successful publication');
+  checks.push('queued/backoff states do not spin; unavailable/legacy blocked diagnostics never require business pipelines; actual running Git phase hides after completion; retry time and paused state; fifteen-second polling refreshes reports after publication');
 
   allowPipeline = false;
   const pipelineReadsBefore = requests.filter(request => request.path.endsWith('/pipelines')).length;

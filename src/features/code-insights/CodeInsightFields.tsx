@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, GitBranch, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { errorText } from "../../shared/api/api";
-import { listResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import { SelectRefresh } from "../../shared/forms/SelectRefresh";
 import { insightText } from "../../shared/i18n/i18n";
@@ -33,8 +31,6 @@ type Props = {
   onChange: (value: unknown) => void;
   onValidityChange: (blocked: boolean) => void;
 };
-const selectClass =
-  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
 
 /** One shared form field manages memberships; connection browsing is reused from checkout. */
 export function CodeInsightRepositories({
@@ -45,13 +41,10 @@ export function CodeInsightRepositories({
   permissions,
   onChange,
   onValidityChange,
-  enabled = true,
 }: Props & { enabled?: boolean }) {
   useTranslation("insight-domain");
   const selected = Array.isArray(value) ? (value as InsightRepository[]) : [];
   const canSelect = permissions.has("repositories.read");
-  const canPipeline =
-    permissions.has("pipelines.read") && permissions.has("pipelines.run");
   const [choice, setChoice] = useState({ connection_id: "", url: "" });
   const [group, setGroup] = useState("");
   const [search, setSearch] = useState("");
@@ -62,56 +55,12 @@ export function CodeInsightRepositories({
     !readOnly && canSelect,
     true,
   );
-  const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>(
-    [],
-  );
-  const [pipelineError, setPipelineError] = useState("");
-  const [pipelineLoading, setPipelineLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    if (readOnly || !canPipeline) return;
-    const controller = new AbortController();
-    setPipelineLoading(true);
-    setPipelineError("");
-    void (async () => {
-      const all: { id: string; name: string }[] = [];
-      for (let page = 1; ; page++) {
-        const result = await listResource<{ id: string; name: string }>(
-          workspace,
-          "pipelines",
-          { page, page_size: 100 },
-          controller.signal,
-        );
-        all.push(...result.items);
-        if (!result.items.length || page * 100 >= result.total) break;
-      }
-      if (!controller.signal.aborted) setPipelines(all);
-    })()
-      .catch((cause) => {
-        if (!controller.signal.aborted) setPipelineError(errorText(cause));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setPipelineLoading(false);
-      });
-    return () => controller.abort();
-  }, [workspace, readOnly, canPipeline, revision]);
-  const isGit = (row: InsightRepository) => {
-    const provider =
-      row.provider ||
-      data.connections.find((connection) => connection.id === row.connection_id)
-        ?.provider;
-    return provider
-      ? provider === "git"
-      : row.repository.includes("://") ||
-          /^[^/@\s]+@[^/:\s]+:/.test(row.repository);
-  };
   const incomplete =
     !selected.length ||
     selected.some(
       (row) =>
         !row.connection_id ||
-        (!row.all_repositories && !row.repository.trim()) ||
-        (enabled && isGit(row) && !row.pipeline_id),
+        (!row.all_repositories && !row.repository.trim()),
     );
   useEffect(() => {
     onValidityChange(!readOnly && incomplete);
@@ -163,8 +112,8 @@ export function CodeInsightRepositories({
         </span>
       </div>
       {selected.length > 0 && (
-        <details open={readOnly || selected.some(row => enabled && isGit(row) && !row.pipeline_id)} className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">{insightText("selectedRepositories", { count: selected.length })} · {insightText("分析流水线")}</summary>
+        <details open={readOnly} className="rounded-lg border p-3">
+        <summary className="cursor-pointer text-sm font-medium">{insightText("selectedRepositories", { count: selected.length })}</summary>
         <ul className="divide-y rounded-lg border">
           {selected.map((row, index) => (
             <li
@@ -210,75 +159,6 @@ export function CodeInsightRepositories({
                   </Button>
                 )}
               </div>
-              {!readOnly && canPipeline ? (
-                <AutoField
-                  label={insightText("分析流水线")}
-                  required={enabled && isGit(row)}
-                  className="block space-y-2"
-                >
-                  <SelectRefresh label={insightText("重试读取流水线")} loading={pipelineLoading} onRefresh={() => setRevision(value => value + 1)}><select
-                    aria-label={insightText("pipelineFor", {
-                      repository: row.repository,
-                    })}
-                    className={selectClass}
-                    value={row.pipeline_id}
-                    required={enabled && isGit(row)}
-                    disabled={pipelineLoading || !!pipelineError}
-                    onChange={(event) =>
-                      onChange(
-                        selected.map((item, position) =>
-                          position === index
-                            ? { ...item, pipeline_id: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                  >
-                    <option value="">
-                      {isGit(row)
-                        ? insightText("请选择分析流水线")
-                        : insightText("使用平台接口")}
-                    </option>
-                    {row.pipeline_id &&
-                      !pipelines.some(
-                        (pipeline) => pipeline.id === row.pipeline_id,
-                      ) && (
-                        <option value={row.pipeline_id}>
-                          {row.pipeline_name || insightText("已配置分析流水线")}
-                        </option>
-                      )}
-                    {pipelines.map((pipeline) => (
-                      <option key={pipeline.id} value={pipeline.id}>
-                        {pipeline.name}
-                      </option>
-                    ))}
-                  </select></SelectRefresh>
-                </AutoField>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {insightText("分析流水线：")}
-                  {row.pipeline_name ||
-                    (row.pipeline_id
-                      ? insightText("已配置分析流水线")
-                      : isGit(row)
-                        ? insightText("未配置分析流水线")
-                        : insightText("使用平台接口"))}
-                </p>
-              )}
-              {isGit(row) && (
-                <p className="text-xs text-muted-foreground">
-                  {insightText(
-                    "普通 Git 通过分析流水线采集；启用持续采集前须选择流水线。",
-                  )}
-                </p>
-              )}
-              {!readOnly && enabled && isGit(row) && !row.pipeline_id && (
-                <p role="alert" className="text-sm text-destructive">
-                  {insightText(
-                    "请为此 Git 仓库选择分析流水线，或关闭持续采集后保存。",
-                  )}
-                </p>
-              )}
             </li>
           ))}
         </ul>
@@ -325,23 +205,6 @@ export function CodeInsightRepositories({
         <p className="text-sm text-muted-foreground">
           {insightText("更改仓库范围需要仓库读取权限。")}
         </p>
-      )}
-      {!readOnly && !canPipeline && (
-        <p className="text-xs text-muted-foreground">
-          {insightText("更换分析流水线需要流水线读取及执行权限。")}
-        </p>
-      )}
-      {!readOnly && pipelineLoading && (
-        <p role="status" className="text-sm">
-          {insightText("正在读取分析流水线…")}
-        </p>
-      )}
-      {!readOnly && pipelineError && (
-        <div>
-          <p role="alert" className="text-sm text-destructive">
-            {pipelineError}
-          </p>
-        </div>
       )}
     </section>
   );

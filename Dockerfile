@@ -8,6 +8,7 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY index.html tsconfig.json vite.config.ts ./
+COPY scripts/build-raft-theme.mjs ./scripts/build-raft-theme.mjs
 COPY src ./src
 RUN npm run build
 
@@ -41,7 +42,7 @@ COPY --from=server /out/ferry-server /linux/ferry-server
 COPY --from=server /out/ferry-runner /linux/ferry-runner
 
 FROM ${BASE_REGISTRY}/debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 ferry \
     && useradd --uid 10001 --gid ferry --no-create-home ferry \

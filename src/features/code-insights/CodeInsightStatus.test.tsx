@@ -74,19 +74,49 @@ it("opens undiscovered or inaccessible source diagnostics instead of hiding them
   expect(host.textContent).not.toContain("unavailable");
 });
 
-it("reports a missing pipeline as blocked instead of queued or invented generation progress", async () => {
+it("shows legacy blocked diagnostics without requiring a business pipeline or inventing progress", async () => {
   detail.sources = [{ repository: "team/project", state: "queued", pipeline_required: true, synced_at: 0, job: { state: "queued", effective_state: "blocked", generation: 10, completed_generation: 0 } }];
   await render();
-  expect(status()).toContain("分析需要配置");
-  expect(host.textContent).toContain("等待配置分析流水线");
+  expect(status()).toContain("分析尚未完成");
+  expect(host.textContent).toContain("采集暂不可用");
+  expect(host.textContent).not.toContain("流水线");
   expect(host.textContent).not.toContain("0/10");
   expect(host.textContent).not.toContain("已排队");
   expect(host.querySelector(".animate-spin")).toBeNull();
   expect(metric("最近成功分析")).toBe("尚未成功");
-  expect(sourceTaskState({ pipeline_required: true, state: "queued" })).toBe("blocked");
+  expect(sourceTaskState({ pipeline_required: true, state: "queued" })).toBe("queued");
   expect(sourceTaskState({ pipeline_required: true, job: { effective_state: "running" } })).toBe("running");
   await act(async () => button("配置与同步")!.click());
   expect(onConfigure).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ["api", "平台接口采集"],
+  ["git_fetch", "获取仓库变更"],
+  ["git_analyze", "分析提交信息"],
+])("shows the actual %s collector phase only while running", async (phase, label) => {
+  detail.sources = [{ repository: "team/project", pipeline_required: true, job: { state: "queued", effective_state: "running", collector_phase: phase } }];
+  await render();
+  expect(host.querySelector("li")!.textContent).toContain(label);
+  expect(status()).toContain("同步中");
+  detail.sources = [{ repository: "team/project", job: { effective_state: "retry_wait", collector_phase: phase } }];
+  await act(async () => vi.advanceTimersByTimeAsync(15_000));
+  expect(host.querySelector("li")!.textContent).not.toContain(label);
+  expect(status()).toContain("等待重试");
+});
+
+it.each([
+  ["zh-CN", ["平台接口采集", "获取仓库变更", "分析提交信息"]],
+  ["en-US", ["Collecting from provider API", "Fetching repository changes", "Analyzing commits"]],
+  ["zh-TW", ["平台介面採集", "取得倉庫變更", "分析提交資訊"]],
+  ["ja-JP", ["プラットフォーム API から収集中", "リポジトリの変更を取得中", "コミットを分析中"]],
+  ["ko-KR", ["플랫폼 API에서 수집 중", "저장소 변경 사항 가져오는 중", "커밋 분석 중"]],
+  ["ms-MY", ["Mengumpul daripada API platform", "Mendapatkan perubahan repositori", "Menganalisis komit"]],
+])("localizes collection phases in %s", async (locale, labels) => {
+  await i18n.changeLanguage(locale);
+  detail.sources = ["api", "git_fetch", "git_analyze"].map(phase => ({ repository: phase, job: { effective_state: "running", collector_phase: phase } }));
+  await render();
+  for (const label of labels) expect(host.textContent).toContain(label);
 });
 
 it.each([

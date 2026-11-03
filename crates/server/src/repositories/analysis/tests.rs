@@ -1,6 +1,6 @@
 use super::*;
 use crate::entities::{users, workspace_members, workspace_roles, workspaces};
-use sea_orm::PaginatorTrait;
+use sea_orm::{PaginatorTrait, TransactionTrait};
 
 #[test]
 fn shared_history_demand_unions_wildcard_and_explicit_selection() {
@@ -1293,6 +1293,42 @@ async fn expired_slot_is_reclaimed_and_fences_old_worker_publication_renewal_and
     );
     assert_eq!(commits::Entity::find().count(&s.db).await.unwrap(), 0);
     finish(&s, &new, Ok(())).await.unwrap();
+}
+
+#[tokio::test]
+async fn heartbeat_waiting_for_sqlite_never_starves_the_transaction_owner() {
+    let (_dir, s) = fixture().await;
+    let claim = claimed(&s).await;
+    let previous = jobs::Entity::find_by_id(7)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .lease_until;
+    let process = async {
+        let tx = s.db.begin().await?;
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+        tx.commit().await?;
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+        Ok(())
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        with_heartbeat(&s, &claim, process, std::time::Duration::from_millis(10)),
+    )
+    .await
+    .expect("renewal must keep polling the connection owner")
+    .unwrap();
+    assert!(
+        jobs::Entity::find_by_id(7)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .lease_until
+            > previous
+    );
+    finish(&s, &claim, Ok(())).await.unwrap();
 }
 
 #[tokio::test]

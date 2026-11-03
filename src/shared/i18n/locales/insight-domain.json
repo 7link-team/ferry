@@ -1,4 +1,10 @@
 {
+  "请先加入至少一个仓库。": ["Add at least one repository.", "請先加入至少一個倉庫。", "リポジトリを1つ以上追加してください。", "저장소를 하나 이상 추가하세요.", "Tambah sekurang-kurangnya satu repositori."],
+  "采集暂不可用": ["Collection temporarily unavailable", "採集暫不可用", "収集は一時的に利用できません", "수집을 일시적으로 사용할 수 없음", "Pengumpulan tidak tersedia buat sementara"],
+  "采集暂未完成，请查看仓库错误详情并重试同步。": ["Collection is incomplete. Review the repository error details and retry synchronization.", "採集尚未完成，請查看倉庫錯誤詳情並重試同步。", "収集が完了していません。リポジトリのエラー詳細を確認し、同期を再試行してください。", "수집이 완료되지 않았습니다. 저장소 오류 내용을 확인하고 동기화를 다시 시도하세요.", "Pengumpulan belum selesai. Semak butiran ralat repositori dan cuba semula penyegerakan."],
+  "平台接口采集": ["Collecting from provider API", "平台介面採集", "プラットフォーム API から収集中", "플랫폼 API에서 수집 중", "Mengumpul daripada API platform"],
+  "获取仓库变更": ["Fetching repository changes", "取得倉庫變更", "リポジトリの変更を取得中", "저장소 변경 사항 가져오는 중", "Mendapatkan perubahan repositori"],
+  "分析提交信息": ["Analyzing commits", "分析提交資訊", "コミットを分析中", "커밋 분석 중", "Menganalisis komit"],
   "刷新仓库": ["Refresh repositories", "重新整理儲存庫", "リポジトリを更新", "저장소 새로 고침", "Muat semula repositori"],
   "搜索仓库": ["Search repositories", "搜尋儲存庫", "リポジトリを検索", "저장소 검색", "Cari repositori"],
   "选择当前结果（{{count}}）": ["Select matching repositories ({{count}})", "選擇目前結果（{{count}}）", "検索結果を選択（{{count}}）", "현재 결과 선택 ({{count}})", "Pilih repositori sepadan ({{count}})"],

@@ -3,6 +3,8 @@ use crate::{entities::locks, lock};
 use ferry_protocol::contribution::{ANALYSIS_VERSION, Commit, valid_sha};
 use std::collections::VecDeque;
 
+mod git;
+mod git_facts;
 mod pipeline;
 mod provider;
 
@@ -214,40 +216,77 @@ async fn renew_claim(s: &AppState, claim: &Claim) -> Result<()> {
 
 pub(super) async fn run_claim(s: &AppState, claim: Claim) -> Result<()> {
     let process = async {
-        // A persisted pipeline run is resumed before trying the API again.
-        if claim.connection.provider == "git" || !claim.job.cursor.is_empty() {
+        // Finish already launched legacy runs, but never launch a business
+        // pipeline for new collection work.
+        let legacy_run = serde_json::from_str::<Value>(&claim.job.cursor)
+            .ok()
+            .is_some_and(|cursor| cursor["run_id"].as_i64().is_some_and(|id| id > 0));
+        if legacy_run {
             return pipeline::collect(s, &claim).await;
         }
+        if claim.connection.provider == "git" {
+            return git::collect(s, &claim).await;
+        }
+        set_phase(s, &claim, "api").await?;
         match collect(s, &claim).await {
-            Err(_)
-                if {
-                    let config = decode(&claim.config)?;
-                    !config.pipeline_id.is_empty()
-                        || config
-                            .pipeline_bindings
-                            .get(&claim.source.remote_path)
-                            .is_some_and(|p| !p.is_empty())
-                } =>
+            // Permission failures remain failures. Incomplete provider facts
+            // and unsupported endpoints can be completed from the authorized Git URL.
+            Err(error)
+                if error.0 != axum::http::StatusCode::FORBIDDEN
+                    && error.0 != axum::http::StatusCode::UNAUTHORIZED =>
             {
-                pipeline::collect(s, &claim).await
+                git::collect(s, &claim).await
             }
             result => result,
         }
     };
+    let result = with_heartbeat(s, &claim, process, std::time::Duration::from_secs(20)).await;
+    finish(s, &claim, result).await
+}
+
+async fn with_heartbeat(
+    s: &AppState,
+    claim: &Claim,
+    process: impl std::future::Future<Output = Result<()>>,
+    interval: std::time::Duration,
+) -> Result<()> {
     tokio::pin!(process);
-    let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
+    let mut tick = tokio::time::interval(interval);
     tick.tick().await;
-    let result = loop {
-        tokio::select! {
-            result=&mut process=>break result,
-            _=tick.tick()=>{
-                if let Err(error) = renew_claim(s, &claim).await {
-                    break Err(error);
-                }
+    // Keep polling collection while renewal waits for the database. Awaiting
+    // renewal inside a select branch can starve a collector holding the only
+    // SQLite connection, preventing it from committing and releasing the pool.
+    let heartbeat = async {
+        loop {
+            tick.tick().await;
+            if let Err(error) = renew_claim(s, claim).await {
+                return Err::<(), ApiError>(error);
             }
         }
     };
-    finish(s, &claim, result).await
+    tokio::pin!(heartbeat);
+    tokio::select! {
+        result = &mut process => result,
+        result = &mut heartbeat => result,
+    }
+    // Both futures drop here, releasing any cancelled transaction before finish.
+}
+
+async fn set_phase(s: &AppState, claim: &Claim, phase: &str) -> Result<()> {
+    let tx = crate::variables::transaction(s, claim.job.workspace_id.into()).await?;
+    fence(&tx, claim).await?;
+    jobs::Entity::update_many()
+        .col_expr(
+            jobs::Column::Cursor,
+            Expr::value(json!({"collector_phase":phase}).to_string()),
+        )
+        .col_expr(jobs::Column::UpdatedAt, Expr::value(db::now()))
+        .filter(jobs::Column::Id.eq(claim.job.id))
+        .filter(jobs::Column::LeaseOwner.eq(&claim.owner))
+        .exec(&tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn finish(s: &AppState, claim: &Claim, result: Result<()>) -> Result<()> {

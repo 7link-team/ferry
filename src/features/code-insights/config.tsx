@@ -113,8 +113,8 @@ export function codeInsightForm(_workspace: string): FormConfig<Row> {
     resource: "code-insights",
     width: "full",
     presentation: "sections",
-    incompleteMessage: "请先加入至少一个仓库，并完成仓库所需的分析流水线配置。",
-    incompleteMessageKey: "insight-domain:请先加入至少一个仓库，并完成仓库所需的分析流水线配置。",
+    incompleteMessage: "请先加入至少一个仓库。",
+    incompleteMessageKey: "insight-domain:请先加入至少一个仓库。",
     heading: (row) => String(row.name ?? insightText("代码洞察")),
     blank: {
       name: "",
