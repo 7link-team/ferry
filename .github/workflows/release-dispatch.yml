@@ -1,0 +1,63 @@
+name: Build and publish verified 020-alpha1
+on:
+  push:
+    branches: [feat/020-alpha1-release-dispatch]
+    paths: [.github/workflows/release-dispatch.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sha='b7be871528b8e04e9b8f0c74fd2096f624b30370';
+            const tag='v0.2.0-alpha.1';
+            const repo=context.repo;
+            async function requireMain() {
+              const {data}=await github.rest.repos.getCommit({...repo,ref:'main'});
+              if(data.sha!==sha)throw Error('Main changed; refusing publication');
+            }
+            async function runs(workflow,event) {
+              return (await github.rest.actions.listWorkflowRuns({...repo,workflow_id:workflow,event,head_sha:sha})).data.workflow_runs;
+            }
+            async function waitFor(workflow,event) {
+              for(let attempt=0;attempt<900;attempt++) {
+                const matching=await runs(workflow,event);
+                if(matching.length>1)throw Error('Ambiguous source runs '+workflow);
+                const run=matching[0];
+                if(run) {
+                  if(run.head_sha!==sha || run.head_branch!=='main')throw Error('Unexpected source');
+                  if(attempt%6===0)core.info(`${workflow} ${run.id}: ${run.status}`);
+                  if(run.status==='completed') {
+                    if(run.conclusion!=='success')throw Error(`Required ${workflow} ${run.id} ${run.conclusion}`);
+                    return run;
+                  }
+                }
+                await new Promise(resolve=>setTimeout(resolve,10000));
+              }
+              throw Error('Timed out; inspect existing run before retry');
+            }
+            await requireMain();
+            if((await runs('build.yml','workflow_dispatch')).length)throw Error('Build already dispatched; inspect first');
+            for(const run of await runs('build.yml','push')) {
+              if(run.status!=='completed')await github.rest.actions.cancelWorkflowRun({...repo,run_id:run.id});
+            }
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
+            const build=await waitFor('build.yml','workflow_dispatch');
+            const image=await waitFor('server-image.yml','push');
+            core.notice(`Verified build ${build.id} and source image ${image.id}`);
+            await requireMain();
+            if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Already published/dispatched; inspect first');
+            const notes = "新增洞察报告与代码走查，并交付 alpha.40 之后的通知、安装和升级修复。\n\n- 仓库新增「洞察报告」：日报、周报、月报、季报、年报；按人员昵称映射或应用多仓库统计，支持时区、历史生成、不可变修订及 JSON/CSV/HTML 导出。应用报告展示与本期提交匹配的测试和走查证据，不将提交量换算为业务完成百分比。\n- 构建新增「代码走查」：手动或提交触发，自动生成可编辑的专用流水线；固定提交 SHA，独立运行测试和 AI 审计，保存 JUnit 结果、扫描覆盖及发现处理记录。排队任务保留原配置和流水线快照，无可用执行器时显示等待原因。\n- AI 模型凭据保留在服务端，不注入仓库脚本；提供文件、字节、Token 和并发预算，校验结构化发现的位置与内容。\n- 执行容量增加主机侧进程锁，服务租约超时后仍防止同一槽位重复执行；不确定的占用显示为待核验。\n- 通知订阅弹窗适配窄屏、多渠道独立语言及 URL 自动识别；统一 HostAgent／主机代理与 Runner／执行器术语。\n- 升级脚本以实际运行容器版本与健康状态判断完成，支持镜像拉取中断后的续升。\n\n验证范围：新增模块具备单元、真实 PostgreSQL/MySQL 与浏览器验收；Windows 私有 Git 走查使用实际 HostAgent 和 Actions 执行，AI 接口使用本地契约服务。平台接口契约测试不等于所有平台真实账号验收；商业模型供应商和用户自有 Cloudflare Tunnel 配置需按实际部署验证。";
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
+            const publication=await waitFor('publish-verified.yml','workflow_dispatch');
+            const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
+            if(release.draft || !release.prerelease)throw Error('Unexpected release state');
+            core.notice(`Published ${tag}: ${publication.id}`);
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'server-image.yml',ref:'main',inputs:{release_tag:tag}});
+            const versioned=await waitFor('server-image.yml','workflow_dispatch');
+            core.notice(`Versioned image: ${versioned.id}`);
