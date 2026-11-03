@@ -14,7 +14,7 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='b7be871528b8e04e9b8f0c74fd2096f624b30370';
+            const sha='f27307149c40cea45b839d40b10440677cc2dcd1';
             const tag='v0.2.0-alpha.1';
             const repo=context.repo;
             async function requireMain() {
@@ -42,6 +42,15 @@ jobs:
               throw Error('Timed out; inspect existing run before retry');
             }
             await requireMain();
+
+            for (const prior of [{"id": 41694947329, "sha": "8fd8414288d86c81ba7ea8a17089b35a045f60d2"}, {"id": 41694857508, "sha": "b7be871528b8e04e9b8f0c74fd2096f624b30370"}, {"id": 41695678228, "sha": "b7be871528b8e04e9b8f0c74fd2096f624b30370"}]) {
+              const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id:prior.id});
+              if(run.head_sha!==prior.sha)throw Error('Superseded run source mismatch');
+              if(run.status!=='completed') {
+                await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {...repo,run_id:prior.id});
+                core.info(`Stopped superseded run ${prior.id}`);
+              }
+            }
             if((await runs('build.yml','workflow_dispatch')).length)throw Error('Build already dispatched; inspect first');
             for(const run of await runs('build.yml','push')) {
               if(run.status!=='completed')await github.rest.actions.cancelWorkflowRun({...repo,run_id:run.id});
