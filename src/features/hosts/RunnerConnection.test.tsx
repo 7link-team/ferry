@@ -8,7 +8,9 @@ import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { HostConnectionCommand,RunnerConnection,RunnerUpdateStatus,runnerInstallCommand,runnerServerOrigin,runnerUninstallCommand } from "../../app/pages/RunnerConnection";
 import { i18n } from "../../shared/i18n/i18n";
 
-it.skipIf(process.platform !== "win32")("rejects legacy Runner help before native installation with an actionable error", () => {
+// Native PowerShell startup/fixture compilation can exceed the 5s unit-test budget on hosted Windows.
+// Each child still has a hard 20s process deadline, inside the 30s native-test deadline.
+it.skipIf(process.platform !== "win32")("rejects legacy Runner help before native installation with an actionable error", { timeout: 30_000 }, () => {
   const harness = `
 $ErrorActionPreference = 'Stop'
 $tokens = $null; $errors = $null
@@ -48,11 +50,11 @@ $global:fixtureHelp = "      --user    Install for the current user instead of t
 & $check
 Write-Output 'PASS legacy rejection and compatible CLI'
 `;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000 });
   expect(output).toContain("PASS legacy rejection and compatible CLI");
 });
 
-it.skipIf(process.platform !== "win32")("passes the install scope to the native Runner as whole arguments", () => {
+it.skipIf(process.platform !== "win32")("passes the install scope to the native Runner as whole arguments", { timeout: 30_000 }, () => {
   // Execute the installer's own scope and install statements against a real
   // executable that records its argv, exactly as the native Runner receives it.
   const harness = `
@@ -77,7 +79,7 @@ try {
 } finally { Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Output 'PASS installer scope arguments'
 `;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true });
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000 });
   expect(output).toContain("PASS installer scope arguments");
 });
 
@@ -147,7 +149,7 @@ echo 'unix uninstall verified'
   expect(execFileSync("sh", ["-c", script], { encoding: "utf8", env })).toContain("unix uninstall verified");
 });
 
-it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs the current-user uninstall against a fixture Runner", () => {
+it.skipIf(process.platform !== "win32")("parses the elevated uninstall payload and runs the current-user uninstall against a fixture Runner", { timeout: 30_000 }, () => {
   const system = runnerUninstallCommand("windows", "system");
   const payloads = [...system.matchAll(/-EncodedCommand'?,? '?([A-Za-z0-9+/=]{20,})/g)].map(m => m[1]!);
   const user = runnerUninstallCommand("windows", "user");
@@ -200,12 +202,12 @@ Write-Output 'uninstall commands verified'
   const file = join(mkdtempSync(join(tmpdir(), "runner-uninstall-test-")), "harness.ps1");
   writeFileSync(file, "﻿" + harness, "utf8");
   try {
-    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], { encoding: "utf8", windowsHide: true });
+    const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], { encoding: "utf8", windowsHide: true, timeout: 20_000 });
     expect(output).toContain("uninstall commands verified");
   } finally { rmSync(dirname(file), { recursive: true, force: true }); }
 });
 
-it.skipIf(process.platform !== "win32")("runs the generated current-user Windows command without elevation and restores the environment", () => {
+it.skipIf(process.platform !== "win32")("runs the generated current-user Windows command without elevation and restores the environment", { timeout: 30_000 }, () => {
   const command = runnerInstallCommand("windows", "https://example.com", "fixture-token", "user");
   const harness = `
 $ErrorActionPreference = 'Stop'
@@ -253,7 +255,7 @@ foreach ($case in @('success', 'installer-failure', 'download-failure')) {
 }
 Write-Output 'current-user command verified'
 `;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("current-user command verified");
 }, 30000);
 
@@ -411,7 +413,7 @@ it("shows creation errors and lets the user retry", async () => {
 // Execute the exact generated block in PowerShell on native Windows CI. Mock only
 // the network; execute a fixture installer in a real child PowerShell and assert
 // after success, installer failure and download failure, including unset values.
-it.skipIf(process.platform !== "win32")("restores Windows environment after executing the generated command", () => {
+it.skipIf(process.platform !== "win32")("restores Windows environment after executing the generated command", { timeout: 30_000 }, () => {
   const command = runnerInstallCommand("windows", "https://example.com", "fixture-token");
   const harness = `
 $ErrorActionPreference = 'Stop'
@@ -488,7 +490,7 @@ foreach ($original in @('fixture-original', $null)) {
 }
 Write-Output 'environment restored'
 `;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, timeout: 20_000, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("environment restored");
 }, 30000);
 
