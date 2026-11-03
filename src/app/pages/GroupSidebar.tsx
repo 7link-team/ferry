@@ -76,7 +76,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
       if (active === deleting.id) onSelect("");
       setRevision(value => value + 1);
     }} />}
-    <div className="mb-1 flex items-center gap-1 px-2 text-sm font-medium"><FolderTree className="size-4" />{commonText("table.groups")}<span className="flex-1" />
+    <div className="mb-1 flex items-center gap-1 rounded-md bg-muted/70 px-2 text-sm font-medium text-foreground"><FolderTree className="size-4" />{commonText("table.groups")}<span className="flex-1" />
       {canCreate && <Button variant="ghost" size="icon" className="size-7 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={commonText("group.create")} title={commonText("group.create")} onClick={() => open()}><Plus className="size-4" /></Button>}
     </div>
     <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("")}>{commonText("group.all")}{noun}</button>
