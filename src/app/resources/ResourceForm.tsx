@@ -678,7 +678,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
  const incomplete=fields.some(field=>field.required&&(values[field.key]===undefined||values[field.key]===null||values[field.key]===""||(Array.isArray(values[field.key])&&(values[field.key] as unknown[]).length===0)) || (field.type==="number"&&field.min!==undefined&&Number(values[field.key])<field.min));
  return <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)onClose();}}><Dialog.Portal>
   <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-  <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg">
+  <Dialog.Content className={`fixed left-1/2 top-1/2 z-50 max-h-[90dvh] ${action.dialogWidth === "wide" ? "w-[min(48rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]"} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-6 shadow-lg`}>
    <Dialog.Title className="text-lg font-semibold">{configText(action.label, action.labelKey)}</Dialog.Title>
    <Dialog.Description className="mt-2 text-sm text-muted-foreground">{configText(action.description, action.descriptionKey) || commonText("form.actionHelp")}</Dialog.Description>
    <AutoForm className="mt-4 space-y-4" onSubmit={async event=>{

@@ -1,7 +1,25 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { NotificationChannels } from "./NotificationChannels";
+import { NotificationChannels, notificationProvider } from "./NotificationChannels";
+
+it.each([
+  ["https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=example", "WeCom"],
+  ["https://oapi.dingtalk.com/robot/send?access_token=example", "DingTalk"],
+  ["https://open.feishu.cn/open-apis/bot/v2/hook/example", "Feishu"],
+  ["https://open.larksuite.com/open-apis/bot/v2/hook/example", "Lark"],
+  ["https://api.telegram.org/botexample/sendMessage", "Telegram"],
+  ["https://hooks.slack.com/services/example", "Slack"],
+  ["https://discord.com/api/webhooks/example", "Discord"],
+  ["https://chat.googleapis.com/v1/spaces/example/messages", "Google Chat"],
+  ["https://qyapi.weixin.qq.com.example.invalid/cgi-bin/webhook/send", "Webhook"],
+  ["http://qyapi.weixin.qq.com/cgi-bin/webhook/send", "Webhook"],
+  ["https://qyapi.weixin.qq.com:8443/cgi-bin/webhook/send", "Webhook"],
+  ["https://qyapi.weixin.qq.com/other", "Webhook"],
+  ["not a URL", "Webhook"],
+])("recognises only supported official endpoints: %s", (url, expected) => {
+  expect(notificationProvider(url)).toBe(expected);
+});
 
 it("shows saved webhook addresses, independent language selectors and channel controls without JSON", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

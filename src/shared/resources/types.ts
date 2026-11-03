@@ -64,6 +64,7 @@ export interface RowAction<T> {
   /** Shared action form, for operations needing explicit input before execution. */
   parameters?: (row: T) => FormField<Record<string, unknown>>[];
   initialValues?: (row: T) => Record<string, unknown>;
+  dialogWidth?: "wide";
   description?: string;
   descriptionKey?: string;
   destructive?: boolean;

@@ -47,6 +47,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
       { key: "provider_changed", label: hostRepositoryText("repository-monitor.073"), type: "switch", when: row => !!row.provider_changed },
     ] }],
     viewActions: [{
+      dialogWidth: "wide",
       label: hostRepositoryText("repository-monitor.074"), section: hostRepositoryText("repository-monitor.056"), iconOnly: true, icon: <Pencil className="size-4" />, permission: "repositories.update",
       when: row => row.provider !== "git" || canSelectRunner,
       description: hostRepositoryText("repository-monitor.075"),

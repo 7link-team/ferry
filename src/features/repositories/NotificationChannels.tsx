@@ -8,6 +8,27 @@ import { Input } from "../../shared/ui/input";
 
 export type NotificationChannel = { name: string; webhook: string; language: string; enabled: boolean };
 
+// Match the official endpoint checks in notifications/webhook.rs; never infer
+// a provider from a substring, query parameter or look-alike domain.
+export function notificationProvider(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.port) return "Webhook";
+    const path = url.pathname, segments = path.replace(/^\//, "").split("/");
+    switch (url.hostname) {
+      case "qyapi.weixin.qq.com": if (path === "/cgi-bin/webhook/send") return "WeCom"; break;
+      case "oapi.dingtalk.com": if (path === "/robot/send") return "DingTalk"; break;
+      case "open.feishu.cn": if (path.startsWith("/open-apis/bot/v2/hook/")) return "Feishu"; break;
+      case "open.larksuite.com": if (path.startsWith("/open-apis/bot/v2/hook/")) return "Lark"; break;
+      case "api.telegram.org": if (segments.length === 2 && segments[0]!.startsWith("bot") && segments[0]!.length > 3 && segments[1] === "sendMessage") return "Telegram"; break;
+      case "hooks.slack.com": if (path.startsWith("/services/")) return "Slack"; break;
+      case "discord.com": case "discordapp.com": if (path.startsWith("/api/webhooks/")) return "Discord"; break;
+      case "chat.googleapis.com": if (segments.length === 4 && segments[0] === "v1" && segments[1] === "spaces" && segments[3] === "messages") return "Google Chat"; break;
+    }
+  } catch { /* An incomplete URL is validated by the form. */ }
+  return "Webhook";
+}
+
 export function NotificationChannels({ channels, readOnly, onChange, onValidityChange }: {
   channels: NotificationChannel[]; readOnly: boolean;
   onChange: (channels: NotificationChannel[]) => void;
@@ -18,21 +39,30 @@ export function NotificationChannels({ channels, readOnly, onChange, onValidityC
     || new Set(names).size !== names.length || channels.length > 20;
   useEffect(() => { onValidityChange(!readOnly && blocked); return () => onValidityChange(false); }, [blocked, readOnly, onValidityChange]);
   const patch = (index: number, value: Partial<NotificationChannel>) => onChange(channels.map((channel, at) => at === index ? { ...channel, ...value } : channel));
+  const rename = (webhook: string, index: number) => {
+    const provider = notificationProvider(webhook);
+    const used = new Set(channels.filter((_, at) => at !== index).map(channel => channel.name.trim()));
+    let name = provider, number = 2;
+    while (used.has(name)) name = `${provider} ${number++}`;
+    patch(index, { webhook, name });
+  };
   const add = () => {
     let number = 1;
     while (names.includes(`Webhook ${number}`)) number++;
     onChange([...channels, { name: `Webhook ${number}`, webhook: "", language: "en-US", enabled: true }]);
   };
-  return <section className="space-y-3">
+  return <section className="min-w-0 space-y-3">
     <div className="flex items-center justify-between gap-3">
       <h4 className="font-medium">{hostRepositoryText("repository-monitor.channels")}</h4>
       {!readOnly && <Button type="button" variant="outline" size="sm" disabled={channels.length >= 20} onClick={add}><Plus className="size-4" />{commonText("common.add")}</Button>}
     </div>
-    {channels.map((channel, index) => <div key={index} className="grid items-end gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-[minmax(8rem,1fr)_minmax(12rem,2fr)_minmax(8rem,1fr)_auto]">
-      <AutoField label={commonText("common.name")}><Input aria-label={`${commonText("common.name")} ${index + 1}`} value={channel.name} readOnly={readOnly} maxLength={120} onChange={event => patch(index, { name: event.target.value })} /></AutoField>
-      <AutoField label="Webhook URL"><Input type="url" aria-label={`Webhook URL ${index + 1}`} value={channel.webhook} readOnly={readOnly} maxLength={4096} onChange={event => patch(index, { webhook: event.target.value })} /></AutoField>
-      <AutoField label={hostRepositoryText("repository-monitor.notificationLanguage")}><select aria-label={`${hostRepositoryText("repository-monitor.notificationLanguage")} ${index + 1}`} className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={readOnly} value={channel.language} onChange={event => patch(index, { language: event.target.value })}>{supportedLocales.map(locale => <option key={locale} value={locale}>{localeNames[locale]}</option>)}</select></AutoField>
-      <div className="flex h-9 items-center gap-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={channel.enabled} disabled={readOnly} onChange={event => patch(index, { enabled: event.target.checked })} />{hostRepositoryText("repository-monitor.061")}</label>{!readOnly && <Button type="button" variant="ghost" size="icon" aria-label={`${commonText("common.delete")} ${index + 1}`} onClick={() => onChange(channels.filter((_, at) => at !== index))}><Trash2 className="size-4" /></Button>}</div>
+    {channels.map((channel, index) => <div key={index} className="min-w-0 space-y-3 rounded-md border bg-muted/20 p-3" data-notification-channel>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 break-words text-sm font-medium">{notificationProvider(channel.webhook)} · {index + 1}</span>
+        <div className="flex items-center gap-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={channel.enabled} disabled={readOnly} onChange={event => patch(index, { enabled: event.target.checked })} />{hostRepositoryText("repository-monitor.061")}</label>{!readOnly && <Button type="button" variant="ghost" size="icon" aria-label={`${commonText("common.delete")} ${index + 1}`} onClick={() => onChange(channels.filter((_, at) => at !== index))}><Trash2 className="size-4" /></Button>}</div>
+      </div>
+      <AutoField label="Webhook URL"><Input type="url" className="min-w-0" aria-label={`Webhook URL ${index + 1}`} value={channel.webhook} readOnly={readOnly} maxLength={4096} onChange={event => rename(event.target.value, index)} /></AutoField>
+      <AutoField label={hostRepositoryText("repository-monitor.notificationLanguage")}><select aria-label={`${hostRepositoryText("repository-monitor.notificationLanguage")} ${index + 1}`} className="h-9 w-full min-w-0 max-w-64 rounded-md border bg-background px-3 text-sm" disabled={readOnly} value={channel.language} onChange={event => patch(index, { language: event.target.value })}>{supportedLocales.map(locale => <option key={locale} value={locale}>{localeNames[locale]}</option>)}</select></AutoField>
     </div>)}
   </section>;
 }
