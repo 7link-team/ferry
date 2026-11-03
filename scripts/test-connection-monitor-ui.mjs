@@ -32,7 +32,7 @@ try {
     if (path.endsWith('/code-connection-monitors/42')) {
       if (request.method() === 'PATCH') {
         saved = request.postDataJSON();
-        const webhook = saved.clear_webhook ? '' : saved.webhook || monitor.webhook;
+        const webhook = saved.notification_channels?.[0]?.webhook ?? '';
         Object.assign(monitor, saved, { webhook, has_webhook: !!webhook, version: monitor.version + 1 });
       }
       json = monitor;
@@ -59,19 +59,18 @@ try {
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   const dialog = page.getByRole('dialog');
   assert.equal(await dialog.locator('textarea').inputValue(), 'org/team/repo');
-  const webhookInput = dialog.getByLabel('通知 Webhook 地址', { exact: true });
+  const webhookInput = dialog.getByRole('textbox', { name: 'Webhook URL 1', exact: true });
   assert.equal(await webhookInput.inputValue(), monitor.webhook, 'edit pre-fills the configured webhook');
-  assert.equal(await webhookInput.getAttribute('type'), 'text', 'notification URLs are readable');
-  await dialog.getByRole('combobox', { name: '通知语言', exact: true }).click();
-  await page.getByRole('option', { name: '日本語', exact: true }).click();
+  assert.equal(await webhookInput.getAttribute('type'), 'url', 'notification URLs are readable');
+  await dialog.getByRole('combobox', { name: '通知语言 1', exact: true }).selectOption('ja-JP');
   assert.equal(await dialog.getByText('新增仓库', { exact: true }).count(), 0);
   await dialog.locator('button[type=submit]').click();
   await dialog.waitFor({ state: 'hidden' });
   assert.equal(saved.version, 2);
   assert.deepEqual(saved.events, ['push']);
   assert.equal(saved.repositories, 'org/team/repo');
-  assert.equal(saved.webhook, monitor.webhook, 'saving unrelated settings retains the configured URL');
-  assert.equal(saved.notification_language, 'ja-JP');
+  assert.equal(saved.notification_channels[0].webhook, monitor.webhook, 'saving unrelated settings retains the configured URL');
+  assert.equal(saved.notification_channels[0].language, 'ja-JP');
   assert.match(page.url(), /\/code-connections\/42\?/);
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   await webhookInput.fill('https://notify.example.invalid/hooks/replacement-token');
@@ -79,11 +78,12 @@ try {
   await dialog.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   assert.equal(await webhookInput.inputValue(), 'https://notify.example.invalid/hooks/replacement-token', 'replacement survives reopening');
-  await dialog.getByRole('checkbox', { name: '清除已保存的通知地址', exact: true }).check();
+  await dialog.getByRole('button', { name: '删除 1', exact: true }).click();
   await dialog.locator('button[type=submit]').click();
   await dialog.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
-  assert.equal(await webhookInput.inputValue(), '', 'explicit clearing reopens as empty');
+  assert.deepEqual(saved.notification_channels, [], 'explicit removal persists an empty channel list');
+  assert.equal(await webhookInput.count(), 0, 'removed channel stays absent when reopening');
   await dialog.getByRole('combobox', { name: '监控类型', exact: true }).click();
   await page.getByRole('option', { name: '主动轮询', exact: true }).click();
   assert.equal(await dialog.getByText('Webhook 验证密钥', { exact: true }).count(), 0);
