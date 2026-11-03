@@ -26,7 +26,7 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     docker = shutil.which('docker')
     assert docker and sys.platform == 'linux', 'Requires a real Linux Docker host'
-    project = 'storage-' + uuid.uuid4().hex[:10]
+    project = 'storage_' + uuid.uuid4().hex[:10]
     with tempfile.TemporaryDirectory(prefix='ferry-storage-') as temporary:
         root = Path(temporary)
         deployment = root / 'ferry'
@@ -64,8 +64,14 @@ exec "$STORAGE_TEST_DOCKER" "$@"
 
         def quick(*args, failure=None, check=True):
             env = dict(environment, STORAGE_TEST_FAILURE=failure or '')
-            return run('sh', str(repo / 'scripts/quickstart.sh'), '--dir', str(deployment),
-                       *args, cwd=root, env=env, check=check)
+            result = run('sh', str(repo / 'scripts/quickstart.sh'), '--dir', str(deployment),
+                         *args, cwd=root, env=env, check=False)
+            if check and result.returncode:
+                logs = ''
+                if (deployment / 'compose.storage.yaml').exists():
+                    logs = compose('logs', '--no-color', '--tail', '8', 'ferry', engine, check=False).stdout
+                raise AssertionError(f'quickstart failed ({result.returncode}):\n{result.stdout[-700:]}\n{logs[-1300:]}')
+            return result
 
         def settings():
             return dict(line.split('=', 1) for line in (deployment / '.env.production').read_text().splitlines()
