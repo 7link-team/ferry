@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import traceback
 import urllib.request
 import uuid
 
@@ -233,4 +234,9 @@ exec "$STORAGE_TEST_DOCKER" "$@"
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        detail = traceback.format_exc()
+        print('::error::' + detail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A'), flush=True)
+        raise
