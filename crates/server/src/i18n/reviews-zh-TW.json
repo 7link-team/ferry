@@ -1,0 +1,16 @@
+{
+  "reviews.error.config": "請填寫走查名稱、選擇儲存庫、啟用測試或 AI，並檢查 Runner 設定與預算限制。",
+  "reviews.error.tests": "請填寫測試命令，或關閉自動測試。",
+  "reviews.error.modelEndpoint": "請填寫有效的 HTTP(S) 聊天補全介面位址與模型名稱。",
+  "reviews.error.modelCredential": "請選擇目前工作空間中可用的模型憑證。",
+  "reviews.error.sha": "請提供完整的基準與目標提交 SHA，或先建立分支基準。",
+  "reviews.error.selection": "請從已連線的儲存庫來源選擇可存取的儲存庫或群組。",
+  "reviews.error.junit": "設定的 JUnit 報告遺失或格式無效。請檢查產物路徑與測試命令後重新執行。",
+  "reviews.error.artifact": "走查輸入產物遺失、無效或超出限制。請檢查關聯流水線的產物後重新執行。",
+  "reviews.error.budget": "走查超出輸入或模型預算。請縮小檔案範圍或增加設定的預算。",
+  "reviews.error.model": "模型請求失敗，或傳回的結構化結果不完整、無效。請檢查模型服務設定後重試。",
+  "reviews.error.branch": "所選分支無法使用。請檢查分支名稱與儲存庫存取權限。",
+  "reviews.error.disabled": "請先啟用此程式碼走查再執行。",
+  "reviews.error.launch": "無法確認流水線是否已啟動。請先檢查關聯的流水線執行記錄，再決定是否重試。",
+  "reviews.error.activeJobs": "此走查仍有活動任務。請先取消任務或等待執行結束，再刪除走查。"
+}

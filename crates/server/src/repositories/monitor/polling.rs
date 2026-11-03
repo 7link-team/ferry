@@ -813,6 +813,50 @@ fn requests(rows: Vec<Value>) -> Result<BTreeMap<String, Request>> {
     }
     Ok(result)
 }
+pub(super) async fn review_ref_snapshot(
+    s: &AppState,
+    connection: &connections::Model,
+    config: &Config,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>> {
+    // A fresh shared observer snapshot already contains fixed SHA facts. Reuse
+    // those when all requested sources are covered rather than polling twice.
+    if let Some(state) = polls::Entity::find_by_id(connection.id)
+        .filter(polls::Column::WorkspaceId.eq(connection.workspace_id))
+        .one(&s.db)
+        .await?
+    {
+        if state.last_error.is_empty()
+            && state.last_polled_at >= db::now() - 30_000
+            && state.last_polled_at >= connection.updated_at
+            && !state.snapshot.is_empty()
+        {
+            let saved: Snapshot = serde_json::from_str(
+                &s.vault
+                    .open_secret(&state.snapshot, &poll_aad(state.workspace_id, state.id))?,
+            )
+            .map_err(|_| invalid())?;
+            if config
+                .repositories
+                .iter()
+                .all(|p| saved.get(p).is_some_and(|r| !r.branches.is_empty()))
+            {
+                return Ok(saved
+                    .into_iter()
+                    .filter(|(p, _)| config.repositories.contains(p))
+                    .map(|(p, r)| (p, r.branches))
+                    .collect());
+            }
+        }
+    }
+    Ok(snapshot(s, connection, config)
+        .await?
+        .0
+        .into_iter()
+        .filter(|(p, _)| config.repositories.contains(p))
+        .map(|(p, r)| (p, r.branches))
+        .collect())
+}
+
 async fn snapshot(
     s: &AppState,
     connection: &connections::Model,

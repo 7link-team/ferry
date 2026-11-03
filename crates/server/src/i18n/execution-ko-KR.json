@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "모델 동시 실행 용량을 기다리는 중입니다.",
+  "reviews.invalid": "코드 검토 설정이 올바르지 않습니다: {reason}.",
+  "reviews.waiting": "일치하는 Runner 또는 파이프라인 용량을 기다리는 중입니다.",
+  "reviews.cancelled": "파이프라인 실행이 취소되거나 건너뛰었습니다.",
   "execution.saveDefinition": "Actions 정의를 저장할 수 없습니다.",
   "execution.unknownFormat": "알 수 없는 파이프라인 정의 형식입니다.",
   "execution.nameRequired": "60자 이내의 이름을 입력하세요.",

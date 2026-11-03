@@ -1,6 +1,7 @@
 pub(crate) mod analysis;
 pub(crate) mod auth;
 pub(crate) mod monitor;
+pub(crate) mod reports;
 use crate::entities::{credentials, pipelines, repositories};
 use crate::error::{Json, Path, Query};
 use crate::snowflake::Id;

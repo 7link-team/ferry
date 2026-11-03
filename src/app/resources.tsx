@@ -39,6 +39,8 @@ import {
   schedulingLists,
 } from "../features/scheduling/resource-config";
 import { tagsForms, tagsLists } from "../features/tags/resource-config";
+import { reportForm, reportList } from "../features/insight-reports/config";
+import { reviewForm, reviewList } from "../features/code-reviews/config";
 import {
   templatesForms,
   templatesLists,
@@ -54,7 +56,7 @@ import {
 import type { AnyRow } from "../shared/resources/config";
 import type { FormConfig, ListConfig, Option } from "../shared/resources/types";
 import { exportResources, importResources } from "./resources/ResourceTransfer";
-import { navigate } from "./router";
+import { href, navigate } from "./router";
 export type { Activity } from "../features/activity/resource-config";
 export type { Credential } from "../features/credentials/types";
 export type { Host, HostGroup } from "../features/hosts/resource-config";
@@ -70,6 +72,8 @@ export function listConfigs(
 ): Record<string, ListConfig<AnyRow>> {
   const context = { workspace, permissions, onChanged, hostStates, dictionaries, navigate };
   const configs = {
+    "insight-reports": reportList(workspace),
+    "code-reviews": reviewList(workspace),
     ...marketplaceLists(context),
     ...alertsLists(context),
     ...repositoriesLists(context),
@@ -117,6 +121,8 @@ export function formConfigs(
 ): Record<string, FormConfig<AnyRow>> {
   const context = { workspace, permissions, hostStates: STATES, navigate };
   return {
+    "insight-reports": reportForm(workspace, {href,navigate}),
+    "code-reviews": reviewForm(workspace, {href,navigate}),
     ...marketplaceForms(context),
     ...alertsForms(context),
     ...repositoriesForms(context),

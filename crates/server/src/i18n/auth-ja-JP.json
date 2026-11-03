@@ -1,4 +1,7 @@
 {
+  "permission.group.insight-reports": "分析レポート",
+  "permission.group.code-reviews": "コードレビュー",
+  "permission.action.generate": "生成",
   "auth.password_save": "パスワードを保存できませんでした。再試行してください。",
   "auth.email_invalid": "有効なメールアドレスを入力してください。",
   "auth.password_short": "パスワードは{minimum}文字以上で入力してください。",

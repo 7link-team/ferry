@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "Menunggu kapasiti serentak model.",
+  "reviews.invalid": "Konfigurasi semakan kod tidak sah: {reason}.",
+  "reviews.waiting": "Menunggu Runner yang sepadan atau kapasiti saluran paip.",
+  "reviews.cancelled": "Larian saluran paip dibatalkan atau dilangkau.",
   "execution.saveDefinition": "Tidak dapat menyimpan definisi Actions.",
   "execution.unknownFormat": "Format definisi saluran paip tidak diketahui.",
   "execution.nameRequired": "Masukkan nama tidak melebihi 60 aksara.",

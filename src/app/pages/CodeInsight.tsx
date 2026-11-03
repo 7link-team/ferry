@@ -6,6 +6,7 @@ import {
   codeInsightList,
 } from "../../features/code-insights/config";
 import { insightText } from "../../shared/i18n/i18n";
+import { text as reportText } from "../../features/insight-reports/messages";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
@@ -75,6 +76,7 @@ export function CodeInsightDetail({
         value="dashboard"
         className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto"
       >
+        {permissions.has("insight-reports.create") && <a className="self-start text-sm text-primary underline" href={href({group:"repository",item:"insight-reports",mode:"new",id:""},{insight_id:insightId})}>{reportText("createReport")}</a>}
         <CodeInsightStatus workspace={workspace} insightId={insightId} permissions={permissions} onConfigure={() => setTab("settings")} onPublished={onPublished} />
         <RepositoryAnalysis
           refreshVersion={published}

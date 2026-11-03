@@ -46,31 +46,34 @@ type JobResult struct {
 	Outputs           map[string]string `json:"outputs"`
 }
 type Request struct {
-	Actor          string               `json:"actor"`
-	RunNumber      int64                `json:"run_number"`
-	RunAttempt     int                  `json:"run_attempt"`
-	Ref            string               `json:"ref"`
-	SHA            string               `json:"sha"`
-	Repository     string               `json:"repository"`
-	ServerURL      string               `json:"server_url"`
-	RunCancelled   bool                 `json:"run_cancelled"`
-	Mode           string               `json:"mode"`
-	Matrix         map[string]any       `json:"matrix"`
-	CacheDir       string               `json:"cache_dir"`
-	ArtifactDir    string               `json:"artifact_dir"`
-	RunID          string               `json:"run_id"`
-	Workflow       string               `json:"workflow"`
-	Job            string               `json:"job"`
-	Workdir        string               `json:"workdir"`
-	EventName      string               `json:"event_name"`
-	EventPath      string               `json:"event_path"`
-	Needs          map[string]JobResult `json:"needs"`
-	Platforms      map[string]string    `json:"platforms"`
-	Env            map[string]string    `json:"env"`
-	Secrets        map[string]string    `json:"secrets"`
-	Vars           map[string]string    `json:"vars"`
-	Inputs         map[string]string    `json:"inputs"`
-	TimeoutSeconds int                  `json:"timeout_seconds"`
+	ExecutionHost     string               `json:"execution_host"`
+	ExecutionSlot     int                  `json:"execution_slot"`
+	ExecutionCapacity int                  `json:"execution_capacity"`
+	Actor             string               `json:"actor"`
+	RunNumber         int64                `json:"run_number"`
+	RunAttempt        int                  `json:"run_attempt"`
+	Ref               string               `json:"ref"`
+	SHA               string               `json:"sha"`
+	Repository        string               `json:"repository"`
+	ServerURL         string               `json:"server_url"`
+	RunCancelled      bool                 `json:"run_cancelled"`
+	Mode              string               `json:"mode"`
+	Matrix            map[string]any       `json:"matrix"`
+	CacheDir          string               `json:"cache_dir"`
+	ArtifactDir       string               `json:"artifact_dir"`
+	RunID             string               `json:"run_id"`
+	Workflow          string               `json:"workflow"`
+	Job               string               `json:"job"`
+	Workdir           string               `json:"workdir"`
+	EventName         string               `json:"event_name"`
+	EventPath         string               `json:"event_path"`
+	Needs             map[string]JobResult `json:"needs"`
+	Platforms         map[string]string    `json:"platforms"`
+	Env               map[string]string    `json:"env"`
+	Secrets           map[string]string    `json:"secrets"`
+	Vars              map[string]string    `json:"vars"`
+	Inputs            map[string]string    `json:"inputs"`
+	TimeoutSeconds    int                  `json:"timeout_seconds"`
 }
 
 // act masks the message, but structured fields (for example set-output's arg)
@@ -386,6 +389,12 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	release, err := acquireExecutionSlot(ctx, request)
+	if err != nil {
+		reportError(os.Stdout, request.Secrets, ctx, err)
+		os.Exit(1)
+	}
+	defer release()
 	result, err := execute(ctx, request, os.Stdout)
 	reportError(os.Stdout, request.Secrets, ctx, err)
 	_ = json.NewEncoder(os.Stdout).Encode(struct {

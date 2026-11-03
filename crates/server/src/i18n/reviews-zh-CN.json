@@ -1,0 +1,16 @@
+{
+  "reviews.error.config": "请填写走查名称、选择仓库、启用测试或 AI，并检查 Runner 设置与预算限制。",
+  "reviews.error.tests": "请填写测试命令，或关闭自动测试。",
+  "reviews.error.modelEndpoint": "请填写有效的 HTTP(S) 聊天补全接口地址与模型名称。",
+  "reviews.error.modelCredential": "请选择当前工作空间中可用的模型凭据。",
+  "reviews.error.sha": "请提供完整的基线与目标提交 SHA，或先建立分支基线。",
+  "reviews.error.selection": "请从已连接的仓库来源选择可访问的仓库或分组。",
+  "reviews.error.junit": "配置的 JUnit 报告缺失或格式无效。请检查产物路径与测试命令后重新运行。",
+  "reviews.error.artifact": "走查输入产物缺失、无效或超出限制。请检查关联流水线的产物后重新运行。",
+  "reviews.error.budget": "走查超出输入或模型预算。请缩小文件范围或增加配置的预算。",
+  "reviews.error.model": "模型请求失败，或返回的结构化结果不完整、无效。请检查模型服务配置后重试。",
+  "reviews.error.branch": "所选分支不可用。请检查分支名称与仓库访问权限。",
+  "reviews.error.disabled": "请先启用此代码走查再运行。",
+  "reviews.error.launch": "无法确认流水线是否已启动。请先检查关联的流水线运行记录，再决定是否重试。",
+  "reviews.error.activeJobs": "此走查仍有活动任务。请先取消任务或等待执行结束，再删除走查。"
+}

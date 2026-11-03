@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "等待模型并发空闲容量。",
+  "reviews.invalid": "代码走查配置无效：{reason}。",
+  "reviews.waiting": "等待匹配的执行器或流水线空闲容量。",
+  "reviews.cancelled": "流水线运行已取消或跳过。",
   "execution.saveDefinition": "无法保存 Actions 定义。",
   "execution.unknownFormat": "未知的流水线定义格式。",
   "execution.nameRequired": "请填写名称（60 字以内）。",

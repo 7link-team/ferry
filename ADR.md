@@ -1,5 +1,13 @@
 # Architecture Decision Records
 
+## Host execution fencing after server suspension (2026-11-04, implementation)
+- Scope: close the authorized execution-capacity boundary where SQL slot leases expire while a remote Actions worker is still executing.
+- Decision: retain SQL scheduling and owner-checked leases; additionally hold kernel file locks in the actual Actions worker for its host/slot throughout execution and cancellation cleanup. A short allocation lock serializes occupancy checks across all 64 slots, including slots above a reduced capacity. Files remain in the system shared directory and are never unlinked; otherwise separate inodes could defeat exclusion.
+- Reason: database TTL alone cannot fence a suspended remote process. Kernel locks continue to exclude successors during a server pause and release on worker exit; this works through both SSH and HostAgent without a second execution engine or clock synchronization.
+- Alternatives: a heartbeat watchdog still needs proof of child cleanup before its deadline; never reclaiming SQL slots prevents automatic recovery. Neither is used as the physical exclusion mechanism.
+- Tradeoffs: an expired SQL lease does not authorize killing the old worker; a successor waits up to 60 seconds for physical capacity, then fails closed with a diagnostic. Shared-directory permission failures also fail closed. Existing standalone worker requests without host-slot fields remain compatible. This fences worker invocations; it does not claim to prevent arbitrary detached processes deliberately created by repository scripts.
+- Verification: native Windows cross-process exclusion/crash recovery and capacity-reduction tests passed; full worker/server and real remote execution regression pending.
+
 ## Localized mixed execution output (2026-11-02, confirmed)
 - Context: execution outputs mix product summaries with literal command logs. A single Message has a 256 KiB metadata limit, while existing logs allow 1 MiB of raw bytes.
 - Decision: reuse i18n.rs with StoredText, an explicitly versioned `$system_text` collection of Raw and Message segments. Store message identity; render once for each reader. Keep raw logs, provider diagnostics, and user notes literal.

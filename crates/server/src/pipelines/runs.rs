@@ -251,6 +251,12 @@ pub struct TriggerBody {
     branch: Option<String>,
     commit: Option<String>,
     environment_id: Option<String>,
+    /// Internal review claim, never forwarded to workflow inputs or scripts.
+    #[serde(default)]
+    review_lease_owner: Option<String>,
+    /// Immutable queued review template; authorized against the persisted snapshot.
+    #[serde(default)]
+    review_definition: Option<String>,
     /// workflow_dispatch inputs (strings, booleans or numbers).
     #[serde(default)]
     inputs: BTreeMap<String, Value>,
@@ -369,13 +375,48 @@ pub(crate) async fn trigger_with_analysis_source(
     source: Option<(i64, String)>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("pipelines.run")?;
+    let body: TriggerBody = if body.is_empty() {
+        TriggerBody::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("execution.triggerObject"),
+            )
+        })?
+    };
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    if kind == "code-review" {
+        let review_job = body
+            .inputs
+            .get("review_job_id")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<i64>().ok())
+            .ok_or_else(ApiError::missing)?;
+        crate::pipelines::reviews::authorize_launch(
+            &tx,
+            i64::from(scope.workspace_id),
+            scope.user.id.into(),
+            i64::from(id),
+            review_job,
+            body.review_lease_owner.as_deref().unwrap_or_default(),
+            body.commit.as_deref().unwrap_or_default(),
+            body.review_definition.as_deref().unwrap_or_default(),
+        )
+        .await?;
+    }
     let mut p = pipelines::Entity::find_by_id(i64::from(id))
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
+    if kind == "code-review" {
+        p.definition = body
+            .review_definition
+            .clone()
+            .ok_or_else(ApiError::forbidden)?;
+    }
     if let Some((connection, url)) = source {
         let mut document = crate::pipelines::actions::document(&p.definition).ok_or_else(|| {
             ApiError::localized(
@@ -383,6 +424,17 @@ pub(crate) async fn trigger_with_analysis_source(
                 Message::new("execution.analysisActionsRequired"),
             )
         })?;
+        // Review templates own one checkout; instantiate it for this authorized
+        // repository without changing the saved pipeline or ordinary runs.
+        if kind == "code-review" {
+            if document.checkout_bindings.len() != 1 {
+                return Err(ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    Message::new("execution.analysisSourceRequired"),
+                ));
+            }
+            document.checkout_bindings[0].connection_id = connection.to_string();
+        }
         let bindings: Vec<_> = document
             .checkout_bindings
             .iter_mut()
@@ -396,7 +448,26 @@ pub(crate) async fn trigger_with_analysis_source(
         }
         let binding = bindings.into_iter().next().unwrap();
         binding.repository_url = url;
-        binding.git_ref = "+refs/heads/*:refs/remotes/origin/*".into();
+        binding.git_ref = if kind == "code-review" {
+            let sha = body
+                .commit
+                .as_deref()
+                .filter(|sha| {
+                    matches!(sha.len(), 40 | 64)
+                        && sha
+                            .bytes()
+                            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+                })
+                .ok_or_else(|| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.analysisSourceRequired"),
+                    )
+                })?;
+            sha.to_owned()
+        } else {
+            "+refs/heads/*:refs/remotes/origin/*".into()
+        };
         // Keep the YAML step's declarative repository/ref consistent with its
         // connection binding (the validator rejects conflicting values).
         let mut yaml: serde_json::Value =
@@ -430,16 +501,6 @@ pub(crate) async fn trigger_with_analysis_source(
             )
         })?;
     }
-    let body: TriggerBody = if body.is_empty() {
-        TriggerBody::default()
-    } else {
-        serde_json::from_slice(&body).map_err(|_| {
-            ApiError::localized(
-                StatusCode::BAD_REQUEST,
-                Message::new("execution.triggerObject"),
-            )
-        })?
-    };
     let environment = crate::pipelines::contexts::selected(
         &tx,
         scope.workspace_id,
@@ -939,27 +1000,36 @@ pub async fn cancel(
 /// cancelling so its scheduler stops workers and cleans up.
 pub(crate) async fn request_cancel(s: &AppState, r: &runs::Model) -> Result<()> {
     if crate::pipelines::actions::snapshot(&r.definition).is_some() {
-        let queued = runs::Entity::update_many()
-            .col_expr(runs::Column::State, Expr::value("cancelling"))
-            .filter(runs::Column::Id.eq(r.id))
-            .filter(runs::Column::State.eq("queued"))
-            .exec(&s.db)
-            .await?
-            .rows_affected;
-        if queued > 0 {
+        if mark_cancelling(&s.db, r).await? {
             finish(s, r.id, "cancelled").await?;
-        } else {
-            runs::Entity::update_many()
-                .col_expr(runs::Column::State, Expr::value("cancelling"))
-                .filter(runs::Column::Id.eq(r.id))
-                .filter(runs::Column::State.eq("running"))
-                .exec(&s.db)
-                .await?;
         }
     } else {
         finish(s, r.id, "cancelled").await?;
     }
     Ok(())
+}
+/// Persist cancellation inside a caller's transaction; running Actions cleanup
+/// remains owned by the existing scheduler. The caller finishes queued runs.
+pub(crate) async fn mark_cancelling(
+    conn: &impl sea_orm::ConnectionTrait,
+    r: &runs::Model,
+) -> Result<bool> {
+    let queued = runs::Entity::update_many()
+        .col_expr(runs::Column::State, Expr::value("cancelling"))
+        .filter(runs::Column::Id.eq(r.id))
+        .filter(runs::Column::State.eq("queued"))
+        .exec(conn)
+        .await?
+        .rows_affected;
+    if queued == 0 {
+        runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("cancelling"))
+            .filter(runs::Column::Id.eq(r.id))
+            .filter(runs::Column::State.eq("running"))
+            .exec(conn)
+            .await?;
+    }
+    Ok(queued > 0)
 }
 
 /// GitHub concurrency for a new run: older pending runs of its group are

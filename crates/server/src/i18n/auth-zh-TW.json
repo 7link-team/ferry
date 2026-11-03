@@ -1,4 +1,7 @@
 {
+  "permission.group.insight-reports": "洞察報告",
+  "permission.group.code-reviews": "程式碼審查",
+  "permission.action.generate": "產生",
   "auth.password_save": "無法儲存密碼，請重試。",
   "auth.email_invalid": "請填寫有效的電子郵件地址。",
   "auth.password_short": "密碼至少 {minimum} 個字元。",

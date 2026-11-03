@@ -1,4 +1,5 @@
 import { commonText } from "../shared/i18n/i18n";
+import { text as evidenceText } from "../features/insight-reports/messages";
 /**
  * The whole menu tree as data. Moving an item between groups — the planned
  * merge of 主机 / 构建 / 部署 into one top-level module — is an edit here and
@@ -56,6 +57,7 @@ export const nav: NavGroup[] = [
     get label() { return commonText("nav.build"); },
     items: [
       { key: "pipelines", get label() { return commonText("shell.pipeline"); }, resource: "pipelines", permission: "pipelines.read" },
+      { key: "code-reviews", get label() { return evidenceText("reviews"); }, resource: "code-reviews", permission: "code-reviews.read" },
       {key:"pipeline-groups",get label() { return commonText("table.groups"); },resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},
       {key:"pipeline-environments",get label() { return commonText("nav.environments"); },resource:"pipeline-environments",permission:"pipeline-environments.read",hidden:true,parent:"pipelines"},
       {key:"environment-variables",get label() { return commonText("nav.environmentVariables"); },resource:"variables",permission:"variables.read",params:{scope:"environment"},hidden:true,parent:"pipelines"},
@@ -74,6 +76,7 @@ export const nav: NavGroup[] = [
       { key: "repositories", get label() { return commonText("nav.repositories"); }, resource: "code-connections", permission: "repositories.read" },
       { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read" },
       { key: "code-insights", get label() { return commonText("nav.insights"); }, resource: "code-insights", permission: "code-insights.read" },
+      { key: "insight-reports", get label() { return evidenceText("reports"); }, resource: "insight-reports", permission: "insight-reports.read" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "build" }, permission: "credentials.read" },
     ],
   },

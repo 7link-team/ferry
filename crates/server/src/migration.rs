@@ -111,6 +111,8 @@ impl MigratorTrait for Migrator {
             Box::new(RepositoryEventDeliveryMessages),
             Box::new(HostExecutionCapacity),
             Box::new(DeploymentCategory),
+            Box::new(crate::repositories::reports::migration::InsightReports),
+            Box::new(crate::pipelines::reviews::migration::Migration),
         ]
     }
 }

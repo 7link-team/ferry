@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "等待模型並行可用容量。",
+  "reviews.invalid": "程式碼審查設定無效：{reason}。",
+  "reviews.waiting": "等待符合的執行器或流水線可用容量。",
+  "reviews.cancelled": "流水線執行已取消或略過。",
   "execution.saveDefinition": "無法儲存 Actions 定義。",
   "execution.unknownFormat": "未知的流水線定義格式。",
   "execution.nameRequired": "請填寫名稱（60 字以內）。",

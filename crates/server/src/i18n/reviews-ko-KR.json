@@ -1,0 +1,16 @@
+{
+  "reviews.error.config": "리뷰 이름과 저장소를 선택하고 테스트 또는 AI를 활성화한 뒤 Runner 설정과 제한을 확인하세요.",
+  "reviews.error.tests": "테스트 명령을 입력하거나 자동 테스트를 끄세요.",
+  "reviews.error.modelEndpoint": "올바른 HTTP(S) 채팅 완성 엔드포인트와 모델 이름을 입력하세요.",
+  "reviews.error.modelCredential": "이 작업 공간에서 사용할 수 있는 모델 자격 증명을 선택하세요.",
+  "reviews.error.sha": "전체 기준 및 대상 커밋 SHA를 입력하거나 먼저 브랜치 기준을 설정하세요.",
+  "reviews.error.selection": "연결된 소스에서 접근 가능한 저장소 또는 그룹을 선택하세요.",
+  "reviews.error.junit": "설정한 JUnit 보고서가 없거나 잘못되었습니다. 아티팩트 경로와 테스트 명령을 확인한 후 다시 실행하세요.",
+  "reviews.error.artifact": "리뷰 입력 아티팩트가 없거나 잘못되었거나 제한을 초과했습니다. 연결된 파이프라인 아티팩트를 확인하고 다시 실행하세요.",
+  "reviews.error.budget": "입력 또는 모델 예산을 초과했습니다. 파일 범위를 줄이거나 예산을 늘리세요.",
+  "reviews.error.model": "모델 요청이 실패했거나 구조화된 응답이 불완전하거나 잘못되었습니다. 제공자 설정을 확인하고 다시 시도하세요.",
+  "reviews.error.branch": "선택한 브랜치를 사용할 수 없습니다. 브랜치 이름과 저장소 접근 권한을 확인하세요.",
+  "reviews.error.disabled": "실행하기 전에 이 코드 리뷰를 활성화하세요.",
+  "reviews.error.launch": "파이프라인 시작을 확인할 수 없습니다. 다시 시도하기 전에 연결된 실행 기록을 확인하세요.",
+  "reviews.error.activeJobs": "이 리뷰에 활성 작업이 있습니다. 작업을 취소하거나 완료될 때까지 기다린 후 삭제하세요。"
+}

@@ -1,0 +1,16 @@
+{
+  "reviews.error.config": "Enter a review name, select repositories, enable tests or AI, and check Runner settings and limits.",
+  "reviews.error.tests": "Enter a test command or turn off automatic tests.",
+  "reviews.error.modelEndpoint": "Enter a valid HTTP(S) chat-completions endpoint and a model name.",
+  "reviews.error.modelCredential": "Select an available model credential from this workspace.",
+  "reviews.error.sha": "Provide full base and head commit SHAs, or establish the branch baseline first.",
+  "reviews.error.selection": "Select available repositories or a group from a connected repository source.",
+  "reviews.error.junit": "The configured JUnit report is missing or invalid. Check the artifact path and test command, then rerun.",
+  "reviews.error.artifact": "Review input artifacts are missing, invalid, or exceed limits. Check the linked pipeline artifacts and rerun.",
+  "reviews.error.budget": "The review exceeds its input or model budget. Narrow the file scope or increase the configured budget.",
+  "reviews.error.model": "The model request failed or returned an incomplete or invalid structured response. Check the provider configuration and retry.",
+  "reviews.error.branch": "The selected branch is unavailable. Check its name and repository access.",
+  "reviews.error.disabled": "Enable this code review before running it.",
+  "reviews.error.launch": "Pipeline launch could not be confirmed. Check linked pipeline runs before retrying.",
+  "reviews.error.activeJobs": "This review has active runs. Cancel them or wait for them to finish before deleting it."
+}

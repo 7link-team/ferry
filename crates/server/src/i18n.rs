@@ -217,6 +217,22 @@ static CATALOGS: LazyLock<[Catalog; 6]> = LazyLock::new(|| {
             include_str!("i18n/deployment-ko-KR.json"),
             include_str!("i18n/deployment-ms-MY.json"),
         ],
+        [
+            include_str!("i18n/reports-en-US.json"),
+            include_str!("i18n/reports-zh-CN.json"),
+            include_str!("i18n/reports-zh-TW.json"),
+            include_str!("i18n/reports-ja-JP.json"),
+            include_str!("i18n/reports-ko-KR.json"),
+            include_str!("i18n/reports-ms-MY.json"),
+        ],
+        [
+            include_str!("i18n/reviews-en-US.json"),
+            include_str!("i18n/reviews-zh-CN.json"),
+            include_str!("i18n/reviews-zh-TW.json"),
+            include_str!("i18n/reviews-ja-JP.json"),
+            include_str!("i18n/reviews-ko-KR.json"),
+            include_str!("i18n/reviews-ms-MY.json"),
+        ],
     ] {
         for (catalog, source) in catalogs.iter_mut().zip(domain) {
             let domain: Catalog =

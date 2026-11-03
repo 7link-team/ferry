@@ -92,16 +92,20 @@ pub async fn decorate_many(
         .collect::<HashMap<_, _>>();
     let live = slots::Entity::find()
         .filter(slots::Column::HostId.is_in(ids))
-        .filter(slots::Column::ExpiresAt.gt(db::now()))
         .all(conn)
         .await?;
     for (row, value) in rows.iter().zip(values) {
         let p = policies.get(&row.id).cloned().unwrap_or_default();
+        let unresolved = live
+            .iter()
+            .any(|lease| lease.host_id == row.id && lease.expires_at <= db::now());
         let live = live
             .iter()
-            .filter(|lease| lease.host_id == row.id)
+            .filter(|lease| lease.host_id == row.id && lease.expires_at > db::now())
             .collect::<Vec<_>>();
-        let state = if !p.enabled {
+        let state = if unresolved {
+            "recovering"
+        } else if !p.enabled {
             if live.is_empty() {
                 "disabled"
             } else {
@@ -239,7 +243,8 @@ pub async fn candidates(
 const TTL: i64 = 300_000;
 pub struct Lease {
     pub host: i64,
-    slot: i64,
+    pub slot: i64,
+    pub capacity: u32,
     owner: String,
 }
 impl Lease {
@@ -314,7 +319,12 @@ pub async fn try_acquire(
                 .await?
                 .is_some_and(|s| s.owner == owner);
         if own {
-            return Ok(Some(Lease { host, slot, owner }));
+            return Ok(Some(Lease {
+                host,
+                slot,
+                capacity,
+                owner,
+            }));
         }
     }
     Ok(None)
@@ -472,6 +482,24 @@ mod tests {
             .one(&db)
             .await
             .unwrap()
+            .unwrap();
+        slots::Entity::update_many()
+            .col_expr(slots::Column::ExpiresAt, Expr::value(0))
+            .filter(slots::Column::HostId.eq(1))
+            .filter(slots::Column::Slot.eq(replacement.slot))
+            .exec(&db)
+            .await
+            .unwrap();
+        let mut uncertain = json!({});
+        decorate(&db, &host, &mut uncertain).await.unwrap();
+        assert_eq!(uncertain["execution_status"]["state"], "recovering");
+        assert_eq!(uncertain["execution_status"]["active"], 1);
+        slots::Entity::update_many()
+            .col_expr(slots::Column::ExpiresAt, Expr::value(db::now() + TTL))
+            .filter(slots::Column::HostId.eq(1))
+            .filter(slots::Column::Slot.eq(replacement.slot))
+            .exec(&db)
+            .await
             .unwrap();
         save(
             &db,

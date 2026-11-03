@@ -3,6 +3,7 @@ pub(crate) mod actions_run;
 pub(crate) mod artifacts;
 pub(crate) mod concurrency;
 pub(crate) mod contexts;
+pub(crate) mod reviews;
 pub(crate) mod runs;
 use crate::entities::{host_groups, hosts, pipelines, repositories};
 use crate::error::{Json, Path, Query};

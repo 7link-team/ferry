@@ -1,4 +1,7 @@
 {
+  "permission.group.insight-reports": "Laporan cerapan",
+  "permission.group.code-reviews": "Semakan kod",
+  "permission.action.generate": "Jana",
   "auth.password_save": "Kata laluan tidak dapat disimpan. Sila cuba lagi.",
   "auth.email_invalid": "Sila masukkan alamat e-mel yang sah.",
   "auth.password_short": "Kata laluan mesti mengandungi sekurang-kurangnya {minimum} aksara.",

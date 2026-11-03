@@ -31,5 +31,5 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", include: ["src/**/*.test.{ts,tsx}"] },
 });

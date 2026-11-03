@@ -1,4 +1,7 @@
 {
+  "permission.group.insight-reports": "Insight reports",
+  "permission.group.code-reviews": "Code reviews",
+  "permission.action.generate": "Generate",
   "auth.password_save": "Could not save the password. Please try again.",
   "auth.email_invalid": "Please enter a valid email address.",
   "auth.password_short": "The password must contain at least {minimum} characters.",

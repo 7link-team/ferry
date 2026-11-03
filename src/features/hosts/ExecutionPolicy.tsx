@@ -6,7 +6,7 @@ import { Input } from "../../shared/ui/input";
 export type ExecutionPolicy = { enabled: boolean; shared: boolean; capacity: number };
 export type ExecutionStatus = {
   active: number; capacity: number;
-  state: "disabled" | "draining" | "busy" | "available";
+  state: "disabled" | "draining" | "busy" | "available" | "recovering";
   running_jobs: { run_id: string; job_key: string }[];
 };
 export const defaultExecutionPolicy: ExecutionPolicy = { enabled: true, shared: false, capacity: 1 };

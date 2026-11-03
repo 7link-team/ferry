@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "モデルの同時実行枠を待機中です。",
+  "reviews.invalid": "コードレビュー設定が無効です：{reason}。",
+  "reviews.waiting": "対応する Runner またはパイプラインの空きを待機中です。",
+  "reviews.cancelled": "パイプライン実行はキャンセルまたはスキップされました。",
   "execution.saveDefinition": "Actions 定義を保存できませんでした。",
   "execution.unknownFormat": "不明なパイプライン定義形式です。",
   "execution.nameRequired": "60 文字以内の名前を入力してください。",

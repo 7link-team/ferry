@@ -1,0 +1,16 @@
+{
+  "reviews.error.config": "Masukkan nama semakan, pilih repositori, aktifkan ujian atau AI, dan semak tetapan Runner serta had.",
+  "reviews.error.tests": "Masukkan arahan ujian atau matikan ujian automatik.",
+  "reviews.error.modelEndpoint": "Masukkan titik akhir pelengkapan sembang HTTP(S) dan nama model yang sah.",
+  "reviews.error.modelCredential": "Pilih kelayakan model yang tersedia dalam ruang kerja ini.",
+  "reviews.error.sha": "Berikan SHA komit asas dan sasaran penuh, atau tetapkan garis dasar cabang dahulu.",
+  "reviews.error.selection": "Pilih repositori atau kumpulan yang boleh dicapai daripada sumber yang disambungkan.",
+  "reviews.error.junit": "Laporan JUnit yang dikonfigurasi tiada atau tidak sah. Semak laluan artifak dan arahan ujian, kemudian jalankan semula.",
+  "reviews.error.artifact": "Artifak input semakan tiada, tidak sah atau melebihi had. Semak artifak saluran paip yang dipautkan dan jalankan semula.",
+  "reviews.error.budget": "Semakan melebihi bajet input atau model. Kecilkan skop fail atau tambah bajet.",
+  "reviews.error.model": "Permintaan model gagal atau respons berstruktur tidak lengkap atau tidak sah. Semak konfigurasi penyedia dan cuba lagi.",
+  "reviews.error.branch": "Cabang yang dipilih tidak tersedia. Semak nama cabang dan akses repositori.",
+  "reviews.error.disabled": "Aktifkan semakan kod ini sebelum menjalankannya.",
+  "reviews.error.launch": "Pelancaran saluran paip tidak dapat disahkan. Semak rekod pelaksanaan yang dipautkan sebelum mencuba lagi.",
+  "reviews.error.activeJobs": "Semakan ini mempunyai tugas aktif. Batalkan tugas atau tunggu sehingga selesai sebelum memadamkannya."
+}

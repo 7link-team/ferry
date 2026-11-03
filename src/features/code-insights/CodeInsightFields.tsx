@@ -23,6 +23,7 @@ export interface InsightRepository {
   provider?: string;
 }
 type Props = {
+  addLabel?: string;
   navigation: Navigation;
   workspace: string;
   value: unknown;
@@ -34,6 +35,7 @@ type Props = {
 
 /** One shared form field manages memberships; connection browsing is reused from checkout. */
 export function CodeInsightRepositories({
+  addLabel,
   navigation,
   workspace,
   value,
@@ -199,7 +201,7 @@ export function CodeInsightRepositories({
                 {!visible.length && <p role="status" className="p-4 text-sm text-muted-foreground">{insightText("暂无匹配仓库")}</p>}
               </DropdownMenuContent>
             </DropdownMenu>}
-            gitAction={<Button type="button" size="sm" variant="outline" disabled={!choice.url.trim() || !data.connection || data.loading || !!data.error} onClick={add}><Plus aria-hidden="true" className="size-4" />{insightText("加入洞察")}</Button>}
+            gitAction={<Button type="button" size="sm" variant="outline" disabled={!choice.url.trim() || !data.connection || data.loading || !!data.error} onClick={add}><Plus aria-hidden="true" className="size-4" />{addLabel ?? insightText("加入洞察")}</Button>}
             group={group}
             onGroupChange={value => { setGroup(value); setChoice(current => ({ ...current, url: "" })); }}
             onChange={(selection) => {

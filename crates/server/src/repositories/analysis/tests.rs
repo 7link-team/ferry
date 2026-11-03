@@ -27,7 +27,7 @@ pub(crate) async fn fixture() -> (tempfile::TempDir, AppState) {
     fixture_in(dir, db).await
 }
 
-pub(super) async fn fixture_with_database(
+pub(crate) async fn fixture_with_database(
     db: sea_orm::DatabaseConnection,
 ) -> (tempfile::TempDir, AppState) {
     fixture_in(tempfile::tempdir().unwrap(), db).await

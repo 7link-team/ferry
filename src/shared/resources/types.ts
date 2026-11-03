@@ -168,6 +168,8 @@ export interface FormField<T> {
   immutable?: boolean;
   /** Clear dependent selections when this field changes. */
   resetOnChange?: string[];
+  /** Context label for the shared plain-Git repository add control. */
+  repositoryAddLabelKey?: string;
   /** Metadata key for a stored secret's presence (never its value). */
   stored?: string;
   /** Explicitly opt into replacing an existing write-only value, including with empty text. */

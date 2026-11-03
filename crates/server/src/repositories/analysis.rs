@@ -34,6 +34,43 @@ mod sync;
 pub(crate) use identity::recover;
 pub use query::insight_report;
 pub use query::report;
+pub(crate) use query::{ReportFact, report_author_identities, report_facts};
+#[cfg(test)]
+pub(crate) use sync::tests::fixture as report_test_fixture;
+#[cfg(test)]
+pub(crate) async fn report_test_fixture_with_database(
+    db: sea_orm::DatabaseConnection,
+) -> (tempfile::TempDir, AppState) {
+    sync::tests::fixture_with_database(db).await
+}
+#[cfg(test)]
+pub(crate) async fn report_test_seed(
+    s: &AppState,
+    insight: &crate::entities::code_insights::Model,
+    author_date: i64,
+) {
+    let claim = sync::tests::claimed(s).await;
+    let mut value = sync::tests::commit('d');
+    value.author_date = author_date;
+    let fact = sync::store(s, &claim, value).await.unwrap();
+    sync::tests::publish_branches(
+        s,
+        &claim,
+        &[
+            ("main", &fact.sha, &[fact.id]),
+            ("duplicate", &fact.sha, &[fact.id]),
+        ],
+    )
+    .await;
+    let sources = sources::Entity::find().all(&s.db).await.unwrap();
+    let tx = crate::variables::transaction(s, insight.workspace_id.into())
+        .await
+        .unwrap();
+    insight_identity::ensure(s, &tx, insight, &sources)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+}
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Alias {

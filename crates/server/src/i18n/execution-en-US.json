@@ -1,4 +1,8 @@
 {
+  "reviews.waitingAi": "Waiting for model concurrency capacity.",
+  "reviews.invalid": "Invalid code review configuration: {reason}.",
+  "reviews.waiting": "Waiting for a matching Runner or pipeline capacity.",
+  "reviews.cancelled": "Pipeline run cancelled or skipped.",
   "execution.saveDefinition": "Could not save the Actions definition.",
   "execution.unknownFormat": "Unknown pipeline definition format.",
   "execution.nameRequired": "Enter a name of at most 60 characters.",

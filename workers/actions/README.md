@@ -32,6 +32,16 @@ that hangs is killed when that grace expires. Artifact HTTP shutdown has a
 separate maximum of five seconds. The launcher must allow these bounds before
 forcibly terminating the worker.
 
+Server requests additionally bind `execution_host`, `execution_slot`, and
+`execution_capacity`. The worker holds a kernel file lock until execution and
+cancellation cleanup finish. SQL lease expiry alone therefore cannot admit a
+second worker into an occupied slot, including when capacity has been reduced.
+Locks are shared across SSH and HostAgent invocations in the system shared data
+directory (`/tmp` or Windows ProgramData); permission errors fail closed. A
+successor waits up to 60 seconds and then reports occupied capacity. Lock files
+must not be removed while workers may be running. Standalone requests without
+these fields retain their existing behavior.
+
 ## Worker protocol
 
 `Request` also accepts `actor`, `run_number` (int64), `run_attempt` (int), `ref`,

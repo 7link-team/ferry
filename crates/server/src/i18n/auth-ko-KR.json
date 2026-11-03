@@ -1,4 +1,7 @@
 {
+  "permission.group.insight-reports": "인사이트 보고서",
+  "permission.group.code-reviews": "코드 검토",
+  "permission.action.generate": "생성",
   "auth.password_save": "비밀번호를 저장하지 못했습니다. 다시 시도하세요.",
   "auth.email_invalid": "올바른 이메일 주소를 입력하세요.",
   "auth.password_short": "비밀번호는 {minimum}자 이상이어야 합니다.",

@@ -324,6 +324,7 @@ async fn execute_job(
                 &mut aborted,
                 seq,
                 leg,
+                &lease,
             ))
             .await
     });
@@ -379,6 +380,7 @@ async fn execute_job_on_host(
     stop: &mut tokio::sync::watch::Receiver<bool>,
     seq: &tokio::sync::Mutex<i64>,
     leg: &Leg,
+    lease: &crate::hosts::execution::Lease,
 ) -> Result<Outcome> {
     let host = hosts::Entity::find_by_id(job.host_id)
         .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
@@ -439,6 +441,7 @@ async fn execute_job_on_host(
         ch.as_ref(),
         &private,
         leg,
+        lease,
     )
     .await;
     let cleanup = ch
@@ -469,6 +472,7 @@ async fn execute_private(
     ch: &dyn HostChannel,
     private: &str,
     leg: &Leg,
+    lease: &crate::hosts::execution::Lease,
 ) -> Result<Outcome> {
     let run_cancelled = leg.run_cancelled;
     let platform = ch
@@ -789,6 +793,7 @@ async fn execute_private(
         "inputs":context.inputs,"needs":needs,"platforms":platforms,"secrets":secrets,"vars":vars,
         "run_cancelled":run_cancelled,"timeout_seconds":timeout_seconds,
         "run_id":run.id.to_string(),"artifact_dir":artifact_dir,
+        "execution_host":lease.host.to_string(),"execution_slot":lease.slot,"execution_capacity":lease.capacity,
         "mode":if leg.plan { "plan" } else { "" },"matrix":leg.matrix});
     upload(
         ch,

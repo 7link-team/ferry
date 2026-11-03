@@ -58,10 +58,10 @@ export function NotificationChannels({ channels, readOnly, onChange, onValidityC
     </div>
     {channels.map((channel, index) => <div key={index} className="min-w-0 space-y-3 rounded-md border bg-muted/20 p-3" data-notification-channel>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="min-w-0 break-words text-sm font-medium">{notificationProvider(channel.webhook)} · {index + 1}</span>
+        <span className="min-w-0 break-words text-sm font-medium">{hostRepositoryText(`notification.provider.${notificationProvider(channel.webhook)}`)} · {index + 1}</span>
         <div className="flex items-center gap-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={channel.enabled} disabled={readOnly} onChange={event => patch(index, { enabled: event.target.checked })} />{hostRepositoryText("repository-monitor.061")}</label>{!readOnly && <Button type="button" variant="ghost" size="icon" aria-label={`${commonText("common.delete")} ${index + 1}`} onClick={() => onChange(channels.filter((_, at) => at !== index))}><Trash2 className="size-4" /></Button>}</div>
       </div>
-      <AutoField label="Webhook URL"><Input type="url" className="min-w-0" aria-label={`Webhook URL ${index + 1}`} value={channel.webhook} readOnly={readOnly} maxLength={4096} onChange={event => rename(event.target.value, index)} /></AutoField>
+      <AutoField label={hostRepositoryText("notification.webhookUrl")}><Input type="url" className="min-w-0" aria-label={`${hostRepositoryText("notification.webhookUrl")} ${index + 1}`} value={channel.webhook} readOnly={readOnly} maxLength={4096} onChange={event => rename(event.target.value, index)} /></AutoField>
       <AutoField label={hostRepositoryText("repository-monitor.notificationLanguage")}><select aria-label={`${hostRepositoryText("repository-monitor.notificationLanguage")} ${index + 1}`} className="h-9 w-full min-w-0 max-w-64 rounded-md border bg-background px-3 text-sm" disabled={readOnly} value={channel.language} onChange={event => patch(index, { language: event.target.value })}>{supportedLocales.map(locale => <option key={locale} value={locale}>{localeNames[locale]}</option>)}</select></AutoField>
     </div>)}
   </section>;

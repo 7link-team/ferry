@@ -38,7 +38,7 @@ impl Default for InsightConfig {
         }
     }
 }
-#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Selection {
     pub connection_id: String,
@@ -58,7 +58,7 @@ pub struct Body {
     #[serde(default)]
     pub repositories: Vec<Selection>,
 }
-pub(super) fn decode(row: &insights::Model) -> Result<InsightConfig> {
+pub(crate) fn decode(row: &insights::Model) -> Result<InsightConfig> {
     let mut value: Value = serde_json::from_str(&row.config).map_err(|_| {
         ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
@@ -102,7 +102,7 @@ fn next_run(config: &InsightConfig, after: i64) -> Result<i64> {
         )),
     }
 }
-pub(super) async fn owned(
+pub(crate) async fn owned(
     tx: &impl ConnectionTrait,
     scope: &Scope,
     id: Id,
@@ -114,7 +114,7 @@ pub(super) async fn owned(
         .await?
         .ok_or_else(ApiError::missing)
 }
-pub(super) async fn members(
+pub(crate) async fn members(
     tx: &impl ConnectionTrait,
     row: &insights::Model,
 ) -> Result<Vec<selections::Model>> {
@@ -135,7 +135,7 @@ fn selection(row: &selections::Model) -> Selection {
 }
 
 /// Missing/revoked selections remain visible as coverage gaps, never as usable source IDs.
-pub(super) async fn selected_sources(
+pub(crate) async fn selected_sources(
     tx: &impl ConnectionTrait,
     scope: &Scope,
     insight: &insights::Model,

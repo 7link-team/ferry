@@ -132,6 +132,24 @@ jobs:
           createdb -h 127.0.0.1 -U postgres ferry_contribution_test_ci
           FERRY_CONTRIBUTION_TEST_DATABASE_URL='mysql://root:integration-only-password@127.0.0.1:3306/ferry_contribution_test_ci?timezone=%2B08%3A00' cargo test --locked -p ferry-server real_database_migrations_identity_reports_and_cluster_queue -- --ignored
           FERRY_CONTRIBUTION_TEST_DATABASE_URL='postgres://postgres:integration-only-password@127.0.0.1:5432/ferry_contribution_test_ci?options=-c%20timezone%3DAsia%2FShanghai' cargo test --locked -p ferry-server real_database_migrations_identity_reports_and_cluster_queue -- --ignored
+      - name: Code review queue and migration on MySQL and PostgreSQL
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE review_test_ci;'
+          createdb -h 127.0.0.1 -U postgres review_test_ci
+          FERRY_REVIEW_TEST_DATABASE_URL='mysql://root:integration-only-password@127.0.0.1:3306/review_test_ci' cargo test --locked -p ferry-server real_backend_review_queue_crud_claim_and_artifact_matrix -- --ignored
+          FERRY_REVIEW_TEST_DATABASE_URL='postgres://postgres:integration-only-password@127.0.0.1:5432/review_test_ci' cargo test --locked -p ferry-server real_backend_review_queue_crud_claim_and_artifact_matrix -- --ignored
+      - name: Insight report HTTP and persistent scheduling on MySQL and PostgreSQL
+        env:
+          MYSQL_PWD: integration-only-password
+          PGPASSWORD: integration-only-password
+        run: |
+          mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE report_test_ci;'
+          createdb -h 127.0.0.1 -U postgres report_test_ci
+          FERRY_REPORT_TEST_DATABASE_URL='mysql://root:integration-only-password@127.0.0.1:3306/report_test_ci' cargo test --locked -p ferry-server real_database_reports_authenticated_http_and_persistent_schedule -- --ignored
+          FERRY_REPORT_TEST_DATABASE_URL='postgres://postgres:integration-only-password@127.0.0.1:5432/report_test_ci' cargo test --locked -p ferry-server real_database_reports_authenticated_http_and_persistent_schedule -- --ignored
       - name: CSV and XLSX import/export on all three databases
         env:
           MYSQL_PWD: integration-only-password
@@ -359,12 +377,16 @@ jobs:
           python3 .github/scripts/annotate-failures.py --run node scripts/test-contribution-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-theme-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-code-insights-ui.mjs
+          REPORTS_REVIEWS_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-reports-reviews-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-language-switcher-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-typed-values-ui.mjs
           YAML_EDITOR_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-yaml-editor-performance.mjs
           REFERENCE_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-reference-display-ui.mjs
           EXECUTION_UI_URL=http://127.0.0.1:5193 python3 .github/scripts/annotate-failures.py --run node scripts/test-execution-locale-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-locale-ui.mjs
+      - name: Insight reports and code reviews on the real product HTTP API
+        if: matrix.harness == 'build-ui'
+        run: python3 .github/scripts/annotate-failures.py --run python3 -I scripts/test-reports-reviews-live.py target/debug/ferry-server
       - name: Scheduled task browser acceptance
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-cron-ui.mjs

@@ -34,6 +34,31 @@ mod git;
 mod polling;
 pub use polling::scheduler;
 
+/// Reviews reuse the authenticated Runner-based ref observer. This observes refs
+/// only; it never checks out or executes repository content or delivers notifications.
+pub(crate) async fn review_refs(
+    s: &AppState,
+    connection: &connections::Model,
+    runner_id: &str,
+    repositories: &[String],
+) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>> {
+    let scope =
+        Scope::for_actor(s, connection.workspace_id.into(), connection.user_id.into()).await?;
+    let current = owned_connection(&s.db, &scope, connection.id.into()).await?;
+    if current.version != connection.version || current.state != "connected" {
+        return Err(ApiError::forbidden());
+    }
+    let config = Config {
+        runner_id: runner_id.to_owned(),
+        repositories: repositories.to_vec(),
+        provider: current.provider.clone(),
+        events: vec!["push".into()],
+        enabled: true,
+        ..Default::default()
+    };
+    polling::review_ref_snapshot(s, &current, &config).await
+}
+
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Mode {
