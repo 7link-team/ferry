@@ -134,6 +134,36 @@ try {
       }
       await page.evaluate(() => document.documentElement.classList.remove('dark'));
       console.log('PASS opaque sticky hover cells in light and dark themes');
+      const shadowStyles = [];
+      for (const theme of ['modern', 'business', 'eyeCare', 'pinkKawaii', 'neoBrutalism', 'custom']) {
+        for (const dark of [false, true]) {
+          await page.evaluate(({ theme, dark }) => {
+            document.documentElement.dataset.theme = theme;
+            document.documentElement.classList.toggle('dark', dark);
+          }, { theme, dark });
+          const shadows = await page.locator('table').evaluate(table => {
+            const style = element => getComputedStyle(element).boxShadow;
+            return {
+              header: style(table.querySelector('thead th')),
+              left: style(table.querySelector('tbody tr td:first-child')),
+              right: style(table.querySelector('tbody tr td:last-child')),
+              middle: style(table.querySelector('tbody tr td:nth-child(3)')),
+              footer: style(table.closest('[data-auto-table-root]').querySelector('[data-auto-table-footer]')),
+            };
+          });
+          for (const edge of ['header', 'left', 'right', 'footer']) {
+            assert.notEqual(shadows[edge], 'none', `${theme}/${dark}: ${edge} boundary has a rendered shadow`);
+            assert(shadows[edge].includes(dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.18)'), `${theme}/${dark}: ${edge} needs a visible shadow, got ${shadows[edge]}`);
+          }
+          assert.equal(shadows.middle, 'none', 'scrolling data cells remain flat');
+          shadowStyles.push(shadows.header);
+          if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ animations: 'disabled', path: join(process.env.FERRY_SCREENSHOT_DIR, `table-boundaries-${theme}-${dark ? 'dark' : 'light'}.png`) });
+        }
+      }
+      assert.notEqual(shadowStyles[0], shadowStyles[1], 'shadow contrast follows light/dark appearance');
+      await page.evaluate(() => { document.documentElement.dataset.theme = 'modern'; document.documentElement.classList.remove('dark'); });
+      console.log('PASS header, frozen columns and pagination boundary shadows in all six themes and both modes');
+
     }
     console.log(`PASS ${viewport.width}x${viewport.height}: data scrolls both axes; header/footer/edge columns fixed`);
   }

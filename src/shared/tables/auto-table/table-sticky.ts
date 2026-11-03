@@ -27,13 +27,13 @@ export function baseTableStickyClassName(
     "border-separate border-spacing-0",
     cfg.left || cfg.right ? "min-w-max" : "",
     cfg.header
-      ? "[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-20 [&_thead]:bg-background [&_thead]:shadow-[0_4px_8px_-6px_var(--sticky-shadow-color)]"
+      ? "[&_thead]:sticky [&_thead]:top-0 [&_thead]:z-20 [&_thead]:bg-background [&_thead]:shadow-[0_4px_10px_-4px_var(--sticky-shadow-color)]"
       : "",
     (cfg.left ?? 0) > 0
-      ? "[&_tr>*:first-child]:sticky [&_tr>*:first-child]:left-0 [&_tr>*:first-child]:z-10 [&_tr>*:first-child]:min-w-[150px] [&_tr>*:first-child]:bg-background [&_tr>*:first-child]:shadow-[4px_0_8px_-6px_var(--sticky-shadow-color)]"
+      ? "[&_tr>*:first-child]:sticky [&_tr>*:first-child]:left-0 [&_tr>*:first-child]:z-10 [&_tr>*:first-child]:min-w-[150px] [&_tr>*:first-child]:bg-background [&_tr>*:first-child]:shadow-[4px_0_10px_-4px_var(--sticky-shadow-color)]"
       : "",
     (cfg.right ?? 0) > 0
-      ? "[&_tr>*:last-child]:sticky [&_tr>*:last-child]:right-0 [&_tr>*:last-child]:z-10 [&_tr>*:last-child]:min-w-[120px] [&_tr>*:last-child]:bg-background [&_tr>*:last-child]:shadow-[-4px_0_8px_-6px_var(--sticky-shadow-color)]"
+      ? "[&_tr>*:last-child]:sticky [&_tr>*:last-child]:right-0 [&_tr>*:last-child]:z-10 [&_tr>*:last-child]:min-w-[120px] [&_tr>*:last-child]:bg-background [&_tr>*:last-child]:shadow-[-4px_0_10px_-4px_var(--sticky-shadow-color)]"
       : "",
   ]
     .filter(Boolean)
@@ -74,11 +74,11 @@ export function stickyCellStyle(
   const headerSticky = isHeader && cfg.header;
   const shadows: string[] = [];
 
-  if (headerSticky) shadows.push("0 4px 8px -6px var(--sticky-shadow-color)");
+  if (headerSticky) shadows.push("0 4px 10px -4px var(--sticky-shadow-color)");
   if (left > 0 && index === left - 1)
-    shadows.push("4px 0 8px -6px var(--sticky-shadow-color)");
+    shadows.push("4px 0 10px -4px var(--sticky-shadow-color)");
   if (right > 0 && index === total - right)
-    shadows.push("-4px 0 8px -6px var(--sticky-shadow-color)");
+    shadows.push("-4px 0 10px -4px var(--sticky-shadow-color)");
 
   let colStyle: CSSProperties | undefined;
   if (index < left) {

@@ -6,6 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --sticky-shadow-color: rgb(0 0 0 / 0.18);
   --font-sans: "Inter Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   --success: #059669;
@@ -14,6 +15,7 @@
   --warning-foreground: #171717;
 }
 .dark {
+  --sticky-shadow-color: rgb(0 0 0 / 0.5);
   --success: #34d399;
   --success-foreground: #0a0a0a;
   --warning: #fbbf24;

@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                 if '/pipeline-runs/' in path:
-                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy','inputs':{}}.items():
+                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy','inputs':{},'definition_snapshot':None}.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                     # Runs recorded before name snapshots are named live from their IDs.

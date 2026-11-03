@@ -58,14 +58,14 @@ function AutoTableInner<T>(
   const retry = options.onRetry ?? local.refresh;
   const [collapsed, setCollapsed] = useState(new Set<string>());
   const hasActions = !!options.actionsContent || !!options.actions?.length;
-  const sequenceOffset = options.showSequence ? 1 : 0;
-  const offset = sequenceOffset + (options.selectable ? 1 : 0);
+  const selectionOffset = options.selectable ? 1 : 0;
+  const offset = selectionOffset + (options.showSequence ? 1 : 0);
   const count = offset + columns.length + (hasActions ? 1 : 0);
   const actionWidth =
     options.actionWidth ?? getActionColumnWidth(options.actions?.length ?? 0);
   const widths = [
-    ...(options.showSequence ? [56] : []),
     ...(options.selectable ? [40] : []),
+    ...(options.showSequence ? [56] : []),
     ...columns.map((column) => stickyColWidth(column.width)),
     ...(hasActions ? [actionWidth] : []),
   ];
@@ -140,8 +140,8 @@ function AutoTableInner<T>(
           }}
         >
           <colgroup>
-            {options.showSequence && <col style={{ width: 56 }} />}
             {options.selectable && <col style={{ width: 40 }} />}
+            {options.showSequence && <col style={{ width: 56 }} />}
             {columns.map((column) => (
               <col
                 key={String(column.field)}
@@ -152,14 +152,10 @@ function AutoTableInner<T>(
           </colgroup>
           <thead>
             <tr>
-              {options.showSequence && (
-                <th className={cellClass(0, true)} style={style(0, true)}>
-                  {commonText("table.sequence")}</th>
-              )}
               {options.selectable && (
                 <th
-                  className={cellClass(sequenceOffset, true)}
-                  style={style(sequenceOffset, true)}
+                  className={cellClass(0, true)}
+                  style={style(0, true)}
                 >
                   <Checkbox
                     aria-label={commonText("table.selectAll")}
@@ -177,6 +173,10 @@ function AutoTableInner<T>(
                     }
                   />
                 </th>
+              )}
+              {options.showSequence && (
+                <th className={cellClass(selectionOffset, true)} style={style(selectionOffset, true)}>
+                  {commonText("table.sequence")}</th>
               )}
               {columns.map((column, index) => (
                 <th
@@ -300,25 +300,10 @@ function AutoTableInner<T>(
                           }
                         }}
                       >
-                        {options.showSequence && (
-                          <td
-                            className={cn(
-                              cellClass(0),
-                              "tabular-nums text-muted-foreground",
-                            )}
-                            style={style(0)}
-                          >
-                            {getSequenceNumber(
-                              options.pagination === "next" ? 1 : query.page,
-                              query.pageSize,
-                              index,
-                            )}
-                          </td>
-                        )}
                         {options.selectable && (
                           <td
-                            className={cellClass(sequenceOffset)}
-                            style={style(sequenceOffset)}
+                            className={cellClass(0)}
+                            style={style(0)}
                             onClick={(event) => event.stopPropagation()}
                           >
                             <Checkbox
@@ -330,6 +315,21 @@ function AutoTableInner<T>(
                                   : local.toggleSelect(row)
                               }
                             />
+                          </td>
+                        )}
+                        {options.showSequence && (
+                          <td
+                            className={cn(
+                              cellClass(selectionOffset),
+                              "tabular-nums text-muted-foreground",
+                            )}
+                            style={style(selectionOffset)}
+                          >
+                            {getSequenceNumber(
+                              options.pagination === "next" ? 1 : query.page,
+                              query.pageSize,
+                              index,
+                            )}
                           </td>
                         )}
                         {columns.map((column, ci) => (
@@ -439,7 +439,7 @@ function AutoTableInner<T>(
       </div>
       {pagination && (
         <div
-          className={cn("flex shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 text-sm", options.sticky?.pagination && "sticky bottom-0 z-20")}
+          className={cn("flex shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 text-sm", options.sticky?.pagination && "sticky bottom-0 z-20 shadow-[0_-4px_10px_-4px_var(--sticky-shadow-color)]")}
           data-auto-table-footer
         >
           {options.footerContent}

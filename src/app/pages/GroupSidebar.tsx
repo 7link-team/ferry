@@ -70,7 +70,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     </div>
     {resource === "host-groups" && siblings(group.id).map(child => renderGroup(child, depth + 1))}
   </div>;
-  return <aside aria-label={resource === "host-groups" ? commonText("group.hostGroups") : commonText("group.resourceGroups", { name: noun })} className="flex w-full shrink-0 flex-col gap-1 border-b pb-3 sm:w-56 sm:overflow-y-auto sm:border-r sm:border-b-0 sm:pr-3">
+  return <aside aria-label={resource === "host-groups" ? commonText("group.hostGroups") : commonText("group.resourceGroups", { name: noun })} className="flex max-h-32 w-full shrink-0 flex-col gap-1 overflow-y-auto border-b pb-3 sm:max-h-none sm:w-56 sm:border-r sm:border-b-0 sm:pr-3">
     {deleting && <DeleteConfirmDialog action={commonText("group.delete")} target={deleting.name} onClose={() => setDeleting(undefined)} onConfirm={async () => {
       await deleteResource(workspace, resource, deleting.id);
       if (active === deleting.id) onSelect("");

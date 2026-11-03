@@ -89,3 +89,17 @@ it("retains explicit remote pagination without slicing data or inventing a total
   );
   expect(next).toHaveBeenCalledWith(5);
 });
+
+it.each([false, true])("places selection before every column, with sequence=%s", async (showSequence) => {
+  const open = vi.fn();
+  await act(async () => root.render(<AutoTable selectable showSequence={showSequence} rowKey={row => row.id}
+    state={{ rows, total: 2, query: { page: 1, pageSize: 20 } }}
+    sticky={{ header: true, left: 1 }} onRowClick={open}
+    columns={[{ field: "name", name: "Name" }]} />));
+  expect(host.querySelector('thead th:first-child [role="checkbox"]')).not.toBeNull();
+  expect(host.querySelector('tbody td:first-child [role="checkbox"]')).not.toBeNull();
+  expect(host.querySelector<HTMLTableCellElement>('tbody td:first-child')?.style.left).toBe("0px");
+  if (showSequence) expect(host.querySelector('tbody td:nth-child(2)')?.textContent).toBe("1");
+  await act(async () => host.querySelector<HTMLButtonElement>('tbody td:first-child [role="checkbox"]')!.click());
+  expect(open).not.toHaveBeenCalled();
+});

@@ -105,6 +105,10 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   const terminalLink = page.getByRole('link', { name: '打开终端' });
   await terminalLink.waitFor();
+  assert.equal(await page.locator('thead th:first-child [role=checkbox]').count(), 1, 'selection header is the leftmost column');
+  assert.equal(await page.locator('tbody tr:first-child td:first-child [role=checkbox]').count(), 1, 'row selection is the leftmost column');
+  const dataViewport = page.locator('table').locator('..');
+  assert(await dataViewport.evaluate(element => element.clientHeight >= element.querySelector('thead').getBoundingClientRect().height + element.querySelector('tbody tr').getBoundingClientRect().height), 'mobile group navigation leaves usable space for the table header and row actions');
   const actions = await page.locator('table tbody tr').first().locator('td').last().locator('a,button').evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
   assert.deepEqual(actions, ['打开终端', '打开文件', '测试连接', '查看', '编辑', '删除']);
   await page.getByRole('button', { name: '删除', exact: true }).click();
