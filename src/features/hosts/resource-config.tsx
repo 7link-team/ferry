@@ -64,7 +64,7 @@ export interface Host {
 export const CONNECTIONS: Option[] = [
   {
     value: "runner",
-    label: "代理（runner）",
+    label: "主机代理（HostAgent）",
     labelKey: "resource-domain:host.runner",
   },
   {
@@ -249,7 +249,7 @@ export function hostsLists({
           key: "connection",
           label: "接入方式",
           labelKey: "common-domain:form.connection",
-          width: 130,
+          width: 200,
           render: (row: Host) => label(CONNECTIONS, row.connection),
         },
         {
