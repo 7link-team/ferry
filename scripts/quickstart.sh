@@ -179,6 +179,25 @@ require_docker() {
         || fail "Docker with Compose v2 is required. Configuration is ready in $(pwd); install Docker and rerun this command."
 }
 
+healthy_ferry_image() { # IMAGE: configuration alone does not prove deployment.
+    deployed_ids=$($compose ps -q ferry) || return 1
+    [ -n "$deployed_ids" ] || return 1
+    deployed_healthy=1
+    for deployed_id in $deployed_ids; do
+        deployed_state=$(docker inspect --format '{{.Config.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$deployed_id") || return 1
+        deployed_image=${deployed_state%%|*}
+        case "$deployed_image" in
+            "${1%:*}":v*)
+                if newer "${deployed_image##*:}" "${1##*:}"; then
+                    fail "refusing to replace running $deployed_image with older $1; check the deployment configuration"
+                fi
+                ;;
+        esac
+        [ "$deployed_state" = "$1|running|healthy" ] || deployed_healthy=
+    done
+    [ -n "$deployed_healthy" ]
+}
+
 umask 077
 env_file=.env.production
 files="compose.production.yaml compose.postgres.yaml compose.mysql.yaml scripts/postgres-init.sh"
@@ -513,7 +532,28 @@ if [ -n "$upgrade" ]; then
     case "$database" in postgres|mysql) ;; *) fail "FERRY_DATABASE_ENGINE in $env_file must be postgres or mysql" ;; esac
     [ -n "$version" ] || resolve_latest
     if [ "$version" = "$current" ]; then
-        printf 'Already on %s; nothing to upgrade.\n' "$current"
+        require_docker
+        compose_for
+        if healthy_ferry_image "$current_image"; then
+            printf 'Already on %s; running containers are healthy, nothing to upgrade.\n' "$current"
+            exit 0
+        fi
+        # An earlier script may have recorded the new image before its pull or
+        # startup was interrupted. Reconcile it instead of trusting the env file.
+        printf 'Configuration targets %s, but it is not running healthy. Resuming deployment; existing backups are retained.\n' "$version"
+        public_url_compat
+        https_files
+        storage_files
+        compose_for
+        $compose config --quiet || fail "the $version configuration is invalid; services untouched"
+        $compose pull || fail "cannot pull the $version images; rerun --upgrade to resume"
+        prepare_storage
+        $compose up -d --wait --wait-timeout 300 \
+            || fail "$version did not become healthy; inspect with: $compose logs ferry; existing backups are retained"
+        healthy_ferry_image "$current_image" || fail "running Ferry has not reached the healthy $version image; rerun --upgrade to resume"
+        printf 'Deployment resumed successfully on %s. Open Ferry at:\n' "$version"
+        addresses
+        setup_token
         exit 0
     fi
     newer "$version" "$current" \
@@ -539,13 +579,21 @@ if [ -n "$upgrade" ]; then
     for file in "$env_file" $release compose.storage.yaml; do
         if [ -f "$file" ]; then cp -p "$file" "$backup/$file"; saved="$saved $file"; fi
     done
-    restore() { for file in $saved; do cp -p "$backup/$file" "$file"; done; }
+    restore() { for file in $saved; do cp -p "$backup/$file" "$file"; done; upgrade_restore_pending=; }
+    # Before startup, Ctrl-C/TERM must restore the configuration too. Once
+    # startup begins, migrations may have run: retain the target and backup so
+    # a rerun resumes safely instead of rolling the database back implicitly.
+    upgrade_restore_pending=
+    trap 'if [ -n "${upgrade_restore_pending:-}" ]; then restore; fi' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 
     # Stage the whole release before touching the deployment.
     rm -rf .upgrade
     mkdir -p .upgrade/scripts
     download .upgrade $release
     sed "s#^FERRY_IMAGE=.*#FERRY_IMAGE=$image:$version#" "$env_file" > ".upgrade/$env_file"
+    upgrade_restore_pending=1
     for file in $release "$env_file"; do mv ".upgrade/$file" "$file"; done
     rm -rf .upgrade
     chmod 755 scripts/postgres-init.sh
@@ -559,6 +607,7 @@ if [ -n "$upgrade" ]; then
     $compose pull \
         || { restore; fail "cannot pull the $version images; previous files restored, services untouched"; }
     prepare_storage
+    upgrade_restore_pending=
     if ! $compose up -d --wait --wait-timeout 300; then
         printf 'Quickstart failed: %s did not become healthy; inspect it with: %s logs ferry\n' "$version" "$compose" >&2
         printf 'To return to %s, run in %s:\n' "$current" "$(pwd)" >&2

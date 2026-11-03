@@ -25,6 +25,10 @@ cat > "$work/bin/docker" <<EOF
 printf '%s\n' "\$*" >> "$work/docker.log"
 if [ -n "\${DOCKER_FAIL:-}" ]; then case "\$*" in *" \$DOCKER_FAIL"*) exit 1 ;; esac; fi
 case "\$*" in
+    *" ps -q ferry") [ ! -f .test-running-image ] || echo ferry-container ;;
+    "inspect --format "*) [ ! -f .test-running-image ] || printf '%s|running|%s\n' "\$(cat .test-running-image)" "\${RUNNING_HEALTH:-healthy}" ;;
+    *" up -d "*) sed -n 's/^FERRY_IMAGE=//p' .env.production > .test-running-image ;;
+    *" pull") if [ -n "\${INTERRUPT_PULL:-}" ]; then kill -s "\$INTERRUPT_PULL" "\$PPID"; exit 143; fi ;;
     *pg_dump*|*mysqldump*) [ -n "\${DUMP_DOWN:-}" ] || echo '-- dump' ;;
     *" ps -a -q redis") [ -z "\${REDIS_UP:-}" ] || echo redis-container ;;
     "ps -a --filter label=com.docker.compose.project=ferry --format"*) [ -z "\${OTHER_DEPLOYMENT:-}" ] || echo "\$OTHER_DEPLOYMENT" ;;
@@ -163,7 +167,7 @@ refused --upgrade --port 1234
 refused --upgrade --domain ops.example.com
 : > "$work/docker.log"
 output=$(run --upgrade)
-check 'printf "%s" "$output" | grep -q "Already on v9.9.9" && [ ! -s "$work/docker.log" ] && [ "$before" = "$(cat "$env")" ]' 'upgrade to the latest release already deployed changes nothing'
+check 'printf "%s" "$output" | grep -q "Already on v9.9.9" && grep -q "inspect --format" "$work/docker.log" && ! grep -qE " pull$| up -d " "$work/docker.log" && [ "$before" = "$(cat "$env")" ]' 'upgrade skips only an actually running healthy release, preserving configuration'
 for older in v9.9.1 v9.9.9-rc.1; do refused --upgrade --version "$older"; done
 check '[ "$before" = "$(cat "$env")" ] && [ ! -e "$work/ferry/backups" ]' 'refuses downgrades, including to a pre-release of the deployed version'
 (export DUMP_DOWN=1; run --upgrade --version v9.10.0 >/dev/null 2>&1) && { echo 'FAIL upgrade without a database backup'; exit 1; }
@@ -179,8 +183,26 @@ check 'grep -q -- "--profile redis -f compose.storage.yaml pull" "$work/docker.l
 upgraded=$(cat "$env")
 if (export DOCKER_FAIL=pull; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL failed pull reported success'; exit 1; fi
 check '[ "$upgraded" = "$(cat "$env")" ]' 'a failed image pull restores the previous files'
+for signal in INT TERM; do
+    if (export INTERRUPT_PULL=$signal; run --upgrade --version v9.11.0 >/dev/null 2>&1); then echo 'FAIL interrupted pull reported success'; exit 1; fi
+    check '[ "$upgraded" = "$(cat "$env")" ]' "$signal during pull restores the previous configuration before any startup"
+done
 if (export DOCKER_FAIL='up -d'; run --upgrade --version v10.0.1 > /dev/null 2> "$work/err"); then echo 'FAIL unhealthy upgrade reported success'; exit 1; fi
 check 'grep -q "did not become healthy" "$work/err" && grep -q "psql -U postgres -d ferry" "$work/err" && grep -q "v9.10.0-to-v10.0.1/database.sql" "$work/err"' 'an unhealthy release prints the rollback commands with its backup'
+: > "$work/docker.log"
+output=$(run --upgrade --version v10.0.1)
+check 'printf "%s" "$output" | grep -q "Resuming deployment" && printf "%s" "$output" | grep -q "Deployment resumed successfully" && grep -q " pull$" "$work/docker.log" && grep -q " up -d " "$work/docker.log" && has "$work/ferry/.test-running-image" "ghcr.io/7link-team/ferry-server:v10.0.1"' 'interrupted upgrade with the target already recorded resumes from the older running container'
+: > "$work/docker.log"
+(export RUNNING_HEALTH=unhealthy; run --upgrade --version v10.0.1 >/dev/null 2>"$work/err") && { echo 'FAIL unhealthy resumed container reported success'; exit 1; }
+check 'grep -q "not reached the healthy" "$work/err" && grep -q " up -d " "$work/docker.log"' 'matching image with failed health is reconciled and never reported as already upgraded'
+rm "$work/ferry/.test-running-image"
+: > "$work/docker.log"
+output=$(run --upgrade --version v10.0.1)
+check 'printf "%s" "$output" | grep -q "Deployment resumed successfully" && grep -q " up -d " "$work/docker.log"' 'missing Ferry container is recreated even when the configured version matches'
+printf '%s\n' 'ghcr.io/7link-team/ferry-server:v11.0.0' > "$work/ferry/.test-running-image"
+: > "$work/docker.log"
+run --upgrade --version v10.0.1 >/dev/null 2>"$work/err" && { echo 'FAIL resume downgraded a newer running release'; exit 1; }
+check 'grep -q "refusing to replace running" "$work/err" && ! grep -qE " pull$| up -d " "$work/docker.log"' 'resume refuses an actual runtime downgrade even if the configuration is stale'
 : > "$work/docker.log"
 run --dir legacy --upgrade --version v9.10.0 >/dev/null
 check '! grep -q -- "--profile redis -f compose.storage.yaml pull" "$work/docker.log" && grep -q -- "-f compose.https.yaml -f compose.storage.yaml pull" "$work/docker.log" && ! grep -q PUBLIC_URL "$lenv" && grep -qx "ops.example.com {" "$work/legacy/caddy/Caddyfile"' 'upgrading keeps Redis off and the HTTPS proxy on, and drops the public URL the new files no longer need'

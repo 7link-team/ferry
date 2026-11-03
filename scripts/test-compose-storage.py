@@ -43,6 +43,7 @@ shutil.copyfile(Path(os.environ['STORAGE_TEST_REPO']) / relative, args[args.inde
 ''')
         (binary / 'docker').write_text('''#!/bin/sh
 case "${STORAGE_TEST_FAILURE:-}:$*" in
+    interrupt-pull:*' pull') kill -TERM "$PPID"; exit 143 ;;
     copy:*'/backup'*' sh nats') echo 'Injected copy failure' >&2; exit 77 ;;
     cutover:*' up -d --wait'*)
         if grep -q '^FERRY_STORAGE_LAYOUT=directory$' .env.production; then exit 77; fi ;;
@@ -191,6 +192,33 @@ exec "$STORAGE_TEST_DOCKER" "$@"
 
             legacy_links_seeded = False
             verify()
+            # Exercise real upgrade recovery with the old server still running.
+            # Both fixed releases are public images; downloads use this checkout.
+            original_image = settings()['FERRY_IMAGE']
+            upgrade_version = 'v0.1.0-alpha.40'
+            interrupted = quick('--upgrade', '--version', upgrade_version,
+                                failure='interrupt-pull', check=False)
+            assert interrupted.returncode, interrupted.stdout[-1800:]
+            assert settings()['FERRY_IMAGE'] == original_image
+            assert api('/status')['version'] == '0.1.0-alpha.38'
+            verify()
+            print('PASS interrupted image pull restores configuration and keeps the old real server/data healthy', flush=True)
+            # Reproduce the pre-fix script: .env already targets 40 although the
+            # healthy container is still 38. Keep the actual backup just made.
+            set_value('FERRY_IMAGE', original_image.rsplit(':', 1)[0] + ':' + upgrade_version)
+            resumed = quick('--upgrade', '--version', upgrade_version)
+            assert 'Deployment resumed successfully' in resumed.stdout
+            assert api('/status')['version'] == upgrade_version.removeprefix('v')
+            assert settings()['FERRY_IMAGE'] == original_image.rsplit(':', 1)[0] + ':' + upgrade_version
+            original_settings['FERRY_IMAGE'] = settings()['FERRY_IMAGE']
+            verify()
+            ferry_container = compose('ps', '-q', 'ferry').stdout.strip()
+            assert 'Already on' in quick('--upgrade', '--version', upgrade_version).stdout
+            assert compose('ps', '-q', 'ferry').stdout.strip() == ferry_container
+            compose('stop', 'ferry')
+            assert 'Deployment resumed successfully' in quick('--upgrade', '--version', upgrade_version).stdout
+            verify()
+            print('PASS stale target recovery upgrades the real server, preserves IDs/secrets, verifies no-op health, and restarts a stopped container', flush=True)
             compose('down')
             # Recreate an old deployment from its actual persisted bytes, including
             # database UID/mode/symlinks; no artificial empty-volume migration.
