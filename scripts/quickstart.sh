@@ -120,19 +120,34 @@ fetch() { # URL DESTINATION
     fi
 }
 random() { od -An -N32 -tx1 /dev/urandom | tr -d ' \n'; }
+published_release() { # VERSION: Atom also contains tags without release assets.
+    release_available=
+    if fetch "https://github.com/$repository/releases/download/$1/runner-update.json" .release-catalog 2>/dev/null \
+        && [ -s .release-catalog ] \
+        && fetch "https://github.com/$repository/releases/download/$1/runner-update.json.sig" .release-catalog.sig 2>/dev/null \
+        && [ -s .release-catalog.sig ]; then
+        release_available=1
+    fi
+    rm -f .release-catalog .release-catalog.sig
+    [ -n "$release_available" ]
+}
 resolve_latest() {
     printf 'Resolving the latest Ferry release...\n'
-    # The releases feed lists pre-releases newest first and is not subject
-    # to the anonymous API rate limit; the API is only a fallback.
+    # The feed avoids the anonymous API quota but also lists unreleased tags.
+    # Require the signed runner catalog before automatically selecting a tag;
+    # its signature is verified by the server during agent installation.
     if fetch "https://github.com/$repository/releases.atom" .releases 2>/dev/null; then
-        # One XML tag per line, so the first (newest) release wins.
-        version=$(tr '<' '\n' < .releases | sed -n 's#.*/releases/tag/\(v[^"]*\)".*#\1#p' | head -n 1)
+        for candidate in $(tr '<' '\n' < .releases | sed -n 's#.*/releases/tag/\(v[^"]*\)".*#\1#p'); do
+            case "$candidate" in *[!A-Za-z0-9.+-]*) continue ;; v[0-9]*) ;; *) continue ;; esac
+            if published_release "$candidate"; then version=$candidate; break; fi
+        done
     fi
     if [ -z "$version" ] && fetch "https://api.github.com/repos/$repository/releases?per_page=1" .releases 2>/dev/null; then
         version=$(sed -n 's/.*"tag_name": *"\(v[^"]*\)".*/\1/p' .releases | head -n 1)
+        case "$version" in *[!A-Za-z0-9.+-]*) version= ;; v[0-9]*) published_release "$version" || version= ;; *) version= ;; esac
     fi
     rm -f .releases
-    case "$version" in v[0-9]*) ;; *) fail "could not determine the latest release; pass --version" ;; esac
+    case "$version" in v[0-9]*) ;; *) fail "could not find a published release with a signed Runner catalog; wait for publication or explicitly pass --version" ;; esac
 }
 download() { # DIRECTORY FILE...: each file of $version into DIRECTORY, or fail
     target=$1; shift

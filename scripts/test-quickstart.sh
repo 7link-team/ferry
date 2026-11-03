@@ -16,6 +16,10 @@ printf '%s\n' "\$url" >> "$work/curl.log"
 case "\$url" in
     https://github.com/*/releases.atom) [ -z "\${ATOM_DOWN:-}" ] || exit 22; printf '<feed><entry><link rel="alternate" href="https://github.com/o/r/releases/tag/v9.9.9"/></entry><entry><link href="https://github.com/o/r/releases/tag/v9.9.1"/></entry></feed>' > "\$out" ;;
     https://api.github.com/repos/*/releases*) printf '[{"tag_name": "v9.9.6", "prerelease": true}]' > "\$out" ;;
+    https://github.com/*/releases/download/*/runner-update.json*)
+        case "\$url" in */\${UNPUBLISHED_VERSION:-no-version}/*) exit 22 ;; esac
+        case "\$url" in */\${UNSIGNED_VERSION:-no-version}/*.sig) exit 22 ;; esac
+        printf 'fixture release availability marker\n' > "\$out" ;;
     https://raw.githubusercontent.com/*) [ -z "\${EMPTY_DOWNLOAD:-}" ] || exit 0; cp "$repo/\$(printf '%s' "\$url" | sed 's#^https://raw.githubusercontent.com/[^/]*/[^/]*/[^/]*/##')" "\$out" ;;
     *) exit 22 ;;
 esac
@@ -108,6 +112,10 @@ check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql"' 'reruns 
 : > "$work/curl.log"
 (export ATOM_DOWN=1; run --dir fallback --init-only >/dev/null)
 check 'has "$work/fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.6"' 'falls back to the release API when the feed is unavailable'
+(export UNPUBLISHED_VERSION=v9.9.9; run --dir published-fallback --init-only >/dev/null)
+check 'has "$work/published-fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.1" && [ ! -e "$work/published-fallback/.release-catalog" ]' 'skips Atom tags whose Runner release assets have not been published'
+(export UNSIGNED_VERSION=v9.9.9; run --dir signed-fallback --init-only >/dev/null)
+check 'has "$work/signed-fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.1"' 'does not auto-select a partially published catalog missing its signature'
 
 # External TLS keeps the application HTTP origin and has no local TLS proxy.
 run --dir tunnel --proxy-domain Ops.Example.COM --proxy-domain ops.example.org --init-only >/dev/null
