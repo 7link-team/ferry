@@ -325,7 +325,9 @@ it("reorders pipeline groups from the directory", async () => {
     return original(url, init);
   }));
   await act(async () => root.render(<App />));
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="上移分组 Beta"]')!.click());
+  expect(host.querySelector('button[aria-label="上移分组 Beta"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="操作 · Beta"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === "上移")!.click());
   const request = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).includes("pipeline-groups/ordering") && init?.method === "PATCH");
   expect(JSON.parse(request?.[1]?.body as string)).toEqual({ ids: ["2", "1"] });
 });

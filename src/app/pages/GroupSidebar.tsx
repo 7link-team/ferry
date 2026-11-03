@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import { ArrowDown,ArrowUp,FolderTree,Pencil,Plus,Trash2 } from "lucide-react";
+import { ChevronDown,ChevronUp,EllipsisVertical,FolderTree,Pencil,Plus,Trash2 } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
@@ -10,6 +10,7 @@ import { currentLocale } from "../../shared/i18n/locale";
 import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
+import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 
 type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number };
 export function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect }: {
@@ -25,6 +26,8 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const canCreate = permissions.has(`${resource}.create`);
+  const canUpdate = permissions.has(`${resource}.update`);
+  const canDelete = permissions.has(`${resource}.delete`);
   useEffect(() => {
     let live = true;
     const load = async () => {
@@ -60,13 +63,16 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
   const renderGroup = (group: GroupNode, depth: number): React.ReactNode => <div key={group.id}>
     <div className={cn("group flex min-w-0 items-center rounded", active === group.id ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} style={{ paddingLeft: depth * 12 }}>
       <button type="button" aria-current={active === group.id ? "page" : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}>{group.name}</button>
-      {permissions.has(`${resource}.update`) && <>
-        <Button variant="ghost" size="icon" className="size-7 shrink-0 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={commonText("group.moveUp", { name: group.name })} title={commonText("group.up")} disabled={busy || siblings(group.parent_id ?? "")[0]?.id === group.id} onClick={() => void moveGroup(group, -1)}><ArrowUp className="size-3.5" /></Button>
-        <Button variant="ghost" size="icon" className="size-7 shrink-0 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={commonText("group.moveDown", { name: group.name })} title={commonText("group.down")} disabled={busy || siblings(group.parent_id ?? "").at(-1)?.id === group.id} onClick={() => void moveGroup(group, 1)}><ArrowDown className="size-3.5" /></Button>
-      </>}
-      {resource === "host-groups" && canCreate && <Button variant="ghost" size="icon" className="size-7 shrink-0 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={commonText("group.createUnder", { name: group.name })} title={commonText("group.newChild")} onClick={() => open(undefined, group.id)}><Plus className="size-3.5" /></Button>}
-      {permissions.has(`${resource}.update`) && <Button variant="ghost" size="icon" className="size-7 shrink-0 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={commonText("group.editNamed", { name: group.name })} title={commonText("group.edit")} onClick={() => open(group, group.parent_id ?? "")}><Pencil className="size-3.5" /></Button>}
-      {permissions.has(`${resource}.delete`) && <Button variant="ghost" size="icon" className="size-7 shrink-0 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={commonText("group.deleteNamed", { name: group.name })} title={commonText("group.deleteNamed", { name: group.name })} onClick={() => setDeleting(group)}><Trash2 className="size-3.5" /></Button>}
+      {(canUpdate || canDelete || (resource === "host-groups" && canCreate)) && <DropdownMenu>
+        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={`${commonText("table.actions")} · ${group.name}`} title={commonText("table.actions")}><EllipsisVertical className="size-4" /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {canUpdate && <DropdownMenuItem disabled={busy || siblings(group.parent_id ?? "")[0]?.id === group.id} onSelect={() => void moveGroup(group, -1)}><ChevronUp />{commonText("group.up")}</DropdownMenuItem>}
+          {canUpdate && <DropdownMenuItem disabled={busy || siblings(group.parent_id ?? "").at(-1)?.id === group.id} onSelect={() => void moveGroup(group, 1)}><ChevronDown />{commonText("group.down")}</DropdownMenuItem>}
+          {resource === "host-groups" && canCreate && <DropdownMenuItem disabled={busy} onSelect={() => open(undefined, group.id)}><Plus />{commonText("group.newChild")}</DropdownMenuItem>}
+          {canUpdate && <DropdownMenuItem disabled={busy} onSelect={() => open(group, group.parent_id ?? "")}><Pencil />{commonText("group.edit")}</DropdownMenuItem>}
+          {canDelete && <DropdownMenuItem variant="destructive" disabled={busy} onSelect={() => setDeleting(group)}><Trash2 />{commonText("group.delete")}</DropdownMenuItem>}
+        </DropdownMenuContent>
+      </DropdownMenu>}
     </div>
     {resource === "host-groups" && siblings(group.id).map(child => renderGroup(child, depth + 1))}
   </div>;
