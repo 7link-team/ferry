@@ -343,6 +343,9 @@ export function ResourceTable<T>({
           }}>{configText(preset.label, preset.labelKey)}</Button>)}
         </div>)}
         <div data-list-toolbar className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
+          {!hideToolbar && config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
+            {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
+          </div>}
         {!!config.filters?.length && (
           <AutoForm
             className="flex flex-wrap items-end gap-3"
@@ -413,9 +416,7 @@ export function ResourceTable<T>({
           </div>
 
           <span className="flex-1" />
-          {config.grouping && <div role="group" aria-label={commonText("table.viewMode")} title={commonText("table.groupBy", { name: configText(config.grouping.label, config.grouping.labelKey) })} className="inline-flex rounded-md border p-0.5">
-            {([["list", commonText("table.list"), List], ["groups", commonText("table.groups"), FolderTree]] as const).map(([value, label, Icon]) => <Button key={value} size="sm" variant={tableView === value ? "secondary" : "ghost"} aria-pressed={tableView === value} onClick={() => { setTableView(value); setPage(1); }}><Icon className="size-4" />{label}</Button>)}
-          </div>}
+
 
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
             columns={config.columns.filter(column => !hiddenColumns.has(column.key)).map(column => ({ key: column.key, label: configText(column.label, column.labelKey) }))}
