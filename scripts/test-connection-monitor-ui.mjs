@@ -59,7 +59,7 @@ try {
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   const dialog = page.getByRole('dialog');
   assert.equal(await dialog.locator('textarea').inputValue(), 'org/team/repo');
-  const webhookInput = dialog.getByRole('textbox', { name: 'Webhook URL 1', exact: true });
+  const webhookInput = dialog.getByRole('textbox', { name: 'Webhook 地址 1', exact: true });
   assert.equal(await webhookInput.inputValue(), monitor.webhook, 'edit pre-fills the configured webhook');
   assert.equal(await webhookInput.getAttribute('type'), 'url', 'notification URLs are readable');
   await dialog.getByRole('combobox', { name: '通知语言 1', exact: true }).selectOption('ja-JP');

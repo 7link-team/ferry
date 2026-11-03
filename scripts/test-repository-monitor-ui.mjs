@@ -31,8 +31,8 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/${workspace}/code-connections/c1?tab=monitoring`);
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByRole('textbox', { name: 'Webhook URL 1', exact: true }).waitFor();
-  assert.equal(await dialog.getByRole('textbox', { name: 'Webhook URL 1', exact: true }).inputValue(), monitor.notification_channels[0].webhook);
+  await dialog.getByRole('textbox', { name: 'Webhook 地址 1', exact: true }).waitFor();
+  assert.equal(await dialog.getByRole('textbox', { name: 'Webhook 地址 1', exact: true }).inputValue(), monitor.notification_channels[0].webhook);
   for (const width of [320, 375, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     const geometry = await dialog.evaluate(element => {
@@ -48,18 +48,18 @@ try {
   }
   assert.equal(await dialog.getByRole('textbox', { name: '名称 1', exact: true }).count(), 0);
   await dialog.getByRole('button', { name: '添加', exact: true }).click();
-  await dialog.getByRole('textbox', { name: 'Webhook URL 2', exact: true }).fill('https://open.feishu.cn/open-apis/bot/v2/hook/example');
-  await dialog.getByText('Feishu · 2', { exact: true }).waitFor();
+  await dialog.getByRole('textbox', { name: 'Webhook 地址 2', exact: true }).fill('https://open.feishu.cn/open-apis/bot/v2/hook/example');
+  await dialog.getByText('飞书 · 2', { exact: true }).waitFor();
   await dialog.locator('select').filter({ has: page.locator('option[value="ja-JP"]') }).nth(1).selectOption('ja-JP');
   await dialog.getByRole('button', { name: '添加', exact: true }).click();
-  await dialog.getByRole('textbox', { name: 'Webhook URL 3', exact: true }).fill('https://open.feishu.cn/open-apis/bot/v2/hook/second');
+  await dialog.getByRole('textbox', { name: 'Webhook 地址 3', exact: true }).fill('https://open.feishu.cn/open-apis/bot/v2/hook/second');
   await dialog.getByRole('button', { name: '确认修改订阅配置', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
   assert.equal(saves, 1);
   assert.deepEqual(monitor.notification_channels.map(channel => [channel.name, channel.language]), [['Operations', 'zh-CN'], ['Feishu', 'ja-JP'], ['Feishu 2', 'en-US']]);
   await page.reload();
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
-  assert.equal(await dialog.getByRole('textbox', { name: 'Webhook URL 2', exact: true }).inputValue(), 'https://open.feishu.cn/open-apis/bot/v2/hook/example');
+  assert.equal(await dialog.getByRole('textbox', { name: 'Webhook 地址 2', exact: true }).inputValue(), 'https://open.feishu.cn/open-apis/bot/v2/hook/example');
   const languages = dialog.locator('select').filter({ has: page.locator('option[value="ja-JP"]') });
   assert.deepEqual(await languages.evaluateAll(selects => selects.map(select => select.value)), ['zh-CN', 'ja-JP', 'en-US']);
   await dialog.getByRole('button', { name: '删除 1', exact: true }).click();
