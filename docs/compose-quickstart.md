@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --domain ops.example.com --domain ops.example.org
 ```
 
-- **证书**：脚本在部署目录生成 `compose.https.yaml` 和 `caddy/Caddyfile`，启动 Caddy 作为 HTTPS 入口。Caddy 为每个域名自动申请 Let's Encrypt 证书，到期前自动续期，并把 HTTP 自动跳转到 HTTPS。证书保存在 `caddy-data` 数据卷中，重启不会重新申请。
+- **证书**：脚本在部署目录生成 `compose.https.yaml` 和 `caddy/Caddyfile`，启动 Caddy 作为 HTTPS 入口。Caddy 为每个域名自动申请 Let's Encrypt 证书，到期前自动续期，并把 HTTP 自动跳转到 HTTPS。新安装的证书保存在 `data/caddy-data/` 中，重启不会重新申请。
 - **前提**：
   - 每个域名都已解析（A/AAAA 记录）到这台服务器；
   - 云安全组或防火墙放行 80 和 443 端口；
@@ -71,19 +71,19 @@ cloudflared 运行在宿主机时，源站填 `http://127.0.0.1:4290`；运行�
 
 `--init-only` 只生成配置；`--without-redis` 不启动 Redis。随机生成的数据库密码、NATS/Redis 密码及主密钥保存在部署目录的 `.env.production`，重复运行不会重置。新建文件权限为 0600。
 
-PostgreSQL 与 MySQL 的应用账号均不使用数据库管理员身份。数据库、Redis、NATS 客户端端口及管理端口不发布到宿主机；仅应用入口发布。日志滚动限制大小，数据使用命名卷，应用有健康检查、依赖就绪等待、优雅退出时间及重启策略。
+PostgreSQL 与 MySQL 的应用账号均不使用数据库管理员身份。数据库、Redis、NATS 客户端端口及管理端口不发布到宿主机；仅应用入口发布。日志滚动限制大小，新安装的数据挂载在部署目录的 `data/` 下，应用有健康检查、依赖就绪等待、优雅退出时间及重启策略。
 
 Redis **当前未被 Ferry 使用**，是随全套方案提供的可选基础服务。现有连接、终端和文件跨实例路由实际使用 SQL + NATS。没有设置虚假的 Redis 应用配置。
 
 以下维护命令在部署目录中执行，以 PostgreSQL 为例，MySQL 替换第二个文件名：
 
 ```sh
-docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis ps
-docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis logs -f --tail 100 ferry
-docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis down
+docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis -f compose.storage.yaml ps
+docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis -f compose.storage.yaml logs -f --tail 100 ferry
+docker compose --env-file .env.production -f compose.production.yaml -f compose.postgres.yaml --profile redis -f compose.storage.yaml down
 ```
 
-`down` 保留数据卷；**不要给已有部署随意加 `-v`**。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。
+`compose.storage.yaml` 由当前 quickstart 生成，必须放在最后；旧部署先重新运行 quickstart 生成此文件。启用了 Caddy 时，在它之前加 `-f compose.https.yaml`。`down` 保留持久数据；**不要给已有部署随意加 `-v`**。不要修改已有 `FERRY_MASTER_KEY`，否则已有凭证无法解密。
 
 ## 一键升级
 
@@ -110,7 +110,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 
 `--upgrade` 只接受 `--dir` 和 `--version`。
 
-备份不包括应用数据卷和 JetStream 卷，需按日常备份策略另行备份。
+版本升级的 SQL 备份不包含全部应用文件和 JetStream 数据；完整迁移按下文停机归档整个目录。
 
 `FERRY_IMAGE` 使用 digest 固定或非版本标签时，脚本拒绝升级。这种情况需要手动升级：
 
@@ -125,3 +125,60 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 跨宿主机高可用使用外部数据库高可用集群、至少三节点 NATS JetStream（`FERRY_NATS_REPLICAS=3`）、应用负载均衡。各应用副本共享数据库、主密钥及 NATS 命名空间，但必须有**独立数据卷和实例 ID**；不要直接对本文件的 Ferry 服务执行 `--scale`，因为其发布端口和数据卷是单实例定义。详见 README「多实例节点通信」。
 
 本地环境未安装 Docker 时，只能执行配置/启动脚本测试，不能将其宣称为实际容器启动验收。
+
+## 全部数据放在部署目录
+
+新安装默认目录布局如下；数据库只启动所选的一种：
+
+```text
+ferry/
+  .env.production
+  compose.*.yaml
+  scripts/
+  caddy/
+  data/
+    ferry/
+    postgres/
+    mysql/
+    nats/
+    redis/
+    caddy-data/
+    caddy-config/
+  backups/
+```
+
+Compose 中仍使用 `volumes:` 字段，但挂载源是 `./data/ferry` 等本地目录，不是 Docker 命名卷。Ferry 的文件、实例身份、数据库、Redis AOF、NATS JetStream 和 Caddy 证书都随目录保存。不要删除或重新生成 `.env.production`，其中包含解密已有凭据所需的主密钥。新目录权限由 quickstart 初始化，兼容非 root 的 Ferry 容器。
+
+### 已有命名卷迁移
+
+普通重跑和版本升级继续使用已有命名卷，不会突然切换到空目录。迁移是独立命令，不与 `--upgrade` 或访问配置参数混用。在安装目录的上一级执行：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --migrate-storage
+# 原部署在其他位置时显式指定，例如：
+# curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --dir /opt/ferry --migrate-storage
+```
+
+脚本先检查卷归属、目标目录和剩余空间，预拉镜像，然后停止服务；每个原卷完整归档到 `backups/<时间>-storage-<进程号>/`，复制到 `data/`，核对文件 SHA-256、UID/GID、权限、时间和链接元数据后再切换。目标目录已经存在时拒绝覆盖，空间不足以保存归档和副本时也会提前退出。
+
+复制失败时保留归档和原卷，把本次的部分副本移至备份目录，恢复原配置并重新启动原先运行的服务。切换后如果健康检查失败，保留目录存储，输出排查命令；修复后重跑普通 quickstart，不能自动回退到可能已经过期的原卷。成功后原卷仍保留，不自动删除。重复执行已完成的迁移不会再次复制。
+
+### 停机打包迁移到新机器
+
+仅目录模式可直接这样迁移，命名卷模式先完成上一步。以下示例在部署目录的上一级执行，使用 PostgreSQL；MySQL 将 `compose.postgres.yaml` 换为 `compose.mysql.yaml`。启用了 Caddy 时，在最后的 `compose.storage.yaml` 前增加 `-f ferry/compose.https.yaml`。
+
+```sh
+# 停止全部服务，等待数据库和消息队列落盘。
+docker compose --env-file ferry/.env.production -f ferry/compose.production.yaml -f ferry/compose.postgres.yaml --profile redis -f ferry/compose.storage.yaml stop
+# 使用 root，保留容器 UID、权限、符号链接，包含隐藏的 .env.production。
+tar --numeric-owner -czpf ferry-backup.tar.gz ferry
+```
+
+将归档复制到相同 CPU 架构、具有 Docker Compose 的新机器，在目标父目录以 root 解压后启动：
+
+```sh
+tar --numeric-owner -xzpf ferry-backup.tar.gz
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
+```
+
+新机器复用解压出的版本、配置、密钥和数据。更换域名时再用 `--proxy-domain` 或 `--domain` 更新访问配置。确认新机器运行正常后再处理旧部署，避免两份相同实例身份同时运行。目录归档包含密钥与数据库，应按敏感备份保存。

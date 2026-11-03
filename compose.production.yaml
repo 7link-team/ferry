@@ -23,7 +23,7 @@ services:
       FERRY_CLUSTER_NAMESPACE: ${COMPOSE_PROJECT_NAME:-ferry}
     depends_on:
       nats: { condition: service_healthy }
-    volumes: ["ferry-data:/data"]
+    volumes: ["./data/ferry:/data"]
     networks: [backend, egress]
     healthcheck:
       test: [CMD, curl, --fail, --silent, http://127.0.0.1:4290/api/status]
@@ -39,7 +39,7 @@ services:
     environment:
       NATS_PASSWORD: ${NATS_PASSWORD:?Required}
     command: ["--jetstream", "--store_dir", "/data", "--user", "ferry", "--pass", "${NATS_PASSWORD:?Required}", "--http_port", "8222"]
-    volumes: ["nats-data:/data"]
+    volumes: ["./data/nats:/data"]
     networks: [backend]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
@@ -55,7 +55,7 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Required}
     command: [sh, -ec, 'exec redis-server --appendonly yes --appendfsync everysec --requirepass "$$REDIS_PASSWORD"']
-    volumes: ["redis-data:/data"]
+    volumes: ["./data/redis:/data"]
     networks: [backend]
     healthcheck:
       test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG']
@@ -66,8 +66,3 @@ services:
 networks:
   backend: { internal: true }
   egress: {}
-
-volumes:
-  ferry-data:
-  nats-data:
-  redis-data:

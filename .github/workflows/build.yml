@@ -69,6 +69,17 @@ jobs:
       - name: Verify updater signatures and version binding
         run: python3 scripts/test-updater.py
 
+  storage:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Directory storage, legacy migration and tar relocation on real Docker
+        run: python3 scripts/test-compose-storage.py ${{ matrix.database }}
+
   backends:
     # The dialect layer's unit tests cannot catch what actually broke here:
     # Postgres numbers placeholders $1.. and returns i32 for INTEGER. Only a
@@ -665,7 +676,7 @@ jobs:
   release:
     # Dispatch exercises the exact collection/checksum path without publishing.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: [checks, backends, e2e, desktop, runner-linux-arm64, runner-services]
+    needs: [checks, storage, backends, e2e, desktop, runner-linux-arm64, runner-services]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
