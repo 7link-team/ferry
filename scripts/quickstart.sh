@@ -422,7 +422,12 @@ if [ -n "$migrate_storage" ]; then
     backup=backups/$(date -u +%Y%m%dT%H%M%SZ)-storage-$$
     mkdir "$backup"
     cp -p "$env_file" "$backup/$env_file"
-    for file in compose.*.yaml; do cp -p "$file" "$backup/"; done
+    # main disables glob expansion deliberately; enumerate known config files.
+    for file in compose.production.yaml compose.postgres.yaml compose.mysql.yaml compose.https.yaml compose.storage.yaml; do
+        [ ! -f "$file" ] || cp -p "$file" "$backup/"
+    done
+    mkdir "$backup/scripts"
+    cp -p scripts/postgres-init.sh "$backup/scripts/"
     [ ! -d caddy ] || cp -pR caddy "$backup/"
     cp "$inventory" "$backup/volumes.txt"
     rm -f "$inventory"
