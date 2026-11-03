@@ -25,6 +25,8 @@ export interface FieldConfig {
     | "custom";
   value?: unknown;
   col?: 1 | 2;
+  /** Intrinsic control width; full keeps the usual form column. */
+  width?: "auto" | "full";
   show?: Evaluable<boolean>;
   required?: Evaluable<boolean>;
   disabled?: Evaluable<boolean>;
@@ -34,6 +36,7 @@ export interface FieldConfig {
   config?: {
     placeholder?: string;
     options?: SelectOption[];
+    width?: "auto" | "full";
     emptyValues?: readonly (string | number)[];
     emptyLabel?: string;
     min?: number;

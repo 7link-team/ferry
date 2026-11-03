@@ -10,6 +10,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 checks = 0
 def check(condition, label):
@@ -159,6 +160,28 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         commit('tags',upload('tags',rows))
         csv_rows=list(csv.DictReader(io.StringIO(download('tags',query='&q=Paged&sort=-name').decode('utf-8-sig'))))
         check(len(csv_rows)==205 and csv_rows[0]['name']=='Paged 204' and csv_rows[-1]['name']=='Paged 000','export follows filters/sort across multiple pages')
+        selection=urllib.parse.urlencode({'columns':'color,name,virtual_status','headers':json.dumps(['颜色','标签名称','显示状态'],ensure_ascii=False)})
+        for fmt in ['csv','xlsx']:
+            raw=download('tags',fmt=fmt,query='&q=Paged&sort=-name&'+selection)
+            selected=list(openpyxl.load_workbook(io.BytesIO(raw)).active.values) if fmt=='xlsx' else list(csv.reader(io.StringIO(raw.decode('utf-8-sig'))))
+            check(list(selected[0])==['颜色','标签名称','显示状态'] and len(selected)==206 and selected[1][1]=='Paged 204' and selected[-1][1]=='Paged 000',fmt+' export honors visible column order, localized headers, filters and all pages')
+            check(all(not row[2] for row in selected[1:]),fmt+' virtual display columns remain blank')
+            raw=download('credentials',fmt=fmt,query='&'+urllib.parse.urlencode({'columns':'name,secret','headers':json.dumps(['名称','密钥'],ensure_ascii=False)}))
+            selected=list(openpyxl.load_workbook(io.BytesIO(raw)).active.values) if fmt=='xlsx' else list(csv.reader(io.StringIO(raw.decode('utf-8-sig'))))
+            check(selected[1][0]=='API secret' and not selected[1][1] and secret not in str(selected),fmt+' selected secret field never bypasses redacted projection')
+            raw=download('tags',fmt=fmt,query='&q=missing-export-row&'+selection)
+            empty=list(openpyxl.load_workbook(io.BytesIO(raw)).active.values) if fmt=='xlsx' else list(csv.reader(io.StringIO(raw.decode('utf-8-sig'))))
+            check(len(empty)==1 and list(empty[0])==['颜色','标签名称','显示状态'],fmt+' empty filtered export retains selected localized headers')
+        for params in [
+            {'columns':''}, {'columns':'name,name'}, {'columns':'name','headers':'[]'},
+            {'headers':'["Name"]'}, {'columns':'name','headers':'not-json'},
+            {'columns':'nested.secret'}, {'columns':'name','headers':'[1]'},
+            {'columns':'name','headers':'["line\\nfeed"]'},
+        ]:
+            download('tags',query='&'+urllib.parse.urlencode(params),status=400)
+        check(True,'malformed column and header selections rejected')
+        selected=list(csv.reader(io.StringIO(download('tags',query='&q=Paged&columns=name').decode('utf-8-sig'))))
+        check(selected[0]==['name'] and len(selected)==206,'column selection without headers uses stable field names')
         request(owner,root+'/tags',{'name':'=danger','color':''},expected=201)
         raw=download('tags',query='&q=danger').decode('utf-8-sig')
         check("'=danger" in raw,'CSV export escapes formula-leading text')

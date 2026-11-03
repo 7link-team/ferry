@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { GitBranch, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, GitBranch, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { errorText } from "../../shared/api/api";
 import { listResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
+import { SelectRefresh } from "../../shared/forms/SelectRefresh";
 import { insightText } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 import {
   ConnectionRepositoryFields,
   useConnectionRepositories,
@@ -51,10 +53,14 @@ export function CodeInsightRepositories({
   const canPipeline =
     permissions.has("pipelines.read") && permissions.has("pipelines.run");
   const [choice, setChoice] = useState({ connection_id: "", url: "" });
+  const [group, setGroup] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => setSearch(""), [choice.connection_id, group]);
   const data = useConnectionRepositories(
     workspace,
     choice.connection_id,
     !readOnly && canSelect,
+    true,
   );
   const [pipelines, setPipelines] = useState<{ id: string; name: string }[]>(
     [],
@@ -133,6 +139,13 @@ export function CodeInsightRepositories({
     ]);
     setChoice((current) => ({ ...current, url: "" }));
   };
+  const visible = data.repositories.filter(remote => (!group || remote.full_name.startsWith(group + "/")) && remote.full_name.toLowerCase().includes(search.trim().toLowerCase()));
+  const matches = (row: InsightRepository, remote: typeof data.repositories[number]) => row.connection_id === choice.connection_id && (row.repository === remote.full_name || row.repository === remote.url);
+  const allVisible = visible.length > 0 && visible.every(remote => selected.some(row => matches(row, remote)));
+  const toggle = (remotes: typeof data.repositories, checked: boolean) => {
+    if (!data.connection || data.loading || data.error) return;
+    onChange(checked ? [...selected, ...remotes.filter(remote => !selected.some(row => matches(row, remote))).map(remote => ({ connection_id: choice.connection_id, repository: remote.full_name, pipeline_id: "", provider: data.connection!.provider }))] : selected.filter(row => !remotes.some(remote => matches(row, remote))));
+  };
   return (
     <section
       aria-label={insightText("洞察仓库")}
@@ -150,6 +163,8 @@ export function CodeInsightRepositories({
         </span>
       </div>
       {selected.length > 0 && (
+        <details open={readOnly || selected.some(row => enabled && isGit(row) && !row.pipeline_id)} className="rounded-lg border p-3">
+        <summary className="cursor-pointer text-sm font-medium">{insightText("selectedRepositories", { count: selected.length })} · {insightText("分析流水线")}</summary>
         <ul className="divide-y rounded-lg border">
           {selected.map((row, index) => (
             <li
@@ -201,7 +216,7 @@ export function CodeInsightRepositories({
                   required={enabled && isGit(row)}
                   className="block space-y-2"
                 >
-                  <select
+                  <SelectRefresh label={insightText("重试读取流水线")} loading={pipelineLoading} onRefresh={() => setRevision(value => value + 1)}><select
                     aria-label={insightText("pipelineFor", {
                       repository: row.repository,
                     })}
@@ -237,7 +252,7 @@ export function CodeInsightRepositories({
                         {pipeline.name}
                       </option>
                     ))}
-                  </select>
+                  </select></SelectRefresh>
                 </AutoField>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -267,6 +282,7 @@ export function CodeInsightRepositories({
             </li>
           ))}
         </ul>
+        </details>
       )}
       {!readOnly && canSelect && (
         <div className="grid min-w-0 gap-4 rounded-lg bg-muted/40 p-4 sm:grid-cols-2">
@@ -277,29 +293,32 @@ export function CodeInsightRepositories({
             connectionId={choice.connection_id}
             repositoryUrl={choice.url}
             repositoryLabel={insightText("添加洞察仓库")}
-            onChange={(selection) =>
+            repositoryPicker={<DropdownMenu>
+              <SelectRefresh label={insightText("刷新仓库")} loading={data.loading} onRefresh={() => data.setRevision(value => value + 1)}>
+                <DropdownMenuTrigger asChild><Button type="button" variant="outline" className="h-10 w-full justify-between font-normal" aria-label={insightText("选择仓库")} disabled={data.loading || !!data.error}>
+                  <span className="truncate">{insightText("selectedRepositories", { count: selected.filter(row => row.connection_id === choice.connection_id).length })}</span><ChevronDown aria-hidden="true" className="size-4 shrink-0 opacity-50" />
+                </Button></DropdownMenuTrigger>
+              </SelectRefresh>
+              <DropdownMenuContent align="start" className="w-[min(32rem,calc(100vw-3rem))] max-h-[min(28rem,65dvh)] overflow-y-auto p-1">
+                <div className="sticky top-0 z-10 space-y-2 border-b bg-popover p-2">
+                  <Input aria-label={insightText("搜索仓库")} placeholder={insightText("搜索仓库")} value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => { event.stopPropagation(); if (event.key === "ArrowDown") { event.preventDefault(); event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus(); } }} />
+                  <DropdownMenuCheckboxItem checked={allVisible} disabled={!visible.length} onSelect={event => event.preventDefault()} onCheckedChange={() => toggle(visible, !allVisible)}>{insightText("选择当前结果（{{count}}）", { count: visible.length })}</DropdownMenuCheckboxItem>
+                </div>
+                {visible.map(remote => <DropdownMenuCheckboxItem key={remote.url} checked={selected.some(row => matches(row, remote))} onSelect={event => event.preventDefault()} onCheckedChange={checked => toggle([remote], !!checked)} className="break-all py-2">{remote.full_name}</DropdownMenuCheckboxItem>)}
+                {!visible.length && <p role="status" className="p-4 text-sm text-muted-foreground">{insightText("暂无匹配仓库")}</p>}
+              </DropdownMenuContent>
+            </DropdownMenu>}
+            gitAction={<Button type="button" size="sm" variant="outline" disabled={!choice.url.trim() || !data.connection || data.loading || !!data.error} onClick={add}><Plus aria-hidden="true" className="size-4" />{insightText("加入洞察")}</Button>}
+            group={group}
+            onGroupChange={value => { setGroup(value); setChoice(current => ({ ...current, url: "" })); }}
+            onChange={(selection) => {
+              if (selection.connection_id !== choice.connection_id) setGroup("");
               setChoice({
                 connection_id: selection.connection_id,
                 url: selection.url,
-              })
-            }
+              });
+            }}
           />
-          <div className="sm:col-span-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={
-                !choice.url.trim() ||
-                !data.connection ||
-                data.loading ||
-                !!data.error
-              }
-              onClick={add}
-            >
-              <Plus aria-hidden="true" className="size-4" />
-              {insightText("加入洞察")}
-            </Button>
-          </div>
         </div>
       )}
       {!readOnly && !canSelect && (
@@ -322,13 +341,6 @@ export function CodeInsightRepositories({
           <p role="alert" className="text-sm text-destructive">
             {pipelineError}
           </p>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setRevision((current) => current + 1)}
-          >
-            {insightText("重试读取流水线")}
-          </Button>
         </div>
       )}
     </section>
@@ -366,11 +378,13 @@ export function CodeInsightAliases({
       aria-label={insightText("作者昵称映射")}
       className="space-y-4 sm:col-span-2"
     >
-      <p className="text-sm leading-6 text-muted-foreground">
+      <div className="flex flex-wrap items-start justify-between gap-3"><p className="min-w-0 flex-1 text-sm leading-6 text-muted-foreground">
         {insightText(
           "将不同提交姓名或邮箱映射到同一昵称，统一贡献统计。仅影响当前洞察，不会重新采集代码。",
         )}
       </p>
+      {!readOnly && <Button type="button" size="sm" variant="outline" onClick={() => onChange([...aliases, { name: "", email: "", nickname: "" }])}><Plus aria-hidden="true" className="size-4" />{insightText("添加作者映射")}</Button>}
+      </div>
       {aliases.length === 0 && (
         <p
           role="status"
@@ -429,18 +443,6 @@ export function CodeInsightAliases({
           </div>
         ))}
       </div>
-      {!readOnly && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() =>
-            onChange([...aliases, { name: "", email: "", nickname: "" }])
-          }
-        >
-          <Plus aria-hidden="true" className="size-4" />
-          {insightText("添加作者映射")}
-        </Button>
-      )}
       {!readOnly && incomplete && (
         <p role="alert" className="text-sm text-destructive">
           {insightText("每条作者映射须填写姓名或邮箱，以及显示昵称。")}

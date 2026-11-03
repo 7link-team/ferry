@@ -64,7 +64,8 @@ it("renders source coverage errors and switches the real shared report table", a
   await act(async () => root.render(<RepositoryAnalysis workspace="ws" connectionId="11" permissions={new Set(["repositories.read", "repositories.update"])} />));
   expect(requests.some(request => request.url.includes("/code-connection-analyses/11"))).toBe(true);
   expect(host.textContent).toContain("差异采集未完成");
-  expect(host.textContent).toContain("进度 1/2");
+  expect(host.textContent).toContain("已排队");
+  expect(host.textContent).not.toContain("进度 1/2");
   expect(host.textContent).toContain("完整历史");
   expect(requests.some(request => request.url.includes("/pipelines"))).toBe(false);
   expect(host.querySelector('[aria-label="六个周期贡献排名"]')).not.toBeNull();
@@ -121,7 +122,7 @@ it("uses stable author identities so authors sharing a display name remain separ
   expect(host.querySelector('[aria-label="趋势作者图例"]')!.textContent).toContain("Alice（second@example.invalid）");
 });
 
-it("gives all six overview rankings isolated query state and fixed UTC periods", async () => {
+it("uses six compact period charts with fixed UTC periods and one shared filter form", async () => {
   expect(overviewPeriods).toHaveLength(6);
   for (const period of overviewPeriods) {
     const config = overviewRanking("ws", "11", period, new Date("2026-03-01T00:00:00Z"));
@@ -130,11 +131,20 @@ it("gives all six overview rankings isolated query state and fixed UTC periods",
     expect(config.fixed).toEqual({ connection_id: "11", ...analysisDateRange(period, new Date("2026-03-01T00:00:00Z")) });
     expect(config.filters!.some(filter => filter.key === "since" || filter.key === "until")).toBe(false);
   }
-  history.replaceState({}, "", "/workspaces/ws/code-connections/11?tab=analysis&overview.today.page=2&overview.yesterday.page=3");
+  history.replaceState({}, "", "/workspaces/ws/code-connections/11?tab=analysis&authors=Alice&repos=team%2Frepo&since=2000-01-01&overview.today.page=2&overview.yesterday.page=3");
   await act(async () => root.render(<RepositoryAnalysis workspace="ws" connectionId="11" permissions={new Set(["repositories.read"])} />));
   const rankingRequests = requests.filter(request => request.url.includes("/code-contributions/ranking?")).map(request => new URL(request.url, location.origin).searchParams);
-  expect(rankingRequests.filter(params => params.get("page") === "2")).toHaveLength(1);
-  expect(rankingRequests.filter(params => params.get("page") === "3")).toHaveLength(1);
+  expect(rankingRequests).toHaveLength(6);
+  for (const params of rankingRequests) {
+    expect(params.get("page")).toBe("1");
+    expect(params.get("authors")).toBe("Alice");
+    expect(params.get("repos")).toBe("team/repo");
+    expect(params.get("since")).not.toBe("2000-01-01");
+  }
+  expect(requests.filter(request => request.url.includes("/code-contributions/branches?")).length).toBe(6);
+  expect(host.querySelectorAll('form[aria-label="统一分析筛选"]')).toHaveLength(1);
+  expect(host.querySelectorAll("table")).toHaveLength(0);
+  expect([...host.querySelectorAll("button")].filter(button => button.textContent === "搜索")).toHaveLength(1);
 });
 
 it("commits heatmap shortcuts to both shared filters and the URL without losing other conditions", async () => {

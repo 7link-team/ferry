@@ -17,7 +17,7 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let saved;
-  const monitor = { id: '42', provider: 'codeup', mode: 'push', poll_interval_minutes: 1, enabled: true, all_repositories: false, repositories: 'org/team/repo', events: ['push'], version: 2, has_secret: true, has_webhook: true, callback_path: '/api/repository-events/42' };
+  const monitor = { id: '42', provider: 'codeup', mode: 'push', poll_interval_minutes: 1, enabled: true, all_repositories: false, repositories: 'org/team/repo', events: ['push'], version: 2, has_secret: true, has_webhook: true, webhook: 'https://notify.example.invalid/hooks/configured-token', callback_path: '/api/repository-events/42' };
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     let json = { items: [], total: 0, page: 1, page_size: 20 };
@@ -32,7 +32,8 @@ try {
     if (path.endsWith('/code-connection-monitors/42')) {
       if (request.method() === 'PATCH') {
         saved = request.postDataJSON();
-        Object.assign(monitor, saved, { version: monitor.version + 1 });
+        const webhook = saved.clear_webhook ? '' : saved.webhook || monitor.webhook;
+        Object.assign(monitor, saved, { webhook, has_webhook: !!webhook, version: monitor.version + 1 });
       }
       json = monitor;
     }
@@ -58,14 +59,27 @@ try {
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
   const dialog = page.getByRole('dialog');
   assert.equal(await dialog.locator('textarea').inputValue(), 'org/team/repo');
+  const webhookInput = dialog.getByLabel('通知 Webhook 地址', { exact: true });
+  assert.equal(await webhookInput.inputValue(), monitor.webhook, 'edit pre-fills the configured webhook');
   assert.equal(await dialog.getByText('新增仓库', { exact: true }).count(), 0);
   await dialog.locator('button[type=submit]').click();
   await dialog.waitFor({ state: 'hidden' });
   assert.equal(saved.version, 2);
   assert.deepEqual(saved.events, ['push']);
   assert.equal(saved.repositories, 'org/team/repo');
+  assert.equal(saved.webhook, monitor.webhook, 'saving unrelated settings retains the configured URL');
   assert.match(page.url(), /\/code-connections\/42\?/);
   await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  await webhookInput.fill('https://notify.example.invalid/hooks/replacement-token');
+  await dialog.locator('button[type=submit]').click();
+  await dialog.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  assert.equal(await webhookInput.inputValue(), 'https://notify.example.invalid/hooks/replacement-token', 'replacement survives reopening');
+  await dialog.getByRole('checkbox', { name: '清除已保存的通知地址', exact: true }).check();
+  await dialog.locator('button[type=submit]').click();
+  await dialog.waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  assert.equal(await webhookInput.inputValue(), '', 'explicit clearing reopens as empty');
   await dialog.getByRole('combobox').click();
   await page.getByRole('option', { name: '主动轮询', exact: true }).click();
   assert.equal(await dialog.getByText('Webhook 验证密钥', { exact: true }).count(), 0);

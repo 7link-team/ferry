@@ -2,6 +2,7 @@
 
 async function chooseNative(control, value) {
   await control.waitFor();
+  await control.page().waitForFunction(({ element, expected }) => !element.disabled && [...element.options].some(option => option.value === expected), { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
   assert(index >= 0, `Missing option ${value}`);
   await control.click();
@@ -12,7 +13,7 @@ async function chooseNative(control, value) {
 }
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { preview } from "vite";
 import { chromium } from "playwright";
@@ -40,6 +41,7 @@ const permissions = [
 ];
 const errors = [];
 const writes = [];
+const repositoryRequests = [];
 let repositoryMode = 'normal';
 let releaseRepository;
 page.on("pageerror", (error) => errors.push(error.message));
@@ -101,6 +103,8 @@ await page.route("**/api/**", async (route) => {
       page_size: 200,
     };
   if (path === "/workspaces/2/code-connections/11/repositories") {
+    const repositoryPage = Number(new URL(req.url()).searchParams.get('page') || 1);
+    repositoryRequests.push(repositoryPage);
     if (repositoryMode === 'slow') {
       await new Promise(resolve => { releaseRepository = resolve; });
       await route.abort().catch(() => {});
@@ -110,20 +114,18 @@ await page.route("**/api/**", async (route) => {
       await route.fulfill({ status: 502, json: { error: 'Provider unavailable' } });
       return;
     }
+    if (repositoryMode === 'secondPageError' && repositoryPage === 2) {
+      await route.fulfill({ status: 502, json: { error: 'Second page unavailable' } });
+      return;
+    }
     if (repositoryMode === 'empty') {
       await route.fulfill({ json: { items: [], has_more: false } });
       return;
     }
+    const names = repositoryPage === 1 ? ['team/project', 'team/mobile/library'] : ['team/mobile/app', 'other/service'];
     body = {
-      items: [
-        {
-          name: "project",
-          full_name: "team/project",
-          url: "https://git.example.invalid/team/project.git",
-          default_branch: "main",
-        },
-      ],
-      has_more: false,
+      items: names.map(full_name => ({ name: full_name.split('/').at(-1), full_name, url: `https://git.example.invalid/${full_name}.git`, default_branch: 'main' })),
+      has_more: repositoryPage === 1,
     };
   }
   if (path === "/workspaces/2/pipelines")
@@ -165,17 +167,57 @@ try {
   repositoryMode = 'error';
   await page.getByRole('button', { name: '刷新连接', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'Provider unavailable' }).waitFor();
+  repositoryMode = 'secondPageError';
+  const refreshConnection=page.getByRole('button',{name:'刷新连接',exact:true});
+  assert.equal((await refreshConnection.textContent()).trim(),'','Refresh has an icon without an outside text button');
+  assert.equal(await refreshConnection.evaluate(element=>!!element.closest('[data-slot="select-refresh"]')?.querySelector('select[aria-label="仓库连接"]')),true,'Refresh is embedded beside its corresponding select');
+  await refreshConnection.click();
+  await page.getByRole('alert').filter({ hasText: 'Second page unavailable' }).waitFor();
+  assert.equal(await page.getByRole('button',{name:'选择仓库',exact:true}).isDisabled(),true,'A failed later page must not expose a partial repository list');
+  assert.equal(await page.getByLabel('仓库分组', { exact: true }).isDisabled(), true);
   repositoryMode = 'normal';
-  await page.getByRole('button', { name: '重试读取仓库', exact: true }).click();
+  await refreshConnection.click();
   await chooseNative(page.getByLabel("仓库连接", { exact: true }), "11");
-  await chooseNative(page.getByLabel("添加洞察仓库", { exact: true }), "https://git.example.invalid/team/project.git");
-  assert.equal(
-    await submit.isDisabled(),
-    true,
-    "Choosing without adding must not submit an empty scope",
-  );
-  await page.getByRole("button", { name: "加入洞察", exact: true }).click();
-  await page.getByText("已加入 1 个仓库", { exact: true }).waitFor();
+  const repositoryPicker=page.getByRole('button',{name:'选择仓库',exact:true});
+  await page.waitForFunction(()=>!document.querySelector('button[aria-label="选择仓库"]')?.disabled);
+  assert.equal(await connection.inputValue(),'11','Refresh retains the selected connection');
+  assert.equal(writes.length,0,'Refreshing a connection cannot submit the form');
+  assert.equal(await page.getByRole('button',{name:'加入洞察',exact:true}).count(),0,'Platform checkbox selection adds immediately without an extra add action');
+  await repositoryPicker.click();
+  await page.getByRole('menuitemcheckbox',{name:'team/project',exact:true}).click();
+  await page.getByText("已加入 1 个仓库", { exact: true }).first().waitFor();
+  await page.getByRole('menuitemcheckbox',{name:'team/mobile/library',exact:true}).click();
+  await page.getByText('已加入 2 个仓库',{exact:true}).first().waitFor();
+  await page.getByRole('menuitemcheckbox',{name:'team/mobile/library',exact:true}).click();
+  await page.getByText('已加入 1 个仓库',{exact:true}).first().waitFor();
+  await page.getByRole('textbox',{name:'搜索仓库',exact:true}).fill('mobile');
+  assert.equal(await page.getByRole('menuitemcheckbox',{name:'team/project',exact:true}).count(),0);
+  await page.getByRole('menuitemcheckbox',{name:'选择当前结果（2）',exact:true}).click();
+  await page.getByText('已加入 3 个仓库',{exact:true}).first().waitFor();
+  await page.keyboard.press('Escape');
+  assert(repositoryRequests.includes(2), 'Repository pages are loaded automatically');
+  assert.equal(await page.getByRole('button', { name: '加载更多仓库', exact: true }).count(), 0);
+  const group = page.getByLabel('仓库分组', { exact: true });
+  assert.deepEqual(await group.locator('option').evaluateAll(options => options.map(option => option.value)), ['', 'other', 'team', 'team/mobile']);
+  await chooseNative(group, 'team/mobile');
+  await repositoryPicker.click();
+  assert.deepEqual(await page.getByRole('menuitemcheckbox').allTextContents(),['选择当前结果（2）','team/mobile/library','team/mobile/app']);
+  assert.equal(await page.getByRole('textbox',{name:'搜索仓库',exact:true}).inputValue(),'','Changing group resets the repository search');
+  const selectGroup=page.getByRole('menuitemcheckbox',{name:'选择当前结果（2）',exact:true});
+  assert.equal(await selectGroup.getAttribute('aria-checked'),'true');
+  await selectGroup.click();
+  await page.getByText('已加入 1 个仓库',{exact:true}).first().waitFor();
+  await selectGroup.click();
+  await page.getByText('已加入 3 个仓库', { exact: true }).first().waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('summary').filter({hasText:'分析流水线'}).click();
+  await chooseNative(page.getByLabel('分析流水线 team/mobile/library',{exact:true}),'21');
+  await chooseNative(group,'team');
+  await repositoryPicker.click();
+  await page.getByRole('menuitemcheckbox',{name:'team/project',exact:true}).click();
+  await page.getByRole('menuitemcheckbox',{name:'选择当前结果（3）',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await page.getByText('已加入 3 个仓库',{exact:true}).first().waitFor();
   await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === false);
   assert.equal(
     await submit.isEnabled(),
@@ -183,6 +225,7 @@ try {
     "Platform repository does not require a pipeline",
   );
   await chooseNative(page.getByLabel("仓库连接", { exact: true }), "12");
+  assert.equal(await page.getByLabel('仓库分组', { exact: true }).count(), 0, 'Plain Git has no provider namespace selector');
   await page
     .getByLabel("Git 仓库地址", { exact: true })
     .fill("https://git.example.invalid/team/other.git");
@@ -196,6 +239,21 @@ try {
   await chooseNative(page.getByLabel("分析流水线 https://git.example.invalid/team/other.git", { exact: true }), "21");
   await page.waitForFunction(() => document.querySelector('button[type="submit"]')?.disabled === false);
   assert.equal(await submit.isEnabled(), true);
+  await chooseNative(connection,'11');
+  assert.equal(await group.inputValue(),'','Changing the connection resets its namespace filter');
+  await page.waitForFunction(()=>!document.querySelector('button[aria-label="选择仓库"]')?.disabled);
+  await repositoryPicker.click();
+  await page.getByRole('menuitemcheckbox',{name:'other/service',exact:true}).click();
+  await page.getByRole('menuitemcheckbox',{name:'other/service',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await page.getByText('已加入 4 个仓库',{exact:true}).first().waitFor();
+  assert.equal(await page.getByLabel('分析流水线 https://git.example.invalid/team/other.git',{exact:true}).inputValue(),'21','Toggling one connection preserves the other connection pipeline');
+  assert.equal(await page.getByLabel('分析流水线 team/mobile/library',{exact:true}).inputValue(),'21','Group bulk-add preserves existing analysis pipeline bindings');
+  const pipelineRefresh=page.getByRole('button',{name:'重试读取流水线',exact:true}).first();
+  if(!await pipelineRefresh.isVisible())await page.locator('summary').filter({hasText:'分析流水线'}).click();
+  assert.equal(await pipelineRefresh.evaluate(element=>!!element.closest('[data-slot="select-refresh"]')?.querySelector('select')),true);
+  await Promise.all([page.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/pipelines')),pipelineRefresh.click()]);
+  assert.equal(writes.length,0,'Pipeline refresh does not submit the insight');
   for (const width of [1366, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     assert(
@@ -221,7 +279,10 @@ try {
   await page.locator('input[name="reconcile_minutes"]').waitFor();
   await submit.click();
   await page.waitForURL("**/code-insights");
-  assert.equal(writes[0].data.repositories.length, 2);
+  assert.equal(writes[0].data.repositories.length, 4);
+  assert.deepEqual(writes[0].data.repositories.map(row => row.repository).sort(), ['team/project', 'team/mobile/library', 'team/mobile/app', 'https://git.example.invalid/team/other.git'].sort());
+  assert.equal(writes[0].data.repositories.find(row=>row.repository==='team/mobile/library').pipeline_id,'21');
+  assert.equal(writes[0].data.repositories.find(row=>row.connection_id==='12').pipeline_id,'21');
   assert.deepEqual(writes[0].data.aliases, []);
   assert.equal(writes[0].data.update_mode, "event");
 
@@ -272,6 +333,35 @@ try {
   ]);
   assert.equal(writes.at(-1).data.version, nextVersion, 'Second save uses refreshed optimistic-lock version');
   assert.equal(writes.at(-1).data.aliases.length, 2);
+  const catalog=JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/insight-domain.json',import.meta.url),'utf8'));
+  const locales=['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY'];
+  const order=['en-US','zh-TW','ja-JP','ko-KR','ms-MY'];
+  const label=(key,locale)=>locale==='zh-CN'?key:catalog[key][order.indexOf(locale)];
+  for(const locale of locales)for(const width of [1366,320]) {
+    await page.setViewportSize({width,height:900});
+    await page.goto(`${origin}/${locale}/workspaces/2/code-insights/new`);
+    const mode=page.locator('[data-auto-field="update_mode"] [data-slot="select-trigger"]');
+    await mode.waitFor();
+    const before=await mode.boundingBox();
+    await mode.click();
+    await page.getByRole('option',{name:label('事件更新',locale),exact:true}).click();
+    const after=await mode.boundingBox();
+    assert(Math.abs(before.width-after.width)<1,`${locale}/${width}: intrinsic width covers both options without jumping`);
+    const sizing=await mode.evaluate(element=>{
+      const style=getComputedStyle(element),canvas=document.createElement('canvas'),context=canvas.getContext('2d');context.font=style.font;
+      // Include the actual placeholder/unknown-value text reserved by AutoForm,
+      // which can be longer than either option in languages such as Japanese.
+      const labels=element.querySelector('[data-sizer]').getAttribute('data-sizer').split('\n');
+      const longest=Math.max(...labels.map(text=>context.measureText(text).width));
+      const value=element.querySelector('[data-slot="select-value"]');
+      return{width:element.getBoundingClientRect().width,parent:element.closest('[data-auto-fields]').getBoundingClientRect().width,longest,chrome:parseFloat(style.paddingLeft)+parseFloat(style.paddingRight)+16+parseFloat(style.columnGap)+2,clipped:value.scrollWidth>value.clientWidth+1};
+    });
+    assert(sizing.width<=Math.min(sizing.parent,Math.max(128,sizing.longest+sizing.chrome))+4,`${locale}/${width}: a short choice must not fill an entire form column: ${JSON.stringify(sizing)}`);
+    assert.equal(sizing.clipped,false,`${locale}/${width}: selected label remains readable`);
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${locale}/${width}: form has no horizontal overflow`);
+    if(locale==='zh-CN')await page.screenshot({path:`${output}/strategy-compact-${width}.png`});
+  }
+  await page.goto(origin + '/zh-CN/workspaces/2/code-insights/31?tab=authors');
   permissions.splice(permissions.indexOf('code-insights.update'), 1);
   await page.reload();
   await page.getByText('Alice combined', { exact: true }).first().waitFor();
@@ -279,7 +369,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: insight creation, repository validation, responsive layout, event schedule, author mapping and contributor ID preservation",
+    "PASS: insight creation, automatic pagination, multi-select immediate add/uncheck/search/group select-all/dedup, other connection and pipeline retention, embedded refresh, later-page failure/retry, repository validation, six-locale intrinsic select width and320px layout, event schedule, author mapping and contributor ID preservation",
   );
 } finally {
   await browser.close();

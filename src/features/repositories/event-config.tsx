@@ -1,6 +1,6 @@
 import { base } from "../../shared/api/resource";
 import { selectDisplay } from "../../shared/forms/auto-form";
-import { hostRepositoryText } from "../../shared/i18n/i18n";
+import { commonText, hostRepositoryText } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 
@@ -91,14 +91,21 @@ export function repositoryEventForm(): FormConfig<Record<string, unknown>> {
       `${eventLabel(row.event) || hostRepositoryText("repository-monitor.011")} · ${String(row.repository ?? "")}`,
     viewActions: [
       {
+        label: commonText("common.backList"),
+        when: row => new URLSearchParams(location.search).get("from_connection") !== String(row.connection_id),
+        to: () => ({ group: "repository", item: "repository-events", mode: "list" }),
+        query: () => Object.fromEntries([...new URLSearchParams(location.search)].filter(([key]) => key !== "from_connection")),
+      },
+      {
         label: hostRepositoryText("repository-monitor.012"),
+        when: row => new URLSearchParams(location.search).get("from_connection") === String(row.connection_id),
         to: (row) => ({
           group: "repository",
           item: "repositories",
           mode: "view",
           id: String(row.connection_id),
         }),
-        query: () => ({ tab: "events" }),
+        query: () => ({ ...Object.fromEntries([...new URLSearchParams(location.search)].filter(([key]) => key !== "from_connection")), tab: "events" }),
       },
     ],
     sections: [
@@ -362,6 +369,7 @@ export function repositoryEventList(
     actions: [
       {
         label: hostRepositoryText("repository-monitor.095"),
+        query: () => ({ ...Object.fromEntries(new URLSearchParams(location.search)), from_connection: connectionId ?? "" }),
         to: (row) => ({
           group: "repository",
           item: "repository-events",

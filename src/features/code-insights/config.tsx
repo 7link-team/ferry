@@ -1,12 +1,9 @@
 import {
-  base,
-  createResource,
   deleteResource,
 } from "../../shared/api/resource";
 import { insightText } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
-import { analysisState } from "./analysis-config";
 
 export type Row = Record<string, unknown>;
 
@@ -39,7 +36,6 @@ export function codeInsightList(
     ],
     columns: [
       { key: "name", label: "洞察名称", labelKey: "insight-domain:洞察名称" },
-      { key: "description", label: "说明", labelKey: "insight-domain:说明" },
       {
         key: "repositories",
         label: "仓库数",
@@ -112,7 +108,7 @@ export function codeInsightList(
   };
 }
 
-export function codeInsightForm(workspace: string): FormConfig<Row> {
+export function codeInsightForm(_workspace: string): FormConfig<Row> {
   return {
     resource: "code-insights",
     width: "full",
@@ -146,14 +142,6 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
             type: "text",
             required: true,
             span: 2,
-          },
-          {
-            key: "description",
-            label: "说明",
-            labelKey: "insight-domain:说明",
-            type: "textarea",
-            span: 2,
-            when: (row) => !!row.id,
           },
         ],
       },
@@ -254,96 +242,7 @@ export function codeInsightForm(workspace: string): FormConfig<Row> {
           },
         ],
       },
-      {
-        title: "同步覆盖",
-        titleKey: "insight-domain:同步覆盖",
-        fullWidth: true,
-        fields: [
-          {
-            key: "update_mode",
-            label: "更新方式",
-            labelKey: "insight-domain:更新方式",
-            type: "text",
-            immutable: true,
-            when: (row) => !!row.id,
-            display: (row) => updateMode(row.update_mode),
-          },
-          {
-            key: "next_run_at",
-            label: "下次计划更新",
-            labelKey: "insight-domain:下次计划更新",
-            type: "text",
-            immutable: true,
-            when: (row) => !!row.id && row.update_mode === "scheduled",
-            display: (row) => time(row.next_run_at),
-          },
-          {
-            key: "coverage_start",
-            label: "已请求覆盖起点",
-            labelKey: "insight-domain:已请求覆盖起点",
-            type: "text",
-            immutable: true,
-            when: (row) => !!row.id,
-            display: (row) => coverage(row.coverage_start),
-          },
-          {
-            key: "last_error",
-            label: "发现 / 核对错误",
-            labelKey: "insight-domain:发现 / 核对错误",
-            type: "textarea",
-            immutable: true,
-            when: (row) => !!row.id && !!row.last_error,
-            span: 2,
-          },
-          {
-            key: "sources",
-            label: "各仓库覆盖与任务状态",
-            labelKey: "insight-domain:各仓库覆盖与任务状态",
-            type: "records",
-            span: 2,
-            when: (row) => !!row.id,
-            record: {
-              title: (row) => String(row.repository ?? ""),
-              meta: (row) =>
-                insightText("sourceMeta", {
-                  state: analysisState(row.state),
-                  start: coverage(row.coverage_start),
-                  time: time(row.synced_at),
-                }),
-              body: (row) => {
-                const job = row.job as Row | undefined;
-                return [
-                  row.last_error,
-                  job &&
-                    insightText("jobProgress", {
-                      state: analysisState(job.state),
-                      completed: job.completed_generation ?? 0,
-                      generation: job.generation ?? 0,
-                    }),
-                  job?.last_error,
-                ]
-                  .filter(Boolean)
-                  .join("\n");
-              },
-            },
-          },
-        ],
-      },
-    ],
-    viewActions: [
-      {
-        label: "重新核对 / 重试同步",
-        labelKey: "insight-domain:重新核对 / 重试同步",
-        permission: "code-insights.sync",
-        action: async (row) => {
-          await createResource(
-            workspace,
-            "code-insights",
-            {},
-            `${base(workspace, "code-insights")}/${encodeURIComponent(String(row.id))}/sync`,
-          );
-        },
-      },
+
     ],
   };
 }

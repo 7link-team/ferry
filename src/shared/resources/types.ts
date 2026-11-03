@@ -27,7 +27,7 @@ export interface Filter {
   label: string;
   /** Explicit message key; raw labels remain stable action/configuration identities. */
   labelKey?: string | undefined;
-  type: "text" | "select";
+  type: "text" | "select" | "date" | "number";
   options?: Options;
   placeholder?: string;
   placeholderKey?: string;
@@ -171,6 +171,8 @@ export interface FormField<T> {
   reveal?: { permission: string; action: (row: Partial<T>) => Promise<string> };
   /** 2 makes the field span the whole two-column grid. */
   span?: 1 | 2;
+  /** Static selects size to their labels; use full for long directory/name pickers. */
+  width?: "auto" | "full";
   /** Read-only text shown instead of the raw value, e.g. a formatted time. */
   display?: (row: Partial<T>) => string;
   /** Render an http(s) value as an external link on detail pages. */

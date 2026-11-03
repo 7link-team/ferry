@@ -1,0 +1,122 @@
+@import "./tokens.generated.css";
+
+/* Raft Design System, MIT. Source pinned at 1656b5a1c25add2ceda52c4e4d50aab99db27835.
+ * Semantic adapter for Ferry; tokens.generated.css is generated from the unmodified
+ * official DTCG input. Shape/typography follow design/foundations at that revision.
+ * Fonts are locally hosted under SIL OFL (fonts/OFL.txt). No brand assets are used. */
+@font-face { font-family: "Raft Space Grotesk"; src: url("./fonts/SpaceGrotesk-Variable.woff2") format("woff2"); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: "Raft Space Mono"; src: url("./fonts/SpaceMono-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Raft Space Mono"; src: url("./fonts/SpaceMono-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+[data-theme="neoBrutalism"]:root {
+  --font-sans: "Raft Space Grotesk", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-body: var(--font-sans);
+  --font-heading: var(--font-sans);
+  --font-mono: "Raft Space Mono", ui-monospace, monospace;
+  --background: var(--raft-layer-canvas);
+  --foreground: var(--raft-foreground);
+  --card: var(--raft-layer-card);
+  --card-foreground: var(--raft-foreground);
+  --popover: var(--raft-layer-popover);
+  --popover-foreground: var(--raft-foreground);
+  --primary: var(--raft-attention-400);
+  --primary-foreground: var(--raft-sticker-ink);
+  --secondary: var(--raft-fill-muted);
+  --secondary-foreground: var(--raft-foreground);
+  --muted: var(--raft-fill-muted);
+  --muted-foreground: var(--raft-foreground-muted);
+  --accent: var(--raft-brand-soft);
+  --accent-foreground: var(--raft-foreground);
+  --destructive: var(--raft-danger);
+  --destructive-foreground: var(--raft-sticker-ink);
+  --success: var(--raft-success);
+  --success-foreground: var(--raft-success-foreground);
+  --warning: var(--raft-warning);
+  --warning-foreground: var(--raft-warning-foreground);
+  --border: var(--raft-line-hairline);
+  --input: var(--raft-line-field);
+  --ring: var(--raft-foreground);
+  --sidebar: var(--raft-layer-sidebar);
+  --sidebar-foreground: var(--raft-foreground);
+  --sidebar-primary: var(--raft-selected);
+  --sidebar-primary-foreground: var(--raft-sticker-ink);
+  --sidebar-accent: var(--raft-fill-cell-hover);
+  --sidebar-accent-foreground: var(--raft-foreground);
+  --sidebar-border: var(--raft-line-seam);
+  --sidebar-ring: var(--raft-foreground);
+  --radius: 10px;
+  --button-radius: 8px;
+  --border-width: 1px;
+  --shadow-sm: none;
+  --shadow-md: var(--raft-elevation-float);
+  --shadow-lg: var(--raft-elevation-float);
+  --chart-1: var(--raft-info);
+  --chart-2: var(--raft-attention-400);
+  --chart-3: var(--raft-success);
+  --chart-4: var(--raft-warning);
+  --chart-5: var(--raft-palette-lavender-400);
+}
+[data-theme="neoBrutalism"]:is(:lang(zh-TW),:lang(zh-HK),:lang(zh-Hant)) { --font-sans: "Raft Space Grotesk", "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif; }
+[data-theme="neoBrutalism"]:lang(ja) { --font-sans: "Raft Space Grotesk", "Hiragino Sans", "Yu Gothic UI", Meiryo, "Noto Sans JP", system-ui, sans-serif; }
+[data-theme="neoBrutalism"]:lang(ko) { --font-sans: "Raft Space Grotesk", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; }
+
+/* Frame and navigation are different surfaces: yellow only belongs to the frame. */
+[data-theme="neoBrutalism"] #root > div > header { background: var(--raft-layer-frame); color: var(--raft-foreground-on-frame); border-color: var(--raft-line-seam); }
+[data-theme="neoBrutalism"] header nav a { color: var(--raft-foreground-on-frame-muted); }
+[data-theme="neoBrutalism"] header nav a[aria-current="page"] { background: var(--raft-layer-frame-active); color: var(--raft-foreground-on-frame-active); border: 1.5px solid var(--raft-line-frame-active); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+[data-theme="neoBrutalism"] :is(nav.bg-sidebar a[aria-current="page"],aside button[aria-current="page"],aside .group:has(button[aria-current="page"]),[data-slot="tabs-trigger"][data-state="active"]) { background: var(--raft-selected); color: var(--raft-sticker-ink); border: 1.5px solid var(--raft-sticker-ink); border-radius: 8px; box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); font-weight: 700; }
+[data-theme="neoBrutalism"] :is(header nav a,nav.bg-sidebar a) { border: 1.5px solid transparent; border-radius: 8px; }
+
+/* Buttons stay flat and still; only popups cast a soft floating shadow. */
+[data-theme="neoBrutalism"] [data-slot="button"] { border: 1.5px solid var(--raft-line-strong); border-radius: 8px; font-family: var(--font-sans); font-weight: 700; text-transform: none; letter-spacing: normal; box-shadow: none; transform: none; background-image: none; transition: background-color 100ms,color 100ms; }
+[data-theme="neoBrutalism"] [data-slot="button"][data-variant="default"] { background: var(--raft-attention-400); color: var(--raft-sticker-ink); border-color: var(--raft-sticker-ink); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+[data-theme="neoBrutalism"] [data-slot="button"]:is([data-variant="outline"],[data-variant="secondary"]) { background: var(--raft-layer-card); color: var(--raft-foreground); }
+[data-theme="neoBrutalism"] [data-slot="button"]:is([data-variant="ghost"],[data-variant="link"]) { background: transparent; color: var(--raft-foreground); border-color: transparent; }
+[data-theme="neoBrutalism"] [data-slot="button"][data-variant="destructive"] { background: var(--raft-danger); color: var(--raft-sticker-ink); border-color: var(--raft-sticker-ink); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+[data-theme="neoBrutalism"] header [data-slot="button"][data-variant="ghost"] { color: var(--raft-foreground-on-frame); }
+
+/* Fields have one ink edge, no hover tint; invalid and disabled remain distinct. */
+[data-theme="neoBrutalism"] :is(input:not(:where([type="color"],[type="checkbox"],[type="radio"],[type="range"])),textarea,select,[data-slot="select-trigger"]) { border: 1.5px solid var(--raft-line-field); border-radius: 8px; background: var(--raft-layer-card); color: var(--raft-foreground); box-shadow: none; transform: none; font-size: var(--raft-field-font-size); font-weight: 400; }
+[data-theme="neoBrutalism"] :is(input,textarea)::placeholder { color: var(--raft-foreground-hint); }
+[data-theme="neoBrutalism"] :is(input,textarea,select).border-0 { border-width: 0; background: transparent; box-shadow: none; }
+[data-theme="neoBrutalism"] input[type="color"].border-0 { border-width: 0; }
+[data-theme="neoBrutalism"] :is(input,textarea,select).rounded-none { border-radius: 0; }
+[data-theme="neoBrutalism"] :is(input,textarea,select,[data-slot="select-trigger"])[aria-invalid="true"] { border-color: var(--raft-danger-strong); }
+[data-theme="neoBrutalism"] :is([data-slot="button"],input,textarea,select,[data-slot="select-trigger"]):disabled { background: var(--raft-fill-muted); color: var(--raft-foreground-disabled); border-color: var(--raft-line-hairline); box-shadow: none; opacity: 1; transform: none; }
+[data-theme="neoBrutalism"] [data-slot="button"][data-size^="icon"][data-variant="ghost"]:disabled,
+[data-theme="neoBrutalism"] header [data-slot="button"][data-variant="ghost"]:disabled { background: transparent; border-color: transparent; }
+[data-theme="neoBrutalism"] :is(button,a[href],input,textarea,select,[tabindex]):focus-visible { outline: none; box-shadow: var(--raft-focus-ring); }
+[data-theme="neoBrutalism"] :is([role="checkbox"],[role="radio"])[data-state="checked"] { background: var(--raft-foreground); border-color: var(--raft-foreground); color: var(--raft-layer-card); }
+
+/* Popups, cards and readable rows use the official elevation and state layers. */
+[data-theme="neoBrutalism"] :is(.detail-section,[data-slot="card"],.card-shadow,.bg-card.rounded-xl,.bg-card.rounded-lg) { background: var(--raft-layer-card); border-radius: 10px; box-shadow: none; }
+[data-theme="neoBrutalism"] :is([role="dialog"],[role="alertdialog"]) { background: var(--raft-layer-popover); border-color: var(--raft-line-seam); border-radius: 16px; box-shadow: var(--raft-elevation-float); }
+[data-theme="neoBrutalism"] :is([data-slot="dropdown-menu-content"],[data-slot="select-content"],[data-slot="popover-content"]) { background: var(--raft-layer-popover); border-color: var(--raft-line-seam); border-radius: 10px; box-shadow: var(--raft-elevation-float); }
+[data-theme="neoBrutalism"] :is([role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]) { border-radius: 6px; }
+[data-theme="neoBrutalism"] :is([role="menuitemradio"],[role="menuitemcheckbox"])[data-state="checked"] { background: transparent; color: var(--raft-foreground); font-weight: 700; }
+[data-theme="neoBrutalism"] [data-slot="dropdown-menu-content"] > [role="menuitem"].bg-primary { background: transparent; color: var(--raft-foreground); font-weight: 700; }
+[data-theme="neoBrutalism"] [data-slot="dropdown-menu-content"] > [role="menuitem"].bg-primary svg { color: var(--raft-foreground); }
+[data-theme="neoBrutalism"] [data-slot="dropdown-menu-content"] [role="group"] > [role="menuitem"].bg-primary { background: var(--raft-selected); color: var(--raft-sticker-ink); border: 1.5px solid var(--raft-sticker-ink); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+[data-theme="neoBrutalism"] [data-slot="dropdown-menu-content"] .uppercase { text-transform: none; letter-spacing: normal; }
+[data-theme="neoBrutalism"] :is([data-slot="dropdown-menu-content"],[data-slot="select-content"]) [data-highlighted] { background: var(--raft-brand-soft); color: var(--raft-foreground); }
+[data-theme="neoBrutalism"] tbody tr[data-selected="true"] > td { background: linear-gradient(var(--raft-fill-cell-selected),var(--raft-fill-cell-selected)),var(--raft-layer-canvas); }
+[data-theme="neoBrutalism"] :is(td.tabular-nums,th.tabular-nums,.font-mono,code,pre,kbd,time) { font-family: var(--font-mono); }
+
+@media (hover:hover) {
+  [data-theme="neoBrutalism"] :is(button:not(:disabled),a[href],[role="button"]):hover { opacity: 1; }
+  [data-theme="neoBrutalism"] [data-slot="button"]:not(:disabled):hover { background: linear-gradient(var(--raft-fill-medium),var(--raft-fill-medium)),var(--raft-layer-card); transform: none; box-shadow: none; }
+  [data-theme="neoBrutalism"] [data-slot="button"][data-variant="default"]:not(:disabled):hover { background: var(--raft-attention-hover); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+  [data-theme="neoBrutalism"] [data-slot="button"][data-variant="destructive"]:not(:disabled):hover { background: var(--raft-danger-hover); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
+  [data-theme="neoBrutalism"] header [data-slot="button"][data-variant="ghost"]:not(:disabled):hover { background: var(--raft-fill-frame-medium); }
+  [data-theme="neoBrutalism"] tbody tr[data-selected="false"]:hover > td { background: linear-gradient(var(--raft-fill-subtle),var(--raft-fill-subtle)),var(--raft-layer-canvas); }
+}
+[data-theme="neoBrutalism"] [data-slot="button"]:not(:disabled):active { transform: none; }
+[data-theme="neoBrutalism"] [data-slot="button"]:not(:disabled):active { background: linear-gradient(var(--raft-fill-medium),var(--raft-fill-medium)),var(--raft-layer-card); }
+[data-theme="neoBrutalism"] [data-slot="button"][data-variant="default"]:not(:disabled):active { background: var(--raft-attention-active); }
+[data-theme="neoBrutalism"] [data-slot="button"][data-variant="destructive"]:not(:disabled):active { background: var(--raft-danger-active); }
+[data-theme="neoBrutalism"] [role="tab"][aria-selected="true"],
+[data-theme="neoBrutalism"] [role="tab"][aria-selected="true"]:is(:hover,:active) { background: var(--raft-selected); color: var(--raft-sticker-ink); border: 1.5px solid var(--raft-sticker-ink); border-radius: 8px; box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); font-weight: 700; }
+
+/* Official motion: status is still and centered overlays appear in place. */
+[data-theme="neoBrutalism"] :is(.animate-pulse,.motion-safe\:animate-pulse,[role="dialog"],[role="alertdialog"]) { animation: none; }
+[data-theme="neoBrutalism"] :is([role="dialog"],[role="alertdialog"]) { transition: none; }

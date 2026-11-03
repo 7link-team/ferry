@@ -47,6 +47,9 @@ export const states: Record<string, string> = {
   failed: "同步失败",
   partial: "部分覆盖",
   unsupported: "平台不支持",
+  blocked: "等待配置分析流水线",
+  retry_wait: "等待重试",
+  unavailable: "等待发现或恢复访问",
 };
 
 export const analysisState = (value: unknown) =>
@@ -535,17 +538,11 @@ export function analysisConfig(
                 }),
               body: (row) => {
                 const job = row.job as Row | undefined;
-                return [
+                return [...new Set([
+                  job && analysisState(job.effective_state ?? job.state),
                   row.last_error,
-                  job &&
-                    insightText("jobProgress", {
-                      state: analysisState(job.state),
-                      completed: job.completed_generation ?? 0,
-                      generation: job.generation ?? 0,
-                    }),
                   job?.last_error,
-                ]
-                  .filter(Boolean)
+                ].filter(Boolean))]
                   .join("\n");
               },
             },
@@ -667,14 +664,14 @@ export const analysisFilters: Filter[] = [
     key: "since",
     label: "起始日期（UTC）",
     labelKey: "insight-domain:起始日期（UTC）",
-    type: "text",
+    type: "date",
     placeholder: "YYYY-MM-DD",
   },
   {
     key: "until",
     label: "截止日期（UTC）",
     labelKey: "insight-domain:截止日期（UTC）",
-    type: "text",
+    type: "date",
     placeholder: "YYYY-MM-DD",
   },
   {
@@ -727,13 +724,13 @@ export const analysisFilters: Filter[] = [
     key: "geEffective",
     label: "有效变更下限",
     labelKey: "insight-domain:有效变更下限",
-    type: "text",
+    type: "number",
   },
   {
     key: "leEffective",
     label: "有效变更上限",
     labelKey: "insight-domain:有效变更上限",
-    type: "text",
+    type: "number",
   },
 ];
 

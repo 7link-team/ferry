@@ -178,6 +178,10 @@ pub async fn get(
         },
     };
     let mut result = view(row.as_ref(), &config, &connection);
+    // Notification URLs can contain credentials; only editors receive the value.
+    if scope.permissions.contains("repositories.update") {
+        result["webhook"] = json!(config.webhook);
+    }
     result["runner_name"] = json!(match config.runner_id.parse::<Id>() {
         Ok(id) => crate::entities::hosts::Entity::find_by_id(i64::from(id))
             .filter(crate::entities::hosts::Column::WorkspaceId.eq(connection.workspace_id))
@@ -445,6 +449,7 @@ pub async fn update(
     .await?;
     tx.commit().await?;
     let mut result = view(Some(&row), &config, &connection);
+    result["webhook"] = json!(config.webhook);
     result["runner_name"] = json!(runner_name);
     Ok(Json(result))
 }

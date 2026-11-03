@@ -100,7 +100,16 @@ it("shows a repository event's commits, links and times, and omits an unknown op
   expect(host.querySelector('a[href="https://code.example/compare"]')).not.toBeNull();
   expect(host.textContent).toContain("可能是强制推送");
   expect(host.querySelector('section[aria-label="合并请求"]')).toBeNull();
-  expect(host.querySelector('a[aria-label="返回仓库连接"]')?.getAttribute("href")).toContain("tab=events");
+  expect(host.querySelector('a[aria-label="返回仓库连接"]')).toBeNull();
+  const back = host.querySelector('a[aria-label="返回列表"]');
+  expect(back?.getAttribute("href")).toContain("repository-events");
+
+  history.replaceState({}, "", "/ops/build/repository-events/8?from_connection=3&page=2");
+  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)["repository-events"]!} workspace="ops" permissions={permissions} />));
+  const connectionBack = host.querySelector('a[aria-label="返回仓库连接"]')?.getAttribute("href");
+  expect(connectionBack).toContain("tab=events");
+  expect(connectionBack).toContain("page=2");
+  expect(connectionBack).not.toContain("from_connection");
 });
 it("read permission never offers reveal", async () => {
   await mount(new Set(["variables.read"]));

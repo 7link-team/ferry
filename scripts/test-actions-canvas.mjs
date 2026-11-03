@@ -1,5 +1,8 @@
 /** Focused real ReactFlow browser interactions, with no Rust/Go build required. */
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
+import { parseDocument, stringify } from 'yaml';
 import { build } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -14,7 +17,7 @@ const bundle = await build({
  resolve: { alias: { '@': fileURLToPath(new URL('../src', import.meta.url)) } },
  plugins: [react(), tailwindcss(), { name: 'canvas-test',
   resolveId(id) { if(id === entryId) return id; },
-  load(id) { if(id === entryId) return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/features/pipelines/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/features/pipelines/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'},{value:'host-group:group',label:'Local group'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={()=>{}} renderCheckout={(job,index)=> <button onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></main>};createRoot(document.getElementById('root')).render(<App/>);`; }
+  load(id) { if(id === entryId) return `import React, {useState} from 'react';import {createRoot} from 'react-dom/client';import {ActionsEditor} from '/src/features/pipelines/ActionsEditor.tsx';import {DEFAULT_ACTIONS,editActionStep} from '/src/features/pipelines/actions-workflow.ts';import '/src/style.css';function App(){const [draft,setDraft]=useState(JSON.parse(localStorage.getItem('canvas-draft')||'null')||{definition:DEFAULT_ACTIONS});window.canvasDraft=draft;window.setCanvasDraft=setDraft;window.canvasSubmits??=0;return <main style={{padding:16,maxWidth:'100%',height:'100vh',display:'flex',flexDirection:'column'}}><form style={{display:'flex',flexDirection:'column',minHeight:0,flex:1}} onSubmit={event=>{event.preventDefault();window.canvasSubmits++;}}><ActionsEditor draft={draft} options={[{value:'host:local',label:'Local host'},{value:'host-group:group',label:'Local group'}]} readOnly={false} fillHeight onChange={patch=>setDraft(d=>{const next={...d,...patch};localStorage.setItem('canvas-draft',JSON.stringify(next));return next})} onValidityChange={invalid=>{window.canvasInvalid=invalid;}} renderCheckout={(job,index)=> <button type="button" onClick={()=>setDraft(d=>({...d,definition:editActionStep(d.definition,job,index,{id:'source'}),checkout_bindings:[{job_id:job,step_id:'source',repository_id:'repo'}]}))}>Repository selector</button>}/></form></main>};createRoot(document.getElementById('root')).render(<App/>);`; }
  }],
  build: { write: false, rollupOptions: { input: entryId } },
 });
@@ -33,19 +36,82 @@ const server = createHttpServer((request, response) => {
  response.end(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"/>${styles.map(item => `<link rel="stylesheet" href="/${item.fileName}">`).join('')}</head><body><div id="root"></div>${scripts.map(item => `<script type="module" src="/${item.fileName}"></script>`).join('')}</body></html>`);
 });
 let browser;
+const screenshots='data/maintenance/actions-canvas';
+await mkdir(screenshots,{recursive:true});
 try {
- await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROME_PATH?{executablePath:process.env.PLAYWRIGHT_CHROME_PATH}:{})});
+ const chrome=process.env.PLAYWRIGHT_CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe';
+ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));browser=await chromium.launch({headless:true,...(existsSync(chrome)?{executablePath:chrome}:{})});
  const context=await browser.newContext({locale:'zh-CN',extraHTTPHeaders:{'Accept-Language':'zh-CN'},viewport:{width:1280,height:900},permissions:['clipboard-read','clipboard-write']});
  const page=await context.newPage(),errors=[],workers=[],failed=[];page.on('pageerror',error=>errors.push(error.message));page.on('response',response=>{if(response.status()>=400)failed.push(`${response.status()} ${response.url()}`)});page.on('worker',worker=>workers.push(worker.url()));await page.goto(`http://127.0.0.1:${server.address().port}/__canvas`);
  await page.locator('[aria-label="流水线画布"]').waitFor();
  const bottomGap=await page.evaluate(()=>{const main=document.querySelector('main').getBoundingClientRect(),canvas=document.querySelector('[aria-label="流水线画布"]').getBoundingClientRect();return main.bottom-canvas.bottom});
  assert(bottomGap<32,`canvas leaves excessive blank space: ${bottomGap}px`);
+ const initialDraft=await page.evaluate(()=>window.canvasDraft);
+ const stepFixtures=[{id:'first',name:'First step',run:'echo first'},{id:'middle',name:'Middle checkout',uses:'actions/checkout@v4'},{id:'last',name:'Last step',run:'echo last'}];
+ const deletionFixture={definition:stringify({name:'Deletion context',on:'workflow_dispatch',jobs:{build:{name:'Deletion job','runs-on':'self-hosted',steps:stepFixtures}}}),executor_bindings:[{job_id:'build',target_kind:'host',target_ref:'local',image:'host'}],checkout_bindings:[{job_id:'build',step_id:'middle',connection_id:'42'}]};
+ for(const index of [0,1,2]) {
+  await page.evaluate(draft=>window.setCanvasDraft(draft),deletionFixture);
+  await page.waitForFunction(source=>window.canvasDraft.definition===source&&document.querySelector('.react-flow__node[data-id="build"]')?.textContent.includes('Middle checkout'),deletionFixture.definition);
+  await page.waitForTimeout(250); // ReactFlow's measurement/fit debounce must finish before clicking a moving node.
+  await page.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:new RegExp(stepFixtures[index].name)}).click();
+  const panel=page.getByRole('complementary',{name:'步骤配置',exact:true});
+  const remove=panel.getByRole('button',{name:`删除步骤 ${stepFixtures[index].name}`,exact:true});
+  assert.equal(await remove.getAttribute('type'),'button','Step delete cannot submit a pipeline form');
+  assert.equal(await remove.locator('../..').getByRole('heading',{name:'步骤配置',exact:true}).count(),1,'Step delete belongs to its settings header');
+  const beforeSubmit=await page.evaluate(()=>window.canvasSubmits);
+  await remove.click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByRole('heading',{name:new RegExp(`Deletion job / ${stepFixtures[index].name}`)}).waitFor();
+  await dialog.getByRole('button',{name:'取消',exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.canvasDraft.definition),deletionFixture.definition,'Cancelling step deletion preserves the draft');
+  await remove.click();
+  await page.getByRole('button',{name:'确认删除步骤',exact:true}).click();
+  const next=await page.evaluate(()=>window.canvasDraft);
+  assert.deepEqual(parseDocument(next.definition).toJS().jobs.build.steps,stepFixtures.filter((_,position)=>position!==index),'Delete removes only the selected first/middle/last step');
+  assert.equal(next.checkout_bindings.length,index===1?0:1,'Checkout binding removal follows the deleted step identity');
+  assert.deepEqual(next.executor_bindings,deletionFixture.executor_bindings);
+  assert.equal(await page.evaluate(()=>window.canvasSubmits),beforeSubmit,'Deletion must not submit the surrounding form');
+  assert.equal(await page.evaluate(()=>window.canvasInvalid),false,'Remaining valid steps retain a valid draft');
+ }
+ for(const width of [1280,390,320]) {
+  await page.setViewportSize({width,height:900});
+  await page.evaluate(draft=>window.setCanvasDraft(draft),deletionFixture);
+  await page.waitForFunction(source=>window.canvasDraft.definition===source,deletionFixture.definition);
+  await page.waitForTimeout(250);
+  await page.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:/First step/}).click();
+  const panel=page.getByRole('complementary',{name:'步骤配置',exact:true});
+  const heading=panel.getByRole('heading',{name:'步骤配置',exact:true});
+  await heading.scrollIntoViewIfNeeded();
+  const [headerBox,deleteBox,panelBox]=await Promise.all([heading.boundingBox(),panel.getByRole('button',{name:'删除步骤 First step',exact:true}).boundingBox(),panel.boundingBox()]);
+  assert(deleteBox.x>=panelBox.x&&deleteBox.x+deleteBox.width<=panelBox.x+panelBox.width+1,`Delete stays within the ${width}px panel`);
+  assert(Math.abs(deleteBox.y+deleteBox.height/2-headerBox.y-headerBox.height/2)<4,`Delete shares the ${width}px title row`);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`No delete header overflow at ${width}px`);
+  await page.screenshot({path:`${screenshots}/step-header-${width}.png`});
+ }
+ await page.setViewportSize({width:1280,height:900});
+ await page.evaluate(draft=>window.setCanvasDraft(draft),initialDraft);
  await page.getByRole('button',{name:'任务 1',exact:true}).first().click();
  await page.locator('button[title="在此任务后添加串行任务"]').click();
  assert.match(await page.evaluate(()=>window.canvasDraft.definition),/needs:\n\s+- build/);
  await page.locator('button[title="添加并行任务"]').last().click();
  await page.waitForFunction(()=>document.querySelectorAll('.react-flow__edge').length===2,{},{timeout:5000});
  assert.equal(await page.locator('.react-flow__edge').count(),2);
+ await page.getByLabel('流水线画布',{exact:true}).scrollIntoViewIfNeeded();
+ await page.waitForTimeout(250);
+ const edgePoint=await page.locator('.react-flow__edge-interaction').first().evaluate(path=>{const point=path.getPointAtLength(path.getTotalLength()/2);const screen=new DOMPoint(point.x,point.y).matrixTransform(path.getScreenCTM());return{x:screen.x,y:screen.y};});
+ await page.mouse.click(edgePoint.x,edgePoint.y);
+ const unlink=page.getByRole('button',{name:'删除依赖连接',exact:true});
+ await unlink.waitFor();
+ assert.equal(await page.getByLabel('流水线画布',{exact:true}).getByRole('button',{name:'删除依赖连接',exact:true}).count(),1,'Dependency delete belongs to the canvas context');
+ const [unlinkBox,canvasBox]=await Promise.all([unlink.boundingBox(),page.getByLabel('流水线画布',{exact:true}).boundingBox()]);
+ assert(unlinkBox.y>=canvasBox.y&&unlinkBox.y+unlinkBox.height<=canvasBox.y+60,'Dependency action sits in the canvas top-right toolbar');
+ const edgeDraft=await page.evaluate(()=>window.canvasDraft.definition);
+ const submitsBeforeEdge=await page.evaluate(()=>window.canvasSubmits);
+ await unlink.click();
+ await page.getByRole('dialog').getByRole('button',{name:'取消',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.canvasDraft.definition),edgeDraft);
+ assert.equal(await page.evaluate(()=>window.canvasSubmits),submitsBeforeEdge);
+ await page.screenshot({path:`${screenshots}/dependency-action-1280.png`});
  const serialBox=await page.locator('.react-flow__node[data-id="job_1"]').boundingBox(),parallelBox=await page.locator('.react-flow__node[data-id="job_2"]').boundingBox();
  assert(parallelBox.y>=serialBox.y+serialBox.height-1,'parallel task should be placed below its sibling');
  await page.getByRole('button',{name:'添加步骤',exact:true}).last().click();
@@ -121,5 +187,5 @@ try {
  assert(!String(await page.evaluate(()=>window.canvasDraft.definition)).includes('job_1'),'card delete did not remove the task');
  assert.deepEqual(errors,[]);
  assert.deepEqual(failed,[]);
- console.log('PASS: serial/parallel edges, dependency removal, cycle rejection, save/reload, checkout cleanup and 1280/900/390 layout');
+ console.log('PASS: step delete in card header at1280/390/320, first/middle/last deletion and cancel, no form submission, checkout cleanup, serial/parallel edges, dependency removal, cycle rejection, save/reload and 1280/900/390 layout');
 } finally {await browser?.close();await new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}

@@ -327,6 +327,13 @@ pub async fn get(
         .filter(jobs::Column::Id.is_in(sources.iter().filter(|r| r.id > 0).map(|r| r.id)))
         .all(&s.db)
         .await?;
+    let collection_configs: HashMap<_, _> = configs::Entity::find()
+        .filter(configs::Column::Id.is_in(sources.iter().map(|source| source.connection_id)))
+        .all(&s.db)
+        .await?
+        .into_iter()
+        .map(|row| Ok((row.id, super::decode(&row)?)))
+        .collect::<Result<_>>()?;
     let mut value = summary(&row, members.len())?;
     value.as_object_mut().unwrap().extend(
         serde_json::to_value(config)
@@ -374,10 +381,82 @@ pub async fn get(
             })
             .collect::<Vec<_>>()
     );
-    value["sources"] = json!(sources.iter().map(|r|json!({"id":Id::from(r.id),"connection_id":Id::from(r.connection_id),"repository":r.remote_path,"state":r.state,
-        "last_error":crate::i18n::display_stored(&r.last_error),"coverage_start":r.coverage_start,"synced_at":r.synced_at,
-        "job":jobs.iter().find(|j|j.id==r.id).map(|j|json!({"state":j.state,"generation":j.generation,"completed_generation":j.completed_generation,"last_error":crate::i18n::display_stored(&j.last_error)}))})).collect::<Vec<_>>());
+    value["sources"] = json!(
+        sources
+            .iter()
+            .map(|source| {
+                let job = jobs.iter().find(|job| job.id == source.id);
+                let pipeline_configured = collection_configs
+                    .get(&source.connection_id)
+                    .is_some_and(|config| {
+                        !config
+                            .pipeline_bindings
+                            .get(&source.remote_path)
+                            .unwrap_or(&config.pipeline_id)
+                            .is_empty()
+                    });
+                source_status(source, job, pipeline_configured, db::now())
+            })
+            .collect::<Vec<_>>()
+    );
     Ok(Json(value))
+}
+
+/// A failed collection and a newly queued revision can coexist. Expose both the
+/// persisted result and the effective task state instead of treating revisions
+/// as a progress counter or implying that a blocked task is actively collecting.
+fn source_status(
+    source: &sources::Model,
+    job: Option<&jobs::Model>,
+    pipeline_configured: bool,
+    now: i64,
+) -> Value {
+    let error = job
+        .filter(|job| !job.last_error.is_empty())
+        .map_or(source.last_error.as_str(), |job| job.last_error.as_str());
+    let pipeline_errors = [
+        "repository.collector.filesMissing",
+        "repository.collector.pipelineRequired",
+    ];
+    let pipeline_required = !pipeline_configured
+        && match crate::i18n::decode_stored(error) {
+            Some(message) => pipeline_errors.contains(&message.key.as_str()),
+            // Older installations persisted the rendered diagnostic. Recognize
+            // exact known messages, never infer setup requirements from substrings.
+            None => pipeline_errors.iter().any(|key| {
+                crate::i18n::Locale::ALL.iter().any(|locale| {
+                    error == crate::i18n::render(*locale, &crate::i18n::Message::new(*key))
+                })
+            }),
+        };
+    json!({
+        "id":Id::from(source.id), "connection_id":Id::from(source.connection_id),
+        "repository":source.remote_path, "state":source.state,
+        "last_error":crate::i18n::display_stored(&source.last_error),
+        "coverage_start":source.coverage_start, "synced_at":source.synced_at,
+        "pipeline_required":pipeline_required,
+        "job":job.map(|job| {
+            let effective_state = if job.state == "running" && job.lease_until > now {
+                "running"
+            } else if source.state == "unavailable" {
+                "unavailable"
+            } else if pipeline_required {
+                "blocked"
+            } else if job.generation > job.completed_generation {
+                if job.retry_at > now { "retry_wait" } else { "queued" }
+            } else {
+                job.state.as_str()
+            };
+            let pipeline_run_id = serde_json::from_str::<Value>(&job.cursor).ok()
+                .and_then(|cursor| cursor["run_id"].as_i64()).filter(|id| *id > 0)
+                .map(Id::from);
+            json!({"state":job.state,"effective_state":effective_state,
+                "generation":job.generation,"completed_generation":job.completed_generation,
+                "last_error":crate::i18n::display_stored(&job.last_error),
+                "updated_at":job.updated_at,"retry_at":job.retry_at,
+                "lease_until":job.lease_until,"pipeline_run_id":pipeline_run_id})
+        })
+    })
 }
 async fn validate(
     s: &AppState,

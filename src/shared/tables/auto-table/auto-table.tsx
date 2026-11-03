@@ -21,7 +21,6 @@ getSequenceNumber,
 getVisibleColumns,
 } from "./auto-table-state";
 import {
-isStickyColumn,
 stickyCellStyle,
 stickyColWidth,
 } from "./table-sticky";
@@ -78,13 +77,12 @@ function AutoTableInner<T>(
       : {}),
     ...stickyCellStyle(index, count, widths, options.sticky, header),
   });
-  const cellClass = (index: number, header = false) =>
+  const cellClass = (_index: number, header = false) =>
     cn(
       "border-b border-border px-3 py-2.5 text-left",
       header
-        ? "bg-muted text-xs font-medium text-muted-foreground"
-        : "group-hover:bg-accent group-data-[selected=true]:bg-accent",
-      !header && isStickyColumn(index, count, options.sticky) && "bg-card",
+        ? "bg-background text-xs font-medium text-muted-foreground"
+        : "bg-background group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-data-[selected=true]:bg-muted",
     );
   const allSelected =
     rows.length > 0 &&
@@ -128,7 +126,7 @@ function AutoTableInner<T>(
       )}
       <div
         ref={options.scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-card"
+        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background"
         aria-busy={loading}
       >
         <table
@@ -278,7 +276,7 @@ function AutoTableInner<T>(
                         hidden={group !== undefined && collapsed.has(group)}
                         data-selected={selected.has(key)}
                         className={cn(
-                          "group transition-colors data-[selected=true]:bg-accent",
+                          "group transition-colors hover:bg-muted/50 data-[selected=true]:bg-muted",
                           clickable(row) &&
                             "cursor-pointer focus-visible:outline-2 focus-visible:outline-ring",
                           options.rowClassName?.(row),
@@ -441,7 +439,7 @@ function AutoTableInner<T>(
       </div>
       {pagination && (
         <div
-          className="flex shrink-0 flex-wrap items-center gap-3 pb-2 text-sm"
+          className={cn("flex shrink-0 flex-wrap items-center gap-3 border-t bg-background py-3 text-sm", options.sticky?.pagination && "sticky bottom-0 z-20")}
           data-auto-table-footer
         >
           {options.footerContent}

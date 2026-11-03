@@ -1,4 +1,5 @@
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
+import { FormActions } from "../../shared/forms/auto-form/form-actions";
 import { commonText,configText,useCommonTranslation } from "../../shared/i18n/i18n";
 /**
  * The one form implementation, in three modes driven by the route:
@@ -277,8 +278,6 @@ export function ResourceForm<T extends Record<string, unknown>>({
         {permissions.has("pipeline-templates.create") && <Button type="button" variant="ghost" size="sm" onClick={() => { setTemplateError(""); setTemplateDialog("export"); }}><Upload />{commonText("form.saveAsTemplate")}</Button>}
         <div className="ml-auto flex gap-2">
           {headerActions}
-          <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />{commonText("common.save")}</Button>
-          {permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />{commonText("form.saveAndRun")}</Button>}
         </div>
       </header>
       <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3 sm:px-4">
@@ -288,6 +287,10 @@ export function ResourceForm<T extends Record<string, unknown>>({
         </div>}
         {editor && <div className="flex min-h-0 flex-1 flex-col">{renderField(editor)}</div>}
       </main>
+      <FormActions className="m-0 shrink-0 justify-end px-4">
+        <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />{commonText("common.save")}</Button>
+        {permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />{commonText("form.saveAndRun")}</Button>}
+      </FormActions>
       {pendingAction && <ResourceActionDialog action={pendingAction} row={pendingActionRow!} workspace={workspace} permissions={permissions} onClose={closeAction} onDone={() => setPendingAction(undefined)} />}
       <Dialog.Root open={templateDialog !== null} onOpenChange={open => { if (!open && !templateBusy) setTemplateDialog(null); }}><Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
@@ -316,7 +319,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6", !readOnly && config.presentation === "sections" && "mx-auto max-w-5xl")} onSubmit={submit}>
+    <AutoForm className={cn("mx-auto min-w-0 w-full max-w-5xl pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
       {hostConnectionTabs}
       {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
       {error && (
@@ -324,10 +327,6 @@ export function ResourceForm<T extends Record<string, unknown>>({
           {error}
         </p>
       )}
-
-      {readOnly && showViewNavigation && <div className="flex flex-wrap items-center gap-2 border-b pb-4">
-        {!protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <Button asChild size="sm"><a href={href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button>}
-      </div>}
 
       {pendingAction && <ResourceActionDialog action={pendingAction} row={draft as T} workspace={workspace} permissions={permissions} onClose={() => setPendingAction(undefined)} onDone={() => { setPendingAction(undefined); if(route.id) void getResource<T>(workspace,config.resource,route.id,config.endpoint).then(setDraft).catch(cause=>setError(errorText(cause))); }} />}
       {pendingDelete && <DeleteConfirmDialog action={configText(pendingDelete.label, pendingDelete.labelKey)} target={String(draft.name ?? draft.title ?? draft.email ?? route.id ?? commonText("common.record"))} onClose={() => setPendingDelete(undefined)} onConfirm={async () => {
@@ -338,21 +337,21 @@ export function ResourceForm<T extends Record<string, unknown>>({
       }} />}
       {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
 
-      {readOnly && visibleViewActions.some(action => !action.section) && <div className="flex flex-wrap gap-2">{visibleViewActions.filter(action => !action.section).map(renderViewAction)}</div>}
       {(() => {
+      const primarySection = config.sections.findIndex(section => section.fields.some(field => !field.when || field.when(draft)));
       const renderSection = (section: FormConfig<T>["sections"][number], index: number) => {
         const fields = section.fields.filter((field) => !(creating && config.resource === "hosts" && field.key === "connection") && (!field.when || field.when(draft)));
         if (!fields.length) return null;
         return (
-          <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? cn("detail-section", (section.fullWidth || fields.some(field => ["code", "manifest", "actions-editor"].includes(field.type))) && "col-span-full") : config.presentation === "sections" ? "min-w-0 space-y-5 rounded-xl border bg-card p-4 text-card-foreground sm:p-6" : "space-y-4"}>
+          <section key={section.title ?? index} aria-label={configText(section.title, section.titleKey) || (readOnly ? index === 0 ? commonText("common.basic") : commonText("common.other") : undefined)} className={readOnly ? "detail-section" : "min-w-0 w-full space-y-5 rounded-xl border bg-card p-4 text-card-foreground sm:p-6"}>
             {(section.title || readOnly) && (
-              <div className={readOnly ? "detail-section-title" : "flex items-start gap-3 text-sm font-medium"}>
+              <div className={readOnly ? "detail-section-title flex-wrap" : "flex items-start gap-3 text-sm font-medium"}>
                 {!readOnly && config.presentation === "sections" && <span aria-hidden="true" className="flex size-7 shrink-0 items-center justify-center rounded-md bg-secondary text-xs font-semibold tabular-nums text-secondary-foreground">{String(index + 1).padStart(2, "0")}</span>}
                 <div className="min-w-0 flex-1"><h2 className={config.presentation === "sections" && !readOnly ? "leading-7" : undefined}>
                 {configText(section.title, section.titleKey) || (index === 0 ? commonText("common.basic") : commonText("common.other"))}
-              </h2>{!readOnly && section.description && <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">{configText(section.description, section.descriptionKey)}</p>}</div>{readOnly && section.title && visibleViewActions.filter(action => action.section === section.title).map(renderViewAction)}</div>
+              </h2>{!readOnly && section.description && <p className="mt-1 text-xs font-normal leading-5 text-muted-foreground">{configText(section.description, section.descriptionKey)}</p>}</div>{readOnly && <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{visibleViewActions.filter(action => action.section ? action.section === section.title : index === primarySection).map(renderViewAction)}</div>}</div>
             )}
-            <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: configText(field.label, field.labelKey), type: "custom" as const, col: field.span ?? 1, framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
+            <AutoFields className={readOnly ? "detail-fields" : undefined} fields={Object.fromEntries(fields.map(field => [field.key, { name: configText(field.label, field.labelKey), type: "custom" as const, col: field.span ?? 1, width: field.width ?? (field.type === "select" && Array.isArray(field.options) ? "auto" : "full"), framed: false, render: () => renderField(field) }]))} values={draft} onChange={values => setDraft(values as Partial<T>)} readonly={readOnly} />
           </section>
         );
       };
@@ -376,8 +375,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </div>;
       })()}
 
-      {!readOnly && <div className={cn("flex flex-wrap gap-2", config.presentation === "sections" && "sticky bottom-0 z-10 items-center border-t bg-background/95 py-4 backdrop-blur-sm")}>
-            <Button type="submit" disabled={saving || !canEdit || optionsBlocked}>
+      {readOnly && showViewNavigation && !protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <FormActions>
+        <Button asChild className="w-full"><a href={href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button>
+      </FormActions>}
+      {!readOnly && <FormActions>
+            <Button type="submit" className="min-w-0 flex-1" disabled={saving || !canEdit || optionsBlocked}>
               {saving && <Loader2 className="animate-spin" />}
               {creating ? config.resource === "hosts" ? commonText("form.addHost") : commonText("common.create") : commonText("common.save")}
             </Button>
@@ -385,7 +387,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
               <a href={backToList}>{commonText("common.cancel")}</a>
             </Button>}
             {optionsBlocked && config.incompleteMessage && <p role="status" className="w-full text-sm text-muted-foreground sm:ml-3 sm:w-auto sm:flex-1">{configText(config.incompleteMessage, config.incompleteMessageKey)}</p>}
-      </div>}
+      </FormActions>}
     </AutoForm>
   );
 }
@@ -632,7 +634,7 @@ function Field<T>({
 
   return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
     <div className="flex min-w-0 items-start gap-2">
-      <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type === "custom" ? "text" : field.type, config: { options, ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}), ...(field.min === undefined ? {} : { min: field.min }), ...(field.max === undefined ? {} : { max: field.max }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
+      <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type === "custom" ? "text" : field.type, config: { options, width: field.width ?? (Array.isArray(field.options) ? "auto" : "full"), ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}), ...(field.min === undefined ? {} : { min: field.min }), ...(field.max === undefined ? {} : { max: field.max }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
       {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}
     </div>
     {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">{commonText("form.noOptions")}{field.label}{commonText("form.canAdd")}</p>}

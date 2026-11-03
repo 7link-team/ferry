@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { CodeInsightStatus } from "../../features/code-insights/CodeInsightStatus";
 import { useTranslation } from "react-i18next";
 import {
   codeInsightForm,
@@ -24,17 +25,8 @@ export function CodeInsightDetail({
   useTranslation("insight-domain");
   const [tab, setTab] = useQueryValue("tab", "dashboard");
   const form = useMemo(() => codeInsightForm(workspace), [workspace]);
-  const summary = useMemo(
-    () => ({
-      ...form,
-      sections: form.sections.filter(
-        (section) =>
-          section.title === "基本信息" || section.title === "同步覆盖",
-      ),
-      readOnly: () => true,
-    }),
-    [form],
-  );
+  const [published, setPublished] = useState(0);
+  const onPublished = useCallback(() => setPublished(value => value + 1), []);
   const aliases = useMemo(
     () => ({
       ...form,
@@ -83,15 +75,9 @@ export function CodeInsightDetail({
         value="dashboard"
         className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto"
       >
-        <div className="shrink-0">
-          <ResourceForm
-            config={summary}
-            workspace={workspace}
-            permissions={permissions}
-            showViewNavigation={false}
-          />
-        </div>
+        <CodeInsightStatus workspace={workspace} insightId={insightId} permissions={permissions} onConfigure={() => setTab("settings")} onPublished={onPublished} />
         <RepositoryAnalysis
+          refreshVersion={published}
           workspace={workspace}
           connectionId={insightId}
           scope="insight"

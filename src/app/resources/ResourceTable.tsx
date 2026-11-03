@@ -23,6 +23,7 @@ import { cn } from "cn";
 import {
 ArrowUp,
 Cable,
+Columns3,
 ChevronRight,
 Copy,
 Download,
@@ -63,6 +64,7 @@ import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import {
 DropdownMenu,
+DropdownMenuCheckboxItem,
 DropdownMenuContent,
 DropdownMenuItem,
 DropdownMenuTrigger,
@@ -139,10 +141,17 @@ export function ResourceTable<T>({
   config,
   workspace,
   permissions,
+  conditions,
+  refreshKey = 0,
+  hideToolbar = false,
 }: {
   config: ListConfig<T>;
   workspace: string;
   permissions: Set<string>;
+  /** A dashboard owns one set of committed conditions for all its reports. */
+  conditions?: Record<string, string>;
+  refreshKey?: number;
+  hideToolbar?: boolean;
 }) {
   useCommonTranslation();
   const route = useRoute();
@@ -160,6 +169,7 @@ export function ResourceTable<T>({
   const filterKeys = useMemo(() => (config.filters ?? []).map((f) => f.key), [config.filters]);
   const [committed, setCommitted] = useState<Record<string, string>>(() => readFilters(filterKeys, config.queryPrefix));
   const [draft, setDraft] = useState<Record<string, string>>(committed);
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
 
   const [data, setData] = useState<Envelope<T>>();
   const [error, setError] = useState("");
@@ -175,13 +185,14 @@ export function ResourceTable<T>({
 
   const params = useMemo(
     () => ({
+      ...conditions,
       ...config.fixed,
       ...Object.fromEntries(Object.entries(committed).filter(([, v]) => v !== "")),
       page: grouped ? 1 : page,
       page_size: grouped ? 100 : pageSize,
       ...(sort ? { sort } : {}),
     }),
-    [config.fixed, committed, grouped ? 1 : page, grouped ? 100 : pageSize, sort, grouped],
+    [conditions, config.fixed, committed, grouped ? 1 : page, grouped ? 100 : pageSize, sort, grouped],
   );
 
   const load = useCallback(
@@ -219,7 +230,7 @@ export function ResourceTable<T>({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, reloadToken.current]);
+  }, [load, reloadToken.current, refreshKey]);
 
   // Auto-refresh pauses while the tab is hidden: a background tab polling an
   // ops dashboard every 10s is pure waste, and the data is re-read on return.
@@ -331,6 +342,7 @@ export function ResourceTable<T>({
             setDraft(next); setCommitted(next); writeFilters(next, config.queryPrefix); setPage(1); setSelected(new Set());
           }}>{configText(preset.label, preset.labelKey)}</Button>)}
         </div>)}
+        <div data-list-toolbar className="flex flex-wrap items-end gap-3 rounded-md border bg-muted/30 p-3">
         {!!config.filters?.length && (
           <AutoForm
             className="flex flex-wrap items-end gap-3"
@@ -356,7 +368,7 @@ export function ResourceTable<T>({
           </AutoForm>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        {!hideToolbar && <div className="ml-auto flex flex-wrap items-center gap-2">
           {/* 刷新 is a split control: the left half acts, the right half picks
               the interval. */}
           <div className="flex items-center">
@@ -406,6 +418,7 @@ export function ResourceTable<T>({
           </div>}
 
           <ResourceTransfer key={`${workspace}/${config.resource}`} workspace={workspace} resource={config.resource} params={params}
+            columns={config.columns.filter(column => !hiddenColumns.has(column.key)).map(column => ({ key: column.key, label: configText(column.label, column.labelKey) }))}
             canImport={config.toolbar?.import === true && permissions.has(`${config.permissionResource ?? config.resource}.create`)}
             canExport={config.toolbar?.export === true} onChanged={() => { void load(); }} />
           {config.toolbar?.content && (!config.toolbar.content.permission || permissions.has(config.toolbar.content.permission)) && config.toolbar.content.render(reload)}
@@ -419,6 +432,10 @@ export function ResourceTable<T>({
               {typeof config.toolbar?.create === "object" ? configText(config.toolbar.create.label, config.toolbar.create.labelKey) : commonText("common.create")}
             </Button>
           )}
+          {!!config.columns.length && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline"><Columns3 />{commonText("table.columns")}</Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">{config.columns.map(column => <DropdownMenuCheckboxItem key={column.key} checked={!hiddenColumns.has(column.key)} disabled={hiddenColumns.size === config.columns.length - 1 && !hiddenColumns.has(column.key)} onSelect={event => event.preventDefault()} onCheckedChange={() => setHiddenColumns(current => { const next = new Set(current); if (next.has(column.key)) next.delete(column.key); else next.add(column.key); return next; })}>{configText(column.label, column.labelKey)}</DropdownMenuCheckboxItem>)}</DropdownMenuContent>
+          </DropdownMenu>}
+        </div>}
         </div>
         {data && !loading && !error && config.summary?.(data)}
       </div>
@@ -439,6 +456,7 @@ export function ResourceTable<T>({
           sticky={{ header: true }} rowClickable={entry => !entry.row} onRowClick={entry => { if (!entry.row) enterFolder(entry.path); }}
           onPageChange={setPage} onPageSizeChange={value => { setPageSize(value); setPage(1); }} pageSizeOptions={[...PAGE_SIZES]} onRetry={reload} empty={commonText("repository.emptyGroup")} />
       </div> : <AutoTable<T> fill layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
+        hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
         state={{ rows, total, query: { page, pageSize, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
         showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={data?.has_more}
@@ -603,7 +621,7 @@ function RowActionButton({
   );
 }
 
-function FilterField({
+export function FilterField({
   filter,
   value,
   onChange,
@@ -633,6 +651,7 @@ function FilterField({
         </Select>
       ) : (
         <Input
+          type={filter.type}
           className="h-8 w-48"
           value={value}
           placeholder={configText(filter.placeholder, filter.placeholderKey)}
@@ -643,13 +662,13 @@ function FilterField({
   );
 }
 
-function readFilters(keys: string[], prefix?: string): Record<string, string> {
+export function readFilters(keys: string[], prefix?: string): Record<string, string> {
   const params = new URLSearchParams(location.search);
   return Object.fromEntries(keys.map((key) => [key, params.get(prefix ? `${prefix}.${key}` : key) ?? ""]));
 }
 
 /** Filters are replaceState so a search does not add a history entry per key. */
-function writeFilters(values: Record<string, string>, prefix?: string) {
+export function writeFilters(values: Record<string, string>, prefix?: string) {
   const params = new URLSearchParams(location.search);
   for (const [key, value] of Object.entries(values)) {
     const queryKey = prefix ? `${prefix}.${key}` : key;

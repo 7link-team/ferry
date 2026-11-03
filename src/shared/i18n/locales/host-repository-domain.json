@@ -427,7 +427,9 @@
     "manifest-extra.001": "重建",
     "manifest-extra.002": "滚动更新",
     "manifest-extra.003": "添加{{value1}}",
-    "manifest-extra.004": "{{value1}}端口"
+    "manifest-extra.004": "{{value1}}端口",
+    "repository.group": "仓库分组",
+    "repository.allGroups": "全部分组"
   },
   "en-US": {
     "repository.loadingConnections": "Loading repository connections…",
@@ -857,7 +859,9 @@
     "manifest-extra.001": "Recreate",
     "manifest-extra.002": "Rolling update",
     "manifest-extra.003": "Add {{value1}}",
-    "manifest-extra.004": "{{value1}} port"
+    "manifest-extra.004": "{{value1}} port",
+    "repository.group": "Repository group",
+    "repository.allGroups": "All groups"
   },
   "zh-TW": {
     "repository.loadingConnections": "正在載入倉庫連線…",
@@ -1287,7 +1291,9 @@
     "manifest-extra.001": "重建",
     "manifest-extra.002": "輪流更新",
     "manifest-extra.003": "新增{{value1}}",
-    "manifest-extra.004": "{{value1}}連接埠"
+    "manifest-extra.004": "{{value1}}連接埠",
+    "repository.group": "倉庫分組",
+    "repository.allGroups": "全部分組"
   },
   "ja-JP": {
     "repository.loadingConnections": "リポジトリ接続を読み込み中…",
@@ -1717,7 +1723,9 @@
     "manifest-extra.001": "再作成",
     "manifest-extra.002": "ローリング更新",
     "manifest-extra.003": "{{value1}}を追加",
-    "manifest-extra.004": "{{value1}}のポート"
+    "manifest-extra.004": "{{value1}}のポート",
+    "repository.group": "リポジトリグループ",
+    "repository.allGroups": "すべてのグループ"
   },
   "ko-KR": {
     "repository.loadingConnections": "저장소 연결을 불러오는 중…",
@@ -2147,7 +2155,9 @@
     "manifest-extra.001": "다시 생성",
     "manifest-extra.002": "롤링 업데이트",
     "manifest-extra.003": "{{value1}} 추가",
-    "manifest-extra.004": "{{value1}} 포트"
+    "manifest-extra.004": "{{value1}} 포트",
+    "repository.group": "저장소 그룹",
+    "repository.allGroups": "모든 그룹"
   },
   "ms-MY": {
     "repository.loadingConnections": "Memuatkan sambungan repositori…",
@@ -2577,6 +2587,8 @@
     "manifest-extra.001": "Cipta semula",
     "manifest-extra.002": "Kemas kini bergilir",
     "manifest-extra.003": "Tambah {{value1}}",
-    "manifest-extra.004": "Port {{value1}}"
+    "manifest-extra.004": "Port {{value1}}",
+    "repository.group": "Kumpulan repositori",
+    "repository.allGroups": "Semua kumpulan"
   }
 }

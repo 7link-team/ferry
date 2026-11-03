@@ -21,6 +21,11 @@ it("places repository management between build and hosts and preserves old bookm
   const keys = nav.map(group => group.key);
   expect(keys.indexOf("repository")).toBe(keys.indexOf("build") + 1);
   expect(keys.indexOf("host")).toBe(keys.indexOf("repository") + 1);
+  const repositoryItems = nav.find(group => group.key === "repository")!.items;
+  const events = repositoryItems.findIndex(item => item.key === "repository-events");
+  expect(events).toBe(repositoryItems.findIndex(item => item.key === "code-insights") - 1);
+  expect(repositoryItems[events]!.hidden).not.toBe(true);
+  expect(repositoryItems[events]!.permission).toBe("repositories.read");
   for (const [item, resource] of [["repositories", "code-connections"], ["code-insights", "code-insights"], ["repository-events", "repository-events"]]) {
     for (const suffix of ["", "/new", "/109124836743184391", "/109124836743184391/edit"]) {
       const legacy = parse(`/zh-CN/${workspace}/build/${item}${suffix}`, "");

@@ -971,6 +971,42 @@ async fn export(
 ) -> Result<Response> {
     let xlsx = format(&q)?;
     q.remove("format");
+    let requested_columns = q.remove("columns");
+    let requested_headers = q.remove("headers");
+    let selection = match (requested_columns, requested_headers) {
+        (None, None) => None,
+        (Some(columns), headers) => {
+            let columns: Vec<String> = columns.split(',').map(str::to_owned).collect();
+            let mut unique = HashSet::new();
+            if columns.len() > 64
+                || columns.iter().any(|key| {
+                    key.is_empty()
+                        || key.len() > 128
+                        || !key.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+                        || !unique.insert(key.clone())
+                })
+            {
+                return Err(invalid_file());
+            }
+            let headers = match headers {
+                Some(value) => {
+                    serde_json::from_str::<Vec<String>>(&value).map_err(|_| invalid_file())?
+                }
+                None => columns.clone(),
+            };
+            if headers.len() != columns.len()
+                || headers.iter().any(|label| {
+                    label.trim().is_empty()
+                        || label.chars().count() > 256
+                        || label.chars().any(char::is_control)
+                })
+            {
+                return Err(invalid_file());
+            }
+            Some((columns, headers))
+        }
+        (None, Some(_)) => return Err(invalid_file()),
+    };
     q.insert("page".into(), "1".into());
     q.insert("page_size".into(), "200".into());
     let mut data = page(s.clone(), scope.clone(), r, q.clone()).await?;
@@ -996,12 +1032,13 @@ async fn export(
     if r == "variables" && !columns.iter().any(|key| key == "value") {
         columns.push("value".into());
     }
+    // Values always come from the authorized, redacted list projection. A UI-only
+    // virtual column (or a requested secret absent from that projection) is blank.
+    let (columns, headers) = selection.unwrap_or_else(|| (columns.clone(), columns));
     let (tx, rx) = tokio::sync::mpsc::channel(2);
     let writer = tokio::task::spawn_blocking(move || write_file(rx, xlsx));
     let produced = async {
-        tx.send(vec![columns.clone()])
-            .await
-            .map_err(|_| invalid_file())?;
+        tx.send(vec![headers]).await.map_err(|_| invalid_file())?;
         let mut current = 1u64;
         loop {
             let items = data["items"].as_array().ok_or_else(invalid_file)?;

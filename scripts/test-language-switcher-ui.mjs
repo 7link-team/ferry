@@ -133,6 +133,14 @@ try {
       const items = page.getByRole("menuitemradio");
       await items.first().waitFor();
       assert.equal(await items.count(), 6);
+      assert.equal(await items.locator('span[aria-hidden="true"]').count(), 6, 'each language has a compact locale tag');
+      const activeStyle = await page.getByRole("menuitemradio", { name, exact: true }).evaluate(element => {
+        const css = getComputedStyle(element);
+        return { background: css.backgroundColor, color: css.color, classes: element.className, checks: element.querySelectorAll('svg.lucide-check').length };
+      });
+      assert.equal(activeStyle.checks, 1, 'selected language shows the reference trailing check');
+      assert.match(activeStyle.classes, /data-\[state=checked\]:bg-primary/);
+      assert.notEqual(activeStyle.background, 'rgba(0, 0, 0, 0)', 'selected row is visibly filled');
       assert.equal(
         await page
           .getByRole("menuitemradio", { name, exact: true })

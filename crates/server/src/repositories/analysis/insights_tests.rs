@@ -7,6 +7,101 @@ use crate::repositories::analysis::{self as analysis, sync};
 use sea_orm::PaginatorTrait;
 use sync::tests::{claimed, commit, fixture, queued_repository};
 
+#[tokio::test]
+async fn insight_collection_status_distinguishes_pending_revisions_retries_and_blocked_fallback() {
+    let (_dir, s) = fixture().await;
+    grant(&s).await;
+    let id = create_one(&s, body("Status", vec![member(4, "team/repo")])).await;
+    let mut source = sources::Entity::find_by_id(7)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut job = jobs::Entity::find_by_id(7)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let now = db::now();
+    source.state = "failed".into();
+    source.synced_at = now - 100_000;
+    source.last_error = crate::i18n::store_message(&crate::i18n::Message::new(
+        "repository.collector.filesMissing",
+    ));
+    job.state = "queued".into();
+    job.generation = 10;
+    job.completed_generation = 0;
+    job.updated_at = now - 2000;
+    job.last_error = source.last_error.clone();
+    job.retry_at = now + 60_000;
+    sources::Entity::update(source.clone().into_active_model().reset_all())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    jobs::Entity::update(job.clone().into_active_model().reset_all())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let detail = detail(&s, id).await;
+    let status = &detail["sources"][0];
+    assert_eq!(status["pipeline_required"], true);
+    assert_eq!(status["state"], "failed");
+    assert_eq!(status["synced_at"], source.synced_at);
+    assert_eq!(status["job"]["state"], "queued");
+    assert_eq!(status["job"]["effective_state"], "blocked");
+    assert_eq!(status["job"]["updated_at"], job.updated_at);
+    assert_eq!(status["job"]["retry_at"], job.retry_at);
+    // Binding a fallback makes the pending retry actionable without hiding the
+    // previous error or falsely reporting that completed_generation is work done.
+    assert_eq!(
+        source_status(&source, Some(&job), true, now)["job"]["effective_state"],
+        "retry_wait"
+    );
+    job.retry_at = 0;
+    assert_eq!(
+        source_status(&source, Some(&job), true, now)["job"]["effective_state"],
+        "queued"
+    );
+    job.state = "running".into();
+    job.lease_until = now + 60_000;
+    job.cursor = r#"{"run_id":9007199254740993}"#.into();
+    let running = source_status(&source, Some(&job), false, now);
+    assert_eq!(running["job"]["effective_state"], "running");
+    assert_eq!(running["job"]["pipeline_run_id"], "9007199254740993");
+    assert_eq!(running["job"]["lease_until"], job.lease_until);
+    // An expired lease cannot continue to present a live worker to the UI.
+    assert_eq!(
+        source_status(&source, Some(&job), true, job.lease_until)["job"]["effective_state"],
+        "queued"
+    );
+    job.state = "complete".into();
+    job.completed_generation = job.generation;
+    job.last_error.clear();
+    source.last_error.clear();
+    source.state = "complete".into();
+    assert_eq!(
+        source_status(&source, Some(&job), false, now)["job"]["effective_state"],
+        "complete"
+    );
+    assert!(Value::is_null(
+        &source_status(&source, None, false, now)["job"]
+    ));
+    // A transient provider/network error must not be mislabeled as missing setup.
+    source.last_error = "Network unavailable".into();
+    assert_eq!(
+        source_status(&source, Some(&job), false, now)["pipeline_required"],
+        false
+    );
+    source.last_error = crate::i18n::render(
+        crate::i18n::Locale::ZhCn,
+        &crate::i18n::Message::new("repository.collector.filesMissing"),
+    );
+    assert_eq!(
+        source_status(&source, Some(&job), false, now)["pipeline_required"],
+        true
+    );
+}
+
 async fn grant(s: &AppState) {
     let permissions = [
         "repositories.read",

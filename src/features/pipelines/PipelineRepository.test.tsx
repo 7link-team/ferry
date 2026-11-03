@@ -79,7 +79,7 @@ it('loads additional branches, retries the failed page and preserves the ref',as
  }));
  await act(async()=>root.render(<Harness/>));
  await select('仓库连接','c1');await select('节点仓库','https://git.example/team/repo.git');
- const click=async(text:string)=>act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent===text)!.click());
+ const click=async(text:string)=>act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent===text||button.getAttribute('aria-label')===text)!.click());
  await click('加载更多分支');expect(host.querySelector('[role="alert"]')?.textContent).toContain('过于频繁');
  expect(host.querySelector('datalist')?.textContent).toContain('main');
  fail=false;await click('重试读取分支');

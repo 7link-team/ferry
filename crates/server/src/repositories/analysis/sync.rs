@@ -94,6 +94,7 @@ pub(super) async fn try_claim(
         return Ok(None);
     };
     current.state = "running".into();
+    current.updated_at = db::now();
     current.lease_owner = owner.clone();
     current.lease_until = db::now() + LEASE_MS;
     jobs::Entity::update(current.clone().into_active_model().reset_all())

@@ -72,8 +72,8 @@ export const nav: NavGroup[] = [
     get label() { return commonText("nav.repository"); },
     items: [
       { key: "repositories", get label() { return commonText("nav.repositories"); }, resource: "code-connections", permission: "repositories.read" },
+      { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read" },
       { key: "code-insights", get label() { return commonText("nav.insights"); }, resource: "code-insights", permission: "code-insights.read" },
-      { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read", hidden: true, parent: "repositories" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "build" }, permission: "credentials.read" },
     ],
   },

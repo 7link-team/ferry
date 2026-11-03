@@ -192,7 +192,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
 
   return (
     <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
-      <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-card px-4 py-1">
+      <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
         <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           Ferry
         </a>
@@ -203,8 +203,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               {...to(g.key, menuTarget(findGroup(g.key)!, g.items[0]!).key)}
               aria-current={g.key === group.key ? "page" : undefined}
               className={cn(
-                "rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground",
-                g.key === group.key && "bg-accent text-foreground",
+                "rounded-md px-3 py-1.5 text-sm transition-colors",
+                g.key === group.key ? "sidebar-active-item bg-sidebar-primary font-medium text-sidebar-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >
               {g.label}
@@ -259,8 +259,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                 {...to(group.key, menuTarget(group, i).key, menuTarget(group, i).params)}
                 aria-current={i.key === parentItem.key ? "page" : undefined}
                 className={cn(
-                  "rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground",
-                  i.key === parentItem.key && "sidebar-active-item bg-sidebar-accent text-sidebar-accent-foreground",
+                  "rounded-md px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors",
+                  i.key === parentItem.key ? "sidebar-active-item bg-sidebar-primary font-medium text-sidebar-primary-foreground" : "text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
                 {i.label}

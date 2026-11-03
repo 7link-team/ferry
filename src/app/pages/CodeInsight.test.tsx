@@ -57,6 +57,17 @@ const setInput = async (input: HTMLInputElement | HTMLTextAreaElement, value: st
 });
 const choose = async (select: HTMLSelectElement, value: string) => act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
 
+const openRepositories = async () => act(async () => {
+  host.querySelector<HTMLButtonElement>('button[aria-label="\u9009\u62e9\u4ed3\u5e93"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+});
+const clickRepository = async (label: string) => act(async () => {
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(element => element.textContent === label)!;
+  expect(item, label).toBeDefined(); item.click();
+});
+const closeRepositories = async () => act(async () => {
+  document.querySelector('[role="menu"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+});
+
 it("scopes all reports and six period rankings to an insight without the legacy connection query", async () => {
   for (const [kind] of analysisReports) {
     const config = analysisReport("ws", "31", kind, "insight");
@@ -89,16 +100,61 @@ it("adds repositories from paginated named connections, remote pages and explici
   const connectionSelect = host.querySelector<HTMLSelectElement>('select[aria-label="仓库连接"]')!;
   expect(connectionSelect.textContent).toContain("Git source");
   await choose(connectionSelect, "11");
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "加载更多仓库")!.click());
-  await choose(host.querySelector<HTMLSelectElement>('select[aria-label="添加洞察仓库"]')!, "https://git.example.invalid/team/second.git");
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "加入洞察")!.click());
-  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "" }]);
+  expect(requests.some(request => request.url.includes('/code-connections/11/repositories?page=2'))).toBe(true);
+  expect([...host.querySelectorAll<HTMLButtonElement>("button")].some(button => button.textContent === "加载更多仓库")).toBe(false);
+  await openRepositories();
+  await clickRepository("team/second");
+  await closeRepositories();
+  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "", provider: "github" }]);
   await choose(host.querySelector<HTMLSelectElement>('select[aria-label="分析流水线 team/second"]')!, "21");
   await choose(connectionSelect, "12");
   await setInput(host.querySelector<HTMLInputElement>('input[aria-label="Git 仓库地址"]')!, "git@git.example.invalid:other/repo.git");
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "加入洞察")!.click());
-  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "21" }, { connection_id: "12", repository: "git@git.example.invalid:other/repo.git", pipeline_id: "" }]);
+  expect(selected).toEqual([{ connection_id: "11", repository: "team/second", pipeline_id: "21", provider: "github" }, { connection_id: "12", repository: "git@git.example.invalid:other/repo.git", pipeline_id: "" }]);
   expect(requests.filter(request => request.url.includes("code-connections?")).length).toBe(2);
+});
+
+it("selects repository namespace groups across all pages, adds a group once, and resets it on connection changes", async () => {
+  const originalFetch = fetch;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/code-connections/11/repositories?')) {
+      requests.push({ url, method: 'GET' });
+      const second = new URL(url, location.origin).searchParams.get('page') === '2';
+      const names = second ? ['team/mobile/app', 'other/service'] : ['team/project', 'team/mobile/library'];
+      return { ok: true, status: 200, json: async () => ({ items: names.map(full_name => ({ name: full_name.split('/').at(-1), full_name, url: `https://git.example.invalid/${full_name}.git`, default_branch: 'main' })), has_more: !second }) };
+    }
+    return originalFetch(url, init);
+  }));
+  let selected: InsightRepository[] = [];
+  function Editor() {
+    const [value, setValue] = useState<InsightRepository[]>([]); selected = value;
+    return <CodeInsightRepositories workspace="ws" value={value} readOnly={false} permissions={new Set(["repositories.read"])} onChange={next => setValue(next as InsightRepository[])} onValidityChange={() => {}} />;
+  }
+  await act(async () => root.render(<Editor />));
+  const connection = host.querySelector<HTMLSelectElement>('select[aria-label="仓库连接"]')!;
+  await choose(connection, '11');
+  const group = host.querySelector<HTMLSelectElement>('select[aria-label="仓库分组"]')!;
+  expect([...group.options].map(option => option.value)).toEqual(['', 'other', 'team', 'team/mobile']);
+  await choose(group, 'team/mobile');
+  await openRepositories();
+  expect([...document.querySelectorAll('[role="menuitemcheckbox"]')].map(item => item.textContent)).toEqual(['\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff082\uff09', 'team/mobile/library', 'team/mobile/app']);
+  await clickRepository('team/mobile/app');
+  await clickRepository('team/mobile/library');
+  expect(selected.map(row => row.repository)).toEqual(['team/mobile/app', 'team/mobile/library']);
+  await clickRepository('\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff082\uff09');
+  expect(selected).toHaveLength(0);
+  await clickRepository('\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff082\uff09');
+  await closeRepositories();
+  await choose(group, 'team');
+  await openRepositories();
+  await clickRepository('\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff083\uff09');
+  expect(selected.map(row => row.repository)).toEqual(['team/mobile/library', 'team/mobile/app', 'team/project']);
+  expect(new Set(selected.map(row => row.repository)).size).toBe(3);
+  await closeRepositories();
+  await choose(connection, '12');
+  expect(host.querySelector('select[aria-label="仓库分组"]')).toBeNull();
+  await choose(connection, '11');
+  expect(host.querySelector<HTMLSelectElement>('select[aria-label="仓库分组"]')!.value).toBe('');
 });
 
 it("edits author mappings without JSON and preserves contributor IDs across locales", async () => {
@@ -119,6 +175,22 @@ it("edits author mappings without JSON and preserves contributor IDs across loca
   }
   await setInput(input, 'New name');
   expect(blocked).toBe(false); expect(value).toEqual([{ email: "alice@example.invalid", nickname: "New name", contributor_id: "123" }]);
+});
+
+it("keeps existing platform pipeline bindings and other connections while toggling filtered repository selections", async () => {
+  const savedRows:InsightRepository[]=[{connection_id:'11',repository:'https://git.example.invalid/team/project.git',pipeline_id:'21',provider:'github'},{connection_id:'12',repository:'git@git.example.invalid:other/repo.git',pipeline_id:'21',provider:'git'}];
+  let selected:InsightRepository[]=[];
+  function Editor(){const[value,setValue]=useState(savedRows);selected=value;return <CodeInsightRepositories workspace="ws" value={value} readOnly={false} permissions={new Set(['repositories.read'])} onChange={next=>setValue(next as InsightRepository[])} onValidityChange={()=>{}}/>;}
+  await act(async()=>root.render(<Editor/>));
+  await choose(host.querySelector<HTMLSelectElement>('select[aria-label="仓库连接"]')!,'11');
+  await openRepositories();
+  expect([...document.querySelectorAll('[role="menuitemcheckbox"]')].find(item=>item.textContent==='team/project')?.getAttribute('aria-checked')).toBe('true');
+  await clickRepository('team/second');
+  expect(selected.slice(0,2)).toEqual(savedRows);
+  expect(selected).toHaveLength(3);
+  await clickRepository('选择当前结果（2）');
+  expect(selected).toEqual([savedRows[1]]);
+  await closeRepositories();
 });
 
 it("requires a pipeline for enabled Git memberships and permits saving disabled ones", async () => {
@@ -143,6 +215,10 @@ it("saves an optimistic flat insight through the shared edit form without pipeli
   history.replaceState({}, "", "/workspaces/ws/code-insights/31/edit");
   await act(async () => root.render(<ResourceForm config={codeInsightForm("ws")} workspace="ws" permissions={new Set(["code-insights.read", "code-insights.update"])} />));
   expect(host.textContent).toContain("Platform source");
+  expect(host.querySelector('[name="description"]')).toBeNull();
+  expect(host.textContent).not.toContain("同步覆盖");
+  expect(host.textContent).not.toContain("各仓库覆盖与任务状态");
+  expect(codeInsightForm("ws").sections).toHaveLength(3);
   const name = host.querySelector<HTMLInputElement>('input[type="text"]')!;
   await setInput(name, "Renamed insight");
   await act(async () => host.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -195,7 +271,7 @@ it("does not leave Git selection disabled when a previous platform request is st
   await act(async () => root.render(<CodeInsightRepositories workspace="ws" value={[]} readOnly={false} permissions={new Set(["repositories.read"])} onChange={() => {}} onValidityChange={() => {}} />));
   const connection = host.querySelector<HTMLSelectElement>('select[aria-label="仓库连接"]')!;
   await choose(connection, '11');
-  expect(host.querySelector<HTMLSelectElement>('select[aria-label="添加洞察仓库"]')?.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="选择仓库"]')?.disabled).toBe(true);
   await choose(connection, '12');
   await setInput(host.querySelector<HTMLInputElement>('input[aria-label="Git 仓库地址"]')!, 'https://git.example.invalid/team/repo.git');
   expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('加入洞察'))!.disabled).toBe(false);

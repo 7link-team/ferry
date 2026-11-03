@@ -405,6 +405,8 @@ jobs:
           python3 .github/scripts/annotate-failures.py --run node scripts/test-host-workspace.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-table-layout-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-resource-details-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-select-refresh-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-crud-layout-ui.mjs
       - name: Pipeline environments and classification acceptance
         if: matrix.harness == 'pipelines'
         run: python3 scripts/test-pipeline-classification.py

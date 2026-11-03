@@ -47,6 +47,24 @@ try {
     await control.pressSequentially(value); await control.press('Tab');
     assert.equal(await control.inputValue(), value, 'Typed value must persist after blur');
   };
+  const environment=(await get(root+'/dictionaries')).items.find(row=>row.key==='environment');
+  const environmentBefore=await get(root+'/dictionaries/'+environment.id);
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${environment.id}/edit`);
+  const dictionaryType=p.getByLabel('值类型',{exact:true});
+  await dictionaryType.waitFor(); assert(await dictionaryType.isEnabled());
+  assert.deepEqual(await dictionaryType.locator('option').evaluateAll(nodes=>nodes.map(node=>node.value)),['tab','selection']);
+  for(const next of ['tab','selection']) {
+    await dictionaryType.click(); await dictionaryType.press(next==='tab'?'Home':'End'); await dictionaryType.press('Enter');
+    assert.equal(await dictionaryType.inputValue(),next);
+    await p.getByRole('button',{name:'保存',exact:true}).click();
+    await p.waitForURL(`**/workspaces/${workspace_tenant}/dictionaries`);
+    const saved=await get(root+'/dictionaries/'+environment.id);
+    assert.equal(saved.value_type,next);
+    assert.deepEqual(JSON.parse(saved.value_json),JSON.parse(environmentBefore.value_json),'Changing compatible types must preserve every option');
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${environment.id}/edit`);
+    await dictionaryType.waitFor(); assert.equal(await dictionaryType.inputValue(),next);
+  }
+  console.log('PASS: built-in environment dictionary native type switch in both directions, options preserved, real save and reload');
   const initialHeartbeat=(await get(root+'/settings')).items.find(row=>row.key==='heartbeat_timeout_seconds');
   const heartbeatEdit=`${origin}/zh-CN/workspaces/${workspace_tenant}/settings/${initialHeartbeat.id}/edit`;
   await p.goto(heartbeatEdit);

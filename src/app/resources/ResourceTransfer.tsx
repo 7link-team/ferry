@@ -1,6 +1,7 @@
-import { Download,Loader2,Upload,X } from "lucide-react";
+import { ChevronDown,Download,Loader2,Upload,X } from "lucide-react";
+import { cn } from "cn";
 import { Dialog } from "radix-ui";
-import { useState } from "react";
+import { useRef,useState } from "react";
 import { toast } from "sonner";
 import { api,ApiError,errorText,localizedFetch } from "../../shared/api/api";
 import { base,queryString } from "../../shared/api/resource";
@@ -27,8 +28,9 @@ async function download(path: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-export function ResourceTransfer({ workspace, resource, params, canImport, canExport, onChanged }: {
+export function ResourceTransfer({ workspace, resource, params, columns, canImport, canExport, onChanged }: {
   workspace: string; resource: string; params: Record<string, string | number | undefined>;
+  columns?: { key: string; label: string }[];
   canImport: boolean; canExport: boolean; onChanged: () => void;
 }) {
   useCommonTranslation();
@@ -37,6 +39,8 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<Preview>();
   const [file, setFile] = useState<File>();
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const endpoint = base(workspace, resource);
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError("");
@@ -48,7 +52,8 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
     setPreview(undefined);
   };
   const close = () => { if (!busy) void run(async () => { await discard(); setFile(undefined); setOpen(false); }); };
-  const columns = [...new Set(preview?.rows.flatMap(row => Object.keys(row.values)) ?? [])];
+  const previewColumns = [...new Set(preview?.rows.flatMap(row => Object.keys(row.values)) ?? [])];
+  const exportParams = { ...params, ...(columns?.length ? { columns: columns.map(column => column.key).join(','), headers: JSON.stringify(columns.map(column => column.label)) } : {}) };
   return <>
     {canImport && <Dialog.Root open={open} onOpenChange={value => value ? setOpen(true) : close()}>
       <Dialog.Trigger asChild><Button size="sm" variant="outline"><Upload /> {commonText("transfer.import")}</Button></Dialog.Trigger>
@@ -61,20 +66,28 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
           <div className="flex flex-wrap gap-2">
             {(["xlsx", "csv"] as const).map(format => <Button key={format} variant="outline" size="sm" disabled={busy} onClick={() => void run(() => download(`${endpoint}/import-template?format=${format}`, `${resource}-template.${format}`))}>{commonText("transfer.downloadTemplate", { format: format.toUpperCase() })}</Button>)}
           </div>
-          <AutoField label={commonText("transfer.chooseFile")} className="grid gap-2 text-sm"><Input type="file" accept=".csv,.xlsx" disabled={busy || !!preview} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} /></AutoField>
+          {!preview && <AutoField label={commonText("transfer.chooseFile")} className="grid gap-2 text-sm">
+            <div role="button" tabIndex={busy ? -1 : 0} aria-disabled={busy} aria-label={commonText("transfer.chooseFile")} className={cn("flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-8 transition-colors", dragging ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/50", file && "border-primary/50 bg-primary/5", busy && "pointer-events-none opacity-50")}
+              onClick={() => !busy && fileInput.current?.click()} onKeyDown={event => { if (!busy && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); fileInput.current?.click(); } }} onDragOver={event => { event.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); if (!busy) { setFile(event.dataTransfer.files[0]); setError(""); } }}>
+              <Upload aria-hidden="true" className="size-8 text-muted-foreground" />
+              <p className={cn("break-all text-center text-sm", file ? "font-medium text-primary" : "text-muted-foreground")}>{file?.name ?? commonText("transfer.dropzone")}</p>
+            </div>
+            <Input ref={fileInput} type="file" className="sr-only" accept=".csv,.xlsx" disabled={busy} onChange={e => { setFile(e.target.files?.[0]); setError(""); }} />
+          </AutoField>}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {busy && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" /> {commonText("transfer.processing")}</p>}
           {preview && <>
             <p role="status" className="text-sm">{preview.valid ? commonText("transfer.valid", { count: preview.count }) : commonText("transfer.invalid")}</p>
             <AutoTable pagination={false} fill rowKey={row => String(row.row)} minWidth={600} sticky={{ header: true, left: 1 }}
               state={{ rows: preview.rows, total: preview.rows.length, query: { page: 1, pageSize: Math.max(1, preview.rows.length) } }}
-              columns={[{ field: "row", name: commonText("transfer.row"), width: "88px" }, { field: "error", name: commonText("transfer.validation"), width: "200px", render: (_value, row) => <span className={row.error ? "text-destructive" : ""}>{row.error ?? commonText("transfer.passed")}</span> }, ...columns.map(key => ({ field: key, name: key, width: "220px", render: (_value: unknown, row: Preview["rows"][number]) => <span className="whitespace-pre-wrap break-words">{typeof row.values[key] === "string" ? String(row.values[key]) : JSON.stringify(row.values[key])}</span> }))]} />
+              columns={[{ field: "row", name: commonText("transfer.row"), width: "88px" }, { field: "error", name: commonText("transfer.validation"), width: "200px", render: (_value, row) => <span className={row.error ? "text-destructive" : ""}>{row.error ?? commonText("transfer.passed")}</span> }, ...previewColumns.map(key => ({ field: key, name: columns?.find(column => column.key === key)?.label ?? key, width: "220px", render: (_value: unknown, row: Preview["rows"][number]) => <span className="whitespace-pre-wrap break-words">{typeof row.values[key] === "string" ? String(row.values[key]) : JSON.stringify(row.values[key])}</span> }))]} />
           </>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button variant="outline" disabled={busy} onClick={close}>{commonText("common.cancel")}</Button>
             {preview ? <Button variant="outline" disabled={busy} onClick={() => void run(discard)}>{commonText("transfer.chooseAgain")}</Button> : <Button disabled={busy || !file} onClick={() => void run(async () => {
               if (!file) return;
               if (file.size > 8 * 1024 * 1024) throw new Error(commonText("transfer.tooLarge"));
+              if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error(commonText("transfer.invalidFormat"));
               const form = new FormData(); form.append("file", file);
               setPreview(await api<Preview>(`${endpoint}/imports`, { method: "POST", body: form }));
             })}>{commonText("transfer.preview")}</Button>}
@@ -86,8 +99,8 @@ export function ResourceTransfer({ workspace, resource, params, canImport, canEx
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>}
-    {canExport && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline" disabled={busy}>{busy && !open ? <Loader2 className="animate-spin" /> : <Download />} {commonText("transfer.export")}</Button></DropdownMenuTrigger>
-      <DropdownMenuContent align="end">{(["xlsx", "csv"] as const).map(format => <DropdownMenuItem key={format} onSelect={() => void run(() => download(`${endpoint}/exports${queryString({ ...params, format })}`, `${resource}.${format}`))}>{commonText("transfer.exportFormat", { format: format.toUpperCase() })}</DropdownMenuItem>)}</DropdownMenuContent>
+    {canExport && <DropdownMenu><DropdownMenuTrigger asChild><Button size="sm" variant="outline" disabled={busy}>{busy && !open ? <Loader2 className="animate-spin" /> : <Download />} {commonText("transfer.export")}<ChevronDown className="size-4" /></Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end">{(["xlsx", "csv"] as const).map(format => <DropdownMenuItem key={format} onSelect={() => void run(() => download(`${endpoint}/exports${queryString({ ...exportParams, format })}`, `${resource}.${format}`))}>{commonText("transfer.exportFormat", { format: format.toUpperCase() })}</DropdownMenuItem>)}</DropdownMenuContent>
     </DropdownMenu>}
   </>;
 }

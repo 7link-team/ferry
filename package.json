@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/build-raft-theme.mjs --check && tsc -b && vite build",
     "typecheck": "tsc -b",
     "tauri": "cd desktop && tauri",
     "desktop:dev": "cd desktop && tauri dev",

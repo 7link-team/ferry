@@ -166,18 +166,18 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
     {pendingDelete && <DeleteConfirmDialog action={executionText(pendingDelete.action)} target={pendingDelete.target} description={executionText("editor.deleteHelp")} onClose={() => setPendingDelete(undefined)} onConfirm={pendingDelete.run} />}
     {mode === undefined && <div className="flex gap-1" role="tablist" aria-label={executionText("editor.mode")}>{([["visual", executionText("shared.common.form.visual")], ["yaml", "YAML"]] as const).map(([key, title]) => <Button key={key} type="button" role="tab" aria-selected={tab === key} variant={tab === key ? "secondary" : "ghost"} onClick={() => setTab(key)}>{title}</Button>)}</div>}
     {tab === "yaml" && missingHosts.length > 0 && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{executionText("editor.missingHosts")}{missingHosts.map(row => <Button key={row.id} type="button" variant="outline" size="sm" onClick={() => { setSelection({ job: row.id }); setTab("visual"); }}>{row.name}</Button>)}</div>}
-    {selectedEdge && !readOnly && <Button type="button" variant="outline" size="icon" aria-label={executionText("editor.deleteDependency")} title={executionText("editor.deleteDependency")} onClick={() => {
+    {tab === "yaml" ? <Suspense fallback={<div role="status" className="grid h-[520px] place-items-center text-sm text-muted-foreground">{executionText("editor.loadingYaml")}</div>}><YamlEditor value={source} readOnly={readOnly} fillHeight={fillHeight} onChange={definition => {
+      try { parseActions(definition); } catch { onChange({ definition }); return; }
+      change(() => definition);
+    }} /></Suspense> : <div className={cn("flex min-h-[520px] flex-col overflow-hidden rounded-lg border lg:flex-row", fillHeight ? "flex-1 lg:min-h-0" : "lg:h-[620px]")}>
+      <div className="relative h-[520px] min-w-0 shrink-0 lg:h-full lg:flex-1 lg:shrink" aria-label={executionText("editor.canvas")}>
+        {selectedEdge && !readOnly && <div className="absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-md border bg-card pl-3 pr-1 shadow-sm"><span className="truncate text-xs">{parsed.jobs.find(row => row.id === selectedEdge.source)?.name ?? selectedEdge.source} → {parsed.jobs.find(row => row.id === selectedEdge.target)?.name ?? selectedEdge.target}</span><Button type="button" variant="ghost" size="icon" className="size-8 shrink-0" aria-label={executionText("editor.deleteDependency")} title={executionText("editor.deleteDependency")} onClick={() => {
       const edge = selectedEdge;
       setPendingDelete({ action: "editor.deleteDependency", target: `${parsed.jobs.find(row => row.id === edge.source)?.name ?? edge.source} → ${parsed.jobs.find(row => row.id === edge.target)?.name ?? edge.target}`, run: () => {
         change(() => editActionJob(source, edge.target, { needs: parsed.jobs.find(row => row.id === edge.target)!.needs.filter(id => id !== edge.source) }));
         setSelectedEdge(undefined);
       } });
-    }}><Unlink2 className="size-4" /></Button>}
-    {tab === "yaml" ? <Suspense fallback={<div role="status" className="grid h-[520px] place-items-center text-sm text-muted-foreground">{executionText("editor.loadingYaml")}</div>}><YamlEditor value={source} readOnly={readOnly} fillHeight={fillHeight} onChange={definition => {
-      try { parseActions(definition); } catch { onChange({ definition }); return; }
-      change(() => definition);
-    }} /></Suspense> : <div className={cn("flex min-h-[520px] flex-col overflow-hidden rounded-lg border lg:flex-row", fillHeight ? "flex-1 lg:min-h-0" : "lg:h-[620px]")}>
-      <div className="h-[520px] min-w-0 shrink-0 lg:h-full lg:flex-1 lg:shrink" aria-label={executionText("editor.canvas")}>
+    }}><Unlink2 className="size-4" /></Button></div>}
         {!parsed.error && <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesFocusable={!readOnly} deleteKeyCode={null} onConnect={onConnect} onEdgeClick={(_, edge) => setSelectedEdge({ source: edge.source, target: edge.target })} onPaneClick={() => setSelectedEdge(undefined)} onNodesChange={changes => {
           const dimensions = changes.flatMap(change => change.type === "dimensions" && change.dimensions ? [[change.id, change.dimensions] as const] : []);
           if (dimensions.length) setMeasurements(current => ({ ...current, ...Object.fromEntries(dimensions) }));
@@ -193,7 +193,13 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
         }} fitView minZoom={0.25} maxZoom={1.5} ariaLabelConfig={{ "controls.zoomIn.ariaLabel": executionText("editor.zoomIn"), "controls.zoomOut.ariaLabel": executionText("editor.zoomOut"), "controls.fitView.ariaLabel": executionText("editor.fitCanvas") }}><FitCanvas topology={parsed.jobs.map(job => `${job.id}:${job.needs.join(",")}:${job.steps.length}`).join(";")} /><Background /><Controls showInteractive={false} /></ReactFlow>}
       </div>
       {job && <aside ref={panel} aria-label={step ? executionText("editor.stepSettings") : executionText("editor.jobSettings")} className={cn("w-full space-y-4 overflow-y-auto border-t bg-background p-4 max-h-[620px] lg:w-80 lg:shrink-0 lg:border-l lg:border-t-0", fillHeight && "lg:max-h-none")}>
-        <div className="flex items-center justify-between"><h3 className="font-semibold">{step ? executionText("editor.stepSettings") : executionText("editor.jobSettings")}</h3><Button type="button" variant="ghost" size="icon" aria-label={executionText("editor.closeSettings")} onClick={() => setSelection(undefined)}><X className="size-4" /></Button></div>
+        <div className="flex items-center justify-between gap-2"><h3 className="min-w-0 font-semibold">{step ? executionText("editor.stepSettings") : executionText("editor.jobSettings")}</h3><div className="flex shrink-0 items-center gap-1">{!readOnly && step && selection?.step !== undefined && <Button type="button" variant="destructive" size="icon" aria-label={executionText("editor.deleteStepName", { name: step.name || step.uses || selection.step + 1 })} title={executionText("editor.deleteStep")} onClick={() => {
+          const jobId = job.id, index = selection.step!;
+          setPendingDelete({ action: "editor.deleteStep", target: `${job.name} / ${step.name || step.uses || index + 1}`, run: () => {
+            change(() => removeActionStep(source, jobId, index));
+            setSelection(undefined);
+          } });
+        }}><Trash2 className="size-4" /></Button>}<Button type="button" variant="ghost" size="icon" aria-label={executionText("editor.closeSettings")} onClick={() => setSelection(undefined)}><X className="size-4" /></Button></div></div>
         <AutoField label={<span className="text-sm">{executionText("shared.common.common.name")}</span>} className="block space-y-2"><Input aria-label={step ? executionText("editor.stepName") : executionText("editor.jobName")} value={String(step?.name ?? (!step ? job.raw.name : "") ?? "")} disabled={readOnly} onChange={e => update({ name: e.target.value })} /></AutoField>
         {!step ? <>
           <AutoField label={<span className="text-sm">{executionText("editor.jobType")}</span>} className="block space-y-2"><select aria-label={executionText("editor.jobType")} className={inputClass} disabled={readOnly} value={job.raw["ferry-approval"] === true ? "approval" : "actions"} onChange={e => {
@@ -221,13 +227,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
           </>}
         </>}
         {(step || job.raw["ferry-approval"] !== true) && <AutoField label={<span className="text-sm">{executionText("editor.timeout")}</span>} className="block space-y-2"><Input aria-label={executionText("editor.timeout")} type="text" inputMode="numeric" placeholder={step ? executionText("editor.inheritTimeout") : executionText("editor.defaultTimeout")} value={String((step ?? job.raw)["timeout-minutes"] ?? "")} disabled={readOnly} onChange={e => update({ "timeout-minutes": e.target.value ? (/^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value) : null })} /></AutoField>}
-        {!readOnly && step && selection?.step !== undefined && <Button type="button" variant="destructive" size="icon" aria-label={executionText("editor.deleteStepName", { name: step.name || step.uses || selection.step + 1 })} title={executionText("editor.deleteStep")} onClick={() => {
-          const jobId = job.id, index = selection.step!;
-          setPendingDelete({ action: "editor.deleteStep", target: `${job.name} / ${step.name || step.uses || index + 1}`, run: () => {
-            change(() => removeActionStep(source, jobId, index));
-            setSelection(undefined);
-          } });
-        }}><Trash2 className="size-4" /></Button>}
+
       </aside>}
     </div>}
     {(parsed.error || error) && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{parsed.error || error}</p>}

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./shared/theme/fonts.css";
 @import "./shared/theme/themes.css";
+@import "./shared/theme/raft/theme.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -26,7 +27,7 @@
   }
   .resource-detail {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 38rem), 1fr));
+    grid-template-columns: minmax(0, 1fr);
     @apply items-start gap-6;
   }
   .resource-detail > :not(.detail-section) {

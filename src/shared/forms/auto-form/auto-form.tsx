@@ -176,11 +176,13 @@ export function AutoFields({
 }) {
   useCommonTranslation();
   const errors = useContext(Errors);
+  const flow = !readonly && columns === 2 && Object.values(fields ?? {}).some(field => field.width === "auto" || field.type === "select" && field.width !== "full" && field.config?.width !== "full");
   return (
     <div
       className={cn(
-        "grid min-w-0 gap-x-6 gap-y-5",
-        columns === 2 && "sm:grid-cols-2",
+        "min-w-0 gap-x-6 gap-y-5",
+        flow ? "flex flex-wrap items-start" : "grid",
+        !flow && columns === 2 && "sm:grid-cols-2",
         className,
       )}
       data-auto-fields
@@ -198,11 +200,13 @@ export function AutoFields({
               ["textarea", "code", "custom", "title", "multi-select"].includes(
                 field.type,
               ));
+          const intrinsic = field.width === "auto" || field.type === "select" && field.width !== "full" && field.config?.width !== "full";
+          const sizing = flow ? full ? "w-full basis-full" : intrinsic ? "w-fit max-w-full shrink" : "w-full sm:w-[calc((100%-1.5rem)/2)]" : full ? "sm:col-span-2" : undefined;
           if (field.type === "title")
             return (
               <h3
                 key={name}
-                className="col-span-full border-b pb-3 text-sm font-semibold"
+                className={cn("col-span-full border-b pb-3 text-sm font-semibold", flow && "w-full basis-full")}
               >
                 {field.name}
               </h3>
@@ -211,7 +215,7 @@ export function AutoFields({
             return (
               <div
                 key={name}
-                className={cn("min-w-0", full && "sm:col-span-2")}
+                className={cn("min-w-0", sizing)}
               >
                 {field.render({
                   name,
@@ -233,7 +237,7 @@ export function AutoFields({
               required={required && !readonly}
               help={field.help}
               error={errors[name]}
-              className={cn(full && "sm:col-span-2")}
+              className={sizing}
             >
               {field.render ? (
                 field.render({
@@ -338,14 +342,17 @@ export function FieldControl({
           onChange(value === "__auto_empty__" ? "" : value)
         }
       >
-        <SelectTrigger className="w-full">
-          <SelectValue
+        <SelectTrigger className={(field.width ?? config.width) === "full" ? "w-full" : "w-fit max-w-full min-w-[min(100%,8rem)]"}>
+          <span className="grid min-w-0 text-left">
+          <SelectValue className="col-start-1 row-start-1"
             placeholder={
               config.placeholder ?? config.emptyLabel ??
               config.options?.find((option) => option.value === "")?.label ??
               commonText("common.select")
             }
           />
+          {(field.width ?? config.width) !== "full" && <span aria-hidden="true" data-sizer={[...(config.options ?? []).map(option => option.label), config.placeholder ?? config.emptyLabel ?? commonText("common.select"), text && !config.options?.some(option => option.value === text) ? selectDisplay(value, config) : ""].join("\n")} className="invisible col-start-1 row-start-1 h-0 overflow-hidden after:whitespace-pre after:content-[attr(data-sizer)]" />}
+          </span>
         </SelectTrigger>
         <SelectContent>
           {text && !config.options?.some((option) => option.value === text) && !config.emptyValues?.some(empty => String(empty) === text) && (

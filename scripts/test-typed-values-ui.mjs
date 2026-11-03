@@ -82,7 +82,9 @@ try {
     await typeSelector.press('Enter');
     assert.equal(await typeSelector.inputValue(), type);
     if (type === 'tab' || type === 'selection') {
-      await page.getByRole('button', { name: '添加选项', exact: true }).click();
+      const addOption=page.getByRole('button', { name: '添加选项', exact: true });
+      assert.equal(await addOption.locator('..').getByRole('heading').count(),1,'Option add belongs to its list header');
+      await addOption.click();
       await page.getByLabel('选项 1 值', { exact: true }).fill('first');
       await page.getByLabel('选项 1 显示名称', { exact: true }).fill('First');
     } else if (type === 'num') {
@@ -96,7 +98,10 @@ try {
       if (type === 'image') await page.waitForFunction(() => !!document.querySelector('img[alt="sample.png"]')?.complete, undefined, { timeout: 20000 });
     } else if (type === 'code') {
       await page.getByLabel('代码值', { exact: true }).fill('const value = 1;');
-      await page.getByRole('button', { name: '使用代码编辑器', exact: true }).click();
+      const codeMode=page.getByRole('button', { name: '使用代码编辑器', exact: true });
+      assert.equal(await codeMode.locator('..').getByText('代码值',{exact:true}).count(),1,'Code mode belongs beside the field title');
+      assert.equal(await codeMode.evaluate(element=>!!element.closest('label')),false,'An action must not be nested inside a form label');
+      await codeMode.click();
       await page.locator('.monaco-editor').waitFor();
     }
     else if (type === 'json') {

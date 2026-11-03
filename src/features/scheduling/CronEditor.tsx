@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect,useState } from "react";
 import { AutoField } from "../../shared/forms/auto-form";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
@@ -69,8 +69,10 @@ export function CronEditor({ value, readOnly, onChange, onValidityChange }: {
   onValidityChange: (invalid: boolean) => void;
 }) {
   useCommonTranslation();
+  const [custom, setCustom] = useState(false);
   const error = cronError(value);
   const parsed = readCycle(value);
+  if (custom) parsed.cycle = "custom";
   useEffect(() => onValidityChange(!!error), [error, onValidityChange]);
   const number = (label: string, current: number, min: number, max: number, key: "interval" | "hour" | "minute" | "day") =>
     <AutoField label={<>{label}</>} className="flex min-w-24 flex-col gap-1 text-sm"><Input aria-label={label} type="number" min={min} max={max} value={current} readOnly={readOnly} onChange={event => {
@@ -80,8 +82,13 @@ export function CronEditor({ value, readOnly, onChange, onValidityChange }: {
     }} /></AutoField>;
   return <div className="space-y-3">
     <div className="flex flex-wrap items-end gap-3">
-      <AutoField label={commonText("cron.schedule")}><select aria-label={commonText("cron.cycleType")} className="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm" disabled={readOnly} value={parsed.cycle} onChange={event => onChange(expression(event.target.value as Cycle, 1, 0, 0, 1) || value)}>
-        <option value="minutes">{commonText("cron.everyMinutes")}</option><option value="hours">{commonText("cron.everyHours")}</option><option value="daily">{commonText("cron.daily")}</option><option value="weekly">{commonText("cron.weekly")}</option><option value="monthly">{commonText("cron.monthly")}</option><option value="custom" disabled>{commonText("cron.custom")}</option>
+      <AutoField label={commonText("cron.schedule")}><select aria-label={commonText("cron.cycleType")} className="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm" disabled={readOnly} value={parsed.cycle} onChange={event => {
+        const cycle = event.target.value as Cycle;
+        setCustom(cycle === "custom");
+        // Entering custom mode only changes the editor, never the saved value.
+        if (cycle !== "custom") onChange(expression(cycle, 1, 0, 0, 1));
+      }}>
+        <option value="minutes">{commonText("cron.everyMinutes")}</option><option value="hours">{commonText("cron.everyHours")}</option><option value="daily">{commonText("cron.daily")}</option><option value="weekly">{commonText("cron.weekly")}</option><option value="monthly">{commonText("cron.monthly")}</option><option value="custom">{commonText("cron.custom")}</option>
       </select></AutoField>
       {parsed.cycle === "minutes" && number(commonText("cron.minuteInterval"), parsed.interval, 1, 59, "interval")}
       {parsed.cycle === "hours" && number(commonText("cron.hourInterval"), parsed.interval, 1, 23, "interval")}
