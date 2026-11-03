@@ -572,7 +572,7 @@ if [ -n "$upgrade" ]; then
         exit 0
     fi
     newer "$version" "$current" \
-        || fail "$version is older than the deployed $current; downgrades are refused because database migrations only move forward"
+        || fail "$version is older than the configured $current; downgrades are refused because database migrations only move forward. To resume an interrupted $current upgrade, rerun with --version $current"
     require_docker
     compose_for
     release="$files"
