@@ -47,10 +47,12 @@ export function ThemeSwitcher() {
     <Dialog.Root open={editing} onOpenChange={setEditing}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-5 text-foreground shadow-lg">
-          <Dialog.Title className="pr-10 text-lg font-semibold">{label("customize")}</Dialog.Title>
-          <Dialog.Description className="mb-5 mt-1 text-sm text-muted-foreground">{label("description")}</Dialog.Description>
-          <Dialog.Close asChild><Button variant="ghost" size="icon" aria-label={label("close")} className="absolute right-3 top-3"><X /></Button></Dialog.Close>
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90dvh] w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border bg-background text-foreground shadow-lg">
+          <header data-slot="custom-theme-header" className="relative shrink-0 border-b p-5 pr-14">
+            <Dialog.Title className="text-lg font-semibold">{label("customize")}</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-muted-foreground">{label("description")}</Dialog.Description>
+            <Dialog.Close asChild><Button variant="ghost" size="icon" aria-label={label("close")} className="absolute right-3 top-3"><X /></Button></Dialog.Close>
+          </header>
           <CustomThemePanel />
         </Dialog.Content>
       </Dialog.Portal>

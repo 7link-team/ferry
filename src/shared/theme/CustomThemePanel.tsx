@@ -1,4 +1,4 @@
-import { useMemo,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import '../i18n/i18n';
 
@@ -7,8 +7,7 @@ import { Input } from '../ui/input';
 import { useTheme } from './theme';
 import { sanitizeCustomThemeVariables } from './theme-validation';
 
-import { Copy,RotateCcw,Shuffle,Upload } from 'lucide-react';
-import { Badge } from '../ui/badge';
+import { Download,RotateCcw,Shuffle,Upload } from 'lucide-react';
 import { Tabs,TabsContent,TabsList,TabsTrigger } from '../ui/tabs';
 
 const colorKeys = [
@@ -180,19 +179,13 @@ export function CustomThemePanel() {
   const [mode, setMode] = useState<'light' | 'dark'>('light');
   const [importText, setImportText] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const importInput = useRef<HTMLTextAreaElement>(null);
   const [feedback, setFeedback] = useState('');
   const [colorDrafts, setColorDrafts] = useState<Record<string, string>>({});
 
-  const custom = mode === 'light' ? customLight : customDark;
-  const { resolved: resolvedTheme } = useTheme();
+  useEffect(() => { if (showImport) importInput.current?.focus(); }, [showImport]);
 
-  // The preview must match the CURRENT document light/dark mode (not the editing tab), so the
-  // surface's --background and inherited --foreground come from the same palette — otherwise a
-  // light-tab preview inside a dark app gives e.g. a white button bg with white (dark-mode) text.
-  const previewStyle = useMemo(() => {
-    const src = resolvedTheme === 'dark' ? customDark : customLight;
-    return { ...src } as Record<string, string>;
-  }, [resolvedTheme, customLight, customDark]);
+  const custom = mode === 'light' ? customLight : customDark;
 
   const handleColorChange = (themeMode: 'light' | 'dark', key: string, value: string) => {
     // The native picker yields #rrggbb; store it directly so it round-trips to the swatch.
@@ -271,9 +264,14 @@ export function CustomThemePanel() {
     return JSON.stringify({ light: customLight, dark: customDark }, null, 2);
   };
 
-  const handleCopy = async () => {
-    try { await navigator.clipboard.writeText(exportJson()); setFeedback(t('copied')); }
-    catch { setFeedback(t('copyFailed')); }
+  const handleExport = () => {
+    try {
+      const url = URL.createObjectURL(new Blob([exportJson()], { type: 'application/json;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'theme.json';
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      setFeedback(t('exported'));
+    } catch { setFeedback(t('exportFailed')); }
   };
 
   const handleImport = () => {
@@ -300,13 +298,15 @@ export function CustomThemePanel() {
   };
 
   return (
-    <div className="space-y-6">
-      <Tabs value={mode} onValueChange={(v) => setMode(v as 'light' | 'dark')}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <Tabs value={mode} onValueChange={(v) => setMode(v as 'light' | 'dark')} className="min-h-0 flex-1 gap-0 overflow-hidden">
+        <div data-slot="custom-theme-tabs" className="shrink-0 border-b px-5 py-3">
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="light">{t('mode.light')}</TabsTrigger>
           <TabsTrigger value="dark">{t('mode.dark')}</TabsTrigger>
         </TabsList>
-
+        </div>
+        <div data-slot="custom-theme-scroll" className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain p-5">
         {(['light', 'dark'] as const).map((m) => (
           <TabsContent key={m} value={m} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -315,7 +315,7 @@ export function CustomThemePanel() {
                 const textValue = getColorTextValue(m, key);
 
                 return (
-                <div key={key} className="flex items-center justify-between gap-2">
+                <div key={key} className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-sm">{label}</label>
                   <div className="flex items-center gap-2">
                     <Input
@@ -341,13 +341,13 @@ export function CustomThemePanel() {
 
             <div className="space-y-3 rounded-md border p-4">
               <h4 className="text-sm font-semibold">{t('customPanel.typography')}</h4>
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm">{t('customPanel.fontFamily')}</label>
                 <select
                   aria-label={t("customPanel.fontFamily")}
                   value={custom['--font-body'] ?? fontOptions[0]!.value}
                   onChange={(e) => handleFontChange(e.target.value)}
-                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  className="h-8 max-w-full rounded-md border bg-background px-2 text-sm"
                 >
                   {fontOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -357,7 +357,7 @@ export function CustomThemePanel() {
                 </select>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm">
                   {t('customPanel.radius')} ({parseFloat(custom['--radius'] ?? '0.875')}rem)
                 </label>
@@ -373,7 +373,7 @@ export function CustomThemePanel() {
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm">
                   {t('customPanel.borderWidth')} ({parseInt(custom['--border-width'] ?? '1', 10)}px)
                 </label>
@@ -389,12 +389,12 @@ export function CustomThemePanel() {
                 />
               </div>
 
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm">{t('customPanel.shadowPreset')}</label>
                 <select
                   aria-label={t("customPanel.shadowPreset")}
                   onChange={(e) => applyShadowPreset(e.target.value)}
-                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  className="h-8 max-w-full rounded-md border bg-background px-2 text-sm"
                   defaultValue=""
                 >
                   <option value="" disabled>{t('customPanel.choosePreset')}</option>
@@ -408,18 +408,17 @@ export function CustomThemePanel() {
             </div>
           </TabsContent>
         ))}
+
+      {showImport && <textarea ref={importInput} aria-label={t("customPanel.importPlaceholder")}
+        value={importText}
+        onChange={(e) => setImportText(e.target.value)}
+        placeholder={t('customPanel.importPlaceholder')}
+        className="min-h-[120px] w-full rounded-md border bg-transparent p-2 text-sm"
+      />}
+      </div>
       </Tabs>
 
-      <div className="space-y-3 rounded-md border bg-background p-4 text-foreground" style={previewStyle}>
-        <h4 className="text-sm font-semibold">{t('customPanel.preview')}</h4>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button className="btn-primary">{t('customPanel.primaryButton')}</Button>
-          <Button variant="outline">{t('customPanel.outlineButton')}</Button>
-          <Input placeholder={t('customPanel.inputPlaceholder')} className="w-40" />
-          <Badge>{t('customPanel.badge')}</Badge>
-        </div>
-      </div>
-
+      <footer data-slot="custom-theme-footer" className="shrink-0 space-y-2 border-t bg-background p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" onClick={handleRandomize}>
           <Shuffle className="mr-1 size-3.5" />
@@ -429,29 +428,20 @@ export function CustomThemePanel() {
           <RotateCcw className="mr-1 size-3.5" />
           {t('customPanel.reset')}
         </Button>
-        <Button variant="outline" size="sm" onClick={handleCopy}>
-          <Copy className="mr-1 size-3.5" />
-          {t('customPanel.copyJson')}
+        <Button variant="outline" size="sm" onClick={handleExport}>
+          <Download className="mr-1 size-3.5" />
+          {t('customPanel.export')}
         </Button>
         <Button variant="outline" size="sm" onClick={() => setShowImport((v) => !v)}>
           <Upload className="mr-1 size-3.5" />
           {t('customPanel.import')}
         </Button>
+        {showImport && <Button size="sm" onClick={handleImport}>{t('customPanel.applyImport')}</Button>}
       </div>
 
       {feedback && <p role="status" className="text-sm text-muted-foreground">{feedback}</p>}
 
-      {showImport && (
-        <div className="space-y-2">
-          <textarea aria-label={t("customPanel.importPlaceholder")}
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            placeholder={t('customPanel.importPlaceholder')}
-            className="min-h-[120px] w-full rounded-md border bg-transparent p-2 text-sm"
-          />
-          <Button size="sm" onClick={handleImport}>{t('customPanel.applyImport')}</Button>
-        </div>
-      )}
+      </footer>
     </div>
   );
 }
