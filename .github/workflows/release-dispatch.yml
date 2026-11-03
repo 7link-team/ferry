@@ -14,7 +14,7 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='63ebdb05a141f8ad4f72f01ab42155be07491941';
+            const sha='6b45f35040a322fc74cf788e376aacc05282dcc3';
             const tag='v0.2.0-alpha.1';
             const repo=context.repo;
             async function requireMain() {
@@ -43,7 +43,7 @@ jobs:
             }
             await requireMain();
 
-            for (const prior of [{"id": 41700810057, "sha": "7fa679450f05889cae1f2e084b04160f3b58847e"}]) {
+            for (const prior of [{"id": 41701645355, "sha": "eb470528075a4877950dfabe0ca9f4c2ec0ecb26"}, {"id": 41702143739, "sha": "63ebdb05a141f8ad4f72f01ab42155be07491941"}]) {
               const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id:prior.id});
               if(run.head_sha!==prior.sha)throw Error('Superseded run source mismatch');
               if(run.status!=='completed') {
