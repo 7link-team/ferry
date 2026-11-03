@@ -10,11 +10,18 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 // Read the real navigation tree without loading browser-only label rendering in Node.
 // This acceptance loop uses resource/params only; translated label getters stay lazy.
 const navSource = await readFile(new URL('../src/app/nav.ts', import.meta.url), 'utf8');
-const labelImport = 'import { commonText } from "../shared/i18n/i18n";';
-assert(navSource.includes(labelImport), 'navigation label import is explicitly isolated');
-const navModule = ts.transpileModule(navSource.replace(labelImport, 'const commonText = (key: string) => key;'), {
+let isolatedNav = navSource;
+for (const [labelImport, binding] of [
+  ['import { commonText } from "../shared/i18n/i18n";', 'commonText'],
+  ['import { text as evidenceText } from "../features/insight-reports/messages";', 'evidenceText'],
+]) {
+  assert(isolatedNav.includes(labelImport), `navigation label import is explicitly isolated: ${binding}`);
+  isolatedNav = isolatedNav.replace(labelImport, `const ${binding} = (key: string) => key;`);
+}
+const navModule = ts.transpileModule(isolatedNav, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+assert(!/^import\s/m.test(navModule), 'navigation fixture must isolate all runtime imports before loading its data URL');
 const { nav } = await import(`data:text/javascript;base64,${Buffer.from(navModule).toString('base64')}`);
 const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
 const listener = createServer();
