@@ -172,7 +172,13 @@
     "workflow.invalidJobId": "Job ID {{id}} is invalid.",
     "workflow.stepsArray": "The steps of job {{id}} must be an array of steps.",
     "workflow.dependencyMissing": "Dependency job {{id}} does not exist.",
-    "workflow.stepsMissing": "Job {{id}} is missing steps."
+    "workflow.stepsMissing": "Job {{id}} is missing steps.",
+    "run.views": "Run views",
+    "run.configurationSnapshot": "Configuration snapshot",
+    "run.configurationSnapshotHelp": "Saved when this run was triggered. Later pipeline edits do not change this snapshot. Secret variable values are not displayed.",
+    "run.workflowSnapshot": "Workflow snapshot",
+    "run.executionBindings": "Execution bindings",
+    "run.snapshotUnavailable": "This historical run has no available configuration snapshot."
   },
   "zh-CN": {
     "editor.dragJob": "拖动任务",
@@ -347,7 +353,13 @@
     "workflow.invalidJobId": "任务标识 {{id}} 无效。",
     "workflow.stepsArray": "任务 {{id}} 的 steps 必须是步骤数组。",
     "workflow.dependencyMissing": "依赖任务 {{id}} 不存在。",
-    "workflow.stepsMissing": "任务 {{id}} 缺少 steps。"
+    "workflow.stepsMissing": "任务 {{id}} 缺少 steps。",
+    "run.views": "运行视图",
+    "run.configurationSnapshot": "配置快照",
+    "run.configurationSnapshotHelp": "保存于本次运行触发时，后续修改流水线不会改变此快照。不展示密钥变量值。",
+    "run.workflowSnapshot": "工作流快照",
+    "run.executionBindings": "执行绑定",
+    "run.snapshotUnavailable": "此历史运行没有可用的配置快照。"
   },
   "zh-TW": {
     "editor.dragJob": "拖動任務",
@@ -522,7 +534,13 @@
     "workflow.invalidJobId": "任務標識 {{id}} 無效。",
     "workflow.stepsArray": "任務 {{id}} 的 steps 必須是步驟陣列。",
     "workflow.dependencyMissing": "依賴任務 {{id}} 不存在。",
-    "workflow.stepsMissing": "任務 {{id}} 缺少 steps。"
+    "workflow.stepsMissing": "任務 {{id}} 缺少 steps。",
+    "run.views": "執行檢視",
+    "run.configurationSnapshot": "設定快照",
+    "run.configurationSnapshotHelp": "儲存於本次執行觸發時，後續修改流水線不會改變此快照。不顯示機密變數值。",
+    "run.workflowSnapshot": "工作流程快照",
+    "run.executionBindings": "執行綁定",
+    "run.snapshotUnavailable": "此歷史執行沒有可用的設定快照。"
   },
   "ja-JP": {
     "editor.dragJob": "ジョブをドラッグ",
@@ -697,7 +715,13 @@
     "workflow.invalidJobId": "ジョブ ID {{id}} は無効です。",
     "workflow.stepsArray": "ジョブ {{id}} の steps はステップの配列である必要があります。",
     "workflow.dependencyMissing": "依存先のジョブ {{id}} が存在しません。",
-    "workflow.stepsMissing": "ジョブ {{id}} に steps がありません。"
+    "workflow.stepsMissing": "ジョブ {{id}} に steps がありません。",
+    "run.views": "実行ビュー",
+    "run.configurationSnapshot": "設定スナップショット",
+    "run.configurationSnapshotHelp": "実行開始時に保存された設定です。以後の変更は反映されません。機密変数の値は表示しません。",
+    "run.workflowSnapshot": "ワークフロースナップショット",
+    "run.executionBindings": "実行バインディング",
+    "run.snapshotUnavailable": "この過去の実行には設定スナップショットがありません。"
   },
   "ko-KR": {
     "editor.dragJob": "작업 드래그",
@@ -872,7 +896,13 @@
     "workflow.invalidJobId": "작업 ID {{id}}가 유효하지 않습니다.",
     "workflow.stepsArray": "작업 {{id}}의 steps는 단계 배열이어야 합니다.",
     "workflow.dependencyMissing": "종속 작업 {{id}}가 존재하지 않습니다.",
-    "workflow.stepsMissing": "작업 {{id}}에 steps가 없습니다."
+    "workflow.stepsMissing": "작업 {{id}}에 steps가 없습니다.",
+    "run.views": "실행 보기",
+    "run.configurationSnapshot": "설정 스냅샷",
+    "run.configurationSnapshotHelp": "실행 시작 시 저장된 설정입니다. 이후 변경은 반영되지 않으며 비밀 변수 값은 표시하지 않습니다.",
+    "run.workflowSnapshot": "워크플로 스냅샷",
+    "run.executionBindings": "실행 바인딩",
+    "run.snapshotUnavailable": "이 과거 실행에는 설정 스냅샷이 없습니다."
   },
   "ms-MY": {
     "editor.dragJob": "Seret tugas",
@@ -1047,6 +1077,12 @@
     "workflow.invalidJobId": "ID tugas {{id}} tidak sah.",
     "workflow.stepsArray": "steps bagi tugas {{id}} mestilah tatasusunan langkah.",
     "workflow.dependencyMissing": "Tugas kebergantungan {{id}} tidak wujud.",
-    "workflow.stepsMissing": "Tugas {{id}} tiada steps."
+    "workflow.stepsMissing": "Tugas {{id}} tiada steps.",
+    "run.views": "Paparan pelaksanaan",
+    "run.configurationSnapshot": "Gambaran konfigurasi",
+    "run.configurationSnapshotHelp": "Disimpan ketika pelaksanaan dicetuskan. Perubahan saluran paip kemudian tidak mengubah gambaran ini. Nilai pemboleh ubah rahsia tidak dipaparkan.",
+    "run.workflowSnapshot": "Gambaran aliran kerja",
+    "run.executionBindings": "Ikatan pelaksanaan",
+    "run.snapshotUnavailable": "Pelaksanaan terdahulu ini tiada gambaran konfigurasi."
   }
 }

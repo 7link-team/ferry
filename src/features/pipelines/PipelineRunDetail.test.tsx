@@ -26,6 +26,7 @@ const mount = async (permissions = new Set<string>()) => {
   await act(async () => { root.render(<PipelineRunDetail workspace="ops" runId="1" permissions={permissions} />); });
 };
 beforeEach(() => {
+  history.replaceState(null, "", "/zh-CN/workspaces/ops/pipeline-runs/1");
   localStorage.setItem("ui.locale", "zh-CN");
   void i18n.changeLanguage("zh-CN");
   vi.useFakeTimers();
@@ -133,4 +134,16 @@ it("keeps executable steps out of a manual gate's job view", async () => {
   expect(content.textContent).toContain('等待人工确认');
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('aside button')].find(button => button.textContent?.includes('Build'))!.click());
   expect(content.querySelectorAll('[aria-expanded]')).toHaveLength(1);
+});
+
+it("links the source pipeline and opens the saved configuration via a shareable tab", async () => {
+  const snapshot = { workflow: "name: Original workflow\njobs: {}", executor_bindings: [], checkout_bindings: [] };
+  fetchMock.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes("/logs?") ? { items: [], next_seq: 0 } : { ...detail(), pipeline_name: "Source pipeline", definition_snapshot: snapshot } }));
+  await mount();
+  expect(host.querySelector<HTMLAnchorElement>('a[href$="/pipelines/2"]')?.textContent).toBe("Source pipeline");
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')][1]!;
+  await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })));
+  expect(new URLSearchParams(location.search).get("tab")).toBe("snapshot");
+  expect(host.querySelector('pre')?.textContent).toBe(snapshot.workflow);
+  expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/logs?"))).toHaveLength(1);
 });

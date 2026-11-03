@@ -164,6 +164,8 @@ pub async fn get(
         );
     }
     let snapshot = crate::pipelines::actions::snapshot(&r.definition);
+    // Only the authored document: resolved credentials and sealed variable values stay private.
+    v["definition_snapshot"] = json!(snapshot.as_ref().map(|snapshot| &snapshot.document));
     v["steps"] = json!(
         rows.iter()
             .map(
@@ -1545,6 +1547,8 @@ mod tests {
             )
             .await
             .unwrap();
+            assert_eq!(value["definition_snapshot"], json!(snapshot.document));
+            assert!(value["definition_snapshot"].get("checkouts").is_none());
             assert_eq!(
                 value["steps"][0]["name"],
                 crate::i18n::render(locale, &Message::new("actions.runCommand"))

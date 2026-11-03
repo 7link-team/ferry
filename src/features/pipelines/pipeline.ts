@@ -21,6 +21,7 @@ export interface PipelineRun {
   finished_at: number;
   steps: PipelineStep[];
   definition_format?: string;
+  definition_snapshot?: { workflow: string; executor_bindings: unknown[]; checkout_bindings: unknown[] } | null;
   jobs?: { key: string; name?: string; step_indices?: number[]; host_id: string; state: string; started_at: number; finished_at: number }[];
   variables?: { environment: string; name: string; scope: string; scope_ref: string; version: number; secret: boolean }[];
 }
