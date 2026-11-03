@@ -204,7 +204,7 @@ exec "$STORAGE_TEST_DOCKER" "$@"
             print('PASS legacy rerun retains named volumes and all data', flush=True)
 
             failure = quick('--migrate-storage', failure='copy', check=False)
-            assert failure.returncode and 'Injected copy failure' in failure.stdout
+            assert failure.returncode and 'Injected copy failure' in failure.stdout, failure.stdout[-1800:]
             assert settings().get('FERRY_STORAGE_LAYOUT') is None
             assert not (deployment / 'data/ferry').exists()
             verify()
