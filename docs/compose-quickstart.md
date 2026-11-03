@@ -33,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
   - 本机没有其他程序占用 80 和 443 端口。
 
   证书验证不需要手动配置 DNS。
-- **访问**：Ferry 本身仍只监听 `127.0.0.1:4290`，外部只能通过 HTTPS 访问。
+- **访问**：登录 Cookie 只通过 HTTPS 发送。新安装默认发布在 `0.0.0.0:4290`；如仅使用本机反向代理，可显式添加 `--bind 127.0.0.1`。已有部署保留原监听地址。
 - **按访问域名生成命令**：从哪个域名打开 Ferry，Runner 安装命令和节点连接命令就显示哪个域名。
 - **不在列表内的域名**：Ferry 拒绝访问。
 - **已有部署加域名、换域名**：直接用新的完整域名列表重新执行上述命令。不需要先升级，也适用于更早版本的部署。
@@ -42,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 
 ## 局域网 HTTP
 
-不使用 HTTPS 时，Ferry 默认只允许本机访问。允许局域网通过 IP 访问（换成服务器实际 IP）：
+新安装默认发布在 `0.0.0.0:4290`，访问白名单初始只包含本机名称。允许局域网通过 IP 访问（换成服务器实际 IP）：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --allow-host 192.168.0.10 --bind 0.0.0.0
@@ -54,6 +54,18 @@ curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quick
 - 保留 Host 头；
 - 支持 WebSocket Upgrade；
 - 设置足够长的终端会话空闲超时。
+
+## Cloudflare Tunnel / 外部 HTTPS
+
+HTTPS 由 cloudflared、Nginx 等外部代理提供时，用 `--proxy-domain`，不使用 `--domain`：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --dir "$HOME/ferry" --proxy-domain ops.example.com --bind 0.0.0.0
+```
+
+同一命令适用于已安装的部署：保留当前版本、数据库和密钥，更新访问白名单、监听地址与 HTTPS Cookie 设置，不启动 Caddy；原来配置了 Caddy 时会移除其入口。`--dir` 必须指向原部署目录。多个访问域名可重复传入 `--proxy-domain`，不能与 `--domain` 或 `--allow-host` 混用。
+
+cloudflared 运行在宿主机时，源站填 `http://127.0.0.1:4290`；运行在独立容器时，填该容器能访问的宿主机地址。容器里的 `127.0.0.1` 指向容器自身。外部 HTTPS 在代理终止，代理到 Ferry 的连接使用 HTTP，并保留原始 Host 和 WebSocket Upgrade。
 
 ## 配置与维护
 

@@ -48,7 +48,7 @@ check '[ -f "$work/ferry/compose.production.yaml" ] && [ -f "$work/ferry/compose
 check 'cmp -s "$work/ferry/compose.production.yaml" "$repo/compose.production.yaml" && [ ! -e "$work/ferry/compose.https.yaml" ] && [ ! -e "$work/ferry/caddy/Caddyfile" ]' 'downloaded files are the release files byte for byte; no HTTPS proxy without a domain'
 check 'has "$env" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.9"' 'deploys the image of the latest published release, never a stale pin'
 check 'grep -q "/releases.atom$" "$work/curl.log" && ! grep -q "api.github.com" "$work/curl.log"' 'resolves the newest release from the releases feed without the rate-limited API'
-check 'has "$env" "FERRY_ALLOWED_HOSTS=localhost,127.0.0.1" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'records local-only access, the port and Redis; no public URL setting'
+check 'has "$env" "FERRY_BIND_ADDRESS=0.0.0.0" && has "$env" "FERRY_ALLOWED_HOSTS=localhost,127.0.0.1" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'publishes on all interfaces with an explicit host allowlist, the port and Redis; no public URL setting'
 secrets=$(secrets_of "$env" | cut -d= -f2)
 check '[ "$(printf "%s\n" "$secrets" | grep -cE "^[0-9a-f]{64}$")" = 6 ] && [ "$(printf "%s\n" "$secrets" | sort -u | wc -l | tr -d " ")" = 6 ]' 'generates six distinct 256-bit hex secrets'
 check 'grep -q "compose version" "$work/docker.log" && grep -q "compose.postgres.yaml --profile redis config --quiet" "$work/docker.log" && grep -q "up -d --wait --wait-timeout 300" "$work/docker.log" && ! grep -q -- "--profile https" "$work/docker.log"' 'validates the configuration before starting and waits for health'
@@ -98,6 +98,22 @@ check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql"' 'reruns 
 (export ATOM_DOWN=1; run --dir fallback --init-only >/dev/null)
 check 'has "$work/fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.6"' 'falls back to the release API when the feed is unavailable'
 
+# External TLS keeps the application HTTP origin and has no local TLS proxy.
+run --dir tunnel --proxy-domain Ops.Example.COM --proxy-domain ops.example.org --init-only >/dev/null
+tenv="$work/tunnel/.env.production"
+tsecrets=$(secrets_of "$tenv")
+check 'has "$tenv" "FERRY_DOMAINS=" && has "$tenv" "FERRY_ALLOWED_HOSTS=ops.example.com,ops.example.org,localhost,127.0.0.1" && has "$tenv" "FERRY_SECURE_COOKIE=true" && has "$tenv" "FERRY_BIND_ADDRESS=0.0.0.0" && [ ! -f "$work/tunnel/compose.https.yaml" ]' 'external HTTPS allows the proxy domains, enables secure cookies and does not start Caddy'
+output=$(run --dir tunnel)
+check 'printf "%s" "$output" | grep -q "https://ops.example.com" && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'external HTTPS reruns retain the access settings and secrets and print the public HTTPS address'
+run --dir tunnel --domain old.example.com --init-only >/dev/null
+run --dir tunnel --proxy-domain new.example.com --bind 0.0.0.0 >/dev/null
+check 'has "$tenv" "FERRY_ALLOWED_HOSTS=new.example.com,localhost,127.0.0.1" && has "$tenv" "FERRY_SECURE_COOKIE=true" && [ ! -f "$work/tunnel/compose.https.yaml" ] && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'switching from Caddy to external HTTPS removes Caddy and preserves existing credentials'
+refused --proxy-domain ops.example.com --domain other.example.com
+refused --proxy-domain ops.example.com --allow-host other.example.com
+refused --proxy-domain https://ops.example.com
+refused --proxy-domain 127.0.0.1
+refused --upgrade --proxy-domain ops.example.com
+
 # A second directory must not take over another deployment's containers and volumes.
 (export OTHER_DEPLOYMENT=/opt/ferry; run --dir second >/dev/null 2>"$work/err") && { echo 'FAIL second deployment accepted'; exit 1; }
 check '[ ! -e "$work/second/.env.production" ] && grep -q "already runs from /opt/ferry; rerun this command in /opt" "$work/err"' 'refuses to create a second deployment over the containers of another directory, naming it'
@@ -106,6 +122,11 @@ check '[ ! -e "$work/third/.env.production" ] && grep -q "data volumes of an ear
 before_rerun=$(cat "$env")
 (export OTHER_DEPLOYMENT=/root/ferry; run >/dev/null)
 check '[ "$before_rerun" = "$(cat "$env")" ]' 'an existing deployment can still take its containers back from another directory'
+
+# Explicit loopback bindings on existing installations must not be broadened by reruns.
+run --dir loopback --bind 127.0.0.1 --init-only >/dev/null
+run --dir loopback --init-only >/dev/null
+check 'has "$work/loopback/.env.production" "FERRY_BIND_ADDRESS=127.0.0.1"' 'keeps the listener chosen by an existing installation'
 
 # A deployment made by an earlier release (up to v0.1.0-alpha.29): its Compose
 # file requires FERRY_PUBLIC_URL; no FERRY_REDIS or FERRY_DOMAINS yet.

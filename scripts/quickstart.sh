@@ -6,7 +6,7 @@
 # Creates (or reuses) a deployment directory with the released Compose files of
 # one version and random credentials, then starts the stack and prints the
 # first-time setup token. Re-running reuses every secret; access options given
-# again (--domain, --allow-host, --bind, --port) replace the recorded ones.
+# again (--domain, --proxy-domain, --allow-host, --bind, --port) replace the recorded ones.
 # --upgrade backs up the database and configuration, then moves an existing
 # deployment to a newer release while keeping every secret and address.
 set -eu
@@ -21,6 +21,7 @@ image_repository=${FERRY_IMAGE_REPOSITORY:-ghcr.io/7link-team/ferry-server}
 version=
 database=
 domains=
+proxy_domains=
 hosts=
 bind=
 port=
@@ -39,15 +40,17 @@ Usage: quickstart.sh [options]
   --database NAME       postgres (default) or mysql; fixed at first start
   --domain NAME         Serve HTTPS on NAME with an automatic, auto-renewed certificate;
                         repeat for several domains (needs DNS to this host and ports 80/443)
+  --proxy-domain NAME   Use external HTTPS (e.g. cloudflared); allow NAME with secure
+                        cookies, without starting Caddy; repeatable
   --allow-host NAME     Allow plain-HTTP access by NAME or IP, e.g. a LAN address with
                         --bind 0.0.0.0; repeatable; cannot be combined with --domain
-  --bind ADDRESS        Published Ferry listener address (default: 127.0.0.1)
+  --bind ADDRESS        Published Ferry listener address (default: 0.0.0.0)
   --port PORT           Published Ferry port (default: 4290)
   --without-redis       Do not start the optional Redis service
   --init-only           Create configuration without running Docker
   --upgrade             Back up, then upgrade an existing deployment to the latest
                         release (or --version); secrets and addresses are kept
-On an existing deployment, --domain/--allow-host replace the access names and
+On an existing deployment, --domain/--proxy-domain/--allow-host replace the access names and
 --bind/--port replace the listener; secrets are never changed.
 USAGE
 }
@@ -61,6 +64,7 @@ while [ "$#" -gt 0 ]; do
         --version) value "$@"; version=$2; shift 2 ;;
         --database) value "$@"; database=$2; configured=$1; shift 2 ;;
         --domain) name "$@"; domains="$domains $(printf '%s' "$2" | tr 'A-Z' 'a-z')"; configured=$1; shift 2 ;;
+        --proxy-domain) name "$@"; proxy_domains="$proxy_domains $(printf '%s' "$2" | tr 'A-Z' 'a-z')"; configured=$1; shift 2 ;;
         --allow-host) name "$@"; hosts="$hosts $(printf '%s' "$2" | tr 'A-Z' 'a-z')"; configured=$1; shift 2 ;;
         --bind) value "$@"; bind=$2; configured=$1; shift 2 ;;
         --port) value "$@"; port=$2; configured=$1; shift 2 ;;
@@ -79,15 +83,17 @@ if [ -n "$port" ]; then
 fi
 [ -z "$bind" ] || printf '%s\n' "$bind" | grep -Eq '^[0-9A-Fa-f:.]+$' || fail "--bind must be an IP address"
 label='[a-z0-9]([a-z0-9-]*[a-z0-9])?'
-for name in $domains; do
+for name in $domains $proxy_domains; do
     # A DNS name with a letter-led top-level label: certificates are issued for names, not IPs.
     printf '%s\n' "$name" | grep -Eq "^($label\.)+[a-z]([a-z0-9-]*[a-z0-9])?\$" \
-        || fail "--domain must be a domain name such as ops.example.com (got $name)"
+        || fail "--domain/--proxy-domain must be a domain name such as ops.example.com (got $name)"
 done
 for name in $hosts; do
     printf '%s\n' "$name" | grep -Eq "^($label\.)*$label\$|^[0-9a-f]*:[0-9a-f:.]*\$" \
         || fail "--allow-host must be a host name or IP address without scheme or port (got $name)"
 done
+[ -z "$proxy_domains" ] || [ -z "$domains$hosts" ] \
+    || fail "--proxy-domain cannot be combined with --domain or --allow-host"
 [ -z "$domains" ] || [ -z "$hosts" ] \
     || fail "--domain and --allow-host cannot be combined: HTTPS sign-in cookies are not sent over plain HTTP"
 case "$version" in ''|v[0-9]*) ;; *) fail "--version must look like v0.1.0" ;; esac
@@ -193,6 +199,10 @@ addresses() {
     names=$(env_get FERRY_DOMAINS | tr -d ',')
     if [ -n "$names" ]; then
         for name in $names; do printf '  https://%s\n' "$name"; done
+    elif [ "$(env_get FERRY_SECURE_COOKIE)" = true ]; then
+        for name in $(env_get FERRY_ALLOWED_HOSTS | tr ',' ' '); do
+            case "$name" in localhost|127.0.0.1) ;; *) printf '  https://%s\n' "$name" ;; esac
+        done
     else
         for name in $(env_get FERRY_ALLOWED_HOSTS | tr ',' ' '); do
             case "$name" in localhost|127.0.0.1) ;; *:*) printf '  http://[%s]:%s\n' "$name" "$(env_get FERRY_PORT)" ;; *) printf '  http://%s:%s\n' "$name" "$(env_get FERRY_PORT)" ;; esac
@@ -381,7 +391,7 @@ if [ ! -f "$env_file" ]; then
         printf 'FERRY_DOMAINS=\n'
         printf 'FERRY_ALLOWED_HOSTS=localhost,127.0.0.1\n'
         printf 'FERRY_SECURE_COOKIE=false\n'
-        printf 'FERRY_BIND_ADDRESS=127.0.0.1\n'
+        printf 'FERRY_BIND_ADDRESS=0.0.0.0\n'
         printf 'FERRY_PORT=4290\n'
         printf 'FERRY_REDIS=%s\n' "${redis:-true}"
         for key in FERRY_MASTER_KEY DATABASE_PASSWORD POSTGRES_ROOT_PASSWORD MYSQL_ROOT_PASSWORD NATS_PASSWORD REDIS_PASSWORD; do
@@ -390,18 +400,18 @@ if [ ! -f "$env_file" ]; then
     } > "$env_file.new"
     mv "$env_file.new" "$env_file"
     printf 'Created %s/%s with random credentials. Back up this file securely.\n' "$(pwd)" "$env_file"
-elif [ -n "$domains$hosts$bind$port$redis" ]; then
+elif [ -n "$domains$proxy_domains$hosts$bind$port$redis" ]; then
     printf 'Updating access settings in %s/%s; secrets are unchanged.\n' "$(pwd)" "$env_file"
 else
     printf 'Reusing %s/%s unchanged.\n' "$(pwd)" "$env_file"
 fi
 
 # Requested access settings replace the recorded ones; secrets never change.
-if [ -n "$domains$hosts" ]; then
-    names=$(printf '%s\n' $domains $hosts | awk '!seen[$0]++' | tr '\n' ',')
+if [ -n "$domains$proxy_domains$hosts" ]; then
+    names=$(printf '%s\n' $domains $proxy_domains $hosts | awk '!seen[$0]++' | tr '\n' ',')
     env_set FERRY_DOMAINS "$(printf '%s\n' $domains | awk '!seen[$0]++' | sed 's/$/, /' | tr -d '\n' | sed 's/, $//')"
     env_set FERRY_ALLOWED_HOSTS "${names}localhost,127.0.0.1"
-    if [ -n "$domains" ]; then env_set FERRY_SECURE_COOKIE true; else env_set FERRY_SECURE_COOKIE false; fi
+    if [ -n "$domains$proxy_domains" ]; then env_set FERRY_SECURE_COOKIE true; else env_set FERRY_SECURE_COOKIE false; fi
 fi
 [ -z "$bind" ] || env_set FERRY_BIND_ADDRESS "$bind"
 [ -z "$port" ] || env_set FERRY_PORT "$port"

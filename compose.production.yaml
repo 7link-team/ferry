@@ -13,7 +13,7 @@ services:
   ferry:
     <<: *service
     image: ${FERRY_IMAGE:?Run scripts/quickstart.sh first}
-    ports: ["${FERRY_BIND_ADDRESS:-127.0.0.1}:${FERRY_PORT:-4290}:4290"]
+    ports: ["${FERRY_BIND_ADDRESS:-0.0.0.0}:${FERRY_PORT:-4290}:4290"]
     environment:
       FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:?Run scripts/quickstart.sh first}
       FERRY_MASTER_KEY: ${FERRY_MASTER_KEY:?Required}
