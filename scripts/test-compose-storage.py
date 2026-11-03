@@ -157,7 +157,9 @@ exec "$STORAGE_TEST_DOCKER" "$@"
             compose('exec', '-T', 'redis', 'sh', '-ec',
                 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SET storage-fixture persisted')
             compose('exec', '-T', 'ferry', 'sh', '-ec',
-                'printf persistent > /data/storage-fixture; chmod 640 /data/storage-fixture; ln -s storage-fixture /data/storage-link')
+                'printf persistent > /data/storage-fixture; chmod 640 /data/storage-fixture; '
+                'ln -s storage-fixture /data/storage-link; '
+                'ln -s missing-fixture "/data/storage dangling\nlink"')
             run(docker, 'run', '--rm', '--network', 'none', '--mount',
                 f'type=bind,src={deployment}/data,dst=/target', 'alpine:3.22', 'sh', '-ec',
                 'printf certificate-fixture > /target/caddy-data/certificate.fixture; '
@@ -169,6 +171,10 @@ exec "$STORAGE_TEST_DOCKER" "$@"
                 assert api(prefix + f'/variables/{variable}/disclosures', {})['value'] == 'temporary-encrypted-value'
                 assert sql('SELECT id,secret FROM credentials ORDER BY id') == original_ciphertext
                 assert compose('exec', '-T', 'ferry', 'cat', '/data/storage-link').stdout == 'persistent'
+                assert compose('exec', '-T', 'ferry', 'readlink', '/data/storage dangling\nlink').stdout.strip() == 'missing-fixture'
+                if legacy_links_seeded:
+                    for link in ('storage-link', 'storage dangling\nlink'):
+                        assert compose('exec', '-T', 'ferry', 'stat', '-c', '%Y', '/data/' + link).stdout.strip() == '946684800'
                 assert compose('exec', '-T', 'redis', 'sh', '-ec',
                     'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli GET storage-fixture').stdout.strip() == 'persisted'
                 message = nats('$JS.API.STREAM.MSG.GET.STORAGE_FIXTURE', {'last_by_subj': 'storage.fixture'})
@@ -183,6 +189,7 @@ exec "$STORAGE_TEST_DOCKER" "$@"
                             f'type=bind,src={deployment}/data/{item},dst=/source,readonly',
                             'alpine:3.22', 'cat', f'/source/{name}.fixture').stdout == value
 
+            legacy_links_seeded = False
             verify()
             compose('down')
             # Recreate an old deployment from its actual persisted bytes, including
@@ -199,6 +206,11 @@ exec "$STORAGE_TEST_DOCKER" "$@"
             run('sudo', 'mv', str(deployment / 'data'), str(root / 'initial-directories'))
             set_value('FERRY_STORAGE_LAYOUT', None)
             quick()
+            # Make source-link timestamps deterministic and older than any copy.
+            # Cover both a live link and a dangling link with whitespace/newline.
+            compose('exec', '-T', 'ferry', 'touch', '-h', '-m', '-d', '@946684800',
+                    '/data/storage-link', '/data/storage dangling\nlink')
+            legacy_links_seeded = True
             verify()
             assert 'ferry-data:/data' in (deployment / 'compose.storage.yaml').read_text()
             print('PASS legacy rerun retains named volumes and all data', flush=True)

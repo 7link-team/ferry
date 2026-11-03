@@ -461,6 +461,12 @@ if [ -n "$migrate_storage" ]; then
                 # BusyBox tar restores directory timestamps before its children;
                 # cp -a applies directory metadata after the recursive copy.
                 cp -a /source/. "/target/$name/"
+                # BusyBox cp -a preserves symlink ownership, but not timestamps.
+                # Read names with NUL delimiters and never follow dangling links.
+                (cd /source && find . -type l -print0 |
+                    while IFS= read -r -d "" link; do
+                        touch -h -m -d "@$(stat -c %Y "$link")" "/target/$name/$link"
+                    done)
                 (cd /source && find . -type f -exec sha256sum {} \; | LC_ALL=C sort) > /backup/source-hashes
                 (cd "/target/$name" && find . -type f -exec sha256sum {} \; | LC_ALL=C sort) > /backup/target-hashes
                 cmp /backup/source-hashes /backup/target-hashes
