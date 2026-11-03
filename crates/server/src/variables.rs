@@ -1206,6 +1206,7 @@ mod tests {
             id: Set(42),
             workspace_id: Set(1),
             name: Set("web".into()),
+            category: Set(String::new()),
             manifest: Set(manifest.to_string()),
             preview_artifact: Set(String::new()),
             mode: Set("compose".into()),

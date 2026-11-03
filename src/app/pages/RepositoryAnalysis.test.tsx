@@ -141,7 +141,7 @@ it("uses six compact period charts with fixed UTC periods and one shared filter 
     expect(params.get("repos")).toBe("team/repo");
     expect(params.get("since")).not.toBe("2000-01-01");
   }
-  expect(requests.filter(request => request.url.includes("/code-contributions/branches?")).length).toBe(6);
+  expect(requests.filter(request => request.url.includes("/code-contributions/repositories?")).length).toBe(6);
   expect(host.querySelectorAll('form[aria-label="统一分析筛选"]')).toHaveLength(1);
   expect(host.querySelectorAll("table")).toHaveLength(0);
   expect([...host.querySelectorAll("button")].filter(button => button.textContent === "搜索")).toHaveLength(1);
@@ -182,10 +182,10 @@ it("keeps pipeline configuration readable without pipeline permissions and loads
 });
 
 it("links source commits only to safe URLs supplied by the platform", async () => {
-  const column = analysisReport("ws", "11", "commits").columns.find(column => column.key === "commitHash")!;
+  const column = analysisReport("ws", "11", "commits").columns.find(column => column.key === "repository")!;
   await act(async () => root.render(<>{column.render!({ commitHash: "abc", commitUrl: "https://git.example/team/repo/commit/abc" })}</>));
   expect(host.querySelector("a")!.getAttribute("href")).toBe("https://git.example/team/repo/commit/abc");
   expect(host.querySelector("a")!.getAttribute("rel")).toBe("noopener noreferrer");
   await act(async () => root.render(<>{column.render!({ commitHash: "abc", commitUrl: "javascript:alert(1)" })}</>));
-  expect(host.querySelector("a")).toBeNull(); expect(host.textContent).toBe("abc");
+  expect(host.querySelector("a")).toBeNull(); expect(host.textContent).toContain("abc");
 });

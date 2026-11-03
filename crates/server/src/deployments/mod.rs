@@ -31,7 +31,7 @@ use std::{
 
 const SPEC: Spec = Spec {
     search: &["name"],
-    filters: &["state"],
+    filters: &["state", "category"],
     sortable: &["name", "created_at", "updated_at"],
     default_sort: "name",
 };
@@ -42,7 +42,7 @@ const REV_SPEC: Spec = Spec {
     default_sort: "-number",
 };
 fn app_json(r: &apps::Model) -> Value {
-    json!({"id":Id::from(r.id),"name":r.name,"manifest":r.manifest,"mode":r.mode,"target_kind":r.target_kind,
+    json!({"id":Id::from(r.id),"name":r.name,"category":r.category,"manifest":r.manifest,"mode":r.mode,"target_kind":r.target_kind,
         "target_ref":Id::from(r.target_ref),"workdir":r.workdir,"description":r.description,"state":r.state,
         "revision_number":r.revision_number,"current_revision":Id::from(r.current_revision),
         "created_at":r.created_at,"updated_at":r.updated_at,"version":r.version})
@@ -68,6 +68,8 @@ async fn scoped(
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
+    #[serde(default)]
+    category: Option<String>,
     manifest: String,
     mode: String,
     target_kind: String,
@@ -77,6 +79,25 @@ pub struct Body {
     description: String,
     #[serde(default)]
     version: i64,
+}
+async fn check_category(
+    conn: &impl sea_orm::ConnectionTrait,
+    scope: &Scope,
+    category: &str,
+    previous: Option<&str>,
+) -> Result<()> {
+    if category.is_empty() || previous == Some(category) {
+        return Ok(());
+    }
+    if !crate::maintenance::dictionary_contains(conn, scope.workspace_id, "app-category", category)
+        .await?
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("deployment.categoryInvalid"),
+        ));
+    }
+    Ok(())
 }
 async fn check(
     conn: &impl sea_orm::ConnectionTrait,
@@ -285,11 +306,13 @@ pub(crate) async fn create_in(
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("deployments.create")?;
     let (name, manifest, target_ref) = check(tx, &scope, &b).await?;
+    check_category(tx, scope, b.category.as_deref().unwrap_or_default(), None).await?;
     let (id, now) = (s.next_id()?, db::now());
     let row = apps::Model {
         id: id.into(),
         workspace_id: scope.workspace_id.into(),
         name: name.clone(),
+        category: b.category.unwrap_or_default(),
         manifest,
         preview_artifact: String::new(),
         mode: b.mode,
@@ -342,9 +365,13 @@ pub async fn update(
         ));
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let current = scoped(&tx, &scope, &id).await?;
+    let category = b.category.as_deref().unwrap_or(&current.category);
+    check_category(&tx, &scope, category, Some(&current.category)).await?;
     bindings(&tx, &r, &manifest).await?;
     let n = apps::Entity::update_many()
         .col_expr(apps::Column::Name, Expr::value(name.clone()))
+        .col_expr(apps::Column::Category, Expr::value(category))
         .col_expr(apps::Column::Manifest, Expr::value(manifest))
         .col_expr(apps::Column::PreviewArtifact, Expr::value(""))
         .col_expr(apps::Column::Description, Expr::value(b.description))
@@ -1828,6 +1855,7 @@ mod variable_snapshot_tests {
                 &scope,
                 &Body {
                     name: String::new(),
+                    category: None,
                     manifest: String::new(),
                     mode: "compose".into(),
                     target_kind: "host".into(),

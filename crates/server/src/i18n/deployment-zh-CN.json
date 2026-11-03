@@ -214,5 +214,6 @@
   "deployment.output.succeeded": "部署成功",
   "deployment.output.failed": "部署失败",
   "deployment.output.uncertainPrefix": "执行结果无法确认：",
-  "deployment.output.verifyRemote": " 请核实远端进程及容器。\n"
+  "deployment.output.verifyRemote": " 请核实远端进程及容器。\n",
+  "deployment.categoryInvalid": "请选择工作空间字典中的应用分类。"
 }

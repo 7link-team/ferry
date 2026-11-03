@@ -1,7 +1,7 @@
 import { deleteResource } from "../../shared/api/resource";
 import { commonText } from "../../shared/i18n/i18n";
 import type { ResourceConfigContext } from "../../shared/resources/config";
-import { type AnyRow, form, list } from "../../shared/resources/config";
+import { type AnyRow, form, list, cronDate } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import {
   repositoryEventForm,
@@ -22,6 +22,7 @@ export interface CodeConnection {
   organization: string;
   url?: string;
   version: number;
+  recent_commit_event?: { repository: string; reference: string; summary: string; created_at: number } | null;
 }
 
 export function repositoriesLists({
@@ -64,12 +65,20 @@ export function repositoriesLists({
           render: (row) =>
             ({
               connected: commonText("resource-domain:runner.connected"),
+              refreshing: commonText("state.refreshingAuthorization"),
+              reauthorize: commonText("state.reauthorizationRequired"),
               expired: commonText("resource-domain:repository.authExpired"),
               refreshable: commonText(
                 "resource-domain:repository.authRefreshable",
               ),
               failed: commonText("resource-domain:repository.connectionFailed"),
             })[row.state] ?? row.state,
+        },
+        {
+          key: "recent_commit_event",
+          label: "最近提交事件",
+          labelKey: "resource-domain:repository.recentCommitEvent",
+          render: row => row.recent_commit_event ? <div className="space-y-0.5"><div className="truncate" title={row.recent_commit_event.summary}>{row.recent_commit_event.summary || row.recent_commit_event.repository}</div><div className="text-xs text-muted-foreground">{row.recent_commit_event.reference} · {cronDate(row.recent_commit_event.created_at)}</div></div> : "—",
         },
         {
           key: "description",

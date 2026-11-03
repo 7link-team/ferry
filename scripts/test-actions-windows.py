@@ -4,6 +4,7 @@ runner and the Windows Actions worker, all from this checkout.
 
 Usage: python scripts/test-actions-windows.py [SERVER] [RUNNER] [WORKERS_DIR]
 """
+import contextlib
 import http.cookiejar
 import json
 import os
@@ -72,8 +73,20 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
             except (OSError, AssertionError):
                 pass
             time.sleep(0.5)
+        if os.environ.get('FERRY_TEST_EXECUTION_CAPACITY_ONLY') == '1':
+            details = {'label': label, 'server_log': (work / 'server.log').read_text(encoding='utf-8', errors='replace'),
+                       'runner_log': (work / 'runner.log').read_text(encoding='utf-8', errors='replace'), 'runs': []}
+            for run_id in capacity_runs:
+                try:
+                    details['runs'].append({'run': api(f'{root}/pipeline-runs/{run_id}'), 'logs': api(f'{root}/pipeline-runs/{run_id}/logs?after=0')})
+                except Exception as error:
+                    details['runs'].append({'id': run_id, 'error': str(error)})
+            evidence = Path('data/maintenance') / f'alpha40-capacity-failure-{int(time.time() * 1000)}.json'
+            evidence.write_text(json.dumps(details, ensure_ascii=False, indent=2), encoding='utf-8')
+            print('FAIL EVIDENCE', evidence, flush=True)
         raise SystemExit(f'FAIL timed out waiting for {label}; see {work}')
 
+    capacity_runs = []
     try:
         eventually(lambda: api('/status')['ok'], 30, 'server')
         api('/setup', {'name': 'Windows Builder', 'email': 'builder@example.invalid', 'password': 'temporary-password',
@@ -96,7 +109,10 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
             return api(root + '/pipelines', body, status=201)['id']
 
         def run(pipeline_id, body=None):
-            return api(f'{root}/pipelines/{pipeline_id}/runs', body or {}, method='POST', status=201)['id']
+            run_id = api(f'{root}/pipelines/{pipeline_id}/runs', body or {}, method='POST', status=201)['id']
+            if os.environ.get('FERRY_TEST_EXECUTION_CAPACITY_ONLY') == '1':
+                capacity_runs.append(run_id)
+            return run_id
 
         def finished(run_id, seconds=300):
             return eventually(lambda: (lambda row: row if row['state'] in ('succeeded', 'failed', 'cancelled') else None)(api(f'{root}/pipeline-runs/{run_id}')),
@@ -114,6 +130,93 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
         check('the minimal echo hello workflow succeeds on Windows',
               echo_result['state'] == 'succeeded' and 'hello' in echo_output,
               f"{echo_result['state']} {echo_output}")
+        if os.environ.get('FERRY_TEST_EXECUTION_CAPACITY_ONLY') == '1':
+            def policy(enabled=True, shared=False, capacity=1):
+                current = api(f'{root}/nodes/{host}')
+                api(f'{root}/nodes/{host}', dict(current, execution={'enabled': enabled, 'shared': shared, 'capacity': capacity}), method='PATCH')
+                return api(f'{root}/nodes/{host}')
+
+            def occupancy():
+                return api(f'{root}/nodes/{host}')['execution_status']
+
+            def cancel(run_id):
+                api(f'{root}/pipeline-runs/{run_id}/cancellations', {}, method='POST')
+                return finished(run_id, 120)
+
+            holder = pipeline('Capacity real holder', {'hold': {'runs-on': 'self-hosted', 'steps': [{'run': 'Write-Output CAPACITY_HOLDER; Start-Sleep -Seconds 180'}]}})
+            if os.environ.get('FERRY_TEST_EXECUTION_POOL_ONLY') != '1':
+                check('existing hosts default to private one-slot execution', node['execution'] == {'enabled': True, 'shared': False, 'capacity': 1})
+                first_hold = run(holder)
+                eventually(lambda: 'CAPACITY_HOLDER' in text(first_hold), 120, 'first real holder')
+                second_hold = run(holder)
+                eventually(lambda: api(f'{root}/pipeline-runs/{second_hold}')['state'] == 'running', 30, 'second run admitted to scheduler')
+                time.sleep(2)
+                check('capacity one admits one real worker and queues the next run', occupancy()['active'] == 1 and 'CAPACITY_HOLDER' not in text(second_hold))
+                check('cancelling a capacity waiter finishes without starting it', cancel(second_hold)['state'] == 'cancelled' and 'CAPACITY_HOLDER' not in text(second_hold))
+                draining = policy(enabled=False)
+                check('disabling execution drains the active worker', draining['execution_status']['state'] == 'draining' and draining['execution_status']['active'] == 1)
+                disabled_waiter = run(holder)
+                time.sleep(2)
+                check('disabled host does not start another worker', 'CAPACITY_HOLDER' not in text(disabled_waiter) and occupancy()['active'] == 1)
+                cancel(disabled_waiter)
+                cancel(first_hold)
+                eventually(lambda: occupancy()['active'] == 0, 60, 'cancel cleanup releases capacity')
+                check('drained disabled host reports disabled', occupancy()['state'] == 'disabled')
+            policy(enabled=True, shared=True, capacity=2)
+            pool_body = {'name': 'Shared pool real workers', 'definition_format': 'github-actions',
+                         'definition': json.dumps({'on': 'workflow_dispatch', 'jobs': {
+                             job: {'runs-on': ['self-hosted', 'windows', 'x64'], 'steps': [{'run': f'Write-Output POOL_{job}; Start-Sleep -Seconds 180'}]} for job in ['one', 'two']}}),
+                         'executor_bindings': [{'job_id': job, 'target_kind': 'pool', 'target_ref': '', 'image': 'host'} for job in ['one', 'two']]}
+            pooled = api(root + '/pipelines', pool_body, status=201)['id']
+            pooled_run = run(pooled)
+            eventually(lambda: 'POOL_one' in text(pooled_run) and 'POOL_two' in text(pooled_run), 120, 'two real pool workers')
+            status = occupancy()
+            check('shared pool places two workers and exposes ownership', status['active'] == 2 and status['state'] == 'busy' and {job['job_key'] for job in status['running_jobs']} == {'one', 'two'})
+            policy(enabled=True, shared=True, capacity=1)
+            third_hold = run(holder)
+            time.sleep(2)
+            check('reducing capacity drains excess workers before replacement', occupancy()['active'] == 2 and 'CAPACITY_HOLDER' not in text(third_hold))
+            cancel(third_hold)
+            cancel(pooled_run)
+            eventually(lambda: occupancy()['active'] == 0, 60, 'pool cleanup releases every slot')
+            check('cancelled pool workers release slots after cleanup', occupancy()['state'] == 'available')
+            # Force loss of this fixture's durable lease while a real child is
+            # running. Renewal must cancel and await cleanup before failure.
+            lost_lease_run = run(holder)
+            eventually(lambda: 'CAPACITY_HOLDER' in text(lost_lease_run), 120, 'lease-loss real holder')
+            import sqlite3
+            with contextlib.closing(sqlite3.connect(work / 'server' / 'ferry.sqlite', timeout=30)) as fixture_db:
+                fixture_db.execute('UPDATE host_execution_slots SET expires_at = 0 WHERE run_id = ?', (int(lost_lease_run),))
+                fixture_db.commit()
+            lost_result = finished(lost_lease_run, 120)
+            check('lease renewal loss cancels the real worker and awaits terminal cleanup', lost_result['state'] == 'failed' and occupancy()['active'] == 0)
+            eventually(lambda: leftovers() == before, 60, 'lease-loss private directory cleanup')
+            recovered_run = run(pipeline('Capacity recovery', {'recover': {'runs-on': 'self-hosted', 'steps': [{'run': 'Write-Output CAPACITY_RECOVERED'}]}}))
+            check('a worker can start after lease-loss cleanup', finished(recovered_run)['state'] == 'succeeded' and 'CAPACITY_RECOVERED' in text(recovered_run))
+            matrix_active = str(work / 'matrix-active').replace("'", "''")
+            matrix_command = ("$dir='" + matrix_active + "'; New-Item -ItemType Directory -Force -Path $dir | Out-Null; "
+                              "$marker=Join-Path $dir '${{ matrix.index }}'; Set-Content -Path $marker -Value active; "
+                              "try { if ((Get-ChildItem -File $dir).Count -gt 1) { throw 'HOST_CAPACITY_OVERBOOKED' }; "
+                              "Write-Output 'MATRIX_${{ matrix.index }}'; Start-Sleep -Seconds 2 } finally { Remove-Item -LiteralPath $marker -ErrorAction SilentlyContinue }")
+            matrix_run = run(pipeline('Matrix legs obey host capacity', {'matrix': {
+                'runs-on': 'self-hosted', 'strategy': {'matrix': {'index': [1, 2, 3]}, 'max-parallel': 3, 'fail-fast': False},
+                'steps': [{'run': matrix_command}],
+            }}))
+            matrix_peak = 0
+            matrix_deadline = time.time() + 180
+            while time.time() < matrix_deadline:
+                matrix_peak = max(matrix_peak, occupancy()['active'])
+                matrix_result = api(f'{root}/pipeline-runs/{matrix_run}')
+                if matrix_result['state'] in ('succeeded', 'failed', 'cancelled'):
+                    break
+                time.sleep(0.25)
+            else:
+                raise AssertionError('matrix legs did not finish')
+            matrix_text = text(matrix_run)
+            check('real matrix legs run individually under one-slot capacity', matrix_result['state'] == 'succeeded' and matrix_peak == 1 and all(f'MATRIX_{index}' in matrix_text for index in [1, 2, 3]), matrix_text[-2000:])
+            print(f'PASS: {checks} real Windows execution capacity checks')
+            raise SystemExit(0)
+
         if os.environ.get('FERRY_TEST_ACTIONS_ECHO_ONLY') == '1':
             raise SystemExit(0)
 
@@ -285,6 +388,16 @@ with tempfile.TemporaryDirectory(prefix='actions-windows-') as directory:
         check('private job directories are removed afterwards', leftovers() == before, str(leftovers()))
         print(f'PASS: {checks} Windows Actions checks')
     finally:
+        # A failed capacity assertion must still terminate remote child processes
+        # through the product cancellation path before stopping its runner.
+        for run_id in capacity_runs:
+            try:
+                current = api(f'{root}/pipeline-runs/{run_id}')
+                if current['state'] not in ('succeeded', 'failed', 'cancelled'):
+                    api(f'{root}/pipeline-runs/{run_id}/cancellations', {}, method='POST', status=None)
+                    finished(run_id, 120)
+            except (OSError, AssertionError, SystemExit):
+                pass
         for process in reversed(processes):
             process.terminate()
             try:

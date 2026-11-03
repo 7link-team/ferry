@@ -92,6 +92,79 @@ fn supported_events(provider: &str, mode: Mode) -> Vec<&'static str> {
         .collect()
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct NotificationChannel {
+    name: String,
+    webhook: String,
+    language: String,
+    #[serde(default = "channel_enabled")]
+    enabled: bool,
+}
+fn channel_enabled() -> bool {
+    true
+}
+fn channels(config: &Config) -> Vec<NotificationChannel> {
+    config.notification_channels.clone().unwrap_or_else(|| {
+        if config.webhook.is_empty() {
+            Vec::new()
+        } else {
+            vec![NotificationChannel {
+                name: "Webhook".into(),
+                webhook: config.webhook.clone(),
+                language: config.notification_language.clone(),
+                enabled: true,
+            }]
+        }
+    })
+}
+
+fn validate_channels(channels: &[NotificationChannel]) -> Result<()> {
+    let mut names = std::collections::HashSet::new();
+    if channels.len() > 20 {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.webhookFormat"),
+        ));
+    }
+    for channel in channels {
+        let url = reqwest::Url::parse(&channel.webhook).ok();
+        if channel.name.trim().is_empty()
+            || channel.name.len() > 120
+            || !names.insert(channel.name.trim())
+            || channel.webhook.len() > 4096
+            || !url.as_ref().is_some_and(|url| {
+                matches!(url.scheme(), "http" | "https")
+                    && url.host_str().is_some()
+                    && url.username().is_empty()
+                    && url.password().is_none()
+                    && url.fragment().is_none()
+            })
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.webhookFormat"),
+            ));
+        }
+        if !crate::i18n::Locale::ALL
+            .iter()
+            .any(|locale| locale.tag() == channel.language)
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.languageInvalid"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChannelDelivery {
+    name: String,
+    language: String,
+    result: String,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Config {
     #[serde(default)]
@@ -109,6 +182,8 @@ struct Config {
     webhook: String,
     #[serde(default = "default_notification_language")]
     notification_language: String,
+    #[serde(default)]
+    notification_channels: Option<Vec<NotificationChannel>>,
 }
 #[derive(Deserialize)]
 pub struct Body {
@@ -131,6 +206,8 @@ pub struct Body {
     clear_webhook: bool,
     #[serde(default)]
     notification_language: Option<String>,
+    #[serde(default)]
+    notification_channels: Option<Vec<NotificationChannel>>,
 }
 fn aad(workspace: i64, id: i64) -> String {
     format!("repository-monitor:{workspace}:{id}")
@@ -190,6 +267,17 @@ pub async fn get(
     // Notification URLs can contain credentials; only editors receive the value.
     if scope.permissions.contains("repositories.update") {
         result["webhook"] = json!(config.webhook);
+        result["notification_channels"] = json!(channels(&config));
+    } else {
+        result["notification_channels"] = json!(
+            channels(&config)
+                .into_iter()
+                .map(|mut channel| {
+                    channel.webhook.clear();
+                    channel
+                })
+                .collect::<Vec<_>>()
+        );
     }
     result["runner_name"] = json!(match config.runner_id.parse::<Id>() {
         Ok(id) => crate::entities::hosts::Entity::find_by_id(i64::from(id))
@@ -403,6 +491,12 @@ pub async fn update(
             crate::i18n::Message::new("repository.monitor.languageInvalid"),
         ));
     }
+    let notification_channels = body
+        .notification_channels
+        .or(previous.notification_channels);
+    if let Some(channels) = &notification_channels {
+        validate_channels(channels)?;
+    }
     let config = Config {
         mode: body.mode,
         poll_interval_minutes: body.poll_interval_minutes,
@@ -419,6 +513,7 @@ pub async fn update(
         secret,
         webhook,
         notification_language,
+        notification_channels,
     };
     let encoded = serde_json::to_string(&config).map_err(|_| {
         ApiError::localized(
@@ -478,6 +573,7 @@ pub async fn update(
     result["webhook"] = json!(config.webhook);
     result["notification_language"] = json!(config.notification_language);
     result["runner_name"] = json!(runner_name);
+    result["notification_channels"] = json!(channels(&config));
     Ok(Json(result))
 }
 
@@ -672,7 +768,57 @@ fn event_json(row: events::Model) -> Value {
         .and_then(|text| serde_json::from_str::<Value>(text).ok())
         .unwrap_or(Value::Null);
     let detail = detail::display(&detail);
-    json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":crate::i18n::display_stored(&row.action),"delivery":crate::i18n::display_stored(&row.delivery),"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
+    let mut delivery_details =
+        serde_json::from_str::<Vec<ChannelDelivery>>(&row.delivery).unwrap_or_default();
+    for delivery in &mut delivery_details {
+        delivery.result = crate::i18n::display_stored(&delivery.result);
+    }
+    let delivery = if delivery_details.is_empty() {
+        crate::i18n::display_stored(&row.delivery)
+    } else {
+        delivery_details
+            .iter()
+            .map(|item| format!("{}: {}", item.name, item.result))
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+    json!({"id":Id::from(row.id),"connection_id":Id::from(row.connection_id),"event":row.event,"repository":row.repository,"reference":row.reference,"actor":row.actor,"action":crate::i18n::display_stored(&row.action),"delivery":delivery,"delivery_details":delivery_details,"created_at":row.created_at,"summary":detail::summary(&detail),"detail":detail})
+}
+
+/// Only the caller's already-authorized connections are considered; branches are unrestricted.
+pub(crate) async fn latest_commit_events(
+    s: &AppState,
+    workspace: Id,
+    ids: Vec<i64>,
+) -> Result<std::collections::HashMap<i64, Value>> {
+    use sea_orm::{QuerySelect, sea_query::ExprTrait};
+    let mut result = std::collections::HashMap::new();
+    if ids.is_empty() {
+        return Ok(result);
+    }
+    let latest: Vec<(i64, i64)> = events::Entity::find()
+        .select_only()
+        .column(events::Column::ConnectionId)
+        .column_as(Expr::col(events::Column::Id).max(), "latest_id")
+        .filter(events::Column::WorkspaceId.eq(workspace))
+        .filter(events::Column::ConnectionId.is_in(ids))
+        .filter(events::Column::Event.eq("push"))
+        .group_by(events::Column::ConnectionId)
+        .into_tuple()
+        .all(&s.db)
+        .await?;
+    if latest.is_empty() {
+        return Ok(result);
+    }
+    for event in events::Entity::find()
+        .filter(events::Column::WorkspaceId.eq(workspace))
+        .filter(events::Column::Id.is_in(latest.into_iter().map(|(_, id)| id)))
+        .all(&s.db)
+        .await?
+    {
+        result.insert(event.connection_id, event_json(event));
+    }
+    Ok(result)
 }
 /// Events of every connection the caller owns in this workspace, newest first.
 pub async fn workspace_history(
@@ -869,7 +1015,7 @@ async fn record(
         return Ok(None);
     }
     let event_id = s.next_id()?;
-    let delivery = if config.webhook.is_empty() {
+    let delivery = if !channels(config).iter().any(|channel| channel.enabled) {
         crate::i18n::store_message(&crate::i18n::Message::new(
             "repository.monitor.unconfiguredDelivery",
         ))
@@ -904,22 +1050,47 @@ async fn deliver(
     event_id: Id,
     event: &Event,
 ) -> Result<()> {
-    let locale = crate::i18n::Locale::from_tag(&config.notification_language).unwrap_or_default();
-    crate::i18n::with_locale(
-        locale,
-        deliver_notice(s, connection, config, event_id, event),
-    )
-    .await
+    let mut deliveries = Vec::new();
+    for channel in channels(config)
+        .into_iter()
+        .filter(|channel| channel.enabled)
+    {
+        let locale = crate::i18n::Locale::from_tag(&channel.language).unwrap_or_default();
+        let result = crate::i18n::with_locale(
+            locale,
+            deliver_notice(connection, &channel.webhook, event_id, event),
+        )
+        .await?;
+        deliveries.push(ChannelDelivery {
+            name: channel.name,
+            language: channel.language,
+            result,
+        });
+    }
+    if !deliveries.is_empty() {
+        // Keep the legacy single-channel representation for old consumers.
+        let result = if config.notification_channels.is_none() {
+            deliveries.remove(0).result
+        } else {
+            serde_json::to_string(&deliveries).map_err(|_| ApiError::missing())?
+        };
+        events::Entity::update_many()
+            .col_expr(events::Column::Delivery, Expr::value(result))
+            .filter(events::Column::WorkspaceId.eq(connection.workspace_id))
+            .filter(events::Column::Id.eq(event_id))
+            .exec(&s.db)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn deliver_notice(
-    s: &AppState,
     connection: &connections::Model,
-    config: &Config,
+    webhook: &str,
     event_id: Id,
     event: &Event,
-) -> Result<()> {
-    if !config.webhook.is_empty() {
+) -> Result<String> {
+    if !webhook.is_empty() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
@@ -979,22 +1150,46 @@ async fn deliver_notice(
         data["detail"] = detail;
         let notice = crate::notifications::webhook::Notice {
             title: &title,
-            fields,
-            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data}),
+            fields: fields.clone(),
+            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data,"notification":{"title":title,"fields":fields}}),
         };
-        let delivery =
-            crate::notifications::webhook::deliver(&client, &config.webhook, &notice).await;
-        events::Entity::update_many()
-            .col_expr(events::Column::Delivery, Expr::value(delivery))
-            .filter(events::Column::Id.eq(event_id))
-            .exec(&s.db)
-            .await?;
+        let delivery = crate::notifications::webhook::deliver(&client, webhook, &notice).await;
+        return Ok(delivery);
     }
-    Ok(())
+    Ok(String::new())
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notification_channels_preserve_legacy_and_validate_independent_configuration() {
+        use super::*;
+        let config = Config {
+            webhook: "https://example.invalid/hook".into(),
+            notification_language: "ja-JP".into(),
+            ..Default::default()
+        };
+        let legacy = channels(&config);
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(legacy[0].language, "ja-JP");
+        assert!(validate_channels(&legacy).is_ok());
+        let config = Config {
+            notification_channels: Some(Vec::new()),
+            ..config
+        };
+        assert!(
+            channels(&config).is_empty(),
+            "explicit empty list removes legacy delivery"
+        );
+        let mut invalid = legacy.clone();
+        invalid[0].webhook = "file:///secret".into();
+        assert!(validate_channels(&invalid).is_err());
+        invalid[0] = legacy[0].clone();
+        invalid[0].language = "invalid".into();
+        assert!(validate_channels(&invalid).is_err());
+        assert!(validate_channels(&[legacy[0].clone(), legacy[0].clone()]).is_err());
+    }
+
     #[test]
     fn legacy_notification_language_remains_english() {
         let mut legacy = serde_json::to_value(super::Config::default()).unwrap();

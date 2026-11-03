@@ -1,6 +1,6 @@
 import { commonText } from "../../shared/i18n/i18n";
 export interface Deployment {
-  id: string; name: string; manifest: string; mode: string; target_kind: string;
+  id: string; name: string; category?: string; manifest: string; mode: string; target_kind: string;
   target_ref: string; workdir: string; description: string; state: string;
   version: number; current_revision: string; latest_revision?: Revision;
   current_targets?: { host_id: string; current_revision: string }[];

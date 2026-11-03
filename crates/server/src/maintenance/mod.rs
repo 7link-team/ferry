@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
+mod states;
 mod values;
 
 #[cfg(test)]
@@ -195,6 +196,15 @@ const SETTINGS: &[(&str, &str, i64, i64, i64)] = &[
         10000,
     ),
 ];
+fn setting_category(key: &str) -> &'static str {
+    match key {
+        "heartbeat_timeout_seconds" => "hosts",
+        "history_retention_days" => "history",
+        "pipeline_concurrent_runs" => "pipelines",
+        "repository_event_retention_days" => "repositories",
+        _ => "general",
+    }
+}
 const SPEC: Spec = Spec {
     search: &["key", "name", "description"],
     filters: &["category", "value_type"],
@@ -244,7 +254,7 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                 value: Set(value),
                 name: Set(name.into()),
                 description: Set(String::new()),
-                category: Set("general".into()),
+                category: Set(setting_category(key).into()),
                 value_type: Set("num".into()),
                 value_json: Set(None),
                 schema_json: Set(None),
@@ -255,6 +265,17 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
             .exec(conn)
             .await?;
         }
+        // Split the legacy catch-all category without replacing custom categories.
+        settings::Entity::update_many()
+            .col_expr(
+                settings::Column::Category,
+                Expr::value(setting_category(key)),
+            )
+            .filter(settings::Column::WorkspaceId.eq(workspace))
+            .filter(settings::Column::Key.eq(key))
+            .filter(settings::Column::Category.eq("general"))
+            .exec(conn)
+            .await?;
         // Added metadata must match the displayed built-in names for list search.
         // Preserve the operational value, optimistic version and timestamps.
         settings::Entity::update_many()
@@ -265,7 +286,7 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
             .exec(conn)
             .await?;
     }
-    for (key, name, items) in [
+    let mut builtin_dictionaries = vec![
         (
             "host-state",
             crate::i18n::message("maintenance.hostStateName"),
@@ -293,7 +314,9 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                 ("database", crate::i18n::message("maintenance.database")),
             ],
         ),
-    ] {
+    ];
+    builtin_dictionaries.extend(states::definitions());
+    for (key, name, items) in builtin_dictionaries {
         if dictionaries::Entity::find()
             .filter(dictionaries::Column::WorkspaceId.eq(workspace))
             .filter(dictionaries::Column::Key.eq(key))
@@ -329,6 +352,7 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                     .map(|(v, l)| Item {
                         value: v.into(),
                         label: l.into(),
+                        color: None,
                     })
                     .collect::<Vec<_>>(),
             )
@@ -705,6 +729,8 @@ pub async fn delete_setting(
 struct Item {
     value: String,
     label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
 }
 #[derive(Deserialize)]
 pub struct DictionaryBody {
@@ -809,8 +835,35 @@ async fn items(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<Vec
         .map(|r| Item {
             value: r.value,
             label: r.label,
+            color: None,
         })
         .collect())
+}
+pub(crate) async fn dictionary_contains(
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+    key: &str,
+    value: &str,
+) -> Result<bool> {
+    let row = dictionaries::Entity::find()
+        .filter(dictionaries::Column::WorkspaceId.eq(workspace))
+        .filter(dictionaries::Column::Key.eq(key))
+        .filter(dictionaries::Column::Builtin.eq(1))
+        .one(conn)
+        .await?;
+    let Some(row) = row else { return Ok(false) };
+    if let Some(raw) = row.value_json {
+        let parsed = serde_json::from_str::<Value>(&raw).unwrap_or(Value::Null);
+        return Ok(values::options(&parsed).as_array().is_some_and(|options| {
+            options
+                .iter()
+                .any(|option| option["value"].as_str() == Some(value))
+        }));
+    }
+    Ok(items(conn, workspace, row.id.into())
+        .await?
+        .iter()
+        .any(|item| item.value == value))
 }
 fn dict_json(row: dictionaries::Model) -> Value {
     let raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
@@ -851,6 +904,7 @@ pub async fn list_dictionaries(
             old_items.entry(item.dictionary_id).or_default().push(Item {
                 value: item.value,
                 label: item.label,
+                color: None,
             });
         }
     }
@@ -878,8 +932,15 @@ pub async fn get_dictionary(
     let model = dict_row(&s.db, scope.workspace_id, id).await?;
     let legacy = model.value_json.is_none();
     let mut row = dict_json(model);
-    let options =
-        serde_json::to_string_pretty(&items(&s.db, scope.workspace_id, id).await?).unwrap();
+    let options = if legacy {
+        serde_json::to_string_pretty(&items(&s.db, scope.workspace_id, id).await?).unwrap()
+    } else {
+        values::options(
+            &serde_json::from_str::<Value>(row["value_json"].as_str().unwrap_or("[]"))
+                .unwrap_or(Value::Null),
+        )
+        .to_string()
+    };
     row["items"] = json!(options);
     if legacy {
         row["value_json"] = json!(options);
@@ -1007,17 +1068,18 @@ pub async fn update_dictionary(
             crate::i18n::Message::new("maintenance.systemDictionaryTypeRequired"),
         ));
     }
-    if old.key == "host-state"
-        && values
+    if let Some(expected) = states::controlled_values(&old.key) {
+        if values
             .iter()
-            .map(|i| i.value.as_str())
+            .map(|item| item.value.as_str())
             .collect::<HashSet<_>>()
-            != HashSet::from(["online", "offline", "unknown"])
-    {
-        return Err(ApiError::localized(
-            StatusCode::BAD_REQUEST,
-            crate::i18n::Message::new("maintenance.hostStateControlled"),
-        ));
+            != expected.iter().copied().collect::<HashSet<_>>()
+        {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("maintenance.stateControlled"),
+            ));
+        }
     }
     let n = dictionaries::Entity::update_many()
         .col_expr(dictionaries::Column::Name, Expr::value(body.name))
@@ -1101,16 +1163,36 @@ pub async fn delete_dictionary(
 /// Safe presentation preferences are available to every workspace member.
 pub async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
     let mut dicts = serde_json::Map::new();
-    for row in dictionaries::Entity::find()
+    let rows = dictionaries::Entity::find()
         .filter(dictionaries::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(dictionaries::Column::Builtin.eq(1))
         .all(&s.db)
-        .await?
-    {
-        dicts.insert(
-            row.key,
-            json!(items(&s.db, scope.workspace_id, row.id.into()).await?),
-        );
+        .await?;
+    let mut grouped: HashMap<i64, Vec<Item>> = HashMap::new();
+    if !rows.is_empty() {
+        for item in dictionary_items::Entity::find()
+            .filter(dictionary_items::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(dictionary_items::Column::DictionaryId.is_in(rows.iter().map(|row| row.id)))
+            .order_by_asc(dictionary_items::Column::Position)
+            .all(&s.db)
+            .await?
+        {
+            grouped.entry(item.dictionary_id).or_default().push(Item {
+                value: item.value,
+                label: item.label,
+                color: None,
+            });
+        }
+    }
+    for row in rows {
+        let options = row
+            .value_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .filter(Value::is_array)
+            .map(|value| values::options(&value))
+            .unwrap_or_else(|| json!(grouped.remove(&row.id).unwrap_or_default()));
+        dicts.insert(row.key, options);
     }
     Ok(Json(
         json!({"default_page_size":setting(&s.db,scope.workspace_id,"default_page_size").await?,"dictionaries":dicts}),

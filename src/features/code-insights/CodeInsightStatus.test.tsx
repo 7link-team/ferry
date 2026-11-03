@@ -64,13 +64,13 @@ const status = () => host.querySelector('[role="status"]')!.textContent!;
 const button = (name: string) => [...host.querySelectorAll("button")].find(item => item.textContent?.includes(name));
 const metric = (label: string) => [...host.querySelectorAll("dt")].find(item => item.textContent === label)?.nextElementSibling?.textContent;
 
-it("opens undiscovered or inaccessible source diagnostics instead of hiding them behind an unknown state", async () => {
+it("keeps source diagnostics collapsed by default while showing the aggregate failure state", async () => {
   detail.sources = [{ repository: "team/new", state: "unavailable", last_error: "Source discovery has not completed", synced_at: 0 }];
   await render();
   expect(status()).toContain("分析尚未完成");
   expect(host.textContent).toContain("等待发现或恢复访问");
   expect(host.textContent).toContain("Source discovery has not completed");
-  expect(host.querySelector("details")!.open).toBe(true);
+  expect(host.querySelector("details")!.open).toBe(false);
   expect(host.textContent).not.toContain("unavailable");
 });
 

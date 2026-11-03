@@ -12,7 +12,7 @@ import { useQueryValue } from "../router";
 export * from "../../features/code-insights/analysis-config";
 
 const filterKeys = [...analysisFilters.map(filter => filter.key), "period"];
-const primary = new Set(["repos", "authors", "branches", "since", "until", "period"]);
+const primary = new Set(["repos", "authors", "since", "until", "period"]);
 
 export function RepositoryAnalysis({ workspace, connectionId, permissions, scope = "connection", refreshVersion = 0 }: { workspace: string; connectionId: string; permissions: Set<string>; scope?: "connection" | "insight"; refreshVersion?: number }) {
   useTranslation("insight-domain");
@@ -52,7 +52,7 @@ export function RepositoryAnalysis({ workspace, connectionId, permissions, scope
   return <div className={scope === "insight" ? "flex min-w-0 shrink-0 flex-col gap-5" : "flex min-h-0 flex-1 flex-col gap-5 overflow-auto"}>
     {scope === "connection" && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />}
     <section className="flex min-w-0 flex-col gap-5" aria-label={insightText("贡献分析报告")}>
-      <div className="flex flex-wrap gap-1 border-b pb-2" aria-label={insightText("报告维度")}>{analysisReports.map(([key, label]) => <Button key={key} size="sm" variant={kind === key ? "secondary" : "ghost"} aria-pressed={kind === key} onClick={() => setReport(key)}>{insightText(label)}</Button>)}</div>
+      <div className="flex flex-wrap gap-1 border-b pb-2" aria-label={insightText("报告维度")}>{analysisReports.filter(([key]) => key !== "branches" || advanced || kind === "branches").map(([key, label]) => <Button key={key} size="sm" variant={kind === key ? "secondary" : "ghost"} aria-pressed={kind === key} onClick={() => setReport(key)}>{insightText(label)}</Button>)}</div>
       <div className="space-y-3 rounded-xl border bg-card p-4">
         {reportConfig.filterPresets?.map(group => <div key={group.label} role="group" aria-label={configText(group.label, group.labelKey)} className="flex flex-wrap gap-1">{group.presets.map(preset => <Button key={preset.label} size="xs" variant="ghost" onClick={() => commit({ ...conditions, ...(typeof preset.values === "function" ? preset.values() : preset.values) })}>{configText(preset.label, preset.labelKey)}</Button>)}</div>)}
         <AutoForm aria-label={insightText("统一分析筛选")} className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); commit(draft); }}>

@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlparse
 
 
 def main():
@@ -29,7 +29,24 @@ def main():
         "contribution_fixture", Path(__file__).with_name("test-contribution-analysis.py"))
     fixture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fixture)
-    receiver = ThreadingHTTPServer(("127.0.0.1", 0), fixture.Provider)
+    available_repositories = ["owner/repository"]
+
+    class Provider(fixture.Provider):
+        def respond(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/user/repos":
+                assert self.headers.get("Authorization") == "Bearer valid-personal-token-github"
+                fixture.calls[("github", "request")] += 1
+                page = parse_qs(parsed.query).get("page", ["1"])[0]
+                return self.json([
+                    {"id": 101 + index, "name": path.rsplit("/", 1)[1],
+                     "default_branch": "main", "full_name": path,
+                     "clone_url": fixture.api_base + "/" + path + ".git"}
+                    for index, path in enumerate(available_repositories)
+                ] if page == "1" else [])
+            return super().respond()
+
+    receiver = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     fixture.api_base = f"http://127.0.0.1:{receiver.server_port}"
     threading.Thread(target=receiver.serve_forever, daemon=True).start()
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
@@ -268,6 +285,58 @@ def main():
                     assert report(union_recent)["total"] == 0
                     assert not fixture.fixture_errors, fixture.fixture_errors
                     print("PASS wildcard full history widens an existing recent explicit source without widening its insight", flush=True)
+
+                    dynamic_connection = request(root + "/code-connections", {
+                        "name": "Dynamic repository admission", "provider": "github",
+                        "credential_id": credential, "base_url": fixture.api_base,
+                        "api_url": fixture.api_base}, expected=201)["id"]
+                    dynamic = request(endpoint, {
+                        "name": "Owner descendants", "enabled": True,
+                        "update_mode": "event", "full_history": True,
+                        "repositories": [{"connection_id": dynamic_connection,
+                                          "repository": "owner/*"}]}, expected=201)["id"]
+                    wait(lambda: collected(dynamic), "dynamic group initialization")
+                    assert report(dynamic)["total"] == 3
+                    version = detail(dynamic)["version"]
+                    available_repositories.extend(["owner/future/new", "outsider/repository"])
+                    # Advance only discovery's durable clock. The real scheduler
+                    # discovers and queues the newly authorized matching repository.
+                    with closing(sqlite3.connect(work / "ferry.sqlite", timeout=15)) as db, db:
+                        db.execute("UPDATE repository_analysis_configs SET next_reconcile_at=0 WHERE id=?",
+                                   (dynamic_connection,))
+                    def admitted():
+                        value = collected(dynamic)
+                        return value if value and len(value["sources"]) == 2 else None
+                    admitted_group = wait(admitted, "future descendant automatic admission")
+                    assert detail(dynamic)["version"] == version
+                    assert {row["repository"] for row in admitted_group["sources"]} == {
+                        "owner/repository", "owner/future/new"}
+                    assert report(dynamic)["total"] == 6, "identical SHAs in distinct repositories must remain distinct"
+                    assert sql("SELECT COUNT(*) FROM repository_analysis_sources WHERE connection_id=?",
+                               (dynamic_connection,))[0][0] == 2
+                    all_dynamic = request(endpoint, {
+                        "name": "All available repositories", "enabled": True,
+                        "update_mode": "event", "full_history": True,
+                        "repositories": [{"connection_id": dynamic_connection,
+                                          "all_repositories": True}]}, expected=201)["id"]
+                    wait(lambda: collected(all_dynamic) if len(detail(all_dynamic)["sources"]) == 3 else None,
+                         "all repositories admits outside namespace")
+                    assert report(all_dynamic)["total"] == 9
+                    assert report(dynamic)["total"] == 6
+                    available_repositories.append("outsider/future")
+                    with closing(sqlite3.connect(work / "ferry.sqlite", timeout=15)) as db, db:
+                        db.execute("UPDATE repository_analysis_configs SET next_reconcile_at=0 WHERE id=?",
+                                   (dynamic_connection,))
+                    wait(lambda: collected(all_dynamic) if len(detail(all_dynamic)["sources"]) == 4 else None,
+                         "all repositories automatically admits future repository")
+                    assert report(all_dynamic)["total"] == 12
+                    assert report(dynamic)["total"] == 6
+                    assert sql("SELECT COUNT(*) FROM repository_analysis_configs WHERE id=?",
+                               (dynamic_connection,))[0][0] == 1
+                    assert not sql("SELECT id FROM pipelines")
+                    assert not sql("SELECT id FROM pipeline_runs")
+                    assert not fixture.fixture_errors, fixture.fixture_errors
+                    print("PASS automatic nested-group admission without insight edits; outside namespace excluded; all-repository scope shares facts and expands independently", flush=True)
                 except Exception:
                     log.flush()
                     print((work / "server.log").read_text(encoding="utf8", errors="replace")[-6000:], file=sys.stderr)

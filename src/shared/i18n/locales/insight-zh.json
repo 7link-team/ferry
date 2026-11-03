@@ -1,4 +1,10 @@
 {
+  "commitIdentity": "仓库 / 分支 / SHA",
+  "commitAuthor": "作者",
+  "insertAliasAfter": "在第 {{index}} 行下方添加映射",
+  "groupRepositories": "{{group}} 下全部仓库",
+  "selectedScopes": "已选择 {{count}} 个仓库范围",
+  "dynamicRepositoriesHelp": "此范围内的新仓库会在采集时自动加入。",
   "selectedRepositories": "已加入 {{count}} 个仓库",
   "removeAlias": "移除映射 {{index}}",
   "aliasHelp": "JSON 数组，例如 {{example}}。修改昵称时保留 contributor_id；只影响当前洞察。",

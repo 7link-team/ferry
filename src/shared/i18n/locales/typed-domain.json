@@ -87,5 +87,10 @@
   "delete": ["Delete", "删除", "刪除", "削除", "삭제", "Padam"],
   "copyName": ["{{name}} (copy)", "{{name}}（副本）", "{{name}}（副本）", "{{name}}（コピー）", "{{name}}(복사본)", "{{name}} (salinan)"],
   "basic": ["Basic information", "基础信息", "基本資訊", "基本情報", "기본 정보", "Maklumat asas"],
-  "constraints": ["Value constraints", "值约束", "值約束", "値の制約", "값 제한", "Had nilai"]
+  "constraints": ["Value constraints", "值约束", "值約束", "値の制約", "값 제한", "Had nilai"],
+  "category.general": ["General", "通用", "通用", "全般", "일반", "Umum"],
+  "category.hosts": ["Hosts", "主机", "主機", "ホスト", "호스트", "Hos"],
+  "category.history": ["History", "历史保留", "歷史保留", "履歴", "기록", "Sejarah"],
+  "category.pipelines": ["Pipelines", "流水线", "流水線", "パイプライン", "파이프라인", "Saluran paip"],
+  "category.repositories": ["Repositories", "仓库", "儲存庫", "リポジトリ", "저장소", "Repositori"]
 }

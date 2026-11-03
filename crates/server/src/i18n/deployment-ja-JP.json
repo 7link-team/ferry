@@ -214,5 +214,6 @@
   "deployment.output.succeeded": "デプロイ成功",
   "deployment.output.failed": "デプロイ失敗",
   "deployment.output.uncertainPrefix": "実行結果を確認できません：",
-  "deployment.output.verifyRemote": " リモートプロセスとコンテナーを確認してください。\n"
+  "deployment.output.verifyRemote": " リモートプロセスとコンテナーを確認してください。\n",
+  "deployment.categoryInvalid": "ワークスペース辞書のアプリケーション分類を選択してください。"
 }

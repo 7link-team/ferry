@@ -404,6 +404,7 @@ jobs:
           python3 .github/scripts/annotate-failures.py --run node scripts/test-manual-approval.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-named-connection-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-connection-monitor-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-repository-monitor-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-runner-connection-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-host-workspace-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-host-workspace.mjs

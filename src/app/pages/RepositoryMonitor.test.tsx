@@ -19,7 +19,7 @@ it("retains unknown saved subscription events when opening the edit form",async(
     expect(initial({provider:'codeup',events:['push','repository.future','repository.created']})).toMatchObject({events:['push','repository.future']});
   }finally{await act(async()=>root.unmount());}
 });
-it("shows webhook URLs as text and offers all six persisted notification languages",async()=>{
+it("migrates legacy webhook URLs and languages into editable channels without losing configuration",async()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
   const host=document.createElement('div'),root=createRoot(host);
   try{
@@ -29,8 +29,9 @@ it("shows webhook URLs as text and offers all six persisted notification languag
       const row={provider,webhook:'https://notify.example.invalid/token',notification_language:'ja-JP'};
       expect(action.initialValues!(row)).toMatchObject({webhook:row.webhook,notification_language:'ja-JP'});
       const fields=action.parameters!(row);
-      expect(fields.find(field=>field.key==='webhook')!.type).toBe('text');
-      expect(fields.find(field=>field.key==='notification_language')!.options).toHaveLength(6);
+      expect(action.initialValues!(row).notification_channels).toEqual([{name:'Webhook',webhook:row.webhook,language:'ja-JP',enabled:true}]);
+      expect(fields.find(field=>field.key==='notification_channels')!.type).toBe('custom');
+      expect(fields.some(field=>field.key==='webhook')).toBe(false);
     }
     expect(action.initialValues!({provider:'codeup'}).notification_language).toBe('en-US');
   }finally{await act(async()=>root.unmount());}

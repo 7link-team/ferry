@@ -1,8 +1,9 @@
+import { useTerminalPalette } from "./terminal-palette";
 import { ArrowLeft,Columns2,FolderOpen,Plus,Rows2,SquareTerminal,X } from "lucide-react";
 import { Tabs } from "radix-ui";
 import { lazy,Suspense,useEffect,useState,type CSSProperties,type ReactNode } from "react";
 import { api,errorText } from "../../shared/api/api";
-import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText,hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
@@ -42,6 +43,7 @@ function arrange(node: Node, rect: Rect = { left: 0, top: 0, width: 100, height:
 
 export function HostWorkspace({ navigation, workspace, hostId, permissions, headerActions }: { navigation: Navigation; workspace: string; hostId: string; permissions: Set<string>; headerActions?: ReactNode }) {
   useCommonTranslation();
+  const { palette: terminalPalette, setPalette: setTerminalPalette } = useTerminalPalette();
   const canTerminal = permissions.has("hosts.terminal");
   const canFiles = permissions.has("hosts.files");
   const initialKind: Kind = new URLSearchParams(location.search).get("tool") === "files" && canFiles ? "files" : canTerminal ? "terminal" : "files";
@@ -103,7 +105,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto p-2">
         {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<p role="status">{hostRepositoryText("host.079")}</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
-        {node.opened.includes("files") && <Tabs.Content value="files" forceMount className={node.kind === "files" ? "h-full min-h-0" : "hidden"}><HostFiles workspace={workspace} hostId={hostId} canTerminal={canTerminal} {...(node.directory ? { initialPath: node.directory } : {})} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} /></Tabs.Content>}
+        {node.opened.includes("files") && <Tabs.Content value="files" forceMount className={node.kind === "files" ? "h-full min-h-0" : "hidden"}><HostFiles active={tab.id === activeTab && node.id === tab.activePane && node.kind === "files"} workspace={workspace} hostId={hostId} canTerminal={canTerminal} initialPath={node.directory ?? "/"} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} /></Tabs.Content>}
       </div>
     </section></Tabs.Root>;
   };
@@ -116,6 +118,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
       <HostLatency workspace={workspace} hostId={hostId} />
       {canTerminal && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.082")} title={hostRepositoryText("host.082")} onClick={() => addTab("terminal")}><SquareTerminal className="size-4" /></Button>}
       {canFiles && <Button variant="outline" size="icon" aria-label={hostRepositoryText("host.083")} title={hostRepositoryText("host.083")} onClick={() => addTab("files")}><FolderOpen className="size-4" /></Button>}
+      <select aria-label={commonText("terminal.palette")} className="h-8 min-w-0 max-w-40 rounded-md border border-input bg-background px-2 text-sm font-medium" value={terminalPalette} onChange={event => setTerminalPalette(event.target.value)}>{["theme", "classic", "light", "dracula", "solarized"].map(value => <option key={value} value={value}>{commonText(`terminal.${value}`)}</option>)}</select>
       {headerActions}
     </header>
     {error && <p role="alert" className="border-b px-3 py-1 text-sm text-destructive">{error}</p>}

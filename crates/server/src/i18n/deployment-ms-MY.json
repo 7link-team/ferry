@@ -214,5 +214,6 @@
   "deployment.output.succeeded": "Pelaksanaan berjaya",
   "deployment.output.failed": "Pelaksanaan gagal",
   "deployment.output.uncertainPrefix": "Hasil pelaksanaan tidak dapat dipastikan: ",
-  "deployment.output.verifyRemote": " Sahkan proses jauh dan bekas.\n"
+  "deployment.output.verifyRemote": " Sahkan proses jauh dan bekas.\n",
+  "deployment.categoryInvalid": "Pilih kategori aplikasi daripada kamus ruang kerja."
 }

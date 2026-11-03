@@ -2,6 +2,7 @@
 //! `resource::list`, writes go through `version` optimistic locking, and every
 //! mutation lands in `activity`.
 pub(crate) mod channel;
+pub(crate) mod execution;
 pub(crate) mod monitor;
 pub(crate) mod remote;
 pub(crate) mod runner;
@@ -492,6 +493,8 @@ fn host_json(row: &hosts::Model) -> Value {
 pub struct HostBody {
     name: String,
     #[serde(default)]
+    execution: Option<execution::Policy>,
+    #[serde(default)]
     runner_auto_update: Option<String>,
     #[serde(default)]
     tag_ids: Option<Vec<Id>>,
@@ -527,6 +530,9 @@ fn check_host(body: &HostBody, creating: bool) -> Result<(String, String)> {
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("hosts.autoUpdateInvalid"),
         ));
+    }
+    if let Some(policy) = &body.execution {
+        policy.validate()?;
     }
     let name = check_name(&body.name)?;
     let connection = if creating { body.connection.trim() } else { "" };
@@ -718,6 +724,13 @@ pub(crate) async fn create_host_in(
     })
     .exec(tx)
     .await?;
+    execution::save(
+        tx,
+        scope.workspace_id,
+        id,
+        &body.execution.clone().unwrap_or_default(),
+    )
+    .await?;
     replace_tags(tx, scope, id, body.tag_ids.as_deref()).await?;
     activity_in(
         &s,
@@ -726,7 +739,7 @@ pub(crate) async fn create_host_in(
         "create",
         "hosts",
         &id,
-        json!({"name": name, "connection": connection}),
+        json!({"name": name, "connection": connection, "execution":body.execution.clone().unwrap_or_default()}),
     )
     .await?;
     Ok((StatusCode::CREATED, Json(json!({"id": id}))))
@@ -825,6 +838,9 @@ pub async fn update_host(
             ApiError::missing()
         });
     }
+    if let Some(policy) = &body.execution {
+        execution::save(&tx, scope.workspace_id, id, policy).await?;
+    }
     replace_tags(&tx, &scope, id, body.tag_ids.as_deref()).await?;
     activity_in(
         &s,
@@ -833,7 +849,7 @@ pub async fn update_host(
         "update",
         "hosts",
         &id,
-        json!({"name": name}),
+        json!({"name": name, "execution":body.execution}),
     )
     .await?;
     tx.commit().await?;
@@ -860,6 +876,27 @@ async fn host_is_free(
         return Err(ApiError::localized(
             StatusCode::CONFLICT,
             crate::i18n::Message::new("hosts.jumpInUseCannotDelete"),
+        ));
+    }
+    if crate::entities::host_execution_slots::Entity::find()
+        .filter(
+            crate::entities::host_execution_slots::Column::HostId.in_subquery(
+                sea_orm::sea_query::Query::select()
+                    .column(hosts::Column::Id)
+                    .from(hosts::Entity)
+                    .and_where(Expr::col(hosts::Column::WorkspaceId).eq(i64::from(*workspace_id)))
+                    .to_owned(),
+            ),
+        )
+        .filter(crate::entities::host_execution_slots::Column::HostId.eq(*id))
+        .filter(crate::entities::host_execution_slots::Column::ExpiresAt.gt(db::now()))
+        .count(conn)
+        .await?
+        > 0
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("hosts.executionInUse"),
         ));
     }
     crate::cron_jobs::ensure_unreferenced(conn, *workspace_id, "host", &[*id]).await?;
@@ -1534,9 +1571,9 @@ async fn hosts_with_tags(
             )
         })
         .collect();
-    Ok(rows
-        .iter()
-        .map(|row| {
+    let mut results = Vec::new();
+    for row in rows {
+        let result = (|| {
             let mut result = host_json(row);
             let mut ids: Vec<i64> = links
                 .iter()
@@ -1551,6 +1588,9 @@ async fn hosts_with_tags(
             );
             result["tag_ids"] = json!(ids.into_iter().map(Id::from).collect::<Vec<_>>());
             result
-        })
-        .collect())
+        })();
+        results.push(result);
+    }
+    execution::decorate_many(conn, rows, &mut results).await?;
+    Ok(results)
 }

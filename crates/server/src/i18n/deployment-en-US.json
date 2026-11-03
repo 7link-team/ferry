@@ -214,5 +214,6 @@
   "deployment.output.succeeded": "Deployment succeeded",
   "deployment.output.failed": "Deployment failed",
   "deployment.output.uncertainPrefix": "Execution outcome is uncertain: ",
-  "deployment.output.verifyRemote": " Verify remote processes and containers.\n"
+  "deployment.output.verifyRemote": " Verify remote processes and containers.\n",
+  "deployment.categoryInvalid": "Choose an application category from the workspace dictionary."
 }

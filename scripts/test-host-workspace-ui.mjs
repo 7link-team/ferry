@@ -64,8 +64,15 @@ try {
   assert.equal(await page.getByRole('navigation').count(), 0, 'workspace has no application navigation');
   await page.getByRole('button', { name: '预览 note.txt' }).click();
   const editor = page.getByRole('textbox', { name: '文件内容' });
-  assert.equal(await editor.inputValue(), 'hello world\n');
-  await editor.fill('updated note\n');
+  await editor.waitFor();
+  await page.locator('.monaco-editor .view-lines').filter({hasText:'hello world'}).waitFor();
+  // Monaco's native EditContext is an accessibility surface beneath the painted
+  // text layer. Click the visible editor as a user does, then type normally.
+  await page.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('ControlOrMeta+Home');
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('updated note');
+  await page.keyboard.press('Enter');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   assert.equal(saved, 'updated note\n');
   await page.getByRole('button', { name: '关闭预览' }).click();
@@ -116,7 +123,9 @@ try {
   await page.getByRole('dialog').getByRole('button', { name: '取消' }).click();
   assert.equal(await terminalLink.getAttribute('target'), '_blank');
   assert.equal(new URL(await terminalLink.getAttribute('href'), origin).pathname, '/zh-CN/workspaces/109124796398174208/nodes/h1/workspace');
-  await page.getByRole('button', { name: '上移分组 Beta' }).click();
+  assert.equal(await page.getByRole('button', { name: '上移分组 Beta' }).count(), 0);
+  await page.getByRole('button', { name: '操作 · Beta', exact: true }).click();
+  await page.getByRole('menuitem', { name: '上移', exact: true }).click();
   assert.equal(reordered, true);
   await page.waitForFunction(() => {
     const labels = [...document.querySelectorAll('aside[aria-label="主机分组"] button')].map(button => button.textContent.trim());

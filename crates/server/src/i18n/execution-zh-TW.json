@@ -120,5 +120,7 @@
   "request.jsonContentType": "請使用 Content-Type: application/json 傳送請求。",
   "request.body": "無法讀取請求本文，或本文超過大小限制。",
   "request.query": "URL 查詢參數無效。",
-  "request.path": "URL 路徑參數無效。"
+  "request.path": "URL 路徑參數無效。",
+  "execution.capacityWaiting": "任務 {job} 正在等候可用執行容量。",
+  "execution.executorAssigned": "任務 {job} 已分配至主機 {host}。"
 }

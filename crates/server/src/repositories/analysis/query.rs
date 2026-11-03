@@ -604,6 +604,7 @@ fn validate_kind(kind: &str) -> Result<()> {
         "overview",
         "contributors",
         "ranking",
+        "repositories",
         "branches",
         "commits",
         "heatmap",
@@ -649,7 +650,11 @@ pub async fn report(
         .await?;
     source_rows.retain(|row| {
         settings.get(&row.connection_id).is_some_and(|config| {
-            config.all_repositories || config.repositories.contains(&row.remote_path)
+            config.all_repositories
+                || config
+                    .repositories
+                    .iter()
+                    .any(|path| repository_matches(path, &row.remote_path))
         })
     });
     let projection = Projection::Legacy(scope.user.id.into());
@@ -794,6 +799,41 @@ async fn render(
             json!({"items":items,"total":total,"page":page,"page_size":size,"coverage":coverage}),
         ));
     }
+    if kind == "repositories" {
+        #[derive(FromQueryResult)]
+        struct RepositoryAggregate {
+            repository_id: i64,
+            contributors: i64,
+            commits: i64,
+            additions: i64,
+            deletions: i64,
+            effectives: i64,
+        }
+        let mut q = cohort.select();
+        q.column((a("f"), a("repository_id")))
+            .expr_as(
+                col("f", "contributor_id").count_distinct(),
+                a("contributors"),
+            )
+            .expr_as(Expr::cust("COUNT(*)"), a("commits"))
+            .group_by_col((a("f"), a("repository_id")));
+        for name in ["additions", "deletions", "effectives"] {
+            q.expr_as(sum(backend, "f", name), a(name));
+        }
+        let total = count(&s, q.clone()).await?;
+        q.order_by(a("effectives"), Order::Desc)
+            .order_by((a("f"), a("repository_id")), Order::Asc)
+            .limit(size)
+            .offset(offset);
+        let items: Vec<Value> = rows::<RepositoryAggregate>(&s, &q).await?.into_iter().map(|row| {
+            let repo = repo_rows.get(&row.repository_id);
+            json!({"id":Id::from(row.repository_id),"repository":repo.map(|v|&v.path),"repoUrl":repo.map(|v|&v.url),
+                "contributors":row.contributors,"commits":row.commits,"additions":row.additions,"deletions":row.deletions,"effectives":row.effectives})
+        }).collect();
+        return Ok(Json(
+            json!({"items":items,"total":total,"page":page,"page_size":size,"coverage":coverage}),
+        ));
+    }
     if kind == "branches" {
         let mut q = branch_aggregate(&cohort, backend);
         let total = count(&s, cohort.branch_catalog()).await?;
@@ -845,7 +885,7 @@ async fn render(
     if kind == "period" || kind == "heatmap" {
         // Complete chart series are an explicit contract. Only chart endpoints
         // materialize all groups; list-only reports group and page in the DB.
-        let series = aggregate_items(
+        let mut series = aggregate_items(
             &s,
             &cohort,
             period,
@@ -853,6 +893,30 @@ async fn render(
             rows::<Aggregate>(&s, &q).await?,
         )
         .await?;
+        if kind == "heatmap" {
+            let by_author = grouped(&cohort, backend, period, false)?;
+            let authors = aggregate_items(
+                &s,
+                &cohort,
+                period,
+                false,
+                rows::<Aggregate>(&s, &by_author).await?,
+            )
+            .await?;
+            let mut days: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+            for author in authors {
+                days.entry(author["period"].as_str().unwrap_or("").to_owned())
+                    .or_default()
+                    .push(author);
+            }
+            for day in &mut series {
+                let authors = days
+                    .remove(day["period"].as_str().unwrap_or(""))
+                    .unwrap_or_default();
+                day["contributors"] = json!(authors.len());
+                day["authors"] = json!(authors);
+            }
+        }
         let total = series.len();
         let items: Vec<_> = series
             .iter()

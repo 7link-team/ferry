@@ -15,13 +15,17 @@ func patchCompatibility(moduleDir string) error {
 		{"schema/workflow_schema.json", "\"with\": \"step-with\",\n          \"env\": \"step-env\"", "\"with\": \"step-with\",\n          \"working-directory\": \"string-steps-context\",\n          \"env\": \"step-env\""},
 		// Rewrite at the step factory so host composite/reusable steps use the
 		// same builtin path as top-level steps. Container selection stays in act.
-		{"runner/runner.go", "type Config struct {", "type Config struct {\n\tFerryRewriteStep func(*model.Step) error"},
+		{"runner/runner.go", "type Config struct {", "type Config struct {\n\tFerryRewriteStep func(*model.Step) error\n\tFerryNoRepository bool"},
 		{"runner/step_factory.go", "\"fmt\"", "\"fmt\"\n\t\"context\""},
 		{"runner/step_factory.go", "\tswitch stepModel.Type() {", "\thostRC := rc\n\tfor hostRC.Parent != nil { hostRC = hostRC.Parent }\n\tif rc.Config.FerryRewriteStep != nil && hostRC.Run.Job().Container() == nil && hostRC.platformImage(context.Background()) == \"-self-hosted\" {\n\t\tif err := rc.Config.FerryRewriteStep(stepModel); err != nil { return nil, err }\n\t}\n\tswitch stepModel.Type() {"},
 		{"exprparser/functions.go", "func (impl *interperterImpl) jobSuccess() (bool, error) {", "func (impl *interperterImpl) jobSuccess() (bool, error) {\n\tif impl.env.Job.Status == \"cancelled\" { return false, nil }"},
 		{"model/workflow.go", "matrixProduct := common.CartesianProduct(m)", "matrixProduct := orderedMatrixProduct(m, j.Strategy.RawMatrix)"},
 		{"model/workflow.go", "\t\"github.com/nektos/act/pkg/common\"\n", ""},
 		{"runner/run_context.go", "\"strings\"\n", "\"strings\"\n\t\"sync/atomic\"\n"},
+		// An intentionally repository-free invocation has no ref or SHA to
+		// infer. Keep explicit context values and normal repository diagnostics.
+		{"runner/run_context.go", `if ghc.Ref == "" {`, `if ghc.Ref == "" && !rc.Config.FerryNoRepository {`},
+		{"runner/run_context.go", `if ghc.Sha == "" {`, `if ghc.Sha == "" && !rc.Config.FerryNoRepository {`},
 		{"runner/run_context.go", "Cancelled           bool", "Cancelled           atomic.Bool\n\tStrategyJobTotal int\n\tStrategyJobIndex int"},
 		{"runner/run_context.go", "if rc.Cancelled {", "if rc.Cancelled.Load() {"},
 		{"runner/run_context.go", "for k, v := range rc.Run.Job().Outputs {\n\t\t\tinterpolated := ee.Interpolate(ctx, v)", "for k, v := range rc.Run.Job().Outputs {\n\t\t\tif ferryMissingOutput(v, rc.StepResults) { delete(rc.Run.Job().Outputs,k); continue }\n\t\t\tinterpolated := ee.Interpolate(ctx, v)"},

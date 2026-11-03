@@ -1,3 +1,4 @@
+import { TagBadge } from "../tags/TagBadge";
 import {
   createResource,
   deleteResource,
@@ -12,6 +13,7 @@ import {
   label,
   list,
   namedOptions,
+  dictionaryOptions,
   type AnyRow,
 } from "../../shared/resources/config";
 import type {
@@ -38,7 +40,7 @@ export interface Pipeline {
   application_name: string;
   tag_ids: string[];
   environment_ids: string[];
-  tags: { id: string; name: string }[];
+  tags: { id: string; name: string; color?: string }[];
   environments: { id: string; name: string }[];
   target_ref: string;
   definition: string;
@@ -270,9 +272,9 @@ export function pipelinesLists({
           render: (row) => (
             <span className="flex flex-wrap gap-1">
               {row.tags?.map((tag) => (
-                <Badge key={tag.id} variant="secondary">
+                <TagBadge color={tag.color} key={tag.id}>
                   {tag.name}
-                </Badge>
+                </TagBadge>
               ))}
             </span>
           ),
@@ -532,6 +534,7 @@ export function pipelinesForms({
               label: "名称",
               labelKey: "common-domain:common.name",
               type: "text",
+              options: dictionaryOptions(workspace, "environment"),
               required: true,
             },
             {

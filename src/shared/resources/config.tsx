@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import { listResource } from "../api/resource";
+import { api } from "../api/api";
 import { commonText, configText } from "../i18n/i18n";
 import { currentLocale } from "../i18n/locale";
 import type { Navigation } from "../routing/types";
@@ -34,21 +36,27 @@ export function ago(at: number) {
 }
 
 export const namedOptions =
-  (workspace: string, resource: string) => async (): Promise<Option[]> => {
+  <T extends { id: string; name: string } = { id: string; name: string }>(workspace: string, resource: string, render?: (row: T) => ReactNode) => async (): Promise<Option[]> => {
     const items: Option[] = [];
     for (let page = 1; ; page += 1) {
-      const result = await listResource<{ id: string; name: string }>(
+      const result = await listResource<T>(
         workspace,
         resource,
         { page, page_size: 200 },
       );
       items.push(
-        ...result.items.map((row) => ({ value: row.id, label: row.name })),
+        ...result.items.map((row) => ({ value: row.id, label: row.name, ...(render ? { content: render(row) } : {}) })),
       );
       if (!result.items.length || page * result.page_size >= result.total)
         return items;
     }
   };
+
+/** Builtin presentation dictionaries are readable without maintenance permissions. */
+export const dictionaryOptions = (workspace: string, key: string) => async (): Promise<Option[]> => {
+  const preferences = await api<{ dictionaries: Record<string, Option[]> }>(`/workspaces/${workspace}/preferences`);
+  return preferences.dictionaries[key] ?? [];
+};
 
 export const cronDate = (value: number) =>
   value ? new Date(value).toLocaleString(currentLocale()) : "—";
@@ -58,4 +66,5 @@ export type ResourceConfigContext = {
   permissions?: Set<string> | undefined;
   onChanged?: (() => void) | undefined;
   navigate: Navigation["navigate"];
+  dictionaries?: Record<string, Option[]>;
 };

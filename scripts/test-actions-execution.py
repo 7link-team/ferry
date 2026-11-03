@@ -9,6 +9,9 @@ def accept(context):
     api, create, trigger, done, logs, check = (context[key] for key in ('api', 'create', 'trigger', 'done', 'logs', 'check'))
     command, work, name = (context[key] for key in ('command', 'work', 'name'))
     runner, ssh, credential, repo_url, root_dir = (context[key] for key in ('runner', 'ssh', 'cred', 'repo_url', 'root_dir'))
+    # This barrier intentionally runs two jobs on one host; capacity is explicit.
+    runner_row = api(f'/workspaces/{workspace_ops}/nodes/{runner}')
+    api(f'/workspaces/{workspace_ops}/nodes/{runner}', dict(runner_row, execution={'enabled': True, 'shared': False, 'capacity': 2}), method='PATCH')
     second = work / 'second-source'
     shutil.copytree(work / 'source', second)
     (second / 'payload.txt').write_text('independent-second-repository\n')

@@ -85,6 +85,7 @@ try {
       let items = series;
       if (kind === 'overview') items = [{ id: 'total', projects: 1, commits: 6, additions: 72, deletions: 14, effectives: 58 }];
       if (kind === 'contributors' || kind === 'ranking') items = [series[0], series[1]];
+      if (kind === 'repositories') items = [{ id: 'repository', repository: 'team/repository', nicknames: ['Alice', 'Bob'], commits: 6, additions: 72, deletions: 14, effectives: 58 }];
       if (kind === 'branches') items = [{ id: 'branch', repository: 'team/repository', branchName: 'main', present: true, nicknames: ['Alice', 'Bob'], commits: 6, additions: 72, deletions: 14, effectives: 58 }];
       if (kind === 'commits') items = [{ id: 'commit', repository: 'team/repository', branches: ['main', 'release'], commitHash: 'a'.repeat(40), commitUrl: 'https://example.invalid/team/repository/commit/' + 'a'.repeat(40), message: 'feat: browser fixture', messageType: 'feat', isMerge: false, nickname: 'Alice', authorName: 'Alice', authorEmail: 'alice@example.invalid', date: now, committerDate: now, additions: 20, deletions: 5, effectives: 15, languageStats: { TypeScript: { additions: 20, deletions: 5 } } }];
       return json(envelope(items, url.searchParams, { coverage, ...(['heatmap', 'period'].includes(kind) ? { series } : {}) }));
@@ -111,6 +112,10 @@ try {
   await page.getByRole('tab', { name: '代码洞察', exact: true }).click();
   await page.getByRole('region',{name:'相关代码洞察'}).getByRole('link',{name:'查看',exact:true}).click();
   const insightPath = origin + '/zh-CN/workspaces/2/code-insights/31';
+  const sourceDetails = page.getByText('各仓库覆盖与任务状态', { exact: true });
+  await sourceDetails.waitFor();
+  assert.equal(await sourceDetails.evaluate(element => element.parentElement.open), false, 'repository task details are collapsed initially');
+  await sourceDetails.click();
   await page.getByText('Fixture: one branch awaits complete diff', { exact: false }).waitFor();
   await page.getByRole('region', { name: '六个周期贡献排名', exact: true }).waitFor();
   assert.equal((await page.locator('body').innerText()).includes('Invalid Date'), false);
@@ -136,10 +141,10 @@ try {
 
   await sharedForm.getByLabel('仓库（逗号分隔）', { exact: true }).fill('team/repository');
   await sharedForm.getByLabel('作者昵称（逗号分隔）', { exact: true }).fill('Alice');
-  await sharedForm.getByLabel('分支（逗号分隔）', { exact: true }).fill('main');
   await sharedForm.getByLabel('起始日期（UTC）', { exact: true }).fill(iso(30));
   await sharedForm.getByLabel('截止日期（UTC）', { exact: true }).fill(iso(0));
   await sharedForm.getByRole('button', { name: '高级筛选', exact: true }).click();
+  await sharedForm.getByLabel('分支（逗号分隔）', { exact: true }).fill('main');
   await sharedForm.getByLabel('提交类型（逗号分隔）', { exact: true }).fill('feat');
   await sharedForm.getByLabel('有效变更下限', { exact: true }).fill('1');
   await sharedForm.getByLabel('有效变更上限', { exact: true }).fill('500');
@@ -235,12 +240,13 @@ try {
   checks.push('creates independent insight through shared form, same repository selected twice with different mappings');
   await page.goto(insightPath);
 
-  const dimensions = [['contributors', '贡献者'], ['ranking', '贡献排名'], ['branches', '分支'], ['commits', '提交明细'], ['heatmap', '每日热力数据'], ['period', '周期统计'], ['overview', '总览']];
+  const dimensions = [['contributors', '贡献者'], ['ranking', '贡献排名'], ['repositories', '仓库'], ['branches', '分支'], ['commits', '提交明细'], ['heatmap', '每日热力数据'], ['period', '周期统计'], ['overview', '总览']];
   await report.getByRole('form', { name: '统一分析筛选', exact: true }).waitFor();
   await sharedForm.getByLabel('作者昵称（逗号分隔）', { exact: true }).fill('Alice');
   await sharedForm.getByRole('button', { name: '搜索', exact: true }).click();
   await page.waitForLoadState('networkidle');
   for (const [kind, label] of dimensions) {
+    if (kind === 'branches') await sharedForm.getByRole('button', { name: '高级筛选', exact: true }).click();
     const [response] = await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/reports/${kind}`) && response.ok()),
       page.getByRole('button', { name: label, exact: true }).click(),
@@ -257,12 +263,14 @@ try {
     if (kind === 'commits') {
       const link = page.getByRole('link', { name: '在源平台查看提交 ' + 'a'.repeat(40), exact: true });
       assert.equal(await link.getAttribute('href'), 'https://example.invalid/team/repository/commit/' + 'a'.repeat(40));
-      await report.getByRole('cell', { name: 'main\nrelease', exact: true }).waitFor();
+      const identityCell = visibleRow.getByRole('cell').filter({ has: link });
+      assert.match(await identityCell.innerText(), /team\/repository\s+main\s+release\s+a{40}/, 'repository, branches and SHA share the identity column');
+      assert.match(await visibleRow.getByRole('cell').filter({ hasText: 'alice@example.invalid' }).innerText(), /Alice\s+Alice\s+alice@example\.invalid/, 'nickname, name and email share the author column');
     }
     if (kind === 'heatmap') { assert((await report.locator('svg rect').count()) > 0); }
     if (kind === 'period') { assert.equal(await report.locator('[data-author]').count(), 2); await report.locator('svg[role="img"]').scrollIntoViewIfNeeded(); await page.screenshot({ path: resolve(output, 'desktop-trend.png') }); }
   }
-  checks.push('all seven shared-filter report views, source commit link, branch membership, heatmap and per-author trend');
+  checks.push('all eight shared-filter report views, repository aggregation, source commit link, branch membership, heatmap and per-author trend');
 
   await page.getByRole('button', { name: '每日热力数据', exact: true }).click();
   const shortcuts = page.getByRole('group', { name: '热力图提交类型', exact: true });
@@ -332,8 +340,10 @@ try {
   source.last_error='Fixture: repository discovery awaits access restoration';
   await page.goto(insightPath);
   await taskStatus.getByRole('status').filter({hasText:'分析尚未完成'}).waitFor();
+  assert.equal(await taskStatus.locator('details').getAttribute('open'),null,'Repository diagnostics remain collapsed by default');
+  await taskStatus.locator('summary').click();
   await taskStatus.getByText('等待发现或恢复访问',{exact:true}).waitFor();
-  assert.equal(await taskStatus.locator('details').getAttribute('open'),'','Unavailable repository diagnostics are expanded');
+  assert.equal(await taskStatus.locator('details').getAttribute('open'),'','Repository diagnostics expand on demand');
   assert.equal((await taskStatus.innerText()).includes('unavailable'),false,'Unavailable is localized rather than shown as an unknown raw state');
   await taskStatus.getByText(source.last_error,{exact:true}).waitFor();
   source.job=queuedJob;
@@ -343,6 +353,7 @@ try {
   source.job.effective_state = 'blocked';
   source.job.updated_at = now;
   await page.goto(insightPath);
+  await taskStatus.locator('summary').click();
   await taskStatus.getByText('采集暂不可用', { exact: true }).waitFor();
   assert((await taskStatus.getByRole('status').innerText()).includes('分析尚未完成'));
   assert.equal((await taskStatus.innerText()).includes('流水线'),false,'Legacy blocked state must not require a business pipeline');
@@ -361,6 +372,7 @@ try {
   source.job.effective_state = 'retry_wait';
   source.job.retry_at = now + 60000;
   await page.goto(insightPath);
+  await taskStatus.locator('summary').click();
   await taskStatus.getByText('等待重试', { exact: true }).waitFor();
   await taskStatus.getByText('下次重试：', { exact: false }).waitFor();
   assert((await taskStatus.getByRole('status').innerText()).includes('等待重试'));
@@ -369,6 +381,7 @@ try {
   source.job.effective_state = 'running';
   source.job.collector_phase = 'git_fetch';
   await page.goto(insightPath);
+  await taskStatus.locator('summary').click();
   await taskStatus.getByText('同步中', { exact: true }).waitFor();
   await taskStatus.getByText('获取仓库变更', { exact: true }).waitFor();
   assert.equal(await taskStatus.getByRole('status').locator('.animate-spin').count(),1,'Running work has a progress indicator');

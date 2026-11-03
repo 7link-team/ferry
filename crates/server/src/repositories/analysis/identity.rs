@@ -284,9 +284,12 @@ async fn context(
         .map(|v| Ok((v.id, decode(&v)?)))
         .collect::<Result<HashMap<_, _>>>()?;
     source_rows.retain(|row| {
-        settings
-            .get(&row.connection_id)
-            .is_some_and(|v| v.all_repositories || v.repositories.contains(&row.remote_path))
+        settings.get(&row.connection_id).is_some_and(|v| {
+            v.all_repositories
+                || v.repositories
+                    .iter()
+                    .any(|path| repository_matches(path, &row.remote_path))
+        })
     });
     let mut resolved = HashMap::new();
     let mut rules: BTreeMap<i64, Vec<Rule>> = BTreeMap::new();

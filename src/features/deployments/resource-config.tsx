@@ -7,6 +7,7 @@ import {
   label,
   list,
   namedOptions,
+  dictionaryOptions,
   type AnyRow,
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
@@ -16,12 +17,14 @@ import { deploymentState, type Deployment, type Revision } from "./deployment";
 
 export function deploymentsLists({
   workspace,
+  dictionaries,
 }: ResourceConfigContext): Record<string, ListConfig<AnyRow>> {
   return {
     deployments: list({
       resource: "deployments",
       rowKey: (r: Deployment) => r.id,
       filters: [
+        { key: "category", label: "分类", labelKey: "typed-domain:category", type: "select", options: dictionaries?.["app-category"] ?? dictionaryOptions(workspace, "app-category") },
         {
           key: "q",
           label: "名称",
@@ -36,6 +39,7 @@ export function deploymentsLists({
           labelKey: "common-domain:common.name",
           sortable: true,
         },
+        { key: "category", label: "分类", labelKey: "typed-domain:category", render: (row: Deployment) => row.category ? label(dictionaries?.["app-category"] ?? [], row.category) : "—" },
         {
           key: "state",
           label: "状态",
@@ -155,6 +159,7 @@ export function deploymentsForms({
       heading: (r: Deployment) => r.name,
       blank: {
         name: "",
+        category: "",
         mode: "compose",
         target_kind: "host",
         target_ref: "",
@@ -173,6 +178,7 @@ export function deploymentsForms({
               type: "text",
               required: true,
             },
+            { key: "category", label: "分类", labelKey: "typed-domain:category", type: "select", options: dictionaryOptions(workspace, "app-category") },
             {
               key: "mode",
               label: "部署模式",

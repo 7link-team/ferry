@@ -61,8 +61,8 @@ export function HostLatency({ workspace, hostId }: { workspace: string; hostId: 
   const label = milliseconds !== undefined ? `${milliseconds} ms` : checking ? hostRepositoryText("host.003") : hostRepositoryText("host.004");
   const title = [error, hostRepositoryText("host.006"), checking ? hostRepositoryText("host.005") : ""].filter(Boolean).join(" ");
   return <span title={title} aria-label={hostRepositoryText("host.007", {value1: label, value2: checking ? hostRepositoryText("host.008") : ""})}
-    className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-current/15 bg-current/5 px-2 text-xs tabular-nums ${color}`}>
-    <Icon aria-hidden="true" className={`size-3.5 ${checking ? "motion-safe:animate-spin" : "motion-safe:animate-pulse"}`} />
+    className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-muted/60 px-2 text-xs font-semibold tabular-nums text-foreground">
+    <Icon aria-hidden="true" className={`size-3.5 ${color} ${checking ? "motion-safe:animate-spin" : ""}`} />
     <span>{label}</span>
   </span>;
 }

@@ -1,3 +1,4 @@
+import { DictionaryState } from "../maintenance/DictionaryState";
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -82,13 +83,13 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
       <div><dt className="text-xs text-muted-foreground">{insightText("状态检查时间")}</dt><dd className="mt-1 tabular-nums">{time(checkedAt)}</dd></div>
     </dl>
     {(active.length > 0 || blocked.length > 0) && <p className="text-xs text-muted-foreground">{insightText(blocked.length ? "采集暂未完成，请查看仓库错误详情并重试同步。" : "任务状态每 15 秒更新；下次计划时间表示触发采集，不是完成时间。当前无法准确预估完成时间。")}</p>}
-    {sources.length > 0 && <details open={active.length > 0 || blocked.length > 0 || failed.length > 0} className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{insightText("各仓库覆盖与任务状态")}</summary><ul className="mt-3 divide-y">{sources.map((source, index) => {
+    {sources.length > 0 && <details className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{insightText("各仓库覆盖与任务状态")}</summary><ul className="mt-3 divide-y">{sources.map((source, index) => {
       const job = source.job as Row | undefined;
       const state = sourceTaskState(source);
       const phase = state === "running" ? collectorPhaseLabel(job?.collector_phase) : "";
       const lastError = String(job?.last_error || source.last_error || "");
       return <li key={String(source.repository ?? index)} className="space-y-1 py-3 first:pt-0 last:pb-0">
-        <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all text-sm font-medium">{String(source.repository ?? "—")}</span><span className={`text-xs ${state === "blocked" || state === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{taskStateLabel(state)}</span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all text-sm font-medium">{String(source.repository ?? "—")}</span><span className={`text-xs ${state === "blocked" || state === "failed" ? "text-destructive" : "text-muted-foreground"}`}><DictionaryState dictionary="insight-state" value={state}>{taskStateLabel(state)}</DictionaryState></span></div>
         <p className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span>{insightText("最近成功分析")}：{Number(source.synced_at) > 0 ? time(source.synced_at) : insightText("尚未成功")}</span>{job?.updated_at ? <span>{insightText("任务状态更新")}：{time(job.updated_at)}</span> : null}{state === "retry_wait" && job?.retry_at ? <span>{insightText("下次重试")}：{time(job.retry_at)}</span> : null}</p>
         {phase && <p className="text-xs text-muted-foreground">{phase}</p>}
         {lastError && <p className="break-words text-xs text-destructive">{lastError}</p>}

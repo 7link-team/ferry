@@ -364,18 +364,33 @@ pub async fn list_connections(
 ) -> Result<Json<Value>> {
     scope.require("repositories.read")?;
     let query = crate::resources::resource::ListQuery::parse(&CONNECTION_SPEC, &raw)?;
-    let (rows, total) = crate::resources::resource::list(
-        &s.db,
-        &CONNECTION_SPEC,
-        connections::Entity::find()
-            .filter(connections::Column::UserId.eq(scope.user.id))
-            .filter(connections::Column::Name.ne("")),
-        &scope.workspace_id,
-        &query,
+    let (rows, total) =
+        crate::resources::resource::list::<connections::Entity, connections::Model>(
+            &s.db,
+            &CONNECTION_SPEC,
+            connections::Entity::find()
+                .filter(connections::Column::UserId.eq(scope.user.id))
+                .filter(connections::Column::Name.ne("")),
+            &scope.workspace_id,
+            &query,
+        )
+        .await?;
+    let recent = crate::repositories::monitor::latest_commit_events(
+        &s,
+        scope.workspace_id,
+        rows.iter().map(|row| row.id).collect(),
     )
     .await?;
+    let items: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let mut item = connection_json(row);
+            item["recent_commit_event"] = recent.get(&row.id).cloned().unwrap_or(Value::Null);
+            item
+        })
+        .collect();
     Ok(Json(
-        json!({"items":rows.iter().map(connection_json).collect::<Vec<_>>(),"total":total,"page":query.page,"page_size":query.page_size}),
+        json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
     ))
 }
 

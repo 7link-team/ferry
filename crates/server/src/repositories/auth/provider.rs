@@ -207,6 +207,36 @@ impl OAuthSettings {
                 }
             }
             if value.enabled {
+                let missing = if value.client_id.is_empty() {
+                    Some("Client ID")
+                } else if value.client_secret.is_empty() {
+                    Some("Client Secret")
+                } else if kind == "gitea" && value.base_url.is_empty() {
+                    Some("Base URL")
+                } else {
+                    None
+                };
+                if let Some(field) = missing {
+                    let field = match (kind, field) {
+                        ("gitlab", "Client ID") => "Application ID",
+                        ("gitlab", "Client Secret") => "Secret",
+                        _ => field,
+                    };
+                    return Err(ApiError::localized(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        crate::i18n::Message::new("repository.auth.oauthRequiredField")
+                            .with(
+                                "provider",
+                                match kind {
+                                    "github" => "GitHub",
+                                    "gitlab" => "GitLab",
+                                    "gitea" => "Gitea",
+                                    _ => "Gitee",
+                                },
+                            )
+                            .with("field", field),
+                    ));
+                }
                 self.callback(s)?;
                 self.provider(kind)?;
             }

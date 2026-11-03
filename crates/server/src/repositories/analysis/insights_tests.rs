@@ -779,3 +779,114 @@ async fn missing_or_revoked_repository_is_visible_as_unavailable_without_a_usabl
         "revocation hides rather than deletes persisted facts and source history"
     );
 }
+
+#[tokio::test]
+async fn dynamic_group_publication_projects_new_authors_into_its_insight() {
+    let (_dir, s) = fixture().await;
+    grant(&s).await;
+    managed(&s, 4).await;
+    let id = create_one(&s, body("Dynamic authors", vec![member(4, "team/*")])).await;
+    let claim = claimed(&s).await;
+    sync::store(&s, &claim, commit('a')).await.unwrap();
+    let source = sources::Entity::find_by_id(7)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    analysis::insight_identity::refresh_repository(&s, &s.db, &source)
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::entities::code_insight_identity_links::Entity::find()
+            .filter(crate::entities::code_insight_identity_links::Column::InsightId.eq(id))
+            .count(&s.db)
+            .await
+            .unwrap(),
+        1,
+        "group membership must project authors arriving after insight creation"
+    );
+}
+
+#[tokio::test]
+async fn dynamic_insight_groups_include_future_sources_without_editing_membership() {
+    let (_dir, s) = fixture().await;
+    grant(&s).await;
+    managed(&s, 4).await;
+    let id = create_one(&s, body("Dynamic group", vec![member(4, "team/*")])).await;
+    let parent = insights::Entity::find_by_id(id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let actor = scope(&s).await;
+    let before = selected_sources(&s.db, &actor, &parent).await.unwrap();
+    assert_eq!(
+        before
+            .iter()
+            .map(|r| r.remote_path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["team/repo"]
+    );
+    let config = configs::Entity::find_by_id(4)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let config = analysis::decode(&config).unwrap();
+    assert!(config.selects("team/future/new"));
+    assert!(!config.selects("team-other/repo"));
+
+    let original = before[0].clone();
+    for (source_id, repository_id, path) in
+        [(41, 42, "team/future/new"), (43, 44, "team-other/repo")]
+    {
+        let mut repo = repositories::Entity::find_by_id(original.repository_id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        repo.id = repository_id;
+        repo.path = path.into();
+        repo.identity = format!("future-{repository_id}");
+        repositories::Entity::insert(repo.into_active_model())
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let mut source = original.clone();
+        source.id = source_id;
+        source.repository_id = repository_id;
+        source.remote_path = path.into();
+        sources::Entity::insert(source.into_active_model())
+            .exec(&s.db)
+            .await
+            .unwrap();
+    }
+    let after = selected_sources(&s.db, &actor, &parent).await.unwrap();
+    assert_eq!(
+        after
+            .iter()
+            .map(|r| r.remote_path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["team/repo", "team/future/new"]
+    );
+    assert_eq!(members(&s.db, &parent).await.unwrap().len(), 1);
+    let mut queued = BTreeSet::new();
+    enqueue_scheduled(&s, &s.db, &parent, &mut queued)
+        .await
+        .unwrap();
+    assert!(queued.contains(&41));
+    assert!(!queued.contains(&43));
+    connections::Entity::update_many()
+        .col_expr(connections::Column::State, Expr::value("disconnected"))
+        .filter(connections::Column::Id.eq(4))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert!(
+        selected_sources(&s.db, &actor, &parent)
+            .await
+            .unwrap()
+            .iter()
+            .all(|r| r.id == 0)
+    );
+}

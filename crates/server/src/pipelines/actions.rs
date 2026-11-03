@@ -567,8 +567,8 @@ pub fn parse(document: &Document) -> Result<(Vec<Job>, Vec<Environment>)> {
                 crate::i18n::Message::new("actions.servicesContainerRequired"),
             ));
         }
-        // runs-on is descriptive; the executor binding always selects the actual host/image,
-        // including when the labels or runner group contain expressions.
+        // Explicit host bindings preserve descriptive labels for compatibility.
+        // Group/pool bindings constrain placement with these labels at resolution.
         let labels = match raw.get("runs-on") {
             Some(Value::Object(runner)) => {
                 let mut labels = string_list(runner.get("labels"), "runs-on.labels")?;
@@ -930,6 +930,15 @@ pub async fn check_bindings(
         .await?;
     }
     for binding in &document.executor_bindings {
+        if binding.target_kind == "pool" {
+            if !binding.target_ref.is_empty() {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.executorInvalid"),
+                ));
+            }
+            continue;
+        }
         if !binding.target_ref.is_empty() {
             let reference = Id::reference(&binding.target_ref)?;
             if binding.target_kind == "host-group" {
@@ -970,13 +979,48 @@ pub async fn resolve(
             .find(|b| b.job_id == job.key)
         {
             job.image = binding.image.clone();
-            if !binding.target_ref.is_empty() {
+            if matches!(binding.target_kind.as_str(), "pool" | "host-group")
+                && job.labels.iter().any(|label| label.contains("${{"))
+            {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.runnerLabelsUnsupported"),
+                ));
+            }
+            if binding.target_kind == "pool" {
+                let eligible = crate::hosts::execution::candidates(
+                    conn,
+                    scope.workspace_id.into(),
+                    0,
+                    0,
+                    true,
+                    &job.labels,
+                )
+                .await?;
+                job.host_id = eligible.first().map_or(0, |(host, _, _)| host.id);
+            } else if !binding.target_ref.is_empty() {
                 let reference = Id::reference(&binding.target_ref)?;
                 job.host_id =
                     host(conn, scope.workspace_id, &binding.target_kind, reference).await?;
                 if binding.target_kind == "host-group" {
                     job.host_group_id = reference.into();
+                    let eligible = crate::hosts::execution::candidates(
+                        conn,
+                        scope.workspace_id.into(),
+                        0,
+                        job.host_group_id,
+                        false,
+                        &job.labels,
+                    )
+                    .await?;
+                    job.host_id = eligible.first().map_or(0, |(host, _, _)| host.id);
                 }
+            }
+            if job.host_id == 0 && matches!(binding.target_kind.as_str(), "pool" | "host-group") {
+                return Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("actions.noEligibleRunner"),
+                ));
             }
         }
     }

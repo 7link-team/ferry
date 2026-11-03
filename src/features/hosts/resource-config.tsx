@@ -1,3 +1,5 @@
+import { TagBadge } from "../tags/TagBadge";
+import { defaultExecutionPolicy, ExecutionPolicyFields, type ExecutionPolicy, type ExecutionStatus } from "./ExecutionPolicy";
 import { FolderOpen, SquareTerminal } from "lucide-react";
 import {
   createResource,
@@ -6,7 +8,8 @@ import {
   runAction,
   runItemAction,
 } from "../../shared/api/resource";
-import { commonText } from "../../shared/i18n/i18n";
+import { commonText, executionText } from "../../shared/i18n/i18n";
+import { currentLocale, localizedPath } from "../../shared/i18n/locale";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import {
   ago,
@@ -54,6 +57,8 @@ export interface Host {
   description: string;
   seen_at: number;
   version: number;
+  execution?: ExecutionPolicy;
+  execution_status?: ExecutionStatus;
 }
 
 export const CONNECTIONS: Option[] = [
@@ -121,7 +126,11 @@ export const TARGETS = [
 export function hostsLists({
   workspace,
   hostStates,
+  permissions,
 }: ResourceConfigContext & { hostStates: Option[] }): Record<string, ListConfig<AnyRow>> {
+  const stateOptions = hostStates.map(option => option.color ? {
+    ...option, content: <TagBadge color={option.color}>{label(hostStates, option.value)}</TagBadge>,
+  } : option);
   return {
     "host-groups": list({
       resource: "host-groups",
@@ -211,7 +220,7 @@ export function hostsLists({
           label: "状态",
           labelKey: "resource-domain:status.title",
           type: "select",
-          options: hostStates,
+          options: stateOptions,
         },
       ],
       columns: [
@@ -223,9 +232,9 @@ export function hostsLists({
           render: (row: Host) => (
             <span className="flex flex-wrap gap-1">
               {row.tags?.map((tag) => (
-                <Badge variant="secondary" key={tag.id}>
+                <TagBadge color={tag.color} key={tag.id}>
                   {tag.name}
-                </Badge>
+                </TagBadge>
               ))}
             </span>
           ),
@@ -248,7 +257,12 @@ export function hostsLists({
           label: "状态",
           labelKey: "resource-domain:status.title",
           width: 90,
-          render: (row: Host) => (
+          render: (row: Host) => {
+            const text = row.connection === "runner" && row.state === "offline"
+              ? commonText("resource-domain:runner.disconnected")
+              : label(hostStates, row.state);
+            const color = hostStates.find(option => option.value === row.state)?.color;
+            return color ? <TagBadge color={color}>{text}</TagBadge> : (
             <Badge
               variant={
                 row.state === "online"
@@ -258,11 +272,16 @@ export function hostsLists({
                     : "secondary"
               }
             >
-              {row.connection === "runner" && row.state === "offline"
-                ? commonText("resource-domain:runner.disconnected")
-                : label(hostStates, row.state)}
+              {text}
             </Badge>
-          ),
+            );
+          },
+        },
+        {
+          key: "execution_status",
+          label: "执行容量",
+          labelKey: "execution-domain:hostExecution.title",
+          render: (row: Host) => row.execution_status ? <div className="space-y-1"><Badge variant="secondary">{executionText(`hostExecution.${row.state === "online" ? row.execution_status.state : "unavailable"}`)}</Badge><div className="text-xs tabular-nums text-muted-foreground">{row.execution_status.active} / {row.execution_status.capacity}</div>{permissions?.has("pipelines.read") && row.execution_status.running_jobs.map((job, index) => <a key={`${job.run_id}:${job.job_key}:${index}`} className="block max-w-48 truncate text-xs text-primary underline underline-offset-2" href={localizedPath(`/workspaces/${workspace}/pipeline-runs/${job.run_id}`, currentLocale())}>{job.job_key} · {job.run_id}</a>)}</div> : "—",
         },
         {
           key: "seen_at",
@@ -272,7 +291,7 @@ export function hostsLists({
           sortable: true,
           render: (row: Host) =>
             row.seen_at
-              ? `${row.state === "online" ? commonText("resource-domain:host.updatedAt") : commonText("resource-domain:host.lastOnline")} ${ago(row.seen_at)}`
+              ? ago(row.seen_at)
               : commonText("resource-domain:host.neverConnected"),
         },
       ],
@@ -404,6 +423,7 @@ export function hostsForms({
         username: "",
         group_id: "",
         tag_ids: [],
+        execution: { ...defaultExecutionPolicy },
         credential_id: "",
         jump_host_id: "",
         description: "",
@@ -479,6 +499,14 @@ export function hostsForms({
               helpKey: "resource-domain:host.connectionImmutable",
             },
           ],
+        },
+        {
+          title: "流水线执行资源",
+          titleKey: "execution-domain:hostExecution.section",
+          fields: [{
+            key: "execution", label: "执行容量", labelKey: "execution-domain:hostExecution.title", type: "custom", span: 2,
+            render: ({ draft, readOnly, onPatch, onValidityChange }) => <ExecutionPolicyFields value={draft.execution} readOnly={readOnly} onChange={execution => onPatch({ execution })} onValidityChange={onValidityChange} />,
+          }],
         },
         {
           title: "SSH 连接",

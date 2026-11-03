@@ -169,7 +169,7 @@ async fn selected_sources_mode(
     for member in &members {
         if authorized.contains(&member.connection_id) {
             let entry = paths.entry(member.connection_id).or_default();
-            entry.0 |= member.all_repositories != 0;
+            entry.0 |= member.all_repositories != 0 || member.repository.ends_with("/*");
             entry.1.insert(member.repository.clone());
         }
     }
@@ -204,7 +204,8 @@ async fn selected_sources_mode(
             .into_iter()
             .flatten()
             .filter(|source| {
-                member.all_repositories != 0 || source.remote_path == member.repository
+                member.all_repositories != 0
+                    || repository_matches(&member.repository, &source.remote_path)
             })
             .cloned()
             .collect();
@@ -500,7 +501,18 @@ async fn validate(
                 crate::i18n::Message::new("repository.analysis.platformPathRequired"),
             ));
         }
-        if member.repository.len() > 400 || member.repository.chars().any(char::is_control) {
+        let invalid_group = member.repository.contains('*')
+            && (connection.provider == "git"
+                || !member.repository.ends_with("/*")
+                || member.repository[..member.repository.len() - 2]
+                    .split('/')
+                    .any(|part| {
+                        part.is_empty() || part == "." || part == ".." || part.contains('*')
+                    }));
+        if invalid_group
+            || member.repository.len() > 400
+            || member.repository.chars().any(char::is_control)
+        {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("repository.analysis.repositoryUrlInvalid"),

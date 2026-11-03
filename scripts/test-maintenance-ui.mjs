@@ -52,7 +52,8 @@ try {
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${environment.id}/edit`);
   const dictionaryType=p.getByLabel('值类型',{exact:true});
   await dictionaryType.waitFor(); assert(await dictionaryType.isEnabled());
-  assert.deepEqual(await dictionaryType.locator('option').evaluateAll(nodes=>nodes.map(node=>node.value)),['tab','selection']);
+  assert.deepEqual(await dictionaryType.locator('option:not(:disabled)').evaluateAll(nodes=>nodes.map(node=>node.value)),['tab','selection']);
+  assert.equal(await dictionaryType.locator('option:disabled').count(),10,'All incompatible builtin dictionary types remain disabled');
   for(const next of ['tab','selection']) {
     await dictionaryType.click(); await dictionaryType.press(next==='tab'?'Home':'End'); await dictionaryType.press('Enter');
     assert.equal(await dictionaryType.inputValue(),next);
@@ -137,10 +138,67 @@ try {
   const unknown=keys.indexOf('unknown');
   assert(unknown>=0,'migrated system dictionary retains unknown key');
   await p.getByLabel(`选项 ${unknown+1} 显示名称`,{exact:true}).fill('等待接入');
+  await p.getByLabel(`选项 ${unknown+1} 显示名称 颜色`,{exact:true}).fill('#123456');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'host-state',exact:true}).waitFor();
+  const stateDictionary=(await get(root+'/dictionaries')).items.find(row=>row.key==='host-state');
+  assert.equal(JSON.parse(stateDictionary.value_json).find(option=>option.value==='unknown').color,'#123456');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${stateDictionary.id}/edit`);
+  assert.equal(await p.getByLabel(`选项 ${unknown+1} 显示名称 颜色`,{exact:true}).inputValue(),'#123456');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`);
   await p.getByRole('cell',{name:'等待接入',exact:true}).waitFor();
+  assert.deepEqual(await p.getByRole('cell',{name:'等待接入',exact:true}).locator('[data-slot="badge"]').first().evaluate(element=>({background:getComputedStyle(element).backgroundColor,color:getComputedStyle(element).color})),{background:'rgb(18, 52, 86)',color:'rgb(255, 255, 255)'});
+  console.log('PASS: controlled-state native color editing, save/reload and host-row contrast preserve machine keys');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dashboard`);
+  await p.getByText('等待接入',{exact:true}).first().waitFor();
+  const controlledRows=(await get(root+'/dictionaries?page_size=200')).items;
+  for (const key of ['pipeline-state','deployment-state','cron-state','alert-state','repository-state','insight-state']) {
+    const dictionary=controlledRows.find(row=>row.key===key); assert(dictionary,key+' seeded');
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${dictionary.id}/edit`);
+    const inputs=p.locator('input[aria-label$=" 值"]'); await inputs.first().waitFor();
+    const values=await inputs.evaluateAll(nodes=>nodes.map(node=>({value:node.value,disabled:node.disabled})));
+    assert(values.every(node=>node.disabled),key+' machine values locked');
+    assert.equal(await p.getByRole('button',{name:'添加选项',exact:true}).count(),0);
+    const selected=key==='deployment-state'?values.findIndex(node=>node.value==='idle'):0;
+    const index=selected+1;
+    await p.getByLabel(`选项 ${index} 显示名称`,{exact:true}).fill('UI '+key);
+    await p.getByLabel(`选项 ${index} 显示名称 颜色`,{exact:true}).fill('#123456');
+    await p.getByRole('button',{name:'保存',exact:true}).click();
+    await p.waitForURL(`**/workspaces/${workspace_tenant}/dictionaries`);
+    const saved=JSON.parse((await get(root+'/dictionaries/'+dictionary.id)).value_json);
+    assert.deepEqual(saved.map(option=>option.value),values.map(option=>option.value),key+' operational values preserved');
+    assert.equal(saved[selected].label,'UI '+key); assert.equal(saved[selected].color,'#123456');
+  }
+  const displayHost=(await get(root+'/nodes')).items.find(row=>row.name==='Dictionary host');
+  const displayApp=await post(owner,root+'/deployments',{name:'Dictionary deployment',mode:'compose',target_kind:'host',target_ref:displayHost.id,workdir:'/tmp/state-dictionary',manifest:JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'nginx:alpine'}]})});
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments`);
+  const deploymentState=p.getByRole('cell',{name:'UI deployment-state',exact:true}); await deploymentState.waitFor();
+  assert.equal(await deploymentState.locator('[data-slot="badge"]').evaluate(element=>getComputedStyle(element).backgroundColor),'rgb(18, 52, 86)');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${displayApp.id}`);
+  await p.getByText('UI deployment-state',{exact:true}).waitFor();
+  assert.equal((await get(root+'/deployments/'+displayApp.id)).state,'idle');
+  console.log('PASS: all six controlled state editors save labels/colors, preserve operational values; deployment list/detail and dashboard host consume preferences');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${displayApp.id}/edit`);
+  const categorySelect=p.locator('select[name="category"]'); await categorySelect.waitFor();
+  await categorySelect.locator('option[value="web"]').waitFor({state:'attached'});
+  await categorySelect.selectOption('web');
+  await p.getByRole('button',{name:'保存',exact:true}).click();
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/deployments`);
+  assert.equal((await get(root+'/deployments/'+displayApp.id)).category,'web');
+  const categoryName=(await get(root+'/preferences')).dictionaries['app-category'].find(option=>option.value==='web').label;
+  await p.getByRole('cell',{name:categoryName,exact:true}).waitFor();
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/pipeline-environments/new`);
+  const environmentName=p.locator('input[name="name"]'); await environmentName.waitFor();
+  const suggestions=await environmentName.getAttribute('list'); assert(suggestions,'Environment names have native suggestions');
+  await p.locator(`datalist[id="${suggestions}"] option[value="dev"]`).waitFor({state:'attached'});
+  await environmentName.fill('custom-browser-environment');
+  await p.locator('select[name="target_ref"]').selectOption(displayHost.id);
+  await p.getByRole('button',{name:'创建',exact:true}).click();
+  await p.waitForURL(`**/workspaces/${workspace_tenant}/pipeline-environments`);
+  assert((await get(root+'/pipeline-environments')).items.some(row=>row.name==='custom-browser-environment'));
+  console.log('PASS: application category editor persists dictionary selection; environment name offers dictionary suggestions and saves custom text');
+
+
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('标识',{exact:false}).fill('custom');

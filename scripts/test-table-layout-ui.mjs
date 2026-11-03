@@ -73,7 +73,8 @@ try {
       const footer = document.querySelector('nav[aria-label="分页"]').parentElement;
       const rect = e => { const r = (e || table).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
       const body = table.querySelector('tbody tr');
-      return { viewport: innerHeight, width: innerWidth, footer: rect(footer), scroll: rect(scroll), header: rect(table.querySelector('thead')), first: rect(body.firstElementChild), last: rect(body.lastElementChild), data: rect(body.children[1]), scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight, scrollWidth: scroll.scrollWidth, clientWidth: scroll.clientWidth, pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth };
+      const sequenceIndex = [...table.querySelectorAll('thead th')].findIndex(cell => cell.textContent.trim() === '序号');
+      return { viewport: innerHeight, width: innerWidth, footer: rect(footer), scroll: rect(scroll), header: rect(table.querySelector('thead')), first: rect(body.firstElementChild), last: rect(body.lastElementChild), sequence: rect(body.children[sequenceIndex]), data: rect(body.children[sequenceIndex + 1]), scrollHeight: scroll.scrollHeight, clientHeight: scroll.clientHeight, scrollWidth: scroll.scrollWidth, clientWidth: scroll.clientWidth, pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth };
     });
   }
   function fills(g, label, padding = 0) {
@@ -116,7 +117,8 @@ try {
     // Sticky cells, not the thead box itself, establish the fixed header frame.
     const headerTop = await page.locator('thead th').first().evaluate(e => e.getBoundingClientRect().top);
     assert(Math.abs(headerTop - before.scroll.top - 1) < 2, 'header remains at data viewport top');
-    assert(Math.abs(after.first.left - before.first.left) < 2, 'first column remains fixed');
+    assert(Math.abs(after.first.left - before.first.left) < 2, 'checkbox remains fixed');
+    assert(Math.abs(after.sequence.left - before.sequence.left) < 2, `sequence remains fixed beside checkbox (${viewport.width}): ${JSON.stringify({before, after})}`);
     assert(Math.abs(after.last.right - before.last.right) < 2, 'action column remains fixed');
     assert(after.data.left < before.data.left - 100 && after.data.top < before.data.top - 100, 'middle data scrolls both axes');
     assert(Math.abs(after.footer.top - before.footer.top) < 2, 'footer never moves with table rows');
@@ -143,11 +145,13 @@ try {
           }, { theme, dark });
           const shadows = await page.locator('table').evaluate(table => {
             const style = element => getComputedStyle(element).boxShadow;
+            const sequenceIndex = [...table.querySelectorAll('thead th')].findIndex(cell => cell.textContent.trim() === '序号');
+            const cells = table.querySelector('tbody tr').children;
             return {
               header: style(table.querySelector('thead th')),
-              left: style(table.querySelector('tbody tr td:first-child')),
+              left: style(cells[sequenceIndex]),
               right: style(table.querySelector('tbody tr td:last-child')),
-              middle: style(table.querySelector('tbody tr td:nth-child(3)')),
+              middle: style(cells[sequenceIndex + 1]),
               footer: style(table.closest('[data-auto-table-root]').querySelector('[data-auto-table-footer]')),
             };
           });

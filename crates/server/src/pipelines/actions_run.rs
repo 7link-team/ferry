@@ -14,7 +14,9 @@ use crate::{
 };
 use axum::http::StatusCode;
 use futures::{StreamExt, stream::FuturesUnordered};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr};
+#[cfg(test)]
+use sea_orm::QueryOrder;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -106,11 +108,31 @@ pub async fn execute(
     if environment_approval || snapshot.jobs.iter().any(|job| job.manual) {
         return execute_reserved(s, run, snapshot, stop).await;
     }
-    let hosts = snapshot
-        .jobs
-        .iter()
-        .map(|job| job.host_id.to_string())
-        .collect();
+    let mut hosts = Vec::new();
+    for job in &snapshot.jobs {
+        let pool = snapshot
+            .document
+            .executor_bindings
+            .iter()
+            .any(|binding| binding.job_id == job.key && binding.target_kind == "pool");
+        if pool || job.host_group_id != 0 {
+            hosts.extend(
+                crate::hosts::execution::candidates(
+                    &s.db,
+                    run.workspace_id,
+                    job.host_id,
+                    job.host_group_id,
+                    pool,
+                    &job.labels,
+                )
+                .await?
+                .into_iter()
+                .map(|(host, _, _)| host.id.to_string()),
+            );
+        } else {
+            hosts.push(job.host_id.to_string());
+        }
+    }
     // Only acquisition is cancellable here. Once execution starts, its existing
     // cancellation path owns remote process termination and credential cleanup.
     let reservations = {

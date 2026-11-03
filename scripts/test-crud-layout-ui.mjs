@@ -66,8 +66,8 @@ try {
       const left=parentBox.left+parent.clientLeft+parseFloat(parentStyle.paddingLeft),available=parent.clientWidth-parseFloat(parentStyle.paddingLeft)-parseFloat(parentStyle.paddingRight);
       return{form:rect(form),parent:{left,available},max:parseFloat(formStyle.maxWidth),cards:[...form.querySelectorAll(':scope > section')].map(rect),document:document.documentElement.scrollWidth,viewport:innerWidth};
     });
-    assert(Number.isFinite(result.max),`${width}px ${mode}: the shared form has a bounded reading width`);
-    assert(Math.abs(result.form.width-Math.min(result.max,result.parent.available))<2,`${width}px ${mode}: shared form fills available width up to its bound: ${JSON.stringify(result)}`);
+    assert(!Number.isFinite(result.max),`${width}px ${mode}: shared forms do not impose a page-specific maximum width`);
+    assert(Math.abs(result.form.width-result.parent.available)<2,`${width}px ${mode}: shared form fills the content width: ${JSON.stringify(result)}`);
     assert(Math.abs(result.form.x+result.form.width/2-result.parent.left-result.parent.available/2)<2,`${width}px ${mode}: shared form is centered`);
     assert(result.cards.length>=2,`${width}px ${mode}: fixture exercises multiple schema sections`);
     for(const [index,card] of result.cards.entries()) {

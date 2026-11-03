@@ -1,3 +1,4 @@
+import { terminalPalettes, useTerminalPalette } from "./terminal-palette";
 import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
 /**
  * Remote terminal over the host channel. Identical for a runner host and an
@@ -42,8 +43,15 @@ type Status = "connecting" | "open" | "closed" | "error";
 /** xterm needs literal colors, so the CSS tokens are read off the element. */
 function paletteFrom(element: HTMLElement) {
   const style = getComputedStyle(element);
-  const read = (name: string, fallback: string) =>
-    style.getPropertyValue(name).trim() || fallback;
+  const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const read = (name: string, fallback: string) => {
+    const value = style.getPropertyValue(name).trim() || fallback;
+    if (!context) return fallback;
+    context.clearRect(0, 0, 1, 1); context.fillStyle = fallback; context.fillStyle = value; context.fillRect(0, 0, 1, 1);
+    const [r, g, b] = context.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map(channel => channel!.toString(16).padStart(2, "0")).join("")}`;
+  };
   return {
     background: read("--color-card", "#161a21"),
     foreground: read("--color-foreground", "#e6e9ee"),
@@ -58,7 +66,8 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
   const terminal = useRef<Terminal>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState("");
-  const { resolved } = useTheme();
+  const { resolved, palette: appPalette, customLight, customDark } = useTheme();
+  const { palette } = useTerminalPalette();
 
   useEffect(() => {
     const element = mount.current;
@@ -71,7 +80,7 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
       // Enough history to scroll back through a build log without being able
       // to exhaust memory on a chatty process.
       scrollback: 5000,
-      theme: paletteFrom(element),
+      theme: terminalPalettes[palette] ?? paletteFrom(element),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -158,9 +167,9 @@ export function HostTerminal({ workspace, hostId, directory }: { workspace: stri
   // because someone toggled dark mode.
   useEffect(() => {
     if (terminal.current && mount.current) {
-      terminal.current.options.theme = paletteFrom(mount.current);
+      terminal.current.options.theme = terminalPalettes[palette] ?? paletteFrom(mount.current);
     }
-  }, [resolved]);
+  }, [resolved, appPalette, customLight, customDark, palette]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden">

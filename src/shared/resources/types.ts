@@ -11,8 +11,12 @@ import type { Envelope } from "../api/resource";
 import type { Route } from "../routing/types";
 
 export interface Option {
+  /** Optional rich label, preserving plain label text for search/accessibility. */
+  content?: ReactNode;
   value: string;
   label: string;
+  /** Optional validated dictionary presentation color; values remain stable. */
+  color?: string;
   /** Explicit message key; raw labels remain stable action/configuration identities. */
   labelKey?: string | undefined;
   group?: string;
@@ -177,11 +181,13 @@ export interface FormField<T> {
   display?: (row: Partial<T>) => string;
   /** Render an http(s) value as an external link on detail pages. */
   link?: boolean;
+  /** Copy a public field value beside its control or detail text. */
+  copyable?: boolean;
   /** How each item of a `records` field is shown. */
   record?: {
     title: (item: Record<string, unknown>) => string;
-    meta?: (item: Record<string, unknown>) => string;
-    body?: (item: Record<string, unknown>) => string;
+    meta?: (item: Record<string, unknown>) => ReactNode;
+    body?: (item: Record<string, unknown>) => ReactNode;
     href?: (item: Record<string, unknown>) => string;
   };
 }

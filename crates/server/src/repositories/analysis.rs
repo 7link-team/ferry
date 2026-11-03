@@ -57,7 +57,7 @@ pub struct Config {
     pub collection_version: i64,
     pub enabled: bool,
     pub all_repositories: bool,
-    /// Full repository paths; generic Git connections use full repository URLs.
+    /// Exact paths/URLs, or platform group selectors ending in `/*`.
     pub repositories: Vec<String>,
     /// None preserves legacy event delivery for every selected repository.
     /// Some contains event-mode paths; an empty path selects every repository.
@@ -91,10 +91,9 @@ impl Default for Config {
 impl Config {
     fn required_coverage_start(&self, path: &str, fallback: i64) -> i64 {
         self.coverage_starts
-            .get(path)
-            .into_iter()
-            .chain(self.coverage_starts.get(""))
-            .copied()
+            .iter()
+            .filter(|(selected, _)| selected.is_empty() || repository_matches(selected, path))
+            .map(|(_, start)| *start)
             .reduce(coverage_union)
             .unwrap_or(fallback)
     }
@@ -111,16 +110,32 @@ impl Config {
             && self.coverage_starts == other.coverage_starts
     }
     pub(crate) fn selects(&self, path: &str) -> bool {
-        self.enabled && (self.all_repositories || self.repositories.iter().any(|p| p == path))
+        self.enabled
+            && (self.all_repositories
+                || self
+                    .repositories
+                    .iter()
+                    .any(|p| repository_matches(p, path)))
     }
     pub(crate) fn event_selects(&self, path: &str) -> bool {
         self.selects(path)
             && self.event_repositories.as_ref().is_none_or(|paths| {
                 paths
                     .iter()
-                    .any(|selected| selected.is_empty() || selected == path)
+                    .any(|selected| selected.is_empty() || repository_matches(selected, path))
             })
     }
+}
+
+/// Group selectors match descendants on a slash boundary, never similarly named groups.
+fn repository_matches(selected: &str, path: &str) -> bool {
+    selected == path
+        || selected.strip_suffix("/*").is_some_and(|group| {
+            !group.is_empty()
+                && path
+                    .strip_prefix(group)
+                    .is_some_and(|suffix| suffix.starts_with('/') && suffix.len() > 1)
+        })
 }
 
 // Zero means unlimited history, rather than the Unix epoch.

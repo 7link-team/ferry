@@ -9,6 +9,7 @@ vi.mock("./HostTerminal", () => ({ HostTerminal: ({ directory }: { directory: st
 let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
+  history.replaceState({}, "", "/workspaces/ops/nodes/1/workspace?tool=files");
   void i18n.changeLanguage("zh-CN");
   localStorage.setItem("ui.locale", "zh-CN");
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

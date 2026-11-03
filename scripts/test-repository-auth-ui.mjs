@@ -107,7 +107,7 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, permissions: ['clipboard-read', 'clipboard-write'], viewport: { width: 1280, height: 800 } });
   const errors = [];
 
   const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
@@ -133,18 +133,51 @@ try {
   for (const tab of ['GitHub','GitLab','Gitee','Gitea']) assert.equal(await platform.getByRole('tab',{name:tab,exact:true}).count(),1,`${tab} tab`);
   assert.equal(await platform.getByLabel('允许注册新账号',{exact:true}).count(),0,'other groups stay hidden');
   await platform.getByLabel('平台公开访问地址',{exact:true}).fill(origin);
+  const initialSettings = await (await context.request.get(`${origin}/api/platform/settings/1`)).json();
+  for (const name of ['GitHub','GitLab','Gitee','Gitea']) {
+    const key = name.toLowerCase();
+    const idLabel = key === 'gitlab' ? 'Application ID' : 'Client ID';
+    const secretLabel = key === 'gitlab' ? 'Secret' : 'Client Secret';
+    const draft = {version:initialSettings.version,registration_enabled:true,oauth_public_url:origin,[`oauth_${key}_enabled`]:true};
+    for (const field of ['Client ID','Client Secret',...(key==='gitea'?['Base URL']:[])]) {
+      const response = await context.request.patch(`${origin}/api/platform/settings/1`,{headers,data:draft});
+      assert.equal(response.status(),400,`${name}: missing ${field} must reject save`);
+      const error = await response.text();
+      const shown = field === 'Client ID' ? idLabel : field === 'Client Secret' ? secretLabel : field;
+      assert(error.includes(name) && error.includes(shown),`${name}: validation identifies missing ${shown}`);
+      draft[`oauth_${key}_${field==='Client ID'?'client_id':'client_secret'}`] = field==='Client ID'?'fixture-client-id':'fixture-client-secret';
+      assert.equal((await (await context.request.get(`${origin}/api/platform/settings/1`)).json()).version,initialSettings.version,'rejected save is atomic');
+    }
+    await platform.getByRole('tab',{name,exact:true}).click();
+    await platform.getByLabel(`${name} ${idLabel}`,{exact:true}).waitFor();
+    assert.equal(await platform.getByLabel(`${name} ${secretLabel}`,{exact:true}).inputValue(),'','first-time secret is directly editable');
+    assert.equal(await platform.getByLabel(`替换${name} ${secretLabel}（不勾选则保留原值）`,{exact:true}).count(),0,'unset secret needs no replace checkbox');
+  }
+  await platform.getByRole('tab',{name:'GitHub',exact:true}).click();
   await platform.getByLabel('启用 GitHub 网页授权',{exact:true}).check();
-  await platform.getByLabel('GitHub 应用 ID',{exact:true}).fill('fixture-client-id');
-  await platform.getByLabel('替换GitHub 应用密钥（不勾选则保留原值）',{exact:true}).check();
-  await platform.getByLabel('GitHub 应用密钥',{exact:true}).fill('fixture-client-secret');
+  await platform.getByLabel('GitHub Client ID',{exact:true}).fill('fixture-client-id');
+  await platform.getByLabel('GitHub Client Secret',{exact:true}).fill('fixture-client-secret');
   await platform.getByLabel('GitHub 网站地址',{exact:true}).fill(providerOrigin);
   await platform.getByLabel('GitHub API 地址',{exact:true}).fill(providerOrigin);
   await platform.getByRole('button',{name:'保存',exact:true}).click();
   await platform.getByText('平台设置已保存，立即生效。',{exact:true}).waitFor();
   await platform.waitForFunction(expected => [...document.querySelectorAll('input')].some(input => input.value === expected), origin+'/api/repository-providers/callback');
-  await platform.getByLabel('GitHub 应用 ID',{exact:true}).waitFor();
-  assert.equal(await platform.getByLabel('GitHub 应用密钥',{exact:true}).count(),0,'stored app secret is not returned');
+  await platform.getByLabel('GitHub Client ID',{exact:true}).waitFor();
+  assert.equal(await platform.getByLabel('GitHub Client Secret',{exact:true}).count(),0,'stored app secret is not returned');
   assert.equal(await platform.getByLabel('当前回调地址',{exact:true}).inputValue(),origin+'/api/repository-providers/callback');
+  await platform.getByRole('button',{name:'复制 当前回调地址',exact:true}).click();
+  assert.equal(await platform.evaluate(()=>navigator.clipboard.readText()),origin+'/api/repository-providers/callback');
+  await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'执行器',exact:true}).click();
+  assert.equal(await platform.getByRole('heading',{name:'执行器',exact:true}).count(),1,'runner is the settings category; auto-upgrade is a field');
+  await platform.getByLabel('执行器默认自动升级',{exact:true}).waitFor();
+  for (const theme of ['modern','business','eyeCare','pinkKawaii','neoBrutalism','custom']) {
+    for (const dark of [false,true]) {
+      await platform.evaluate(({theme,dark})=>{document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',dark);},{theme,dark});
+      const backgrounds = await platform.locator('h1,h2,h3').evaluateAll(headings=>headings.filter(element=>element.getClientRects().length).map(element=>getComputedStyle(element).backgroundColor));
+      assert(backgrounds.length>0 && backgrounds.every(color=>color!=='rgba(0, 0, 0, 0)' && color!=='transparent'),`${theme}/${dark}: visible headings have themed backgrounds`);
+    }
+  }
+  await platform.evaluate(()=>{document.documentElement.dataset.theme='modern';document.documentElement.classList.remove('dark');});
 
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections`);
   assert.equal(await p.getByRole('navigation',{name:'仓库页面',exact:true}).count(),0,'no separate repository authorization tabs');

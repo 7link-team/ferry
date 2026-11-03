@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/nektos/act/pkg/artifactcache"
 	"github.com/nektos/act/pkg/common"
 	"github.com/nektos/act/pkg/container"
@@ -55,7 +58,22 @@ func cleanupContext(parent context.Context, alreadyCancelled bool) (context.Cont
 	return ctx, func() { close(done); cancelSignal(); stop() }
 }
 
+// Empty repository metadata is intentional for command-only workflows. Retain
+// legacy inference when a standalone caller supplies a real committed workdir.
+func noRepository(request Request) bool {
+	if request.Repository != "" {
+		return false
+	}
+	repo, err := git.PlainOpenWithOptions(request.Workdir, &git.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
+	if err != nil {
+		return errors.Is(err, git.ErrRepositoryNotExists)
+	}
+	_, err = repo.Head()
+	return errors.Is(err, plumbing.ErrReferenceNotFound)
+}
+
 func evaluationContext(ctx context.Context, request Request, workflow *model.Workflow, config *runner.Config) (*runner.RunContext, error) {
+	config.FerryNoRepository = noRepository(request)
 	event := "{}"
 	if request.EventPath != "" {
 		data, err := os.ReadFile(request.EventPath)

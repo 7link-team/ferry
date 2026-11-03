@@ -624,6 +624,15 @@ async fn branch_queries_stay_constant_as_branch_count_grows_and_fact_union_is_de
         overview["items"][0]["commits"], 128,
         "64 branch memberships must not multiply facts"
     );
+    let repos = read(&s, "repositories", &[]).await;
+    assert_eq!(repos["total"], 1);
+    assert_eq!(repos["items"][0]["commits"], 128);
+    assert_eq!(repos["items"][0]["contributors"], 16);
+    let heatmap = read(&s, "heatmap", &[]).await;
+    let day = &heatmap["series"][0];
+    assert_eq!(day["commits"], 128);
+    assert_eq!(day["contributors"], 16);
+    assert_eq!(day["authors"].as_array().unwrap().len(), 16);
     let ranking = read(&s, "ranking", &[("page_size", "5"), ("page", "2")]).await;
     assert_eq!(ranking["total"], 16);
     assert_eq!(ranking["items"].as_array().unwrap().len(), 5);

@@ -94,7 +94,7 @@ fn fields(resource: &str) -> Result<Vec<(&'static str, &'static str)>> {
         "pipelines" => {
             "name definition definition_format executor_bindings:json checkout_bindings:json graph_layout:json repository_id target_kind target_ref description group_id application_id tag_ids:json environment_ids:json"
         }
-        "deployments" => "name manifest mode target_kind target_ref workdir description",
+        "deployments" => "name category manifest mode target_kind target_ref workdir description",
         "variables" => "name scope scope_ref kind description value:secret",
         "cron-jobs" => {
             "name description scope schedule timezone enabled:bool action target_kind target_ref command timeout_seconds:number max_retries:number retry_delay_seconds:number environment_id"

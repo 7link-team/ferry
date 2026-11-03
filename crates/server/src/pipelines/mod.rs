@@ -183,8 +183,8 @@ async fn check(
             }
             if !document.executor_bindings.iter().any(|binding| {
                 binding.job_id == job.key
-                    && !binding.target_ref.is_empty()
-                    && binding.target_ref != "0"
+                    && ((binding.target_kind == "pool" && binding.target_ref.is_empty())
+                        || (!binding.target_ref.is_empty() && binding.target_ref != "0"))
             }) {
                 return Err(ApiError::localized(
                     StatusCode::BAD_REQUEST,

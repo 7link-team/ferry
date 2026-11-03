@@ -35,10 +35,10 @@ export function LanguageSwitcher({ floating = false }: { floating?: boolean }) {
             aria-label={t("language.label")}
             aria-description={localeNames[locale]}
             title={`${t("language.label")}: ${localeNames[locale]}`}
-            className="h-8 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground max-sm:size-8 max-sm:p-0 max-sm:has-[>svg]:px-0"
+            className="h-8 gap-1.5 rounded-md px-2 has-[>svg]:px-2 text-foreground transition-colors hover:bg-accent hover:text-accent-foreground max-sm:size-8 max-sm:p-0 max-sm:has-[>svg]:px-0"
           >
             <Globe aria-hidden="true" className="size-4 shrink-0" />
-            <span className="hidden max-w-[100px] truncate text-xs sm:inline" lang={locale}>
+            <span className="hidden max-w-[100px] truncate text-sm font-medium sm:inline" lang={locale}>
               {localeNames[locale]}
             </span>
           </Button>

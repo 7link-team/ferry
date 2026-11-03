@@ -120,5 +120,7 @@
   "request.jsonContentType": "Hantar permintaan dengan Content-Type: application/json.",
   "request.body": "Badan permintaan tidak dapat dibaca atau melebihi had saiz.",
   "request.query": "Parameter pertanyaan URL tidak sah.",
-  "request.path": "Parameter laluan URL tidak sah."
+  "request.path": "Parameter laluan URL tidak sah.",
+  "execution.capacityWaiting": "Tugas {job} sedang menunggu kapasiti pelaksanaan.",
+  "execution.executorAssigned": "Tugas {job} ditugaskan kepada hos {host}."
 }

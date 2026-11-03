@@ -126,6 +126,13 @@ pub fn validate(kind: &str, raw: &str, schema: &str) -> Result<TypedValue> {
                 {
                     return Err(invalid("typed.optionsInvalid"));
                 }
+                if item.get("color").is_some_and(|color| {
+                    color
+                        .as_str()
+                        .is_none_or(|color| !valid_option_color(color))
+                }) {
+                    return Err(invalid("typed.optionsInvalid"));
+                }
             }
             if options.len() > 200 {
                 return Err(invalid("typed.optionsTooMany"));
@@ -199,11 +206,23 @@ pub fn validate(kind: &str, raw: &str, schema: &str) -> Result<TypedValue> {
     Ok(TypedValue { value, schema })
 }
 
+fn valid_option_color(color: &str) -> bool {
+    color.strip_prefix('#').is_some_and(|hex| {
+        matches!(hex.len(), 3 | 6) && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
 pub fn options(value: &Value) -> Value {
-    json!(value.as_array().into_iter().flatten().map(|item| json!({
-        "value":item.get("value").or_else(|| item.get("key")).and_then(Value::as_str).unwrap_or_default(),
-        "label":item["label"].as_str().unwrap_or_default()
-    })).collect::<Vec<_>>())
+    json!(value.as_array().into_iter().flatten().map(|item| {
+        let mut option = json!({
+            "value":item.get("value").or_else(|| item.get("key")).and_then(Value::as_str).unwrap_or_default(),
+            "label":item["label"].as_str().unwrap_or_default()
+        });
+        if let Some(color) = item.get("color").and_then(Value::as_str).filter(|color| valid_option_color(color)) {
+            option["color"] = json!(color);
+        }
+        option
+    }).collect::<Vec<_>>())
 }
 
 pub fn summary(raw: &str) -> String {
@@ -270,6 +289,31 @@ mod tests {
                 }
             })
             .await;
+        }
+    }
+
+    #[test]
+    fn option_colors_validate_and_survive_legacy_key_normalization() {
+        for kind in ["tab", "selection"] {
+            let value = validate(kind, r##"[{"key":"online","label":"Online","color":"#1aB"},{"value":"offline","label":"Offline","color":"#123aBC"},{"value":"unknown","label":"Unknown"}]"##, "{}").unwrap();
+            let options = options(&value.value);
+            assert_eq!(
+                options[0],
+                json!({"value":"online","label":"Online","color":"#1aB"})
+            );
+            assert_eq!(options[1]["color"], "#123aBC");
+            assert!(options[2].get("color").is_none());
+            for color in [
+                json!("red"),
+                json!("#12"),
+                json!("#12345678"),
+                json!("url(x)"),
+                json!(null),
+                json!(42),
+            ] {
+                let raw = json!([{"value":"online","label":"Online","color":color}]);
+                assert!(validate(kind, &raw.to_string(), "{}").is_err());
+            }
         }
     }
 

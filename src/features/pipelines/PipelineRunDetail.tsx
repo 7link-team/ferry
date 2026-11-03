@@ -1,3 +1,4 @@
+import { Badge } from "../../shared/ui/badge";
 import { Tabs } from "radix-ui";
 import { ChevronDown,ChevronRight } from "lucide-react";
 import { memo,useEffect,useLayoutEffect,useRef,useState } from "react";
@@ -5,9 +6,14 @@ import { api,errorText } from "../../shared/api/api";
 import { base,named } from "../../shared/api/resource";
 import { executionText,useCommonTranslation } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
-import { Badge } from "../../shared/ui/badge";
+import { DictionaryState } from "../maintenance/DictionaryState";
 import { Button } from "../../shared/ui/button";
 import { duration,isActive,mergeLogs,stateBadge,type LogPage,type PipelineRun,type RunLog } from "./pipeline";
+
+function PipelineState({ value }: { value: string }) {
+  const { label, ...props } = stateBadge(value);
+  return <DictionaryState dictionary="pipeline-state" value={value}><Badge {...props}>{label}</Badge></DictionaryState>;
+}
 
 const CANCEL_NOTICE = "run.stopNotice";
 
@@ -120,7 +126,6 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
     }
   };
 
-  const badge = stateBadge(run?.state ?? "queued");
   const currentJob = run?.jobs?.find(job => job.key === selectedJob) ?? run?.jobs?.find(job => job.state === "failed" || job.state === "running" || job.state === "waiting") ?? run?.jobs?.[0];
   const visibleSteps = currentJob?.step_indices ? run?.steps.filter(step => currentJob.step_indices!.includes(step.index)) ?? [] : run?.steps ?? [];
   const otherLogs = logs.filter(log => log.step_index < 0);
@@ -131,7 +136,7 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
         <section aria-label={executionText("run.summary")} className="max-h-[35dvh] shrink-0 space-y-3 overflow-auto overscroll-contain rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="font-semibold">{executionText("run.number", { number: run.number })}</h2>
-            <Badge variant={badge.variant} className={badge.className}>{badge.label}</Badge>
+            <PipelineState value={run.state} />
             {isActive(run.state) && permissions.has("pipelines.run") && (
               <Button variant="outline" size="sm" disabled={busy || run.state === "cancelling"} onClick={() => void cancel()}>
                 {busy ? executionText("run.submitting") : run.state === "cancelling" ? executionText("run.cancelling") : actions ? executionText("run.cancel") : executionText("run.stopWaiting")}
@@ -169,18 +174,16 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
           <aside aria-label={executionText("run.jobList")} className="max-h-32 min-h-0 overflow-y-auto overscroll-contain border-b bg-muted/30 p-3 lg:max-h-none lg:border-b-0 lg:border-r" tabIndex={0}>
             <h2 className="mb-2 px-2 text-sm font-semibold">{executionText("shared.resource.cron.task")}</h2>
             <div className="space-y-1">{run.jobs?.map(job => {
-              const status = stateBadge(job.state);
-              return <button key={job.key} type="button" className={`flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent ${currentJob?.key === job.key ? "bg-accent font-medium" : ""}`} aria-current={currentJob?.key === job.key ? "true" : undefined} onClick={() => setSelectedJob(job.key)}><span className="min-w-0 truncate">{job.name || job.key}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge></button>;
+              return <button key={job.key} type="button" className={`flex w-full items-center justify-between gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent ${currentJob?.key === job.key ? "bg-accent font-medium" : ""}`} aria-current={currentJob?.key === job.key ? "true" : undefined} onClick={() => setSelectedJob(job.key)}><span className="min-w-0 truncate">{job.name || job.key}</span><PipelineState value={job.state} /></button>;
             })}</div>
           </aside>
           <section aria-label={executionText("run.stepsAndLogs")} className="min-h-0 min-w-0 overflow-y-auto overscroll-contain p-3 sm:p-4" tabIndex={0}>
             <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="font-semibold">{currentJob?.name || currentJob?.key || executionText("run.steps")}</h2>{currentJob && <span className="text-xs text-muted-foreground">{duration(currentJob.started_at, currentJob.finished_at)}</span>}{complete && <span className="text-xs text-muted-foreground">{executionText("run.logsLoaded")}</span>}{currentJob && run.environments?.[currentJob.key] && <span className="text-xs text-muted-foreground">{executionText("run.environmentPrefix")}{/^https?:\/\//.test(run.environments[currentJob.key]!.url) ? <a className="underline" href={run.environments[currentJob.key]!.url} target="_blank" rel="noreferrer">{run.environments[currentJob.key]!.name}</a> : run.environments[currentJob.key]!.name}{run.environments[currentJob.key]!.approval ? executionText("run.approvalRequired") : ""}</span>}{currentJob?.state === "waiting" && permissions.has("pipelines.run") && <Button type="button" size="sm" disabled={busy} onClick={() => void approve(currentJob.key)}>{run.environments?.[currentJob.key]?.approval ? executionText("run.approveDeployment") : executionText("run.confirmContinue")}</Button>}</div>
             <div className="divide-y border-y">{visibleSteps.map(step => {
-              const status = stateBadge(step.state);
               const stepName = currentJob && step.name.startsWith(`${currentJob.name || currentJob.key} / `) ? step.name.slice((currentJob.name || currentJob.key).length + 3) : step.name;
               const chunks = logs.filter(log => log.step_index === step.index);
               const expanded = expandedSteps[step.index] ?? (step.state === "failed" || step.state === "running" || chunks.length > 0);
-              return <div key={step.index}><button type="button" className="flex w-full items-center gap-2 px-2 py-3 text-left text-sm hover:bg-accent" aria-expanded={expanded} onClick={() => setExpandedSteps(current => ({ ...current, [step.index]: !expanded }))}>{expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}<span className="min-w-0 flex-1 truncate">{stepName}</span><Badge variant={status.variant} className={status.className}>{status.label}</Badge><span className="text-xs text-muted-foreground">{duration(step.started_at, step.finished_at)}</span></button>{expanded && <div ref={step.index === visibleSteps[0]?.index ? scroll : undefined} role="region" aria-label={step.index === visibleSteps[0]?.index ? executionText("run.executionLogs") : executionText("run.stepLogs", { name: stepName })} className="max-h-[32rem] min-h-16 overflow-auto overscroll-contain border-t bg-background px-3 py-2 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{chunks.length ? chunks.map(log => <LogChunk key={log.seq} log={log} />) : <span className="text-muted-foreground">{executionText("run.noLogs")}</span>}{step.exit_code !== null && <p className="mt-2 text-muted-foreground">{executionText("run.exitCodeValue", { code: step.exit_code })}</p>}</div>}</div>;
+              return <div key={step.index}><button type="button" className="flex w-full items-center gap-2 px-2 py-3 text-left text-sm hover:bg-accent" aria-expanded={expanded} onClick={() => setExpandedSteps(current => ({ ...current, [step.index]: !expanded }))}>{expanded ? <ChevronDown className="size-4 shrink-0" /> : <ChevronRight className="size-4 shrink-0" />}<span className="min-w-0 flex-1 truncate">{stepName}</span><PipelineState value={step.state} /><span className="text-xs text-muted-foreground">{duration(step.started_at, step.finished_at)}</span></button>{expanded && <div ref={step.index === visibleSteps[0]?.index ? scroll : undefined} role="region" aria-label={step.index === visibleSteps[0]?.index ? executionText("run.executionLogs") : executionText("run.stepLogs", { name: stepName })} className="max-h-[32rem] min-h-16 overflow-auto overscroll-contain border-t bg-background px-3 py-2 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{chunks.length ? chunks.map(log => <LogChunk key={log.seq} log={log} />) : <span className="text-muted-foreground">{executionText("run.noLogs")}</span>}{step.exit_code !== null && <p className="mt-2 text-muted-foreground">{executionText("run.exitCodeValue", { code: step.exit_code })}</p>}</div>}</div>;
             })}</div>
             {otherLogs.length > 0 && <div className="mt-4"><h3 className="mb-2 text-sm font-medium">{executionText("run.runtimeLogs")}</h3><div ref={!visibleSteps.length ? scroll : undefined} role="region" aria-label={executionText("run.runtimeLogs")} tabIndex={0} className="max-h-64 min-h-20 overflow-auto overscroll-contain border bg-background p-3 font-mono text-xs leading-5" onScroll={() => { const el = scroll.current; if (el) follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 32; }}>{otherLogs.map(log => <LogChunk key={log.seq} log={log} />)}</div></div>}
             {!visibleSteps.length && otherLogs.length === 0 && <p className="py-6 text-sm text-muted-foreground">{currentJob?.state === "waiting" ? (run.environments?.[currentJob.key]?.approval ? executionText("run.waitDeployment", { name: run.environments[currentJob.key]!.name }) : executionText("run.waitApproval")) : complete ? executionText("run.noStepLogs") : executionText("run.waitJob")}</p>}

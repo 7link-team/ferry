@@ -120,5 +120,7 @@
   "request.jsonContentType": "请使用 Content-Type: application/json 发送请求。",
   "request.body": "无法读取请求正文，或正文超出大小限制。",
   "request.query": "URL 查询参数无效。",
-  "request.path": "URL 路径参数无效。"
+  "request.path": "URL 路径参数无效。",
+  "execution.capacityWaiting": "任务 {job} 正在等待可用执行容量。",
+  "execution.executorAssigned": "任务 {job} 已分配至主机 {host}。"
 }

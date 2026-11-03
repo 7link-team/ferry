@@ -178,7 +178,19 @@
     "run.configurationSnapshotHelp": "Saved when this run was triggered. Later pipeline edits do not change this snapshot. Secret variable values are not displayed.",
     "run.workflowSnapshot": "Workflow snapshot",
     "run.executionBindings": "Execution bindings",
-    "run.snapshotUnavailable": "This historical run has no available configuration snapshot."
+    "run.snapshotUnavailable": "This historical run has no available configuration snapshot.",
+    "hostExecution.title": "Execution capacity",
+    "hostExecution.section": "Pipeline execution resources",
+    "hostExecution.enabled": "Accept pipeline jobs",
+    "hostExecution.shared": "Include in shared pool",
+    "hostExecution.capacity": "Concurrent jobs",
+    "hostExecution.disabled": "Disabled",
+    "hostExecution.draining": "Draining",
+    "hostExecution.busy": "Busy",
+    "hostExecution.available": "Available",
+    "hostExecution.unavailable": "Unavailable",
+    "editor.sharedPool": "Shared pool",
+    "editor.sharedPoolHelp": "Automatically match online shared hosts by operating system, architecture and labels. Wait when capacity is occupied."
   },
   "zh-CN": {
     "editor.dragJob": "拖动任务",
@@ -359,7 +371,19 @@
     "run.configurationSnapshotHelp": "保存于本次运行触发时，后续修改流水线不会改变此快照。不展示密钥变量值。",
     "run.workflowSnapshot": "工作流快照",
     "run.executionBindings": "执行绑定",
-    "run.snapshotUnavailable": "此历史运行没有可用的配置快照。"
+    "run.snapshotUnavailable": "此历史运行没有可用的配置快照。",
+    "hostExecution.title": "执行容量",
+    "hostExecution.section": "流水线执行资源",
+    "hostExecution.enabled": "接收流水线任务",
+    "hostExecution.shared": "加入共享执行池",
+    "hostExecution.capacity": "并发任务数",
+    "hostExecution.disabled": "已停用",
+    "hostExecution.draining": "排空中",
+    "hostExecution.busy": "繁忙",
+    "hostExecution.available": "可接单",
+    "hostExecution.unavailable": "不可用",
+    "editor.sharedPool": "共享执行池",
+    "editor.sharedPoolHelp": "按操作系统、架构和标签自动匹配在线共享主机；容量占满时排队等待。"
   },
   "zh-TW": {
     "editor.dragJob": "拖動任務",
@@ -540,7 +564,19 @@
     "run.configurationSnapshotHelp": "儲存於本次執行觸發時，後續修改流水線不會改變此快照。不顯示機密變數值。",
     "run.workflowSnapshot": "工作流程快照",
     "run.executionBindings": "執行綁定",
-    "run.snapshotUnavailable": "此歷史執行沒有可用的設定快照。"
+    "run.snapshotUnavailable": "此歷史執行沒有可用的設定快照。",
+    "hostExecution.title": "執行容量",
+    "hostExecution.section": "流水線執行資源",
+    "hostExecution.enabled": "接收流水線任務",
+    "hostExecution.shared": "加入共享執行池",
+    "hostExecution.capacity": "並行任務數",
+    "hostExecution.disabled": "已停用",
+    "hostExecution.draining": "排空中",
+    "hostExecution.busy": "忙碌",
+    "hostExecution.available": "可接單",
+    "hostExecution.unavailable": "無法使用",
+    "editor.sharedPool": "共享執行池",
+    "editor.sharedPoolHelp": "依作業系統、架構及標籤自動匹配線上共享主機；容量已滿時排隊等候。"
   },
   "ja-JP": {
     "editor.dragJob": "ジョブをドラッグ",
@@ -721,7 +757,19 @@
     "run.configurationSnapshotHelp": "実行開始時に保存された設定です。以後の変更は反映されません。機密変数の値は表示しません。",
     "run.workflowSnapshot": "ワークフロースナップショット",
     "run.executionBindings": "実行バインディング",
-    "run.snapshotUnavailable": "この過去の実行には設定スナップショットがありません。"
+    "run.snapshotUnavailable": "この過去の実行には設定スナップショットがありません。",
+    "hostExecution.title": "実行容量",
+    "hostExecution.section": "パイプライン実行リソース",
+    "hostExecution.enabled": "パイプラインジョブを受け付ける",
+    "hostExecution.shared": "共有プールに追加",
+    "hostExecution.capacity": "同時実行ジョブ数",
+    "hostExecution.disabled": "無効",
+    "hostExecution.draining": "ドレイン中",
+    "hostExecution.busy": "使用中",
+    "hostExecution.available": "受付可能",
+    "hostExecution.unavailable": "利用不可",
+    "editor.sharedPool": "共有プール",
+    "editor.sharedPoolHelp": "OS、アーキテクチャ、ラベルでオンラインの共有ホストを選択します。容量不足時は待機します。"
   },
   "ko-KR": {
     "editor.dragJob": "작업 드래그",
@@ -902,7 +950,19 @@
     "run.configurationSnapshotHelp": "실행 시작 시 저장된 설정입니다. 이후 변경은 반영되지 않으며 비밀 변수 값은 표시하지 않습니다.",
     "run.workflowSnapshot": "워크플로 스냅샷",
     "run.executionBindings": "실행 바인딩",
-    "run.snapshotUnavailable": "이 과거 실행에는 설정 스냅샷이 없습니다."
+    "run.snapshotUnavailable": "이 과거 실행에는 설정 스냅샷이 없습니다.",
+    "hostExecution.title": "실행 용량",
+    "hostExecution.section": "파이프라인 실행 리소스",
+    "hostExecution.enabled": "파이프라인 작업 수신",
+    "hostExecution.shared": "공유 풀에 포함",
+    "hostExecution.capacity": "동시 작업 수",
+    "hostExecution.disabled": "비활성",
+    "hostExecution.draining": "비우는 중",
+    "hostExecution.busy": "사용 중",
+    "hostExecution.available": "수신 가능",
+    "hostExecution.unavailable": "사용 불가",
+    "editor.sharedPool": "공유 풀",
+    "editor.sharedPoolHelp": "운영체제, 아키텍처 및 레이블로 온라인 공유 호스트를 선택합니다. 용량이 가득 차면 대기합니다."
   },
   "ms-MY": {
     "editor.dragJob": "Seret tugas",
@@ -1083,6 +1143,18 @@
     "run.configurationSnapshotHelp": "Disimpan ketika pelaksanaan dicetuskan. Perubahan saluran paip kemudian tidak mengubah gambaran ini. Nilai pemboleh ubah rahsia tidak dipaparkan.",
     "run.workflowSnapshot": "Gambaran aliran kerja",
     "run.executionBindings": "Ikatan pelaksanaan",
-    "run.snapshotUnavailable": "Pelaksanaan terdahulu ini tiada gambaran konfigurasi."
+    "run.snapshotUnavailable": "Pelaksanaan terdahulu ini tiada gambaran konfigurasi.",
+    "hostExecution.title": "Kapasiti pelaksanaan",
+    "hostExecution.section": "Sumber pelaksanaan saluran",
+    "hostExecution.enabled": "Terima tugas saluran",
+    "hostExecution.shared": "Sertakan dalam kumpulan kongsi",
+    "hostExecution.capacity": "Tugas serentak",
+    "hostExecution.disabled": "Dilumpuhkan",
+    "hostExecution.draining": "Mengosongkan",
+    "hostExecution.busy": "Sibuk",
+    "hostExecution.available": "Tersedia",
+    "hostExecution.unavailable": "Tidak tersedia",
+    "editor.sharedPool": "Kumpulan kongsi",
+    "editor.sharedPoolHelp": "Padankan hos kongsi dalam talian mengikut sistem operasi, seni bina dan label. Tunggu apabila kapasiti penuh."
   }
 }

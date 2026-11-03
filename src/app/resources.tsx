@@ -1,3 +1,4 @@
+import { DictionaryState, stateDictionary } from "../features/maintenance/DictionaryState";
 import { activityLists } from "../features/activity/resource-config";
 import { alertsForms, alertsLists } from "../features/alerts/resource-config";
 import {
@@ -65,8 +66,9 @@ export function listConfigs(
   permissions?: Set<string>,
   onChanged?: () => void,
   hostStates: Option[] = STATES,
+  dictionaries: Record<string, Option[]> = {},
 ): Record<string, ListConfig<AnyRow>> {
-  const context = { workspace, permissions, onChanged, hostStates, navigate };
+  const context = { workspace, permissions, onChanged, hostStates, dictionaries, navigate };
   const configs = {
     ...marketplaceLists(context),
     ...alertsLists(context),
@@ -89,6 +91,16 @@ export function listConfigs(
       key,
       {
         ...config,
+        ...(stateDictionary[key] && key !== "hosts" ? {
+          columns: config.columns.map(column => column.key === "state" ? {
+            ...column,
+            render: (row: AnyRow) => <DictionaryState dictionary={stateDictionary[key]!} value={String(row.state)}>{column.render ? column.render(row) : String(row.state)}</DictionaryState>,
+          } : column),
+          filters: (config.filters ?? []).map(filter => filter.key === "state" && dictionaries[stateDictionary[key]!] ? {
+            ...filter,
+            options: dictionaries[stateDictionary[key]!]!.map(option => ({ ...option, content: <DictionaryState dictionary={stateDictionary[key]!} value={option.value}>{option.label}</DictionaryState> })),
+          } : filter),
+        } : {}),
         toolbar: {
           ...config.toolbar,
           import: !config.endpoint && importResources.has(config.resource),

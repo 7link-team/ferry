@@ -1,3 +1,4 @@
+import { decodeTextFile, encodeTextFile, textFileLanguage, type TextEncoding } from "./text-file";
 import { AutoField,AutoForm } from "../../shared/forms/auto-form";
 import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
@@ -76,7 +77,8 @@ function FileKindIcon({ name }: { name: string }) {
   const Icon = fileIcon(name);
   return <Icon className="size-4 shrink-0 text-muted-foreground" />;
 }
-type Preview = { name: string; path: string; kind: "text" | "image"; value: string; original: string; url?: string };
+type Preview = { name: string; path: string; kind: "text" | "image"; value: string; original: string; url?: string; encoding?: TextEncoding; readOnly?: boolean };
+const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 const HostTerminal = lazy(() => import("./HostTerminal").then(module => ({ default: module.HostTerminal })));
 let nextPaneId = 0;
 
@@ -110,8 +112,10 @@ export function parent(dir: string) {
   return cut <= 0 ? "/" : dir.slice(0, cut);
 }
 
-export function HostFiles({ workspace, hostId, canTerminal = false, initialPath = "/", onOpenTerminal }: { workspace: string; hostId: string; canTerminal?: boolean; initialPath?: string; onOpenTerminal?: (directory: string) => void }) {
+export function HostFiles({ workspace, hostId, canTerminal = false, initialPath: requestedPath, active = true, onOpenTerminal }: { workspace: string; hostId: string; canTerminal?: boolean; initialPath?: string; active?: boolean; onOpenTerminal?: (directory: string) => void }) {
   useCommonTranslation();
+  const initialPath = useRef(requestedPath ?? (active ? new URLSearchParams(location.search).get("directory") : null) ?? "/").current;
+  const activeRef = useRef(active); activeRef.current = active;
   const paneId = useRef(++nextPaneId);
   const pagePath = useRef(location.pathname);
   const currentPath = useRef(initialPath);
@@ -174,9 +178,13 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         if (remember) setTrail(current => current.paths[current.index] === target ? current : {
           paths: [...current.paths.slice(0, current.index + 1), target], index: current.index + 1,
         });
-        if (remember && changed) {
+        if (activeRef.current && location.pathname === pagePath.current) {
+          const url = new URL(location.href);
+          url.searchParams.set("directory", target);
           const state = history.state ?? {};
-          history.pushState({ ...state, ferryFilePaths: { ...state.ferryFilePaths, [paneId.current]: target } }, "", location.href);
+          const next = { ...state, ferryFilePaths: { ...state.ferryFilePaths, [paneId.current]: target } };
+          if (remember && changed) history.pushState(next, "", url);
+          else history.replaceState(next, "", url);
         }
         return true;
       } catch (cause) {
@@ -212,7 +220,8 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
   useEffect(() => {
     const restore = (event: PopStateEvent) => {
       if (location.pathname !== pagePath.current) return;
-      const target = event.state?.ferryFilePaths?.[paneId.current] ?? initialPath;
+      if (!activeRef.current && !event.state?.ferryFilePaths?.[paneId.current]) return;
+      const target = event.state?.ferryFilePaths?.[paneId.current] ?? new URLSearchParams(location.search).get("directory") ?? initialPath;
       void load(target);
       setTrail(current => {
         const index = current.paths.indexOf(target);
@@ -222,6 +231,13 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, [initialPath, load]);
+  useEffect(() => {
+    if (!active || location.pathname !== pagePath.current) return;
+    const url = new URL(location.href);
+    url.searchParams.set("directory", currentPath.current);
+    url.searchParams.set("tool", "files");
+    history.replaceState(history.state, "", url);
+  }, [active]);
   const moveHistory = async (offset: number) => {
     const index = trail.index + offset;
     const target = trail.paths[index];
@@ -326,20 +342,21 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
         const type = entry.name.toLowerCase().endsWith(".png") ? "image/png" : entry.name.toLowerCase().endsWith(".webp") ? "image/webp" : entry.name.toLowerCase().endsWith(".gif") ? "image/gif" : entry.name.toLowerCase().endsWith(".bmp") ? "image/bmp" : "image/jpeg";
         setPreview({ name: entry.name, path: target, kind: "image", value: "", original: "", url: URL.createObjectURL(new Blob([bytes], { type })) });
       } else {
-        const value = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-        if (value.includes("\0")) throw new Error(hostRepositoryText("host-files.017"));
-        setPreview({ name: entry.name, path: target, kind: "text", value, original: value });
+        let decoded;
+        try { decoded = decodeTextFile(bytes); }
+        catch { throw new Error(hostRepositoryText("host-files.017")); }
+        setPreview({ name: entry.name, path: target, kind: "text", ...decoded, original: decoded.value });
       }
     } catch (cause) { setError(errorText(cause)); }
     finally { setPreviewing(""); }
   };
   const savePreview = async () => {
-    if (!preview || preview.kind !== "text") return;
+    if (!preview || preview.kind !== "text" || preview.readOnly) return;
     const saved = preview;
     setBusy(hostRepositoryText("host-files.018", {value1: preview.name})); setError("");
     try {
       const response = await localizedFetch(`${endpoint}/content?path=${encodeURIComponent(preview.path)}`, {
-        method: "PUT", headers: { "X-Ferry-Request": "1" }, body: new Blob([preview.value], { type: "text/plain;charset=utf-8" }),
+        method: "PUT", headers: { "X-Ferry-Request": "1" }, body: new Blob([encodeTextFile(preview.value, preview.encoding ?? "utf-8")], { type: "application/octet-stream" }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -505,12 +522,12 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath 
           <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <Dialog.Title className="min-w-0 flex-1 truncate text-sm font-semibold" title={preview?.path}>{preview?.name}</Dialog.Title>
             <Dialog.Description className="sr-only">{hostRepositoryText("host-files.060")}</Dialog.Description>
-            {preview?.kind === "text" && <Button size="sm" onClick={() => void savePreview()} disabled={!!busy || preview.value === preview.original}><Save className="size-4" />{hostRepositoryText("host-files.061")}</Button>}
+            {preview?.kind === "text" && <Button size="sm" onClick={() => void savePreview()} disabled={!!busy || preview.readOnly || preview.value === preview.original}><Save className="size-4" />{hostRepositoryText("host-files.061")}</Button>}
             <Button variant="ghost" size="icon" aria-label={hostRepositoryText("host-files.062")} onClick={closePreview}><X className="size-4" /></Button>
           </div>
           {error && <p role="alert" className="border-b px-3 py-2 text-sm text-destructive">{error}</p>}
           {preview?.kind === "image" ? <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4"><img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" /></div> :
-            <textarea aria-label={hostRepositoryText("host-files.063")} spellCheck={false} value={preview?.value ?? ""} onChange={event => setPreview(current => current ? { ...current, value: event.target.value } : current)} className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-sm leading-relaxed outline-none" />}
+            <div className="flex min-h-0 flex-1 flex-col">{preview?.readOnly && <p role="status" className="border-b px-3 py-2 text-sm text-muted-foreground">{hostRepositoryText("host-files.encodingReadOnly", { encoding: preview.encoding })}</p>}<div className="min-h-0 flex-1"><Suspense fallback={<Loader2 className="m-4 size-5 animate-spin" />}><CodeEditor value={preview?.value ?? ""} language={textFileLanguage(preview?.name ?? "")} path={`file:///hosts/${encodeURIComponent(workspace)}/${encodeURIComponent(hostId)}/${encodeURIComponent(preview?.path ?? "")}`} label={hostRepositoryText("host-files.063")} readOnly={preview?.readOnly ?? false} onChange={value => setPreview(current => current ? { ...current, value } : current)} /></Suspense></div></div>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

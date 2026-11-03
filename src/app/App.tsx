@@ -1,3 +1,4 @@
+import { DictionaryContext } from "../features/maintenance/DictionaryState";
 import { cn } from "cn";
 import { Loader2,LogOut } from "lucide-react";
 import { useEffect,useMemo,useState } from "react";
@@ -110,7 +111,7 @@ export function App() {
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
-    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<LanguageSwitcher />} />;
+    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<><LanguageSwitcher /><ThemeSwitcher /></>} />;
   }
   return <Workspace identity={identity} onSignedOut={reload} />;
 }
@@ -134,15 +135,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
       navigate({ ...route, workspace: workspaceId }, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
   }, [route.workspace, workspaceId]);
 
-  const [preferences, setPreferences] = useState<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>();
+  const [preferences, setPreferences] = useState<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>();
   const [preferencesError, setPreferencesError] = useState("");
   useEffect(() => {
     let live=true; setPreferences(undefined); setPreferencesError("");
-    if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string}[]>}>(`/workspaces/${workspaceId}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError(commonText("shell.preferencesFailed"));});
+    if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>(`/workspaces/${workspaceId}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError(commonText("shell.preferencesFailed"));});
     return ()=>{live=false;};
   },[workspaceId,route.item,route.mode]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, preferences?.dictionaries["host-state"]), [workspaceId, permissions, onSignedOut, preferences]);
+  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, preferences?.dictionaries["host-state"], preferences?.dictionaries), [workspaceId, permissions, onSignedOut, preferences]);
   const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions]);
 
   // Keep the form configuration stable while background preferences refresh.
@@ -191,7 +192,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     </div>;
 
   return (
-    <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
+    <DictionaryContext.Provider value={preferences?.dictionaries ?? {}}><div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
       <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
         <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           Ferry
@@ -203,8 +204,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
               {...to(g.key, menuTarget(findGroup(g.key)!, g.items[0]!).key)}
               aria-current={g.key === group.key ? "page" : undefined}
               className={cn(
-                "rounded-md px-3 py-1.5 text-sm transition-colors",
-                g.key === group.key ? "sidebar-active-item bg-sidebar-primary font-medium text-sidebar-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                g.key === group.key ? "sidebar-active-item bg-sidebar-primary font-semibold text-sidebar-primary-foreground" : "text-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >
               {g.label}
@@ -384,7 +385,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           )}
         </main>
       </div>
-    </div>
+    </div></DictionaryContext.Provider>
   );
 }
 

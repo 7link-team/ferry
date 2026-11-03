@@ -120,5 +120,7 @@
   "request.jsonContentType": "Send the request with Content-Type: application/json.",
   "request.body": "The request body could not be read or exceeds the size limit.",
   "request.query": "The URL query parameters are invalid.",
-  "request.path": "The URL path parameters are invalid."
+  "request.path": "The URL path parameters are invalid.",
+  "execution.capacityWaiting": "Job {job} is waiting for execution capacity.",
+  "execution.executorAssigned": "Job {job} was assigned to host {host}."
 }

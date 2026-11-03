@@ -103,12 +103,12 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/new`);
   await command.waitFor();
   await page.getByRole('tab', { name: 'SSH', exact: true }).click();
-  assert.equal(await page.getByRole('tab', { name: '代理 Runner' }).count(), 1);
+  assert.equal(await page.getByRole('tab', { name: '主机代理' }).count(), 1);
   assert.equal(await page.getByRole('tab', { name: 'SSH', exact: true }).getAttribute('aria-selected'), 'true');
   await page.getByRole('textbox', { name: /主机地址/ }).waitFor();
-  await page.getByRole('tab', { name: '代理 Runner' }).click();
+  await page.getByRole('tab', { name: '主机代理' }).click();
   await command.waitFor();
-  assert.equal(await page.getByRole('tab', { name: '代理 Runner' }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('tab', { name: '主机代理' }).getAttribute('aria-selected'), 'true');
   console.log('PASS new host switches Runner to SSH and back with the tabs retained');
 
   permissions = ['pipelines.read', 'pipelines.create', 'pipeline-groups.read'];

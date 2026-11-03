@@ -500,14 +500,13 @@ pub(super) async fn refresh_repository(
     let parents = selections::Entity::find()
         .filter(selections::Column::WorkspaceId.eq(source.workspace_id))
         .filter(selections::Column::ConnectionId.eq(source.connection_id))
-        .filter(
-            sea_orm::Condition::any()
-                .add(selections::Column::AllRepositories.eq(1))
-                .add(selections::Column::Repository.eq(&source.remote_path)),
-        )
         .all(tx)
         .await?
         .into_iter()
+        .filter(|row| {
+            row.all_repositories != 0
+                || super::repository_matches(&row.repository, &source.remote_path)
+        })
         .map(|row| row.insight_id)
         .collect::<BTreeSet<_>>();
     for insight in code_insights::Entity::find()

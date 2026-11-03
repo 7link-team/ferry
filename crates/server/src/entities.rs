@@ -443,6 +443,7 @@ pub mod deployments {
         pub id: i64,
         pub workspace_id: i64,
         pub name: String,
+        pub category: String,
         pub manifest: String,
         pub preview_artifact: String,
         pub mode: String,
@@ -1383,6 +1384,42 @@ pub mod code_insight_identity_links {
         pub identity_id: i64,
         pub workspace_id: i64,
         pub contributor_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// Execution policy is independent of transport/enrolment state.
+pub mod host_execution_policies {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "host_execution_policies")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub host_id: i64,
+        pub workspace_id: i64,
+        pub enabled: bool,
+        pub shared: bool,
+        pub capacity: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod host_execution_slots {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "host_execution_slots")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub host_id: i64,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub slot: i64,
+        pub owner: String,
+        pub run_id: i64,
+        pub job_key: String,
+        pub expires_at: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

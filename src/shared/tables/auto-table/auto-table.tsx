@@ -61,6 +61,7 @@ function AutoTableInner<T>(
   const selectionOffset = options.selectable ? 1 : 0;
   const offset = selectionOffset + (options.showSequence ? 1 : 0);
   const count = offset + columns.length + (hasActions ? 1 : 0);
+  const sticky = { ...options.sticky, left: Math.max(options.sticky?.left ?? 0, offset) };
   const actionWidth =
     options.actionWidth ?? getActionColumnWidth(options.actions?.length ?? 0);
   const widths = [
@@ -75,7 +76,7 @@ function AutoTableInner<T>(
     columns[index - offset]?.width
       ? { width: widths[index], minWidth: widths[index] }
       : {}),
-    ...stickyCellStyle(index, count, widths, options.sticky, header),
+    ...stickyCellStyle(index, count, widths, sticky, header),
   });
   const cellClass = (_index: number, header = false) =>
     cn(

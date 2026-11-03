@@ -1450,3 +1450,35 @@ async fn failed_worker_finalization_preserves_revoked_source_visibility() {
     assert_eq!(job(&s).await.completed_generation, 0);
     assert_eq!(locks::Entity::find().count(&s.db).await.unwrap(), 0);
 }
+
+#[test]
+fn dynamic_groups_match_descendants_and_preserve_shared_history() {
+    let mut config = Config {
+        enabled: true,
+        all_repositories: false,
+        repositories: vec!["team/mobile/*".into()],
+        event_repositories: Some(vec!["team/mobile/*".into()]),
+        ..Default::default()
+    };
+    for path in ["team/mobile/app", "team/mobile/new/repo"] {
+        assert!(config.selects(path));
+        assert!(config.event_selects(path));
+    }
+    for path in ["team/mobile", "team/mobiles/app", "other/team/mobile/app"] {
+        assert!(!config.selects(path));
+        assert!(!config.event_selects(path));
+    }
+    config.coverage_starts.insert("team/mobile/*".into(), 100);
+    config.coverage_starts.insert("team/mobile/app".into(), 200);
+    assert_eq!(config.required_coverage_start("team/mobile/app", 999), 100);
+    assert_eq!(
+        config.required_coverage_start("team/mobile/new/repo", 999),
+        100
+    );
+    assert_eq!(config.required_coverage_start("team/mobiles/app", 999), 999);
+    config.coverage_starts.insert("team/*".into(), 0);
+    assert_eq!(
+        config.required_coverage_start("team/mobile/new/repo", 999),
+        0
+    );
+}

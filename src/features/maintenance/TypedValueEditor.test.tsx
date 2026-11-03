@@ -86,13 +86,27 @@ it("edits and reorders options while keeping legacy items synchronized", async (
   expect(blocked).toHaveBeenLastCalledWith(false);
   await click("删除选项 3"); expect(parseJson<unknown[]>(saved.value_json, [])).toHaveLength(2);
 });
-it("locks host-state keys and deletions but permits label editing and ordering", async () => {
-  await act(async () => root.render(<Harness initial={{ key: "host-state", builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online"},{"value":"offline","label":"Offline"}]' }} />));
+it.each(["host-state", "pipeline-state", "deployment-state", "cron-state", "alert-state", "repository-state", "insight-state"])("locks %s keys and deletions but permits labels and ordering", async (key) => {
+  await act(async () => root.render(<Harness initial={{ key, builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online"},{"value":"offline","label":"Offline"}]' }} />));
   expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')!.disabled).toBe(true);
   expect(host.querySelector<HTMLButtonElement>('[aria-label="删除选项 1"]')!.disabled).toBe(true);
   expect(host.textContent).not.toContain("添加选项");
   await fill("选项 1 显示名称", "Connected"); await click("下移选项 1");
   expect(parseJson<Record<string, string>[]>(saved.value_json, [])[1]!.label).toBe("Connected");
+});
+it("edits and clears controlled-state colors without losing them on label edits or reordering", async () => {
+  await act(async () => root.render(<Harness initial={{ key: "host-state", builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online","color":"#123456"},{"value":"offline","label":"Offline"}]' }} />));
+  await fill("选项 1 显示名称", "Connected");
+  expect(JSON.parse(saved.value_json!)[0].color).toBe("#123456");
+  await fill("选项 1 显示名称 颜色", "#abcdef");
+  expect(JSON.parse(saved.value_json!)[0]).toEqual({ value: "online", label: "Connected", color: "#abcdef" });
+  expect(saved.items).toBe(saved.value_json);
+  await click("下移选项 1");
+  expect(JSON.parse(saved.value_json!)[1].color).toBe("#abcdef");
+  await click("清空 选项 2 显示名称 颜色");
+  expect(JSON.parse(saved.value_json!)[1]).toEqual({ value: "online", label: "Connected" });
+  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 2 值"]')!.disabled).toBe(true);
+  expect(typedValueError("selection", '[{"value":"online","label":"Online","color":"url(x)"}]', {})).not.toBe("");
 });
 it("preserves an explicit zero constraint and can remove it", async () => {
   await act(async () => root.render(<Harness schema initial={{ value_type: "num", schema_json: "{}" }} />));

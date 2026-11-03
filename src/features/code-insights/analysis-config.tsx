@@ -1,3 +1,6 @@
+import { DictionaryState } from "../maintenance/DictionaryState";
+import { Tooltip } from "radix-ui";
+import { AnalysisTooltip, metricClass } from "./AnalysisTooltip";
 import { Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { Envelope } from "../../shared/api/resource";
@@ -22,6 +25,7 @@ export const analysisReports = [
   ["overview", "总览"],
   ["contributors", "贡献者"],
   ["ranking", "贡献排名"],
+  ["repositories", "仓库"],
   ["branches", "分支"],
   ["commits", "提交明细"],
   ["heatmap", "每日热力数据"],
@@ -130,6 +134,7 @@ export function AnalysisSummary({
       effectives: previous.effectives + Number(row.effectives ?? 0),
     });
   }
+  const seriesByDate = new Map((data.series ?? []).map(row => [String(row.period ?? row.date ?? ""), row]));
   const points = [...totals].sort(([a], [b]) => a.localeCompare(b));
   const authorName = (row: Row) =>
     String(row.nickname ?? row.name ?? insightText("未命名作者"));
@@ -160,6 +165,8 @@ export function AnalysisSummary({
           {
             commits: Number(row.commits ?? 0),
             effectives: Number(row.effectives ?? 0),
+            additions: Number(row.additions ?? 0),
+            deletions: Number(row.deletions ?? 0),
           },
         ]),
     ),
@@ -193,7 +200,7 @@ export function AnalysisSummary({
       ? Math.floor((last - start) / 86400000) + 1
       : 0;
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <Tooltip.Provider delayDuration={100}><div className="space-y-3 rounded-md border p-3">
       {reportCoverage && (
         <p role="status" className="text-sm">
           {insightText("coverageSummary", {
@@ -222,20 +229,27 @@ export function AnalysisSummary({
                   aria-label={insightText(
                     "每日提交热力图，深色表示更多提交，下方表格提供精确数值",
                   )}
-                  width={Math.max(280, Math.ceil(days / 7) * 16)}
-                  height="128"
+                  width={Math.max(340, 60 + Math.ceil(days / 7) * 16)}
+                  height="156"
                   className="text-primary"
                 >
+                  {Array.from({ length: 7 }, (_, index) => <text key={index} x="0" y={34 + index * 16} fill="var(--foreground)" fontSize="11">{new Intl.DateTimeFormat(currentLocale(), { weekday: "short", timeZone: "UTC" }).format(Date.UTC(2024, 0, 1 + index))}</text>)}
+                  {Array.from({ length: Math.ceil(days / 7) }, (_, week) => {
+                    const date = new Date(start + week * 7 * dayMs);
+                    if (week && date.getUTCMonth() === new Date(start + (week - 1) * 7 * dayMs).getUTCMonth()) return null;
+                    return <text key={week} x={60 + week * 16} y="14" fill="var(--foreground)" fontSize="11">{new Intl.DateTimeFormat(currentLocale(), { month: "short", year: "numeric", timeZone: "UTC" }).format(date)}</text>;
+                  })}
                   {Array.from({ length: days }, (_, index) => {
                     const date = new Date(start + index * 86400000)
                       .toISOString()
                       .slice(0, 10);
                     const commits = totals.get(date)?.commits ?? 0;
                     return (
-                      <rect
-                        key={date}
-                        x={Math.floor(index / 7) * 16}
-                        y={(index % 7) * 16}
+                      <AnalysisTooltip key={date} date={date} row={seriesByDate.get(date) ?? {}}><rect
+                        tabIndex={0}
+                        aria-label={date}
+                        x={60 + Math.floor(index / 7) * 16}
+                        y={24 + (index % 7) * 16}
                         width="12"
                         height="12"
                         rx="2"
@@ -245,7 +259,7 @@ export function AnalysisSummary({
                         <title>
                           {insightText("commitCount", { date, count: commits })}
                         </title>
-                      </rect>
+                      </rect></AnalysisTooltip>
                     );
                   })}
                 </svg>
@@ -255,17 +269,21 @@ export function AnalysisSummary({
                   aria-label={insightText(
                     "周期有效变更趋势，下方表格提供作者和周期精确数值",
                   )}
-                  viewBox="0 0 800 180"
-                  className="h-44 w-full text-primary"
+                  viewBox="0 0 800 220"
+                  className="h-56 min-w-[36rem] w-full text-primary"
                 >
                   <line
-                    x1="20"
+                    x1="60"
                     x2="780"
-                    y1="155"
-                    y2="155"
+                    y1="175"
+                    y2="175"
                     stroke="currentColor"
                     opacity="0.2"
                   />
+                  <line x1="60" x2="60" y1="20" y2="175" stroke="var(--foreground)" opacity="0.3" />
+                  {[...new Set(Array.from({ length: 5 }, (_, index) => Math.round(max * index / 4)))].map(value => <g key={value}><line x1="60" x2="780" y1={175 - value / max * 155} y2={175 - value / max * 155} stroke="var(--foreground)" opacity="0.12" /><text x="52" y={179 - value / max * 155} textAnchor="end" fill="var(--foreground)" fontSize="11">{value.toLocaleString()}</text></g>)}
+                  {points.filter((_, index) => index % Math.max(1, Math.ceil((points.length - 1) / 5)) === 0 || index === points.length - 1).map(([date]) => <text key={date} x={60 + points.findIndex(([key]) => key === date) / Math.max(1, points.length - 1) * 720} y="202" textAnchor={date === points[0]![0] ? "start" : date === points.at(-1)![0] ? "end" : "middle"} fill="var(--foreground)" fontSize="11">{date}</text>)}
+                  <text x="60" y="12" fill="var(--foreground)" fontSize="11">{insightText("有效变更")}</text>
                   {authorPoints.map((author, authorIndex) => (
                     <g
                       key={author.key}
@@ -281,7 +299,7 @@ export function AnalysisSummary({
                         points={points
                           .map(
                             ([date], index) =>
-                              `${20 + (index / Math.max(1, points.length - 1)) * 760},${145 - ((author.values.get(date)?.effectives ?? 0) / max) * 125}`,
+                              `${60 + (index / Math.max(1, points.length - 1)) * 720},${175 - ((author.values.get(date)?.effectives ?? 0) / max) * 155}`,
                           )
                           .join(" ")}
                       >
@@ -290,14 +308,15 @@ export function AnalysisSummary({
                       {points.map(([date], index) => {
                         const value = author.values.get(date);
                         return (
-                          <circle
-                            key={date}
+                          <AnalysisTooltip key={date} date={date} author={author.name} row={value ?? {}}><circle
+                            tabIndex={0}
+                            aria-label={`${author.name} ${date}`}
                             cx={
-                              20 +
-                              (index / Math.max(1, points.length - 1)) * 760
+                              60 +
+                              (index / Math.max(1, points.length - 1)) * 720
                             }
-                            cy={145 - ((value?.effectives ?? 0) / max) * 125}
-                            r="3"
+                            cy={175 - ((value?.effectives ?? 0) / max) * 155}
+                            r="5"
                           >
                             <title>
                               {insightText("trendPoint", {
@@ -307,26 +326,15 @@ export function AnalysisSummary({
                                 commits: value?.commits ?? 0,
                               })}
                             </title>
-                          </circle>
+                          </circle></AnalysisTooltip>
                         );
                       })}
                     </g>
                   ))}
-                  <text x="20" y="176" fill="currentColor" fontSize="12">
-                    {points[0]![0]}
-                  </text>
-                  <text
-                    x="780"
-                    y="176"
-                    textAnchor="end"
-                    fill="currentColor"
-                    fontSize="12"
-                  >
-                    {points[points.length - 1]![0]}
-                  </text>
                 </svg>
               )}
             </div>
+            {kind === "heatmap" && <div className="flex items-center gap-2 text-xs text-muted-foreground"><span>0</span>{[0.08, 0.25, 0.5, 0.75, 1].map(opacity => <span key={opacity} className="size-3 rounded-sm bg-primary" style={{ opacity }} />)}<span>{max.toLocaleString()} · {insightText("提交数")}</span></div>}
             {kind === "period" && (
               <ul
                 aria-label={insightText("趋势作者图例")}
@@ -362,7 +370,7 @@ export function AnalysisSummary({
             {insightText("尚无可绘制的已采集数据。")}
           </p>
         ))}
-    </div>
+    </div></Tooltip.Provider>
   );
 }
 
@@ -530,20 +538,11 @@ export function analysisConfig(
             span: 2,
             record: {
               title: (row) => String(row.repository ?? ""),
-              meta: (row) =>
-                insightText("sourceMeta", {
-                  state: analysisState(row.state),
-                  start: coverage(row.coverage_start),
-                  time: timestamp(row.synced_at),
-                }),
+              meta: (row) => <><DictionaryState dictionary="insight-state" value={String(row.state)}>{analysisState(row.state)}</DictionaryState> ? {coverage(row.coverage_start)} ? {timestamp(row.synced_at)}</>,
               body: (row) => {
                 const job = row.job as Row | undefined;
-                return [...new Set([
-                  job && analysisState(job.effective_state ?? job.state),
-                  row.last_error,
-                  job?.last_error,
-                ].filter(Boolean))]
-                  .join("\n");
+                const state = String(job?.effective_state ?? job?.state ?? "");
+                return <>{job && <DictionaryState dictionary="insight-state" value={state}>{analysisState(state)}</DictionaryState>}{[...new Set([row.last_error, job?.last_error].filter(Boolean))].map(error => <span key={String(error)} className="block">{String(error)}</span>)}</>;
               },
             },
           },
@@ -749,7 +748,7 @@ export function analysisReport(
       label: "有效变更",
       labelKey: "insight-domain:有效变更",
     },
-  ];
+  ].map(column => ({ ...column, render: (row: Row) => <span className={`font-medium tabular-nums ${metricClass(column.key)}`}>{Number(row[column.key] ?? 0).toLocaleString()}</span> }));
   return {
     resource: `code-contributions/${kind}`,
     permissionResource: scope === "insight" ? "code-insights" : "repositories",
@@ -821,30 +820,21 @@ export function analysisReport(
         : []),
     ],
     columns:
-      kind === "commits"
+      kind === "repositories"
+        ? [{ key: "repository", label: "仓库", labelKey: "insight-domain:仓库" }, { key: "contributors", label: "贡献者", labelKey: "insight-domain:贡献者" }, ...metrics]
+        : kind === "commits"
         ? [
             {
               key: "repository",
-              label: "仓库",
-              labelKey: "insight-domain:仓库",
-            },
-            {
-              key: "branches",
-              label: "分支",
-              labelKey: "insight-domain:分支",
-              render: (row) => lines(row.branches),
-            },
-            {
-              key: "commitHash",
-              label: "提交 SHA",
-              labelKey: "insight-domain:提交 SHA",
+              label: "\u4ed3\u5e93 / \u5206\u652f / SHA",
+              labelKey: "insight-domain:commitIdentity",
               render: (row) => {
                 const sha = (
                   <span className="font-mono" title={String(row.commitHash)}>
                     {String(row.commitHash)}
                   </span>
                 );
-                return typeof row.commitUrl === "string" &&
+                const link = typeof row.commitUrl === "string" &&
                   /^https?:\/\//i.test(row.commitUrl) ? (
                   <a
                     href={row.commitUrl}
@@ -860,6 +850,7 @@ export function analysisReport(
                 ) : (
                   sha
                 );
+                return <div className="space-y-1"><div className="font-medium">{String(row.repository ?? "\u2014")}</div><div className="text-xs text-muted-foreground">{lines(row.branches)}</div><div className="text-xs">{link}</div></div>;
               },
             },
             {
@@ -881,18 +872,9 @@ export function analysisReport(
             },
             {
               key: "nickname",
-              label: "作者昵称",
-              labelKey: "insight-domain:作者昵称",
-            },
-            {
-              key: "authorName",
-              label: "作者姓名",
-              labelKey: "insight-domain:作者姓名",
-            },
-            {
-              key: "authorEmail",
-              label: "作者邮箱",
-              labelKey: "insight-domain:作者邮箱",
+              label: "\u4f5c\u8005",
+              labelKey: "insight-domain:commitAuthor",
+              render: row => <div className="space-y-1"><div className="font-medium">{String(row.nickname || "\u2014")}</div><div className="text-xs text-muted-foreground">{String(row.authorName || "\u2014")}</div><div className="text-xs text-muted-foreground">{String(row.authorEmail || "\u2014")}</div></div>,
             },
             {
               key: "date",

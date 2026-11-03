@@ -120,5 +120,7 @@
   "request.jsonContentType": "Content-Type: application/json を指定してリクエストを送信してください。",
   "request.body": "リクエスト本文を読み取れないか、サイズ制限を超えています。",
   "request.query": "URL のクエリパラメーターが無効です。",
-  "request.path": "URL のパスパラメーターが無効です。"
+  "request.path": "URL のパスパラメーターが無効です。",
+  "execution.capacityWaiting": "ジョブ {job} は実行容量の空きを待っています。",
+  "execution.executorAssigned": "ジョブ {job} をホスト {host} に割り当てました。"
 }

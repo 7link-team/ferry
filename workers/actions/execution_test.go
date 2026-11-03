@@ -372,3 +372,45 @@ func TestDefaultCacheDirWithoutHome(t *testing.T) {
 		t.Fatalf("cache dir without HOME: %q", dir)
 	}
 }
+
+func TestRepositoryContextInferenceAndRepositoryFreeDiagnostics(t *testing.T) {
+	empty := t.TempDir()
+	if output, err := testCommandContext(context.Background(), "git", "-C", empty, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("empty git workdir: %v %s", err, output)
+	}
+	committed := repository(t)
+	gitValue := func(argument string) string {
+		t.Helper()
+		output, err := testCommandContext(context.Background(), "git", "-C", committed, argument, "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	actualRef, actualSHA := gitValue("symbolic-ref"), gitValue("rev-parse")
+	script := platformScript("echo 'value=${{ github.ref }}|${{ github.sha }}' >> \"$GITHUB_OUTPUT\"; echo '${{ github.ref }}|${{ github.sha }}'", "'value=${{ github.ref }}|${{ github.sha }}' >> $env:GITHUB_OUTPUT; Write-Output '${{ github.ref }}|${{ github.sha }}'")
+	workflow := "on: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    outputs:\n      value: ${{ steps.probe.outputs.value }}\n    steps:\n      - id: probe\n        run: |\n          " + script + "\n"
+	for _, tc := range []struct {
+		name, root, repository, value string
+		warn                          bool
+	}{
+		{name: "repository-free unborn workdir", root: empty, value: "|"},
+		{name: "real repository inference", root: committed, value: actualRef + "|" + actualSHA},
+		{name: "configured missing revision remains diagnostic", root: empty, repository: "owner/configured", warn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			result, err := execute(context.Background(), Request{Workflow: workflow, Job: "build", Workdir: tc.root, Repository: tc.repository, CacheDir: t.TempDir(), Platforms: map[string]string{"self-hosted": "-self-hosted"}}, &logs)
+			if err != nil || result.State != "success" {
+				t.Fatalf("result=%+v err=%v logs=%s", result, err, logs.String())
+			}
+			if !tc.warn && result.Outputs["value"] != tc.value {
+				t.Fatalf("inferred metadata=%q want=%q logs=%s", result.Outputs["value"], tc.value, logs.String())
+			}
+			warnings := strings.Count(logs.String(), "unable to get git ref") + strings.Count(logs.String(), "unable to get git revision")
+			if (warnings > 0) != tc.warn {
+				t.Fatalf("metadata warning count=%d expected warning=%v logs=%s", warnings, tc.warn, logs.String())
+			}
+		})
+	}
+}

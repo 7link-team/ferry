@@ -44,6 +44,7 @@ export function CodeInsightRepositories({
 }: Props & { enabled?: boolean }) {
   useTranslation("insight-domain");
   const selected = Array.isArray(value) ? (value as InsightRepository[]) : [];
+  const summary = (rows: InsightRepository[]) => insightText(rows.some(row => row.all_repositories || row.repository.endsWith("/*")) ? "selectedScopes" : "selectedRepositories", { count: rows.length });
   const canSelect = permissions.has("repositories.read");
   const [choice, setChoice] = useState({ connection_id: "", url: "" });
   const [group, setGroup] = useState("");
@@ -89,6 +90,14 @@ export function CodeInsightRepositories({
     setChoice((current) => ({ ...current, url: "" }));
   };
   const visible = data.repositories.filter(remote => (!group || remote.full_name.startsWith(group + "/")) && remote.full_name.toLowerCase().includes(search.trim().toLowerCase()));
+  const dynamicRepository = group ? `${group}/*` : "";
+  const dynamicSelected = selected.some(row => row.connection_id === choice.connection_id && (group ? row.repository === dynamicRepository : row.all_repositories));
+  const covered = (row: InsightRepository, path: string) => row.connection_id === choice.connection_id && (row.all_repositories || (row.repository.endsWith("/*") && path.startsWith(row.repository.slice(0, -1))));
+  const selectDynamic = (checked: boolean) => {
+    if (!data.connection || data.loading || data.error) return;
+    const remaining = selected.filter(row => row.connection_id !== choice.connection_id || (group ? row.repository !== dynamicRepository : !row.all_repositories));
+    onChange(checked ? [...remaining.filter(row => row.connection_id !== choice.connection_id || (group && !row.repository.startsWith(group + "/"))), { connection_id: choice.connection_id, repository: dynamicRepository, all_repositories: !group, pipeline_id: "", provider: data.connection.provider }] : remaining);
+  };
   const matches = (row: InsightRepository, remote: typeof data.repositories[number]) => row.connection_id === choice.connection_id && (row.repository === remote.full_name || row.repository === remote.url);
   const allVisible = visible.length > 0 && visible.every(remote => selected.some(row => matches(row, remote)));
   const toggle = (remotes: typeof data.repositories, checked: boolean) => {
@@ -108,12 +117,12 @@ export function CodeInsightRepositories({
           </span>
         </h3>
         <span className="rounded-md bg-secondary px-2 py-1 text-xs tabular-nums text-secondary-foreground">
-          {insightText("selectedRepositories", { count: selected.length })}
+          {summary(selected)}
         </span>
       </div>
       {selected.length > 0 && (
         <details open={readOnly} className="rounded-lg border p-3">
-        <summary className="cursor-pointer text-sm font-medium">{insightText("selectedRepositories", { count: selected.length })}</summary>
+        <summary className="cursor-pointer text-sm font-medium">{summary(selected)}</summary>
         <ul className="divide-y rounded-lg border">
           {selected.map((row, index) => (
             <li
@@ -137,7 +146,7 @@ export function CodeInsightRepositories({
                     <span className="font-medium">
                       {row.all_repositories
                         ? insightText("全部可见仓库")
-                        : row.repository}
+                        : row.repository.endsWith("/*") ? insightText("groupRepositories", { group: row.repository.slice(0, -2) }) : row.repository}
                     </span>
                   </p>
                 </div>
@@ -176,15 +185,17 @@ export function CodeInsightRepositories({
             repositoryPicker={<DropdownMenu>
               <SelectRefresh label={insightText("刷新仓库")} loading={data.loading} onRefresh={() => data.setRevision(value => value + 1)}>
                 <DropdownMenuTrigger asChild><Button type="button" variant="outline" className="h-10 w-full justify-between font-normal" aria-label={insightText("选择仓库")} disabled={data.loading || !!data.error}>
-                  <span className="truncate">{insightText("selectedRepositories", { count: selected.filter(row => row.connection_id === choice.connection_id).length })}</span><ChevronDown aria-hidden="true" className="size-4 shrink-0 opacity-50" />
+                  <span className="truncate">{summary(selected.filter(row => row.connection_id === choice.connection_id))}</span><ChevronDown aria-hidden="true" className="size-4 shrink-0 opacity-50" />
                 </Button></DropdownMenuTrigger>
               </SelectRefresh>
               <DropdownMenuContent align="start" className="w-[min(32rem,calc(100vw-3rem))] max-h-[min(28rem,65dvh)] overflow-y-auto p-1">
                 <div className="sticky top-0 z-10 space-y-2 border-b bg-popover p-2">
                   <Input aria-label={insightText("搜索仓库")} placeholder={insightText("搜索仓库")} value={search} onChange={event => setSearch(event.target.value)} onKeyDown={event => { event.stopPropagation(); if (event.key === "ArrowDown") { event.preventDefault(); event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus(); } }} />
+                  <DropdownMenuCheckboxItem checked={dynamicSelected} disabled={selected.some(row => row.connection_id === choice.connection_id && row.all_repositories) && !!group} onSelect={event => event.preventDefault()} onCheckedChange={checked => selectDynamic(!!checked)}>{group ? insightText("groupRepositories", { group }) : insightText("全部可见仓库")}</DropdownMenuCheckboxItem>
+                  <p className="px-2 text-xs text-muted-foreground">{insightText("dynamicRepositoriesHelp")}</p>
                   <DropdownMenuCheckboxItem checked={allVisible} disabled={!visible.length} onSelect={event => event.preventDefault()} onCheckedChange={() => toggle(visible, !allVisible)}>{insightText("选择当前结果（{{count}}）", { count: visible.length })}</DropdownMenuCheckboxItem>
                 </div>
-                {visible.map(remote => <DropdownMenuCheckboxItem key={remote.url} checked={selected.some(row => matches(row, remote))} onSelect={event => event.preventDefault()} onCheckedChange={checked => toggle([remote], !!checked)} className="break-all py-2">{remote.full_name}</DropdownMenuCheckboxItem>)}
+                {visible.map(remote => <DropdownMenuCheckboxItem key={remote.url} checked={selected.some(row => matches(row, remote) || covered(row, remote.full_name))} disabled={selected.some(row => covered(row, remote.full_name))} onSelect={event => event.preventDefault()} onCheckedChange={checked => toggle([remote], !!checked)} className="break-all py-2">{remote.full_name}</DropdownMenuCheckboxItem>)}
                 {!visible.length && <p role="status" className="p-4 text-sm text-muted-foreground">{insightText("暂无匹配仓库")}</p>}
               </DropdownMenuContent>
             </DropdownMenu>}
@@ -246,7 +257,7 @@ export function CodeInsightAliases({
           "将不同提交姓名或邮箱映射到同一昵称，统一贡献统计。仅影响当前洞察，不会重新采集代码。",
         )}
       </p>
-      {!readOnly && <Button type="button" size="sm" variant="outline" onClick={() => onChange([...aliases, { name: "", email: "", nickname: "" }])}><Plus aria-hidden="true" className="size-4" />{insightText("添加作者映射")}</Button>}
+      {!readOnly && !aliases.length && <Button type="button" size="sm" variant="outline" onClick={() => onChange([{ name: "", email: "", nickname: "" }])}><Plus aria-hidden="true" className="size-4" />{insightText("添加作者映射")}</Button>}
       </div>
       {aliases.length === 0 && (
         <p
@@ -260,8 +271,9 @@ export function CodeInsightAliases({
         {aliases.map((alias, index) => (
           <div
             key={index}
-            className="grid min-w-0 items-start gap-4 rounded-lg border p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto]"
+            className="grid min-w-0 items-start gap-4 rounded-lg border p-4 sm:grid-cols-2 lg:grid-cols-[auto_1fr_1fr_1fr_auto]"
           >
+            {!readOnly && <Button type="button" variant="ghost" size="icon" className="lg:mt-6" aria-label={insightText("insertAliasAfter", { index: index + 1 })} onClick={() => onChange([...aliases.slice(0, index + 1), { name: "", email: "", nickname: "" }, ...aliases.slice(index + 1)])}><Plus aria-hidden="true" className="size-4" /></Button>}
             {(
               [
                 ["name", "提交姓名"],

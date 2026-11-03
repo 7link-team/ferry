@@ -95,10 +95,10 @@ it("generates current-user commands without elevation, keeping system commands u
 });
 
 it("generates one-click uninstall commands for each platform and install scope", () => {
-  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "Runner 已卸载：注册和安装目录均已删除。"'`);
+  expect(runnerUninstallCommand("linux")).toBe(`sudo sh -c 'd="/var/lib/runner-agent"; if [ -x "$d/runner-service" ]; then "$d/runner-service" service uninstall --name runner-agent || exit 1; fi; rm -rf "$d" && [ ! -e "$d" ] && echo "主机代理 已卸载：注册和安装目录均已删除。"'`);
   // Success is reported in the window the command was pasted into, never silently.
   for (const platform of ["linux", "macos", "windows"] as const) for (const scope of ["system", "user"] as const)
-    expect(runnerUninstallCommand(platform, scope), `${platform}/${scope}`).toContain("Runner 已卸载");
+    expect(runnerUninstallCommand(platform, scope), `${platform}/${scope}`).toContain("主机代理 已卸载");
   expect(runnerUninstallCommand("macos", "system")).toBe(runnerUninstallCommand("linux", "system"));
   const linuxUser = runnerUninstallCommand("linux", "user");
   expect(linuxUser).toContain('d="$HOME/.local/state/runner-agent"');
@@ -176,7 +176,7 @@ try {
   Set-Content (Join-Path $root 'service.json') '{}'
   $env:FIXTURE_FAIL = '0'
   $reported = & { ${user} } 6>&1 | Out-String
-  if ($reported -notlike '*Runner 已卸载*') { throw "Success must be reported: $reported" }
+  if ($reported -notlike '*主机代理 已卸载*') { throw "Success must be reported: $reported" }
   if ((Get-Content $env:FIXTURE_ARGS) -ne 'service uninstall --name runner-agent --user') { throw 'Wrong uninstall arguments' }
   if (Test-Path -LiteralPath $root) { throw 'Installation directory must be removed' }
   # Not installed: succeeds without invoking anything.
@@ -255,7 +255,7 @@ Write-Output 'current-user command verified'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("current-user command verified");
-});
+}, 30000);
 
 it("accepts only HTTP(S) origins, without credentials, paths or query", () => {
   expect(runnerServerOrigin(" https://runner.example:8443/ ")).toBe("https://runner.example:8443");
@@ -490,7 +490,7 @@ Write-Output 'environment restored'
 `;
   const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(harness, "utf16le").toString("base64")], { encoding: "utf8", windowsHide: true, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath")) });
   expect(output).toContain("environment restored");
-});
+}, 30000);
 
 it("requires HTTPS for remote installation but permits exact loopback HTTP origins", () => {
   for (const origin of ["http://localhost:4290", "http://127.0.0.1:4290", "http://[::1]:4290"])

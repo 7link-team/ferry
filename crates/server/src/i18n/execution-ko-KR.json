@@ -120,5 +120,7 @@
   "request.jsonContentType": "Content-Type: application/json으로 요청을 보내세요.",
   "request.body": "요청 본문을 읽을 수 없거나 크기 제한을 초과했습니다.",
   "request.query": "URL 쿼리 매개변수가 유효하지 않습니다.",
-  "request.path": "URL 경로 매개변수가 유효하지 않습니다."
+  "request.path": "URL 경로 매개변수가 유효하지 않습니다.",
+  "execution.capacityWaiting": "작업 {job}이 실행 용량을 기다리고 있습니다.",
+  "execution.executorAssigned": "작업 {job}이 호스트 {host}에 할당되었습니다."
 }

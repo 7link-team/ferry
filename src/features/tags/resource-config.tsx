@@ -1,3 +1,6 @@
+import { TagBadge } from "./TagBadge";
+import { AutoField } from "../../shared/forms/auto-form";
+import { commonText } from "../../shared/i18n/i18n";
 import { deleteResource } from "../../shared/api/resource";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import {
@@ -16,7 +19,7 @@ export interface Tag {
 }
 
 export const tagOptions = (workspace: string) =>
-  namedOptions(workspace, "tags");
+  namedOptions<Tag>(workspace, "tags", tag => <TagBadge color={tag.color}>{tag.name}</TagBadge>);
 
 export function tagsLists({
   workspace,
@@ -85,7 +88,7 @@ export function tagsForms({}: ResourceConfigContext): Record<
     tags: form({
       resource: "tags",
       heading: (row: Tag) => row.name,
-      blank: { name: "", color: "" },
+      blank: { name: "", color: "#4f9cf9" },
       sections: [
         {
           fields: [
@@ -100,8 +103,9 @@ export function tagsForms({}: ResourceConfigContext): Record<
               key: "color",
               label: "颜色",
               labelKey: "resource-domain:tag.color",
-              type: "text",
-              placeholder: "#4f9cf9",
+              type: "custom",
+              render: ({ draft, readOnly, onPatch }) => <AutoField label={commonText("resource-domain:tag.color")}><div className="flex items-center gap-3"><input type="color" aria-label={commonText("resource-domain:tag.color")} className="h-10 w-14 cursor-pointer rounded-md border border-input bg-background p-1 disabled:cursor-default" value={/^#[\da-f]{6}$/i.test(draft.color ?? "") ? draft.color! : "#4f9cf9"} disabled={readOnly} onChange={event => onPatch({ color: event.target.value })} /><TagBadge color={draft.color}>{draft.name || commonText("common.name")}</TagBadge></div></AutoField>,
+
             },
           ],
         },

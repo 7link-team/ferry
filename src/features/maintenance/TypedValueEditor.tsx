@@ -3,10 +3,11 @@ import { lazy,Suspense,useEffect,useRef,useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api,errorText,localizedFetch } from "../../shared/api/api";
 import { AutoField } from "../../shared/forms/auto-form";
-import { typedText } from "../../shared/i18n/i18n";
+import { commonText,typedText } from "../../shared/i18n/i18n";
 import { useTheme } from "../../shared/theme/theme";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
+import { TagBadge } from "../tags/TagBadge";
 export { sanitizeRichText } from "./value-content";
 
 const Editor = lazy(async () => { await import("../../shared/editor/runtime"); return import("@monaco-editor/react"); });
@@ -55,6 +56,7 @@ export function typedValueError(type: string, raw: string, schema: Record<string
       const key = String(item?.value ?? item?.key ?? "");
       if (!key.trim() || !String(item?.label ?? "").trim()) return typedText("optionRequired");
       if (keys.has(key)) return typedText("optionDuplicate");
+      if (item.color !== undefined && (typeof item.color !== "string" || !/^#([\da-f]{3}|[\da-f]{6})$/i.test(item.color))) return typedText("optionRequired");
       keys.add(key);
     }
   } else if (isMedia(type)) {
@@ -116,7 +118,7 @@ export function TypedValueEditor(props: Props) {
   };
   const text = typeof value === "string" ? value : "";
   return <div className="min-w-0 space-y-3">
-    {isOptions(type) ? <OptionsEditor value={value} readOnly={readOnly} locked={!!draft.builtin && draft.key === "host-state"} onChange={emit} />
+    {isOptions(type) ? <OptionsEditor value={value} readOnly={readOnly} locked={!!draft.builtin && ["host-state", "pipeline-state", "deployment-state", "cron-state", "alert-state", "repository-state", "insight-state"].includes(draft.key ?? "")} onChange={emit} />
       : isMedia(type) ? <MediaEditor {...props} type={type} schema={schema} value={value} onChange={emit} onValidityChange={setUploadBusy} />
       : type === "num" ? <AutoField label={typedText("value")}><Input aria-label={typedText("value")} type="number" value={typeof value === "number" ? value : ""} min={schema.min as number | undefined} max={schema.max as number | undefined} step={schema.decimals === undefined ? "any" : 10 ** -Number(schema.decimals)} disabled={readOnly} onChange={event => { if (!event.target.value || !Number.isFinite(event.target.valueAsNumber)) { setRawError("invalidNumber"); onPatch({ value_json: "null" }); } else emit(event.target.valueAsNumber); }} /></AutoField>
       : type === "json" ? <CodeValue label={typedText("jsonValue")} value={raw} language="json" readOnly={readOnly} onChange={next => { setRawError(""); onPatch({ value_json: next }); }} />
@@ -132,13 +134,19 @@ function OptionsEditor({ value, readOnly, locked, onChange }: { value: unknown; 
   useTranslation("typed-domain");
   const items = Array.isArray(value) ? value as Record<string, unknown>[] : [];
   const move = (index: number, offset: number) => { const next = [...items]; [next[index], next[index + offset]] = [next[index + offset]!, next[index]!]; onChange(next); };
-  const update = (index: number, key: string, text: string) => onChange(items.map((item, i) => i === index ? { value: String(item.value ?? item.key ?? ""), label: String(item.label ?? ""), [key]: text } : item));
+  const update = (index: number, key: string, text: string) => onChange(items.map((item, i) => {
+    if (i !== index) return item;
+    const next = { ...item, value: String(item.value ?? item.key ?? ""), label: String(item.label ?? ""), [key]: text };
+    if (key === "color" && !text) delete next.color;
+    return next;
+  }));
   return <div className="space-y-3" aria-label={typedText("options")}>
     <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-medium">{typedText("options")}</h3>{!readOnly && !locked && <Button type="button" variant="outline" size="sm" onClick={() => onChange([...items, { value: "", label: "" }])}><Plus className="size-4" />{typedText("addOption")}</Button>}</div>
     {!items.length && <p className="text-sm text-muted-foreground">{typedText("emptyOptions")}</p>}
     {items.map((item, index) => <div key={index} className="flex flex-wrap items-end gap-2 rounded-md border p-3">
       <AutoField label={typedText("optionValue", { index: index + 1 })} className="min-w-32 flex-1"><Input aria-label={typedText("optionValue", { index: index + 1 })} value={String(item.value ?? item.key ?? "")} disabled={readOnly || locked} onChange={event => update(index, "value", event.target.value)} /></AutoField>
       <AutoField label={typedText("optionLabel", { index: index + 1 })} className="min-w-40 flex-1"><Input aria-label={typedText("optionLabel", { index: index + 1 })} value={String(item.label ?? "")} disabled={readOnly} onChange={event => update(index, "label", event.target.value)} /></AutoField>
+      <AutoField label={commonText("resource-domain:tag.color")} className="min-w-0 max-w-full"><div className="flex h-10 min-w-0 items-center gap-2"><input type="color" aria-label={`${typedText("optionLabel", { index: index + 1 })} ${commonText("resource-domain:tag.color")}`} className="h-10 w-12 cursor-pointer rounded-md border border-input bg-background p-1 disabled:cursor-default" value={/^#[\da-f]{6}$/i.test(String(item.color ?? "")) ? String(item.color) : /^#[\da-f]{3}$/i.test(String(item.color ?? "")) ? `#${String(item.color).slice(1).split("").map(char => char + char).join("")}` : "#4f9cf9"} disabled={readOnly} onChange={event => update(index, "color", event.target.value)} /><TagBadge color={typeof item.color === "string" ? item.color : undefined}><span className="max-w-32 truncate">{String(item.label ?? "") || typedText("optionLabel", { index: index + 1 })}</span></TagBadge>{!readOnly && item.color !== undefined && <Button type="button" size="sm" variant="ghost" aria-label={`${commonText("common.clear")} ${typedText("optionLabel", { index: index + 1 })} ${commonText("resource-domain:tag.color")}`} onClick={() => update(index, "color", "")}>{commonText("common.clear")}</Button>}</div></AutoField>
       {!readOnly && <div className="flex gap-1"><Button type="button" variant="outline" size="icon" aria-label={typedText("moveUp", { index: index + 1 })} disabled={!index} onClick={() => move(index, -1)}><ArrowUp className="size-4" /></Button><Button type="button" variant="outline" size="icon" aria-label={typedText("moveDown", { index: index + 1 })} disabled={index === items.length - 1} onClick={() => move(index, 1)}><ArrowDown className="size-4" /></Button><Button type="button" variant="ghost" size="icon" aria-label={typedText("deleteOption", { index: index + 1 })} disabled={locked} onClick={() => onChange(items.filter((_, i) => i !== index))}><Trash2 className="size-4" /></Button></div>}
     </div>)}
     {locked && <p className="text-xs text-muted-foreground">{typedText("hostStateHelp")}</p>}

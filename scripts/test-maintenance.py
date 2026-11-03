@@ -73,6 +73,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check((concurrent['value'],concurrent['default'],concurrent['min'])==(10,10,0),'pipeline concurrency defaults to 10 runs, 0 meaning unlimited')
         event_retention=next(r for r in settings if r['key']=='repository_event_retention_days')
         check((event_retention['value'],event_retention['default'],event_retention['min'],event_retention['max'])==(0,0,0,36500),'repository event retention defaults to permanent with a bounded range')
+        categories={row['key']:row['category'] for row in settings}
+        check(categories=={'default_page_size':'general','heartbeat_timeout_seconds':'hosts','history_retention_days':'history','pipeline_concurrent_runs':'pipelines','repository_event_retention_days':'repositories'},'builtin settings have meaningful persisted categories')
+        check(request(owner,root+'/settings?category=hosts')['total']==1,'category filtering uses persisted category keys')
         prefs=request(guest,root+'/preferences')
         check(prefs['default_page_size']==20 and len(prefs['dictionaries']['host-state'])==3,'members receive presentation preferences')
         setting=next(r for r in settings if r['key']=='default_page_size'); sid=setting['id']
@@ -95,21 +98,59 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(json.loads(request(owner,url)['items'])==[{'value':'b','label':'Revised'}],'dictionary update replaces children atomically')
         request(outsider,f'/workspaces/{workspace_other}/dictionaries/'+did,expected=404)
         check(request(owner,root+'/dictionaries?q=custom')['total']==1,'dictionary search works')
+        controlled = {
+            'pipeline-state': {'queued','cancelling','running','waiting','pending','approved','succeeded','failed','cancelled','timed_out','skipped'},
+            'deployment-state': {'pending','skipped','idle','queued','running','succeeded','failed','needs-review'},
+            'cron-state': {'queued','running','succeeded','failed','skipped','needs-review'},
+            'alert-state': {'firing','recovered'},
+            'repository-state': {'connected','refreshing','reauthorize'},
+            'insight-state': {'pending','queued','running','complete','failed','partial','unsupported','blocked','retry_wait','unavailable'},
+        }
+        dictionary_rows = request(owner,root+'/dictionaries?page_size=200')['items']
+        for key, expected_states in controlled.items():
+            state_row = next(row for row in dictionary_rows if row['key'] == key)
+            state_url = root+'/dictionaries/'+state_row['id']
+            state_body = request(owner,state_url)
+            state_options = json.loads(state_body['items'])
+            check({item['value'] for item in state_options} == expected_states, key+' seeds canonical values')
+            request(owner,state_url,dict(state_body,items=json.dumps(state_options[:-1])),'PATCH',400)
+            request(owner,state_url,dict(state_body,items=json.dumps(state_options+[{'value':'invented','label':'Invented'}])),'PATCH',400)
+            request(owner,state_url,dict(state_body,key=key+'-renamed'),'PATCH',400)
+            request(owner,state_url,dict(state_body,value_type='text',value_json='"invalid"'),'PATCH',400)
+            request(owner,state_url,method='DELETE',expected=400)
+            state_options.reverse()
+            state_options[0].update(label='Custom '+key,color='#123456')
+            request(owner,state_url,dict(state_body,items=json.dumps(state_options)),'PATCH')
+            check(request(guest,root+'/preferences')['dictionaries'][key] == state_options, key+' exposes labels colors and order to members')
+            other_options = request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries'][key]
+            check(all(item['label'] != 'Custom '+key for item in other_options),key+' presentation stays workspace scoped')
+            request(owner,state_url,dict(state_body,items=json.dumps(state_options)),'PATCH',409)
         builtin=next(r for r in request(owner,root+'/dictionaries')['items'] if r['key']=='host-state')
         built=request(owner,root+'/dictionaries/'+builtin['id'])
-        changed=json.loads(built['items']);changed[0]['label']='Connected'
+        changed=json.loads(built['items']);changed[0]['label']='Connected';changed[0]['color']='#12Ab34'
         request(owner,root+'/dictionaries/'+builtin['id'],dict(built,items=json.dumps(changed)),'PATCH')
         check(request(guest,root+'/preferences')['dictionaries']['host-state'][0]['label']=='Connected','dictionary labels consumed by member preferences')
+        check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'batched preferences preserve every state value, label and position')
+        color_row=request(owner,root+'/dictionaries/'+builtin['id'])
+        check(json.loads(color_row['items'])==changed and json.loads(color_row['value_json'])==changed,'dictionary canonical and legacy option APIs retain colors')
+        color_list=next(r for r in request(owner,root+'/dictionaries')['items'] if r['id']==builtin['id'])
+        check(json.loads(color_list['value_json'])==changed,'dictionary list retains presentation colors')
+        for invalid_color in ['red','#12','#12345678','url(javascript:alert(1))',None,42]:
+            invalid_items=[dict(item,color=invalid_color) if index==0 else item for index,item in enumerate(changed)]
+            request(owner,root+'/dictionaries/'+builtin['id'],dict(color_row,items=json.dumps(invalid_items)),'PATCH',400)
+        check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'invalid colors cannot alter controlled dictionary presentation')
+        check(request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries']['host-state'][0]['label']!='Connected','dictionary presentation overrides remain workspace isolated')
+        check('custom' not in request(guest,root+'/preferences')['dictionaries'],'preferences expose only builtin dictionaries')
         request(owner,root+'/dictionaries/'+builtin['id'],dict(built,version=2,items='[]'),'PATCH',400)
         request(owner,root+'/dictionaries/'+builtin['id'],method='DELETE',expected=400)
         request(owner,url,method='DELETE',expected=204)
         request(owner,url,expected=404)
         check(True,'builtin machine states protected and custom dictionaries deletable')
         events=request(owner,root+'/activity?resource=dictionaries')['items']
-        check(len(events)==4,'dictionary writes audited')
+        check(len(events)==4+len(controlled),'successful dictionary writes audited exactly once; rejected edits are not audited')
         typed_samples = {
-            'text': 'A typed value', 'num': 0, 'tab': [{'key':'a','label':'Alpha'}],
-            'selection': [{'value':'a','label':'Alpha'}], 'image': [], 'video': [], 'file': [],
+            'text': 'A typed value', 'num': 0, 'tab': [{'key':'a','label':'Alpha','color':'#AbC'}],
+            'selection': [{'value':'a','label':'Alpha','color':'#123456'}], 'image': [], 'video': [], 'file': [],
             'code': 'print(1)', 'markdown': '# Heading', 'html': '<p>HTML</p>',
             'richtext': '<p>Rich text</p>', 'json': {'enabled':True,'count':2},
         }
@@ -158,6 +199,36 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/settings/'+sid,method='DELETE',expected=400)
         check(request(guest,root+'/preferences')['default_page_size']==37,'builtin setting values and constraints remain authoritative')
         check('typed_json' not in request(guest,root+'/preferences')['dictionaries'],'custom typed contents not exposed in member preferences')
+        category_host=request(owner,root+'/nodes',{'name':'Category fixture','connection':'runner'},expected=201)['id']
+        category_manifest=json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'nginx:alpine'}]})
+        category_body={'name':'Classified app','category':'web','mode':'compose','target_kind':'host','target_ref':category_host,'workdir':'/tmp/category-fixture','manifest':category_manifest}
+        category_id=request(owner,root+'/deployments',category_body,expected=201)['id']
+        category_url=root+'/deployments/'+category_id
+        check(request(owner,category_url)['category']=='web' and request(owner,category_url)['state']=='idle','application category persists without changing lifecycle state')
+        check(request(owner,root+'/deployments?category=web')['total']==1 and request(owner,root+'/deployments?category=worker')['total']==0,'application list filters persisted dictionary category keys')
+        request(owner,category_url,dict(category_body,category='missing',version=1),'PATCH',400)
+        legacy_edit={key:value for key,value in category_body.items() if key!='category'}
+        request(owner,category_url,dict(legacy_edit,version=1,name='Legacy compatible'),'PATCH')
+        check(request(owner,category_url)['category']=='web','legacy clients omitting category preserve the stored classification')
+        app_dictionary=next(row for row in request(owner,root+'/dictionaries')['items'] if row['key']=='app-category')
+        app_dictionary=request(owner,root+'/dictionaries/'+app_dictionary['id'])
+        app_options=json.loads(app_dictionary['items'])+[{'value':'tenant-app','label':'Tenant application','color':'#345678'}]
+        request(owner,root+'/dictionaries/'+app_dictionary['id'],dict(app_dictionary,items=json.dumps(app_options)),'PATCH')
+        request(owner,category_url,dict(category_body,category='tenant-app',version=2),'PATCH')
+        check(request(owner,root+'/deployments?category=tenant-app')['items'][0]['id']==category_id,'custom workspace dictionary category is consumed by application edits and filters')
+        other_host=request(outsider,f'/workspaces/{workspace_other}/nodes',{'name':'Other category fixture','connection':'runner'},expected=201)['id']
+        request(outsider,f'/workspaces/{workspace_other}/deployments',dict(category_body,target_ref=other_host,category='tenant-app'),expected=400)
+        uncategorized=request(outsider,f'/workspaces/{workspace_other}/deployments',dict(legacy_edit,target_ref=other_host),expected=201)['id']
+        check(request(outsider,f'/workspaces/{workspace_other}/deployments/'+uncategorized)['category']=='','old create payloads remain valid and category dictionaries are workspace isolated')
+        current_dictionary=request(owner,root+'/dictionaries/'+app_dictionary['id'])
+        request(owner,root+'/dictionaries/'+app_dictionary['id'],dict(current_dictionary,items=json.dumps(app_options[:-1])),'PATCH')
+        request(owner,category_url,dict(category_body,category='tenant-app',version=3,name='Historical classification'),'PATCH')
+        check(request(owner,category_url)['category']=='tenant-app','removing a dictionary option does not erase existing application classifications')
+        request(owner,category_url,dict(category_body,category='',version=4),'PATCH')
+        check(request(owner,category_url)['category']=='','optional application category can be cleared')
+        for environment_name in ['dev','custom-environment-name']:
+            env_id=request(owner,root+'/pipeline-environments',{'name':environment_name,'description':'Dictionary suggestions remain optional','target_kind':'host','target_ref':category_host},expected=201)['id']
+            check(request(owner,root+'/pipeline-environments/'+env_id)['name']==environment_name,'environment names accept '+environment_name+' without enum enforcement')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             import sqlite3
             host=request(owner,root+'/nodes',{'name':'Offline','connection':'runner'},expected=201)['id']
@@ -185,6 +256,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 conn.execute('UPDATE deployments SET state=?,current_revision=? WHERE id=?',('succeeded',102,app))
                 conn.execute('UPDATE deployments SET state=? WHERE id=?',('needs-review',uncertain))
             proc=launch()
+            check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'controlled state colors and labels survive restart and builtin seeding')
+            restarted_preferences=request(guest,root+'/preferences')['dictionaries']
+            for key in controlled:
+                check(restarted_preferences[key][0]['label']=='Custom '+key and restarted_preferences[key][0]['color']=='#123456',key+' presentation survives restart')
             for resource in ['settings','dictionaries']:
                 persisted=request(owner,root+'/'+resource+'/'+typed_ids[(resource,'json')])
                 check(json.loads(persisted['value_json'])==typed_samples['json'],resource+' typed contents persist across restart')
@@ -208,6 +283,11 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             check(True,'current revision and uncertain deployments/history retained')
             check(request(owner,root+'/activity?action=retention-cleanup')['total']==2,'automatic cleanup is audited')
         print(f'{checks} checks passed',flush=True)
+    except BaseException:
+        log.flush()
+        print('SERVER FAILURE DIAGNOSTIC exit='+str(proc.poll()),flush=True)
+        print((data/'server.log').read_text(encoding='utf-8',errors='replace')[-16000:],flush=True)
+        raise
     finally:
         if proc.poll() is None: proc.terminate();proc.wait(timeout=20)
         log.close()

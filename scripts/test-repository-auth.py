@@ -276,6 +276,21 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         callback(dict(pushed,after='c'*40))
         check(request(owner,monitor_events)['items'][0]['delivery'].startswith('\u6295\u9012\u5931\u8d25 HTTP 503'),'failed notification result recorded without retry')
         notification_status=204
+        channels=[{'name':'English','webhook':api_base+'/notifications','language':'en-US','enabled':True},
+                  {'name':'Japanese','webhook':api_base+'/notifications','language':'ja-JP','enabled':True},
+                  {'name':'Disabled','webhook':api_base+'/notifications','language':'zh-CN','enabled':False}]
+        saved=request(owner,monitor,dict(settings,version=saved['version'],notification_channels=channels),method='PATCH')
+        check(saved['notification_channels']==channels,'all channel URLs, languages and enabled states persist')
+        before=len(notifications)
+        callback(dict(pushed,after='e'*40,ref='refs/heads/feature/latest'))
+        check(len(notifications)==before+2,'one event independently delivers to both enabled channels and skips disabled channels')
+        check(notifications[-2]['notification']['title']!=notifications[-1]['notification']['title'],'each channel renders its own language')
+        outcomes=request(owner,monitor_events)['items'][0]['delivery_details']
+        check([item['name'] for item in outcomes]==['English','Japanese'],'each channel has its own persisted delivery result')
+        recent=next(item for item in request(owner,root+'/code-connections')['items'] if item['id']==linked['id'])['recent_commit_event']
+        check(recent['reference'].endswith('feature/latest') and recent['id']==request(owner,monitor_events)['items'][0]['id'],'connection recent commit event includes non-default branches')
+        request(owner,monitor,dict(settings,version=saved['version'],notification_channels=[dict(channels[0],language='invalid')]),method='PATCH',expected=400)
+        request(owner,monitor,dict(settings,version=saved['version'],notification_channels=[channels[0],channels[0]]),method='PATCH',expected=400)
         disabled=request(owner,monitor,dict(settings,version=saved['version'],enabled=False,secret='',webhook=''),method='PATCH')
         callback(dict(pushed,after='d'*40),404)
         check(disabled['has_secret'] and disabled['has_webhook'],'disabling preserves encrypted configuration while rejecting callbacks')

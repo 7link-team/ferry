@@ -15,9 +15,9 @@ import { commonText,configText,useCommonTranslation } from "../../shared/i18n/i1
  * set (§8 of the design doc).
  */
 import { cn } from "cn";
-import { ArrowLeft,Download,Loader2,Play,Save,SlidersHorizontal,Upload } from "lucide-react";
+import { ArrowLeft,Copy,Download,Loader2,Play,Save,SlidersHorizontal,Upload } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useCallback,useEffect,useState,type ReactNode } from "react";
+import { useCallback,useEffect,useId,useState,type ReactNode } from "react";
 import { toast } from "sonner";
 import { ManifestEditor } from "../../features/deployments/ManifestEditor";
 import { ActionsEditor } from "../../features/pipelines/ActionsEditor";
@@ -247,8 +247,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
         catch(cause){setError(errorText(cause));}finally{setSaving(false);}
       }}>{action.iconOnly ? action.icon : configText(action.label, action.labelKey)}</Button>;
 
-  const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background py-2" role="tablist" aria-label={commonText("form.connection")}>
-    {([ ["runner", commonText("form.runner")], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
+  const hostConnectionTabs = creating && config.resource === "hosts" && <div className="sticky top-0 z-10 grid grid-cols-2 items-center gap-2 border-b bg-background py-2" role="tablist" aria-label={commonText("form.connection")}>
+    {([ ["runner", commonText("form.runner")], ["ssh", "SSH"] ] as const).map(([connection, label]) => <Button key={connection} className="w-full min-w-0" type="button" role="tab" aria-selected={draft.connection === connection} variant={draft.connection === connection ? "secondary" : "ghost"} onClick={() => setDraft(current => ({ ...current, connection } as Partial<T>))}>{label}</Button>)}
   </div>;
 
   if (creating && config.resource === "hosts" && draft.connection === "runner") return <div className="w-full space-y-4 pb-8">
@@ -319,7 +319,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <AutoForm className={cn("mx-auto min-w-0 w-full max-w-5xl pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
+    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
       {hostConnectionTabs}
       {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
       {error && (
@@ -472,9 +472,9 @@ function SecretField<T>({ field, value, stored, creating, asText, readOnly, draf
     {canReveal && revealed !== undefined && <pre aria-label={commonText("form.plaintext")} className="whitespace-pre-wrap break-all rounded-md border p-3 font-mono text-sm">{revealed === "" ? commonText("form.emptyString") : revealed}</pre>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
   </Wrapper>;
-  const replacing = creating || value !== undefined;
+  const replacing = creating || !stored || value !== undefined;
   return <Wrapper field={field}>
-    {!creating && <label className="flex items-center gap-2 text-sm">
+    {!creating && stored && <label className="flex items-center gap-2 text-sm">
       <Checkbox checked={replacing} disabled={readOnly} onCheckedChange={(checked) => onChange(checked ? "" : undefined)} />
       {commonText("form.replace")}{field.label}{commonText("form.retainValue")}</label>}
     {!creating && <p className="text-xs text-muted-foreground">{stored ? commonText("form.secretSet") : commonText("form.secretMissing")}</p>}
@@ -521,6 +521,7 @@ function Field<T>({
 }) {
   useCommonTranslation();
   const { options: rawOptions, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
+  const suggestionsId = useId();
   const options = rawOptions.map(option => ({ ...option, label: configText(option.label, option.labelKey), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
   if (field.type === "multiselect" && Array.isArray(value)) {
     for (const selected of value.map(String)) {
@@ -532,13 +533,17 @@ function Field<T>({
   const [creatingOption, setCreatingOption] = useState(false);
   const [optionSearch, setOptionSearch] = useState("");
   useEffect(() => {
-    reportOptions(field.key, optionsLoading || !!optionsError);
+    reportOptions(field.key, field.type !== "text" && (optionsLoading || !!optionsError));
     return () => reportOptions(field.key, false);
-  }, [field.key, optionsLoading, optionsError, reportOptions]);
+  }, [field.key, field.type, optionsLoading, optionsError, reportOptions]);
   const reportManifest = useCallback((blocked: boolean) => reportOptions(`$manifest:${field.key}`, blocked), [field.key, reportOptions]);
   const reportCheckout = useCallback((blocked: boolean) => reportOptions(`$checkout:${field.key}`, blocked), [field.key, reportOptions]);
   const text = String(value ?? "");
-  if (optionsError) return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}{commonText("form.refreshRetry")}</p></Wrapper>;
+  const copyControl = field.copyable && field.type !== "secret" && field.type !== "password" && <Button type="button" variant="ghost" size="icon" className="shrink-0" disabled={!text} aria-label={`${commonText("common.copy")} ${field.label}`} title={`${commonText("common.copy")} ${field.label}`} onClick={async () => {
+    try { await navigator.clipboard.writeText(text); toast.success(commonText("common.copied")); }
+    catch { toast.error(commonText("common.copyFailed")); }
+  }}><Copy className="size-4" aria-hidden="true" /></Button>;
+  if (optionsError && field.type !== "text") return <Wrapper field={field}><p role="alert" className="text-destructive">{field.label}：{optionsError}{commonText("form.refreshRetry")}</p></Wrapper>;
 
   const label = (
     <span className="text-sm font-medium">
@@ -551,7 +556,7 @@ function Field<T>({
     return <SecretField field={field} value={value} stored={stored} creating={creating}
       asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
-  if (optionsLoading) return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">{commonText("form.loadingOptions", { name: field.label })}</p></Wrapper>;
+  if (optionsLoading && field.type !== "text") return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">{commonText("form.loadingOptions", { name: field.label })}</p></Wrapper>;
 
   if (field.type === "custom" && field.render) return <Wrapper field={field}>{field.render({ workspace, draft, readOnly, onPatch: onChange, onValidityChange: reportManifest })}</Wrapper>;
 
@@ -567,7 +572,7 @@ function Field<T>({
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    if (asText) return <Wrapper field={field}>{label}<p className="text-sm">{options.filter(option => selected.has(option.value)).map(option => option.label).join("、") || "—"}</p></Wrapper>;
+    if (asText) return <Wrapper field={field}>{label}<div className="flex flex-wrap gap-1 text-sm">{options.some(option => selected.has(option.value)) ? options.filter(option => selected.has(option.value)).map(option => <span key={option.value}>{option.content ?? configText(option.label, option.labelKey)}</span>) : "\u2014"}</div></Wrapper>;
     const toggle = (key: string, checked: boolean) => {
       const next = new Set(selected);
       if (checked) {
@@ -585,7 +590,7 @@ function Field<T>({
       {!options.length && <p className="text-sm text-muted-foreground">{commonText("form.noOptions")}{field.label}{field.createOption && permissions.has(field.createOption.permission) ? commonText("form.canCreate") : commonText("form.askCreator")}</p>}
       {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, labelKey:field.createOption.labelKey, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
       {[...new Set(options.filter(o => o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
-        {options.filter(o => (o.group ?? commonText("common.option")) === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{configText(option.label, option.labelKey)}</label>)}
+        {options.filter(o => (o.group ?? commonText("common.option")) === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.content ?? configText(option.label, option.labelKey)}</label>)}
       </div></div>)}
       {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     </fieldset></Wrapper>;
@@ -617,7 +622,7 @@ function Field<T>({
     return (
       <Wrapper field={field}>
         {label}
-        <p className={cn("min-h-5 text-sm break-words", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
+        <div className="flex min-w-0 items-start gap-2"><p className={cn("min-h-5 min-w-0 flex-1 text-sm break-words", (field.type === "code" || field.type === "textarea") && "whitespace-pre-wrap", field.type === "code" && "font-mono")}>
           {href ? (
             <a className="text-primary underline underline-offset-4" href={href} target="_blank" rel="noopener noreferrer">{href}</a>
           ) : field.type === "switch" ? (
@@ -627,14 +632,21 @@ function Field<T>({
           ) : (
             shown || "—"
           )}
-        </p>
+        </p>{copyControl}</div>
       </Wrapper>
     );
   }
 
+  if (field.type === "text" && field.options) return <AutoField name={field.key} label={field.label} required={field.required} help={field.help}>
+    <Input name={field.key} aria-label={field.label} list={suggestionsId} value={text} disabled={readOnly} required={field.required} placeholder={field.placeholder} onChange={event => onChange(event.target.value)} />
+    <datalist id={suggestionsId}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist>
+    {optionsError && <p role="alert" className="text-sm text-destructive">{optionsError}{commonText("form.refreshRetry")}</p>}
+  </AutoField>;
+
   return <AutoField name={field.key} label={field.label} required={field.required} help={field.help} className={field.span === 2 ? "sm:col-span-2" : undefined}>
     <div className="flex min-w-0 items-start gap-2">
       <div className="min-w-0 flex-1"><FieldControl name={field.key} field={{ name: field.label, type: field.type === "secret" ? "textarea" : field.type === "custom" ? "text" : field.type, config: { options, width: field.width ?? (Array.isArray(field.options) ? "auto" : "full"), ...(field.emptyValues ? { emptyValues: field.emptyValues } : {}), ...(field.emptyLabel || field.emptyLabelKey ? { emptyLabel: configText(field.emptyLabel, field.emptyLabelKey) } : {}), ...(field.min === undefined ? {} : { min: field.min }), ...(field.max === undefined ? {} : { max: field.max }), ...(field.placeholder ? { placeholder: field.placeholder } : {}) } }} value={value} required={field.required} disabled={readOnly} onChange={onChange} /></div>
+      {copyControl}
       {field.createOption && !readOnly && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}
     </div>
     {!options.length && field.createOption && !readOnly && <p className="text-xs text-muted-foreground">{commonText("form.noOptions")}{field.label}{commonText("form.canAdd")}</p>}
@@ -673,7 +685,7 @@ export function ResourceActionDialog<T>({ action, row, workspace, permissions, o
     event.preventDefault();event.stopPropagation();if(busy||incomplete||Object.values(blocked).some(Boolean))return;
     setBusy(true);setError("");try{await action.action?.(row,values);onDone();}catch(cause){setError(errorText(cause));}finally{setBusy(false);}
    }}>
-    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),[field.key]:value}))} />)}
+    {fields.map(field=><Field key={field.key} field={field} workspace={workspace} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={permissions} reportOptions={report} onChange={value=>setValues(current=>({...current,...Object.fromEntries((field.resetOnChange??[]).map(key=>[key,undefined])),...(field.type === "custom" && field.render ? value as Record<string, unknown> : { [field.key]: value })}))} />)}
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||incomplete||Object.values(blocked).some(Boolean)}>{busy?commonText("common.processing"):commonText("form.confirmAction", { action: configText(action.label, action.labelKey) })}</Button></div>
    </AutoForm>

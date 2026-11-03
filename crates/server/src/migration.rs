@@ -109,6 +109,8 @@ impl MigratorTrait for Migrator {
             Box::new(CodeInsightSchedules),
             Box::new(RunnerAutoUpdates),
             Box::new(RepositoryEventDeliveryMessages),
+            Box::new(HostExecutionCapacity),
+            Box::new(DeploymentCategory),
         ]
     }
 }
@@ -4805,5 +4807,183 @@ impl MigrationTrait for RunnerAutoUpdates {
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+struct HostExecutionCapacity;
+struct DeploymentCategory;
+impl MigrationName for DeploymentCategory {
+    fn name(&self) -> &str {
+        "deployment_category_v1"
+    }
+}
+fn deployment_category_column() -> TableAlterStatement {
+    Table::alter()
+        .table(Alias::new("deployments"))
+        .add_column(
+            ColumnDef::new(Alias::new("category"))
+                .string_len(100)
+                .not_null()
+                .default(""),
+        )
+        .to_owned()
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DeploymentCategory {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        execute_schema(
+            m,
+            SchemaStatement::Column("deployments", "category", deployment_category_column()),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("不自动删除业务数据".into()))
+    }
+}
+
+#[cfg(test)]
+mod deployment_category_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, Statement};
+
+    #[test]
+    fn category_column_uses_portable_default_empty_ddl() {
+        for sql in [
+            deployment_category_column().to_string(MysqlQueryBuilder),
+            deployment_category_column().to_string(PostgresQueryBuilder),
+            deployment_category_column().to_string(SqliteQueryBuilder),
+        ] {
+            assert!(
+                sql.contains("category") && sql.contains("NOT NULL") && sql.contains("DEFAULT ''"),
+                "{sql}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn existing_applications_upgrade_without_data_loss_and_migration_retries() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        db.execute_unprepared(
+            "CREATE TABLE deployments (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared(
+            "INSERT INTO deployments (id,name) VALUES (1,'existing application')",
+        )
+        .await
+        .unwrap();
+        let manager = SchemaManager::new(&db);
+        DeploymentCategory.up(&manager).await.unwrap();
+        DeploymentCategory.up(&manager).await.unwrap();
+        let row = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT name,category FROM deployments WHERE id=1",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.try_get::<String>("", "name").unwrap(),
+            "existing application"
+        );
+        assert_eq!(row.try_get::<String>("", "category").unwrap(), "");
+        db.execute_unprepared("UPDATE deployments SET category='web' WHERE id=1")
+            .await
+            .unwrap();
+        DeploymentCategory.up(&manager).await.unwrap();
+        let row = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT category FROM deployments WHERE id=1",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.try_get::<String>("", "category").unwrap(), "web");
+    }
+}
+
+impl MigrationName for HostExecutionCapacity {
+    fn name(&self) -> &str {
+        "host_execution_capacity_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for HostExecutionCapacity {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        m.create_table(
+            create_table("host_execution_policies", backend)
+                .col(
+                    ColumnDef::new(Alias::new("host_id"))
+                        .big_integer()
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("workspace_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("enabled"))
+                        .boolean()
+                        .not_null()
+                        .default(true),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("shared"))
+                        .boolean()
+                        .not_null()
+                        .default(false),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("capacity"))
+                        .big_integer()
+                        .not_null()
+                        .default(1_i64),
+                )
+                .to_owned(),
+        )
+        .await?;
+        m.create_table(
+            create_table("host_execution_slots", backend)
+                .col(
+                    ColumnDef::new(Alias::new("host_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(Alias::new("slot")).big_integer().not_null())
+                .col(
+                    ColumnDef::new(Alias::new("owner"))
+                        .string_len(36)
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("run_id"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(ColumnDef::new(Alias::new("job_key")).string().not_null())
+                .col(
+                    ColumnDef::new(Alias::new("expires_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .primary_key(
+                    Index::create()
+                        .col(Alias::new("host_id"))
+                        .col(Alias::new("slot")),
+                )
+                .to_owned(),
+        )
+        .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("?????????".into()))
     }
 }

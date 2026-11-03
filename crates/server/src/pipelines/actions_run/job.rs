@@ -166,7 +166,208 @@ pub(super) async fn job_state(
     Ok(())
 }
 
+/// A slot covers exactly one worker invocation, including cleanup. Waiting never
+/// holds capacity, and cancellation/lease loss is forwarded before awaiting cleanup.
+#[allow(clippy::too_many_arguments)]
 async fn execute_job(
+    s: &AppState,
+    run: &runs::Model,
+    snapshot: &Snapshot,
+    job: &Job,
+    completed: &BTreeMap<String, Outcome>,
+    variables: &BTreeMap<String, String>,
+    delivered: &Delivered,
+    credential: Option<&(String, String, String)>,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+    seq: &tokio::sync::Mutex<i64>,
+    leg: &Leg,
+) -> Result<Outcome> {
+    let pool = snapshot
+        .document
+        .executor_bindings
+        .iter()
+        .any(|binding| binding.job_id == job.key && binding.target_kind == "pool");
+    let mut waiting_reported = false;
+    let lease = loop {
+        if *stop.borrow() || (!leg.run_cancelled && !history::active(s, run.id).await?) {
+            return Ok(Outcome {
+                state: "cancelled".into(),
+                ..Outcome::default()
+            });
+        }
+        // Share the existing workspace mutation lock with host CRUD. Policy,
+        // membership and slot allocation therefore commit in one serial order.
+        let tx = crate::variables::transaction(s, run.workspace_id.into()).await?;
+        let candidates = crate::hosts::execution::candidates(
+            &tx,
+            run.workspace_id,
+            job.host_id,
+            job.host_group_id,
+            pool,
+            &job.labels,
+        )
+        .await?;
+        let mut selected = None;
+        for (host, policy, occupied) in candidates {
+            if occupied >= policy.capacity as usize {
+                continue;
+            }
+            if let Some(lease) = crate::hosts::execution::try_acquire(
+                &tx,
+                host.id,
+                policy.capacity,
+                run.id,
+                &job.key,
+            )
+            .await?
+            {
+                selected = Some(lease);
+                break;
+            }
+        }
+        tx.commit().await?;
+        if let Some(lease) = selected {
+            break lease;
+        }
+        if !waiting_reported {
+            append_message(
+                s,
+                run.id,
+                -1,
+                &mut *seq.lock().await,
+                "stdout",
+                Message::new("execution.capacityWaiting").with("job", job.key.clone()),
+            )
+            .await?;
+            waiting_reported = true;
+        }
+        tokio::select! {
+            _ = stop.changed() => {},
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {},
+        }
+    };
+    let mut assigned = job.clone();
+    assigned.host_id = lease.host;
+    if leg.matrix.is_none() && !leg.plan {
+        if let Err(error) = jobs::Entity::update_many()
+            .col_expr(jobs::Column::HostId, Expr::value(lease.host))
+            .filter(jobs::Column::RunId.eq(run.id))
+            .filter(jobs::Column::JobKey.eq(&job.key))
+            .exec(&s.db)
+            .await
+        {
+            lease.release(&s.db).await?;
+            return Err(error.into());
+        }
+        if let Err(error) = append_message(
+            s,
+            run.id,
+            -1,
+            &mut *seq.lock().await,
+            "stdout",
+            Message::new("execution.executorAssigned")
+                .with("job", job.key.clone())
+                .with("host", lease.host.to_string()),
+        )
+        .await
+        {
+            lease.release(&s.db).await?;
+            return Err(error);
+        }
+    }
+    if let Some(name) = &leg.name {
+        if let Err(error) = append_message(
+            s,
+            run.id,
+            -1,
+            &mut *seq.lock().await,
+            "stdout",
+            Message::new("execution.matrixAssigned")
+                .with("job", job.key.clone())
+                .with("name", name.clone())
+                .with("host", lease.host.to_string()),
+        )
+        .await
+        {
+            lease.release(&s.db).await?;
+            return Err(error);
+        }
+    }
+    let (abort, mut aborted) = tokio::sync::watch::channel(*stop.borrow());
+    // Keep the large remote execution state on the heap across the lease loop.
+    let task = Box::pin(async {
+        let reserve = crate::hosts::runner::reservations::reserve_with(
+            s.cluster.as_ref(),
+            vec![lease.host.to_string()],
+        );
+        tokio::pin!(reserve);
+        let guards = tokio::select! {
+            guards = &mut reserve => guards?,
+            _ = aborted.changed() => return Ok(Outcome {state: "cancelled".into(), ..Outcome::default()}),
+        };
+        if *aborted.borrow() {
+            return Ok(Outcome {
+                state: "cancelled".into(),
+                ..Outcome::default()
+            });
+        }
+        guards
+            .run(execute_job_on_host(
+                s,
+                run,
+                snapshot,
+                &assigned,
+                completed,
+                variables,
+                delivered,
+                credential,
+                &mut aborted,
+                seq,
+                leg,
+            ))
+            .await
+    });
+    let result = keep_renewed(task, stop, &abort, Duration::from_secs(10), || {
+        lease.renew(&s.db)
+    })
+    .await;
+    lease.release(&s.db).await?;
+    result
+}
+
+/// Keep polling execution while renewal waits for the database: execution may
+/// own the only pooled connection and must finish its transaction to release it.
+async fn keep_renewed<T, Task, Renew, Renewal>(
+    task: Task,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+    abort: &tokio::sync::watch::Sender<bool>,
+    period: Duration,
+    mut renew: Renew,
+) -> Result<T>
+where
+    Task: std::future::Future<Output = Result<T>>,
+    Renew: FnMut() -> Renewal,
+    Renewal: std::future::Future<Output = Result<bool>>,
+{
+    tokio::pin!(task);
+    let mut renewal = tokio::time::interval(period);
+    renewal.tick().await;
+    loop {
+        tokio::select! {
+            result = &mut task => return result,
+            _ = stop.changed() => { abort.send_replace(true); },
+            renewed = async { renewal.tick().await; renew().await } => {
+                if !matches!(renewed, Ok(true)) {
+                    abort.send_replace(true);
+                    let _ = (&mut task).await;
+                    return Err(crate::cluster::unavailable());
+                }
+            }
+        }
+    }
+}
+
+async fn execute_job_on_host(
     s: &AppState,
     run: &runs::Model,
     snapshot: &Snapshot,
@@ -723,6 +924,7 @@ struct Leg {
     run_cancelled: bool,
     plan: bool,
     matrix: Option<Value>,
+    name: Option<String>,
 }
 
 /// Run a job. A matrix job bound to a host group with several online members
@@ -750,21 +952,7 @@ pub(super) async fn execute_legs(
     };
     let strategy = crate::pipelines::actions::job_policies(&snapshot.document, &job.key)
         .is_some_and(|policies| policies.strategy);
-    let members: Vec<i64> = if job.host_group_id != 0 && strategy {
-        hosts::Entity::find()
-            .filter(hosts::Column::WorkspaceId.eq(run.workspace_id))
-            .filter(hosts::Column::GroupId.eq(job.host_group_id))
-            .filter(hosts::Column::State.eq("online"))
-            .order_by_asc(hosts::Column::Id)
-            .all(&s.db)
-            .await?
-            .into_iter()
-            .map(|host| host.id)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if members.len() < 2 {
+    if !strategy {
         return execute_job(
             s, run, snapshot, job, completed, variables, delivered, credential, stop, seq, &whole,
         )
@@ -809,7 +997,6 @@ pub(super) async fn execute_legs(
     let fail_fast = fail_fast.unwrap_or(true);
     // Legs stop with the job, and the others stop when fail-fast trips.
     let (abort, aborted) = tokio::sync::watch::channel(*stop.borrow());
-    let mut load: BTreeMap<i64, usize> = members.iter().map(|id| (*id, 0)).collect();
     let mut pending = instances.into_iter();
     let mut running = FuturesUnordered::new();
     let mut merged = Outcome {
@@ -822,57 +1009,29 @@ pub(super) async fn execute_legs(
             let Some(instance) = pending.next() else {
                 break;
             };
-            let host = *load
-                .iter()
-                .min_by_key(|(id, count)| (**count, **id))
-                .map(|(id, _)| id)
-                .expect("members");
-            *load.get_mut(&host).unwrap() += 1;
-            let mut leg_job = job.clone();
-            leg_job.host_id = host;
+            let leg_job = job.clone();
             let leg = Leg {
                 matrix: Some(instance.matrix.clone()),
+                name: Some(instance.name.clone()),
                 ..whole.clone()
             };
             let mut leg_stop = aborted.clone();
-            append_message(
-                s,
-                run.id,
-                -1,
-                &mut *seq.lock().await,
-                "stdout",
-                Message::new("execution.matrixAssigned")
-                    .with("job", job.key.clone())
-                    .with("name", instance.name.clone())
-                    .with("host", host.to_string()),
-            )
-            .await?;
             running.push(async move {
-                let reserve = crate::hosts::runner::reservations::reserve_with(
-                    s.cluster.as_ref(),
-                    vec![host.to_string()],
-                );
-                let result = match reserve.await {
-                    Ok(guards) => {
-                        guards
-                            .run(execute_job(
-                                s,
-                                run,
-                                snapshot,
-                                &leg_job,
-                                completed,
-                                variables,
-                                delivered,
-                                credential,
-                                &mut leg_stop,
-                                seq,
-                                &leg,
-                            ))
-                            .await
-                    }
-                    Err(error) => Err(error),
-                };
-                (host, instance.name, result)
+                let result = execute_job(
+                    s,
+                    run,
+                    snapshot,
+                    &leg_job,
+                    completed,
+                    variables,
+                    delivered,
+                    credential,
+                    &mut leg_stop,
+                    seq,
+                    &leg,
+                )
+                .await;
+                (instance.name, result)
             });
         }
         if running.is_empty() {
@@ -880,8 +1039,7 @@ pub(super) async fn execute_legs(
         }
         tokio::select! {
             next = running.next() => {
-                let Some((host, name, result)) = next else { break };
-                *load.get_mut(&host).unwrap() -= 1;
+                let Some((name, result)) = next else { break };
                 let outcome = match result {
                     Ok(outcome) => outcome,
                     Err(error) => {
@@ -948,4 +1106,47 @@ pub(super) async fn execute_legs(
         "success".into()
     };
     Ok(merged)
+}
+
+#[cfg(test)]
+mod lease_polling_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, TransactionTrait};
+
+    #[tokio::test]
+    async fn renewal_keeps_polling_execution_that_owns_the_only_connection() {
+        let mut options = sea_orm::ConnectOptions::new("sqlite::memory:");
+        options.max_connections(1);
+        let db = sea_orm::Database::connect(options).await.unwrap();
+        let transaction_owned = tokio::sync::Notify::new();
+        let renewal_started = tokio::sync::Notify::new();
+        let (_stop, mut stopped) = tokio::sync::watch::channel(false);
+        let (abort, _aborted) = tokio::sync::watch::channel(false);
+        let execution = async {
+            let tx = db.begin().await?;
+            transaction_owned.notify_one();
+            // The renewal read cannot finish until this execution is polled
+            // again and releases the connection. Blocking inside a select arm
+            // therefore makes this test time out deterministically.
+            renewal_started.notified().await;
+            tx.rollback().await?;
+            Ok(())
+        };
+        let result = keep_renewed(
+            execution,
+            &mut stopped,
+            &abort,
+            Duration::from_millis(1),
+            || async {
+                transaction_owned.notified().await;
+                renewal_started.notify_one();
+                db.execute_unprepared("SELECT 1").await?;
+                Ok(true)
+            },
+        );
+        tokio::time::timeout(Duration::from_secs(2), result)
+            .await
+            .expect("renewal stopped polling the transaction owning the only connection")
+            .unwrap();
+    }
 }

@@ -200,7 +200,7 @@ try {
   assert.deepEqual(await group.locator('option').evaluateAll(options => options.map(option => option.value)), ['', 'other', 'team', 'team/mobile']);
   await chooseNative(group, 'team/mobile');
   await repositoryPicker.click();
-  assert.deepEqual(await page.getByRole('menuitemcheckbox').allTextContents(),['选择当前结果（2）','team/mobile/library','team/mobile/app']);
+  assert.deepEqual(await page.getByRole('menuitemcheckbox').allTextContents(),['team/mobile 下全部仓库','选择当前结果（2）','team/mobile/library','team/mobile/app']);
   assert.equal(await page.getByRole('textbox',{name:'搜索仓库',exact:true}).inputValue(),'','Changing group resets the repository search');
   const selectGroup=page.getByRole('menuitemcheckbox',{name:'选择当前结果（2）',exact:true});
   assert.equal(await selectGroup.getAttribute('aria-checked'),'true');
@@ -298,7 +298,7 @@ try {
   assert(page.url().endsWith("?tab=authors"), "Save stays on mapping tab");
   assert.equal(writes.at(-1).data.aliases[0].contributor_id, "123");
   assert.equal(writes.at(-1).data.aliases[0].nickname, "Alice combined");
-  await page.getByRole("button", { name: "添加作者映射", exact: true }).click();
+  await page.getByRole("button", { name: "在第 1 行下方添加映射", exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('button[type="submit"]')?.disabled,
   );
@@ -324,6 +324,24 @@ try {
   ]);
   assert.equal(writes.at(-1).data.version, nextVersion, 'Second save uses refreshed optimistic-lock version');
   assert.equal(writes.at(-1).data.aliases.length, 2);
+  await page.goto(origin + '/zh-CN/workspaces/2/code-insights/new');
+  await page.locator('input[name="name"]').fill('Dynamic scope');
+  await chooseNative(page.getByLabel('仓库连接', {exact:true}), '11');
+  await chooseNative(page.getByLabel('仓库分组', {exact:true}), 'team/mobile');
+  await page.getByRole('button', {name:'选择仓库',exact:true}).click();
+  await page.getByRole('menuitemcheckbox', {name:'team/mobile 下全部仓库',exact:true}).click();
+  for (const path of ['team/mobile/app','team/mobile/library']) {
+    const item=page.getByRole('menuitemcheckbox',{name:path,exact:true});
+    assert.equal(await item.getAttribute('aria-checked'),'true');
+    assert.equal(await item.getAttribute('aria-disabled'),'true');
+  }
+  await page.keyboard.press('Escape');
+  await Promise.all([
+    page.waitForResponse(response=>response.url().endsWith('/code-insights')&&response.request().method()==='POST'),
+    page.getByRole('button',{name:'创建',exact:true}).click(),
+  ]);
+  assert.deepEqual(writes.at(-1).data.repositories,[{connection_id:'11',repository:'team/mobile/*',all_repositories:false,pipeline_id:'',provider:'codeup'}]);
+
   const catalog=JSON.parse(readFileSync(new URL('../src/shared/i18n/locales/insight-domain.json',import.meta.url),'utf8'));
   const locales=['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY'];
   const order=['en-US','zh-TW','ja-JP','ko-KR','ms-MY'];
@@ -352,6 +370,7 @@ try {
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${locale}/${width}: form has no horizontal overflow`);
     if(locale==='zh-CN')await page.screenshot({path:`${output}/strategy-compact-${width}.png`});
   }
+  insight.aliases = [{ email: "alice@example.invalid", nickname: "Alice combined", contributor_id: "123" }];
   await page.goto(origin + '/zh-CN/workspaces/2/code-insights/31?tab=authors');
   permissions.splice(permissions.indexOf('code-insights.update'), 1);
   await page.reload();

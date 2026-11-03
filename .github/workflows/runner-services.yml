@@ -110,6 +110,7 @@ jobs:
         run: |
           ACTIONS_WORKER_TARGETS=windows/amd64 bash scripts/build-actions-workers.sh target/debug/actions-workers
           python scripts/test-actions-windows.py
+          FERRY_TEST_EXECUTION_CAPACITY_ONLY=1 python scripts/test-actions-windows.py
       - name: Build Actions worker for whole-task upgrade acceptance
         if: runner.os == 'Linux'
         run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh

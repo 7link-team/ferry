@@ -50,6 +50,13 @@ it("refreshes a workflow validation error in all six languages without changing 
   expect(parseActions(DEFAULT_ACTIONS).jobs[0]!.steps[0]!.name).toBe("步骤1");
 });
 
+it("accepts an explicit shared pool binding without requiring a specific host", async () => {
+  const validity = vi.fn();
+  await act(async () => root.render(<ActionsEditor draft={{ definition: DEFAULT_ACTIONS, executor_bindings: [{ job_id: "build", target_kind: "pool", target_ref: "", image: "host" }] }} options={[]} readOnly={false} onChange={vi.fn()} onValidityChange={validity} />));
+  expect(validity).toHaveBeenLastCalledWith(false);
+  expect(host.textContent).not.toContain(executionText("editor.missingHosts"));
+});
+
 it("keeps loaded pipeline logs and collapsed steps while translating the execution shell", async () => {
   const rawLog = "用户日志 / user log / 日本語ログ\n";
   const fetcher = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes("/logs?")

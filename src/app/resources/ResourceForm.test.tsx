@@ -4,7 +4,7 @@ import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { DEFAULT_ACTIONS } from "../../features/pipelines/actions-workflow";
 import { i18n } from "../../shared/i18n/i18n";
 import { formConfigs } from "../resources";
-import { ResourceForm } from "./ResourceForm";
+import { ResourceActionDialog, ResourceForm } from "./ResourceForm";
 let root: Root, host: HTMLDivElement, requests: { url: string; method: string | undefined; body: string | undefined }[];
 let stored: Record<string, unknown>;
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);
@@ -31,6 +31,57 @@ beforeEach(() => {
   }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("merges custom action field patches without nesting them or dropping sibling values", async () => {
+  const action = vi.fn();
+  await act(async () => root.render(<ResourceActionDialog workspace="ops" permissions={perms} row={{}} onClose={() => {}} onDone={() => {}} action={{
+    label: "保存渠道", action, initialValues: () => ({ enabled: true, channels: ["Operations"] }),
+    parameters: () => [{ key: "channels", label: "渠道", type: "custom", render: ({ draft, onPatch }) => <button type="button" onClick={() => onPatch({ channels: [...(draft.channels as string[]), "Development"] })}>{(draft.channels as string[]).join(",")}</button> }],
+  }} />));
+  await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] form button[type="button"]')!.click());
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain("Operations,Development");
+  await act(async () => document.querySelector<HTMLFormElement>('[role="dialog"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(action).toHaveBeenCalledWith({}, { enabled: true, channels: ["Operations", "Development"] });
+});
+it("copies an immutable public field and disables copying an empty value", async () => {
+  const writeText = vi.fn(async () => {});
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  const config = { resource: "variables", heading: () => "配置", blank: {}, sections: [{ fields: [{ key: "name", label: "回调地址", type: "text" as const, immutable: true, copyable: true }] }] };
+  history.replaceState({}, "", "/ops/deploy/variables/10/edit");
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  const copy = host.querySelector<HTMLButtonElement>('button[aria-label="复制 回调地址"]')!;
+  expect(copy.disabled).toBe(false);
+  await act(async () => copy.click());
+  expect(writeText).toHaveBeenCalledWith("db-url");
+  await act(async () => root.render(<div />));
+  stored.name = "";
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="复制 回调地址"]')!.disabled).toBe(true);
+});
+it("offers dictionary suggestions on a text field while preserving arbitrary custom names", async () => {
+  const action = vi.fn(async () => {});
+  await act(async () => root.render(<ResourceActionDialog workspace="ops" permissions={new Set()} row={{}} onClose={() => {}} onDone={() => {}} action={{
+    label: "Create environment", action, parameters: () => [{ key: "name", label: "Environment name", type: "text", required: true, options: [{ value: "dev", label: "Development" }] }],
+  }} />));
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="Environment name"]')!;
+  expect(input.list?.options[0]!.value).toBe("dev");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "custom-production-region");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => document.querySelector<HTMLFormElement>('[role="dialog"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(action).toHaveBeenCalledWith({}, { name: "custom-production-region" });
+});
+it("keeps manual environment names editable when optional dictionary suggestions cannot load", async () => {
+  const action = vi.fn(async () => {});
+  await act(async () => root.render(<ResourceActionDialog workspace="ops" permissions={new Set()} row={{}} onClose={() => {}} onDone={() => {}} action={{
+    label: "Create environment", initialValues: () => ({ name: "custom-name" }), action,
+    parameters: () => [{ key: "name", label: "Environment name", type: "text", required: true, options: async () => { throw new Error("suggestions unavailable"); } }],
+  }} />));
+  expect(document.querySelector<HTMLInputElement>('input[aria-label="Environment name"]')!.disabled).toBe(false);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("suggestions unavailable");
+  await act(async () => document.querySelector<HTMLFormElement>('[role="dialog"] form')!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(action).toHaveBeenCalledWith({}, { name: "custom-name" });
+});
 it("secret detail only fetches metadata; reveal is explicit, audited endpoint and can hide", async () => {
   await mount();
   expect(host.textContent).toContain("已设置");
@@ -143,6 +194,16 @@ it("editing a secret omits its value unless replacement is explicitly enabled", 
   await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   const unchanged = requests.find(r => r.method === "PATCH");
   expect(JSON.parse(unchanged!.body!)).not.toHaveProperty("value");
+});
+it("shows an unset secret input immediately without sending a replacement until edited", async () => {
+  stored.has_value = false;
+  history.replaceState({}, "", "/ops/deploy/variables/10/edit");
+  await mount();
+  const input = host.querySelector<HTMLTextAreaElement>('textarea[autocomplete="off"]');
+  expect(input).not.toBeNull();
+  expect(input!.value).toBe("");
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(JSON.parse(requests.find(r => r.method === "PATCH")!.body!)).not.toHaveProperty("value");
 });
 it("an explicitly selected empty replacement sends an empty string", async () => {
   history.replaceState({}, "", "/ops/deploy/variables/10/edit");
@@ -279,7 +340,7 @@ it("shows an install command immediately in the runner host mode", async () => {
   expect(host.textContent).toContain("添加登录凭据");
   expect(host.textContent).not.toContain("接入方式*");
   await act(async () => host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="false"]')!.click());
-  expect(host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="true"]')?.textContent).toBe("代理 Runner");
+  expect(host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="true"]')?.textContent).toBe("主机代理");
   expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="安装命令"]')?.value).toContain("fixture-token");
 });
 it("shows empty host tags as read-only data without creation instructions", async () => {

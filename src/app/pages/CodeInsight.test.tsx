@@ -137,7 +137,7 @@ it("selects repository namespace groups across all pages, adds a group once, and
   expect([...group.options].map(option => option.value)).toEqual(['', 'other', 'team', 'team/mobile']);
   await choose(group, 'team/mobile');
   await openRepositories();
-  expect([...document.querySelectorAll('[role="menuitemcheckbox"]')].map(item => item.textContent)).toEqual(['\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff082\uff09', 'team/mobile/library', 'team/mobile/app']);
+  expect([...document.querySelectorAll('[role="menuitemcheckbox"]')].map(item => item.textContent)).toEqual([insightText('groupRepositories', {group:'team/mobile'}), '\u9009\u62e9\u5f53\u524d\u7ed3\u679c\uff082\uff09', 'team/mobile/library', 'team/mobile/app']);
   await clickRepository('team/mobile/app');
   await clickRepository('team/mobile/library');
   expect(selected.map(row => row.repository)).toEqual(['team/mobile/app', 'team/mobile/library']);
@@ -273,4 +273,31 @@ it("does not leave Git selection disabled when a previous platform request is st
   await choose(connection, '12');
   await setInput(host.querySelector<HTMLInputElement>('input[aria-label="Git 仓库地址"]')!, 'https://git.example.invalid/team/repo.git');
   expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('加入洞察'))!.disabled).toBe(false);
+});
+
+it("persists dynamic connection and group scopes instead of a snapshot of visible repositories", async () => {
+  let selected: InsightRepository[] = [];
+  function Editor() {
+    const [value, setValue] = useState<InsightRepository[]>([]); selected = value;
+    return <CodeInsightRepositories workspace="ws" value={value} readOnly={false} permissions={new Set(["repositories.read"])} onChange={next => setValue(next as InsightRepository[])} onValidityChange={() => {}} />;
+  }
+  await act(async () => root.render(<Editor />));
+  const selects = () => host.querySelectorAll<HTMLSelectElement>('select');
+  await choose(selects()[0]!, '11');
+  await choose(selects()[1]!, 'team');
+  await openRepositories();
+  await clickRepository(insightText('groupRepositories', {group:'team'}));
+  expect(selected).toEqual([{connection_id:'11', repository:'team/*', all_repositories:false, pipeline_id:'', provider:'github'}]);
+  for (const path of ['team/project', 'team/second']) {
+    const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(element => element.textContent === path)!;
+    expect(item.getAttribute('aria-checked')).toBe('true');
+    expect(item.hasAttribute('data-disabled')).toBe(true);
+  }
+  await closeRepositories();
+  await choose(selects()[1]!, '');
+  await openRepositories();
+  await clickRepository(insightText('\u5168\u90e8\u53ef\u89c1\u4ed3\u5e93'));
+  expect(selected).toEqual([{connection_id:'11', repository:'', all_repositories:true, pipeline_id:'', provider:'github'}]);
+  await clickRepository(insightText('\u5168\u90e8\u53ef\u89c1\u4ed3\u5e93'));
+  expect(selected).toEqual([]);
 });

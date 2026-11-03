@@ -1,3 +1,4 @@
+import { DictionaryState, stateDictionary } from "../maintenance/DictionaryState";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
@@ -134,7 +135,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
                     {Object.entries(states).map(([state, count]) => (
                       <div key={state}>
                         <dt className="text-sm text-muted-foreground">
-                          {label(state)}
+                          <DictionaryState dictionary={stateDictionary[key] ?? ""} value={state}>{label(state)}</DictionaryState>
                         </dt>
                         <dd className="text-xl">{count}</dd>
                       </div>
