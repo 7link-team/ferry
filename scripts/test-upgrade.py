@@ -135,11 +135,12 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     before[path]['user']['is_superadmin'] = False
                     allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
+                    allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
                         added=set(migrated['permissions'])-set(original['permissions'])
-                        assert added<=allowed and set(original['permissions'])<=set(migrated['permissions'])
+                        assert added<=allowed and set(original['permissions'])<=set(migrated['permissions']), ('unexpected workspace permission changes', sorted(added-allowed), sorted(set(original['permissions'])-set(migrated['permissions'])))
                         original['permissions']=migrated['permissions']
                         # Additive: whether the user created the workspace; this user created it.
                         assert migrated['relation'] == 'owner', migrated['relation']
@@ -193,6 +194,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} if role['name'] in ['拥有者','管理员'] else {'marketplace-sources.read'} if role['name']=='只读' else set()
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
                 expected |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
+                expected |= {'code-insights.'+verb for verb in (['read','create','update','delete','sync'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)
