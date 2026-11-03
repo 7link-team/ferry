@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "System setting keys cannot be used for custom settings.",
   "maintenance.settingExists": "The setting key already exists.",
   "maintenance.settingKeyImmutable": "The setting key cannot be changed after creation.",
-  "maintenance.systemMetadataImmutable": "System setting names, categories, descriptions, and constraints cannot be changed.",
+  "maintenance.systemMetadataImmutable": "System setting constraints cannot be changed.",
   "maintenance.systemTypeImmutable": "The numeric type of a system setting cannot be changed.",
   "maintenance.systemIntegerRequired": "System setting values must be integers.",
   "maintenance.settingChanged": "The setting has changed. Refresh and try again.",

@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "系統設定識別碼不可用於自訂設定。",
   "maintenance.settingExists": "設定識別碼已存在。",
   "maintenance.settingKeyImmutable": "設定識別碼建立後不可修改。",
-  "maintenance.systemMetadataImmutable": "系統設定的名稱、分類、說明與約束不可修改。",
+  "maintenance.systemMetadataImmutable": "系統設定的值約束不可修改。",
   "maintenance.systemTypeImmutable": "系統設定的數值類型不可修改。",
   "maintenance.systemIntegerRequired": "系統設定值必須是整數。",
   "maintenance.settingChanged": "設定已變更，請重新整理後再試。",

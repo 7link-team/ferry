@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "システム設定のキーをカスタム設定に使用することはできません。",
   "maintenance.settingExists": "設定キーは既に存在します。",
   "maintenance.settingKeyImmutable": "設定キーは作成後に変更できません。",
-  "maintenance.systemMetadataImmutable": "システム設定の名前、分類、説明、制約は変更できません。",
+  "maintenance.systemMetadataImmutable": "システム設定の値の制約は変更できません。",
   "maintenance.systemTypeImmutable": "システム設定の数値型は変更できません。",
   "maintenance.systemIntegerRequired": "システム設定の値には整数を指定してください。",
   "maintenance.settingChanged": "設定が変更されました。再読み込みしてから再試行してください。",

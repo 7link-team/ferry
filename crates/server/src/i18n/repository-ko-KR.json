@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "시스템 설정 키를 사용자 지정 설정에 사용할 수 없습니다.",
   "maintenance.settingExists": "설정 키가 이미 존재합니다.",
   "maintenance.settingKeyImmutable": "설정 키는 생성 후 변경할 수 없습니다.",
-  "maintenance.systemMetadataImmutable": "시스템 설정의 이름, 분류, 설명 및 제약 조건은 변경할 수 없습니다.",
+  "maintenance.systemMetadataImmutable": "시스템 설정의 값 제약 조건은 변경할 수 없습니다.",
   "maintenance.systemTypeImmutable": "시스템 설정의 수치 유형은 변경할 수 없습니다.",
   "maintenance.systemIntegerRequired": "시스템 설정 값은 정수여야 합니다.",
   "maintenance.settingChanged": "설정이 변경되었습니다. 새로고침 후 다시 시도해 주세요.",

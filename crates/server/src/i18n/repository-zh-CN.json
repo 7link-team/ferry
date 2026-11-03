@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "系统配置标识不可用于自定义配置。",
   "maintenance.settingExists": "配置标识已存在。",
   "maintenance.settingKeyImmutable": "配置标识创建后不可修改。",
-  "maintenance.systemMetadataImmutable": "系统配置的名称、分类、说明与约束不可修改。",
+  "maintenance.systemMetadataImmutable": "系统配置的值约束不可修改。",
   "maintenance.systemTypeImmutable": "系统配置的数值类型不可修改。",
   "maintenance.systemIntegerRequired": "系统配置值必须是整数。",
   "maintenance.settingChanged": "配置已变化，请刷新后重试。",

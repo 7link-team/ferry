@@ -121,6 +121,37 @@ mod locale_tests {
                 "existing editable seed labels stay literal"
             );
         }
+        let current = settings::Entity::find_by_id(row.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut view = setting_json(current);
+        view["name"] = json!("Custom heartbeat label");
+        view["category"] = json!("operations");
+        view["description"] = json!("User description");
+        update_setting(
+            State(s.clone()),
+            scope(),
+            Path(("1".into(), id)),
+            Json(serde_json::from_value(view).unwrap()),
+        )
+        .await
+        .unwrap();
+        for locale in Locale::ALL {
+            with_locale(locale, seed(&s, &s.db, 1.into()))
+                .await
+                .unwrap();
+            let stored = settings::Entity::find_by_id(row.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let view = with_locale(locale, async { setting_json(stored) }).await;
+            assert_eq!(view["name"], "Custom heartbeat label");
+            assert_eq!(view["category"], "operations");
+            assert_eq!(view["description"], "User description");
+        }
         let mut custom = row;
         custom.key = "custom".into();
         custom.name = "用户 {name} 原文".into();
@@ -328,6 +359,13 @@ fn setting_name(key: &str, locale: crate::i18n::Locale) -> String {
     )
 }
 
+fn is_default_setting_name(key: &str, name: &str) -> bool {
+    SETTINGS.iter().any(|d| d.0 == key && d.1 == name)
+        || crate::i18n::Locale::ALL
+            .into_iter()
+            .any(|locale| name == setting_name(key, locale))
+}
+
 fn setting_json(r: settings::Model) -> Value {
     let def = SETTINGS.iter().find(|v| v.0 == r.key);
     let raw = if def.is_some() {
@@ -338,7 +376,12 @@ fn setting_json(r: settings::Model) -> Value {
     let schema = def
         .map(|d| json!({"min":d.3,"max":d.4,"decimals":0}).to_string())
         .unwrap_or_else(|| r.schema_json.unwrap_or_else(|| "{}".into()));
-    json!({"id":Id::from(r.id),"key":r.key,"name":def.map(|d|setting_name(d.0, crate::i18n::current_locale())).unwrap_or(r.name),
+    let name = if def.is_some() && is_default_setting_name(&r.key, &r.name) {
+        setting_name(&r.key, crate::i18n::current_locale())
+    } else {
+        r.name
+    };
+    json!({"id":Id::from(r.id),"key":r.key,"name":name,
         "description":r.description,"category":r.category,"value_type":r.value_type,
         "value_json":raw,"schema_json":schema,"value_summary":values::summary(&raw),
         "builtin":def.is_some(),"type":if r.value_type=="num" {"integer"} else {r.value_type.as_str()},
@@ -531,19 +574,10 @@ pub async fn update_setting(
     }
     if let Some(d) = def {
         let fixed_schema = json!({"min":d.3,"max":d.4,"decimals":0});
-        if body.name.as_deref().is_some_and(|v| {
-            v != d.1
-                && !crate::i18n::Locale::ALL
-                    .into_iter()
-                    .any(|locale| v == setting_name(d.0, locale))
-        }) || body.category.as_deref().is_some_and(|v| v != row.category)
-            || body
-                .description
-                .as_deref()
-                .is_some_and(|v| v != row.description)
-            || body.schema_json.as_deref().is_some_and(|v| {
-                serde_json::from_str::<Value>(v).ok().as_ref() != Some(&fixed_schema)
-            })
+        if body
+            .schema_json
+            .as_deref()
+            .is_some_and(|v| serde_json::from_str::<Value>(v).ok().as_ref() != Some(&fixed_schema))
         {
             return Err(ApiError::localized(
                 StatusCode::BAD_REQUEST,
@@ -551,9 +585,12 @@ pub async fn update_setting(
             ));
         }
     }
-    let name = def
-        .map(|d| d.1.to_string())
-        .unwrap_or_else(|| body.name.unwrap_or_else(|| row.name.clone()));
+    let incoming_name = body.name.unwrap_or_else(|| row.name.clone());
+    let name = if let Some(d) = def.filter(|d| is_default_setting_name(d.0, &incoming_name)) {
+        d.1.to_owned()
+    } else {
+        incoming_name
+    };
     let description = body.description.unwrap_or_else(|| row.description.clone());
     let category = body.category.unwrap_or_else(|| row.category.clone());
     metadata(&row.key, &name, &category, &description)?;

@@ -53,7 +53,10 @@ try {
   const valueInput=p.getByRole('spinbutton',{name:'值',exact:true});
   await valueInput.waitFor();
   assert.equal(await p.locator('form section h2').first().innerText(),'当前值');
-  for(const name of ['标识','名称','分类']) assert(await p.getByRole('textbox',{name:new RegExp('^'+name)}).isDisabled());
+  assert(await p.getByRole('textbox',{name:/^标识/}).isDisabled());
+  await fillByKeyboard(p.getByRole('textbox',{name:/^名称/}),'Runner timeout custom label');
+  await fillByKeyboard(p.getByRole('textbox',{name:/^分类/}),'runner');
+  await fillByKeyboard(p.getByRole('textbox',{name:/^说明/}),'Custom heartbeat description');
   assert(await p.getByLabel('值类型',{exact:true}).isDisabled());
   await fillByKeyboard(valueInput,'1');
   await p.getByRole('alert').first().waitFor();
@@ -66,6 +69,12 @@ try {
   await valueInput.waitFor(); assert.equal(await valueInput.inputValue(),'120');
   const savedHeartbeat=await get(root+'/settings/'+initialHeartbeat.id);
   assert.equal(savedHeartbeat.value,120); assert.equal(savedHeartbeat.value_json,'120');
+  assert.equal(savedHeartbeat.name,'Runner timeout custom label');
+  assert.equal(savedHeartbeat.category,'runner');
+  assert.equal(savedHeartbeat.description,'Custom heartbeat description');
+  assert.equal(await p.getByRole('textbox',{name:/^名称/}).inputValue(),savedHeartbeat.name);
+  assert.equal(await p.getByRole('textbox',{name:/^分类/}).inputValue(),savedHeartbeat.category);
+  assert.equal(await p.getByRole('textbox',{name:/^说明/}).inputValue(),savedHeartbeat.description);
   await mkdir('data/maintenance/form-e2e',{recursive:true});
   await p.screenshot({path:'data/maintenance/form-e2e/builtin-setting.png',fullPage:true});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/settings/new`);
@@ -101,6 +110,7 @@ try {
   assert.equal(new URL(p.url()).searchParams.get('page_size'),null,'default page size is not a stale URL override');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('row').filter({hasText:'host-state'}).getByRole('link',{name:'编辑',exact:true}).click();
+  await p.locator('input[aria-label$=" 值"]').first().waitFor();
   const keys=await p.locator('input[aria-label$=" 值"]').evaluateAll(inputs=>inputs.map(input=>input.value));
   const unknown=keys.indexOf('unknown');
   assert(unknown>=0,'migrated system dictionary retains unknown key');

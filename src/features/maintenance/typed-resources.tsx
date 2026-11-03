@@ -40,11 +40,11 @@ export function typedResourceForm(resource: Resource): FormConfig<TypedValueRow>
     sections: [
       ...(isSetting ? [valueSection] : []),
       { title: "基础信息", titleKey: "typed-domain:basic", fields: [
-        { key: "category", label: "分类", labelKey: "typed-domain:category", type: "text", required: true, disabled: row => !!row.builtin && isSetting },
+        { key: "category", label: "分类", labelKey: "typed-domain:category", type: "text", required: true },
         { key: "key", label: "标识", labelKey: "typed-domain:key", type: "text", required: true, immutable: true },
-        { key: "name", label: "名称", labelKey: "typed-domain:name", type: "text", required: true, disabled: row => !!row.builtin && isSetting },
+        { key: "name", label: "名称", labelKey: "typed-domain:name", type: "text", required: true },
         { key: "value_type", label: "值类型", labelKey: "typed-domain:valueType", type: "custom", disabled: row => !!row.builtin, render: ({ draft, readOnly, onPatch }) => <AutoField label={typedText("valueType")}><select aria-label={typedText("valueType")} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={draft.value_type ?? type} disabled={readOnly} onChange={event => { const next = event.target.value; onPatch({ value_type: next, value_json: initialValue(next), schema_json: "{}", items: "[]", ...(next === "num" ? { value: 0 } : {}) }); }}>{valueTypeOptions.map(option => <option key={option.value} value={option.value}>{typedText(`type.${option.value}`)}</option>)}</select></AutoField> },
-        { key: "description", label: "说明", labelKey: "typed-domain:description", type: "textarea", span: 2, disabled: row => !!row.builtin && isSetting },
+        { key: "description", label: "说明", labelKey: "typed-domain:description", type: "textarea", span: 2 },
       ] },
       { title: "值约束", titleKey: "typed-domain:constraints", fields: [{ key: "schema_json", label: "值约束", labelKey: "typed-domain:constraints", type: "custom", span: 2, disabled: row => !!row.builtin, render: props => <TypedSchemaEditor {...props} resource={resource} /> }] },
       ...(!isSetting ? [valueSection] : []),

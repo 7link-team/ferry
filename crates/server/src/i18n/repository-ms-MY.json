@@ -522,7 +522,7 @@
   "maintenance.systemKeyReserved": "Kunci tetapan sistem tidak boleh digunakan untuk tetapan tersuai.",
   "maintenance.settingExists": "Kunci tetapan sudah wujud.",
   "maintenance.settingKeyImmutable": "Kunci tetapan tidak boleh diubah selepas dicipta.",
-  "maintenance.systemMetadataImmutable": "Nama, kategori, penerangan dan kekangan tetapan sistem tidak boleh diubah.",
+  "maintenance.systemMetadataImmutable": "Kekangan nilai tetapan sistem tidak boleh diubah.",
   "maintenance.systemTypeImmutable": "Jenis angka tetapan sistem tidak boleh diubah.",
   "maintenance.systemIntegerRequired": "Nilai tetapan sistem mestilah integer.",
   "maintenance.settingChanged": "Tetapan telah berubah. Muat semula dan cuba lagi.",
