@@ -45,6 +45,11 @@ const series = [
   { id: 'd2:A', period: iso(1), date: iso(1), nickname: 'Alice', name: 'Alice', email: 'alice@example.invalid', projects: 1, commits: 3, additions: 40, deletions: 7, effectives: 33 },
 ];
 const coverage = { complete: false, start: null, sources: [source], timezone: 'UTC' };
+const heatmapSeries = [...new Set(series.map(row => row.date))].map(date => {
+  const authors = series.filter(row => row.date === date);
+  return { id: date, date, period: date, contributors: authors.length, authors,
+    ...Object.fromEntries(['commits', 'additions', 'deletions', 'effectives'].map(metric => [metric, authors.reduce((sum, row) => sum + row[metric], 0)])) };
+});
 const envelope = (items, params, metadata = {}) => {
   const page = Number(params.get('page') || 1), size = Number(params.get('page_size') || 20);
   return { items: items.slice((page - 1) * size, page * size), total: items.length, page, page_size: size, ...metadata };
@@ -88,7 +93,7 @@ try {
       if (kind === 'repositories') items = [{ id: 'repository', repository: 'team/repository', nicknames: ['Alice', 'Bob'], commits: 6, additions: 72, deletions: 14, effectives: 58 }];
       if (kind === 'branches') items = [{ id: 'branch', repository: 'team/repository', branchName: 'main', present: true, nicknames: ['Alice', 'Bob'], commits: 6, additions: 72, deletions: 14, effectives: 58 }];
       if (kind === 'commits') items = [{ id: 'commit', repository: 'team/repository', branches: ['main', 'release'], commitHash: 'a'.repeat(40), commitUrl: 'https://example.invalid/team/repository/commit/' + 'a'.repeat(40), message: 'feat: browser fixture', messageType: 'feat', isMerge: false, nickname: 'Alice', authorName: 'Alice', authorEmail: 'alice@example.invalid', date: now, committerDate: now, additions: 20, deletions: 5, effectives: 15, languageStats: { TypeScript: { additions: 20, deletions: 5 } } }];
-      return json(envelope(items, url.searchParams, { coverage, ...(['heatmap', 'period'].includes(kind) ? { series } : {}) }));
+      return json(envelope(items, url.searchParams, { coverage, ...(['heatmap', 'period'].includes(kind) ? { series: kind === 'heatmap' ? heatmapSeries : series } : {}) }));
     }
     unexpected.push(path);
     return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'Unspecified browser fixture route' }) });
@@ -267,8 +272,25 @@ try {
       assert.match(await identityCell.innerText(), /team\/repository\s+main\s+release\s+a{40}/, 'repository, branches and SHA share the identity column');
       assert.match(await visibleRow.getByRole('cell').filter({ hasText: 'alice@example.invalid' }).innerText(), /Alice\s+Alice\s+alice@example\.invalid/, 'nickname, name and email share the author column');
     }
-    if (kind === 'heatmap') { assert((await report.locator('svg rect').count()) > 0); }
-    if (kind === 'period') { assert.equal(await report.locator('[data-author]').count(), 2); await report.locator('svg[role="img"]').scrollIntoViewIfNeeded(); await page.screenshot({ path: resolve(output, 'desktop-trend.png') }); }
+    if (kind === 'heatmap') {
+      assert((await report.locator('svg rect').count()) > 0);
+      assert((await report.locator('svg text').count()) >= 8, 'calendar axes show weekdays and months');
+      await report.locator(`svg rect[aria-label="${iso(3)}"]`).hover();
+      const tooltip = page.getByRole('tooltip'); await tooltip.waitFor();
+      assert.match(await tooltip.innerText(), /Alice[\s\S]*Bob/);
+      assert.match(await tooltip.innerText(), /新增行\s*32/);
+      await page.mouse.move(0, 0);
+    }
+    if (kind === 'period') {
+      assert.equal(await report.locator('[data-author]').count(), 2);
+      assert((await report.locator('svg text').count()) >= 5, 'trend has visible date and value scales');
+      await report.locator(`svg circle[aria-label="Alice ${iso(3)}"]`).hover();
+      const tooltip = page.getByRole('tooltip'); await tooltip.waitFor();
+      assert.match(await tooltip.innerText(), /Alice/);
+      assert.match(await tooltip.innerText(), /新增行\s*20/);
+      await page.mouse.move(0, 0);
+      await report.locator('svg[role="img"]').scrollIntoViewIfNeeded(); await page.screenshot({ path: resolve(output, 'desktop-trend.png') });
+    }
   }
   checks.push('all eight shared-filter report views, repository aggregation, source commit link, branch membership, heatmap and per-author trend');
 
