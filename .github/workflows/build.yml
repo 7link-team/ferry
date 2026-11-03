@@ -70,15 +70,8 @@ jobs:
         run: python3 scripts/test-updater.py
 
   storage:
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        database: [postgres, mysql]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Directory storage, legacy migration and tar relocation on real Docker
-        run: python3 scripts/test-compose-storage.py ${{ matrix.database }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/storage.yml
 
   backends:
     # The dialect layer's unit tests cannot catch what actually broke here:

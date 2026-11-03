@@ -1,0 +1,39 @@
+name: Deployment storage acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - compose.*.yaml
+      - scripts/quickstart.sh
+      - scripts/postgres-init.sh
+      - scripts/test-quickstart.sh
+      - scripts/test-compose-storage.py
+      - .github/workflows/storage.yml
+  pull_request:
+    paths:
+      - compose.*.yaml
+      - scripts/quickstart.sh
+      - scripts/postgres-init.sh
+      - scripts/test-quickstart.sh
+      - scripts/test-compose-storage.py
+      - .github/workflows/storage.yml
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Quickstart configuration and upgrade regressions
+        run: sh scripts/test-quickstart.sh
+      - name: Directory storage, legacy migration and tar relocation on real Docker
+        run: python3 scripts/test-compose-storage.py ${{ matrix.database }}
