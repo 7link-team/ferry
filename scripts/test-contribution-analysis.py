@@ -86,6 +86,14 @@ class Provider(BaseHTTPRequestHandler):
     def respond(self):
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
+        if parsed.path.endswith("/info/refs"):
+            # These fixtures describe platform APIs, not Git object stores.
+            # A collector may probe the authorized clone URL when API facts are
+            # incomplete. Missing Git service must preserve unpublished coverage.
+            assert query.get("service") == ["git-upload-pack"], query
+            assert not self.headers.get("Authorization"), "no credentials before a challenge"
+            calls[("git", "unavailable")] += 1
+            return self.json({"error": "Git service is not provided by this fixture"}, status=404)
         token = (query.get("access_token", [""])[0] or self.headers.get("PRIVATE-TOKEN")
                  or self.headers.get("x-yunxiao-token") or self.headers.get("Authorization", "").removeprefix("Bearer ").removeprefix("token "))
         provider = token.removeprefix("valid-personal-token-")

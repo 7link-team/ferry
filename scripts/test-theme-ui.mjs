@@ -25,6 +25,7 @@ try {
   await page.goto(`${url}/zh-CN/workspaces/2/nodes`);
   const themeButton = page.getByRole('button', { name: '主题', exact: true });
   await themeButton.waitFor();
+  assert.equal(await page.getByRole('button', { name: '深浅模式', exact: true }).count(), 0, 'appearance changes belong inside the theme menu');
   await page.getByRole('button', { name: 'Production group', exact: true }).click();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'modern');
   assert.equal(await page.locator('html').evaluate(node => node.classList.contains('dark')), true);
@@ -264,6 +265,10 @@ try {
   await choose('自定义');
   const dialog = page.getByRole('dialog');
   const assertFixedThemeChrome = async currentDialog => {
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
     const scroll = currentDialog.locator('[data-slot="custom-theme-scroll"]');
     const header = currentDialog.locator('[data-slot="custom-theme-header"]');
     const footer = currentDialog.locator('[data-slot="custom-theme-footer"]');
