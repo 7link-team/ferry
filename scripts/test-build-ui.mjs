@@ -137,22 +137,26 @@ try {
   page.on('request', (request) => { if (/pipeline-runs\/[^/]+(?:\/logs\?|$)/.test(request.url())) requests.push(request.url()); });
   await page.getByRole('button', { name: '触发', exact: true }).click();
   await page.waitForURL(/\/workspaces\/\d+\/pipeline-runs\/\d+/);
-  await page.getByLabel('任务步骤和日志', { exact: true }).getByText('运行中', { exact: true }).waitFor();
-  await page.getByLabel('任务步骤和日志', { exact: true }).getByText(/CLONE_OK/).waitFor();
-  await page.getByLabel('任务步骤和日志', { exact: true }).getByText('运行中', { exact: true }).waitFor();
-  assert((await page.getByLabel('任务步骤和日志', { exact: true }).innerText()).includes('运行中'));
+  const stepsAndLogs = page.getByRole('region', { name: '任务步骤和日志', exact: true });
+  const activeBuildStep = stepsAndLogs.getByRole('button', { name: /^构建 运行中(?:\s|$)/ });
+  await activeBuildStep.waitFor();
+  await stepsAndLogs.getByText(/CLONE_OK/).waitFor();
+  await activeBuildStep.waitFor();
+  assert((await stepsAndLogs.innerText()).includes('运行中'));
   // Converted env references read the secrets context, listed as Actions runs list them.
+  await page.getByRole('tab', { name: '配置快照', exact: true }).click();
   assert((await page.getByLabel('执行变量', { exact: true }).innerText()).includes('secrets:build-ui-secret ← build-ui-secret · 构建模块 · v1 · 密钥'));
   assert(!(await page.locator('body').innerText()).includes('browser-managed-build-secret'));
+  await page.getByRole('tab', { name: '任务步骤和日志', exact: true }).click();
   const firstCount = await page.locator('[data-seq]').count();
   await writeFile(join(work, 'allow-build'), '');
-  await page.getByLabel('任务步骤和日志', { exact: true }).getByText(/BUILD_OK/).waitFor();
+  await stepsAndLogs.getByText(/BUILD_OK/).waitFor();
   const secondCount = await page.locator('[data-seq]').count(); assert(secondCount > firstCount);
   await writeFile(join(work, 'allow-finish'), '');
   await page.getByText('日志已加载', { exact: true }).waitFor();
-  assert((await page.getByLabel('任务步骤和日志', { exact: true }).innerText()).includes('FINISH_OK'));
+  assert((await stepsAndLogs.innerText()).includes('FINISH_OK'));
   // The three converted steps plus the conversion's workspace preparation.
-  assert(await page.getByLabel('任务步骤和日志', { exact: true }).getByText('成功', { exact: true }).count() >= 4);
+  assert(await stepsAndLogs.getByText('成功', { exact: true }).count() >= 4);
   if (process.env.UI_SCREENSHOT) await page.screenshot({ path: process.env.UI_SCREENSHOT });
   const finalCount = await page.locator('[data-seq]').count();
   const requestCount = requests.length;
