@@ -41,6 +41,36 @@ it("renders report metadata from the fetched envelope and hides stale charts aft
   expect(element.textContent).toContain("Report unavailable");
   expect(element.textContent).not.toContain("Report Full series");
 });
+it("keeps the 15-second default selectable, spins only the refresh icon and resets after failure", async () => {
+  vi.useFakeTimers();
+  const visibility = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  localStorage.setItem("ferry.refresh.clock", "7");
+  const config: ListConfig<{ id: string; name: string }> = {
+    resource: "clock", defaultRefresh: 15, rowKey: row => row.id,
+    columns: [{ key: "name", label: "Name" }], toolbar: { create: false },
+  };
+  try {
+    await act(async () => root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+    expect(element.querySelector('[role="timer"]')?.textContent).toBe("15s");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(element.querySelector('[role="timer"]')?.textContent).toBe("14s");
+    let fail!: (reason: Error) => void;
+    vi.mocked(listResource).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(14000); });
+    const countdown = element.querySelector('[role="timer"]');
+    expect(countdown?.textContent).toBe("0s");
+    expect(countdown?.querySelector('svg')).toBeNull();
+    expect(element.querySelectorAll('svg.animate-spin')).toHaveLength(1);
+    expect(listResource).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(listResource).toHaveBeenCalledTimes(2);
+    await act(async () => fail(new Error("Refresh failed")));
+    expect(element.querySelector('[role="timer"]')?.textContent).toBe("15s");
+    await act(async () => [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "刷新")!.click());
+    expect(listResource).toHaveBeenCalledTimes(3);
+    expect(element.querySelector('[role="timer"]')?.textContent).toBe("15s");
+  } finally { localStorage.removeItem("ferry.refresh.clock"); visibility.mockRestore(); vi.useRealTimers(); }
+});
 it("shows refresh failures even when a remote page already contains rows, then recovers", async () => {
   const first = { items: [{ id: "1", name: "Repository" }], total: 0, page: 1, page_size: 50, has_more: true };
   vi.mocked(listResource).mockResolvedValueOnce(first);

@@ -134,4 +134,4 @@ export function pageRange(page: number, pageCount: number, window = 1): (number 
 
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
 /** Auto-refresh choices in seconds; 0 is off. */
-export const REFRESH_INTERVALS = [0, 10, 30, 60] as const;
+export const REFRESH_INTERVALS = [0, 5, 10, 15, 30, 60] as const;

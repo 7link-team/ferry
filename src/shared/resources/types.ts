@@ -112,7 +112,6 @@ export interface ListConfig<T> {
     create?: boolean | { label: string; labelKey?: string | undefined };
     import?: boolean;
     export?: boolean;
-    refresh?: readonly number[];
   };
   /** Conditions applied on every request but not shown as filters — this is
    *  how one resource serves several menu entries (cron-jobs scope, …). */

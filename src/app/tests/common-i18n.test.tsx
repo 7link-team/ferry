@@ -118,7 +118,7 @@ it("keeps row action semantics independent of translated labels", async () => {
   type Row = { id: string; name: string };
   const execute = vi.fn(async () => {});
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ items: [{ id: "7", name: "User-owned name" }], total: 1, page: 1, page_size: 20 }) })));
-  const config: ListConfig<Row> = { resource: "tags", rowKey: row => row.id, columns: [{ key: "name", label: "Raw name", labelKey: "common.name" }], actions: [{ label: "查看", labelKey: "common.view", action: execute }], toolbar: { create: false, import: false, export: false, refresh: [0] } };
+  const config: ListConfig<Row> = { resource: "tags", rowKey: row => row.id, columns: [{ key: "name", label: "Raw name", labelKey: "common.name" }], actions: [{ label: "查看", labelKey: "common.view", action: execute }], toolbar: { create: false, import: false, export: false } };
   await act(async () => root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
   for (const locale of ["ja-JP", "zh-CN", "en-US"] as const) {
     await language(locale);

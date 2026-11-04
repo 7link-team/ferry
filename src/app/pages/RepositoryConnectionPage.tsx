@@ -41,7 +41,7 @@ export function RepositoryConnectionDetail({ workspace, connectionId, permission
       { key: "url", label: "address", labelKey: "repository.address" },
       { key: "default_branch", label: "branch", labelKey: "repository.branch", render: (row: { default_branch: string }) => row.default_branch || "—" },
     ],
-    toolbar: { create: false, import: false, export: false, refresh: [0] },
+    toolbar: { create: false, import: false, export: false },
     emptyKey: "repository.empty",
   }), [workspace, connectionId]);
   const activeTab = tab === "repositories" || tab === "monitoring" || tab === "events" || tab === "insights" ? tab : tab === "analysis" ? "insights" : "info";

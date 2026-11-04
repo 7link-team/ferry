@@ -93,7 +93,6 @@ export function workspacesLists({
         create: false,
         import: false,
         export: false,
-        refresh: [0, 30],
       },
     }),
     roles: list({
@@ -163,7 +162,7 @@ export function workspacesLists({
           },
         },
       ],
-      toolbar: { create: true, import: false, export: false, refresh: [0, 30] },
+      toolbar: { create: true, import: false, export: false },
     }),
   };
 }

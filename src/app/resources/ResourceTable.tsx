@@ -24,6 +24,7 @@ import {
 ArrowUp,
 Cable,
 Columns3,
+ChevronDown,
 ChevronRight,
 Copy,
 Download,
@@ -51,6 +52,7 @@ X,
 } from "lucide-react";
 import { useCallback,useEffect,useMemo,useRef,useState,type ReactNode } from "react";
 import { errorText } from "../../shared/api/api";
+import { useAutoRefresh } from "../../shared/api/use-auto-refresh";
 import {
 PAGE_SIZES,
 REFRESH_INTERVALS,
@@ -108,13 +110,15 @@ function rowName(row: unknown, fallback: string) {
 }
 
 function readRefresh(resource: string, fallback = 0) {
+  const valid = (value: number) => (REFRESH_INTERVALS as readonly number[]).includes(value);
+  const initial = valid(fallback) ? fallback : 0;
   try {
     const stored = localStorage.getItem(REFRESH_KEY(resource));
-    if (stored === null) return fallback;
+    if (stored === null) return initial;
     const saved = Number(stored);
-    return (REFRESH_INTERVALS as readonly number[]).includes(saved) ? saved : 0;
+    return valid(saved) ? saved : initial;
   } catch {
-    return fallback;
+    return initial;
   }
 }
 
@@ -181,7 +185,6 @@ export function ResourceTable<T>({
   const [busyActions, setBusyActions] = useState<Set<string>>(new Set());
   const [pendingAction,setPendingAction]=useState<{action:RowAction<T>;row:T}>();
   const [pendingDelete, setPendingDelete] = useState<{ action: string; actionKey?: string | undefined; target: string; run: () => Promise<void> }>();
-  const reloadToken = useRef(0);
 
   const params = useMemo(
     () => ({
@@ -230,25 +233,9 @@ export function ResourceTable<T>({
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, reloadToken.current, refreshKey]);
+  }, [load, refreshKey]);
 
-  // Auto-refresh pauses while the tab is hidden: a background tab polling an
-  // ops dashboard every 10s is pure waste, and the data is re-read on return.
-  useEffect(() => {
-    if (!refresh) return;
-    let timer = 0;
-    const tick = () => {
-      if (!document.hidden) void load();
-      timer = window.setTimeout(tick, refresh * 1000);
-    };
-    timer = window.setTimeout(tick, refresh * 1000);
-    const wake = () => !document.hidden && void load();
-    document.addEventListener("visibilitychange", wake);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", wake);
-    };
-  }, [refresh, load]);
+  const remaining = useAutoRefresh(refresh, load, loading);
 
   const total = data?.total ?? 0;
   const rows = grouped ? [...(data?.items ?? [])].sort((a, b) => config.grouping!.key(a).localeCompare(config.grouping!.key(b))) : data?.items ?? [];
@@ -289,7 +276,6 @@ export function ResourceTable<T>({
     setSelected(new Set());
   };
   const reload = () => {
-    reloadToken.current += 1;
     void load();
   };
 
@@ -374,29 +360,30 @@ export function ResourceTable<T>({
         {!hideToolbar && <div className="ml-auto flex flex-wrap items-center gap-2">
           {/* 刷新 is a split control: the left half acts, the right half picks
               the interval. */}
-          <div className="flex items-center">
+          <div data-slot="refresh-control" className="inline-flex items-center overflow-hidden rounded-full border bg-background shadow-xs">
             <Button
               size="sm"
-              variant="outline"
-              className="rounded-r-none border-r-0"
+              variant="ghost"
+              className="rounded-none! border-0! shadow-none! ring-inset"
               onClick={reload}
               disabled={loading}
             >
               <RefreshCw className={cn(loading && "animate-spin")} />
               {commonText("common.refresh")}</Button>
+            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
-                  variant="outline"
-                  className="rounded-l-none px-2"
+                  variant="ghost"
+                  className="min-w-10 rounded-none! border-0! px-2 shadow-none! ring-inset tabular-nums"
                   aria-label={commonText("table.autoRefresh")}
                 >
-                  {refresh ? `${refresh}s` : commonText("table.off")}
+                  {refresh ? <span role="timer" aria-live="off" aria-busy={loading}>{loading ? "0s" : `${remaining}s`}</span> : <ChevronDown aria-hidden="true" className="size-3.5" />}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {(config.toolbar?.refresh ?? REFRESH_INTERVALS).map((seconds) => (
+                {REFRESH_INTERVALS.map((seconds) => (
                   <DropdownMenuItem
                     key={seconds}
                     onClick={() => {
@@ -460,7 +447,7 @@ export function ResourceTable<T>({
         hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
         state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
-        showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={data?.has_more}
+        showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={!error && data?.has_more}
         sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: true }}
         groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
         onPageChange={setPage}
