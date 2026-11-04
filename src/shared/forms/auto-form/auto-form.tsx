@@ -1,4 +1,4 @@
-import { commonText,useCommonTranslation } from "../../i18n/i18n";
+import { commonText,optionText,useCommonTranslation } from "../../i18n/i18n";
 /** Adapted from 7link-mall-web AutoForm: configuration, conditional fields, renderer extension and shared layout. */
 import { cn } from "cn";
 import {
@@ -272,7 +272,7 @@ export function AutoFields({
 export function selectDisplay(value: unknown, config: NonNullable<FieldConfig["config"]>): string {
   const text = String(value ?? "");
   const option = config.options?.find(option => option.value === text);
-  if (option) return option.label;
+  if (option) return optionText(option);
   if (!text || config.emptyValues?.some(empty => String(empty) === text))
     return config.emptyLabel ?? commonText("common.notSet");
   return commonText("form.unavailableOption", { value: text });
@@ -351,7 +351,7 @@ export function FieldControl({
               commonText("common.select")
             }
           />
-          {(field.width ?? config.width) !== "full" && <span aria-hidden="true" data-sizer={[...(config.options ?? []).map(option => option.label), config.placeholder ?? config.emptyLabel ?? commonText("common.select"), text && !config.options?.some(option => option.value === text) ? selectDisplay(value, config) : ""].join("\n")} className="invisible col-start-1 row-start-1 h-0 overflow-hidden after:whitespace-pre after:content-[attr(data-sizer)]" />}
+          {(field.width ?? config.width) !== "full" && <span aria-hidden="true" data-sizer={[...(config.options ?? []).map(option => optionText(option)), config.placeholder ?? config.emptyLabel ?? commonText("common.select"), text && !config.options?.some(option => option.value === text) ? selectDisplay(value, config) : ""].join("\n")} className="invisible col-start-1 row-start-1 h-0 overflow-hidden after:whitespace-pre after:content-[attr(data-sizer)]" />}
           </span>
         </SelectTrigger>
         <SelectContent>
@@ -367,7 +367,7 @@ export function FieldControl({
               value={option.value || "__auto_empty__"}
               disabled={option.disabled}
             >
-              {option.label}
+              {optionText(option)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -397,7 +397,7 @@ export function FieldControl({
             value={option.value}
             disabled={option.disabled}
           >
-            {option.label}
+            {optionText(option)}
           </option>
         ))}
       </select>

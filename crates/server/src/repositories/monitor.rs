@@ -120,10 +120,13 @@ fn supported_events(provider: &str, mode: Mode) -> Vec<&'static str> {
 #[derive(Clone, Serialize, Deserialize)]
 struct NotificationChannel {
     name: String,
+    #[serde(default)]
     webhook: String,
     language: String,
     #[serde(default = "channel_enabled")]
     enabled: bool,
+    #[serde(default, flatten)]
+    options: crate::notifications::channel::Options,
 }
 fn channel_enabled() -> bool {
     true
@@ -138,6 +141,7 @@ fn channels(config: &Config) -> Vec<NotificationChannel> {
                 webhook: config.webhook.clone(),
                 language: config.notification_language.clone(),
                 enabled: true,
+                options: Default::default(),
             }]
         }
     })
@@ -152,18 +156,11 @@ fn validate_channels(channels: &[NotificationChannel]) -> Result<()> {
         ));
     }
     for channel in channels {
-        let url = reqwest::Url::parse(&channel.webhook).ok();
         if channel.name.trim().is_empty()
             || channel.name.len() > 120
             || !names.insert(channel.name.trim())
             || channel.webhook.len() > 4096
-            || !url.as_ref().is_some_and(|url| {
-                matches!(url.scheme(), "http" | "https")
-                    && url.host_str().is_some()
-                    && url.username().is_empty()
-                    && url.password().is_none()
-                    && url.fragment().is_none()
-            })
+            || channel.options.resolve(&channel.webhook).is_err()
         {
             return Err(ApiError::localized(
                 StatusCode::BAD_REQUEST,
@@ -298,7 +295,14 @@ pub async fn get(
             channels(&config)
                 .into_iter()
                 .map(|mut channel| {
+                    if channel.options.provider.is_empty() || channel.options.provider == "auto" {
+                        channel.options.provider = reqwest::Url::parse(&channel.webhook)
+                            .ok()
+                            .map(|url| crate::notifications::channel::provider(&url).to_owned())
+                            .unwrap_or_default();
+                    }
                     channel.webhook.clear();
+                    channel.options.redact();
                     channel
                 })
                 .collect::<Vec<_>>()
@@ -1083,7 +1087,13 @@ async fn deliver(
         let locale = crate::i18n::Locale::from_tag(&channel.language).unwrap_or_default();
         let result = crate::i18n::with_locale(
             locale,
-            deliver_notice(connection, &channel.webhook, event_id, event),
+            deliver_notice(
+                connection,
+                &channel.webhook,
+                &channel.options,
+                event_id,
+                event,
+            ),
         )
         .await?;
         deliveries.push(ChannelDelivery {
@@ -1112,10 +1122,11 @@ async fn deliver(
 async fn deliver_notice(
     connection: &connections::Model,
     webhook: &str,
+    options: &crate::notifications::channel::Options,
     event_id: Id,
     event: &Event,
 ) -> Result<String> {
-    if !webhook.is_empty() {
+    if !webhook.is_empty() || !options.bot_token.is_empty() {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
@@ -1178,7 +1189,9 @@ async fn deliver_notice(
             fields: fields.clone(),
             generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data,"notification":{"title":title,"fields":fields}}),
         };
-        let delivery = crate::notifications::webhook::deliver(&client, webhook, &notice).await;
+        let delivery =
+            crate::notifications::webhook::deliver_configured(&client, webhook, options, &notice)
+                .await;
         return Ok(delivery);
     }
     Ok(String::new())

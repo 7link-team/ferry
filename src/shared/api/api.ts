@@ -1,5 +1,6 @@
 import { i18n } from "../i18n/i18n";
 import { localeHeaders } from "../i18n/locale";
+import { beginActivity } from "./progress";
 
 export class ApiError extends Error {
   constructor(
@@ -11,11 +12,21 @@ export class ApiError extends Error {
 }
 
 /** Raw same-origin API requests retain streaming bodies and response handling. */
-export function localizedFetch(input: string, options: RequestInit = {}): Promise<Response> {
-  return fetch(input, { ...options, headers: localeHeaders(options.headers) });
+export async function localizedFetch(input: string, options: RequestInit = {}): Promise<Response> {
+  const finish = beginActivity("request", input);
+  try {
+    // Raw streams finish their initial request at headers, without consuming the body.
+    return await fetch(input, { ...options, headers: localeHeaders(options.headers) });
+  } finally { finish(); }
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const finish = beginActivity("request", `/api${path}`);
+  try { return await requestApi<T>(path, options); }
+  finally { finish(); }
+}
+
+async function requestApi<T>(path: string, options: RequestInit): Promise<T> {
   let response: Response;
   try {
     const headers = new Headers(options.headers);

@@ -442,7 +442,16 @@
     "repository.allGroups": "全部分组",
     "repository-monitor.notificationLanguage": "通知语言",
     "host-files.encodingReadOnly": "仅预览：{{encoding}} 编码暂不支持在浏览器中无损保存。",
-    "repository-monitor.channels": "通知渠道"
+    "repository-monitor.channels": "通知渠道",
+    "notification.providerLabel": "通知平台",
+    "notification.auto": "根据地址自动识别",
+    "notification.signing_secret": "签名密钥（可选）",
+    "notification.bot_token": "机器人 Token",
+    "notification.chat_id": "会话 ID",
+    "notification.thread_id": "话题 / 线程 ID（可选）",
+    "notification.bearer_token": "Bearer 令牌（可选）",
+    "notification.instructions": "平台配置指南",
+    "notification.invalid": "请填写必填项，并检查地址是否属于所选通知平台。"
   },
   "en-US": {
     "notification.webhookUrl": "Webhook URL",
@@ -887,7 +896,16 @@
     "repository.allGroups": "All groups",
     "repository-monitor.notificationLanguage": "Notification language",
     "host-files.encodingReadOnly": "Preview only: {{encoding}} encoding cannot be safely saved in the browser.",
-    "repository-monitor.channels": "Notification channels"
+    "repository-monitor.channels": "Notification channels",
+    "notification.providerLabel": "Notification provider",
+    "notification.auto": "Detect from URL",
+    "notification.signing_secret": "Signing secret (optional)",
+    "notification.bot_token": "Bot Token",
+    "notification.chat_id": "Chat ID",
+    "notification.thread_id": "Thread / topic ID (optional)",
+    "notification.bearer_token": "Bearer token (optional)",
+    "notification.instructions": "Provider setup guide",
+    "notification.invalid": "Complete the required fields and check that the URL matches the selected provider."
   },
   "zh-TW": {
     "notification.webhookUrl": "Webhook 位址",
@@ -1332,7 +1350,16 @@
     "repository.allGroups": "全部分組",
     "repository-monitor.notificationLanguage": "通知語言",
     "host-files.encodingReadOnly": "僅預覽：{{encoding}} 編碼無法在瀏覽器中安全儲存。",
-    "repository-monitor.channels": "通知渠道"
+    "repository-monitor.channels": "通知渠道",
+    "notification.providerLabel": "通知平台",
+    "notification.auto": "依網址自動辨識",
+    "notification.signing_secret": "簽章密鑰（選填）",
+    "notification.bot_token": "機器人 Token",
+    "notification.chat_id": "對話 ID",
+    "notification.thread_id": "話題 / 討論串 ID（選填）",
+    "notification.bearer_token": "Bearer 權杖（選填）",
+    "notification.instructions": "平台設定指南",
+    "notification.invalid": "請填寫必填欄位，並檢查網址是否屬於所選通知平台。"
   },
   "ja-JP": {
     "notification.webhookUrl": "Webhook URL",
@@ -1777,7 +1804,16 @@
     "repository.allGroups": "すべてのグループ",
     "repository-monitor.notificationLanguage": "通知言語",
     "host-files.encodingReadOnly": "Preview only: {{encoding}}",
-    "repository-monitor.channels": "通知チャネル"
+    "repository-monitor.channels": "通知チャネル",
+    "notification.providerLabel": "通知プロバイダー",
+    "notification.auto": "URLから自動判定",
+    "notification.signing_secret": "署名シークレット（任意）",
+    "notification.bot_token": "Bot Token",
+    "notification.chat_id": "Chat ID",
+    "notification.thread_id": "スレッド / トピックID（任意）",
+    "notification.bearer_token": "Bearerトークン（任意）",
+    "notification.instructions": "プロバイダー設定ガイド",
+    "notification.invalid": "必須項目を入力し、URLが選択したプロバイダーに一致するか確認してください。"
   },
   "ko-KR": {
     "notification.webhookUrl": "Webhook URL",
@@ -2222,7 +2258,16 @@
     "repository.allGroups": "모든 그룹",
     "repository-monitor.notificationLanguage": "알림 언어",
     "host-files.encodingReadOnly": "Preview only: {{encoding}}",
-    "repository-monitor.channels": "알림 채널"
+    "repository-monitor.channels": "알림 채널",
+    "notification.providerLabel": "알림 플랫폼",
+    "notification.auto": "URL에서 자동 감지",
+    "notification.signing_secret": "서명 비밀 키 (선택)",
+    "notification.bot_token": "봇 토큰",
+    "notification.chat_id": "채팅 ID",
+    "notification.thread_id": "스레드 / 주제 ID (선택)",
+    "notification.bearer_token": "Bearer 토큰 (선택)",
+    "notification.instructions": "플랫폼 설정 가이드",
+    "notification.invalid": "필수 항목을 입력하고 URL이 선택한 플랫폼과 일치하는지 확인하세요."
   },
   "ms-MY": {
     "notification.webhookUrl": "URL Webhook",
@@ -2667,6 +2712,15 @@
     "repository.allGroups": "Semua kumpulan",
     "repository-monitor.notificationLanguage": "Bahasa pemberitahuan",
     "host-files.encodingReadOnly": "Pratonton sahaja: pengekodan {{encoding}} tidak boleh disimpan dengan selamat.",
-    "repository-monitor.channels": "Saluran pemberitahuan"
+    "repository-monitor.channels": "Saluran pemberitahuan",
+    "notification.providerLabel": "Penyedia pemberitahuan",
+    "notification.auto": "Kesan daripada URL",
+    "notification.signing_secret": "Rahsia tandatangan (pilihan)",
+    "notification.bot_token": "Token Bot",
+    "notification.chat_id": "ID Sembang",
+    "notification.thread_id": "ID urutan / topik (pilihan)",
+    "notification.bearer_token": "Token Bearer (pilihan)",
+    "notification.instructions": "Panduan persediaan penyedia",
+    "notification.invalid": "Lengkapkan medan wajib dan semak URL sepadan dengan penyedia yang dipilih."
   }
 }

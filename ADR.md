@@ -1,5 +1,12 @@
 # Architecture Decision Records
 
+## Notification provider forms and independent navigation feedback (2026-11-04)
+- Notification configuration follows Uptime Kuma's provider-first interaction (https://github.com/louislam/uptime-kuma/tree/master/src/components/notifications), while retaining automatic URL detection and legacy channel records. The implementation is independent; no Kuma runtime or source code is bundled.
+- Use official endpoint terminology and protocols: WeCom/DingTalk Markdown links, Feishu/Lark rich-text post links, Telegram HTML, Slack/Google Chat native links, Discord Markdown with automatic mentions disabled. Generic Webhook retains its original JSON.
+- Reuse encrypted repository-monitor configuration and per-channel language/delivery results. Optional DingTalk/Feishu/Lark signing, Telegram token/chat/topic, Discord thread, and generic Bearer authorization live in that encrypted configuration; readers receive redacted secrets. Platform/URL mismatch is rejected. Refer to each provider's linked official setup guide in the form; no live external delivery is implied by local contract tests.
+- Top feedback occupies exactly 1 CSS px. Route progress is the opaque theme-colored bottom layer; every application API request has its own translucent layer (opacity .62), lifetime and animation. URL-path-derived session colors rotate the theme hue by 75–285 degrees. Raw streams finish at response headers; ordinary JSON calls finish after body parsing. These animations indicate pending activity, not measured transfer percentages.
+- Workspace preferences persist through ordinary same-workspace navigation. Maintenance transitions refresh in the background; changing workspaces hides the old preferences until the new data arrives. Shared table empty states retain business-specific explanations and distinguish empty datasets from active filters.
+
 ## Host execution fencing after server suspension (2026-11-04, implementation)
 - Scope: close the authorized execution-capacity boundary where SQL slot leases expire while a remote Actions worker is still executing.
 - Decision: retain SQL scheduling and owner-checked leases; additionally hold kernel file locks in the actual Actions worker for its host/slot throughout execution and cancellation cleanup. A short allocation lock serializes occupancy checks across all 64 slots, including slots above a reduced capacity. Files remain in the system shared directory and are never unlinked; otherwise separate inodes could defeat exclusion.
@@ -427,4 +434,9 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Human "return for changes" (Q08): reviewer returns with a required comment (≤500 chars); the task ends with decision=returned and the graph decides what follows (e.g. a redo loop). Same for external review.
 - Public uploads (Q09): allowed types come from each form field's declaration; configurable upper bounds 200 MB per file and 20 files; chat: 20 messages per minute per session, uploads follow form rules.
 - Statistics (Q11/M1): time buckets use the workspace timezone (default server timezone); waiting time is excluded from duration and shown separately; zero denominator shows "—"; recovery time = time from a failed run to the next succeeded run of the same definition, averaged over the window; per-job failure rate is included.
+
+## Controlled state presentation (2026-11-04)
+- Operational values belong to backend contracts, never editable workspace vocabulary: host, pipeline, deployment, cron, alert, repository and insight state sets cannot be replaced, extended or removed through dictionary CRUD or import.
+- Dictionaries configure presentation only: labels, per-locale overrides, colors and order. Legacy system labels are recognized in all six supported languages and projected into multilingual metadata at read time; custom literal names remain literal. Generated default translations are removed before persistence so later translation corrections remain effective.
+- Frontend filters, badges, forms and exports resolve the active language from the same option metadata and always submit the fixed value. Environment and application-category dictionaries remain business vocabulary rather than operational enums.
 

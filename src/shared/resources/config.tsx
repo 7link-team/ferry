@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { listResource } from "../api/resource";
 import { api } from "../api/api";
-import { commonText, configText } from "../i18n/i18n";
+import { commonText, optionText } from "../i18n/i18n";
 import { currentLocale } from "../i18n/locale";
 import type { Navigation } from "../routing/types";
 import type { FormConfig, ListConfig, Option } from "./types";
@@ -14,7 +14,7 @@ export const form = <T,>(config: FormConfig<T>): FormConfig<AnyRow> => config;
 
 export const label = (options: Option[], value: string) => {
   const option = options.find((option) => option.value === value);
-  return option ? configText(option.label, option.labelKey) : value;
+  return option ? optionText(option) : value;
 };
 
 export function ago(at: number) {

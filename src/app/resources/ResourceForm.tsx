@@ -1,6 +1,6 @@
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
 import { FormActions } from "../../shared/forms/auto-form/form-actions";
-import { commonText,configText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText,configText,optionText,useCommonTranslation } from "../../shared/i18n/i18n";
 /**
  * The one form implementation, in three modes driven by the route:
  *
@@ -426,7 +426,7 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
     {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label={commonText("form.templateList")}>
       {optionsLoading && <p className="py-3 text-sm text-muted-foreground">{commonText("form.loadingTemplates")}</p>}
       {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
-      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{configText(option.label, option.labelKey)}</button>)}
+      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{optionText(option)}</button>)}
     </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>{commonText("common.template")}</span>} className="flex min-w-0 flex-col gap-2 text-sm">
       <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
         <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder={commonText("form.selectTemplate")} /></SelectTrigger>
@@ -522,7 +522,7 @@ function Field<T>({
   useCommonTranslation();
   const { options: rawOptions, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
   const suggestionsId = useId();
-  const options = rawOptions.filter(option => !field.optionFilter || field.optionFilter(option, draft)).map(option => ({ ...option, label: configText(option.label, option.labelKey), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
+  const options = rawOptions.filter(option => !field.optionFilter || field.optionFilter(option, draft)).map(option => ({ ...option, label: optionText(option), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
   if (field.type === "multiselect" && Array.isArray(value)) {
     for (const selected of value.map(String)) {
       if (!options.some(option => option.value === selected))
@@ -572,7 +572,7 @@ function Field<T>({
 
   if (field.type === "multiselect") {
     const selected = new Set(Array.isArray(value) ? value.map(String) : []);
-    if (asText) return <Wrapper field={field}>{label}<div className="flex flex-wrap gap-1 text-sm">{options.some(option => selected.has(option.value)) ? options.filter(option => selected.has(option.value)).map(option => <span key={option.value}>{option.content ?? configText(option.label, option.labelKey)}</span>) : "\u2014"}</div></Wrapper>;
+    if (asText) return <Wrapper field={field}>{label}<div className="flex flex-wrap gap-1 text-sm">{options.some(option => selected.has(option.value)) ? options.filter(option => selected.has(option.value)).map(option => <span key={option.value}>{option.content ?? optionText(option)}</span>) : "\u2014"}</div></Wrapper>;
     const toggle = (key: string, checked: boolean) => {
       const next = new Set(selected);
       if (checked) {
@@ -589,8 +589,8 @@ function Field<T>({
       {field.createOption && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={commonText("form.searchField", { name: field.label })} placeholder={commonText("form.searchField", { name: field.label })} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
       {!options.length && <p className="text-sm text-muted-foreground">{commonText("form.noOptions")}{field.label}{field.createOption && permissions.has(field.createOption.permission) ? commonText("form.canCreate") : commonText("form.askCreator")}</p>}
       {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, labelKey:field.createOption.labelKey, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
-      {[...new Set(options.filter(o => o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
-        {options.filter(o => (o.group ?? commonText("common.option")) === group && o.label.toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.content ?? configText(option.label, option.labelKey)}</label>)}
+      {[...new Set(options.filter(o => optionText(o).toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
+        {options.filter(o => (o.group ?? commonText("common.option")) === group && optionText(o).toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.content ?? optionText(option)}</label>)}
       </div></div>)}
       {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
     </fieldset></Wrapper>;
@@ -639,7 +639,7 @@ function Field<T>({
 
   if (field.type === "text" && field.options) return <AutoField name={field.key} label={field.label} required={field.required} help={field.help}>
     <Input name={field.key} aria-label={field.label} list={suggestionsId} value={text} disabled={readOnly} required={field.required} placeholder={field.placeholder} onChange={event => onChange(event.target.value)} />
-    <datalist id={suggestionsId}>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</datalist>
+    <datalist id={suggestionsId}>{options.map(option => <option key={option.value} value={option.value}>{optionText(option)}</option>)}</datalist>
     {optionsError && <p role="alert" className="text-sm text-destructive">{optionsError}{commonText("form.refreshRetry")}</p>}
   </AutoField>;
 

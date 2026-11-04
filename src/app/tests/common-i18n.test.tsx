@@ -8,6 +8,7 @@ import catalogs from "../../shared/i18n/locales/common-domain.json";
 import type { FormConfig,ListConfig } from "../../shared/resources/types";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
+import { GroupSidebar } from "../pages/GroupSidebar";
 
 let root: Root, host: HTMLDivElement;
 it("resolves namespace-qualified configuration messages containing spaces", async () => {
@@ -29,6 +30,20 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 const fill = async (input: HTMLInputElement, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+it("uses translated All and Ungrouped labels without concatenating a resource noun in six languages", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({items:[],total:0,page:1,page_size:200}))));
+  for (const locale of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"] as const) {
+    await language(locale);
+    for (const resource of ["host-groups", "pipeline-groups"] as const) {
+      await act(async () => root.render(<GroupSidebar workspace="ops" permissions={new Set()} resource={resource} noun="RESOURCE" active="" onSelect={() => {}} />));
+      const buttons = [...host.querySelectorAll('button')].map(button => button.textContent);
+      expect(buttons).toContain(commonText("group.all"));
+      expect(buttons).toContain(commonText("group.ungrouped"));
+      expect(buttons.some(text => text?.includes("RESOURCE"))).toBe(false);
+    }
+  }
 });
 
 it("contains six complete actual catalogs with identical interpolation contracts", () => {

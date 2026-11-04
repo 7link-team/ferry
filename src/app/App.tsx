@@ -136,13 +136,18 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
       navigate({ ...route, workspace: workspaceId }, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
   }, [route.workspace, workspaceId]);
 
-  const [preferences, setPreferences] = useState<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>();
+  const [loadedPreferences, setPreferences] = useState<{workspace:string;value:{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}}>();
+  const preferences = loadedPreferences?.workspace === workspaceId ? loadedPreferences.value : undefined;
   const [preferencesError, setPreferencesError] = useState("");
+  // Configuration edits/imports/deletions refresh preferences on returning to a list
+  // or leaving maintenance. Ordinary navigation reuses this workspace's data.
+  const preferencesPage = ["settings", "dictionaries"].includes(route.item) ? `${route.item}/${route.mode}` : "";
   useEffect(() => {
-    let live=true; setPreferences(undefined); setPreferencesError("");
-    if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>(`/workspaces/${workspaceId}/preferences`).then(value=>{if(live)setPreferences(value);}).catch(()=>{if(live)setPreferencesError(commonText("shell.preferencesFailed"));});
-    return ()=>{live=false;};
-  },[workspaceId,route.item,route.mode]);
+    let live=true; setPreferencesError("");
+    const controller = new AbortController();
+    if (workspaceId) void api<{default_page_size:number;dictionaries:Record<string,{value:string;label:string;color?:string}[]>}>(`/workspaces/${workspaceId}/preferences`, { signal: controller.signal }).then(value=>{if(live)setPreferences({workspace:workspaceId,value});}).catch(()=>{if(live)setPreferencesError(commonText("shell.preferencesFailed"));});
+    return ()=>{live=false;controller.abort();};
+  },[workspaceId,preferencesPage]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
   const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, preferences?.dictionaries["host-state"], preferences?.dictionaries), [workspaceId, permissions, onSignedOut, preferences]);
   const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions]);

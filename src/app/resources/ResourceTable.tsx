@@ -1,4 +1,4 @@
-import { commonText,configText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText,configText,optionText,useCommonTranslation } from "../../shared/i18n/i18n";
 /**
  * The one list implementation. A resource page is a `ListConfig`, never a
  * hand-written table — see CLAUDE.md §12. This component owns:
@@ -459,7 +459,7 @@ export function ResourceTable<T>({
       </div> : <AutoTable<T> fill layout="auto" scrollRef={scrollRef} rowKey={config.rowKey}
         hiddenFields={hiddenColumns}
         columns={config.columns.map(column => ({ field: column.key, name: configText(column.label, column.labelKey), width: column.width ? `${column.width}px` : undefined, align: column.align, sortable: column.sortable, render: (_value, row) => column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? "") }))}
-        state={{ rows, total, query: { page, pageSize, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
+        state={{ rows, total, query: { page, pageSize, filter: committed, sort: sort ? { field: sort.replace(/^-/, ""), direction: sort.startsWith("-") ? "desc" : "asc" } : undefined }, loading, error: rows.length ? undefined : error, selected }}
         showSequence selectable={!!visibleBulk.length} pagination={config.pagination} hasMore={data?.has_more}
         sticky={{ header: true, left: 1, right: visibleActions.length ? 1 : 0, pagination: true }}
         groupBy={grouped ? config.grouping!.key : undefined} empty={config.emptyKey ? commonText(config.emptyKey) : config.empty}
@@ -645,7 +645,7 @@ export function FilterField({
             <SelectItem value="__all__">{commonText("group.all")}</SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
-                {configText(option.label, option.labelKey)}
+                {optionText(option)}
               </SelectItem>
             ))}
           </SelectContent>

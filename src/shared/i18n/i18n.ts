@@ -64,3 +64,7 @@ export function useCommonTranslation() {
 export function configText(value: string | undefined, key?: string): string {
   return key ? commonText(key) : value ?? "";
 }
+/** Dictionary translations are presentation only; option.value is never translated. */
+export function optionText(option: { label: string; labelKey?: string | undefined; labels?: Record<string, string> }): string {
+  return option.labels?.[i18n.resolvedLanguage ?? currentLocale()] ?? option.labels?.[DEFAULT_LOCALE] ?? configText(option.label, option.labelKey);
+}

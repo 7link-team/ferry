@@ -1,4 +1,5 @@
 {
+  "webhook.channelInvalid": "通知平台或渠道配置无效。",
   "repository.identity.conflict": "作者映射冲突：同一 Git 身份匹配多个贡献者，请检查此仓库各连接的作者映射。",
   "repository.analysis.unavailable": "仓库当前不可见，可能已删除或读取权限已变更。",
   "repository.analysis.undiscovered": "仓库尚未完成发现或当前授权不可用。",

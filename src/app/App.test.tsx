@@ -6,6 +6,7 @@ import { i18n } from "../shared/i18n/i18n";
 import { setLocale } from "../shared/i18n/locale";
 import { App } from "./App";
 import { RepositoryMonitor,repositoryEventList } from "./pages/RepositoryMonitor";
+import { navigate } from "./router";
 
 vi.mock("../features/pipelines/YamlEditor", () => ({
   YamlEditor: ({ value }: { value: string }) => <textarea aria-label="GitHub Actions YAML" value={value} readOnly />,
@@ -36,6 +37,44 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("reuses workspace preferences during ordinary navigation and refreshes after maintenance without unloading the page", async () => {
+  required = false; permissions = ["hosts.read", "pipelines.read", "settings.read"];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let preferenceReads = 0, failRefresh = false;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.endsWith("/preferences")) { preferenceReads++; if (failRefresh) throw new TypeError("offline"); }
+    return original(url);
+  }));
+  await act(async () => root.render(<App />));
+  expect(preferenceReads).toBe(1);
+  await act(async () => navigate({ group: "build", item: "pipelines", mode: "list" }, {}));
+  expect(preferenceReads).toBe(1);
+  expect(host.textContent).not.toContain("正在加载工作空间偏好");
+  await act(async () => navigate({ group: "maintenance", item: "settings", mode: "list" }, {}));
+  expect(preferenceReads).toBe(2);
+  failRefresh = true;
+  await act(async () => navigate({ group: "host", item: "hosts", mode: "list" }, {}));
+  expect(preferenceReads).toBe(3);
+  expect(host.querySelector("table")).not.toBeNull();
+  expect(host.textContent).not.toContain("正在加载工作空间偏好");
+});
+it("waits for the new workspace's preferences without displaying the previous workspace's list", async () => {
+  required = false;
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let resolvePreferences!: (response: unknown) => void;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url === "/api/me") return {ok:true,status:200,json:async()=>({user:{id:"1",name:"Owner",email:"owner@example.invalid",is_superadmin:false},workspaces:["2","3"].map(id=>({id,name:id,slug:id,role_name:"Owner",permissions:["hosts.read"]}))})};
+    if (url === "/api/workspaces/3/preferences") return new Promise(resolve => { resolvePreferences = resolve; });
+    return original(url);
+  }));
+  await act(async () => root.render(<App />));
+  expect(host.querySelector("table")).not.toBeNull();
+  await act(async () => navigate({workspace:"3",group:"host",item:"hosts",mode:"list"},{}));
+  expect(host.textContent).toContain("正在加载工作空间偏好");
+  expect(host.querySelector("table")).toBeNull();
+  await act(async () => resolvePreferences({ok:true,status:200,json:async()=>({default_page_size:20,dictionaries:{}})}));
+  expect(host.querySelector("table")).not.toBeNull();
+});
 it("shows initialization to an already authenticated legacy owner, who can defer without losing their route", async () => {
   await act(async () => root.render(<App />));
   expect(host.textContent).toContain("初始化平台超级管理员");
@@ -298,15 +337,15 @@ it("moves pipeline group filtering into a left directory", async () => {
   history.replaceState({}, "", "/zh-CN/workspaces/2/pipelines?page=3&at=120");
   await act(async () => root.render(<App />));
   const directory = host.querySelector('aside[aria-label="流水线分组"]')!;
-  expect(directory.textContent).toContain("全部流水线");
-  expect(directory.textContent).toContain("未分组流水线");
+  expect(directory.textContent).toContain("全部");
+  expect(directory.textContent).toContain("未分组");
   expect(directory.textContent).not.toContain("执行环境");
   expect(host.querySelector('nav[aria-label="流水线页面"]')).toBeNull();
-  await act(async () => (Array.from(directory.querySelectorAll("button")).find(button => button.textContent === "未分组流水线")!).click());
+  await act(async () => (Array.from(directory.querySelectorAll("button")).find(button => button.textContent === "未分组")!).click());
   expect(location.search).toContain("group_id=0");
   expect(location.search).not.toContain("page=");
   expect(location.search).not.toContain("at=");
-  expect(host.querySelector('aside[aria-label="流水线分组"] [aria-current="page"]')?.textContent).toBe("未分组流水线");
+  expect(host.querySelector('aside[aria-label="流水线分组"] [aria-current="page"]')?.textContent).toBe("未分组");
   await act(async () => (directory.querySelector<HTMLButtonElement>('button[aria-label="新建分组"]')!).click());
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("新建分组");
   expect(location.pathname).toBe("/zh-CN/workspaces/2/pipelines");
@@ -338,8 +377,8 @@ it("shows host groups inside the host list without a separate menu page", async 
   await act(async () => root.render(<App />));
   expect(host.querySelector('nav[aria-label="主机页面"]')).toBeNull();
   const directory = host.querySelector('aside[aria-label="主机分组"]')!;
-  expect(directory.textContent).toContain("全部节点");
-  expect(directory.textContent).toContain("未分组节点");
+  expect(directory.textContent).toContain("全部");
+  expect(directory.textContent).toContain("未分组");
   await act(async () => (directory.querySelector<HTMLButtonElement>('button[aria-label="新建分组"]')!).click());
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain("新建分组");
   expect(location.pathname).toBe("/zh-CN/workspaces/2/nodes");

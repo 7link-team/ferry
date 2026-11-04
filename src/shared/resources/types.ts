@@ -15,6 +15,8 @@ export interface Option {
   content?: ReactNode;
   value: string;
   label: string;
+  /** Display-only translations; never used as submitted machine values. */
+  labels?: Record<string, string>;
   /** Optional validated dictionary presentation color; values remain stable. */
   color?: string;
   /** Explicit message key; raw labels remain stable action/configuration identities. */

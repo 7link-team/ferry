@@ -2,7 +2,7 @@ import { deleteResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import { typedText } from "../../shared/i18n/i18n";
 import type { FormConfig,ListConfig } from "../../shared/resources/types";
-import { initialValue,TypedSchemaEditor,TypedValueEditor,VALUE_TYPES,valueTypeOptions,type TypedValueRow } from "./TypedValueEditor";
+import { initialValue,isControlledDictionary,TypedSchemaEditor,TypedValueEditor,VALUE_TYPES,valueTypeOptions,type TypedValueRow } from "./TypedValueEditor";
 
 type Resource = "dictionaries" | "settings";
 const categoryLabel = (value: string) => ["general", "hosts", "history", "pipelines", "repositories"].includes(value)
@@ -23,7 +23,7 @@ export function typedResourceList(workspace: string, resource: Resource): ListCo
       { label: "查看", labelKey: "typed-domain:view", to: row => ({ id: row.id, mode: "view" }) },
       { label: "编辑", labelKey: "typed-domain:edit", permission: `${resource}.update`, to: row => ({ id: row.id, mode: "edit" }) },
       { label: "复制", labelKey: "typed-domain:copy", permission: `${resource}.create`, to: () => ({ mode: "new" }), query: row => ({ copy: row.id }) },
-      { label: "删除", labelKey: "typed-domain:delete", permission: `${resource}.delete`, when: row => !row.builtin, destructive: true, action: row => deleteResource(workspace, resource, row.id) },
+      { label: "删除", labelKey: "typed-domain:delete", permission: `${resource}.delete`, when: row => !row.builtin && !(resource === "dictionaries" && isControlledDictionary(row)), destructive: true, action: row => deleteResource(workspace, resource, row.id) },
     ],
     toolbar: { import: true, export: true },
   };
@@ -45,10 +45,10 @@ export function typedResourceForm(resource: Resource): FormConfig<TypedValueRow>
         { key: "category", label: "分类", labelKey: "typed-domain:category", type: "text", required: true },
         { key: "key", label: "标识", labelKey: "typed-domain:key", type: "text", required: true, immutable: true },
         { key: "name", label: "名称", labelKey: "typed-domain:name", type: "text", required: true },
-        { key: "value_type", label: "值类型", labelKey: "typed-domain:valueType", type: "custom", disabled: row => !!row.builtin && isSetting, render: ({ draft, readOnly, onPatch }) => <AutoField label={typedText("valueType")}><select aria-label={typedText("valueType")} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={draft.value_type ?? type} disabled={readOnly} onChange={event => { const next = event.target.value; const compatible = ["selection", "tab"].includes(draft.value_type ?? type) && ["selection", "tab"].includes(next); onPatch(compatible ? { value_type: next } : { value_type: next, value_json: initialValue(next), schema_json: "{}", items: "[]", ...(next === "num" ? { value: 0 } : {}) }); }}>{valueTypeOptions.map(option => <option key={option.value} value={option.value} disabled={!isSetting && !!draft.builtin && !["selection", "tab"].includes(option.value)}>{typedText(`type.${option.value}`)}</option>)}</select>{draft.builtin && <p className="text-xs text-muted-foreground">{typedText("builtinHelp")}</p>}</AutoField> },
+        { key: "value_type", label: "值类型", labelKey: "typed-domain:valueType", type: "custom", disabled: row => !!row.builtin && isSetting, render: ({ draft, readOnly, onPatch }) => <AutoField label={typedText("valueType")}><select aria-label={typedText("valueType")} className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={draft.value_type ?? type} disabled={readOnly} onChange={event => { const next = event.target.value; const compatible = ["selection", "tab"].includes(draft.value_type ?? type) && ["selection", "tab"].includes(next); onPatch(compatible ? { value_type: next } : { value_type: next, value_json: initialValue(next), schema_json: "{}", items: "[]", ...(next === "num" ? { value: 0 } : {}) }); }}>{valueTypeOptions.map(option => <option key={option.value} value={option.value} disabled={!isSetting && (!!draft.builtin || isControlledDictionary(draft)) && !["selection", "tab"].includes(option.value)}>{typedText(`type.${option.value}`)}</option>)}</select>{draft.builtin && <p className="text-xs text-muted-foreground">{typedText("builtinHelp")}</p>}</AutoField> },
         { key: "description", label: "说明", labelKey: "typed-domain:description", type: "textarea", span: 2 },
       ] },
-      { title: "值约束", titleKey: "typed-domain:constraints", fields: [{ key: "schema_json", label: "值约束", labelKey: "typed-domain:constraints", type: "custom", span: 2, disabled: row => !!row.builtin, render: props => <TypedSchemaEditor {...props} resource={resource} /> }] },
+      { title: "值约束", titleKey: "typed-domain:constraints", fields: [{ key: "schema_json", label: "值约束", labelKey: "typed-domain:constraints", type: "custom", span: 2, disabled: row => !!row.builtin || (!isSetting && isControlledDictionary(row)), render: props => <TypedSchemaEditor {...props} resource={resource} /> }] },
       ...(!isSetting ? [valueSection] : []),
     ],
   };

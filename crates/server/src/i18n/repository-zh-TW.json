@@ -1,4 +1,5 @@
 {
+  "webhook.channelInvalid": "通知平台或頻道設定無效。",
   "repository.identity.conflict": "作者對應衝突：同一 Git 身分符合多個貢獻者，請檢查此儲存庫各連線的作者對應設定。",
   "repository.analysis.unavailable": "目前無法檢視此儲存庫，可能已刪除或讀取權限已變更。",
   "repository.analysis.undiscovered": "尚未完成儲存庫探索，或目前授權無法使用。",

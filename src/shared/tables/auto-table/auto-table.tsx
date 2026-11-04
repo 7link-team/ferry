@@ -12,6 +12,7 @@ type ReactNode,
 import { evaluate } from "../../forms/auto-form";
 import { Button } from "../../ui/button";
 import { Checkbox } from "../../ui/checkbox";
+import { EmptyState } from "../../ui/EmptyState";
 import {
 autoTableViewportStyle,
 buildTableCsv,
@@ -44,6 +45,7 @@ function AutoTableInner<T>(
   const state = options.state;
   const rows = state?.rows ?? local.rows;
   const query = state?.query ?? local.query;
+  const filtered = Object.values(query.filter ?? {}).some(value => value !== "" && value !== undefined && value !== null && value !== false);
   const total = state?.total ?? local.total;
   const loading = state?.loading ?? options.loading ?? local.loading;
   const error = state?.error ?? local.error?.message;
@@ -128,6 +130,7 @@ function AutoTableInner<T>(
       <div
         ref={options.scrollRef}
         className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background"
+        style={{ containerType: "inline-size" }}
         aria-busy={loading}
       >
         <table
@@ -226,7 +229,7 @@ function AutoTableInner<T>(
                   <tr key={row}>
                     {Array.from({ length: count }, (_, index) => (
                       <td key={index} className="border-b p-3">
-                        <div className="h-4 animate-pulse rounded bg-muted" />
+                        <div className="h-4 rounded bg-muted motion-safe:animate-pulse" style={{ width: `${55 + (row * 13 + index * 17) % 40}%`, animationDelay: `${row * 70}ms` }} />
                       </td>
                     ))}
                   </tr>
@@ -416,8 +419,9 @@ function AutoTableInner<T>(
               <tr>
                 <td
                   colSpan={count}
-                  className="px-4 py-16 text-center text-muted-foreground"
+                  className="py-16 text-center text-muted-foreground"
                 >
+                  <div className="sticky left-0 w-[100cqw] max-w-full px-4">
                   {error ? (
                     <div role="alert" className="space-y-3 text-destructive">
                       <p>{error}</p>
@@ -430,8 +434,9 @@ function AutoTableInner<T>(
                         {commonText("common.retry")}</Button>
                     </div>
                   ) : (
-                    (options.empty ?? commonText("table.empty"))
+                    <EmptyState filtered={filtered}>{options.empty ?? commonText(filtered ? "table.empty" : "common.noRecords")}</EmptyState>
                   )}
+                  </div>
                 </td>
               </tr>
             )}

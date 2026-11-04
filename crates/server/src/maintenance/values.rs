@@ -133,6 +133,22 @@ pub fn validate(kind: &str, raw: &str, schema: &str) -> Result<TypedValue> {
                 }) {
                     return Err(invalid("typed.optionsInvalid"));
                 }
+                if item.get("labels").is_some_and(|labels| {
+                    labels.as_object().is_none_or(|labels| {
+                        labels.iter().any(|(locale, label)| {
+                            !crate::i18n::Locale::ALL
+                                .iter()
+                                .any(|supported| supported.tag() == locale)
+                                || label.as_str().is_none_or(|label| {
+                                    label.trim().is_empty()
+                                        || label.chars().count() > 100
+                                        || label.contains('\0')
+                                })
+                        })
+                    })
+                }) {
+                    return Err(invalid("typed.optionsInvalid"));
+                }
             }
             if options.len() > 200 {
                 return Err(invalid("typed.optionsTooMany"));
@@ -221,6 +237,7 @@ pub fn options(value: &Value) -> Value {
         if let Some(color) = item.get("color").and_then(Value::as_str).filter(|color| valid_option_color(color)) {
             option["color"] = json!(color);
         }
+        if let Some(labels) = item.get("labels").and_then(Value::as_object) { option["labels"] = json!(labels); }
         option
     }).collect::<Vec<_>>())
 }
@@ -313,6 +330,27 @@ mod tests {
             ] {
                 let raw = json!([{"value":"online","label":"Online","color":color}]);
                 assert!(validate(kind, &raw.to_string(), "{}").is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn option_translations_validate_and_roundtrip_without_changing_values() {
+        for kind in ["selection", "tab"] {
+            let raw = json!([{"value":"online","label":"Online","labels":{"zh-CN":"在线","ja-JP":"接続中"}}]);
+            let result = validate(kind, &raw.to_string(), "{}").unwrap();
+            assert_eq!(options(&result.value), raw);
+            for labels in [
+                json!(null),
+                json!([]),
+                json!({"xx":"Name"}),
+                json!({"en-US":""}),
+                json!({"en-US":42}),
+                json!({"en-US":"a".repeat(101)}),
+                json!({"en-US":"bad\0name"}),
+            ] {
+                let invalid = json!([{"value":"online","label":"Online","labels":labels}]);
+                assert!(validate(kind, &invalid.to_string(), "{}").is_err());
             }
         }
     }

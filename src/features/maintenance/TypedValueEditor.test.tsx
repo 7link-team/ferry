@@ -28,6 +28,18 @@ it("supports every reference value type with valid initial serialized data", () 
   expect(VALUE_TYPES).toHaveLength(12);
   for (const [type] of VALUE_TYPES) expect(typedValueError(type, initialValue(type), {}), type).toBe("");
 });
+it("edits and clears translated names without changing controlled values or legacy serialization", async () => {
+  await act(async () => root.render(<Harness initial={{ key: "host-state", controlled: true, value_type: "selection", value_json: JSON.stringify([{ value: "online", label: "Online", labels: { "zh-CN": "在线" } }]) }} />));
+  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')?.disabled).toBe(true);
+  await fill("选项 1 显示名称", "已连接");
+  const option = () => parseJson<{ value: string; label: string; labels: Record<string,string> }[]>(saved.value_json, [])[0]!;
+  expect(option()).toEqual({ value: "online", label: "Online", labels: { "zh-CN": "已连接" } });
+  expect(saved.items).toBe(saved.value_json);
+  await fill("选项 1 显示名称", "");
+  expect(option().labels).toEqual({});
+  expect(option().value).toBe("online");
+  expect(option().label).toBe("Online");
+});
 it("provides every typed-editor message and interpolation parameter in all six languages", async () => {
   const locales = ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"];
   for (const [key, values] of Object.entries(typedMessages)) {

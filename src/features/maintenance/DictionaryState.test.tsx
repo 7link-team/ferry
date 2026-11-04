@@ -1,10 +1,30 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { listConfigs } from "../../app/resources";
-import { commonText, i18n } from "../../shared/i18n/i18n";
+import { commonText, i18n, optionText } from "../../shared/i18n/i18n";
 import { DictionaryContext, DictionaryState, dictionaryStateLabel } from "./DictionaryState";
 
 describe("workspace status presentation", () => {
+  it("switches every controlled status using translated display metadata while retaining machine values and colors", async () => {
+    const labels = {"en-US":"Localized English","zh-CN":"本地名称","zh-TW":"本地名稱","ja-JP":"日本語名","ko-KR":"한국어 이름","ms-MY":"Nama setempat"};
+    const previous = i18n.language;
+    try {
+      for (const [locale, expected] of Object.entries(labels)) {
+        await i18n.changeLanguage(locale);
+        for (const dictionary of ["host-state", "pipeline-state", "deployment-state", "cron-state", "alert-state", "repository-state", "insight-state"]) {
+          const option = {value:"running",label:"初始化中文",color:"#123456",labels};
+          const preferences = {[dictionary]:[option]};
+          expect(optionText(option)).toBe(expected);
+          expect(dictionaryStateLabel(preferences,dictionary,"running","fallback")).toBe(expected);
+          const html = renderToStaticMarkup(<DictionaryContext.Provider value={preferences}><DictionaryState dictionary={dictionary} value="running">fallback</DictionaryState></DictionaryContext.Provider>);
+          expect(html).toContain(expected);
+          expect(html).toContain("background-color:#123456");
+          expect(option.value).toBe("running");
+          expect(option.label).toBe("初始化中文");
+        }
+      }
+    } finally { await i18n.changeLanguage(previous); }
+  });
   const dictionaries = {
     "pipeline-state": [{ value: "running", label: "Building", color: "#123456" }, { value: "queued", label: "In line" }],
     "deployment-state": [{ value: "running", label: "Deploying", color: "#ffffff" }],

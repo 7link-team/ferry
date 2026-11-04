@@ -21,6 +21,19 @@ const rows = [
   { id: "1", name: "Alpha" },
   { id: "2", name: "Beta" },
 ];
+it("illustrates empty data and filtered results while preserving custom messages and errors", async () => {
+  const render = async (filter: Record<string, unknown>, extra: Record<string, unknown> = {}) => act(async () => root.render(<AutoTable columns={[{field:"name",name:"Name"}]} state={{rows:[],total:0,query:{page:1,pageSize:20,filter}}} {...extra} />));
+  await render({});
+  expect(host.textContent).toContain("暂无记录");
+  expect(host.querySelector('[role="status"] svg[aria-hidden="true"]')).not.toBeNull();
+  await render({name:"missing"});
+  expect(host.textContent).toContain("没有符合当前筛选条件的记录");
+  await render({}, {empty:"No complete commit facts"});
+  expect(host.textContent).toContain("No complete commit facts");
+  await act(async () => root.render(<AutoTable columns={[{field:"name",name:"Name"}]} state={{rows:[],total:0,query:{page:1,pageSize:20},error:"offline"}} />));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("offline");
+  expect(host.querySelector('[role="status"]')).toBeNull();
+});
 it("opens rows by mouse and keyboard while giving embedded controls and columns priority", async () => {
   const open = vi.fn(),
     action = vi.fn(),

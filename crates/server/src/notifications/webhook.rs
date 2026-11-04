@@ -6,7 +6,7 @@ use crate::i18n::Message;
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Robot {
+pub(super) enum Robot {
     WeCom,
     DingTalk,
     Feishu,
@@ -32,7 +32,7 @@ impl Robot {
 
 /// Only official HTTPS robot endpoints are recognised; a look-alike host or
 /// path stays a generic webhook.
-fn robot(url: &reqwest::Url) -> Option<Robot> {
+pub(super) fn robot(url: &reqwest::Url) -> Option<Robot> {
     if url.scheme() != "https" || url.port().is_some() {
         return None;
     }
@@ -90,27 +90,118 @@ fn lines<'a>(notice: &'a Notice<'_>) -> impl Iterator<Item = (&'a str, String)> 
     notice
         .fields
         .iter()
-        .map(|(name, value)| (name.as_str(), clean(value, 300)))
+        .map(|(name, value)| {
+            (
+                name.as_str(),
+                link_url(value).unwrap_or_else(|| clean(value, 300)),
+            )
+        })
         .filter(|(_, value)| !value.is_empty())
 }
 
-fn plain(notice: &Notice<'_>) -> String {
-    std::iter::once(clean(notice.title, 100))
-        .chain(lines(notice).map(|(name, value)| format!("{name}：{value}")))
+fn link_url(value: &str) -> Option<String> {
+    if value.chars().any(char::is_control) {
+        return None;
+    }
+    let url = reqwest::Url::parse(value.trim()).ok()?;
+    (matches!(url.scheme(), "http" | "https")
+        && url.has_host()
+        && url.username().is_empty()
+        && url.password().is_none())
+    .then(|| url.to_string())
+}
+
+fn html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn markdown(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|c| {
+            if "\\`*_[]()!<>#".contains(c) {
+                vec!['\\', c]
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
+}
+
+fn chat_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn escape(robot: Robot, value: &str) -> String {
+    match robot {
+        Robot::Telegram => html(value),
+        Robot::Slack => chat_text(value),
+        Robot::GoogleChat => value.replace('<', "‹").replace('>', "›"),
+        _ => markdown(value),
+    }
+}
+
+fn formatted_field(robot: Robot, name: &str, value: &str) -> String {
+    let name = escape(robot, name);
+    if let Some(url) = link_url(value) {
+        return match robot {
+            Robot::Telegram => format!("<a href=\"{}\">{name}</a>", html(&url)),
+            Robot::Slack => format!(
+                "<{}|{}>",
+                chat_text(&url.replace('|', "%7C")),
+                name.replace('|', "∣")
+            ),
+            Robot::GoogleChat => format!(
+                "<{}|{}>",
+                url.replace('|', "%7C")
+                    .replace('<', "%3C")
+                    .replace('>', "%3E"),
+                name.replace('|', "∣")
+            ),
+            _ => format!("[{name}]({})", url.replace('(', "%28").replace(')', "%29")),
+        };
+    }
+    format!("{name}：{}", escape(robot, value))
+}
+
+fn formatted(robot: Robot, notice: &Notice<'_>) -> String {
+    std::iter::once(escape(robot, &clean(notice.title, 100)))
+        .chain(lines(notice).map(|(name, value)| formatted_field(robot, name, &value)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, Message> {
     let title = clean(notice.title, 100);
-    let markdown = std::iter::once(format!("### {title}"))
-        .chain(lines(notice).map(|(name, value)| format!("> **{name}**：{value}")))
+    let markdown = std::iter::once(format!("### {}", markdown(&title)))
+        .chain(lines(notice).map(|(name, value)| {
+            if link_url(&value).is_some() {
+                format!("> {}", formatted_field(robot, name, &value))
+            } else {
+                format!("> **{}**：{}", markdown(name), markdown(&value))
+            }
+        }))
         .collect::<Vec<_>>()
         .join("\n");
     Ok(match robot {
         Robot::WeCom => json!({"msgtype":"markdown","markdown":{"content":markdown}}),
         Robot::DingTalk => json!({"msgtype":"markdown","markdown":{"title":title,"text":markdown}}),
-        Robot::Feishu => json!({"msg_type":"text","content":{"text":plain(notice)}}),
+        Robot::Feishu => {
+            let content: Vec<Value> = lines(notice)
+                .map(|(name, value)| match link_url(&value) {
+                    Some(url) => json!([{"tag":"a","text":name,"href":url}]),
+                    None => json!([{"tag":"text","text":format!("{name}：{value}")}]),
+                })
+                .collect();
+            json!({"msg_type":"post","content":{"post":{"en_us":{"title":title,"content":content}}}})
+        }
         Robot::Telegram => {
             // The Bot API needs a destination; it travels in the configured URL.
             let chat = url
@@ -118,11 +209,26 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
                 .find(|(key, value)| key == "chat_id" && !value.is_empty())
                 .map(|(_, value)| value.into_owned())
                 .ok_or_else(|| Message::new("webhook.chatMissing"))?;
-            json!({"chat_id":chat,"text":plain(notice),"disable_web_page_preview":true})
+            json!({"chat_id":chat,"text":formatted(robot, notice),"parse_mode":"HTML","disable_web_page_preview":true})
         }
-        Robot::Slack | Robot::GoogleChat => json!({"text":plain(notice)}),
-        // Discord rejects content over 2000 characters; lines are already clean.
-        Robot::Discord => json!({"content":plain(notice).chars().take(1900).collect::<String>()}),
+        Robot::Slack | Robot::GoogleChat => json!({"text":formatted(robot, notice)}),
+        // Keep whole lines: cutting the message could break a link's destination.
+        Robot::Discord => {
+            let text = formatted(robot, notice);
+            let mut content = String::new();
+            for line in text.lines() {
+                if content.chars().count() + usize::from(!content.is_empty()) + line.chars().count()
+                    > 1900
+                {
+                    break;
+                }
+                if !content.is_empty() {
+                    content.push('\n');
+                }
+                content.push_str(line);
+            }
+            json!({"content":content,"allowed_mentions":{"parse":[]}})
+        }
     })
 }
 
@@ -195,9 +301,36 @@ fn judge(robot: Robot, status: u16, response: &str) -> Result<(), Message> {
 
 /// Deliver once and describe the outcome for the event's delivery column.
 pub async fn deliver(client: &reqwest::Client, url: &str, notice: &Notice<'_>) -> String {
-    let parsed = reqwest::Url::parse(url).ok();
-    let Some((robot, parsed)) = parsed.as_ref().and_then(|u| robot(u).map(|r| (r, u))) else {
-        return match client.post(url).json(&notice.generic).send().await {
+    deliver_configured(client, url, &super::channel::Options::default(), notice).await
+}
+
+pub async fn deliver_configured(
+    client: &reqwest::Client,
+    url: &str,
+    options: &super::channel::Options,
+    notice: &Notice<'_>,
+) -> String {
+    let mut parsed = match options.resolve(url) {
+        Ok(url) => url,
+        Err(reason) => {
+            return crate::i18n::store_message(
+                &Message::new("webhook.notSent")
+                    .with("provider", &options.provider)
+                    .with_message("reason", reason),
+            );
+        }
+    };
+    let detected = if options.provider == "Webhook" {
+        None
+    } else {
+        robot(&parsed)
+    };
+    let Some(robot) = detected else {
+        let mut request = client.post(parsed).json(&notice.generic);
+        if !options.bearer_token.is_empty() {
+            request = request.bearer_auth(&options.bearer_token);
+        }
+        return match request.send().await {
             Ok(response) if response.status().is_success() => crate::i18n::store_message(
                 &Message::new("webhook.deliveredHttp")
                     .with("status", response.status().as_u16().to_string()),
@@ -210,7 +343,7 @@ pub async fn deliver(client: &reqwest::Client, url: &str, notice: &Notice<'_>) -
         };
     };
     let name = robot.name();
-    let message = match body(robot, parsed, notice) {
+    let mut message = match body(robot, &parsed, notice) {
         Ok(message) => message,
         Err(reason) => {
             return crate::i18n::store_message(
@@ -220,7 +353,14 @@ pub async fn deliver(client: &reqwest::Client, url: &str, notice: &Notice<'_>) -
             );
         }
     };
-    match client.post(url).json(&message).send().await {
+    if let Err(reason) = options.prepare(&mut parsed, &mut message, crate::db::now()) {
+        return crate::i18n::store_message(
+            &Message::new("webhook.notSent")
+                .with("provider", name)
+                .with_message("reason", reason),
+        );
+    }
+    match client.post(parsed).json(&message).send().await {
         Ok(response) => {
             let status = response.status().as_u16();
             let text = response.text().await.unwrap_or_default();
@@ -338,7 +478,7 @@ mod tests {
         );
         assert_eq!(
             body(Robot::Feishu, &any, &notice).unwrap(),
-            json!({"msg_type":"text","content":{"text":text}})
+            json!({"msg_type":"post","content":{"post":{"en_us":{"title":"仓库事件：push","content":[[{"tag":"text","text":"仓库：group/app"}],[{"tag":"text","text":"引用：main x"}]]}}}})
         );
         assert_eq!(
             body(
@@ -347,7 +487,7 @@ mod tests {
                 &notice
             )
             .unwrap(),
-            json!({"chat_id":"-100123","text":text,"disable_web_page_preview":true})
+            json!({"chat_id":"-100123","text":text,"parse_mode":"HTML","disable_web_page_preview":true})
         );
         assert_eq!(
             body(
@@ -368,8 +508,70 @@ mod tests {
         );
         assert_eq!(
             body(Robot::Discord, &any, &notice).unwrap(),
-            json!({"content":text})
+            json!({"content":text,"allowed_mentions":{"parse":[]}})
         );
+    }
+
+    #[test]
+    fn links_use_native_platform_formats_and_escape_untrusted_text() {
+        let url = "https://example.invalid/commit/abc?left=1&right=2";
+        let notice = Notice {
+            title: "Push <tag>",
+            fields: vec![
+                ("Commit".into(), url.into()),
+                ("Author".into(), "<script>*name*".into()),
+            ],
+            generic: json!({}),
+        };
+        let any = reqwest::Url::parse("https://example.invalid").unwrap();
+        for platform in [Robot::WeCom, Robot::DingTalk, Robot::Discord] {
+            assert!(
+                body(platform, &any, &notice)
+                    .unwrap()
+                    .to_string()
+                    .contains(&format!("[Commit]({url})"))
+            );
+        }
+        let google = body(Robot::GoogleChat, &any, &notice).unwrap();
+        assert!(
+            google["text"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("<{url}|Commit>"))
+        );
+        let slack = body(Robot::Slack, &any, &notice).unwrap();
+        assert!(
+            slack["text"]
+                .as_str()
+                .unwrap()
+                .contains("left=1&amp;right=2|Commit>")
+        );
+        let telegram_url =
+            reqwest::Url::parse("https://api.telegram.org/bot1:A/sendMessage?chat_id=-1").unwrap();
+        let telegram = body(Robot::Telegram, &telegram_url, &notice).unwrap();
+        assert_eq!(telegram["parse_mode"], "HTML");
+        assert!(telegram["text"].as_str().unwrap().contains(
+            "<a href=\"https://example.invalid/commit/abc?left=1&amp;right=2\">Commit</a>"
+        ));
+        assert!(
+            telegram["text"]
+                .as_str()
+                .unwrap()
+                .contains("&lt;script&gt;")
+        );
+        let feishu = body(Robot::Feishu, &any, &notice).unwrap();
+        assert_eq!(
+            feishu["content"]["post"]["en_us"]["content"][0][0]["href"],
+            url
+        );
+        assert_eq!(
+            feishu["content"]["post"]["en_us"]["content"][0][0]["tag"],
+            "a"
+        );
+        assert!(link_url("javascript:alert(1)").is_none());
+        assert!(link_url("https://user:password@example.invalid/").is_none());
+        let long = format!("https://example.invalid/{}", "a".repeat(500));
+        assert!(formatted_field(Robot::DingTalk, "Commit", &long).contains(&long));
     }
 
     #[test]

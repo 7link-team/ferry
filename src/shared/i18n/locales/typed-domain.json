@@ -1,4 +1,7 @@
 {
+  "optionLocale": ["Label language", "名称语言", "名稱語言", "表示名の言語", "표시 이름 언어", "Bahasa label"],
+  "optionDefaultLabel": ["Default name", "默认名称", "預設名稱", "既定の名前", "기본 이름", "Nama lalai"],
+  "optionLocaleHelp": ["Leave blank to use the default name. Translations do not change option values.", "留空使用默认名称，翻译不会改变选项值。", "留空使用預設名稱，翻譯不會改變選項值。", "空欄の場合は既定名を使用します。翻訳で選択肢の値は変わりません。", "비워 두면 기본 이름을 사용합니다. 번역은 선택 항목 값을 변경하지 않습니다.", "Biarkan kosong untuk nama lalai. Terjemahan tidak mengubah nilai pilihan."],
   "type.text": ["Text", "文本", "文字", "テキスト", "텍스트", "Teks"],
   "type.num": ["Number", "数字", "數字", "数値", "숫자", "Nombor"],
   "type.tab": ["Tag options", "标签选项", "標籤選項", "タグ選択肢", "태그 옵션", "Pilihan tag"],

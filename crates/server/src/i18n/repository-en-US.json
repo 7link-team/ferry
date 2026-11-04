@@ -1,4 +1,5 @@
 {
+  "webhook.channelInvalid": "Invalid notification provider or channel settings.",
   "repository.identity.conflict": "Author mapping conflict: the same Git identity matches multiple contributors. Check author mappings on this repository's connections.",
   "repository.analysis.unavailable": "The repository is currently unavailable. It may have been deleted or its read permissions may have changed.",
   "repository.analysis.undiscovered": "The repository has not been discovered yet, or its current authorization is unavailable.",

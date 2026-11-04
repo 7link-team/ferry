@@ -7,6 +7,8 @@ export type FormMode = "add" | "edit" | "copy" | "detail";
 export interface SelectOption {
   value: string;
   label: string;
+  labels?: Record<string, string>;
+  labelKey?: string | undefined;
   disabled?: boolean;
 }
 export interface FieldConfig {

@@ -68,7 +68,16 @@ mod locale_tests {
                 name: "User 原文".into(),
                 is_superadmin: false,
             },
-            permissions: ["settings.update".to_owned()].into_iter().collect(),
+            permissions: [
+                "settings.update",
+                "dictionaries.update",
+                "dictionaries.delete",
+                "dictionaries.create",
+                "dictionaries.read",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         };
         let row = settings::Entity::find()
             .filter(settings::Column::Key.eq("default_page_size"))
@@ -152,6 +161,113 @@ mod locale_tests {
             assert_eq!(view["name"], "Custom heartbeat label");
             assert_eq!(view["category"], "operations");
             assert_eq!(view["description"], "User description");
+        }
+        for key in std::iter::once("host-state").chain(
+            states::definitions()
+                .iter()
+                .map(|(key, _, _)| *key)
+                .collect::<Vec<_>>(),
+        ) {
+            let dictionary = dictionaries::Entity::find()
+                .filter(dictionaries::Column::Key.eq(key))
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let id = Id::from(dictionary.id);
+            let Json(original) = get_dictionary(State(s.clone()), scope(), Path(("1".into(), id)))
+                .await
+                .unwrap();
+            let options: Value =
+                serde_json::from_str(original["value_json"].as_str().unwrap()).unwrap();
+            for invalid in [
+                json!([]),
+                json!([{"value":"injected","label":"Injected"}]),
+                {
+                    let mut missing = options.clone();
+                    missing.as_array_mut().unwrap().pop();
+                    missing
+                },
+                {
+                    let mut renamed = options.clone();
+                    renamed[0]["value"] = json!("renamed");
+                    renamed
+                },
+            ] {
+                let mut body = original.clone();
+                body["items"] = json!(invalid.to_string());
+                assert!(
+                    update_dictionary(
+                        State(s.clone()),
+                        scope(),
+                        Path(("1".into(), id)),
+                        Json(serde_json::from_value(body).unwrap())
+                    )
+                    .await
+                    .is_err(),
+                    "{key}: reject changed machine values"
+                );
+            }
+            let mut wrong_type = original.clone();
+            wrong_type["value_type"] = json!("text");
+            wrong_type["value_json"] = json!("\"text\"");
+            assert!(
+                update_dictionary(
+                    State(s.clone()),
+                    scope(),
+                    Path(("1".into(), id)),
+                    Json(serde_json::from_value(wrong_type).unwrap())
+                )
+                .await
+                .is_err()
+            );
+            assert!(
+                delete_dictionary(State(s.clone()), scope(), Path(("1".into(), id)))
+                    .await
+                    .is_err()
+            );
+            // Import uses this same creation helper, including reserved-key protection.
+            let tx = s.db.begin().await.unwrap();
+            assert!(
+                create_dictionary_in(
+                    &s,
+                    &tx,
+                    &scope(),
+                    serde_json::from_value(original.clone()).unwrap()
+                )
+                .await
+                .is_err()
+            );
+            tx.rollback().await.unwrap();
+            let mut edited = options.clone();
+            edited.as_array_mut().unwrap().reverse();
+            edited[0]["labels"]["ja-JP"] = json!("Custom Japanese status");
+            edited[0]["color"] = json!("#123456");
+            let mut body = original;
+            body["items"] = json!(edited.to_string());
+            update_dictionary(
+                State(s.clone()),
+                scope(),
+                Path(("1".into(), id)),
+                Json(serde_json::from_value(body).unwrap()),
+            )
+            .await
+            .unwrap();
+            let stored = dictionaries::Entity::find_by_id(dictionary.id)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            let persisted: Value =
+                serde_json::from_str(stored.value_json.as_deref().unwrap()).unwrap();
+            assert_eq!(persisted[0]["value"], edited[0]["value"]);
+            assert_eq!(persisted[0]["labels"]["ja-JP"], "Custom Japanese status");
+            assert_eq!(persisted[0]["color"], "#123456");
+            let view = dict_json(stored);
+            assert_eq!(view["controlled"], true);
+            let readback: Value =
+                serde_json::from_str(view["value_json"].as_str().unwrap()).unwrap();
+            assert_eq!(readback[0]["labels"]["ja-JP"], "Custom Japanese status");
         }
         let mut custom = row;
         custom.key = "custom".into();
@@ -353,6 +469,7 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
                         value: v.into(),
                         label: l.into(),
                         color: None,
+                        labels: Default::default(),
                     })
                     .collect::<Vec<_>>(),
             )
@@ -731,6 +848,8 @@ struct Item {
     label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    labels: HashMap<String, String>,
 }
 #[derive(Deserialize)]
 pub struct DictionaryBody {
@@ -836,6 +955,7 @@ async fn items(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<Vec
             value: r.value,
             label: r.label,
             color: None,
+            labels: Default::default(),
         })
         .collect())
 }
@@ -866,11 +986,17 @@ pub(crate) async fn dictionary_contains(
         .any(|item| item.value == value))
 }
 fn dict_json(row: dictionaries::Model) -> Value {
-    let raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
+    let controlled = states::controlled_values(&row.key);
+    let mut raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
+    if states::controlled_values(&row.key).is_some() {
+        if let Ok(options) = serde_json::from_str(&raw) {
+            raw = states::presentation(&row.key, options).to_string();
+        }
+    }
     json!({"id":Id::from(row.id),"key":row.key,"name":row.name,"description":row.description,
         "category":row.category,"value_type":row.value_type,"value_json":raw,
         "schema_json":row.schema_json.unwrap_or_else(|| "{}".into()),"value_summary":values::summary(&raw),
-        "builtin":row.builtin==1,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
+        "builtin":row.builtin==1,"controlled":controlled.is_some(),"controlled_values":controlled,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
 }
 pub async fn list_dictionaries(
     State(s): State<AppState>,
@@ -905,6 +1031,7 @@ pub async fn list_dictionaries(
                 value: item.value,
                 label: item.label,
                 color: None,
+                labels: Default::default(),
             });
         }
     }
@@ -933,7 +1060,11 @@ pub async fn get_dictionary(
     let legacy = model.value_json.is_none();
     let mut row = dict_json(model);
     let options = if legacy {
-        serde_json::to_string_pretty(&items(&s.db, scope.workspace_id, id).await?).unwrap()
+        states::presentation(
+            row["key"].as_str().unwrap_or_default(),
+            json!(items(&s.db, scope.workspace_id, id).await?),
+        )
+        .to_string()
     } else {
         values::options(
             &serde_json::from_str::<Value>(row["value_json"].as_str().unwrap_or("[]"))
@@ -977,6 +1108,12 @@ pub(crate) async fn create_dictionary_in(
     body: DictionaryBody,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("dictionaries.create")?;
+    if states::controlled_values(&body.key).is_some() {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("maintenance.stateControlled"),
+        ));
+    }
     let values = validate(&body)?;
     let typed = dictionary_value(&body)?;
     if matches!(body.value_type.as_str(), "image" | "video" | "file") {
@@ -1062,7 +1199,9 @@ pub async fn update_dictionary(
             crate::i18n::Message::new("maintenance.dictionaryKeyImmutable"),
         ));
     }
-    if old.builtin == 1 && !matches!(body.value_type.as_str(), "selection" | "tab") {
+    if (old.builtin == 1 || states::controlled_values(&old.key).is_some())
+        && !matches!(body.value_type.as_str(), "selection" | "tab")
+    {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("maintenance.systemDictionaryTypeRequired"),
@@ -1081,6 +1220,8 @@ pub async fn update_dictionary(
             ));
         }
     }
+    let mut typed = typed;
+    states::normalize(&old.key, &mut typed.value);
     let n = dictionaries::Entity::update_many()
         .col_expr(dictionaries::Column::Name, Expr::value(body.name))
         .col_expr(dictionaries::Column::Category, Expr::value(body.category))
@@ -1140,7 +1281,7 @@ pub async fn delete_dictionary(
     let tx = s.db.begin().await?;
     lock(&tx, scope.workspace_id).await?;
     let old = dict_row(&tx, scope.workspace_id, id).await?;
-    if old.builtin == 1 {
+    if old.builtin == 1 || states::controlled_values(&old.key).is_some() {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("maintenance.systemDictionaryDeleteForbidden"),
@@ -1181,6 +1322,7 @@ pub async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json
                 value: item.value,
                 label: item.label,
                 color: None,
+                labels: Default::default(),
             });
         }
     }
@@ -1192,7 +1334,7 @@ pub async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json
             .filter(Value::is_array)
             .map(|value| values::options(&value))
             .unwrap_or_else(|| json!(grouped.remove(&row.id).unwrap_or_default()));
-        dicts.insert(row.key, options);
+        dicts.insert(row.key.clone(), states::presentation(&row.key, options));
     }
     Ok(Json(
         json!({"default_page_size":setting(&s.db,scope.workspace_id,"default_page_size").await?,"dictionaries":dicts}),

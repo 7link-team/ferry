@@ -56,7 +56,7 @@ export const nav: NavGroup[] = [
     key: "build",
     get label() { return commonText("nav.build"); },
     items: [
-      { key: "pipelines", get label() { return commonText("shell.pipeline"); }, resource: "pipelines", permission: "pipelines.read" },
+      { key: "pipelines", get label() { return commonText("nav.pipelines"); }, resource: "pipelines", permission: "pipelines.read" },
       { key: "code-reviews", get label() { return evidenceText("reviews"); }, resource: "code-reviews", permission: "code-reviews.read" },
       {key:"pipeline-groups",get label() { return commonText("table.groups"); },resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},
       {key:"pipeline-environments",get label() { return commonText("nav.environments"); },resource:"pipeline-environments",permission:"pipeline-environments.read",hidden:true,parent:"pipelines"},
@@ -84,7 +84,7 @@ export const nav: NavGroup[] = [
     key: "host",
     get label() { return commonText("nav.hosts"); },
     items: [
-      { key: "hosts", get label() { return commonText("shell.node"); }, resource: "hosts", permission: "hosts.read" },
+      { key: "hosts", get label() { return commonText("nav.nodes"); }, resource: "hosts", permission: "hosts.read" },
       { key: "host-groups", get label() { return commonText("nav.hostGroups"); }, resource: "host-groups", permission: "host-groups.read", hidden: true, parent: "hosts" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "host" }, permission: "credentials.read" },
       { key: "tags", get label() { return commonText("nav.tags"); }, resource: "tags", permission: "tags.read" },

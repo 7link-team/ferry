@@ -1,0 +1,41 @@
+.activity-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 2147483647;
+  height: 1px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.activity-progress-layer {
+  position: absolute;
+  inset: 0;
+  background: var(--primary);
+  opacity: 1;
+  transform-origin: left;
+  animation: activity-advance var(--activity-duration) cubic-bezier(.12, .7, .2, 1) forwards;
+}
+
+.activity-progress-layer[data-kind="request"] {
+  background: hsl(var(--activity-hue) 80% 55%);
+  background: oklch(from var(--primary) max(l, .65) max(c, .16) calc(h + var(--activity-hue)));
+  opacity: .62;
+}
+
+.activity-progress-layer[data-done="true"] {
+  animation: activity-finish 180ms ease-out forwards;
+}
+
+@keyframes activity-advance {
+  from { transform: scaleX(.025); }
+  to { transform: scaleX(.88); }
+}
+
+@keyframes activity-finish {
+  to { transform: scaleX(1); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-progress-layer { animation: none; transform: scaleX(.6); }
+  .activity-progress-layer[data-done="true"] { animation: none; transform: scaleX(1); }
+}

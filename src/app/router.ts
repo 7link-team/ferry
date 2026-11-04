@@ -16,6 +16,7 @@ import { resourceName } from "../shared/api/resource";
 import { currentLocale,LOCALE_EVENT,localizedPath,pathLocale,stripLocalePrefix } from "../shared/i18n/locale";
 import type { Route } from "../shared/routing/types";
 import { nav } from "./nav";
+import { beginRoute, commitRoute } from "../shared/api/progress";
 
 export type { Route } from "../shared/routing/types";
 
@@ -96,15 +97,22 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
 }
 
 const listeners = new Set<() => void>();
-const announce = () => listeners.forEach((fn) => fn());
+const announce = () => {
+  beginRoute(snapshot());
+  listeners.forEach((fn) => fn());
+};
 const subscribe = (fn: () => void) => {
+  if (!listeners.size) {
+    window.addEventListener("popstate", announce);
+    window.addEventListener(LOCALE_EVENT, announce);
+  }
   listeners.add(fn);
-  window.addEventListener("popstate", fn);
-  window.addEventListener(LOCALE_EVENT, fn);
   return () => {
     listeners.delete(fn);
-    window.removeEventListener("popstate", fn);
-    window.removeEventListener(LOCALE_EVENT, fn);
+    if (!listeners.size) {
+      window.removeEventListener("popstate", announce);
+      window.removeEventListener(LOCALE_EVENT, announce);
+    }
   };
 };
 const snapshot = () => location.pathname + location.search;
@@ -121,7 +129,8 @@ export function navigate(
 }
 
 export function useRoute(): Route {
-  useSyncExternalStore(subscribe, snapshot);
+  const url = useSyncExternalStore(subscribe, snapshot);
+  useEffect(() => { commitRoute(url); }, [url]);
   return parse();
 }
 

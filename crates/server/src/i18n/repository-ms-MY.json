@@ -1,4 +1,5 @@
 {
+  "webhook.channelInvalid": "Penyedia atau tetapan saluran pemberitahuan tidak sah.",
   "repository.identity.conflict": "Konflik pemetaan pengarang: identiti Git yang sama sepadan dengan beberapa penyumbang. Semak pemetaan pengarang pada sambungan repositori ini.",
   "repository.analysis.unavailable": "Repositori ini tidak dapat dilihat buat masa ini. Ia mungkin telah dipadamkan atau kebenaran bacanya telah berubah.",
   "repository.analysis.undiscovered": "Repositori belum selesai ditemui atau pengesahan semasanya tidak tersedia.",
