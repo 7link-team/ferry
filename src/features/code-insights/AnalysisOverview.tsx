@@ -10,10 +10,10 @@ function useReport(workspace: string, config: ReturnType<typeof analysisReport>,
   const [state, setState] = useState<{ data?: Envelope<Row>; error?: string; loading: boolean }>({ loading: true });
   useEffect(() => {
     const controller = new AbortController();
-    setState({ loading: true });
+    setState(previous => ({ ...previous, loading: true, error: "" }));
     void listResource<Row>(workspace, config.resource, { ...conditions, ...config.fixed, page: 1, page_size: 10 }, controller.signal, config.endpoint)
       .then(data => { if (!controller.signal.aborted) setState({ data, loading: false }); })
-      .catch(error => { if (!controller.signal.aborted) setState({ error: errorText(error), loading: false }); });
+      .catch(error => { if (!controller.signal.aborted) setState(previous => ({ ...previous, error: errorText(error), loading: false })); });
     return () => controller.abort();
   }, [workspace, config, conditions, refreshKey]);
   return state;
@@ -23,8 +23,8 @@ const metrics = ["commits", "additions", "deletions", "effectives"] as const;
 const metricLabels = ["提交数", "新增行", "删除行", "有效变更"] as const;
 
 function Bars({ state, metric, authors }: { state: ReturnType<typeof useReport>; metric: string; authors: boolean }) {
-  if (state.loading) return <div role="status" className="h-28 animate-pulse rounded-md bg-muted/50" aria-label={insightText("正在加载分析数据")} />;
-  if (state.error) return <p role="alert" className="py-6 text-sm text-destructive">{state.error}</p>;
+  if (state.loading && !state.data) return <div role="status" className="h-28 animate-pulse rounded-md bg-muted/50" aria-label={insightText("正在加载分析数据")} />;
+  if (state.error && !state.data) return <p role="alert" className="py-6 text-sm text-destructive">{state.error}</p>;
   const rows = [...(state.data?.items ?? [])].sort((a, b) => Number(b[metric] ?? 0) - Number(a[metric] ?? 0)).slice(0, 10);
   if (!rows.length) return <p className="flex h-28 items-center justify-center text-sm text-muted-foreground">{insightText("暂无已采集数据")}</p>;
   const max = Math.max(1, ...rows.map(row => Number(row[metric] ?? 0)));
@@ -50,6 +50,8 @@ function PeriodCard({ workspace, connectionId, scope, period, day, conditions, r
   const repos = useReport(workspace, repositories, conditions, refreshKey);
   return <section className="min-w-0 rounded-xl border bg-card p-4" aria-label={insightText("periodRanking", { period: insightText(analysisDatePresets.find(([key]) => key === period)![1]) })}>
     <header className="mb-5 flex flex-wrap items-baseline justify-between gap-2"><h4 className="font-semibold">{insightText(analysisDatePresets.find(([key]) => key === period)![1])}</h4><span className="text-xs tabular-nums text-muted-foreground">{ranking.fixed!.since} – {ranking.fixed!.until}</span></header>
+    {repos.data && repos.error && <p role="alert" className="mb-3 text-sm text-destructive">{repos.error}</p>}
+    {authors.data && authors.error && <p role="alert" className="mb-3 text-sm text-destructive">{authors.error}</p>}
     <div className="grid min-w-0 gap-5 sm:grid-cols-2">
       <div className="min-w-0"><Button size="sm" variant="link" className="mb-3 h-auto p-0" onClick={() => onOpen("repositories", ranking.fixed!)}>{insightText("仓库")}</Button><Bars state={repos} metric={metric} authors={false} /></div>
       <div className="min-w-0"><Button size="sm" variant="link" className="mb-3 h-auto p-0" onClick={() => onOpen("ranking", ranking.fixed!)}>{insightText("贡献排名")}</Button><Bars state={authors} metric={metric} authors /></div>
@@ -67,7 +69,7 @@ export function AnalysisOverview({ workspace, connectionId, scope, day, conditio
   const totals = state.data?.items[0];
   return <div className="space-y-6">
     {state.error && <p role="alert" className="text-sm text-destructive">{state.error}</p>}
-    <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{["projects", ...metrics].map((key, index) => <div key={key} className="rounded-xl border bg-card px-4 py-4"><dt className="text-xs text-muted-foreground">{insightText(index ? metricLabels[index - 1]! : "参与仓库")}</dt><dd className={`mt-2 text-2xl font-semibold tabular-nums ${metricClass(key)}`}>{state.loading || state.error ? "—" : Number(totals?.[key] ?? 0).toLocaleString()}</dd></div>)}</dl>
+    <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">{["projects", ...metrics].map((key, index) => <div key={key} className="rounded-xl border bg-card px-4 py-4"><dt className="text-xs text-muted-foreground">{insightText(index ? metricLabels[index - 1]! : "参与仓库")}</dt><dd className={`mt-2 text-2xl font-semibold tabular-nums ${metricClass(key)}`}>{!state.data ? "—" : Number(totals?.[key] ?? 0).toLocaleString()}</dd></div>)}</dl>
     {state.data?.coverage !== undefined && <AnalysisSummary data={state.data} kind="overview" />}
     <section aria-label={insightText("六个周期贡献排名")} className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">{insightText("周期贡献排名（UTC）")}</h3><span className="text-xs text-muted-foreground">{insightText("有效变更")} · Top 10</span></div>

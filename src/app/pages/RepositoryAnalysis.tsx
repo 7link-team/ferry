@@ -66,7 +66,7 @@ export function RepositoryAnalysis({ workspace, connectionId, permissions, scope
           {advanced && <div className="flex w-full flex-wrap items-end gap-3 border-t pt-3">{reportConfig.filters?.filter(filter => !primary.has(filter.key)).map(filter => <FilterField key={filter.key} filter={filter} value={draft[filter.key] ?? ""} onChange={value => setDraft(previous => ({ ...previous, [filter.key]: value }))} />)}</div>}
         </AutoForm>
       </div>
-      {kind === "overview" ? <AnalysisOverview workspace={workspace} connectionId={connectionId} scope={scope} day={utcDay} conditions={conditions} refreshKey={refreshKey} onOpen={(next, dates) => { commit({ ...conditions, since: dates.since!, until: dates.until! }); setReport(next); }} /> : <div className="flex min-h-[28rem] flex-col"><ResourceTable key={`${connectionId}/${kind}/${refreshKey}`} config={list} workspace={workspace} permissions={permissions} conditions={conditions} refreshKey={refreshKey} hideToolbar /></div>}
+      {kind === "overview" ? <AnalysisOverview workspace={workspace} connectionId={connectionId} scope={scope} day={utcDay} conditions={conditions} refreshKey={refreshKey} onOpen={(next, dates) => { commit({ ...conditions, since: dates.since!, until: dates.until! }); setReport(next); }} /> : <div className="flex min-h-[28rem] flex-col"><ResourceTable key={`${connectionId}/${kind}`} config={list} workspace={workspace} permissions={permissions} conditions={conditions} refreshKey={refreshKey} hideToolbar /></div>}
     </section>
   </div>;
 }

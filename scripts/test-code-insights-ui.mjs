@@ -370,6 +370,76 @@ try {
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${locale}/${width}: form has no horizontal overflow`);
     if(locale==='zh-CN')await page.screenshot({path:`${output}/strategy-compact-${width}.png`});
   }
+  // Refresh real mounted dashboards while requests are deliberately held open.
+  let reportVersion = 1, reportReads = 0, holdReports = false;
+  let releaseReports;
+  let reportGate = Promise.resolve();
+  await page.route('**/code-insights/31/reports/**', async route => {
+    reportReads++;
+    if (holdReports) await reportGate;
+    const kind = new URL(route.request().url()).pathname.split('/').at(-1);
+    const items = kind === 'overview'
+      ? [{ id: 'totals', projects: reportVersion * 4, commits: reportVersion * 100, additions: 100, deletions: 20, effectives: 80 }]
+      : Array.from({ length: 10 }, (_, index) => ({ id: String(index), repository: `team/project-${index}`, name: `Author ${index}`, effectives: reportVersion * 100 - index, commits: 100, additions: 80, deletions: 20 }));
+    await route.fulfill({ json: { items, total: items.length, page: 1, page_size: 20 } });
+  });
+  insight.repository_count = 4;
+  insight.sources = [{ repository: 'team/project', state: 'complete', synced_at: Date.now() }];
+  await page.clock.install();
+  await page.goto(origin + '/zh-CN/workspaces/2/code-insights/31');
+  await page.locator('ol').first().waitFor();
+  await page.getByText('4 仓库', { exact: false }).waitFor();
+  await page.getByRole('button', { name: /定时刷新/ }).waitFor();
+  await page.locator('summary').filter({ hasText: '各仓库覆盖与任务状态' }).click();
+  await page.getByRole('button', { name: '高级筛选', exact: true }).click();
+  const markReading = () => page.evaluate(() => {
+    const panel = document.querySelector('[role="tabpanel"][data-state="active"]');
+    panel.scrollTop = 650;
+    window.readingPanel = panel;
+    window.readingOffset = panel.scrollTop;
+    window.readingChart = document.querySelector('ol');
+    return window.readingOffset;
+  });
+  assert(await markReading() > 300, 'Fixture must actually scroll the reading panel');
+  holdReports = true;
+  reportGate = new Promise(resolve => { releaseReports = resolve; });
+  const beforeReports = reportReads;
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '刷新').click());
+  await page.waitForFunction(() => !document.querySelector('button[aria-expanded="true"]')?.disabled);
+  await page.waitForTimeout(250);
+  assert(reportReads > beforeReports, 'Refresh requests report data');
+  assert(await page.evaluate(() => document.querySelector('ol') === window.readingChart), 'Existing chart remains mounted during refresh');
+  assert(await page.evaluate(() => Math.abs(window.readingPanel.scrollTop - window.readingOffset) <= 1), 'Pending refresh cannot move the reading position');
+  reportVersion = 2;
+  insight.repository_count = 8;
+  holdReports = false;
+  releaseReports();
+  await page.getByText('200', { exact: true }).first().waitFor();
+  assert(await page.evaluate(() => Math.abs(window.readingPanel.scrollTop - window.readingOffset) <= 1), 'Data update retains reading position');
+  assert(await page.locator('details').first().evaluate(element => element.open), 'Diagnostics expansion survives refresh');
+  assert.equal(await page.getByRole('button', { name: '高级筛选', exact: true }).getAttribute('aria-expanded'), 'true');
+  reportVersion = 3;
+  insight.repository_count = 12;
+  insight.sources[0].synced_at += 15000;
+  await page.clock.runFor(15000);
+  await page.getByText('300', { exact: true }).first().waitFor();
+  assert(await page.evaluate(() => Math.abs(window.readingPanel.scrollTop - window.readingOffset) <= 1), 'Automatic data refresh retains reading position');
+  await page.evaluate(() => { window.readingPanel.scrollTop = 0; });
+  await page.getByRole('button', { name: /定时刷新/ }).click();
+  await page.getByText('12 仓库', { exact: false }).waitFor();
+  const pausedReportReads = reportReads;
+  await page.clock.runFor(45000);
+  assert.equal(reportReads, pausedReportReads, 'Pausing automatic refresh stops report polling');
+  await page.evaluate(() => { for (const element of document.querySelectorAll('*')) if (element.scrollTop) element.scrollTop = 0; });
+  await page.screenshot({ path: `${output}/refresh-controls-mobile.png` });
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.screenshot({ path: `${output}/refresh-controls-desktop.png` });
+  await page.getByLabel('报告维度').getByRole('button', { name: '贡献排名', exact: true }).click();
+  await page.getByText('Author 0', { exact: true }).first().waitFor();
+  await page.evaluate(() => { window.readingTable = document.querySelector('table'); });
+  await page.getByRole('button', { name: '刷新', exact: true }).last().click();
+  assert(await page.evaluate(() => document.querySelector('table') === window.readingTable), 'Report refresh keeps the table mounted');
+  await page.screenshot({ path: `${output}/refresh-preserves-reading.png` });
   insight.aliases = [{ email: "alice@example.invalid", nickname: "Alice combined", contributor_id: "123" }];
   await page.goto(origin + '/zh-CN/workspaces/2/code-insights/31?tab=authors');
   permissions.splice(permissions.indexOf('code-insights.update'), 1);
@@ -379,7 +449,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '保存', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: insight creation without business pipelines or hosts, automatic pagination, multi-select immediate add/uncheck/search/group select-all/dedup, other connection retention, embedded refresh, later-page failure/retry, repository validation, six-locale intrinsic select width and320px layout, event schedule, author mapping and contributor ID preservation",
+    "PASS: insight creation, pagination/multi-select/groups/retry, six-locale mobile layout, schedules, author mapping; manual and automatic data refresh preserve charts, reading scroll, expanded diagnostics and filters; dynamic repository total, pause and table identity",
   );
 } finally {
   await browser.close();

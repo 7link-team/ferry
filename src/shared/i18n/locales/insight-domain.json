@@ -1,4 +1,6 @@
 {
+  "正在更新数据…": ["Refreshing data…", "正在更新資料…", "データを更新中…", "데이터 새로고침 중…", "Memuat semula data…"],
+  "{{seconds}} 秒后刷新": ["Refresh in {{seconds}}s", "{{seconds}} 秒後更新", "{{seconds}}秒後に更新", "{{seconds}}초 후 새로고침", "Muat semula dalam {{seconds}}s"],
   "commitIdentity": ["Repository / branch / SHA", "倉庫 / 分支 / SHA", "リポジトリ / ブランチ / SHA", "저장소 / 브랜치 / SHA", "Repositori / cabang / SHA"],
   "commitAuthor": ["Author", "作者", "作者", "작성자", "Pengarang"],
   "insertAliasAfter": ["Add mapping after row {{index}}", "在第 {{index}} 行下方新增映射", "{{index}} 行目の下にマッピングを追加", "{{index}}행 아래에 매핑 추가", "Tambah pemetaan selepas baris {{index}}"],

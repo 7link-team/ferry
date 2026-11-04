@@ -286,20 +286,14 @@ pub async fn list(
         &query,
     )
     .await?;
-    let selections = selections::Entity::find()
-        .filter(selections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(selections::Column::InsightId.is_in(rows.iter().map(|r| r.id)))
-        .all(&s.db)
-        .await?;
-    let items = rows
-        .iter()
-        .map(|row| {
-            summary(
-                row,
-                selections.iter().filter(|m| m.insight_id == row.id).count(),
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut items = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let sources = selected_sources(&s.db, &scope, row).await?;
+        items.push(summary(
+            row,
+            sources.iter().filter(|source| source.id > 0).count(),
+        )?);
+    }
     Ok(Json(
         json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
     ))
@@ -335,7 +329,7 @@ pub async fn get(
         .into_iter()
         .map(|row| Ok((row.id, super::decode(&row)?)))
         .collect::<Result<_>>()?;
-    let mut value = summary(&row, members.len())?;
+    let mut value = summary(&row, sources.iter().filter(|source| source.id > 0).count())?;
     value.as_object_mut().unwrap().extend(
         serde_json::to_value(config)
             .map_err(|_| {
