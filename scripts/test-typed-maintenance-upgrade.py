@@ -84,7 +84,18 @@ with tempfile.TemporaryDirectory(prefix='typed-maintenance-upgrade-') as directo
             for attempt in range(2):
                 prefs = request(root+'/preferences')
                 assert prefs['default_page_size']==37
-                assert prefs['dictionaries']['host-state']==labels
+                upgraded_options = prefs['dictionaries']['host-state']
+                assert [{key:value for key,value in option.items() if key!='labels'}
+                        for option in upgraded_options] == labels
+                catalogs = {locale:json.loads((Path(__file__).resolve().parents[1] /
+                    'crates/server/src/i18n' / f'repository-{locale}.json').read_text())
+                    for locale in ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']}
+                for original, option in zip(labels, upgraded_options):
+                    if original['label'] == 'Preserved label':
+                        assert option == original, 'Custom labels must not become generated translations'
+                    else:
+                        assert option['labels'] == {locale:catalog['maintenance.'+option['value']]
+                            for locale,catalog in catalogs.items()}, option
                 row = request(root+'/dictionaries/'+legacy)
                 assert row['id']==legacy and row['version']==1 and row['description']=='Preserve this content'
                 assert row['category']=='general' and row['value_type']=='selection'
