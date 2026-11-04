@@ -14,7 +14,7 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const sha='edd042dce6f68b1e3fd098cd3f6bfe6bc3c0daee';
+            const sha='f15d214d350f18a79c6201fdd4610dcb2b9957f0';
             const tag='v0.2.0-alpha.2';
             const repo=context.repo;
             async function requireMain() {
@@ -41,27 +41,27 @@ jobs:
               }
               throw Error('Timed out; inspect existing run before retry');
             }
+            const {data:priorController}=await github.rest.actions.getWorkflowRun({...repo,run_id:41780693809});
+            if(priorController.head_sha!=='509fb86c4a6f57fad1472c8dee208a1d96c93289')throw Error('Unexpected old release controller');
+            if(priorController.status!=='completed')await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',{...repo,run_id:priorController.id});
             await requireMain();
 
-            const superseded = new Set(["edd042dce6f68b1e3fd098cd3f6bfe6bc3c0daee", "487562219e1188b59a756be2beb3dbca2874b46e", "e835ed816864acfa89cf7958d4d78337f697beb8", "743b8e8141026698afb416499eda63dce80f9dd1", "4af81e0394e288608e820add7967a2b79966f884", "ebe736239e946e94489b172e5601244a694c1f4a", "b838dc671febfa1ce6e0f1c27d01af6050be6432", "ad48e8fb71b83ffed57373bad44eab2a4f6b3585"]);
-            const old = await github.paginate(github.rest.actions.listWorkflowRuns, {...repo,workflow_id:'build.yml',event:'push',branch:'main',per_page:100});
+            const superseded = new Set(["f15d214d350f18a79c6201fdd4610dcb2b9957f0", "edd042dce6f68b1e3fd098cd3f6bfe6bc3c0daee", "487562219e1188b59a756be2beb3dbca2874b46e", "e835ed816864acfa89cf7958d4d78337f697beb8", "743b8e8141026698afb416499eda63dce80f9dd1", "4af81e0394e288608e820add7967a2b79966f884", "ebe736239e946e94489b172e5601244a694c1f4a", "b838dc671febfa1ce6e0f1c27d01af6050be6432", "ad48e8fb71b83ffed57373bad44eab2a4f6b3585"]);
+            const old = await github.paginate(github.rest.actions.listWorkflowRuns, {...repo,workflow_id:'build.yml',branch:'main',per_page:100});
             for (const run of old) {
-              if (superseded.has(run.head_sha) && run.head_branch==='main' && run.status!=='completed') {
+              if (superseded.has(run.head_sha) && (run.event==='push' || (run.event==='workflow_dispatch' && run.head_sha!==sha)) && run.head_branch==='main' && run.status!=='completed') {
                 await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {...repo,run_id:run.id});
                 core.info(`Cancelled superseded main CI ${run.id} at ${run.head_sha}`);
               }
             }
             if((await runs('build.yml','workflow_dispatch')).length)throw Error('Build already dispatched; inspect first');
-            for(const run of await runs('build.yml','push')) {
-              if(run.status!=='completed')await github.rest.actions.cancelWorkflowRun({...repo,run_id:run.id});
-            }
             await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
             const build=await waitFor('build.yml','workflow_dispatch');
             const image=await waitFor('server-image.yml','push');
             core.notice(`Verified build ${build.id} and source image ${image.id}`);
             await requireMain();
             if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Already published/dispatched; inspect first');
-            const notes = "移除洞察报告与代码走查，保留代码洞察及历史数据，并完善主机代理、通知和多语言体验。\n\n- 移除洞察报告、代码走查的菜单、页面、接口及自动调度；旧接口返回 JSON 404，已存历史数据和数据库迁移保留。代码洞察继续可用。\n- 主机列表与详情显示主机代理版本、共享状态及可用更新，支持立即更新；统一主机代理与流水线执行器术语。\n- 通知渠道先选择平台，再显示对应配置；支持各渠道独立语言、平台原生可跳转链接及窄屏布局。\n- 运行状态保留固定机器值，显示名称支持六语言，避免字典编辑破坏后端状态语义；补齐邀请码等翻译。\n- 工作空间偏好在同空间路由切换时复用，改进列表空状态、加载反馈及顶部独立路由/网络请求进度。\n- 修复共享表单联动时数组被清为空字符串的问题，以及手机列表筛选占用过多空间的问题。\n\n兼容说明：本版不会删除已有洞察报告、代码走查历史记录；相关功能入口和接口已停用。私有平台实账号、外部通知机器人及用户自有 Cloudflare Tunnel 仍需按实际部署验证。";
+            const notes = "移除洞察报告与代码走查，保留代码洞察及历史数据，并完善主机代理、通知和多语言体验。\n\n- 移除洞察报告、代码走查的菜单、页面、接口及自动调度；旧接口返回 JSON 404，已存历史数据和数据库迁移保留。代码洞察继续可用。\n- 主机列表与详情显示主机代理版本、共享状态及可用更新，支持立即更新；统一主机代理与流水线执行器术语。\n- 通知渠道先选择平台，再显示对应配置；支持各渠道独立语言、平台原生可跳转链接及窄屏布局。链接字段显示“链接：完整 URL”，URL 本身可点击。\n- 运行状态保留固定机器值，显示名称支持六语言，避免字典编辑破坏后端状态语义；补齐邀请码等翻译。\n- 工作空间偏好在同空间路由切换时复用，改进列表空状态、加载反馈及顶部独立路由/网络请求进度。\n- 修复共享表单联动时数组被清为空字符串的问题，以及手机列表筛选占用过多空间的问题。\n\n兼容说明：本版不会删除已有洞察报告、代码走查历史记录；相关功能入口和接口已停用。私有平台实账号、外部通知机器人及用户自有 Cloudflare Tunnel 仍需按实际部署验证。";
             await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
             const publication=await waitFor('publish-verified.yml','workflow_dispatch');
             const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
