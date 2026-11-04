@@ -68,7 +68,7 @@ export interface Host {
 export const CONNECTIONS: Option[] = [
   {
     value: "runner",
-    label: "主机代理（HostAgent）",
+    label: "主机代理",
     labelKey: "resource-domain:host.runner",
   },
   {

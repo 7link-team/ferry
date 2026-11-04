@@ -27,12 +27,12 @@ it("renders shared execution status and small HostAgent versions without per-row
 });
 
 it.each([
-  ["en-US", "Agent (HostAgent)"],
-  ["zh-CN", "主机代理（HostAgent）"],
-  ["zh-TW", "主機代理（HostAgent）"],
-  ["ja-JP", "エージェント（HostAgent）"],
-  ["ko-KR", "에이전트(HostAgent)"],
-  ["ms-MY", "Ejen (HostAgent)"],
+  ["en-US", "HostAgent"],
+  ["zh-CN", "主机代理"],
+  ["zh-TW", "主機代理"],
+  ["ja-JP", "ホストエージェント"],
+  ["ko-KR", "호스트 에이전트"],
+  ["ms-MY", "Ejen hos"],
 ])("keeps host connection labels distinct from pipeline runners in %s", async (locale, expected) => {
   await i18n.changeLanguage(locale);
   expect(label(CONNECTIONS, "runner")).toBe(expected);

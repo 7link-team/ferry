@@ -61,6 +61,8 @@ try {
 
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
+  await page.locator('tbody').getByText('主机代理', { exact: true }).waitFor();
+  assert.equal(await page.getByText('主机代理（HostAgent）', { exact: true }).count(), 0);
   assert.equal(await exactButton('连接主机').count(), 0);
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1`);
   const current = page.getByRole('textbox', { name: '当前连接命令' });

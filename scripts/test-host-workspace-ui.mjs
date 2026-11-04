@@ -112,7 +112,7 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   const terminalLink = page.getByRole('link', { name: '打开终端' });
   await terminalLink.waitFor();
-  await page.locator('tbody').getByText('主机代理（HostAgent）', { exact: true }).waitFor();
+  await page.locator('tbody').getByText('主机代理', { exact: true }).waitFor();
   assert.equal(await page.getByText('代理（runner）', { exact: true }).count(), 0);
   assert.equal(await page.locator('thead th:first-child [role=checkbox]').count(), 1, 'selection header is the leftmost column');
   assert.equal(await page.locator('tbody tr:first-child td:first-child [role=checkbox]').count(), 1, 'row selection is the leftmost column');
