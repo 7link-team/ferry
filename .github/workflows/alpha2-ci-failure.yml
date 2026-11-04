@@ -18,6 +18,8 @@ jobs:
             const response=await github.rest.actions.downloadJobLogsForWorkflowRun({...context.repo,job_id:job.id});
             const text=typeof response.data==='string'?response.data:Buffer.from(response.data).toString('utf8');
             const lines=text.split('\n');
-            const start=lines.findIndex(line=>line.includes('##[group]Run cp target/debug/ferry-server'));
-            const excerpt=(start>=0?lines.slice(start):lines.slice(-120)).join('\n');
-            core.error(excerpt.slice(-12000));
+            const evidence=[];
+            for(let index=0;index<lines.length;index++) {
+              if(/Traceback|AssertionError|error:|fatal:|panicked at|FAILED/.test(lines[index]))evidence.push(...lines.slice(Math.max(0,index-5),index+14));
+            }
+            core.error((evidence.length?evidence:lines.slice(-80)).join('\n').slice(0,22000));
