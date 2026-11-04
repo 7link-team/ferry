@@ -476,6 +476,8 @@ fn host_json(row: &hosts::Model) -> Value {
         "connection": row.connection,
         "os": row.os,
         "agent_version": row.agent_version,
+        "agent_update_available": row.connection == "runner" && runner::older_version(&row.agent_version, env!("CARGO_PKG_VERSION")),
+        "agent_update_state": row.agent_update.as_deref().and_then(|value| serde_json::from_str::<Value>(value).ok()).and_then(|value| value.get("state").cloned()),
         "runner_auto_update": row.runner_auto_update,
         "state": row.state,
         "group_id": Id::from(row.group_id),

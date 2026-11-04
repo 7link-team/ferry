@@ -353,6 +353,7 @@ export function RunnerConnection(props: Props) {
 }
 
 type RunnerUpdate = {
+  available?: boolean;
   agent_version: string;
   target_version: string;
   supported: boolean;
@@ -363,7 +364,38 @@ type RunnerUpdate = {
   update: null | { state: string; version: string; message: string; auto?: { attempts: number; next_retry_at: number } };
 };
 
-export function RunnerUpdateStatus({ workspace, hostId }: { workspace: string; hostId: string }) {
+export function HostAgentVersion({ workspace, hostId, version, available, updateState, online, canUpdate }: {
+  workspace: string; hostId: string; version?: string | undefined; available?: boolean | undefined;
+  updateState?: string | undefined; online: boolean; canUpdate: boolean;
+}) {
+  const [pending, setPending] = useState(false);
+  const [accepted, setAccepted] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => { setAccepted(false); setError(""); }, [workspace, hostId, version, updateState]);
+  const busy = accepted || ["draining", "updating", "unknown"].includes(updateState ?? "");
+  const update = async () => {
+    setPending(true); setError("");
+    try {
+      const path = `/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}/runner-updates`;
+      const status = await api<RunnerUpdate>(path);
+      if (!status.supported || !status.ready) {
+        setError(commonText(`resource-domain:runner.${status.supported ? "waitHealthy" : "unsupportedHelp"}`));
+        return;
+      }
+      await api(path, { method: "POST", body: "{}" });
+      setAccepted(true);
+    } catch (cause) { setError(errorText(cause)); }
+    finally { setPending(false); }
+  };
+  return <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <span className="tabular-nums text-muted-foreground">HostAgent {version || "—"}</span>
+    {busy ? <span role="status" className="text-primary">{commonText(`resource-domain:runner.${updateState === "unknown" ? "verifyReconnect" : updateState === "draining" || accepted ? "draining" : "updating"}`)}</span>
+      : available && canUpdate && <Button type="button" variant="outline" size="xs" disabled={pending || !online} title={commonText("resource-domain:runner.updateWaitHelp")} onClick={event => { event.stopPropagation(); void update(); }}>{pending && <Loader2 className="size-3 animate-spin" />}{commonText("resource-domain:runner.updateNow")}</Button>}
+    {error && <span role="alert" className="basis-full text-destructive">{error}</span>}
+  </div>;
+}
+
+export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { workspace: string; hostId: string; canUpdate?: boolean }) {
   useTranslation("resource-domain");
   const [status, setStatus] = useState<RunnerUpdate>();
   const [error, setError] = useState("");
@@ -384,7 +416,8 @@ export function RunnerUpdateStatus({ workspace, hostId }: { workspace: string; h
     <h2 className="font-semibold">{commonText("resource-domain:runner.updateTitle")}</h2>
     {error ? <p role="alert" className="text-destructive">{commonText("resource-domain:runner.refreshFailed")}{error}</p> : !status ? <p role="status">{commonText("resource-domain:runner.loadingUpdate")}</p> : null}
     {status && <>
-      <p>{commonText("resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>
+      <HostAgentVersion workspace={workspace} hostId={hostId} version={status.agent_version} available={status.available && status.supported} updateState={status.update?.state} online={status.ready} canUpdate={canUpdate} />
+      <p className="text-xs text-muted-foreground">{commonText("resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>
       <p>{commonText("resource-domain:runner.autoPolicy")}{status.enabled ? commonText("resource-domain:status.enabled") : commonText("resource-domain:status.off")}{status.auto_update === "inherit" ? commonText("resource-domain:runner.inherited") : commonText("resource-domain:runner.overridden")}</p>
       {status.update && <div role="status" aria-live="polite"><p>{labels[status.update.state] ?? status.update.state} · {status.update.version}</p><p className="text-muted-foreground">{status.update.message}</p>
         {!!status.update.auto?.next_retry_at && <p>{commonText("resource-domain:runner.nextRetry")}{new Date(status.update.auto.next_retry_at).toLocaleString(currentLocale())}</p>}

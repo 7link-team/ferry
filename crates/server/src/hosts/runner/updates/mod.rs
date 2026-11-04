@@ -8,6 +8,7 @@ use jobs::*;
 pub use jobs::{UpdateBody, start_update, update_status};
 use persistence::*;
 pub(crate) use policy::automatic_updates;
+pub(crate) use policy::older_version;
 use policy::*;
 pub(crate) use recovery::recover_updates;
 #[cfg(test)]
@@ -54,6 +55,19 @@ static UPDATES: LazyLock<Mutex<HashMap<String, UpdateJob>>> = LazyLock::new(Defa
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_update_request_selects_server_catalog_without_breaking_explicit_requests() {
+        let automatic: super::UpdateBody = serde_json::from_str("{}").unwrap();
+        assert!(
+            automatic.version.is_empty()
+                && automatic.manifest.is_empty()
+                && automatic.signature.is_empty()
+        );
+        let explicit: super::UpdateBody = serde_json::from_value(serde_json::json!({"version":"1.2.3","manifest":"signed catalog","signature":"signature"})).unwrap();
+        assert_eq!(explicit.version, "1.2.3");
+        assert_eq!(explicit.manifest, "signed catalog");
+        assert_eq!(explicit.signature, "signature");
+    }
     use super::*;
     use crate::hosts::runner::test_support::scratch_db;
 

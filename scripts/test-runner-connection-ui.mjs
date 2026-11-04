@@ -5,25 +5,31 @@ import { preview } from 'vite';
 import { chromium } from 'playwright';
 
 const server = await preview({ preview: { host: '127.0.0.1', port: 0 } });
-const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
+const origin = process.env.FERRY_UI_ORIGIN || `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: Number(process.env.FERRY_UI_VIEWPORT_WIDTH || 1280), height: 800 }, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  let permissions = ['hosts.read', 'hosts.create', 'hosts.enroll'];
+  let permissions = ['hosts.read', 'hosts.create', 'hosts.enroll', 'hosts.update'];
   let connection = 'runner', listReads = 0, creates = 0, resets = 0, online = false;
   let currentToken = 'fixture-current-token';
-  const host = () => ({ id: 'h1', name: 'Fixture host', address: 'fixture.invalid', connection, state: online ? 'online' : 'offline', port: 22, username: 'root', tags: [], tag_ids: [], group_id: '', credential_id: '', description: '', version: 1 });
+  let updates = 0;
+  let updateState = null;
+  const host = () => ({ id: 'h1', name: 'Fixture host', address: 'fixture.invalid', connection, state: online ? 'online' : 'offline', port: 22, username: 'root', tags: [], tag_ids: [], group_id: '', credential_id: '', description: '', agent_version: '0.1.0-alpha.38', agent_update_available: true, agent_update_state: updateState?.state, execution: { enabled: true, shared: true, capacity: 2 }, execution_status: { active: 0, capacity: 2, state: 'available', running_jobs: [] }, version: 1 });
   await page.route('**/api/**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     let body;
     if (path === '/api/me') body = { user: { id: 'u1', name: 'Tester', email: 'tester@example.invalid', is_superadmin: false }, workspaces: [{ id: '109124796398174208', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions }] };
     else if (path === '/api/setup') body = { required: false };
     else if (path.endsWith('/preferences')) body = { default_page_size: 20, dictionaries: {} };
-    else if (path === '/api/workspaces/109124796398174208/nodes') { listReads++; body = { items: [host()], total: 1, page: 1, page_size: 20 }; }
+    else if (path === '/api/workspaces/109124796398174208/nodes') { listReads++; body = new URL(request.url()).searchParams.get('connection') === 'ssh' ? { items: [host(), { ...host(), id: 'h2', name: 'Valid jump host', jump_host_id: '0' }], total: 2, page: 1, page_size: 200 } : { items: [host()], total: 1, page: 1, page_size: 20 }; }
+    else if (path === '/api/workspaces/109124796398174208/nodes/h1/runner-updates') {
+      if (request.method() === 'POST') { assert.deepEqual(request.postDataJSON(), {}); updates++; updateState = { state: 'draining', version: '0.2.0-alpha.1', message: 'Waiting for tasks' }; }
+      body = { available: true, agent_version: '0.1.0-alpha.38', target_version: '0.2.0-alpha.1', supported: true, ready: online, enabled: true, auto_update: 'inherit', update: updateState };
+    }
     else if (path === '/api/workspaces/109124796398174208/nodes/h1') body = host();
     else if (path === '/api/workspaces/109124796398174208/nodes/h1/metrics') body = { cpu_percent: 12.5, load1: 0.2, memory_used: 1024, memory_total: 4096, disks: [{ name: 'system', mount: '/', used: 1024, total: 4096 }], networks: [{ name: 'eth0', received: 10, transmitted: 20 }] };
     else if (path === '/api/workspaces/109124796398174208/nodes/h1/connection-credentials') {
@@ -93,10 +99,40 @@ try {
   assert.equal(await page.getByRole('textbox', { name: '当前连接命令' }).count(), 0);
   console.log('PASS SSH detail has no Agent command');
 
-  permissions = ['hosts.read']; connection = 'runner';
+  permissions = ['hosts.read', 'hosts.update']; connection = 'runner';
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes`);
   await page.getByRole('table').waitFor();
+  await page.getByText('HostAgent 0.1.0-alpha.38', { exact: true }).waitFor();
+  await page.getByText('共享', { exact: true }).waitFor();
+  const updateNow = page.getByRole('button', { name: '立即更新', exact: true });
+  assert.equal(await updateNow.isDisabled(), true);
+  online = true;
+  await page.reload();
+  await updateNow.click();
+  await page.getByRole('status').filter({ hasText: '等待任务结束' }).waitFor();
+  assert.equal(updates, 1);
+  updateState = null;
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1?tab=connect`);
+  await page.getByText('HostAgent 0.1.0-alpha.38', { exact: true }).waitFor();
+  await Promise.all([page.waitForResponse(response => response.url().endsWith('/runner-updates') && response.request().method() === 'POST'), updateNow.click()]);
+  assert.equal(updates, 2);
+  console.log('PASS list/detail version, shared badge, offline guard and signed-update requests');
+  connection = 'ssh';
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1/edit`);
+  const jump = page.getByRole('combobox', { name: '跳板主机', exact: true });
+  await jump.click();
+  await page.getByRole('option', { name: 'Valid jump host', exact: true }).waitFor();
+  assert.equal(await page.getByRole('option', { name: 'Fixture host', exact: true }).count(), 0);
+  await page.getByRole('option', { name: 'Valid jump host', exact: true }).click();
+  console.log('PASS edited node is excluded from jump-host dropdown, valid peer remains selectable');
+  connection = 'runner';
+  await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/nodes/h1`);
+
+  permissions = ['hosts.read'];
+  await page.reload();
+  await page.getByText('HostAgent 0.1.0-alpha.38', { exact: true }).waitFor();
+  assert.equal(await updateNow.count(), 0);
+
   assert.equal(await page.getByRole('textbox', { name: '当前连接命令' }).count(), 0);
   assert.equal(await exactButton('重置连接').count(), 0);
   permissions = ['hosts.read', 'hosts.create', 'hosts.enroll'];

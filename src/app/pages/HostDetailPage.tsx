@@ -99,7 +99,7 @@ export function HostDetail({
           {form && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />}
           {canConnect && <HostConnectionCommand workspace={workspace} hostId={hostId} compact />}
         </div>
-        {connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner" && <RunnerUpdateStatus workspace={workspace} hostId={hostId} />}
+        {connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner" && <RunnerUpdateStatus workspace={workspace} hostId={hostId} canUpdate={permissions.has("hosts.update")} />}
         </>}
       </div>
     </div>

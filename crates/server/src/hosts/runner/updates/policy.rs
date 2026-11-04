@@ -37,7 +37,7 @@ pub(super) async fn automatic_allowed(s: &AppState, id: Id) -> Result<bool> {
         && policy_enabled(global_auto_update(s).await?, &host.runner_auto_update))
 }
 
-pub(super) fn older_version(current: &str, target: &str) -> bool {
+pub(crate) fn older_version(current: &str, target: &str) -> bool {
     match (
         semver::Version::parse(current),
         semver::Version::parse(target),

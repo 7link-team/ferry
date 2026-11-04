@@ -7,6 +7,7 @@ import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { HostConnectionCommand,RunnerConnection,RunnerUpdateStatus,runnerInstallCommand,runnerServerOrigin,runnerUninstallCommand } from "../../app/pages/RunnerConnection";
 import { i18n } from "../../shared/i18n/i18n";
+import { HostAgentVersion } from "./RunnerConnection";
 
 // Native PowerShell startup/fixture compilation can exceed the 5s unit-test budget on hosted Windows.
 // Each child still has a hard 20s process deadline, inside the 30s native-test deadline.
@@ -551,4 +552,49 @@ it("reports upgrade status fetch errors and stops polling after unmount", async 
   const count = get.mock.calls.length;
   await act(async () => vi.advanceTimersByTimeAsync(10000));
   expect(get).toHaveBeenCalledTimes(count);
+});
+
+it("requests a signed server-version update once and reports drain feedback", async () => {
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => ({ ok: true, status: init?.method === "POST" ? 202 : 200,
+    json: async () => ({ supported: true, ready: true, available: true }) }));
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<HostAgentVersion workspace="ops" hostId="h1" version="0.1.0" available online canUpdate />));
+  expect(host.textContent).toContain("HostAgent 0.1.0");
+  const button = host.querySelector("button")!;
+  expect(button.textContent).toContain("立即更新");
+  await act(async () => button.click());
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1]![1]).toMatchObject({ method: "POST", body: "{}" });
+  expect(host.querySelector("button")).toBeNull();
+  expect(host.textContent).toContain("等待任务结束");
+});
+
+it.each([
+  { available: false, online: true, canUpdate: true, updateState: undefined },
+  { available: true, online: true, canUpdate: false, updateState: undefined },
+  { available: true, online: true, canUpdate: true, updateState: "updating" },
+])("hides update action for current, read-only and busy agents: %j", async props => {
+  await act(async () => root.render(<HostAgentVersion workspace="ops" hostId="h1" version="0.2.0" {...props} />));
+  expect(host.querySelector("button")).toBeNull();
+});
+
+it("disables offline updates and preserves retry after admission failure", async () => {
+  await act(async () => root.render(<HostAgentVersion workspace="ops" hostId="h1" version="0.1.0" available online={false} canUpdate />));
+  expect(host.querySelector("button")!.disabled).toBe(true);
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => ({ ok: init?.method !== "POST", status: init?.method === "POST" ? 409 : 200,
+    json: async () => init?.method === "POST" ? { error: "Update already active" } : { supported: true, ready: true } })));
+  await act(async () => root.render(<HostAgentVersion workspace="ops" hostId="h1" version="0.1.0" available online canUpdate />));
+  await act(async () => host.querySelector("button")!.click());
+  expect(host.querySelector('[role="alert"]')!.textContent).toContain("Update already active");
+  expect(host.querySelector("button")!.disabled).toBe(false);
+});
+
+it.each([{ supported: false, ready: true }, { supported: true, ready: false }])("does not submit upgrades for unavailable agent capability: %j", async status => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => status }));
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<HostAgentVersion workspace="ops" hostId="h1" version="0.1.0" available online canUpdate />));
+  await act(async () => host.querySelector("button")!.click());
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role="alert"]')!.textContent).toBeTruthy();
+  expect(host.querySelector("button")!.disabled).toBe(false);
 });

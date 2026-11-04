@@ -522,7 +522,7 @@ function Field<T>({
   useCommonTranslation();
   const { options: rawOptions, error: optionsError, loading: optionsLoading, reload: reloadOptions } = useOptions(field.options);
   const suggestionsId = useId();
-  const options = rawOptions.map(option => ({ ...option, label: configText(option.label, option.labelKey), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
+  const options = rawOptions.filter(option => !field.optionFilter || field.optionFilter(option, draft)).map(option => ({ ...option, label: configText(option.label, option.labelKey), ...(option.group ? { group: configText(option.group, option.groupKey) } : {}) }));
   if (field.type === "multiselect" && Array.isArray(value)) {
     for (const selected of value.map(String)) {
       if (!options.some(option => option.value === selected))

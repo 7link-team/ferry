@@ -1,4 +1,5 @@
 import { TagBadge } from "../tags/TagBadge";
+import { HostAgentVersion } from "./RunnerConnection";
 import { defaultExecutionPolicy, ExecutionPolicyFields, type ExecutionPolicy, type ExecutionStatus } from "./ExecutionPolicy";
 import { FolderOpen, SquareTerminal } from "lucide-react";
 import {
@@ -53,6 +54,9 @@ export interface Host {
   tags: { id: string; name: string; color: string }[];
   credential_id: string;
   os?: string;
+  agent_version?: string;
+  agent_update_available?: boolean;
+  agent_update_state?: string;
   jump_host_id: string;
   description: string;
   seen_at: number;
@@ -250,7 +254,7 @@ export function hostsLists({
           label: "接入方式",
           labelKey: "common-domain:form.connection",
           width: 200,
-          render: (row: Host) => label(CONNECTIONS, row.connection),
+          render: (row: Host) => <div className="space-y-1"><div>{label(CONNECTIONS, row.connection)}</div>{row.connection === "runner" && <HostAgentVersion workspace={workspace} hostId={row.id} version={row.agent_version} available={row.agent_update_available} updateState={row.agent_update_state} online={row.state === "online"} canUpdate={permissions?.has("hosts.update") ?? false} />}</div>,
         },
         {
           key: "state",
@@ -281,7 +285,7 @@ export function hostsLists({
           key: "execution_status",
           label: "执行容量",
           labelKey: "execution-domain:hostExecution.title",
-          render: (row: Host) => row.execution_status ? <div className="space-y-1"><Badge variant="secondary">{executionText(`hostExecution.${row.state === "online" ? row.execution_status.state : "unavailable"}`)}</Badge><div className="text-xs tabular-nums text-muted-foreground">{row.execution_status.active} / {row.execution_status.capacity}</div>{permissions?.has("pipelines.read") && row.execution_status.running_jobs.map((job, index) => <a key={`${job.run_id}:${job.job_key}:${index}`} className="block max-w-48 truncate text-xs text-primary underline underline-offset-2" href={localizedPath(`/workspaces/${workspace}/pipeline-runs/${job.run_id}`, currentLocale())}>{job.job_key} · {job.run_id}</a>)}</div> : "—",
+          render: (row: Host) => row.execution_status ? <div className="space-y-1">{row.execution?.shared && <Badge variant="outline">{executionText("hostExecution.sharedBadge")}</Badge>}<Badge variant="secondary">{executionText(`hostExecution.${row.state === "online" ? row.execution_status.state : "unavailable"}`)}</Badge><div className="text-xs tabular-nums text-muted-foreground">{row.execution_status.active} / {row.execution_status.capacity}</div>{permissions?.has("pipelines.read") && row.execution_status.running_jobs.map((job, index) => <a key={`${job.run_id}:${job.job_key}:${index}`} className="block max-w-48 truncate text-xs text-primary underline underline-offset-2" href={localizedPath(`/workspaces/${workspace}/pipeline-runs/${job.run_id}`, currentLocale())}>{job.job_key} · {job.run_id}</a>)}</div> : "—",
         },
         {
           key: "seen_at",
@@ -547,6 +551,7 @@ export function hostsForms({
               emptyValues: ["0", 0],
               emptyLabelKey: "resource-domain:reference.noJumpHost",
               options: sshJumpOptions(workspace),
+              optionFilter: (option, draft: Partial<Host>) => option.value !== draft.id,
               help: "可选。先添加一台可直连的 SSH 主机，多个目标主机可共用它。目标主机仍使用自己的登录凭据。",
               helpKey: "resource-domain:host.jumpHelp",
               when: (draft: Partial<Host>) => draft.connection === "ssh",

@@ -1,5 +1,5 @@
 use super::*;
-use sea_orm::{ConnectionTrait, Database};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, Database, IntoActiveModel};
 use sea_orm_migration::MigratorTrait;
 
 #[tokio::test]
@@ -238,6 +238,50 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         live().remove(&self.id.to_string());
         UPDATES.lock().unwrap().remove(&self.id.to_string());
+    }
+}
+
+#[tokio::test]
+async fn immediate_updates_require_permission_and_never_select_a_downgrade() {
+    let f = Fixture::new().await;
+    let scope = |allowed| Scope {
+        workspace_id: 1.into(),
+        user: crate::accounts::auth::User {
+            id: 1.into(),
+            name: "operator".into(),
+            email: String::new(),
+            is_superadmin: false,
+        },
+        permissions: if allowed {
+            ["hosts.update".into()].into_iter().collect()
+        } else {
+            Default::default()
+        },
+    };
+    let empty = || Json(serde_json::from_str::<UpdateBody>("{}").unwrap());
+    let error = start_update(
+        State(f.s.clone()),
+        scope(false),
+        Path(("1".into(), f.id)),
+        empty(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.0, StatusCode::FORBIDDEN);
+    for version in [env!("CARGO_PKG_VERSION"), "999.0.0", "unknown"] {
+        let mut host = f.host().await.into_active_model();
+        host.agent_version = Set(version.into());
+        host.update(&f.s.db).await.unwrap();
+        let error = start_update(
+            State(f.s.clone()),
+            scope(true),
+            Path(("1".into(), f.id)),
+            empty(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, StatusCode::BAD_REQUEST);
+        assert!(f.host().await.agent_update.is_none());
     }
 }
 

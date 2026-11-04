@@ -33,6 +33,7 @@ pub use enrollment::{
 use enrollment::{enrol, reported_address, verify_key};
 pub(crate) use transport::cluster_open;
 pub use transport::{connect, open, session};
+pub(crate) use updates::older_version;
 use updates::stored_update_failure;
 pub use updates::{UpdateBody, start_update, update_status};
 pub(crate) use updates::{automatic_updates, recover_updates};

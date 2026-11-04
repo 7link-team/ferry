@@ -158,7 +158,8 @@ export interface FormField<T> {
   placeholder?: string;
   placeholderKey?: string;
   options?: Options;
-  /** Conditional display, e.g. address/port/user only for an SSH host. */
+  /** Filter loaded choices against the current record, e.g. exclude itself. */
+  optionFilter?: (option: Option, draft: Partial<T>) => boolean;
   /** Legacy values meaning no selection for this field; never applied to numeric metrics. */
   emptyValues?: readonly (string | number)[];
   emptyLabel?: string;

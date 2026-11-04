@@ -3,8 +3,11 @@ use super::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct UpdateBody {
+    #[serde(default)]
     pub(super) version: String,
+    #[serde(default)]
     pub(super) manifest: String,
+    #[serde(default)]
     pub(super) signature: String,
 }
 
@@ -48,7 +51,7 @@ pub async fn update_status(
     }
     let global = global_auto_update(&s).await?;
     Ok(Json(
-        json!({"agent_version":host.agent_version,"target_version":env!("CARGO_PKG_VERSION"),"global_auto_update":global,"auto_update":host.runner_auto_update,"enabled":policy_enabled(global,&host.runner_auto_update),"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
+        json!({"available":older_version(&host.agent_version, env!("CARGO_PKG_VERSION")),"agent_version":host.agent_version,"target_version":env!("CARGO_PKG_VERSION"),"global_auto_update":global,"auto_update":host.runner_auto_update,"enabled":policy_enabled(global,&host.runner_auto_update),"supported":registration.as_ref().is_some_and(|r|r.managed)||info.as_ref().is_some_and(|info|info.managed),"ready":registration.as_ref().is_some_and(|r|r.ready.load(std::sync::atomic::Ordering::Acquire))||info.as_ref().is_some_and(|info|info.ready),"update":status}),
     ))
 }
 
@@ -56,7 +59,7 @@ pub async fn start_update(
     State(s): State<AppState>,
     scope: Scope,
     Path((_workspace, id)): Path<(String, Id)>,
-    Json(body): Json<UpdateBody>,
+    Json(mut body): Json<UpdateBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("hosts.update")?;
     let host = update_host(&s, &scope, id).await?;
@@ -70,6 +73,34 @@ pub async fn start_update(
             StatusCode::CONFLICT,
             crate::i18n::Message::new("runner.activeUpdate"),
         ));
+    }
+    if body.version.is_empty() && body.manifest.is_empty() && body.signature.is_empty() {
+        if !older_version(&host.agent_version, env!("CARGO_PKG_VERSION")) {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("runner.alreadyVersion"),
+            ));
+        }
+        let catalog = crate::hosts::runner::install::catalog().await?;
+        ferry_protocol::release::verify_catalog(
+            &catalog.bytes,
+            &catalog.signature,
+            &catalog.key,
+            &runner_target(&host)?,
+            &host.agent_version,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .map_err(|error| crate::hosts::runner::install::verification_error(&error))?;
+        body = UpdateBody {
+            version: env!("CARGO_PKG_VERSION").into(),
+            manifest: String::from_utf8(catalog.bytes).map_err(|_| {
+                ApiError::localized(
+                    StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("runner.manifestEncoding"),
+                )
+            })?,
+            signature: catalog.signature,
+        };
     }
     if body.version.len() > 128
         || body.manifest.len() > 65536
