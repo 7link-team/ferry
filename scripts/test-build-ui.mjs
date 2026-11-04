@@ -88,11 +88,14 @@ try {
   page = await context.newPage();
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   const assets = []; context.on('request', (request) => assets.push(request.url()));
-  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/code-connections`);
-  await page.getByRole('button', { name: '创建连接', exact: true }).waitFor();
+  // Ordinary navigation now reuses preferences. Leaving maintenance is the
+  // real refresh boundary; hold that request while a new form is being edited.
+  await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/settings`);
+  await page.locator('table').waitFor();
   let releasePreferences;
   const preferencesGate = new Promise(resolve => { releasePreferences = resolve; });
   await page.route('**/preferences', async route => { await preferencesGate; await route.continue(); });
+  await page.getByRole('link', { name: '仓库', exact: true }).click();
   await page.getByRole('button', { name: '创建连接', exact: true }).click();
   await page.getByLabel('名称', { exact: false }).fill('UI repository');
   await page.getByRole('combobox', {name:'代码平台',exact:true}).selectOption('git');
