@@ -126,6 +126,7 @@ export type FieldType =
   | "repository-source"
   | "marketplace-repository"
   | "actions-editor"
+  | "actions-template-editor"
   | "cron"
   | "text"
   | "textarea"

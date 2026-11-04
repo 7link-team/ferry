@@ -51,9 +51,10 @@ function FitCanvas({ topology }: { topology: string }) {
 }
 const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
 
-export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mode, onModeChange, onChange, onValidityChange, renderCheckout }: {
+export function ActionsEditor({ draft, options, readOnly, fillHeight = false, requireExecutorBinding = true, mode, onModeChange, onChange, onValidityChange, renderCheckout }: {
   draft: Record<string, unknown>; options: Option[]; readOnly: boolean;
   fillHeight?: boolean;
+  requireExecutorBinding?: boolean;
   mode?: "visual" | "yaml";
   onModeChange?: (mode: "visual" | "yaml") => void;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (invalid: boolean) => void;
@@ -73,7 +74,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, mo
   const panel = useRef<HTMLElement>(null);
   const parsed = useMemo(() => { try { return { ...parseActions(source), error: "" }; } catch (cause) { return { jobs: [] as ActionJob[], error: cause instanceof Error ? cause.message : String(cause) }; } }, [source, i18n.language]);
   const bindings = (draft.executor_bindings ?? []) as Binding[];
-  const missingHosts = parsed.jobs.filter(job => job.raw["ferry-approval"] !== true && !bindings.some(binding => binding.job_id === job.id && (binding.target_kind === "pool" || (binding.target_ref && binding.target_ref !== "0"))));
+  const missingHosts = requireExecutorBinding ? parsed.jobs.filter(job => job.raw["ferry-approval"] !== true && !bindings.some(binding => binding.job_id === job.id && (binding.target_kind === "pool" || (binding.target_ref && binding.target_ref !== "0")))) : [];
   useEffect(() => { onValidityChange(!!parsed.error || missingHosts.length > 0); return () => onValidityChange(false); }, [parsed.error, missingHosts.length, onValidityChange]);
   useEffect(() => { panel.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [selection?.job, selection?.step]);
   const layout = (draft.graph_layout ?? {}) as Record<string, { x: number; y: number }>;

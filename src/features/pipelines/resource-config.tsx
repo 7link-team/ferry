@@ -1,3 +1,4 @@
+import { pipelineExecutorOptions } from "./executor-options";
 import { TagBadge } from "../tags/TagBadge";
 import {
   createResource,
@@ -670,26 +671,7 @@ export function pipelinesForms({
               type: "actions-editor",
               required: true,
               span: 2,
-              options: async () =>
-                (
-                  await Promise.all(
-                    ["hosts", "host-groups"]
-                      .filter(
-                        (resource) =>
-                          !permissions || permissions.has(`${resource}.read`),
-                      )
-                      .map(async (resource) =>
-                        (await namedOptions(workspace, resource)()).map(
-                          (option) => ({
-                            value: `${resource === "hosts" ? "host" : "host-group"}:${option.value}`,
-                            get label() {
-                              return `${resource === "hosts" ? commonText("common-domain:nav.hosts") : commonText("common-domain:nav.hostGroups")} · ${option.label}`;
-                            },
-                          }),
-                        ),
-                      ),
-                  )
-                ).flat(),
+              options: pipelineExecutorOptions(workspace, permissions),
             },
           ],
         },

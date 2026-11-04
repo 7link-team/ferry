@@ -22,6 +22,7 @@ it("creates new pipeline templates as Actions workflows", () => {
   expect(content.engine).toBe("github-actions");
   expect(content.workflow).toContain("{{ .Values.command }}");
   expect(content).not.toHaveProperty("workdir");
+  expect(config.sections.flatMap(section => section.fields).find(field => field.key === "content")?.type).toBe("actions-template-editor");
 });
 it("rejects a malformed template rendering instead of selecting a legacy editor", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/renderings") ? {definition:'{"steps":[]}'} : {parameters:"[]"} })));

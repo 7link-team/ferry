@@ -189,7 +189,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.resource];
 
-  if (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit"))
+  if ((item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit")) ||
+      (item.resource === "pipeline-templates" && ["new", "edit", "view"].includes(route.mode)))
     return <div className="h-full min-h-0 min-w-0">
       {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : formConfig ? (
         <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace headerActions={<LanguageSwitcher />} />

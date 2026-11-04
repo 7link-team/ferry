@@ -10,6 +10,7 @@ import {
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { DEFAULT_ACTIONS, parseActions } from "../pipelines/actions-workflow";
+import { pipelineExecutorOptions } from "../pipelines/executor-options";
 
 export interface Template {
   id: string;
@@ -106,9 +107,10 @@ export const templateList = (
     toolbar: { create: true, import: false, export: false },
   });
 
-export const templateForm = (resource: string, application: boolean) =>
+export const templateForm = (resource: string, application: boolean, workspace = "", permissions?: Set<string>) =>
   form<Template>({
     resource,
+    width: "full",
     heading: (r) => r.name,
     blank: {
       name: "",
@@ -218,7 +220,8 @@ export const templateForm = (resource: string, application: boolean) =>
                 : application
                   ? "resource-domain:template.appContent"
                   : "resource-domain:template.pipelineContent",
-            type: "code",
+            type: resource === "pipeline-templates" ? "actions-template-editor" : "code",
+            ...(resource === "pipeline-templates" ? { options: pipelineExecutorOptions(workspace, permissions) } : {}),
             span: 2,
             required: true,
             help:
@@ -389,13 +392,13 @@ export function templatesLists({
   };
 }
 
-export function templatesForms({}: ResourceConfigContext): Record<
+export function templatesForms({ workspace, permissions }: ResourceConfigContext): Record<
   string,
   FormConfig<AnyRow>
 > {
   return {
     "config-templates": templateForm("config-templates", false),
     "app-templates": templateForm("app-templates", true),
-    "pipeline-templates": templateForm("pipeline-templates", false),
+    "pipeline-templates": templateForm("pipeline-templates", false, workspace, permissions),
   };
 }
