@@ -1,5 +1,4 @@
 import { commonText } from "../shared/i18n/i18n";
-import { text as evidenceText } from "../features/insight-reports/messages";
 /**
  * The whole menu tree as data. Moving an item between groups — the planned
  * merge of 主机 / 构建 / 部署 into one top-level module — is an edit here and
@@ -75,7 +74,6 @@ export const nav: NavGroup[] = [
       { key: "repositories", get label() { return commonText("nav.repositories"); }, resource: "code-connections", permission: "repositories.read" },
       { key: "repository-events", get label() { return commonText("nav.repositoryEvents"); }, resource: "repository-events", permission: "repositories.read" },
       { key: "code-insights", get label() { return commonText("nav.insights"); }, resource: "code-insights", permission: "code-insights.read" },
-      { key: "insight-reports", get label() { return evidenceText("reports"); }, resource: "insight-reports", permission: "insight-reports.read" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "build" }, permission: "credentials.read" },
     ],
   },

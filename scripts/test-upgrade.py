@@ -123,10 +123,13 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 output=api('/workspaces/upgrade/pipeline-runs/'+executed+'/logs?after=0')['items']
                 assert 'UPGRADE_SAME_RESULT' in ''.join(row['chunk'] for row in output)
                 print('PASS: legacy pipeline executes the same command result before and after Actions migration')
-            for resource in ('insight-reports',):
-                listing = api('/workspaces/upgrade/' + resource)
-                assert listing['items'] == []
-            print('PASS: existing workspace owner can access insight reports after upgrade')
+            for resource in ('insight-reports', 'code-reviews'):
+                try:
+                    api('/workspaces/upgrade/' + resource)
+                    raise AssertionError('Retired feature endpoint is still available: ' + resource)
+                except urllib.error.HTTPError as error:
+                    assert error.code == 404
+            print('PASS: retired report and review endpoints remain unavailable after upgrade')
             for path in paths:
                 after = api(path)
                 if '/credentials/' in path:
@@ -140,7 +143,6 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
                     allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}
-                    allowed |= {'insight-reports.'+verb for verb in ['read','create','update','delete','generate']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -217,7 +219,6 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
                 expected |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'code-insights.'+verb for verb in (['read','create','update','delete','sync'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
-                expected |= {'insight-reports.'+verb for verb in (['read','create','update','delete','generate'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)

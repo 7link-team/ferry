@@ -1,7 +1,6 @@
 import i18n from "i18next";
 import { initReactI18next,useTranslation } from "react-i18next";
 import { currentLocale,DEFAULT_LOCALE,LOCALE_EVENT,localeCatalogs,supportedLocales } from "./locale";
-import reportsReviewsMessages from "./locales/reports-reviews-domain";
 import commonMessages from "./locales/common-domain.json";
 import executionMessages from "./locales/execution-domain.json";
 import hostRepositoryMessages from "./locales/host-repository-domain.json";
@@ -20,7 +19,7 @@ void i18n.use(initReactI18next).init({
   lng: currentLocale(),
   fallbackLng: DEFAULT_LOCALE,
   supportedLngs: supportedLocales,
-  resources: Object.fromEntries(Object.entries(localeCatalogs).map(([locale, translation]) => [locale, { translation, "reports-reviews-domain": reportsReviewsMessages[locale]!, "execution-domain": executionMessages[locale as keyof typeof executionMessages], "host-repository-domain": hostRepositoryMessages[locale as keyof typeof hostRepositoryMessages], "insight-domain": insightResources[locale]!, "resource-domain": resourceMessages[locale as keyof typeof resourceMessages], "typed-domain": Object.fromEntries(Object.entries(typedMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])), "common-domain": commonMessages[locale as keyof typeof commonMessages], theme: themeMessages[locale as keyof typeof themeMessages] }])),
+  resources: Object.fromEntries(Object.entries(localeCatalogs).map(([locale, translation]) => [locale, { translation, "execution-domain": executionMessages[locale as keyof typeof executionMessages], "host-repository-domain": hostRepositoryMessages[locale as keyof typeof hostRepositoryMessages], "insight-domain": insightResources[locale]!, "resource-domain": resourceMessages[locale as keyof typeof resourceMessages], "typed-domain": Object.fromEntries(Object.entries(typedMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])), "common-domain": commonMessages[locale as keyof typeof commonMessages], theme: themeMessages[locale as keyof typeof themeMessages] }])),
   interpolation: { escapeValue: false },
   initAsync: false,
 });

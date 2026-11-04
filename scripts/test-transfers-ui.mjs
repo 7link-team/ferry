@@ -13,7 +13,6 @@ const navSource = await readFile(new URL('../src/app/nav.ts', import.meta.url), 
 let isolatedNav = navSource;
 for (const [labelImport, binding] of [
   ['import { commonText } from "../shared/i18n/i18n";', 'commonText'],
-  ['import { text as evidenceText } from "../features/insight-reports/messages";', 'evidenceText'],
 ]) {
   assert(isolatedNav.includes(labelImport), `navigation label import is explicitly isolated: ${binding}`);
   isolatedNav = isolatedNav.replace(labelImport, `const ${binding} = (key: string) => key;`);
@@ -23,6 +22,8 @@ const navModule = ts.transpileModule(isolatedNav, {
 }).outputText;
 assert(!/^import\s/m.test(navModule), 'navigation fixture must isolate all runtime imports before loading its data URL');
 const { nav } = await import(`data:text/javascript;base64,${Buffer.from(navModule).toString('base64')}`);
+assert(!JSON.stringify(nav).includes('insight-reports'), 'retired reports have no navigation entry');
+assert(!JSON.stringify(nav).includes('code-reviews'), 'retired reviews have no navigation entry');
 const work = await mkdtemp(join(tmpdir(), 'platform-ui-'));
 const listener = createServer();
 await new Promise(r => listener.listen(0, '127.0.0.1', r));
@@ -58,6 +59,14 @@ try {
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
+  for (const resource of ['insight-reports', 'code-reviews']) {
+    for (const method of ['get', 'post']) {
+      const response = await owner.request[method](`${origin}/api${root}/${resource}`, { headers, ...(method === 'post' ? { data: {} } : {}) });
+      assert.equal(response.status(), 404, `retired ${resource} ${method} is unavailable`);
+      assert(response.headers()['content-type'].includes('application/json'), 'retired API returns JSON, never the SPA');
+    }
+  }
+  console.log('PASS retired reports and reviews have no navigation or GET/POST API');
   const get=async path => {const r=await owner.request.get(`${origin}/api${path}`); assert(r.ok()); return r.json();};
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/tags`);
   await p.getByRole('button',{name:'导入',exact:true}).click();

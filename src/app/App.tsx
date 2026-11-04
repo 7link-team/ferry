@@ -21,7 +21,6 @@ import { Account,accountRoute } from "./Account";
 import { Entry } from "./Entry";
 import { findGroup,findItem,nav,type NavGroup,type NavItem } from "./nav";
 import { CodeInsightDetail } from "./pages/CodeInsight";
-import { EvidenceDetail } from "./pages/EvidenceDetail";
 import { DeploymentDetail } from "./pages/DeploymentDetail";
 import { HostDetail } from "./pages/HostDetailPage";
 import { HostList } from "./pages/HostListPage";
@@ -354,8 +353,6 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             ) : (
               <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
             )
-          ) : route.mode === "view" && item.resource === "insight-reports" && route.id ? (
-            <EvidenceDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} id={route.id} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "code-insights" && route.id ? (
             <CodeInsightDetail key={`${current.id}/${route.id}`} workspace={current.id} insightId={route.id} permissions={permissions} />
           ) : route.mode === "view" && item.resource === "code-connections" && route.id && formConfig ? (

@@ -1,5 +1,4 @@
 {
-  "permission.group.insight-reports": "洞察報告",
   "permission.group.code-reviews": "程式碼審查",
   "permission.action.generate": "產生",
   "auth.password_save": "無法儲存密碼，請重試。",

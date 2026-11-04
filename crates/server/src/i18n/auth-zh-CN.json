@@ -1,5 +1,4 @@
 {
-  "permission.group.insight-reports": "洞察报告",
   "permission.group.code-reviews": "代码走查",
   "permission.action.generate": "生成",
   "auth.password_save": "无法保存密码，请重试。",

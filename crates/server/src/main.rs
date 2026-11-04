@@ -226,22 +226,6 @@ async fn main() -> anyhow::Result<()> {
         cfg.repository_analysis_concurrency,
         drain_rx.clone(),
     ));
-    let report_state = s.clone();
-    let mut report_stop = drain_rx.clone();
-    let reports_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = report_stop.changed() => break,
-                _ = interval.tick() => {
-                    if let Err(error) = repositories::reports::tick(&report_state).await {
-                        tracing::warn!(error = %error.1, "Insight report generation failed");
-                    }
-                }
-            }
-        }
-    });
     let recovery_state = s.clone();
     let mut recovery_stop = drain_rx.clone();
     let recovery_task = tokio::spawn(async move {
@@ -275,7 +259,6 @@ async fn main() -> anyhow::Result<()> {
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
-        .merge(repositories::reports::routes())
         .route(
             "/{workspace}/code-insights",
             get(repositories::analysis::insights::list)
@@ -833,7 +816,6 @@ async fn main() -> anyhow::Result<()> {
     runner_auto_update_task.await?;
     repository_monitor_task.await?;
     repository_analysis_task.await?;
-    reports_task.await?;
     recovery_task.await?;
     cron_task.await?;
     deployment_task.await?;
