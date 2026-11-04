@@ -132,6 +132,7 @@ try {
       await page.keyboard.press("ArrowDown");
       const items = page.getByRole("menuitemradio");
       await items.first().waitFor();
+      await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "menuitemradio");
       assert.equal(await items.count(), 6);
       assert.equal(await items.locator('span[aria-hidden="true"]').count(), 6, 'each language has a compact locale tag');
       const activeStyle = await page.getByRole("menuitemradio", { name, exact: true }).evaluate(element => {
@@ -190,9 +191,17 @@ try {
   const trigger = page.locator('header button[aria-haspopup="menu"]').first();
   await trigger.focus();
   await page.keyboard.press("Space");
+  await page.waitForFunction(() => document.activeElement?.getAttribute("role") === "menuitemradio");
+  const keyboardItems = page.getByRole("menuitemradio");
+  const expectFocused = async (item) => page.waitForFunction(
+    element => document.activeElement === element, await item.elementHandle(),
+  );
   await page.keyboard.press("Home");
+  await expectFocused(keyboardItems.first());
   await page.keyboard.press("ArrowDown");
+  await expectFocused(keyboardItems.nth(1));
   await page.keyboard.press("ArrowUp");
+  await expectFocused(keyboardItems.first());
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.documentElement.lang === "en-US");
   await page.waitForFunction(
@@ -210,11 +219,19 @@ try {
     "true",
   );
   await page.keyboard.press("End");
+  await expectFocused(page.getByRole("menuitemradio").last());
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.documentElement.lang === "ms-MY");
+  await page.getByRole("menu").waitFor({ state: "hidden" });
   await trigger.click();
   await page.getByRole("menu").waitFor();
+  // Raw coordinate clicks do not get Playwright's actionability/stability wait.
+  // Let Radix finish mounting and registering its outside-pointer listener.
+  await page.getByRole("menuitemradio").last().click({ trial: true });
   const outside = await page.getByLabel("Draft", { exact: true }).boundingBox();
+  assert(await page.getByRole("menu").evaluate((menu, point) =>
+    !menu.contains(document.elementFromPoint(point.x, point.y)),
+  { x: outside.x + outside.width - 8, y: outside.y + outside.height - 8 }), "outside click is outside the menu");
   await page.mouse.move(
     outside.x + outside.width - 8,
     outside.y + outside.height - 8,
