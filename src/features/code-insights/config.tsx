@@ -41,9 +41,7 @@ export function codeInsightList(
         label: "仓库数",
         labelKey: "insight-domain:仓库数",
         render: (row) =>
-          Array.isArray(row.repositories)
-            ? row.repositories.length
-            : String(row.repository_count ?? "—"),
+          String(row.repository_count ?? "—"),
       },
       {
         key: "update_mode",

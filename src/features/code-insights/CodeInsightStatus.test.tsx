@@ -74,6 +74,29 @@ it("keeps source diagnostics collapsed by default while showing the aggregate fa
   expect(host.textContent).not.toContain("unavailable");
 });
 
+it("shows a countdown, pauses polling, preserves expanded diagnostics and updates the repository total", async () => {
+  detail.repository_count = 8;
+  detail.sources = [{ repository: "team/project", state: "complete", synced_at: successAt }];
+  await render();
+  expect(status()).toContain("8 仓库");
+  expect(host.textContent).toContain("15 秒后刷新");
+  const diagnostics = host.querySelector("details")!;
+  diagnostics.open = true;
+  await act(async () => vi.advanceTimersByTimeAsync(1000));
+  expect(host.textContent).toContain("14 秒后刷新");
+  await act(async () => button("定时刷新")!.click());
+  const paused = requests.length;
+  await act(async () => vi.advanceTimersByTimeAsync(45000));
+  expect(requests).toHaveLength(paused);
+  detail = { ...detail, repository_count: 12, sources: [{ repository: "team/project", state: "complete", synced_at: checkedAt + 45000 }] };
+  await act(async () => button("定时刷新")!.click());
+  expect(status()).toContain("12 仓库");
+  expect(onPublished).toHaveBeenCalledOnce();
+  expect(host.querySelector("details")).toBe(diagnostics);
+  expect(diagnostics.open).toBe(true);
+  expect(requests.every(request => request.method === "GET")).toBe(true);
+});
+
 it("shows legacy blocked diagnostics without requiring a business pipeline or inventing progress", async () => {
   detail.sources = [{ repository: "team/project", state: "queued", pipeline_required: true, synced_at: 0, job: { state: "queued", effective_state: "blocked", generation: 10, completed_generation: 0 } }];
   await render();

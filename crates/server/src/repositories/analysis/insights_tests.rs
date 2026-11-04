@@ -820,6 +820,7 @@ async fn dynamic_insight_groups_include_future_sources_without_editing_membershi
         .unwrap();
     let actor = scope(&s).await;
     let before = selected_sources(&s.db, &actor, &parent).await.unwrap();
+    assert_eq!(detail(&s, id).await["repository_count"], 1);
     assert_eq!(
         before
             .iter()
@@ -870,6 +871,23 @@ async fn dynamic_insight_groups_include_future_sources_without_editing_membershi
         vec!["team/repo", "team/future/new"]
     );
     assert_eq!(members(&s.db, &parent).await.unwrap().len(), 1);
+    assert_eq!(detail(&s, id).await["repository_count"], 2);
+    let listed = list(State(s.clone()), scope(&s).await, Query(HashMap::new()))
+        .await
+        .unwrap()
+        .0;
+    assert_eq!(listed["items"][0]["repository_count"], 2);
+    edit(&s, id, |body| {
+        body.repositories[0].all_repositories = true;
+        body.repositories[0].repository.clear();
+    })
+    .await;
+    assert_eq!(detail(&s, id).await["repository_count"], 3);
+    edit(&s, id, |body| {
+        body.repositories[0].all_repositories = false;
+        body.repositories[0].repository = "team/*".into();
+    })
+    .await;
     let mut queued = BTreeSet::new();
     enqueue_scheduled(&s, &s.db, &parent, &mut queued)
         .await
@@ -889,4 +907,5 @@ async fn dynamic_insight_groups_include_future_sources_without_editing_membershi
             .iter()
             .all(|r| r.id == 0)
     );
+    assert_eq!(detail(&s, id).await["repository_count"], 0);
 }

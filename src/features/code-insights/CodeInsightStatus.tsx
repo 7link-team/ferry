@@ -1,9 +1,9 @@
 import { DictionaryState } from "../maintenance/DictionaryState";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
 import { base, createResource } from "../../shared/api/resource";
-import { insightText } from "../../shared/i18n/i18n";
+import { commonText, insightText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { analysisState } from "./analysis-config";
 import { time, type Row } from "./config";
@@ -36,25 +36,44 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const [checkedAt, setCheckedAt] = useState(0);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [remaining, setRemaining] = useState(15);
+  const [refreshing, setRefreshing] = useState(false);
+  const previousSuccess = useRef("");
+  useEffect(() => { previousSuccess.current = ""; }, [workspace, insightId]);
   useEffect(() => {
     let live = true;
     let timer = 0;
+    let countdown = 0;
     const controller = new AbortController();
-    let previousSuccess = "";
     const read = async () => {
+      if (!live) return;
+      setRefreshing(true);
       try {
         const next = await api<Row>(`${base(workspace, "code-insights")}/${encodeURIComponent(insightId)}`, { signal: controller.signal });
         if (!live) return;
         const success = JSON.stringify((next.sources as Row[] | undefined ?? []).map(source => [source.repository, source.synced_at]));
-        if (previousSuccess && previousSuccess !== success) onPublished();
-        previousSuccess = success;
+        if (previousSuccess.current && previousSuccess.current !== success) onPublished();
+        previousSuccess.current = success;
         setRow(next); setCheckedAt(Date.now()); setError("");
       } catch (cause) { if (live && !controller.signal.aborted) setError(errorText(cause)); }
-      if (live) timer = window.setTimeout(() => { if (document.hidden) timer = window.setTimeout(read, 15000); else void read(); }, 15000);
+      if (live) {
+        setRefreshing(false);
+        setRemaining(15);
+        if (autoRefresh) {
+          countdown = window.setInterval(() => { if (!document.hidden) setRemaining(value => Math.max(0, value - 1)); }, 1000);
+          const tick = () => {
+            if (document.hidden) { timer = window.setTimeout(tick, 1000); return; }
+            clearInterval(countdown);
+            void read();
+          };
+          timer = window.setTimeout(tick, 15000);
+        }
+      }
     };
     void read();
-    return () => { live = false; controller.abort(); clearTimeout(timer); };
-  }, [workspace, insightId, revision, onPublished]);
+    return () => { live = false; controller.abort(); clearTimeout(timer); clearInterval(countdown); };
+  }, [workspace, insightId, revision, onPublished, autoRefresh]);
   const sources = (row?.sources ?? []) as Row[];
   const active = sources.filter(source => ["running", "queued", "retry_wait"].includes(sourceTaskState(source)));
   const running = active.some(source => sourceTaskState(source) === "running");
@@ -72,8 +91,12 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
   };
   return <section aria-label={insightText("分析任务状态")} className="space-y-4 rounded-xl border bg-card p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(row?.name ?? insightText("代码洞察"))}</h2><p role="status" className="mt-1 flex items-center gap-2 text-sm"><Icon className={`size-4 shrink-0 ${running ? "animate-spin" : ""}`} />{insightText(status)}{row && <span className="text-muted-foreground">· {sources.length} {insightText("仓库")}</span>}</p></div>
-      <div className="flex flex-wrap gap-2">{permissions.has("code-insights.sync") && <Button size="sm" variant="outline" disabled={busy} onClick={() => void retry()}><RefreshCw className={busy ? "animate-spin" : ""} />{insightText("重新核对 / 重试同步")}</Button>}<Button size="sm" variant="ghost" onClick={onConfigure}>{insightText("配置与同步")}</Button></div>
+      <div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(row?.name ?? insightText("代码洞察"))}</h2><p role="status" className="mt-1 flex items-center gap-2 text-sm"><Icon className={`size-4 shrink-0 ${running ? "animate-spin" : ""}`} />{insightText(status)}{row && <span className="text-muted-foreground">· {Number(row.repository_count ?? sources.length)} {insightText("仓库")}</span>}</p></div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" aria-pressed={autoRefresh} onClick={() => setAutoRefresh(value => !value)}>{commonText("table.autoRefresh")} · {autoRefresh ? insightText("已启用") : insightText("已停用")}</Button>
+        {autoRefresh && <span className="text-xs tabular-nums text-muted-foreground">{refreshing ? insightText("正在更新数据…") : insightText("{{seconds}} 秒后刷新", { seconds: remaining })}</span>}
+        <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => { setRevision(value => value + 1); onPublished(); }}><RefreshCw className={refreshing ? "animate-spin" : ""} />{commonText("common.refresh")}</Button>
+        {permissions.has("code-insights.sync") && <Button size="sm" variant="outline" disabled={busy} onClick={() => void retry()}><RefreshCw className={busy ? "animate-spin" : ""} />{insightText("重新核对 / 重试同步")}</Button>}<Button size="sm" variant="ghost" onClick={onConfigure}>{insightText("配置与同步")}</Button></div>
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {row?.last_error ? <p role="alert" className="text-sm text-destructive">{String(row.last_error)}</p> : null}
