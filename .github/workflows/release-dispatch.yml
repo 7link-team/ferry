@@ -41,9 +41,11 @@ jobs:
               }
               throw Error('Timed out; inspect existing run before retry');
             }
-            const {data:priorController}=await github.rest.actions.getWorkflowRun({...repo,run_id:41786305289});
-            if(priorController.head_sha!=='509fb86c4a6f57fad1472c8dee208a1d96c93289')throw Error('Unexpected old release controller');
-            if(priorController.status!=='completed')await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',{...repo,run_id:priorController.id});
+            for (const [id, expected] of [[41786305289,'f6b2a863e7c0a4b708c1f84919aa6491b001136d'],[41787238690,'c630690a']]) {
+              const {data:prior}=await github.rest.actions.getWorkflowRun({...repo,run_id:id});
+              if(!prior.head_sha.startsWith(expected))throw Error('Unexpected superseded controller');
+              if(prior.status!=='completed')await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',{...repo,run_id:id});
+            }
             await requireMain();
 
             const superseded = new Set(["1e1f5bb10475634dbea60dbd72c62643ab0e17e8", "f15d214d350f18a79c6201fdd4610dcb2b9957f0", "edd042dce6f68b1e3fd098cd3f6bfe6bc3c0daee", "487562219e1188b59a756be2beb3dbca2874b46e", "e835ed816864acfa89cf7958d4d78337f697beb8", "743b8e8141026698afb416499eda63dce80f9dd1", "4af81e0394e288608e820add7967a2b79966f884", "ebe736239e946e94489b172e5601244a694c1f4a", "b838dc671febfa1ce6e0f1c27d01af6050be6432", "ad48e8fb71b83ffed57373bad44eab2a4f6b3585"]);
@@ -54,19 +56,23 @@ jobs:
                 core.info(`Cancelled superseded main CI ${run.id} at ${run.head_sha}`);
               }
             }
-            if((await runs('build.yml','workflow_dispatch')).length)throw Error('Build already dispatched; inspect first');
-            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
+            const builds=await runs('build.yml','workflow_dispatch');
+            if(builds.length>1)throw Error('Ambiguous build dispatches');
+            if(!builds.length)await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
             const build=await waitFor('build.yml','workflow_dispatch');
             const image=await waitFor('server-image.yml','push');
             core.notice(`Verified build ${build.id} and source image ${image.id}`);
             await requireMain();
-            if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Already published/dispatched; inspect first');
+            const publications=await runs('publish-verified.yml','workflow_dispatch');
+            if(publications.length>1)throw Error('Ambiguous publication dispatches');
             const notes = "移除洞察报告与代码走查，保留代码洞察及历史数据，并完善主机代理、通知和多语言体验。\n\n- 移除洞察报告、代码走查的菜单、页面、接口及自动调度；旧接口返回 JSON 404，已存历史数据和数据库迁移保留。代码洞察继续可用。\n- 主机列表与详情显示主机代理版本、共享状态及可用更新，支持立即更新；统一主机代理与流水线执行器术语。\n- 通知渠道先选择平台，再显示对应配置；支持各渠道独立语言、平台原生可跳转链接及窄屏布局。链接字段显示“链接：完整 URL”，URL 本身可点击。\n- 运行状态保留固定机器值，显示名称支持六语言，避免字典编辑破坏后端状态语义；补齐邀请码等翻译。\n- 工作空间偏好在同空间路由切换时复用，改进列表空状态、加载反馈及顶部独立路由/网络请求进度。\n- 修复共享表单联动时数组被清为空字符串的问题，以及手机列表筛选占用过多空间的问题。\n\n兼容说明：本版不会删除已有洞察报告、代码走查历史记录；相关功能入口和接口已停用。私有平台实账号、外部通知机器人及用户自有 Cloudflare Tunnel 仍需按实际部署验证。\n\n- Unified auto-refresh choices (Off/5/10/15/30/60 seconds), live countdowns and joined capsule controls. Only the existing refresh icon spins while the countdown shows 0s; the next countdown starts after success or failure. Disabled polling uses a chevron.\n- Code insight repository counts follow discovered repositories. Status polling updates published reports without resetting filters, expanded sections or reading position.\n- Upgrade regression coverage preserves legacy dictionary values and custom labels while verifying generated translations.";
-            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
+            if(!publications.length)await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
             const publication=await waitFor('publish-verified.yml','workflow_dispatch');
             const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
             if(release.draft || !release.prerelease)throw Error('Unexpected release state');
             core.notice(`Published ${tag}: ${publication.id}`);
-            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'server-image.yml',ref:'main',inputs:{release_tag:tag}});
+            const versions=await runs('server-image.yml','workflow_dispatch');
+            if(versions.length>1)throw Error('Ambiguous version image dispatches');
+            if(!versions.length)await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'server-image.yml',ref:'main',inputs:{release_tag:tag}});
             const versioned=await waitFor('server-image.yml','workflow_dispatch');
             core.notice(`Versioned image: ${versioned.id}`);
