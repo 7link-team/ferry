@@ -151,22 +151,24 @@ fn escape(robot: Robot, value: &str) -> String {
 fn formatted_field(robot: Robot, name: &str, value: &str) -> String {
     let name = escape(robot, name);
     if let Some(url) = link_url(value) {
-        return match robot {
-            Robot::Telegram => format!("<a href=\"{}\">{name}</a>", html(&url)),
+        let text = escape(robot, &url);
+        let link = match robot {
+            Robot::Telegram => format!("<a href=\"{}\">{text}</a>", html(&url)),
             Robot::Slack => format!(
                 "<{}|{}>",
                 chat_text(&url.replace('|', "%7C")),
-                name.replace('|', "∣")
+                text.replace('|', "∣")
             ),
             Robot::GoogleChat => format!(
                 "<{}|{}>",
                 url.replace('|', "%7C")
                     .replace('<', "%3C")
                     .replace('>', "%3E"),
-                name.replace('|', "∣")
+                text.replace('|', "∣")
             ),
-            _ => format!("[{name}]({})", url.replace('(', "%28").replace(')', "%29")),
+            _ => format!("[{text}]({})", url.replace('(', "%28").replace(')', "%29")),
         };
+        return format!("{name}：{link}");
     }
     format!("{name}：{}", escape(robot, value))
 }
@@ -196,7 +198,7 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
         Robot::Feishu => {
             let content: Vec<Value> = lines(notice)
                 .map(|(name, value)| match link_url(&value) {
-                    Some(url) => json!([{"tag":"a","text":name,"href":url}]),
+                    Some(url) => json!([{"tag":"text","text":format!("{name}：")},{"tag":"a","text":url,"href":url}]),
                     None => json!([{"tag":"text","text":format!("{name}：{value}")}]),
                 })
                 .collect();
@@ -529,7 +531,7 @@ mod tests {
                 body(platform, &any, &notice)
                     .unwrap()
                     .to_string()
-                    .contains(&format!("[Commit]({url})"))
+                    .contains(&format!("Commit：[{url}]({url})"))
             );
         }
         let google = body(Robot::GoogleChat, &any, &notice).unwrap();
@@ -537,21 +539,21 @@ mod tests {
             google["text"]
                 .as_str()
                 .unwrap()
-                .contains(&format!("<{url}|Commit>"))
+                .contains(&format!("Commit：<{url}|{url}>"))
         );
         let slack = body(Robot::Slack, &any, &notice).unwrap();
         assert!(
             slack["text"]
                 .as_str()
                 .unwrap()
-                .contains("left=1&amp;right=2|Commit>")
+                .contains("Commit：<https://example.invalid/commit/abc?left=1&amp;right=2|https://example.invalid/commit/abc?left=1&amp;right=2>")
         );
         let telegram_url =
             reqwest::Url::parse("https://api.telegram.org/bot1:A/sendMessage?chat_id=-1").unwrap();
         let telegram = body(Robot::Telegram, &telegram_url, &notice).unwrap();
         assert_eq!(telegram["parse_mode"], "HTML");
         assert!(telegram["text"].as_str().unwrap().contains(
-            "<a href=\"https://example.invalid/commit/abc?left=1&amp;right=2\">Commit</a>"
+            "Commit：<a href=\"https://example.invalid/commit/abc?left=1&amp;right=2\">https://example.invalid/commit/abc?left=1&amp;right=2</a>"
         ));
         assert!(
             telegram["text"]
@@ -561,12 +563,24 @@ mod tests {
         );
         let feishu = body(Robot::Feishu, &any, &notice).unwrap();
         assert_eq!(
-            feishu["content"]["post"]["en_us"]["content"][0][0]["href"],
+            feishu["content"]["post"]["en_us"]["content"][0][1]["href"],
             url
         );
         assert_eq!(
-            feishu["content"]["post"]["en_us"]["content"][0][0]["tag"],
+            feishu["content"]["post"]["en_us"]["content"][0][1]["tag"],
             "a"
+        );
+        assert_eq!(
+            feishu["content"]["post"]["en_us"]["content"][0][0]["text"],
+            "Commit："
+        );
+        assert_eq!(
+            feishu["content"]["post"]["en_us"]["content"][0][1]["text"],
+            url
+        );
+        assert_eq!(
+            formatted_field(Robot::WeCom, "链接", url),
+            format!("链接：[{url}]({url})")
         );
         assert!(link_url("javascript:alert(1)").is_none());
         assert!(link_url("https://user:password@example.invalid/").is_none());
