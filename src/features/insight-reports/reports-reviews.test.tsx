@@ -4,11 +4,6 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
 import messages from "../../shared/i18n/locales/reports-reviews-domain";
 import { reportForm, reportActions } from "./config";
-import {
-  reviewForm,
-  reviewActions,
-  reviewCancelAction,
-} from "../code-reviews/config";
 import { statusText } from "./messages";
 import { reportTrend } from "./trend";
 import { ReportScope, type Row, type ReportOptions } from "./ReportScope";
@@ -16,28 +11,6 @@ import { ReportScope, type Row, type ReportOptions } from "./ReportScope";
 let host: HTMLDivElement;
 let root: Root;
 let changes: Row;
-it("offers run cancellation only for active review jobs through the shared authorized action", async () => {
-  const action = reviewCancelAction("2", "review/1");
-  expect(action.permission).toBe("code-reviews.run");
-  expect(action.parameters?.({})).toEqual([]);
-  for (const state of ["queued", "launching", "waiting", "running"])
-    expect(action.when?.({ state })).toBe(true);
-  for (const state of ["completed", "cancelling", "cancelled", "failed"])
-    expect(action.when?.({ state })).toBe(false);
-  const fetch = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(JSON.stringify({ id: "job", state: "cancelled" }), {
-        status: 200,
-      }),
-    );
-  vi.stubGlobal("fetch", fetch);
-  await action.action?.({ id: "job/1" });
-  expect(String(fetch.mock.calls[0]?.[0])).toContain(
-    "/code-reviews/review%2F1/runs/job%2F1/cancel",
-  );
-  expect(fetch.mock.calls[0]?.[1]?.method).toBe("POST");
-});
 it("shows contributors and line evidence at the snapshot timezone boundary", () => {
   const data = reportTrend({
     timezone: "Asia/Kathmandu",
@@ -134,6 +107,42 @@ function Harness() {
     />
   );
 }
+it("shows each contributor name and email once while retaining distinct aliases", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...choices,
+        people: [
+          {
+            key: "canonical",
+            nickname: "Combined",
+            name: "Combined",
+            email: "person@example.invalid",
+            aliases: [
+              "Combined",
+              "person@example.invalid",
+              { name: "Old name", email: "person@example.invalid" },
+            ],
+          },
+        ],
+      }),
+    })),
+  );
+  await act(async () => root.render(<Harness />));
+  const label = [...host.querySelectorAll("label")].find((item) =>
+    item.textContent?.includes("Combined"),
+  )!;
+  expect(label.textContent?.match(/Combined/g)).toHaveLength(1);
+  expect(label.textContent?.match(/person@example.invalid/g)).toHaveLength(1);
+  expect(label.textContent).toContain("Old name");
+  await act(async () =>
+    label.querySelector<HTMLButtonElement>("button")!.click(),
+  );
+  expect(changes.author_keys).toEqual(["canonical"]);
+});
 it("keeps canonical person keys and maps an application to multiple authorized repositories", async () => {
   await act(async () => root.render(<Harness />));
   const alice = [...host.querySelectorAll("label")].find((label) =>
@@ -198,7 +207,7 @@ it("blocks saving a new scope when options cannot be authorized", async () => {
   );
   expect(validity).toHaveBeenLastCalledWith(true);
 });
-it("uses flat generate/run payloads and preserves historical dates and fixed SHAs", async () => {
+it("uses flat generate payloads and preserves historical dates", async () => {
   const generate = reportActions("2")[0]!;
   await generate.action!(
     { id: "r" },
@@ -211,43 +220,14 @@ it("uses flat generate/run payloads and preserves historical dates and fixed SHA
       body: '{"period":"quarter","period_start":"2026-07-01"}',
     }),
   );
-  await reviewActions("2")[0]!.action!(
-    { id: "c" },
-    { base_sha: "aaa", head_sha: "bbb", full_scan: true },
-  );
-  expect(fetch).toHaveBeenLastCalledWith(
-    "/api/workspaces/2/code-reviews/c/run",
-    expect.objectContaining({
-      body: '{"base_sha":"aaa","head_sha":"bbb","full_scan":true}',
-    }),
-  );
 });
-it("offers five report periods and independent test/AI configuration through the shared resource contract", () => {
+it("offers five report periods through the shared resource contract", () => {
   const report = reportForm("2");
   const periods = report.sections
     .flatMap((section) => section.fields)
     .find((field) => field.key === "periods")!;
   expect(periods.type).toBe("multiselect");
   expect(periods.options).toHaveLength(5);
-  const fields = reviewForm("2").sections.flatMap((section) => section.fields);
-  expect(fields.find((field) => field.key === "repositories")?.type).toBe(
-    "connection-repositories",
-  );
-  expect(
-    fields.find((field) => field.key === "test_command")?.when!({
-      tests_enabled: false,
-      ai_enabled: true,
-    }),
-  ).toBe(false);
-  expect(
-    fields.find((field) => field.key === "ai_model")?.when!({
-      tests_enabled: false,
-      ai_enabled: true,
-    }),
-  ).toBe(true);
-  expect(fields.find((field) => field.key === "pipeline_id")?.type).toBe(
-    "custom",
-  );
 });
 it("translates every new message in six locales and separates task, test and AI outcomes", async () => {
   const keys = Object.keys(messages["en-US"]!);

@@ -562,6 +562,18 @@ fn run_json(row: &runs::Model) -> Result<Value> {
     Ok(run_fields(row, snapshot))
 }
 fn localize_snapshot(snapshot: &mut Value) {
+    // Preserve immutable stored history, but do not expose retired review data.
+    if let Some(object) = snapshot.as_object_mut() {
+        object.remove("review_evidence");
+    }
+    if let Some(groups) = snapshot.get_mut("groups").and_then(Value::as_array_mut) {
+        for group in groups {
+            if let Some(object) = group.as_object_mut() {
+                object.remove("review_evidence");
+            }
+        }
+    }
+
     if let Some(sources) = snapshot["coverage"]["sources"].as_array_mut() {
         for source in sources {
             if let Some(error) = source["last_error"].as_str() {
@@ -583,7 +595,6 @@ struct HistorySnapshot {
     coverage: Value,
     previous: Value,
     preview: bool,
-    review_evidence: Value,
 }
 fn history_json(row: &runs::Model) -> Result<Value> {
     // Deserialize only history fields; evidence is available on the detail and
@@ -615,53 +626,6 @@ async fn authorize_history(
     let current = authorized_sources(tx, scope, &insight).await?;
     let snapshot: HistorySnapshot =
         serde_json::from_str(&run.snapshot).map_err(|_| bad("snapshot"))?;
-    if snapshot.review_evidence["available"] == true {
-        scope.require("code-reviews.read")?;
-        scope.require("credentials.read")?;
-        if let Some(runs) = snapshot.review_evidence["runs"].as_array() {
-            let ids: BTreeSet<_> = runs
-                .iter()
-                .filter_map(|run| run["connection_id"].as_str())
-                .map(key)
-                .collect::<Result<_>>()?;
-            let connections = crate::entities::repository_connections::Entity::find()
-                .filter(
-                    crate::entities::repository_connections::Column::WorkspaceId
-                        .eq(scope.workspace_id),
-                )
-                .filter(crate::entities::repository_connections::Column::UserId.eq(scope.user.id))
-                .filter(crate::entities::repository_connections::Column::State.eq("connected"))
-                .filter(
-                    crate::entities::repository_connections::Column::Id.is_in(ids.iter().copied()),
-                )
-                .all(tx)
-                .await?;
-            if connections.len() != ids.len() {
-                return Err(ApiError::forbidden());
-            }
-            let credentials: BTreeSet<_> = crate::entities::credentials::Entity::find()
-                .filter(crate::entities::credentials::Column::WorkspaceId.eq(scope.workspace_id))
-                .filter(
-                    crate::entities::credentials::Column::Id.is_in(
-                        connections
-                            .iter()
-                            .filter(|c| c.credential_id != 0)
-                            .map(|c| c.credential_id),
-                    ),
-                )
-                .all(tx)
-                .await?
-                .into_iter()
-                .map(|c| c.id)
-                .collect();
-            if connections
-                .iter()
-                .any(|c| c.credential_id != 0 && !credentials.contains(&c.credential_id))
-            {
-                return Err(ApiError::forbidden());
-            }
-        }
-    }
     if row.user_id != run.user_id || row.workspace_id != run.workspace_id {
         return Err(ApiError::missing());
     }

@@ -114,7 +114,7 @@ fn role_permissions(role: &roles::Model) -> Result<Vec<String>> {
 }
 fn role_json(row: roles::Model) -> Value {
     json!({"id": Id::from(row.id), "name": workspace::role_name(&row.name, row.builtin != 0), "builtin": row.builtin != 0,
-        "permissions": serde_json::from_str::<Value>(&row.permissions).unwrap_or(json!([])), "version": row.version, "created_at": row.created_at})
+        "permissions": serde_json::from_str::<Vec<String>>(&row.permissions).unwrap_or_default().into_iter().filter(|p| !p.starts_with("code-reviews.")).collect::<Vec<_>>(), "version": row.version, "created_at": row.created_at})
 }
 async fn role(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<roles::Model> {
     roles::Entity::find_by_id(i64::from(id))

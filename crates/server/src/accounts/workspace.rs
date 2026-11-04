@@ -548,31 +548,6 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
         "permission.group.insight-reports",
         "permission.action.generate",
     ),
-    (
-        "code-reviews.read",
-        "permission.group.code-reviews",
-        "permission.action.read",
-    ),
-    (
-        "code-reviews.create",
-        "permission.group.code-reviews",
-        "permission.action.create",
-    ),
-    (
-        "code-reviews.update",
-        "permission.group.code-reviews",
-        "permission.action.update",
-    ),
-    (
-        "code-reviews.delete",
-        "permission.group.code-reviews",
-        "permission.action.delete",
-    ),
-    (
-        "code-reviews.run",
-        "permission.group.code-reviews",
-        "permission.action.run",
-    ),
 ];
 
 /// Permissions a chosen permission cannot work without. The role editor adds
@@ -596,21 +571,6 @@ pub fn dependencies(permission: &str) -> Vec<String> {
             "code-insights.read",
             "repositories.read",
             "deployments.read",
-        ],
-        "code-reviews.read" => &["repositories.read", "pipelines.read", "credentials.read"],
-        "code-reviews.create" | "code-reviews.update" => &[
-            "repositories.read",
-            "pipelines.create",
-            "pipelines.update",
-            "pipelines.run",
-            "credentials.read",
-            "hosts.read",
-        ],
-        "code-reviews.run" => &[
-            "repositories.read",
-            "pipelines.run",
-            "credentials.read",
-            "hosts.terminal",
         ],
         "code-insights.read" => &["repositories.read"],
         "code-insights.sync" => &[
@@ -707,7 +667,6 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 "repositories",
                 "code-insights",
                 "insight-reports",
-                "code-reviews",
                 "pipelines",
                 "pipeline-templates",
                 "credentials",
@@ -729,7 +688,6 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 "pipelines.run".into(),
                 "code-insights.sync".into(),
                 "insight-reports.generate".into(),
-                "code-reviews.run".into(),
                 "deployments.apply".into(),
                 "dashboard.read".into(),
             ])
@@ -778,7 +736,6 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
                 p.starts_with("marketplace-sources.")
                     || p.starts_with("code-insights.")
                     || p.starts_with("insight-reports.")
-                    || p.starts_with("code-reviews.")
                     || p.starts_with("config-templates.")
                     || p.starts_with("pipeline-groups.")
                     || p.starts_with("pipeline-environments.")
@@ -1248,7 +1205,7 @@ mod tests {
                 "operator" => {}
                 _ => unreachable!(),
             }
-            for (resource, action) in [("insight-reports", "generate"), ("code-reviews", "run")] {
+            for (resource, action) in [("insight-reports", "generate")] {
                 match *key {
                     "owner" | "admin" | "developer" => {
                         expected.extend(

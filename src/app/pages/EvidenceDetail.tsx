@@ -11,11 +11,6 @@ import { ResourceForm, ResourceActionDialog } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
 import { href, navigate, useQueryValue } from "../router";
 import {
-  reviewForm,
-  reviewActions,
-  reviewCancelAction,
-} from "../../features/code-reviews/config";
-import {
   reportForm,
   reportActions,
   date,
@@ -30,25 +25,18 @@ export function EvidenceDetail({
   workspace,
   id,
   permissions,
-  review = false,
 }: {
   workspace: string;
   id: string;
   permissions: Set<string>;
-  review?: boolean;
 }) {
   useTranslation("reports-reviews-domain");
-  const resource = review ? "code-reviews" : "insight-reports";
+  const resource = "insight-reports";
   const endpoint = `${base(workspace, resource)}/${encodeURIComponent(id)}`;
   const [tab, setTab] = useQueryValue("tab", "overview");
   const [runId, setRunId] = useQueryValue("run", "");
   const [definition, setDefinition] = useState<Row>();
   const [actionOpen, setActionOpen] = useState(false);
-  const [cancelRun, setCancelRun] = useState<Row>();
-  const cancelAction = useMemo(
-    () => reviewCancelAction(workspace, id),
-    [workspace, id],
-  );
   const [refresh, setRefresh] = useState(0);
   const [selected, setSelected] = useState<Row>();
   const [error, setError] = useState("");
@@ -66,11 +54,8 @@ export function EvidenceDetail({
     };
   }, [endpoint, refresh]);
   const form = useMemo(
-    () =>
-      review
-        ? reviewForm(workspace, { href, navigate })
-        : reportForm(workspace, { href, navigate }),
-    [review, workspace],
+    () => reportForm(workspace, { href, navigate }),
+    [workspace],
   );
   useEffect(() => {
     let live = true;
@@ -136,20 +121,6 @@ export function EvidenceDetail({
       clearInterval(timer);
     };
   }, [endpoint, runId, selected]);
-  useEffect(() => {
-    if (!review || runId) return;
-    let live = true;
-    void api<Envelope<Row>>(`${endpoint}/runs?page=1&page_size=1`)
-      .then((data) => {
-        if (live && data.items[0]) setRunId(String(data.items[0].id));
-      })
-      .catch((cause) => {
-        if (live) setError(errorText(cause));
-      });
-    return () => {
-      live = false;
-    };
-  }, [endpoint, runId, setRunId, refresh, review]);
   const runs = useMemo<ListConfig<Row>>(
     () => ({
       resource: `${resource}/${id}/runs`,
@@ -158,25 +129,23 @@ export function EvidenceDetail({
       queryPrefix: "runs",
       rowKey: (row) => String(row.id),
       defaultRefresh: 10,
-      ...(!review
-        ? {
-            filters: [
-              {
-                key: "period",
-                label: "period",
-                labelKey: key("period"),
-                type: "select" as const,
-                options: options(periods),
-              },
-              {
-                key: "period_start",
-                label: "periodStart",
-                labelKey: key("periodStart"),
-                type: "date" as const,
-              },
-            ],
-          }
-        : {}),
+      ...{
+        filters: [
+          {
+            key: "period",
+            label: "period",
+            labelKey: key("period"),
+            type: "select" as const,
+            options: options(periods),
+          },
+          {
+            key: "period_start",
+            label: "periodStart",
+            labelKey: key("periodStart"),
+            type: "date" as const,
+          },
+        ],
+      },
       columns: [
         {
           key: "created_at",
@@ -195,55 +164,25 @@ export function EvidenceDetail({
             </Button>
           ),
         },
-        ...(review
-          ? [
-              {
-                key: "repository",
-                label: "repositories",
-                labelKey: key("repositories"),
-              },
-              {
-                key: "head_sha",
-                label: "head_sha",
-                labelKey: key("head_sha"),
-                render: (row: Row) => (
-                  <span className="break-all font-mono">
-                    {String(row.head_sha ?? "—")}
-                  </span>
-                ),
-              },
-              {
-                key: "test_state",
-                label: "tests_enabled",
-                labelKey: key("tests_enabled"),
-                render: (row: Row) => statusText(row.test_state, "test"),
-              },
-              {
-                key: "ai_state",
-                label: "ai_enabled",
-                labelKey: key("ai_enabled"),
-                render: (row: Row) => statusText(row.ai_state, "ai"),
-              },
-            ]
-          : [
-              {
-                key: "period",
-                label: "period",
-                labelKey: key("period"),
-                render: (row: Row) => text(String(row.period)),
-              },
-              {
-                key: "period_start",
-                label: "periodStart",
-                labelKey: key("periodStart"),
-                render: (row: Row) => date(row.period_start),
-              },
-              {
-                key: "definition_version",
-                label: "version",
-                labelKey: key("version"),
-              },
-            ]),
+
+        {
+          key: "period",
+          label: "period",
+          labelKey: key("period"),
+          render: (row: Row) => text(String(row.period)),
+        },
+        {
+          key: "period_start",
+          label: "periodStart",
+          labelKey: key("periodStart"),
+          render: (row: Row) => date(row.period_start),
+        },
+        {
+          key: "definition_version",
+          label: "version",
+          labelKey: key("version"),
+        },
+
         {
           key: "state",
           label: "state",
@@ -251,124 +190,14 @@ export function EvidenceDetail({
           render: (row) => statusText(row.state),
         },
         { key: "error", label: "error", labelKey: key("error") },
-        ...(review && permissions.has("code-reviews.run")
-          ? [
-              {
-                key: "cancel",
-                label: "cancelRun",
-                labelKey: key("cancelRun"),
-                render: (row: Row) =>
-                  cancelAction.when?.(row) ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setCancelRun(row)}
-                    >
-                      {text("cancelRun")}
-                    </Button>
-                  ) : null,
-              },
-            ]
-          : []),
       ],
       toolbar: { create: false, import: false, export: false },
       empty: "empty",
       emptyKey: key("empty"),
     }),
-    [
-      resource,
-      id,
-      endpoint,
-      setRunId,
-      setTab,
-      review,
-      permissions,
-      cancelAction,
-    ],
+    [resource, id, endpoint, setRunId, setTab],
   );
-  const operation = (
-    review ? reviewActions(workspace) : reportActions(workspace)
-  )[0]!;
-  const findings = useMemo<ListConfig<Row>>(
-    () => ({
-      resource: `code-reviews/${id}/findings`,
-      endpoint: `${endpoint}/findings`,
-      permissionResource: resource,
-      queryPrefix: "findings",
-      rowKey: (row) => String(row.id),
-      filters: [
-        {
-          key: "status",
-          label: "state",
-          labelKey: key("state"),
-          type: "select",
-          options: options(["open", "fixed", "ignored", "false_positive"]),
-        },
-      ],
-      columns: [
-        { key: "severity", label: "severity", labelKey: key("severity") },
-        {
-          key: "repository",
-          label: "repositories",
-          labelKey: key("repositories"),
-        },
-        {
-          key: "file",
-          label: "file",
-          labelKey: key("file"),
-          render: (row) => (
-            <span className="break-all">
-              {String(row.file ?? "—")}
-              {Number(row.line) > 0 ? `:${row.line}` : ""}
-            </span>
-          ),
-        },
-        {
-          key: "message",
-          label: "message",
-          labelKey: key("message"),
-          render: (row) => (
-            <div className="max-w-xl whitespace-pre-wrap break-words">
-              <p>{String(row.message ?? "")}</p>
-              <p className="mt-2 text-muted-foreground">
-                {text("suggestion")}: {String(row.suggestion ?? "—")}
-              </p>
-              <p className="mt-2">{String(row.evidence ?? "")}</p>
-            </div>
-          ),
-        },
-        {
-          key: "status",
-          label: "state",
-          labelKey: key("state"),
-          render: (row) => text(String(row.status)),
-        },
-        {
-          key: "last_seen",
-          label: "last",
-          labelKey: key("last"),
-          render: (row) => date(row.last_seen),
-        },
-      ],
-      actions: ["open", "fixed", "ignored", "false_positive"].map((status) => ({
-        label: status,
-        labelKey: key(status),
-        permission: "code-reviews.update",
-        when: (row) => row.status !== status,
-        action: async (row) => {
-          await api(
-            `${endpoint}/findings/${encodeURIComponent(String(row.id))}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({ status, version: row.version }),
-            },
-          );
-        },
-      })),
-      toolbar: { create: false, import: false, export: false },
-    }),
-    [id, endpoint, resource],
-  );
+  const operation = reportActions(workspace)[0]!;
   const reportOverview = useMemo<ListConfig<Row>>(
     () => ({
       ...runs,
@@ -388,12 +217,7 @@ export function EvidenceDetail({
   return (
     <Tabs
       value={
-        [
-          "overview",
-          "history",
-          "configuration",
-          ...(review ? ["findings"] : []),
-        ].includes(tab)
+        ["overview", "history", "configuration"].includes(tab)
           ? tab
           : "overview"
       }
@@ -402,33 +226,19 @@ export function EvidenceDetail({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="min-w-0 break-words text-lg font-semibold">
-          {String(definition?.name ?? text(review ? "reviews" : "reports"))}
+          {String(definition?.name ?? text("reports"))}
         </h2>
-        {definition &&
-          permissions.has(`${resource}.${review ? "run" : "generate"}`) && (
-            <Button type="button" onClick={() => setActionOpen(true)}>
-              {text(review ? "run" : "generate")}
-            </Button>
-          )}
+        {definition && permissions.has(`${resource}.generate`) && (
+          <Button type="button" onClick={() => setActionOpen(true)}>
+            {text("generate")}
+          </Button>
+        )}
       </div>
       {definition?.trigger_error ? (
         <p role="alert" className="break-words text-destructive">
           {text("trigger_error")}: {String(definition.trigger_error)}
         </p>
       ) : null}
-      {cancelRun && (
-        <ResourceActionDialog
-          action={cancelAction}
-          row={cancelRun}
-          workspace={workspace}
-          permissions={permissions}
-          onClose={() => setCancelRun(undefined)}
-          onDone={() => {
-            setCancelRun(undefined);
-            setRefresh((value) => value + 1);
-          }}
-        />
-      )}
       {actionOpen && definition && (
         <ResourceActionDialog
           action={operation}
@@ -440,23 +250,17 @@ export function EvidenceDetail({
             setActionOpen(false);
             setRefresh((value) => value + 1);
             setRunId("");
-            if (!review)
-              void api<Envelope<Row>>(`${endpoint}/runs?page=1&page_size=1`)
-                .then((data) => {
-                  if (data.items[0]) setRunId(String(data.items[0].id));
-                })
-                .catch((cause) => setError(errorText(cause)));
+            void api<Envelope<Row>>(`${endpoint}/runs?page=1&page_size=1`)
+              .then((data) => {
+                if (data.items[0]) setRunId(String(data.items[0].id));
+              })
+              .catch((cause) => setError(errorText(cause)));
           }}
         />
       )}
       <div className="min-w-0 overflow-x-auto border-b pb-2">
-        <TabsList aria-label={text(review ? "reviews" : "reports")}>
-          {[
-            "overview",
-            "history",
-            ...(review ? ["findings"] : []),
-            "configuration",
-          ].map((name) => (
+        <TabsList aria-label={text("reports")}>
+          {["overview", "history", "configuration"].map((name) => (
             <TabsTrigger key={name} value={name}>
               {text(name)}
             </TabsTrigger>
@@ -478,15 +282,6 @@ export function EvidenceDetail({
           refreshKey={refresh}
         />
       </TabsContent>
-      {review && (
-        <TabsContent value="findings" className="flex min-h-0 flex-1 flex-col">
-          <ResourceTable
-            config={findings}
-            workspace={workspace}
-            permissions={permissions}
-          />
-        </TabsContent>
-      )}
       <TabsContent
         value="overview"
         className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-auto"
@@ -496,67 +291,13 @@ export function EvidenceDetail({
             {error}
           </p>
         )}
-        {!review ? (
-          <ResourceTable
-            config={reportOverview}
-            workspace={workspace}
-            permissions={permissions}
-            refreshKey={refresh}
-          />
-        ) : (
-          <>
-            {runId && !selected && !error && (
-              <p role="status">{text("loading")}</p>
-            )}
-            {selected ? (
-              <>
-                <RunEvidence
-                  row={selected}
-                  review={review}
-                  workspace={workspace}
-                />
-                {permissions.has("code-reviews.run") &&
-                  cancelAction.when?.(selected) && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setCancelRun(selected)}
-                    >
-                      {text("cancelRun")}
-                    </Button>
-                  )}
-                {!review && selected.state === "complete" && (
-                  <div className="flex flex-wrap gap-4">
-                    {["html", "csv", "json"].map((format) => (
-                      <a
-                        key={format}
-                        className="text-sm text-primary underline"
-                        href={`/api${endpoint}/runs/${encodeURIComponent(String(selected.id))}/export?format=${format}`}
-                        download
-                      >
-                        {text("exportReport")} · {format.toUpperCase()}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </>
-            ) : (
-              !runId && (
-                <p className="text-sm text-muted-foreground">
-                  {text("history")}
-                </p>
-              )
-            )}
-            <div className="flex min-h-80 min-w-0 flex-1 flex-col">
-              <ResourceTable
-                config={runs}
-                workspace={workspace}
-                permissions={permissions}
-                refreshKey={refresh}
-              />
-            </div>
-          </>
-        )}
+
+        <ResourceTable
+          config={reportOverview}
+          workspace={workspace}
+          permissions={permissions}
+          refreshKey={refresh}
+        />
       </TabsContent>
     </Tabs>
   );
@@ -566,7 +307,6 @@ export function ReportSummary({
   items,
   runId,
   selected,
-  workspace,
   endpoint,
   onChoose,
 }: {
@@ -590,7 +330,7 @@ export function ReportSummary({
     return <p role="status">{text("loading")}</p>;
   return (
     <div className="min-w-0 space-y-4">
-      <RunEvidence row={selected} review={false} workspace={workspace} />
+      <RunEvidence row={selected} />
       {selected.state === "complete" && (
         <div className="flex flex-wrap gap-4">
           {["html", "csv", "json"].map((format) => (
@@ -609,32 +349,20 @@ export function ReportSummary({
   );
 }
 
-function RunEvidence({
-  row,
-  review,
-  workspace,
-}: {
-  row: Row;
-  review: boolean;
-  workspace: string;
-}) {
+function RunEvidence({ row }: { row: Row }) {
   const snapshot = (row.snapshot ?? {}) as Row;
-  const coverage = (review ? row.coverage : snapshot.coverage) as
-    Row | undefined;
-  const summary = (review ? row.test_summary : snapshot.summary) as
-    Row | undefined;
+  const coverage = snapshot.coverage as Row | undefined;
+  const summary = snapshot.summary as Row | undefined;
   const previous = snapshot.previous as Row | undefined;
   const trend = reportTrend(snapshot);
   const max = Math.max(1, ...trend.map((point) => Number(point.commits) || 0));
-  const facts = review
-    ? ["state", "test_state", "ai_state", "base_sha", "head_sha", "error"]
-    : [
-        "period",
-        "definition_version",
-        "period_start",
-        "period_end",
-        "generated_at",
-      ];
+  const facts = [
+    "period",
+    "definition_version",
+    "period_start",
+    "period_end",
+    "generated_at",
+  ];
   return (
     <section className="min-w-0 space-y-5 rounded-md border p-4">
       <dl className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -673,12 +401,12 @@ function RunEvidence({
           </div>
         ))}
       </dl>
-      {!review && (
+      {
         <p className="text-sm text-muted-foreground">
           {text("evidence")}
           {snapshot.preview ? ` ${text("preview")}` : ""}
         </p>
-      )}
+      }
       {summary && (
         <dl className="grid gap-4 sm:grid-cols-3">
           {Object.entries(summary)
@@ -700,12 +428,6 @@ function RunEvidence({
             ))}
         </dl>
       )}
-      {!review && snapshot.review_evidence ? (
-        <ReviewEvidence
-          value={snapshot.review_evidence as Row}
-          workspace={workspace}
-        />
-      ) : null}
       {trend.length > 0 && (
         <div>
           <h3 className="mb-3 font-medium">{text("trend")}</h3>
@@ -759,26 +481,9 @@ function RunEvidence({
         <div className="space-y-2">
           <h3 className="font-medium">
             {text("coverage")}:{" "}
-            {!review && text(coverage.complete ? "complete" : "incomplete")}
+            {text(coverage.complete ? "complete" : "incomplete")}
           </h3>
-          {review ? (
-            ["scanned", "skipped"].map((name) => (
-              <div key={name}>
-                <h4 className="text-sm font-medium">{text(name)}</h4>
-                <ul className="space-y-1 text-sm">
-                  {((coverage[name] ?? []) as unknown[]).map((item, index) => (
-                    <li key={index} className="break-all">
-                      {typeof item === "string"
-                        ? item
-                        : Object.entries(item as Row)
-                            .map(([k, v]) => `${k}: ${String(v)}`)
-                            .join(" · ")}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))
-          ) : (
+          {
             <ul className="space-y-1 text-sm">
               {((coverage.sources ?? []) as Row[]).map((source, index) => (
                 <li key={index} className="break-all">
@@ -797,10 +502,10 @@ function RunEvidence({
                 ),
               )}
             </ul>
-          )}
+          }
         </div>
       )}
-      {!review && (
+      {
         <>
           <ul className="space-y-2">
             {((snapshot.groups ?? []) as Row[]).map((group, index) => (
@@ -824,12 +529,6 @@ function RunEvidence({
                       {text(name)}: {String(group[name])}
                     </span>
                   ))}
-                {group.review_evidence ? (
-                  <ReviewEvidence
-                    value={group.review_evidence as Row}
-                    workspace={workspace}
-                  />
-                ) : null}
               </li>
             ))}
           </ul>
@@ -859,179 +558,16 @@ function RunEvidence({
             {String(snapshot.timezone ?? "—")}
           </p>
         </>
-      )}
-      {review && (
-        <>
-          {["test_error", "ai_error"].map((name) =>
-            row[name] ? (
-              <p
-                key={name}
-                role="alert"
-                className="break-words text-destructive"
-              >
-                {text(name === "test_error" ? "tests_enabled" : "ai_enabled")}:{" "}
-                {String(row[name])}
-              </p>
-            ) : null,
-          )}
-        </>
-      )}
-      {(review ? row.config_snapshot : snapshot.config) ? (
-        <ConfigurationSnapshot
-          config={(review ? row.config_snapshot : snapshot.config) as Row}
-        />
+      }
+      {snapshot.config ? (
+        <ConfigurationSnapshot config={snapshot.config as Row} />
       ) : null}
-      {review && row.pipeline_run_id ? (
-        <a
-          className="text-primary underline"
-          href={href({
-            workspace,
-            group: "build",
-            item: "runs",
-            id: String(row.pipeline_run_id),
-            mode: "view",
-          })}
-        >
-          {text("logs")}
-        </a>
-      ) : null}
-    </section>
-  );
-}
-
-export function ReviewEvidence({
-  value,
-  workspace,
-}: {
-  value: Row;
-  workspace: string;
-}) {
-  const runs = (Array.isArray(value.runs) ? value.runs : []) as Row[];
-  return (
-    <section
-      className="w-full min-w-0 space-y-3 border-t pt-3"
-      aria-label={text("reviewEvidence")}
-    >
-      <h4 className="font-medium">{text("reviewEvidence")}</h4>
-      {value.available !== true ? (
-        <p className="text-sm text-muted-foreground">
-          {text("unavailable")} · {text("evidence.permission")}
-        </p>
-      ) : (
-        <>
-          {value.total === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {text("noReviewEvidence")}
-            </p>
-          ) : (
-            <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-              {["total", "tests_passed", "tests_failed", "findings"]
-                .filter((name) => typeof value[name] === "number")
-                .map((name) => (
-                  <div key={name}>
-                    <dt className="text-muted-foreground">
-                      {text(`evidence.${name}`)}
-                    </dt>
-                    <dd className="font-medium tabular-nums">
-                      {String(value[name])}
-                    </dd>
-                  </div>
-                ))}
-            </dl>
-          )}
-          <ul className="space-y-3 text-sm">
-            {runs.map((run, index) => (
-              <li
-                key={String(run.id ?? index)}
-                className="min-w-0 space-y-1 border-l pl-3"
-              >
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <a
-                    className="text-primary underline"
-                    href={href(
-                      {
-                        workspace,
-                        group: "build",
-                        item: "code-reviews",
-                        id: String(run.review_id),
-                        mode: "view",
-                      },
-                      { tab: "overview", run: String(run.id) },
-                    )}
-                  >
-                    {text("reviews")} · {String(run.repository)}
-                  </a>
-                  <span>{statusText(run.state)}</span>
-                  {run.pipeline_run_id &&
-                  String(run.pipeline_run_id) !== "0" ? (
-                    <a
-                      className="text-primary underline"
-                      href={href({
-                        workspace,
-                        group: "build",
-                        item: "runs",
-                        id: String(run.pipeline_run_id),
-                        mode: "view",
-                      })}
-                    >
-                      {text("logs")}
-                    </a>
-                  ) : null}
-                </div>
-                <p className="break-all font-mono text-xs">
-                  {String(run.head_sha ?? "—")}
-                </p>
-                <p>
-                  {text("tests_enabled")}: {statusText(run.test_state, "test")}{" "}
-                  · {text("ai_enabled")}: {statusText(run.ai_state, "ai")}
-                  {["completed_clear", "completed_findings"].includes(
-                    String(run.ai_state),
-                  ) && typeof run.finding_count === "number"
-                    ? ` · ${text("evidence.findings")}: ${run.finding_count}`
-                    : ""}
-                </p>
-              </li>
-            ))}
-          </ul>
-          {((value.unavailable_repositories ?? []) as Row[]).map(
-            (repo, index) => (
-              <p key={index} className="break-all text-sm text-destructive">
-                {String(repo.repository)} ·{" "}
-                {text(
-                  `evidence.${repo.reason === "credential" ? "credential" : "authorization"}`,
-                )}
-              </p>
-            ),
-          )}
-        </>
-      )}
     </section>
   );
 }
 
 function ConfigurationSnapshot({ config }: { config: Row }) {
-  const scalarFields = [
-    "name",
-    "enabled",
-    "trigger",
-    "branch",
-    "dimension",
-    "timezone",
-    "tests_enabled",
-    "ai_enabled",
-    "test_command",
-    "junit_path",
-    "runner_kind",
-    "runner_ref",
-    "ai_endpoint",
-    "ai_model",
-    "ai_credential_id",
-    "ai_timeout_seconds",
-    "ai_concurrency",
-    "ai_max_tokens",
-    "max_files",
-    "max_bytes",
-  ];
+  const scalarFields = ["name", "enabled", "dimension", "timezone"];
   return (
     <details>
       <summary className="cursor-pointer font-medium">
@@ -1046,13 +582,13 @@ function ConfigurationSnapshot({ config }: { config: Row }) {
               <dd className="whitespace-pre-wrap break-all text-sm">
                 {typeof config[name] === "boolean"
                   ? text(config[name] ? "enabled" : "not_enabled")
-                  : ["trigger", "dimension", "runner_kind"].includes(name)
+                  : ["dimension"].includes(name)
                     ? text(String(config[name]))
                     : String(config[name] ?? "—")}
               </dd>
             </div>
           ))}
-        {["periods", "author_keys", "runner_labels", "include", "exclude"]
+        {["periods", "author_keys"]
           .filter(
             (name) =>
               Array.isArray(config[name]) && (config[name] as unknown[]).length,

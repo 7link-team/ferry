@@ -124,49 +124,60 @@ export function ReportScope({
                   .toLowerCase()
                   .includes(search.toLowerCase()),
               )
-              .map((person) => (
-                <label
-                  key={person.key}
-                  className="flex min-h-11 items-center gap-2"
-                >
-                  <Checkbox
-                    checked={authors.includes(person.key)}
-                    disabled={readOnly}
-                    onCheckedChange={(checked) =>
-                      onPatch({
-                        author_keys: toggleValue(
-                          authors,
-                          person.key,
-                          !!checked,
-                        ),
-                      })
-                    }
-                  />
-                  <span>
-                    {person.nickname ||
-                      person.name ||
-                      person.email ||
-                      person.key}
-                    <small className="block text-muted-foreground">
-                      {[
-                        person.name,
-                        person.email,
-                        ...(person.aliases ?? []).map((alias) =>
-                          typeof alias === "string"
-                            ? alias
-                            : alias && typeof alias === "object"
-                              ? Object.values(alias)
-                                  .filter((value) => typeof value === "string")
-                                  .join(" · ")
-                              : "",
-                        ),
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </small>
-                  </span>
-                </label>
-              ))}
+              .map((person) => {
+                const title =
+                  person.nickname || person.name || person.email || person.key;
+                const details = [
+                  ...new Set(
+                    [
+                      person.name,
+                      person.email,
+                      ...(person.aliases ?? []).flatMap((alias) =>
+                        typeof alias === "string"
+                          ? [alias]
+                          : alias && typeof alias === "object"
+                            ? Object.values(alias).filter(
+                                (value): value is string =>
+                                  typeof value === "string",
+                              )
+                            : [],
+                      ),
+                    ]
+                      .map((value) => value?.trim())
+                      .filter(
+                        (value): value is string => !!value && value !== title,
+                      ),
+                  ),
+                ].join(" · ");
+                return (
+                  <label
+                    key={person.key}
+                    className="flex min-h-11 items-center gap-2"
+                  >
+                    <Checkbox
+                      checked={authors.includes(person.key)}
+                      disabled={readOnly}
+                      onCheckedChange={(checked) =>
+                        onPatch({
+                          author_keys: toggleValue(
+                            authors,
+                            person.key,
+                            !!checked,
+                          ),
+                        })
+                      }
+                    />
+                    <span>
+                      {title}
+                      {details && (
+                        <small className="block text-muted-foreground">
+                          {details}
+                        </small>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
           </div>
           <a
             className="text-primary underline"

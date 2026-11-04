@@ -27,12 +27,6 @@ def main():
     class Provider(fixture.Provider):
         def respond(self):
             parsed = urlparse(self.path)
-            if parsed.path == "/repos/owner/repository/commits":
-                token = self.headers.get("Authorization", "").removeprefix("Bearer ").removeprefix("token ")
-                assert token == "valid-personal-token-github", "unexpected branch-resolution authorization"
-                assert parse_qs(parsed.query) == {"page": ["1"], "per_page": ["50"], "sha": ["main"]}, self.path
-                fixture.calls[("github", "review_branch_resolution")] += 1
-                return self.json([fixture.metadata("github", fixture.C)])
             if parsed.path == "/user/repos":
                 return self.json([{"id": 101, "name": "repository", "default_branch": "main", "full_name": "owner/repository", "clone_url": fixture.api_base + "/owner/repository.git"}])
             return super().respond()
@@ -84,14 +78,16 @@ def main():
                 time.sleep(.2)
             detail["aliases"] = [{"name": "", "email": email, "nickname": "Combined"} for email in ["first@example.invalid", "second@example.invalid"]]
             request(base + "/code-insights/" + insight, detail, "PATCH")
+            host = request(base + "/nodes", {"name": "Report fixture host", "connection": "runner"})["id"]
+            manifest = json.dumps({"apiVersion": "ferry/v1", "kind": "Application", "metadata": {"name": "fixture"}, "services": [{"name": "web", "image": "nginx:alpine"}]})
+            request(base + "/deployments", {"name": "Fixture application", "mode": "compose", "target_kind": "host", "target_ref": host, "workdir": "/tmp/report-fixture", "manifest": manifest})
             browser_env = dict(os.environ, LIVE_BASE_URL=origin, LIVE_WORKSPACE=workspace, LIVE_INSIGHT_ID=insight, LIVE_CONNECTION_ID=connection, LIVE_EMAIL=email, LIVE_PASSWORD=password, LIVE_OUTPUT=str(state))
             result = subprocess.run(["node", "scripts/test-reports-reviews-live-ui.mjs"], cwd=root, env=browser_env, capture_output=True, text=True, encoding="utf-8", errors="replace", **flags)
             (state / "browser.log").write_text(result.stdout + result.stderr, encoding="utf-8")
             print(result.stdout + result.stderr, flush=True)
             assert result.returncode == 0, "live browser failed; inspect browser.log"
             assert not fixture.fixture_errors, fixture.fixture_errors
-            assert fixture.calls[("github", "review_branch_resolution")] > 0, "manual review must resolve the configured branch through the provider"
-            print("PASS real product API + Chromium report CRUD/generation/aliases and review CRUD/kickoff; fixture state: " + str(state), flush=True)
+            print("PASS real product API + Chromium report CRUD/generation/aliases and retired review endpoints; fixture state: " + str(state), flush=True)
         finally:
             (state / "provider-evidence.json").write_text(json.dumps({"fixture_errors": fixture.fixture_errors, "calls": {"/".join(key): value for key, value in fixture.calls.items()}}, indent=2), encoding="utf-8")
             process.terminate()

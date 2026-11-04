@@ -123,10 +123,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 output=api('/workspaces/upgrade/pipeline-runs/'+executed+'/logs?after=0')['items']
                 assert 'UPGRADE_SAME_RESULT' in ''.join(row['chunk'] for row in output)
                 print('PASS: legacy pipeline executes the same command result before and after Actions migration')
-            for resource in ('insight-reports', 'code-reviews'):
+            for resource in ('insight-reports',):
                 listing = api('/workspaces/upgrade/' + resource)
                 assert listing['items'] == []
-            print('PASS: existing workspace owner can access insight reports and code reviews after upgrade')
+            print('PASS: existing workspace owner can access insight reports after upgrade')
             for path in paths:
                 after = api(path)
                 if '/credentials/' in path:
@@ -141,7 +141,6 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
                     allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}
                     allowed |= {'insight-reports.'+verb for verb in ['read','create','update','delete','generate']}
-                    allowed |= {'code-reviews.'+verb for verb in ['read','create','update','delete','run']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -219,7 +218,6 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'code-insights.'+verb for verb in (['read','create','update','delete','sync'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'insight-reports.'+verb for verb in (['read','create','update','delete','generate'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
-                expected |= {'code-reviews.'+verb for verb in (['read','create','update','delete','run'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)

@@ -1,9 +1,8 @@
-import { renderToStaticMarkup } from "react-dom/server";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
-import { ReportSummary, ReviewEvidence } from "./EvidenceDetail";
+import { ReportSummary } from "./EvidenceDetail";
 
 it("selects only filtered report revisions and hides stale or empty evidence", async () => {
   await i18n.changeLanguage("en-US");
@@ -66,69 +65,4 @@ it("selects only filtered report revisions and hides stale or empty evidence", a
     host.remove();
     vi.unstubAllGlobals();
   }
-});
-
-it("distinguishes unavailable and absent evidence from passing tests", async () => {
-  await i18n.changeLanguage("en-US");
-  const unavailable = renderToStaticMarkup(
-    <ReviewEvidence
-      workspace="2"
-      value={{ available: false, reason: "permission" }}
-    />,
-  );
-  expect(unavailable).toContain("Code review read permission is required");
-  expect(unavailable).not.toContain("Tests passed");
-  const empty = renderToStaticMarkup(
-    <ReviewEvidence
-      workspace="2"
-      value={{
-        available: true,
-        total: 0,
-        tests_passed: 0,
-        tests_failed: 0,
-        findings: 0,
-        runs: [],
-      }}
-    />,
-  );
-  expect(empty).toContain("No execution evidence");
-  expect(empty).not.toContain("Tests passed");
-});
-it("links real immutable run SHAs and shows independent test and AI outcomes", async () => {
-  await i18n.changeLanguage("en-US");
-  const html = renderToStaticMarkup(
-    <ReviewEvidence
-      workspace="2"
-      value={{
-        available: true,
-        total: 1,
-        tests_passed: 0,
-        tests_failed: 1,
-        findings: 2,
-        runs: [
-          {
-            id: "run",
-            review_id: "review",
-            repository: "team/api",
-            head_sha: "immutable-sha",
-            state: "completed",
-            test_state: "failed",
-            ai_state: "completed_findings",
-            finding_count: 2,
-            pipeline_run_id: "pipeline",
-          },
-        ],
-        unavailable_repositories: [
-          { repository: "team/private", reason: "credential" },
-        ],
-      }}
-    />,
-  );
-  expect(html).toContain("immutable-sha");
-  expect(html).toContain("Tests failed");
-  expect(html).toContain("AI completed: findings");
-  expect(html).toContain("code-reviews/review");
-  expect(html).toContain("run=run");
-  expect(html).toContain("pipeline-runs/pipeline");
-  expect(html).toContain("Repository credential unavailable");
 });

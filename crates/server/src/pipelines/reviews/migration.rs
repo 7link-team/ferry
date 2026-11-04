@@ -1,6 +1,39 @@
 //! Append-only module migration, registered by the server migrator.
 use sea_orm_migration::prelude::*;
+
+/// Old managed pipelines remain stored, but the retired feature cannot run them.
+pub(crate) async fn owns_pipeline(
+    db: &impl sea_orm::ConnectionTrait,
+    pipeline: i64,
+) -> Result<bool, sea_orm::DbErr> {
+    use sea_orm::sea_query::{Alias, Expr, Query};
+    let query = Query::select()
+        .column(Alias::new("id"))
+        .from(Alias::new("code_reviews"))
+        .and_where(Expr::col(Alias::new("pipeline_id")).eq(pipeline))
+        .limit(1)
+        .to_owned();
+    Ok(db.query_one(&query).await?.is_some())
+}
 pub struct Migration;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::ConnectionTrait;
+
+    #[tokio::test]
+    async fn retired_managed_pipeline_is_identified_without_removing_history() {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+        db.execute_unprepared("INSERT INTO code_reviews (id,workspace_id,user_id,pipeline_id,version,cursor,created_at,updated_at,name,description,config,baselines) VALUES (1,1,1,42,1,0,0,0,'Historic review','','{}','{}')").await.unwrap();
+        assert!(owns_pipeline(&db, 42).await.unwrap());
+        assert!(!owns_pipeline(&db, 43).await.unwrap());
+        // Reapplying the old migration leaves historical rows intact.
+        Migration.up(&SchemaManager::new(&db)).await.unwrap();
+        assert!(owns_pipeline(&db, 42).await.unwrap());
+    }
+}
 impl MigrationName for Migration {
     fn name(&self) -> &str {
         "m20261104_code_reviews"

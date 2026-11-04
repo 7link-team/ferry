@@ -432,7 +432,7 @@ async fn applications_share_evidence_without_double_counting_and_snapshot_mappin
     assert_eq!(snapshot["groups"][1]["commits"], 1);
     assert_eq!(snapshot["coverage"]["complete"], true);
     assert_eq!(snapshot["commits"].as_array().unwrap().len(), 1);
-    assert_eq!(snapshot["review_evidence"]["available"], false);
+    assert!(snapshot.get("review_evidence").is_none());
     use crate::entities::code_insight_people as people;
     people::Entity::update_many()
         .col_expr(people::Column::DisplayName, Expr::value("New nickname"))
@@ -470,86 +470,42 @@ async fn applications_share_evidence_without_double_counting_and_snapshot_mappin
         second["snapshot"]["commits"][0]["nickname"]
     );
     assert_eq!(first, load_run(&s, &scope, id, run_id).await.unwrap());
-    use crate::{
-        entities::{credentials, workspace_roles},
-        pipelines::reviews::entities::{definitions as reviews, jobs as review_runs},
-    };
-    let mut permissions: Vec<_> = scope.permissions.iter().cloned().collect();
-    permissions.push("code-reviews.read".into());
-    permissions.push("pipelines.read".into());
-    workspace_roles::Entity::update_many()
-        .col_expr(
-            workspace_roles::Column::Permissions,
-            Expr::value(encode(&permissions).unwrap()),
-        )
-        .filter(workspace_roles::Column::Id.eq(2))
-        .exec(&s.db)
-        .await
-        .unwrap();
-    let scope = Scope::for_actor(&s, 1.into(), 1.into()).await.unwrap();
-    reviews::Model {
-        id: 50,
-        workspace_id: 1,
-        user_id: 1,
-        name: "Review".into(),
-        description: String::new(),
-        config: "{}".into(),
-        pipeline_id: 0,
-        version: 1,
-        cursor: 0,
-        baselines: "{}".into(),
-        created_at: 0,
-        updated_at: 0,
-    }
-    .into_active_model()
-    .insert(&s.db)
-    .await
-    .unwrap();
-    for (job_id, sha) in [(51, 'd'), (52, 'e')] {
-        review_runs::Model{id:job_id,workspace_id:1,review_id:50,dedupe:format!("report-evidence-{job_id}"),state:"completed".into(),snapshot:encode(&json!({"config":{},"config_version":1,"connection_id":4,"repository":"team/repo","url":"https://example.test/team/repo","base_sha":"a".repeat(40),"head_sha":sha.to_string().repeat(40),"full_scan":false,"pipeline_id":0,"user_id":1})).unwrap(),result:encode(&json!({"test_state":"failed","ai_state":"completed","finding_count":2})).unwrap(),pipeline_run_id:0,lease_until:0,lease_owner:String::new(),created_at:0,finished_at:0}.into_active_model().insert(&s.db).await.unwrap();
-    }
-    let Json(queued) = generate(
-        State(s.clone()),
-        scope.clone(),
-        Path(("1".into(), id)),
-        Json(Generate {
-            period: "day".into(),
-            period_start: Some("2024-02-29".into()),
-        }),
+    let mut legacy: Value = serde_json::from_str(
+        &runs::Entity::find_by_id(run_id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .snapshot,
     )
-    .await
     .unwrap();
-    generation::work(&s).await.unwrap();
-    let evidence_id = queued["id"].as_str().unwrap().parse().unwrap();
-    let evidence = load_run(&s, &scope, id, evidence_id).await.unwrap();
-    assert_eq!(evidence["snapshot"]["review_evidence"]["available"], true);
-    assert_eq!(evidence["snapshot"]["review_evidence"]["total"], 1);
-    assert_eq!(evidence["snapshot"]["review_evidence"]["tests_failed"], 1);
-    assert_eq!(evidence["snapshot"]["review_evidence"]["findings"], 2);
-    for group in evidence["snapshot"]["groups"].as_array().unwrap() {
-        assert_eq!(group["review_evidence"]["total"], 1);
+    legacy["review_evidence"] = json!({"available": true, "runs": [{"review_id":"50"}]});
+    if let Some(groups) = legacy["groups"].as_array_mut() {
+        for group in groups {
+            group["review_evidence"] = json!({"available":true});
+        }
     }
-    review_runs::Entity::update_many()
-        .col_expr(review_runs::Column::Result, Expr::value("{}".to_owned()))
-        .filter(review_runs::Column::Id.eq(51))
+    runs::Entity::update_many()
+        .col_expr(
+            runs::Column::Snapshot,
+            Expr::value(encode(&legacy).unwrap()),
+        )
+        .filter(runs::Column::Id.eq(run_id))
         .exec(&s.db)
         .await
         .unwrap();
-    assert_eq!(
-        evidence,
-        load_run(&s, &scope, id, evidence_id).await.unwrap(),
-        "review evidence is immutable in the report revision"
-    );
-    let mut revoked = scope.clone();
-    revoked.permissions.remove("code-reviews.read");
-    assert!(load_run(&s, &revoked, id, evidence_id).await.is_err());
-    credentials::Entity::delete_by_id(5)
+    let historic = load_run(&s, &scope, id, run_id).await.unwrap();
+    assert!(historic["snapshot"].get("review_evidence").is_none());
+    for group in historic["snapshot"]["groups"].as_array().unwrap() {
+        assert!(group.get("review_evidence").is_none());
+    }
+    crate::entities::credentials::Entity::delete_by_id(5)
         .exec(&s.db)
         .await
         .unwrap();
     assert!(
-        load_run(&s, &scope, id, evidence_id).await.is_err(),
-        "review snapshot cannot bypass a deleted credential"
+        load_run(&s, &scope, id, run_id).await.is_err(),
+        "historical reports still enforce repository credentials"
     );
 }
 

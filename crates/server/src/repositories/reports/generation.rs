@@ -169,15 +169,6 @@ async fn build(s: &AppState, run: &runs::Model) -> Result<Value> {
             let mut group = metrics(&items, tz)?;
             group["key"] = json!(app.application_id);
             group["name"] = json!(application.name);
-            let repositories: Vec<_> = report_sources
-                .iter()
-                .filter(|source| ids.contains(&source.repository_id.to_string()))
-                .map(|source| (source.connection_id, source.remote_path.clone()))
-                .collect();
-            let commits: BTreeSet<_> = items.iter().map(|fact| fact.sha.clone()).collect();
-            group["review_evidence"] =
-                crate::pipelines::reviews::report_summary(&tx, &scope, &repositories, &commits)
-                    .await?;
             groups.push(group);
         }
     }
@@ -245,17 +236,7 @@ async fn build(s: &AppState, run: &runs::Model) -> Result<Value> {
     let repository_scope:Vec<_>=source_json.iter().map(|source|json!({"connection_id":source["connection_id"],"repository":source["repository"],"repository_id":source["repository_id"],"config_version":source["config_version"],"coverage_start":source["coverage_start"]})).collect();
     let repository_scope_version =
         digest(&json!({"sources":repository_scope,"applications":config.applications}))?;
-    let review_evidence = if config.dimension == "application" {
-        let repositories: Vec<_> = report_sources
-            .iter()
-            .map(|source| (source.connection_id, source.remote_path.clone()))
-            .collect();
-        let commits: BTreeSet<_> = current.iter().map(|fact| fact.sha.clone()).collect();
-        Some(crate::pipelines::reviews::report_summary(&tx, &scope, &repositories, &commits).await?)
-    } else {
-        None
-    };
-    let value = json!({"summary":metrics(&current,tz)?,"previous":metrics(&previous,tz)?,"trend":trend,"groups":groups,"commits":current,"review_evidence":review_evidence,"coverage":{"complete":complete,"sources":source_json,"missing_repositories":missing,"identity_error":identity.identity_error,"date_filter":"author_date","date_bucket":"author_date"},"config":config,"identity_version":identity_version,"identities":identity_snapshot,"identity_aliases":aliases,"repository_scope_version":repository_scope_version,"source_insight_version":insight.version,"timezone":config.timezone,"preview":run.period_end>db::now(),"period_start":run.period_start,"period_end":run.period_end,"generated_at":db::now()});
+    let value = json!({"summary":metrics(&current,tz)?,"previous":metrics(&previous,tz)?,"trend":trend,"groups":groups,"commits":current,"coverage":{"complete":complete,"sources":source_json,"missing_repositories":missing,"identity_error":identity.identity_error,"date_filter":"author_date","date_bucket":"author_date"},"config":config,"identity_version":identity_version,"identities":identity_snapshot,"identity_aliases":aliases,"repository_scope_version":repository_scope_version,"source_insight_version":insight.version,"timezone":config.timezone,"preview":run.period_end>db::now(),"period_start":run.period_start,"period_end":run.period_end,"generated_at":db::now()});
     tx.commit().await?;
     Ok(value)
 }

@@ -597,22 +597,6 @@ def main():
                     'secret': remote.secret if auth_mode == 'ssh' else password}, status=201)['id']
                 connection_body['credential_id'] = credential
             connection = api(root + '/code-connections', connection_body, status=201)['id']
-            if os.environ.get('FERRY_TEST_CODE_REVIEWS') == '1':
-                import runpy
-                def create_review_resource(resource, body):
-                    return api(root + '/' + resource, body, status=201)['id']
-                review_checks = []
-                def review_check(label, condition, detail=''):
-                    assert condition, (label, detail)
-                    review_checks.append(label)
-                    print('PASS ' + label, flush=True)
-                context = dict(api=api, create=create_review_resource, check=review_check,
-                    workspace_ops=workspace, runner=host, cred=connection_body.get('credential_id',''),
-                    repo_url=source, commit=git('rev-parse','HEAD'), all_runs=[], windows=True,
-                    repository_file='file.py', repository_content='root\nnext')
-                runpy.run_path(str(Path(__file__).with_name('test-code-reviews-execution.py')))['accept'](context)
-                print(f'PASS: {len(review_checks)} actual Windows code review checks', flush=True)
-                return
             if monitor_mode:
                 exercise_monitor(work, api, eventually, git, repo, source, root, connection,
                     host, auth_mode, remote, processes, logs, environment, server, flags, origin, launch_log,

@@ -251,12 +251,6 @@ pub struct TriggerBody {
     branch: Option<String>,
     commit: Option<String>,
     environment_id: Option<String>,
-    /// Internal review claim, never forwarded to workflow inputs or scripts.
-    #[serde(default)]
-    review_lease_owner: Option<String>,
-    /// Immutable queued review template; authorized against the persisted snapshot.
-    #[serde(default)]
-    review_definition: Option<String>,
     /// workflow_dispatch inputs (strings, booleans or numbers).
     #[serde(default)]
     inputs: BTreeMap<String, Value>,
@@ -387,35 +381,13 @@ pub(crate) async fn trigger_with_analysis_source(
     };
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    if kind == "code-review" {
-        let review_job = body
-            .inputs
-            .get("review_job_id")
-            .and_then(Value::as_str)
-            .and_then(|value| value.parse::<i64>().ok())
-            .ok_or_else(ApiError::missing)?;
-        crate::pipelines::reviews::authorize_launch(
-            &tx,
-            i64::from(scope.workspace_id),
-            scope.user.id.into(),
-            i64::from(id),
-            review_job,
-            body.review_lease_owner.as_deref().unwrap_or_default(),
-            body.commit.as_deref().unwrap_or_default(),
-            body.review_definition.as_deref().unwrap_or_default(),
-        )
-        .await?;
-    }
     let mut p = pipelines::Entity::find_by_id(i64::from(id))
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
-    if kind == "code-review" {
-        p.definition = body
-            .review_definition
-            .clone()
-            .ok_or_else(ApiError::forbidden)?;
+    if crate::pipelines::reviews::migration::owns_pipeline(&tx, i64::from(id)).await? {
+        return Err(ApiError::missing());
     }
     if let Some((connection, url)) = source {
         let mut document = crate::pipelines::actions::document(&p.definition).ok_or_else(|| {
@@ -424,17 +396,6 @@ pub(crate) async fn trigger_with_analysis_source(
                 Message::new("execution.analysisActionsRequired"),
             )
         })?;
-        // Review templates own one checkout; instantiate it for this authorized
-        // repository without changing the saved pipeline or ordinary runs.
-        if kind == "code-review" {
-            if document.checkout_bindings.len() != 1 {
-                return Err(ApiError::localized(
-                    StatusCode::BAD_REQUEST,
-                    Message::new("execution.analysisSourceRequired"),
-                ));
-            }
-            document.checkout_bindings[0].connection_id = connection.to_string();
-        }
         let bindings: Vec<_> = document
             .checkout_bindings
             .iter_mut()
@@ -448,26 +409,7 @@ pub(crate) async fn trigger_with_analysis_source(
         }
         let binding = bindings.into_iter().next().unwrap();
         binding.repository_url = url;
-        binding.git_ref = if kind == "code-review" {
-            let sha = body
-                .commit
-                .as_deref()
-                .filter(|sha| {
-                    matches!(sha.len(), 40 | 64)
-                        && sha
-                            .bytes()
-                            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
-                })
-                .ok_or_else(|| {
-                    ApiError::localized(
-                        StatusCode::BAD_REQUEST,
-                        Message::new("execution.analysisSourceRequired"),
-                    )
-                })?;
-            sha.to_owned()
-        } else {
-            "+refs/heads/*:refs/remotes/origin/*".into()
-        };
+        binding.git_ref = "+refs/heads/*:refs/remotes/origin/*".into();
         // Keep the YAML step's declarative repository/ref consistent with its
         // connection binding (the validator rejects conflicting values).
         let mut yaml: serde_json::Value =

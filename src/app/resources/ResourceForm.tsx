@@ -178,7 +178,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       {...(workspaceEditor ? { editorMode, onEditorModeChange: setEditorMode } : {})}
       onChange={(value) => setDraft((d) => ({
         ...d,
-        ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, ""])),
+        ...Object.fromEntries((field.resetOnChange ?? []).map((key) => [key, Array.isArray(d[key]) || Array.isArray(config.blank[key]) ? [] : ""])),
         ...(["repository-source", "marketplace-repository", "actions-editor", "custom"].includes(field.type) ? value as Record<string, unknown> : { [field.key]: value }),
       }) as Partial<T>)}
     />

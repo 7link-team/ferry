@@ -57,7 +57,6 @@ export const nav: NavGroup[] = [
     get label() { return commonText("nav.build"); },
     items: [
       { key: "pipelines", get label() { return commonText("nav.pipelines"); }, resource: "pipelines", permission: "pipelines.read" },
-      { key: "code-reviews", get label() { return evidenceText("reviews"); }, resource: "code-reviews", permission: "code-reviews.read" },
       {key:"pipeline-groups",get label() { return commonText("table.groups"); },resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},
       {key:"pipeline-environments",get label() { return commonText("nav.environments"); },resource:"pipeline-environments",permission:"pipeline-environments.read",hidden:true,parent:"pipelines"},
       {key:"environment-variables",get label() { return commonText("nav.environmentVariables"); },resource:"variables",permission:"variables.read",params:{scope:"environment"},hidden:true,parent:"pipelines"},

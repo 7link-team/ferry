@@ -226,7 +226,6 @@ async fn main() -> anyhow::Result<()> {
         cfg.repository_analysis_concurrency,
         drain_rx.clone(),
     ));
-    let reviews_task = tokio::spawn(pipelines::reviews::scheduler(s.clone(), drain_rx.clone()));
     let report_state = s.clone();
     let mut report_stop = drain_rx.clone();
     let reports_task = tokio::spawn(async move {
@@ -277,7 +276,6 @@ async fn main() -> anyhow::Result<()> {
     // is what makes the Scope extractor the only way to obtain a workspace id.
     let workspace_api = Router::new()
         .merge(repositories::reports::routes())
-        .merge(pipelines::reviews::routes())
         .route(
             "/{workspace}/code-insights",
             get(repositories::analysis::insights::list)
@@ -736,7 +734,8 @@ async fn main() -> anyhow::Result<()> {
 
     let workspace_api = workspace_api
         .merge(resources::transfers::routes())
-        .merge(maintenance::files::routes());
+        .merge(maintenance::files::routes())
+        .fallback(|| async { error::ApiError::missing() });
 
     let draining = drain.subscribe();
     let app = Router::new()
@@ -834,7 +833,6 @@ async fn main() -> anyhow::Result<()> {
     runner_auto_update_task.await?;
     repository_monitor_task.await?;
     repository_analysis_task.await?;
-    reviews_task.await?;
     reports_task.await?;
     recovery_task.await?;
     cron_task.await?;

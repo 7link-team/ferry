@@ -1,4 +1,4 @@
-/** Real Chromium acceptance for the shared report/review forms and result pages. */
+/** Real Chromium acceptance for report forms and immutable result pages. */
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -12,7 +12,9 @@ const server = source
   ? await createServer({ server: { host: "127.0.0.1", port: 0, open: false } })
   : await preview({ preview: { host: "127.0.0.1", port: 0, proxy: {} } });
 if (source) await server.listen();
-const origin = server.resolvedUrls.local[0].replace(/\/$/, "");
+const origin = (
+  process.env.REPORTS_REVIEWS_UI_URL || server.resolvedUrls.local[0]
+).replace(/\/$/, "");
 const chrome =
   process.env.PLAYWRIGHT_CHROME_PATH ||
   "C:/Program Files/Google/Chrome/Application/chrome.exe";
@@ -25,7 +27,7 @@ const errors = [];
 const writes = [];
 page.on("pageerror", (e) => errors.push(e.message));
 const permissions = [
-  ...["insight-reports", "code-reviews"].flatMap((resource) =>
+  ...["insight-reports"].flatMap((resource) =>
     ["read", "create", "update", "delete", "generate", "run"].map(
       (action) => `${resource}.${action}`,
     ),
@@ -52,34 +54,6 @@ let report = {
   applications: [],
   timezone: "Asia/Kuala_Lumpur",
   enabled: true,
-  version: 1,
-};
-let review = {
-  id: "c",
-  name: "Release review",
-  description: "",
-  enabled: true,
-  trigger: "manual",
-  branch: "main",
-  repositories: [{ ...repositories[0], pipeline_id: "" }],
-  tests_enabled: true,
-  ai_enabled: false,
-  test_command: "npm test",
-  junit_path: "junit.xml",
-  runner_kind: "pool",
-  runner_ref: "",
-  runner_labels: [],
-  ai_endpoint: "",
-  ai_model: "",
-  ai_credential_id: "",
-  ai_timeout_seconds: 120,
-  ai_concurrency: 1,
-  ai_max_tokens: 4096,
-  max_files: 100,
-  max_bytes: 1048576,
-  include: [],
-  exclude: [],
-  pipeline_id: "p",
   version: 1,
 };
 const now = Date.now();
@@ -204,41 +178,6 @@ const runDay = {
     ],
   },
 };
-let reviewRun = {
-  id: "cr",
-  review_id: "c",
-  repository: "team/api",
-  base_sha: "aaa111",
-  head_sha: "bbb222",
-  state: "completed",
-  test_state: "failed",
-  ai_state: "completed_findings",
-  pipeline_run_id: "pr",
-  created_at: now,
-  coverage: {
-    scanned: ["src/main.ts"],
-    skipped: [{ file: "binary.png", reason: "binary" }],
-  },
-  test_summary: { total: 3, passed: 2, failed: 1 },
-  config_snapshot: {
-    name: "Release review",
-    ai_model: "gpt-example",
-    tests_enabled: true,
-  },
-};
-let finding = {
-  id: "f",
-  repository: "team/api",
-  severity: "high",
-  file: "src/main.ts",
-  line: 12,
-  message: "Unchecked user input",
-  suggestion: "Validate before passing to storage",
-  evidence: "request.body",
-  status: "open",
-  last_seen: now,
-  version: 1,
-};
 function envelope(items) {
   return { items, total: items.length, page: 1, page_size: 20 };
 }
@@ -256,18 +195,6 @@ await page.route("**/api/**", async (route) => {
     ) {
       report = { ...report, ...value };
       body = report;
-    } else if (
-      path === "/workspaces/2/code-reviews" ||
-      path === "/workspaces/2/code-reviews/c"
-    ) {
-      review = { ...review, ...value };
-      body = review;
-    } else if (path === "/workspaces/2/code-reviews/c/runs/cr/cancel") {
-      reviewRun = { ...reviewRun, state: "cancelling" };
-      body = reviewRun;
-    } else if (path.endsWith("/findings/f")) {
-      finding = { ...finding, ...value, version: finding.version + 1 };
-      body = finding;
     }
   } else if (path === "/me")
     body = {
@@ -319,13 +246,6 @@ await page.route("**/api/**", async (route) => {
     );
   } else if (path === "/workspaces/2/insight-reports/r") body = report;
   else if (path === "/workspaces/2/insight-reports") body = envelope([report]);
-  else if (path === "/workspaces/2/code-reviews/c/runs/cr") body = reviewRun;
-  else if (path === "/workspaces/2/code-reviews/c/runs")
-    body = envelope([reviewRun]);
-  else if (path === "/workspaces/2/code-reviews/c/findings")
-    body = envelope([finding]);
-  else if (path === "/workspaces/2/code-reviews/c") body = review;
-  else if (path === "/workspaces/2/code-reviews") body = envelope([review]);
   else if (path === "/workspaces/2/code-connections")
     body = envelope([
       {
@@ -440,34 +360,13 @@ try {
   );
   await page.getByText("Incomplete data", { exact: false }).first().waitFor();
   await page.getByText("Add login tests", { exact: true }).waitFor();
-  await page
-    .getByRole("region", { name: "Test and review evidence", exact: true })
-    .first()
-    .waitFor();
-  assert(
-    (
-      await page
-        .getByRole("region", { name: "Test and review evidence", exact: true })
-        .first()
-        .innerText()
-    ).includes("Tests failed"),
-  );
   assert.equal(
-    await page.locator("[data-list-toolbar]:visible").count(),
-    1,
-    "Overview has one shared top filter toolbar",
+    await page
+      .getByRole("region", { name: "Test and review evidence", exact: true })
+      .count(),
+    0,
   );
-  const toolbar = await page
-    .locator("[data-list-toolbar]:visible")
-    .boundingBox();
-  const metrics = await page
-    .getByRole("region", { name: "Test and review evidence", exact: true })
-    .first()
-    .boundingBox();
-  assert(
-    toolbar.y < metrics.y,
-    "Period/date controls precede overview evidence",
-  );
+  assert.equal(await page.locator("[data-list-toolbar]:visible").count(), 1);
   await native("Period", "day");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await page
@@ -527,164 +426,7 @@ try {
     path: output + "/report-desktop.png",
     fullPage: true,
   });
-  reviewRun = { ...reviewRun, state: "waiting" };
-  await goto("code-reviews/c");
-  await page.getByText("Waiting for Runner", { exact: true }).first().waitFor();
-  await page
-    .getByRole("button", { name: "Cancel run", exact: true })
-    .first()
-    .click();
-  await page
-    .getByRole("button", { name: "Confirm Cancel run", exact: true })
-    .click();
-  await page.getByText("Cancelling", { exact: true }).first().waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: "Cancel run", exact: true }).count(),
-    0,
-    "Cancelling jobs do not offer repeated cancellation",
-  );
-  reviewRun = { ...reviewRun, state: "cancelled" };
-  await page
-    .getByText("Cancelled", { exact: true })
-    .first()
-    .waitFor({ timeout: 12000 });
-  assert(
-    writes.some(
-      (write) =>
-        write.path.endsWith("/runs/cr/cancel") && write.method === "POST",
-    ),
-    "Cancellation uses the shared action dialog and backend job route",
-  );
-  reviewRun = { ...reviewRun, state: "waiting" };
-  await page.reload();
-  await page.getByText("Waiting for Runner", { exact: true }).first().waitFor();
-  reviewRun = { ...reviewRun, state: "running" };
-  await page
-    .getByText("Running", { exact: true })
-    .first()
-    .waitFor({ timeout: 12000 });
-  reviewRun = { ...reviewRun, state: "completed" };
-  await page
-    .getByText("Complete", { exact: true })
-    .first()
-    .waitFor({ timeout: 12000 });
-  await goto("code-reviews/c/edit");
-  await page.locator('input[name="name"]').fill("Release audit");
-  await native("Trigger", "push");
-  await page.getByRole("checkbox", { name: "AI audit", exact: true }).check();
-  await page
-    .locator('input[name="ai_endpoint"]')
-    .fill("https://api.example.invalid/v1/chat/completions");
-  await page.locator('input[name="ai_model"]').fill("gpt-example");
-  await native("Encrypted AI credential", "cred");
-  for (const [name, value] of Object.entries({
-    ai_timeout_seconds: 60,
-    ai_concurrency: 2,
-    ai_max_tokens: 3000,
-    max_files: 50,
-    max_bytes: 65536,
-  }))
-    await page.locator(`input[name="${name}"]`).fill(String(value));
-  await native("Runner placement", "host");
-  await native("Runner host / group", "host");
-  await page
-    .getByLabel("Runner labels (one per line)", { exact: true })
-    .fill("linux\namd64");
-  await page
-    .getByLabel("Included paths (one per line)", { exact: true })
-    .fill("src/**");
-  await page
-    .getByLabel("Excluded paths (one per line)", { exact: true })
-    .fill("vendor/**");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await page.waitForURL(/code-reviews(\?|$)/);
-  await goto("code-reviews/c");
-  assert(
-    writes.some(
-      (w) =>
-        w.path.endsWith("/code-reviews/c") &&
-        w.method === "PATCH" &&
-        w.value.ai_enabled &&
-        w.value.tests_enabled &&
-        w.value.runner_ref === "host",
-    ),
-  );
-  await page.getByText("Tests failed", { exact: true }).first().waitFor();
-  await page
-    .getByText("AI completed: findings", { exact: true })
-    .first()
-    .waitFor();
-  await page.getByText("binary.png", { exact: false }).waitFor();
-  await page.getByRole("tab", { name: "Findings", exact: true }).click();
-  await page.getByText("Unchecked user input", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "Fixed", exact: true }).click();
-  assert(
-    writes.some(
-      (w) => w.path.endsWith("/findings/f") && w.value.status === "fixed",
-    ),
-  );
-  await page.getByRole("tab", { name: "Overview", exact: true }).click();
-  await page.getByRole("button", { name: "Run review", exact: true }).click();
-  await page.getByLabel("Base SHA", { exact: true }).fill("aaa111");
-  await page.getByLabel("Target SHA", { exact: true }).fill("bbb222");
-  await page.getByLabel("Full repository scan", { exact: true }).check();
-  await page.getByRole("button", { name: /Confirm.*Run review/ }).click();
-  assert(
-    writes.some(
-      (w) =>
-        w.path.endsWith("/run") &&
-        w.value.full_scan &&
-        w.value.head_sha === "bbb222",
-    ),
-  );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await noOverflow();
-  await page.screenshot({
-    path: output + "/review-mobile.png",
-    fullPage: true,
-  });
-  for (const locale of ["zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"]) {
-    await page.goto(origin + `/${locale}/workspaces/2/insight-reports/r`);
-    await page.getByRole("tab").first().waitFor();
-    await noOverflow();
-    assert(
-      !(await page.locator("body").innerText()).includes(
-        "reports-reviews-domain:",
-      ),
-    );
-  }
-  await page.setViewportSize({ width: 1366, height: 900 });
-  await goto("code-reviews/new");
-  await page.locator('input[name="name"]').fill("New audit");
-  await page
-    .getByRole("checkbox", { name: "Automatic tests", exact: true })
-    .uncheck();
-  await page.getByRole("checkbox", { name: "AI audit", exact: true }).check();
-  await page
-    .locator('input[name="ai_endpoint"]')
-    .fill("https://api.example.invalid/v1/chat/completions");
-  await page.locator('input[name="ai_model"]').fill("gpt-example");
-  await native("Encrypted AI credential", "cred");
-  await native("Repository connection", "11");
-  await page
-    .getByLabel("Git repository URL", { exact: true })
-    .fill("https://git.example.invalid/team/api.git");
-  await page
-    .getByRole("button", { name: "Add repository", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.waitForURL(/code-reviews(\?|$)/);
-  assert(
-    writes.some(
-      (w) =>
-        w.path.endsWith("/code-reviews") &&
-        w.method === "POST" &&
-        !w.value.tests_enabled &&
-        w.value.ai_enabled &&
-        w.value.repositories.length === 1,
-    ),
-  );
-  for (const resource of ["insight-reports", "code-reviews"]) {
+  for (const resource of ["insight-reports"]) {
     await goto(resource);
     const row = page.getByRole("row").nth(1);
     await row.getByRole("button", { name: "Delete", exact: true }).click();
@@ -725,7 +467,7 @@ try {
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.setViewportSize({ width: 844, height: 390 });
-  await goto("code-reviews/c");
+  await goto("insight-reports/r");
   await noOverflow();
   assert.deepEqual(errors, []);
   await writeFile(
@@ -737,7 +479,7 @@ try {
     ),
   );
   console.log(
-    "PASS reports/reviews CRUD controls, scopes, run evidence, six locales and mobile viewport",
+    "PASS report CRUD controls, scopes, snapshots, charts and mobile viewport",
   );
 } catch (error) {
   console.error(errors);

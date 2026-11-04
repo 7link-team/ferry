@@ -31,6 +31,24 @@ beforeEach(() => {
   }));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("resets dependent arrays as arrays and scalar fields as strings before creating a resource", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/new");
+  const config = {
+    resource: "variables", heading: () => "Report",
+    blank: { source: "", author_keys: ["old"], applications: [], branch: "main" },
+    sections: [{ fields: [{ key: "source", label: "Source", type: "text" as const, resetOnChange: ["author_keys", "applications", "branch"] }] }],
+  };
+  await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["variables.create"])} />));
+  const input = host.querySelector<HTMLInputElement>('input[name="source"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "new-source");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const saved = requests.find((request) => request.method === "POST");
+  expect(saved).toBeDefined();
+  expect(JSON.parse(saved!.body!)).toMatchObject({ source: "new-source", author_keys: [], applications: [], branch: "" });
+});
 it("merges custom action field patches without nesting them or dropping sibling values", async () => {
   const action = vi.fn();
   await act(async () => root.render(<ResourceActionDialog workspace="ops" permissions={perms} row={{}} onClose={() => {}} onDone={() => {}} action={{
