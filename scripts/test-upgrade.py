@@ -166,6 +166,15 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # Existing hosts inherit the confirmed global update policy.
                     assert after['runner_auto_update'] == before[path].get('runner_auto_update', 'inherit')
                     before[path].setdefault('runner_auto_update', 'inherit')
+                    # This fixture never enrolled an agent; no reported version means
+                    # no available update. The field is additive, not persisted data.
+                    if 'agent_update_available' in after:
+                        assert after['agent_version'] == ''
+                        assert after['agent_update_available'] is False
+                        before[path]['agent_update_available'] = False
+                    if 'agent_update_state' in after:
+                        assert after['agent_update_state'] is None
+                        before[path]['agent_update_state'] = None
                     # Existing hosts stay private with one execution slot. These
                     # additive fields must not alter any persisted host data.
                     for key, default in {
