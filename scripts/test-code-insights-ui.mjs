@@ -21,9 +21,10 @@ import { chromium } from "playwright";
 const output = "data/maintenance/code-insights-ui";
 await mkdir(output, { recursive: true });
 const sourceMode = process.env.CODE_INSIGHTS_UI_SOURCE === "1";
-const server = sourceMode ? await createServer({ server: { host: "127.0.0.1", port: 0, open: false } }) : await preview({ preview: { host: "127.0.0.1", port: 0 } });
-if (sourceMode) await server.listen();
-const origin = server.resolvedUrls.local[0].replace(/\/$/, "");
+const liveOrigin = process.env.CODE_INSIGHTS_UI_URL;
+const server = liveOrigin ? undefined : sourceMode ? await createServer({ server: { host: "127.0.0.1", port: 0, open: false } }) : await preview({ preview: { host: "127.0.0.1", port: 0 } });
+if (sourceMode && server) await server.listen();
+const origin = (liveOrigin || server.resolvedUrls.local[0]).replace(/\/$/, "");
 const chrome =
   process.env.PLAYWRIGHT_CHROME_PATH ||
   "C:/Program Files/Google/Chrome/Application/chrome.exe";
@@ -453,6 +454,6 @@ try {
   );
 } finally {
   await browser.close();
-  if (sourceMode) await server.close();
-  else await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
+  if (sourceMode && server) await server.close();
+  else if (server) await new Promise((resolve, reject) => server.httpServer.close(error => error ? reject(error) : resolve()));
 }
