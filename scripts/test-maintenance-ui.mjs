@@ -167,7 +167,7 @@ try {
     await p.waitForURL(`**/workspaces/${workspace_tenant}/dictionaries`);
     const saved=JSON.parse((await get(root+'/dictionaries/'+dictionary.id)).value_json);
     assert.deepEqual(saved.map(option=>option.value),values.map(option=>option.value),key+' operational values preserved');
-    assert.equal(saved[selected].label,'UI '+key); assert.equal(saved[selected].color,'#123456');
+    assert.equal(saved[selected].labels?.['zh-CN'] ?? saved[selected].label,'UI '+key); assert.equal(saved[selected].color,'#123456');
   }
   const displayHost=(await get(root+'/nodes')).items.find(row=>row.name==='Dictionary host');
   const displayApp=await post(owner,root+'/deployments',{name:'Dictionary deployment',mode:'compose',target_kind:'host',target_ref:displayHost.id,workdir:'/tmp/state-dictionary',manifest:JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'nginx:alpine'}]})});

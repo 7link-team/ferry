@@ -58,7 +58,7 @@ pub(super) fn normalize(dictionary: &str, options: &mut Value) {
             dictionary,
             option["value"].as_str().unwrap_or_default(),
         ));
-        if let Some(labels) = option["labels"].as_object_mut() {
+        if let Some(labels) = option.get_mut("labels").and_then(Value::as_object_mut) {
             labels.retain(|locale, label| {
                 Locale::from_tag(locale).is_some_and(|locale| {
                     label.as_str() != Some(crate::i18n::render(locale, &message).as_str())
@@ -208,6 +208,13 @@ mod tests {
 
     #[test]
     fn custom_names_and_locale_overrides_do_not_change_state_values_or_colors() {
+        let literal = json!([{"value":"online","label":"Custom global name"}]);
+        let mut normalized = literal.clone();
+        normalize("host-state", &mut normalized);
+        assert_eq!(
+            normalized, literal,
+            "missing labels must not become null metadata"
+        );
         let raw = json!([{"value":"online","label":"Online","color":"#123456","labels":{"ja-JP":"Custom Japanese"}}]);
         let view = presentation("host-state", raw.clone());
         assert_eq!(view[0]["labels"]["ja-JP"], "Custom Japanese");

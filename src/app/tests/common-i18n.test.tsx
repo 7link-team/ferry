@@ -9,6 +9,7 @@ import type { FormConfig,ListConfig } from "../../shared/resources/types";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
 import { GroupSidebar } from "../pages/GroupSidebar";
+import { Invitation } from "../../features/workspaces/Invitation";
 
 let root: Root, host: HTMLDivElement;
 it("resolves namespace-qualified configuration messages containing spaces", async () => {
@@ -30,6 +31,28 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 const fill = async (input: HTMLInputElement, value: string) => act(async () => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+it("translates the complete invitation flow and updates existing feedback when the language changes", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({code:"fixture-invite"}), { headers: { "Content-Type": "application/json" } })));
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  await act(async () => root.render(<Invitation workspace="ops" />));
+  for (const locale of ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"] as const) {
+    await language(locale);
+    expect(host.querySelector("section")?.getAttribute("aria-label")).toBe(commonText("invitation.title"));
+    expect(host.textContent).toContain(commonText("invitation.help"));
+    const view = [...host.querySelectorAll("button")].find(button => button.textContent === commonText("invitation.view"))!;
+    await act(async () => view.click());
+    expect(host.querySelector<HTMLInputElement>("input")?.value).toBe("fixture-invite");
+    const rotate = [...host.querySelectorAll("button")].find(button => button.textContent === commonText("invitation.rotate"))!;
+    await act(async () => rotate.click());
+    expect(window.confirm).toHaveBeenLastCalledWith(commonText("invitation.rotateConfirm"));
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(commonText("invitation.rotated"));
+  }
+  await language("en-US");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe(commonText("invitation.rotated"));
+  expect(host.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+  vi.mocked(window.confirm).mockRestore();
 });
 
 it("uses translated All and Ungrouped labels without concatenating a resource noun in six languages", async () => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
 
@@ -14,9 +15,10 @@ try {
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname;
     let json = { items: [], total: 0, page: 1, page_size: 20 };
-    if (path === '/api/me') json = { user: { id: '1', name: 'Tester', email: 'tester@example.invalid' }, workspaces: [{ id: '1', slug: 'ops', name: 'Workspace', permissions: ['hosts.read', 'pipelines.read', 'host-groups.read', 'pipeline-groups.read'] }] };
+    if (path === '/api/me') json = { user: { id: '1', name: 'Tester', email: 'tester@example.invalid' }, workspaces: [{ id: '1', slug: 'ops', name: 'Workspace', permissions: ['hosts.read', 'pipelines.read', 'host-groups.read', 'pipeline-groups.read', 'members.read', 'members.create'] }] };
     else if (path === '/api/setup') json = { required: false };
     else if (path.endsWith('/preferences')) { preferenceReads++; json = { default_page_size: 20, dictionaries: {} }; }
+    else if (path.endsWith('/members/invitation')) json = { code: 'fixture-invite' };
     else if (path.endsWith('/nodes') && !pendingNodes) { pendingNodes = route; return; }
     await route.fulfill({ json });
   });
@@ -55,6 +57,18 @@ try {
   assert.ok(box.x >= 0 && box.x + box.width <= 375);
   assert.deepEqual(errors, []);
   console.log('PASS workspace preference reuse, native navigation, All/Ungrouped, loading skeletons, empty/filter illustrations, six themes and 375px layout');
+  const catalogs = JSON.parse(await readFile(new URL('../src/shared/i18n/locales/common-domain.json', import.meta.url), 'utf8'));
+  for (const [locale, messages] of Object.entries(catalogs)) {
+    await page.goto(`${origin}/${locale}/workspaces/1/members`);
+    const invitation = page.getByRole('region', { name: messages['invitation.title'], exact: true });
+    await invitation.getByRole('button', { name: messages['invitation.view'], exact: true }).click();
+    assert.equal(await invitation.locator('input').inputValue(), 'fixture-invite');
+    assert.ok((await invitation.innerText()).includes(messages['invitation.help']));
+    assert.equal(await invitation.getByRole('button', { name: messages['invitation.copy'], exact: true }).count(), 1);
+    assert.equal(await invitation.getByRole('button', { name: messages['invitation.rotate'], exact: true }).count(), 1);
+  }
+  assert.deepEqual(errors, []);
+  console.log('PASS invitation title, help, controls and code loading in all six languages at 375px');
 } finally {
   await browser?.close();
   await new Promise(resolve => server.httpServer.close(resolve));

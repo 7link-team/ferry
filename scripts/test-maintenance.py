@@ -120,6 +120,9 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
             request(owner,state_url,method='DELETE',expected=400)
             state_options.reverse()
             state_options[0].update(label='Custom '+key,color='#123456')
+            # Editing the default name makes this a literal workspace alias;
+            # generated default translations are read-time presentation metadata.
+            state_options[0].pop('labels', None)
             request(owner,state_url,dict(state_body,items=json.dumps(state_options)),'PATCH')
             check(request(guest,root+'/preferences')['dictionaries'][key] == state_options, key+' exposes labels colors and order to members')
             other_options = request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries'][key]
@@ -128,6 +131,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         builtin=next(r for r in request(owner,root+'/dictionaries')['items'] if r['key']=='host-state')
         built=request(owner,root+'/dictionaries/'+builtin['id'])
         changed=json.loads(built['items']);changed[0]['label']='Connected';changed[0]['color']='#12Ab34'
+        changed[0].pop('labels', None)
         request(owner,root+'/dictionaries/'+builtin['id'],dict(built,items=json.dumps(changed)),'PATCH')
         check(request(guest,root+'/preferences')['dictionaries']['host-state'][0]['label']=='Connected','dictionary labels consumed by member preferences')
         check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'batched preferences preserve every state value, label and position')

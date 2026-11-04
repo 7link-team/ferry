@@ -777,6 +777,8 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .filter(|p| {
                 p.starts_with("marketplace-sources.")
                     || p.starts_with("code-insights.")
+                    || p.starts_with("insight-reports.")
+                    || p.starts_with("code-reviews.")
                     || p.starts_with("config-templates.")
                     || p.starts_with("pipeline-groups.")
                     || p.starts_with("pipeline-environments.")
@@ -1191,7 +1193,11 @@ mod tests {
         let mut legacy = Vec::new();
         for (index, (key, label)) in BUILTIN.iter().enumerate() {
             let mut permissions = builtin_permissions(key);
-            permissions.retain(|permission| !permission.starts_with("code-insights."));
+            permissions.retain(|permission| {
+                !["code-insights.", "insight-reports.", "code-reviews."]
+                    .iter()
+                    .any(|prefix| permission.starts_with(prefix))
+            });
             permissions.push("legacy.existing.read".into());
             let role = workspace_roles::ActiveModel {
                 id: Set(100 + index as i64),
@@ -1241,6 +1247,19 @@ mod tests {
                 "viewer" => expected.push("code-insights.read".into()),
                 "operator" => {}
                 _ => unreachable!(),
+            }
+            for (resource, action) in [("insight-reports", "generate"), ("code-reviews", "run")] {
+                match *key {
+                    "owner" | "admin" | "developer" => {
+                        expected.extend(
+                            ["read", "create", "update", "delete", action]
+                                .map(|verb| format!("{resource}.{verb}")),
+                        );
+                    }
+                    "viewer" => expected.push(format!("{resource}.read")),
+                    "operator" => {}
+                    _ => unreachable!(),
+                }
             }
             assert_eq!(
                 permissions.iter().collect::<HashSet<_>>(),

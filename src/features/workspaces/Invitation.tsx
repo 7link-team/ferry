@@ -1,25 +1,29 @@
 import { useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { AutoField } from "../../shared/forms/auto-form";
+import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 
 export function Invitation({ workspace }: { workspace: string }) {
+  useCommonTranslation();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageKey, setMessageKey] = useState("");
   const load = async (rotate: boolean) => {
-    if (rotate && !window.confirm("重新生成邀请码后，旧邀请码立即失效。继续？"))
+    if (rotate && !window.confirm(commonText("invitation.rotateConfirm")))
       return;
     setBusy(true);
     setMessage("");
+    setMessageKey("");
     try {
       const value = await api<{ code: string }>(
         `/workspaces/${workspace}/members/invitation`,
         { method: rotate ? "POST" : "GET", cache: "no-store" },
       );
       setCode(value.code);
-      if (rotate) setMessage("已生成新邀请码，旧邀请码已失效。");
+      if (rotate) setMessageKey("invitation.rotated");
     } catch (cause) {
       setMessage(errorText(cause));
     } finally {
@@ -29,7 +33,7 @@ export function Invitation({ workspace }: { workspace: string }) {
   return (
     <section
       className="mb-3 space-y-2 rounded-md border p-3"
-      aria-label="邀请成员"
+      aria-label={commonText("invitation.title")}
     >
       <div className="flex flex-wrap items-end gap-2">
         <Button
@@ -37,11 +41,11 @@ export function Invitation({ workspace }: { workspace: string }) {
           disabled={busy}
           onClick={() => void load(false)}
         >
-          查看邀请码
+          {commonText("invitation.view")}
         </Button>
         {code && (
           <>
-            <AutoField label="邀请码" className="text-sm">
+            <AutoField label={commonText("auth.invitation")} className="text-sm">
               <Input readOnly value={code} />
             </AutoField>
             <Button
@@ -49,30 +53,32 @@ export function Invitation({ workspace }: { workspace: string }) {
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(code);
-                  setMessage("邀请码已复制。");
+                  setMessage("");
+                  setMessageKey("invitation.copied");
                 } catch {
-                  setMessage("复制失败，请手动复制邀请码。");
+                  setMessage("");
+                  setMessageKey("invitation.copyFailed");
                 }
               }}
             >
-              复制邀请码
+              {commonText("invitation.copy")}
             </Button>
             <Button
               variant="outline"
               disabled={busy}
               onClick={() => void load(true)}
             >
-              重新生成邀请码
+              {commonText("invitation.rotate")}
             </Button>
           </>
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        对方登录后，在工作空间菜单选择“创建/加入工作空间”，填写邀请码即可加入，初始角色为只读。
+        {commonText("invitation.help")}
       </p>
-      {message && (
+      {(message || messageKey) && (
         <p role="status" className="text-sm">
-          {message}
+          {messageKey ? commonText(messageKey) : message}
         </p>
       )}
     </section>
