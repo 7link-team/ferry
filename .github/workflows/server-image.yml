@@ -66,6 +66,7 @@ jobs:
       - name: Verify initialization, the embedded web UI and a persistent restart
         run: node .github/scripts/smoke-server-image.mjs ferry-server:check
       - name: Push the verified architecture
+        shell: bash
         env:
           IMAGE: ghcr.io/${{ github.repository }}-server
           ARCH: ${{ matrix.arch }}
