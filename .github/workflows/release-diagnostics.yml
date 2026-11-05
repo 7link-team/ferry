@@ -19,6 +19,6 @@ jobs:
               const lines=text.split('\n');
               const selected=new Set();
               lines.forEach((line,index)=>{if(/assert|traceback|error:|failed|expected|exception|panic/i.test(line))for(let n=Math.max(0,index-3);n<=Math.min(lines.length-1,index+7);n++)selected.add(n);});
-              const excerpt=[...selected].sort((a,b)=>a-b).map(n=>lines[n]).join('\n').slice(-45000);
+              const excerpt=[...selected].sort((a,b)=>a-b).map(n=>lines[n]).join('\n').slice(-3500);
               core.notice(excerpt||lines.slice(-80).join('\n'),{title:`Release gate job ${job_id}`});
             }
