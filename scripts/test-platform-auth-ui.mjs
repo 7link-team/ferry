@@ -77,10 +77,12 @@ try {
  await page.getByRole('columnheader',{name:'最后登录时间',exact:false}).waitFor();
  await page.getByText('127.0.0.1',{exact:true}).waitFor();
  await page.screenshot({path:join(work,'accounts.png')});
- await page.goto(origin+'/zh-CN/platform/settings/1/edit');
- await page.getByLabel('系统版本',{exact:true}).waitFor();
- assert.equal(await page.getByLabel('系统版本',{exact:true}).inputValue(),status.version);
+ await page.goto(origin+'/zh-CN/platform/monitor/server-nodes');
+ await page.getByRole('cell').filter({hasText:status.version}).first().waitFor();
+ assert((await page.getByRole('cell').filter({hasText:status.version}).first().innerText()).includes(status.version));
  await page.screenshot({path:join(work,'system-info.png')});
+ await page.goto(origin+'/zh-CN/platform/settings/1/edit');
+ assert.equal(await page.getByLabel('系统版本',{exact:true}).count(),0,'versions belong to individual server nodes');
  await page.getByRole('button',{name:'页脚设置',exact:true}).click();
  const richEditor=page.locator('[data-slate-editor]');
  await richEditor.waitFor();await richEditor.fill('© 2026 Example · contact@example.invalid');
@@ -120,7 +122,8 @@ try {
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  report.checks.push('footer rich text and advanced HTML save; public allowlist response; admin-only write; limits/unknown-setting preservation; script removal; mobile/form/canvas layout');
  // Active logout clears the target and browser Back cannot expose a protected URL.
- await page.getByRole('button',{name:'退出登录',exact:true}).click();
+ await page.getByRole('button',{name:/ · Admin$/}).click();
+ await page.getByRole('menuitem',{name:'退出登录',exact:true}).click();
  await page.waitForURL(origin+'/zh-CN/login');
  await footer.getByRole('link',{name:'示例备案号',exact:true}).waitFor();
  assert.equal(new URL(page.url()).search,'');
@@ -157,7 +160,7 @@ try {
  assert.deepEqual(errors,[]);
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  await patchSettings({footer_html:''});await page.reload();
- await page.getByRole('button',{name:'退出登录',exact:true}).waitFor();
+ await page.getByRole('button',{name:/ · Admin$/}).waitFor();
  assert.equal(await footer.count(),0,'empty footer must not consume layout space');
  assert.deepEqual(await api(anonymous,'/platform/footer'),{content:''});
  report.checks.push('configured footer remains on login; clearing footer removes its entire layout row');
@@ -182,7 +185,8 @@ try {
  await page.waitForFunction(()=>window.customScriptRuns===1&&window.otherSdkLoaded&&window.gaSdkLoaded);
  await page.waitForTimeout(200);assert.equal(collectRequests,1);assert.equal(gaRequests,1);assert.equal(sdkRequests,1);
  const nonce=await page.locator('script[data-platform-scripts]').evaluate(node=>node.nonce);assert(nonce.length>=32);
- await page.getByRole('button',{name:'退出登录',exact:true}).click();await page.waitForURL(/\/login$/);
+ await page.getByRole('button',{name:/ · Admin$/}).click();
+ await page.getByRole('menuitem',{name:'退出登录',exact:true}).click();await page.waitForURL(/\/login$/);
  assert.equal(await page.evaluate(()=>window.customScriptRuns),1);assert.equal(sdkRequests,1,'SPA navigation must not reinject');
  await page.reload();await page.waitForFunction(()=>window.customScriptRuns===1&&window.otherSdkLoaded&&window.gaSdkLoaded);
  assert.notEqual(await page.locator('script[data-platform-scripts]').evaluate(node=>node.nonce),nonce);

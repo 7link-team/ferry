@@ -39,7 +39,7 @@ try {
   const root = `/workspaces/${ws}`;
   const p = await context.newPage();
   const errors = [];
-  p.on('pageerror', error => errors.push(error.message));
+  p.on('pageerror', error => errors.push(error.stack || error.message));
   const canvas = () => p.locator('[aria-label="流水线画布"]');
   const name = 'YAML template';
   const setYaml = async (scope, value) => {

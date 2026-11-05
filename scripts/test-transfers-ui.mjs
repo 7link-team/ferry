@@ -11,11 +11,11 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 // This acceptance loop uses resource/params only; translated label getters stay lazy.
 const navSource = await readFile(new URL('../src/app/nav.ts', import.meta.url), 'utf8');
 let isolatedNav = navSource;
-for (const [labelImport, binding] of [
-  ['import { commonText } from "../shared/i18n/i18n";', 'commonText'],
+for (const [labelImport, replacement] of [
+  ['import { commonText, workflowText } from "../shared/i18n/i18n";', 'const commonText = (key: string) => key; const workflowText = (key: string) => key;'],
 ]) {
-  assert(isolatedNav.includes(labelImport), `navigation label import is explicitly isolated: ${binding}`);
-  isolatedNav = isolatedNav.replace(labelImport, `const ${binding} = (key: string) => key;`);
+  assert(isolatedNav.includes(labelImport), `navigation label import is explicitly isolated: ${labelImport}`);
+  isolatedNav = isolatedNav.replace(labelImport, replacement);
 }
 const navModule = ts.transpileModule(isolatedNav, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },

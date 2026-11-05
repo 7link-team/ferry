@@ -74,7 +74,7 @@ try {
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/alert-rules`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('Offline browser');
-  await p.getByLabel('目标主机',{exact:false}).click();
+  await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
   await p.getByRole('option',{name:'Cron UI runner',exact:true}).click();
   await p.getByRole('checkbox',{name:'启用',exact:true}).click();
   await p.getByRole('button',{name:'创建',exact:true}).click();

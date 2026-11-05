@@ -48,20 +48,20 @@ try {
   const config = await post(owner, root+'/config-templates', {name:'app-conf',content:'enabled=true\n',parameters:'[]'});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new`);
   await p.getByRole('textbox',{name:/^名称/}).fill('Visual application');
-  await p.getByLabel('目标主机',{exact:false}).click();
+  await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
   await p.getByRole('option',{name:'Manifest host',exact:true}).click();
   const editor = p.getByRole('region',{name:'应用配置编辑器',exact:true});
   assert.equal(await editor.getByLabel('应用配置源码（YAML / JSON）').count(),0);
   assert.equal(await editor.locator('[draggable="true"]').count(),0);
   assert.equal(await editor.getByRole('button',{name:/上移|下移|拖动/}).count(),0);
-  await editor.getByLabel('应用标识',{exact:false}).fill('visual-app');
+  await editor.getByLabel('应用标识',{exact:true}).fill('visual-app');
   const service = index => editor.getByRole('region',{name:`服务 ${index}`,exact:true});
-  await service(1).getByLabel('镜像',{exact:false}).fill('nginx:stable');
+  await service(1).getByLabel('镜像',{exact:true}).fill('nginx:stable');
   await service(1).getByLabel('主机发布端口',{exact:true}).fill('8090');
   await service(1).getByRole('button',{name:'添加环境变量',exact:true}).click();
   await service(1).getByLabel('变量名称',{exact:true}).fill('TOKEN');
   await service(1).getByLabel('取值方式',{exact:true}).selectOption('reference');
-  await service(1).getByLabel('变量引用',{exact:false}).fill('variable/token');
+  await service(1).getByLabel('变量引用',{exact:true}).fill('variable/token');
   await service(1).getByRole('button',{name:'添加数据卷',exact:true}).click();
   await service(1).getByLabel('卷名称',{exact:true}).fill('data');
   await service(1).getByLabel('挂载绝对路径',{exact:true}).fill('/var/data');
@@ -69,16 +69,16 @@ try {
   await service(1).getByLabel('文件绝对路径',{exact:true}).fill('/etc/app.conf');
   await service(1).getByLabel('配置文件模板 ID 或名称',{exact:true}).fill(config.id);
   await service(1).getByText('高级配置：命令、依赖、健康检查与资源限制',{exact:true}).click();
-  await service(1).getByLabel('CPU 上限',{exact:false}).fill('500m');
-  await service(1).getByLabel('内存上限',{exact:false}).fill('256Mi');
+  await service(1).getByLabel('CPU 上限',{exact:true}).fill('500m');
+  await service(1).getByLabel('内存上限',{exact:true}).fill('256Mi');
   await service(1).getByRole('checkbox',{name:'就绪检查（HTTP）',exact:true}).check();
   await editor.getByRole('button',{name:'添加服务',exact:true}).click();
   await service(2).getByLabel('服务名称',{exact:true}).fill('cache');
-  await service(2).getByLabel('镜像',{exact:false}).fill('redis:7');
+  await service(2).getByLabel('镜像',{exact:true}).fill('redis:7');
   await service(1).getByRole('checkbox',{name:'cache',exact:true}).check();
   await service(2).getByLabel('服务名称',{exact:true}).fill('redis');
   await editor.getByRole('button',{name:'源码编辑',exact:true}).click();
-  const source = editor.getByLabel('应用配置源码（YAML / JSON）');
+  const source = editor.getByRole('textbox',{name:'应用配置源码（YAML / JSON）',exact:true});
   let manifest = parse(await source.inputValue());
   assert.deepEqual(manifest.services.map(s=>s.name),['web','redis']);
   assert.deepEqual(manifest.services[0].dependsOn,['redis']);
@@ -100,7 +100,7 @@ try {
   manifest.overrides = {compose:{services:{web:{restart:'unless-stopped'}}}};
   await source.fill('# preserve this comment\n'+JSON.stringify(manifest,null,2));
   await editor.getByRole('button',{name:'表单编辑',exact:true}).click();
-  await service(1).getByLabel('镜像',{exact:false}).fill('nginx:alpine');
+  await service(1).getByLabel('镜像',{exact:true}).fill('nginx:alpine');
   const save = p.waitForResponse(r=>r.url().endsWith('/deployments')&&r.request().method()==='POST');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   const saved = await save; assert.equal(saved.status(),201,await saved.text());
@@ -113,7 +113,7 @@ try {
   assert(saved.request().postDataJSON().manifest.includes('# preserve this comment'));
   console.log('PASS form creates real multi-service deployment with ports, secret references, volumes, files, health/resources and dependencies');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${created.id}/edit`);
-  await service(1).getByLabel('镜像',{exact:false}).fill('nginx:stable');
+  await service(1).getByLabel('镜像',{exact:true}).fill('nginx:stable');
   await editor.getByText('应用高级配置：更新策略、标签与模式覆盖',{exact:true}).click();
   await editor.getByLabel('应用标签（JSON 对象）',{exact:true}).fill('{');
   await p.waitForFunction(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='保存')?.disabled);
@@ -132,8 +132,8 @@ try {
   assert.equal(typeof stored.manifest,'string'); // server persists its existing canonical JSON format
   console.log('PASS source/form round trip, malformed source/JSON blocks save, dependency references preserved, edit persists');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${created.id}/edit`);
-  await service(1).getByLabel('镜像',{exact:false}).waitFor();
-  assert.equal(await service(1).getByLabel('镜像',{exact:false}).inputValue(),'nginx:stable');
+  await service(1).getByLabel('镜像',{exact:true}).waitFor();
+  assert.equal(await service(1).getByLabel('镜像',{exact:true}).inputValue(),'nginx:stable');
   await service(1).getByRole('heading',{level:3}).evaluate(el=>el.scrollIntoView({block:'start'}));
   await p.screenshot({path:'/tmp/manifest-form-desktop.png',fullPage:false});
   await p.setViewportSize({width:390,height:844});
@@ -147,7 +147,7 @@ try {
     await p.getByRole('textbox',{name:/^名称/}).fill(`Form ${mode}`);
     await p.getByRole('combobox',{name:/^部署模式/}).click();
     await p.getByRole('option',{name:label,exact:true}).click();
-    await p.getByLabel('目标主机',{exact:false}).click();
+    await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
     await p.getByRole('option',{name:'Manifest host',exact:true}).click();
     if(mode==='native') {
       await service(1).getByLabel('运行来源',{exact:true}).selectOption('artifact');
@@ -155,7 +155,7 @@ try {
       await service(1).getByLabel('流水线',{exact:true}).click();
       await p.getByRole('option',{name:'Artifact pipeline',exact:true}).click();
       // The build picker reloads for the chosen pipeline; wait until it settles.
-      await service(1).getByLabel('固定构建',{exact:true}).filter({hasText:'最新成功构建'}).waitFor();
+      await service(1).getByRole('combobox',{name:'固定构建',exact:true}).filter({hasText:'最新成功构建'}).waitFor();
       await service(1).getByLabel('产物相对路径',{exact:true}).fill('bin/server');
       await service(1).getByRole('button',{name:'删除端口 1',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除端口',exact:true}).click();

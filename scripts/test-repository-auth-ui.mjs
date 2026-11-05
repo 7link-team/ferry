@@ -154,7 +154,7 @@ try {
     assert.equal(await platform.getByLabel(`替换${name} ${secretLabel}（不勾选则保留原值）`,{exact:true}).count(),0,'unset secret needs no replace checkbox');
   }
   await platform.getByRole('tab',{name:'GitHub',exact:true}).click();
-  await platform.getByLabel('启用 GitHub 网页授权',{exact:true}).check();
+  await platform.getByRole('checkbox',{name:'启用 GitHub 网页授权',exact:true}).check();
   await platform.getByLabel('GitHub Client ID',{exact:true}).fill('fixture-client-id');
   await platform.getByLabel('GitHub Client Secret',{exact:true}).fill('fixture-client-secret');
   await platform.getByLabel('GitHub 网站地址',{exact:true}).fill(providerOrigin);
@@ -169,7 +169,7 @@ try {
   assert.equal(await platform.evaluate(()=>navigator.clipboard.readText()),origin+'/api/repository-providers/callback');
   await platform.getByRole('navigation',{name:'配置分类'}).getByRole('button',{name:'主机代理',exact:true}).click();
   assert.equal(await platform.getByRole('heading',{name:'主机代理',exact:true}).count(),1,'HostAgent is the settings category; auto-upgrade is a field');
-  await platform.getByLabel('主机代理 默认自动升级',{exact:true}).waitFor();
+  await platform.getByRole('checkbox',{name:'主机代理 默认自动升级',exact:true}).waitFor();
   for (const theme of ['modern','business','eyeCare','pinkKawaii','neoBrutalism','custom']) {
     for (const dark of [false,true]) {
       await platform.evaluate(({theme,dark})=>{document.documentElement.dataset.theme=theme;document.documentElement.classList.toggle('dark',dark);},{theme,dark});
@@ -184,8 +184,8 @@ try {
   assert.equal(await p.getByRole('link',{name:'平台授权',exact:true}).count(),0);
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await chooseNative(p.getByLabel('代码平台',{exact:true}), 'github');
-  await p.getByLabel(/^连接名称/).fill('Preserved draft');
-  await p.getByLabel(/^备注/).fill('Keep this during OAuth');
+  await p.getByRole('textbox',{name:/^连接名称/}).fill('Preserved draft');
+  await p.getByRole('textbox',{name:/^备注/}).fill('Keep this during OAuth');
   assert.equal(await p.getByLabel(/^默认分支/).count(),0,'connections do not own a default branch');
   assert.equal(await p.getByLabel('选择平台仓库',{exact:true}).count(),0,'connections do not select one repository');
   await p.waitForFunction(()=>document.querySelector('select[aria-label="平台授权方式"] option[value="web"]')?.disabled===false);
@@ -205,8 +205,8 @@ try {
 
   // Reauthorization updates this named connection, preserving its ID and credential references.
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${oauthConnection.id}/edit`);
-  await p.getByLabel(/^连接名称/).fill('Reauthorized connection');
-  await p.getByLabel(/^备注/).fill('Saved during reauthorization');
+  await p.getByRole('textbox',{name:/^连接名称/}).fill('Reauthorized connection');
+  await p.getByRole('textbox',{name:/^备注/}).fill('Saved during reauthorization');
   const reauthPopupPromise=p.waitForEvent('popup');
   await p.getByRole('button',{name:'重新网页授权',exact:true}).click();
   const reauthPopup=await reauthPopupPromise;
@@ -220,7 +220,7 @@ try {
   const invalidCredential=await post(owner,root+'/credentials',{name:'Invalid platform PAT',kind:'token',username:'browser-authorized-user',secret:'invalid-token',description:''});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await chooseNative(p.getByLabel('代码平台',{exact:true}), 'gitee');
-  await p.getByLabel(/^连接名称/).fill('Gitee connection');
+  await p.getByRole('textbox',{name:/^连接名称/}).fill('Gitee connection');
   await chooseNative(p.getByLabel('凭据',{exact:true}), invalidCredential.id);
   assert.equal(await p.locator('input[type="password"]').count(),0,'connection form never copies credential secrets');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
@@ -235,15 +235,15 @@ try {
   const credentialPopupPromise=p.waitForEvent('popup');
   await p.getByRole('link',{name:'新建凭据',exact:true}).click();
   const credentialPage=await credentialPopupPromise;credentialPage.on('pageerror',error=>errors.push(error.message));
-  await credentialPage.getByLabel(/^名称/).fill('Reusable Gitee PAT');
+  await credentialPage.getByRole('textbox',{name:/^名称/}).fill('Reusable Gitee PAT');
   await credentialPage.getByRole('combobox',{name:/类型/}).click();await credentialPage.getByRole('option',{name:'访问令牌',exact:true}).click();
-  await credentialPage.getByLabel(/^账号/).fill('browser-authorized-user');
-  await credentialPage.getByLabel(/^内容/).fill('valid-personal-token');
+  await credentialPage.getByRole('textbox',{name:/^账号/}).fill('browser-authorized-user');
+  await credentialPage.getByRole('textbox',{name:/^内容/}).fill('valid-personal-token');
   await credentialPage.getByRole('button',{name:'创建',exact:true}).click();await credentialPage.waitForURL(`**/workspaces/${workspace_tenant}/credentials?scope=build`);
   const credentialRows=await (await owner.request.get(`${origin}/api${root}/credentials?scope=build`)).json();
   const personalCredential=credentialRows.items.find(row=>row.name==='Reusable Gitee PAT');assert(personalCredential);assert(!('secret' in personalCredential));assert(personalCredential.has_secret);
   await credentialPage.close();
-  assert.equal(await p.getByLabel(/^连接名称/).inputValue(),'Gitee connection');assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
+  assert.equal(await p.getByRole('textbox',{name:/^连接名称/}).inputValue(),'Gitee connection');assert.equal(await p.getByLabel('平台网站地址',{exact:true}).inputValue(),providerOrigin);
   await p.getByRole('button',{name:'刷新凭据',exact:true}).click();
   await chooseNative(p.getByLabel('凭据',{exact:true}), personalCredential.id);
   await p.setViewportSize({width:390,height:844});
@@ -260,7 +260,7 @@ try {
 
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
   await chooseNative(p.getByLabel('代码平台',{exact:true}), 'codeup');
-  await p.getByLabel(/^连接名称/).fill('Codeup private checkout');
+  await p.getByRole('textbox',{name:/^连接名称/}).fill('Codeup private checkout');
   await chooseNative(p.getByLabel('凭据',{exact:true}), personalCredential.id);
   await p.getByLabel('Codeup 组织 ID',{exact:true}).fill('test-org');
   await p.getByText('平台接入地址（自建平台时填写）',{exact:true}).click();
@@ -339,7 +339,7 @@ try {
   assert.equal(await p.getByLabel('凭据',{exact:true}).locator('option').filter({hasText:'Application only'}).count(),0);
   await p.getByLabel('Git 仓库地址（可选）',{exact:true}).fill(providerOrigin+'/generic.git');
   await chooseNative(p.getByLabel('凭据',{exact:true}), passwordCredential.id);
-  await p.getByLabel(/^连接名称/).fill('Generic with password');
+  await p.getByRole('textbox',{name:/^连接名称/}).fill('Generic with password');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.waitForURL(`**/workspaces/${workspace_tenant}/code-connections`);
   rows=await (await owner.request.get(`${origin}/api${root}/code-connections`)).json();
@@ -355,13 +355,14 @@ try {
   }
   await p.setViewportSize({width:1280,height:900});
   await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/new`);
-  await p.getByLabel('流水线名称').fill('Build from connection');
+  await p.getByRole('textbox',{name:'流水线名称',exact:true}).fill('Build from connection');
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);
   await p.locator('.react-flow__node[data-id="build"]').getByRole('button',{name:'任务 1',exact:true}).click();
   await chooseNative(p.getByLabel('任务执行器',{exact:true}), buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
-  await chooseNative(p.getByLabel('步骤类型'), 'checkout');
+  await chooseNative(p.getByLabel('步骤类型',{exact:true}), 'action');
+  await p.getByRole('textbox',{name:'Action 引用',exact:true}).fill('actions/checkout@v4');
   await chooseNative(p.getByLabel('仓库连接',{exact:true}), codeupConnection.id);
   await chooseNative(p.getByLabel('节点仓库',{exact:true}), providerOrigin+'/test-org/team/test-repo.git');
   assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),'');
@@ -369,12 +370,12 @@ try {
   await p.getByRole('button',{name:'加载更多分支',exact:true}).click();
   await p.locator('datalist option[value="release/test"]').waitFor({state:'attached'});
   await p.getByLabel('分支 / 标签 / Commit',{exact:true}).fill(sourceCommit);
-  assert.equal(await p.getByLabel('流水线名称').inputValue(),'Build from connection');
-  await p.getByRole('tab',{name:'YAML',exact:true}).click();
+  assert.equal(await p.getByRole('textbox',{name:'流水线名称',exact:true}).inputValue(),'Build from connection');
+  await p.getByRole('tab',{name:'高级 YAML',exact:true}).click();
   const definition=parseDocument(await readYaml());
   const steps=definition.toJS().jobs.build.steps;
   const checkout=steps.find(step=>step.uses==='actions/checkout@v4'),command=steps.find(step=>step.run);
-  assert(checkout?.id,'checkout configuration assigns a stable step ID');assert.equal(command.run,'echo hello');
+  assert(checkout?.id,'checkout configuration assigns a stable step ID');assert.equal(command.run,'echo "CI_${{ github.job }}_STEP_1"');
   definition.setIn(['jobs','build','steps'],[checkout,{...command,run:'sh build.sh'},{uses:'actions/upload-artifact@v4',with:{name:'result',path:'output/result.txt','if-no-files-found':'error'}}]);
   await setYaml(definition.toString());
   await p.getByRole('button',{name:'保存',exact:true}).click();
@@ -398,7 +399,7 @@ try {
   assert.equal(result.artifacts.length,1);
   const archive=await owner.request.get(origin+'/api'+root+'/pipeline-artifacts/'+result.artifacts[0].id+'/content');
   assert(archive.ok());
-  const content=execFileSync(process.env.PYTHON_BINARY||'python3',['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
+  const content=execFileSync(process.env.PYTHON_BINARY||(process.platform==='win32'?'python':'python3'),['-c','import io,sys,zipfile;sys.stdout.buffer.write(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read("result.txt"))'],{input:await archive.body(),windowsHide:true}).toString();
   assert.equal(content,'built-from-private-repository\n'+sourceCommit+'\n');
   console.log('PASS: browser-selected connection -> authenticated private Git checkout -> checked-in build script -> exact commit artifact');
   console.log('PASS: checkout node browses named connection/repository/branch, persists stable binding and task executor through save/reload');

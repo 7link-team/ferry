@@ -29,7 +29,7 @@ export function CodeEditor({ value, language, path, label, readOnly = false, ori
   if (originalValue !== undefined) return <DiffEditor originalModelPath={`${path}.original`} modifiedModelPath={path}
     original={originalValue} modified={value} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
     onMount={editor => { diffEditor.current = editor; subscription.current?.dispose(); subscription.current = editor.getModifiedEditor().onDidChangeModelContent(() => change.current(editor.getModifiedEditor().getValue())); }}
-    options={{ ariaLabel: label, editContext: false, readOnly, originalEditable: false, automaticLayout: true, renderSideBySide: true, useInlineViewWhenSpaceIsLimited: false,
+    options={{ occurrencesHighlight: "off", ariaLabel: label, editContext: false, readOnly, originalEditable: false, automaticLayout: true, renderSideBySide: true, useInlineViewWhenSpaceIsLimited: false,
       minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, wordWrap: "on", renderOverviewRuler: false }} />;
   return <Editor path={path} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
     value={value} onChange={next => onChange(next ?? "")}

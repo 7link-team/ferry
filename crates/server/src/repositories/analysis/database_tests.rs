@@ -74,7 +74,7 @@ async fn standalone_insight_runtime(s: &AppState, facts: &[commits::Model]) {
     let mapped = edit_aliases(
         s,
         vec![Alias {
-            name: "Author".into(),
+            name: "Other".into(),
             email: "other@example.test".into(),
             nickname: "Migrated team".into(),
             ..Default::default()
@@ -138,8 +138,8 @@ async fn standalone_insight_runtime(s: &AppState, facts: &[commits::Model]) {
     );
     for (kind, total) in [
         ("overview", 1),
-        ("contributors", 1),
-        ("ranking", 1),
+        ("contributors", 2),
+        ("ranking", 2),
         ("branches", 2),
         ("heatmap", 3),
         ("period", 3),
@@ -149,6 +149,17 @@ async fn standalone_insight_runtime(s: &AppState, facts: &[commits::Model]) {
         assert_eq!(value["total"], total, "standalone {kind} SQL");
         assert_eq!(value["items"].as_array().unwrap().len(), 1);
     }
+    assert_eq!(
+        read_insight(
+            s,
+            4,
+            "commits",
+            &[("authors", &mapped.aliases[0].contributor_id)]
+        )
+        .await["total"],
+        2,
+        "the migrated exact author pair must not also match a different name"
+    );
     assert_eq!(
         read_insight(s, 4, "commits", &[("history", "current")]).await["total"],
         1
@@ -226,7 +237,7 @@ async fn standalone_insight_runtime(s: &AppState, facts: &[commits::Model]) {
     )
     .unwrap();
     value.config.aliases = vec![Alias {
-        name: "Author".into(),
+        name: "Other".into(),
         email: "other@example.test".into(),
         nickname: "Independent team".into(),
         ..Default::default()

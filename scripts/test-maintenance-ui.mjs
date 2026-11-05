@@ -71,7 +71,8 @@ try {
   await p.goto(heartbeatEdit);
   const valueInput=p.getByRole('spinbutton',{name:'值',exact:true});
   await valueInput.waitFor();
-  assert.equal(await p.locator('form section h2').first().innerText(),'当前值');
+  assert.equal(await p.locator('form section h2').first().innerText(),'基础信息');
+  await p.getByRole('heading',{name:'当前值',exact:true}).waitFor();
   assert(await p.getByRole('textbox',{name:/^标识/}).isDisabled());
   await fillByKeyboard(p.getByRole('textbox',{name:/^名称/}),'Runner timeout custom label');
   await fillByKeyboard(p.getByRole('textbox',{name:/^分类/}),'runner');
@@ -131,53 +132,21 @@ try {
   const request=p.waitForRequest(r=>r.url().includes(`/api/workspaces/${workspace_tenant}/nodes?`) && new URL(r.url()).searchParams.get('page_size')==='37');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`); await request;
   assert.equal(new URL(p.url()).searchParams.get('page_size'),null,'default page size is not a stale URL override');
+  const retired=['host-state','pipeline-state','deployment-state','cron-state','alert-state','repository-state','insight-state'];
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
-  await p.getByRole('row').filter({hasText:'host-state'}).getByRole('link',{name:'编辑',exact:true}).click();
-  await p.locator('input[aria-label$=" 值"]').first().waitFor();
-  const keys=await p.locator('input[aria-label$=" 值"]').evaluateAll(inputs=>inputs.map(input=>input.value));
-  const unknown=keys.indexOf('unknown');
-  assert(unknown>=0,'migrated system dictionary retains unknown key');
-  await p.getByLabel(`选项 ${unknown+1} 显示名称`,{exact:true}).fill('等待接入');
-  await p.getByLabel(`选项 ${unknown+1} 显示名称 颜色`,{exact:true}).fill('#123456');
-  await p.getByRole('button',{name:'保存',exact:true}).click();
-  await p.getByRole('cell',{name:'host-state',exact:true}).waitFor();
-  const stateDictionary=(await get(root+'/dictionaries')).items.find(row=>row.key==='host-state');
-  assert.equal(JSON.parse(stateDictionary.value_json).find(option=>option.value==='unknown').color,'#123456');
-  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${stateDictionary.id}/edit`);
-  assert.equal(await p.getByLabel(`选项 ${unknown+1} 显示名称 颜色`,{exact:true}).inputValue(),'#123456');
-  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`);
-  await p.getByRole('cell',{name:'等待接入',exact:true}).waitFor();
-  assert.deepEqual(await p.getByRole('cell',{name:'等待接入',exact:true}).locator('[data-slot="badge"]').first().evaluate(element=>({background:getComputedStyle(element).backgroundColor,color:getComputedStyle(element).color})),{background:'rgb(18, 52, 86)',color:'rgb(255, 255, 255)'});
-  console.log('PASS: controlled-state native color editing, save/reload and host-row contrast preserve machine keys');
-  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dashboard`);
-  await p.getByText('等待接入',{exact:true}).first().waitFor();
-  const controlledRows=(await get(root+'/dictionaries?page_size=200')).items;
-  for (const key of ['pipeline-state','deployment-state','cron-state','alert-state','repository-state','insight-state']) {
-    const dictionary=controlledRows.find(row=>row.key===key); assert(dictionary,key+' seeded');
-    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries/${dictionary.id}/edit`);
-    const inputs=p.locator('input[aria-label$=" 值"]'); await inputs.first().waitFor();
-    const values=await inputs.evaluateAll(nodes=>nodes.map(node=>({value:node.value,disabled:node.disabled})));
-    assert(values.every(node=>node.disabled),key+' machine values locked');
-    assert.equal(await p.getByRole('button',{name:'添加选项',exact:true}).count(),0);
-    const selected=key==='deployment-state'?values.findIndex(node=>node.value==='idle'):0;
-    const index=selected+1;
-    await p.getByLabel(`选项 ${index} 显示名称`,{exact:true}).fill('UI '+key);
-    await p.getByLabel(`选项 ${index} 显示名称 颜色`,{exact:true}).fill('#123456');
-    await p.getByRole('button',{name:'保存',exact:true}).click();
-    await p.waitForURL(`**/workspaces/${workspace_tenant}/dictionaries`);
-    const saved=JSON.parse((await get(root+'/dictionaries/'+dictionary.id)).value_json);
-    assert.deepEqual(saved.map(option=>option.value),values.map(option=>option.value),key+' operational values preserved');
-    assert.equal(saved[selected].labels?.['zh-CN'] ?? saved[selected].label,'UI '+key); assert.equal(saved[selected].color,'#123456');
+  const dictionaryRows=(await get(root+'/dictionaries?page_size=200')).items;
+  const preferences=await get(root+'/preferences');
+  for(const key of retired){
+    assert(!dictionaryRows.some(row=>row.key===key),key+' is a fixed workflow state, not an editable dictionary');
+    assert(!(key in preferences.dictionaries),key+' is not an editable display preference');
+    assert.equal(await p.getByRole('cell',{name:key,exact:true}).count(),0);
   }
   const displayHost=(await get(root+'/nodes')).items.find(row=>row.name==='Dictionary host');
+  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/nodes`);
+  await p.getByRole('row').filter({hasText:'Dictionary host'}).getByRole('cell',{name:'未知',exact:true}).waitFor();
   const displayApp=await post(owner,root+'/deployments',{name:'Dictionary deployment',mode:'compose',target_kind:'host',target_ref:displayHost.id,workdir:'/tmp/state-dictionary',manifest:JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'nginx:alpine'}]})});
-  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments`);
-  const deploymentState=p.getByRole('cell',{name:'UI deployment-state',exact:true}); await deploymentState.waitFor();
-  assert.equal(await deploymentState.locator('[data-slot="badge"]').evaluate(element=>getComputedStyle(element).backgroundColor),'rgb(18, 52, 86)');
-  await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${displayApp.id}`);
-  await p.getByText('UI deployment-state',{exact:true}).waitFor();
   assert.equal((await get(root+'/deployments/'+displayApp.id)).state,'idle');
-  console.log('PASS: all six controlled state editors save labels/colors, preserve operational values; deployment list/detail and dashboard host consume preferences');
+  console.log('PASS fixed workflow states are absent from dictionaries and preferences; host and deployment machine states remain intact');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/${displayApp.id}/edit`);
   const categorySelect=p.locator('select[name="category"]'); await categorySelect.waitFor();
   await categorySelect.locator('option[value="web"]').waitFor({state:'attached'});
@@ -201,14 +170,14 @@ try {
 
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/dictionaries`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
-  await p.getByLabel('标识',{exact:false}).fill('custom');
+  await p.getByRole('textbox',{name:'标识',exact:true}).fill('custom');
   await p.getByRole('textbox',{name:/^名称/}).fill('UI dictionary');
   await p.getByRole('button',{name:'添加选项',exact:true}).click();
   await p.getByLabel('选项 1 值',{exact:true}).fill('one');
   await p.getByLabel('选项 1 显示名称',{exact:true}).fill('One');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'UI dictionary'}).getByRole('link',{name:'复制',exact:true}).click();
-  assert.equal(await p.getByLabel('标识',{exact:false}).inputValue(),'custom-copy');
+  assert.equal(await p.getByRole('textbox',{name:'标识',exact:true}).inputValue(),'custom-copy');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'custom-copy'}).getByRole('button',{name:'删除',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
@@ -234,7 +203,7 @@ try {
   assert.equal((await get(root+'/nodes/'+runner.id)).state,'offline');
   console.log('PASS: silent real runner connection closes after configured 40 seconds');
   assert.deepEqual(errors,[]);
-  console.log('PASS: shared settings edit, actual 37-row requests, dictionary labels in host table, dictionary create/copy/delete, no browser errors');
+  console.log('PASS: shared settings edit, actual 37-row requests, fixed states excluded and business dictionary options, dictionary create/copy/delete, no browser errors');
 } finally {
   if (browser) await browser.close();
   if (server.exitCode === null) { server.kill('SIGTERM'); await new Promise(r => server.once('exit', r)); }

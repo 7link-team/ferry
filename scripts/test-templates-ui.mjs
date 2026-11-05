@@ -40,7 +40,7 @@ try {
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
   const readWorkflow = async () => {
-    await p.getByRole('tab',{name:'YAML',exact:true}).click();
+    await p.getByRole('tab',{name:'高级 YAML',exact:true}).click();
     await p.locator('.monaco-editor .view-lines').click();
     await p.keyboard.press('ControlOrMeta+A');
     await p.keyboard.press('ControlOrMeta+C');
@@ -60,13 +60,13 @@ try {
     const name=`UI ${resource}`;
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
-    await p.getByLabel('名称',{exact:false}).fill(name);
+    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name);
     if (app) {
-      await p.getByLabel('参数定义（JSON 数组）',{exact:false}).fill(JSON.stringify([{name:'image',label:'镜像',type:'string',default:'nginx:alpine'},{name:'token',label:'令牌',type:'string',secret:true}]));
-      await p.getByLabel('应用模板（YAML / JSON）',{exact:false}).fill(JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
+      await p.getByLabel('参数定义（JSON 数组）',{exact:true}).fill(JSON.stringify([{name:'image',label:'镜像',type:'string',default:'nginx:alpine'},{name:'token',label:'令牌',type:'string',secret:true}]));
+      await p.getByLabel('应用模板（YAML / JSON）',{exact:true}).fill(JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
     }
     if (!app) {
-      assert.equal(await p.getByLabel('参数定义（JSON 数组）',{exact:false}).count(),0,'new pipeline templates no longer expose dynamic parameters');
+      assert.equal(await p.getByLabel('参数定义（JSON 数组）',{exact:true}).count(),0,'new pipeline templates no longer expose dynamic parameters');
       // Seed a legacy record through the API; the UI must preserve compatibility
       // while new templates use complete Actions YAML without dynamic parameters.
       await post(owner,root+'/'+resource,{
@@ -78,10 +78,10 @@ try {
     if (app) await p.getByRole('button',{name:'创建',exact:true}).click();
     let row=p.getByRole('row').filter({hasText:name});
     await row.getByRole('link',{name:'复制',exact:true}).click();
-    await p.getByLabel('名称',{exact:false}).fill(name+' copy');
+    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name+' copy');
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByRole('row').filter({hasText:name+' copy'}).getByRole('link',{name:'编辑',exact:true}).click();
-    await p.getByLabel('名称',{exact:false}).fill(name+' edited');
+    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name+' edited');
     await p.getByRole('button',{name:'保存',exact:true}).click();
     await p.getByRole('row').filter({hasText:name+' edited'}).getByRole('button',{name:'删除模板',exact:true}).click();
     await p.getByRole('dialog').getByRole('button',{name:'确认删除模板',exact:true}).click();
@@ -93,10 +93,10 @@ try {
       const dialog=p.getByRole('dialog');
       await dialog.getByRole('listbox',{name:'模板列表'}).waitFor();
       assert.equal(await dialog.getByRole('combobox').count(),1,'only the boolean parameter uses a select');
-      await dialog.getByLabel('超时',{exact:false}).fill('');
+      await dialog.getByLabel('超时',{exact:true}).fill('');
       await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
       await dialog.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
-      await dialog.getByLabel('超时',{exact:false}).fill('30');
+      await dialog.getByLabel('超时',{exact:true}).fill('30');
       const template=(await get(root+'/'+resource)).items.find(item=>item.name===name);
       const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
       assert(edited.ok());
@@ -104,7 +104,7 @@ try {
       await dialog.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
       await dialog.getByRole('button',{name:'重新加载模版',exact:true}).click();
       await dialog.getByText(/版本 2/).waitFor();
-      await dialog.getByLabel('超时',{exact:false}).fill('30');
+      await dialog.getByLabel('超时',{exact:true}).fill('30');
       await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
       await dialog.waitFor({state:'hidden'});
       const generated=await readWorkflow();
@@ -132,24 +132,24 @@ try {
     }
     const create=p.getByRole('button',{name:'创建',exact:true});
     assert(await create.isDisabled(),'must generate first');
-    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:false}).fill('token');
+    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
     else {
-      await p.getByLabel('超时',{exact:false}).fill('');
+      await p.getByLabel('超时',{exact:true}).fill('');
       await p.getByRole('button',{name:'生成配置',exact:true}).click();
       await p.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
-      await p.getByLabel('超时',{exact:false}).fill('30');
+      await p.getByLabel('超时',{exact:true}).fill('30');
     }
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
     if(app) await p.getByRole('button',{name:'源码编辑',exact:true}).click();
-    const generated=JSON.parse(await p.getByLabel(label,{exact:false}).inputValue());
+    const generated=JSON.parse(await p.getByLabel(label,{exact:true}).inputValue());
     if(app) assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
     else {
       const step=parseDocument(generated.workflow).toJS().jobs.build.steps.find(step=>step.name==='test');
       assert.equal(step.run,'echo build false'); assert.equal(step['timeout-minutes'],1);
     }
     assert(!JSON.stringify(generated).includes('secret-not-in-template'));
-    await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:false}).fill(app?'nginx:latest':'echo revised');
+    await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:true}).fill(app?'nginx:latest':'echo revised');
     // The field invalidates local generation first; its effect reports the
     // invalid state to the parent form on the next React render.
     await p.waitForFunction(() => [...document.querySelectorAll('button')].find(button => button.textContent === '创建')?.disabled, null, {timeout:5000});
@@ -162,18 +162,18 @@ try {
     assert(await create.isDisabled(),'stale version blocks creation');
     await p.getByRole('button',{name:'重新加载模版',exact:true}).click();
     await p.getByText(/版本 2/).waitFor();
-    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:false}).fill('token');
+    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
     else {
-      await p.getByLabel('超时',{exact:false}).fill('');
+      await p.getByLabel('超时',{exact:true}).fill('');
       await p.getByRole('button',{name:'生成配置',exact:true}).click();
       await p.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
-      await p.getByLabel('超时',{exact:false}).fill('30');
+      await p.getByLabel('超时',{exact:true}).fill('30');
     }
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
     if(app) await p.getByRole('button',{name:'表单编辑',exact:true}).click();
     await p.getByRole('textbox',{name:/^名称/}).fill('Generated '+resource);
-    await p.getByLabel('目标主机',{exact:false}).click();
+    await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
     await p.getByRole('option',{name:'Template host',exact:true}).click();
     await create.click();
     await p.getByRole('cell',{name:'Generated '+resource,exact:true}).waitFor();
@@ -189,11 +189,11 @@ try {
   }
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
-  await p.getByLabel('名称',{exact:false}).fill('Runtime file');
-  await p.getByLabel('应用配置文件内容',{exact:false}).fill('port={{ .Values.port }}\n');
+  await p.getByLabel('名称',{exact:true}).fill('Runtime file');
+  await p.getByLabel('应用配置文件内容',{exact:true}).fill('port={{ .Values.port }}\n');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('link',{name:'编辑',exact:true}).click();
-  await p.getByLabel('应用配置文件内容',{exact:false}).fill('listen={{ .Values.port }}\n');
+  await p.getByLabel('应用配置文件内容',{exact:true}).fill('listen={{ .Values.port }}\n');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   const configs=await get(root+'/config-templates');
   assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');

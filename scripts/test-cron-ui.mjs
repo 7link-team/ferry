@@ -57,10 +57,10 @@ try {
   await p.goto(`${uiOrigin}/zh-CN/workspaces/${workspace_tenant}/cron-jobs?scope=host`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('textbox',{name:/^名称/}).fill('UI command');
-  await p.getByLabel('时区',{exact:false}).fill('Asia/Singapore');
-  await p.getByLabel('动作',{exact:false}).click();await p.getByRole('option',{name:'执行命令',exact:true}).click();
-  await p.getByLabel('目标类型',{exact:false}).click();await p.getByRole('option',{name:'主机',exact:true}).click();
-  await p.getByLabel('目标主机',{exact:false}).click();await p.getByRole('option',{name:'Cron UI runner',exact:true}).click();
+  await p.getByRole('textbox',{name:'时区',exact:true}).fill('Asia/Singapore');
+  await p.getByRole('combobox',{name:'动作',exact:true}).click();await p.getByRole('option',{name:'执行命令',exact:true}).click();
+  await p.getByRole('combobox',{name:'目标类型',exact:true}).click();await p.getByRole('option',{name:'主机',exact:true}).click();
+  await p.getByRole('combobox',{name:'目标主机',exact:true}).click();await p.getByRole('option',{name:'Cron UI runner',exact:true}).click();
   await p.getByRole('textbox',{name:/^命令/}).fill('echo CRON_BROWSER');
   const cycle=p.getByLabel('执行周期类型',{exact:true});
   const cron=p.getByLabel('Cron 表达式',{exact:true});
@@ -118,9 +118,9 @@ try {
   await p.waitForFunction(()=>!document.body.innerText.includes('UI edited'));
   for (const scope of ['build','deploy']) {
     await p.goto(`${uiOrigin}/zh-CN/workspaces/${workspace_tenant}/cron-jobs/new?scope=${scope}`);
-    const selected=await p.getByLabel('所属模块',{exact:false}).innerText();
+    const selected=await p.getByRole('combobox',{name:'所属模块',exact:true}).innerText();
     assert(selected.includes(scope==='build'?'构建':'部署'));
-    await p.getByLabel('动作',{exact:false}).click();
+    await p.getByRole('combobox',{name:'动作',exact:true}).click();
     await p.getByRole('option',{name:scope==='build'?'触发流水线':'重新部署当前配置',exact:true}).waitFor();
     await p.keyboard.press('Escape');
   }
