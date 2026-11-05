@@ -1,0 +1,38 @@
+name: Diagnose Linux workflow sandbox
+on:
+  push:
+    branches: [feat/release030-sandbox-diagnostics]
+    paths: [.github/workflows/sandbox-diagnostics.yml]
+permissions:
+  contents: read
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 001ba9ed8ff647c1782be78e53922dc9f0e09914
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+          save-if: false
+      - run: cargo build --locked -p ferry-sandbox
+      - name: Probe current isolation policy
+        run: |
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+          printf '%s' '{"version":1,"timeout_ms":1000,"memory_bytes":16777216,"deterministic":true,"evaluations":[{"expression":"42","context":{}}]}' | target/debug/ferry-sandbox
+          sudo dmesg | tail -20
+      - name: Grant user namespaces to this sandbox executable only
+        run: |
+          cat > "$RUNNER_TEMP/ferry-sandbox.apparmor" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile ferry-ci-sandbox "${GITHUB_WORKSPACE}/target/debug/ferry-sandbox" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$RUNNER_TEMP/ferry-sandbox.apparmor"
+      - name: Verify native isolation and all expressions
+        run: python3 scripts/test-workflow-sandbox.py target/debug/ferry-sandbox
