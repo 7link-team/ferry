@@ -19,6 +19,6 @@ jobs:
               const lines=text.split('\n');
               const selected=[];
               lines.forEach((line,index)=>{if(/Traceback|AssertionError|FAILED|Error:|error:|left:|right:|panic|Fail|unexpected/.test(line)) selected.push(...lines.slice(Math.max(0,index-1),index+12));});
-              const excerpt=lines.filter(line=>/Push the verified|docker push|docker tag|IMAGE:|ARCH:|digest:|sha-466|error|Error|denied|not found|pushed|Pushed|Layer already|command not found|syntax/i.test(line)).join('\n').slice(-20000);
+              const excerpt=text.slice(text.indexOf('##[group]Run docker tag ferry-server:check')).slice(0,16000);
               for(let start=0;start<excerpt.length;start+=3000)core.notice(excerpt.slice(start,start+3000),{title:`Release job ${job_id} part ${start/3000}`});
             }
