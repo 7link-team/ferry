@@ -97,6 +97,7 @@ try {
   await p.getByRole('button', { name: '步骤 YAML', exact: true }).click();
   const fragment = p.getByRole('dialog');
   await setYaml(fragment, '- invalid step shape\n');
+  await fragment.getByRole('button', { name: '应用到工作流', exact: true }).and(fragment.locator(':disabled')).waitFor();
   assert(await fragment.getByRole('button', { name: '应用到工作流', exact: true }).isDisabled());
   await fragment.getByRole('button', { name: '关闭，不应用', exact: true }).click();
   await p.locator('summary').filter({hasText:'高级 YAML'}).evaluate(el=>{el.parentElement.open=true});
