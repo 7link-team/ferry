@@ -151,7 +151,7 @@ try {
 
   permissions = ['pipelines.read', 'pipelines.create', 'pipeline-groups.read'];
   await page.goto(`${origin}/zh-CN/workspaces/109124796398174208/pipelines/new`);
-  await page.getByRole('tab', { name: 'YAML', exact: true }).click();
+  await page.getByRole('tab', { name: '高级 YAML', exact: true }).click();
   await page.locator('.monaco-editor').waitFor({ timeout: 20000 });
   assert.equal(await page.getByRole('textbox', { name: 'GitHub Actions YAML' }).count(), 1);
   console.log('PASS production pipeline editor loads local Monaco YAML');

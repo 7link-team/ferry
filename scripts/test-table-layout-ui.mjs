@@ -91,15 +91,15 @@ try {
   await openList(`/workspaces/${workspace_layout}/credentials`);
   fills(await geometry(), 'single row');
   await page.locator('tbody tr').first().locator('td').nth(1).click();
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\?scope=build$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
   await page.getByText('Credential 000', { exact: true }).waitFor();
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().focus();
   await page.keyboard.press('Enter');
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\?scope=build$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().getByRole('link', { name: '编辑' }).click();
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit\?scope=build$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   console.log('PASS single row keeps footer at bottom');
   for (let i = 1; i < 65; i++) await seed(i);
@@ -185,7 +185,7 @@ try {
     await route.continue();
   });
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
-  await page.getByRole('heading', { name: '平台设置', exact: true }).waitFor();
+  await page.getByRole('navigation', { name: '配置分类' }).waitFor();
   // Settings are grouped; the repository group is the long one.
   await page.getByRole('navigation', { name: '配置分类' }).getByRole('button', { name: '仓库关联', exact: true }).click();
   await page.getByLabel('平台公开访问地址', { exact: true }).waitFor();

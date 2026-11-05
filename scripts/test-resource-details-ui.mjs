@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { preview } from 'vite';
 import { chromium } from 'playwright';
 
@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 const server = await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = `http://127.0.0.1:${server.httpServer.address().port}`;
 const workspace = '109124796398174208';
+const nodeCatalog = JSON.parse(await readFile(new URL('../src/shared/workflow-contracts/workflow-integration-nodes.json', import.meta.url), 'utf8'));
 const longAddress = 'node-' + 'long-hostname-'.repeat(16) + '.example.invalid';
 let browser;
 try {
@@ -27,6 +28,9 @@ try {
     };
     let value;
     if (path === '/api/setup') value = { required: false };
+    else if (path.endsWith('/workflow-node-catalog')) value = nodeCatalog;
+    else if (path === '/api/platform/footer') value = { content: '' };
+    else if (path === '/api/monitor/pageview') return route.fulfill({ status: 204 });
     else if (path === `/api/workspaces/${workspace}/preferences`) value = { default_page_size: 20, dictionaries: {} };
     else if (path === '/api/me') value = { user: { id: 'u1', name: 'Tester', email: 'test@example.invalid', is_superadmin: false }, workspaces: [{ id: workspace, name: 'Operations', slug: 'ops', role_name: 'Owner', permissions: ['hosts.read', 'hosts.update', 'host-groups.read', 'tags.read', 'credentials.read', 'members.read'] }] };
     else {

@@ -40,7 +40,7 @@ await page.route('**/api/**', async route => {
 
 try {
   await page.goto(origin + '/en-US/workspaces/2/pipelines/42/edit');
-  const yamlTab = page.getByRole('tab', { name: 'YAML', exact: true });
+  const yamlTab = page.getByRole('tab', { name: 'Advanced YAML', exact: true });
   await yamlTab.waitFor();
   const timings = [];
   for (let i = 0; i < 3; i++) {

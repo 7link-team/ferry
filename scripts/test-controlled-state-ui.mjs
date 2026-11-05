@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 
 const server = await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.FERRY_UI_ORIGIN || `http://127.0.0.1:${server.httpServer.address().port}`;
-const labels = { 'en-US': 'Online', 'zh-CN': '在线', 'zh-TW': '在線', 'ja-JP': 'オンライン', 'ko-KR': '온라인', 'ms-MY': 'Dalam talian' };
+const labels = { 'en-US': 'Online', 'zh-CN': '在线', 'zh-TW': '連線中', 'ja-JP': 'オンライン', 'ko-KR': '온라인', 'ms-MY': 'Dalam talian' };
 let browser;
 try {
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });

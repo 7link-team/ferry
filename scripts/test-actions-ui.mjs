@@ -34,16 +34,16 @@ try {
  // Create classification resources through the same shared forms users use.
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines`);
  await page.getByRole('button',{name:'新建分组'}).click();
- const groupDialog=page.getByRole('dialog');await groupDialog.getByLabel('名称').fill('Browser group');
+ const groupDialog=page.getByRole('dialog');await groupDialog.getByLabel('名称',{exact:true}).fill('Browser group');
  await groupDialog.getByRole('button',{name:'保存',exact:true}).click();
  await groupDialog.waitFor({state:'hidden'});
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/new`);
- await page.getByLabel('流水线名称').fill('Canvas pipeline');
+ await page.getByLabel('流水线名称',{exact:true}).fill('Canvas pipeline');
  await page.getByRole('button',{name:'流水线设置'}).click();
  await page.getByRole('combobox',{name:'分组',exact:true}).click();
  await page.getByRole('option',{name:'Browser group',exact:true}).click();
  await page.getByRole('button',{name:'新建标签',exact:true}).click();
- const tagDialog=page.getByRole('dialog');await tagDialog.getByLabel(/^名称/).fill('Browser tag');await tagDialog.getByRole('button',{name:'确认新建标签',exact:true}).click();
+ const tagDialog=page.getByRole('dialog');await tagDialog.getByRole('textbox',{name:'名称',exact:true}).fill('Browser tag');await tagDialog.getByRole('button',{name:'确认新建标签',exact:true}).click();
  await tagDialog.waitFor({state:'hidden'});assert(await page.getByRole('checkbox',{name:'Browser tag',exact:true}).isChecked());
  assert.equal(await page.getByRole('button',{name:'新建执行环境',exact:true}).count(),0);
  assert.equal(await page.getByRole('combobox',{name:/目标主机/}).count(),0,'host selection belongs to task panel');
@@ -92,7 +92,7 @@ jobs:
  await page.getByRole('button',{name:'Compile',exact:true}).click();
  await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
  await page.getByLabel('环境变量.JOB_MARKER',{exact:true}).fill('JOB_ENV_OK');
- await page.getByLabel('运行条件（if）',{exact:true}).fill('success()');
+ await page.getByLabel('运行条件（if）',{exact:true}).selectOption('success()');
  await page.getByLabel('执行器标签（runs-on） 1',{exact:true}).fill('self-hosted');
  await page.getByRole('button',{name:'添加执行器标签',exact:true}).click();
  await page.getByLabel('执行器标签（runs-on） 2',{exact:true}).fill('linux');

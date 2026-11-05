@@ -63,6 +63,8 @@ try {
     if(!path.startsWith('/api/'))return route.continue();
     requests.push({ path, query: url.search, method: request.method(), body: request.postDataJSON() });
     const json = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    if (path === '/api/platform/footer') return json({ content: '' });
+    if (path === '/api/monitor/pageview') return route.fulfill({ status: 204 });
     if (path === '/api/setup') return json({ required: false, has_users: true, registration_enabled: false });
     if (path === '/api/me') return json({ user: { id: '1', name: 'Fixture owner', email: 'owner@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Fixture workspace', slug: 'fixture', role_name: '拥有者', permissions: [...(allowRepositoryRead?['repositories.read']:[]), 'repositories.update', 'credentials.read', 'code-insights.read', 'code-insights.create', 'code-insights.update', 'code-insights.delete', 'code-insights.sync', ...(allowPipeline ? ['pipelines.read', 'pipelines.run'] : [])] }] });
     if (path === '/api/workspaces/2/preferences') return json({ default_page_size: 20, dictionaries: {} });
@@ -194,8 +196,8 @@ try {
   await page.getByRole('button',{name:'加入洞察',exact:true}).click();
   assert.equal(await page.getByLabel('分析流水线 git@git.example.invalid:team/second.git',{exact:true}).count(),0);
   assert.equal(await page.getByRole('button',{name:'保存',exact:true}).isEnabled(),true,'Plain Git saves with its connection and URL alone');
-  await page.getByLabel('初始化最近天数',{exact:false}).fill('120');
-  await page.getByLabel('分支头核对间隔（分钟）',{exact:false}).fill('60');
+  await page.getByLabel('初始化最近天数',{exact:true}).fill('120');
+  await page.getByLabel('分支头核对间隔（分钟）',{exact:true}).fill('60');
   await page.getByRole('button',{name:'保存',exact:true}).click();
   await page.waitForURL(url=>url.pathname==='/zh-CN/workspaces/2/code-insights');
   assert.equal(config.initial_days,120);assert.equal(config.reconcile_minutes,60);
@@ -204,9 +206,9 @@ try {
   assert.equal(config.aliases[0].nickname,'Alice');assert.equal(config.aliases[0].contributor_id,'100');
   await page.goto(insightPath+'?tab=authors');
   await page.getByLabel('统一昵称 1', { exact: true }).fill('');
-  await page.waitForFunction(()=>document.querySelector('button[type="submit"]')?.disabled);
-  assert(await page.getByRole('button', { name: '保存', exact: true }).isDisabled());
-  await page.getByRole('alert').first().waitFor();
+  assert(await page.getByRole('button', { name: '保存', exact: true }).isEnabled());
+  await Promise.all([page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/code-insights/31')), page.getByRole('button', { name: '保存', exact: true }).click()]);
+  assert.equal(config.aliases[0].nickname,'');assert.equal(config.aliases[0].contributor_id,'100');
   await page.getByLabel('统一昵称 1', { exact: true }).fill('小艾');
   await Promise.all([page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/code-insights/31')), page.getByRole('button', { name: '保存', exact: true }).click()]);
   assert.equal(config.aliases[0].nickname,'小艾');assert.equal(config.aliases[0].contributor_id,'100');
@@ -217,14 +219,14 @@ try {
   checks.push('shared settings saves plain Git without business pipelines or host permissions and preserves optimistic version; author mappings preserve contributor IDs; sync retry works');
 
   await page.goto(origin+'/workspaces/2/code-insights/new');
-  await page.getByLabel('洞察名称',{exact:false}).waitFor();
+  await page.getByLabel('洞察名称',{exact:true}).waitFor();
   assert.equal(await page.getByText('各仓库覆盖与任务状态',{exact:true}).count(),0,'Create form excludes runtime task state');
   assert.equal(await page.getByLabel('说明',{exact:true}).count(),0,'Create form excludes the removed description field');
   assert.equal(await page.locator('select[name="update_mode"]').inputValue(),'scheduled');
   assert.equal(await page.getByLabel('Cron 表达式',{exact:true}).inputValue(),'0 */4 * * *');
   await page.getByLabel('间隔小时',{exact:true}).fill('6');
   await page.getByLabel('时区',{exact:true}).fill('Asia/Singapore');
-  await page.getByLabel('洞察名称',{exact:false}).fill('Independent insight');
+  await page.getByLabel('洞察名称',{exact:true}).fill('Independent insight');
   await chooseNative(page.getByLabel('仓库连接',{exact:true}), '11');
   await page.getByRole('button',{name:'选择仓库',exact:true}).click();
   await page.getByRole('menuitemcheckbox',{name:'team/repository',exact:true}).click();
@@ -318,7 +320,7 @@ try {
     assert(width.document <= width.viewport + 1, `page overflow at ${viewport.width}: ${JSON.stringify(width)}`);
     await page.screenshot({ path: resolve(output, `${viewport.width}-heatmap.png`) });
     await page.goto(insightPath+'/edit');
-    await page.getByLabel('洞察名称',{exact:false}).waitFor();
+    await page.getByLabel('洞察名称',{exact:true}).waitFor();
     const formWidth=await page.locator('form').evaluate(node=>node.getBoundingClientRect().width);
     assert(formWidth<=viewport.width+1,'shared edit form fits viewport');
     await page.goto(insightPath+'?analysis_report=heatmap');
@@ -424,7 +426,7 @@ try {
   allowPipeline = false;
   const pipelineReadsBefore = requests.filter(request => request.path.endsWith('/pipelines')).length;
   await page.goto(insightPath+'/edit');
-  await page.getByLabel('洞察名称',{exact:false}).waitFor();
+  await page.getByLabel('洞察名称',{exact:true}).waitFor();
   assert.equal(await page.getByLabel('分析流水线 team/repository',{exact:true}).count(),0);
   assert.equal(requests.filter(request=>request.path.endsWith('/pipelines')).length,pipelineReadsBefore);
   checks.push('limited role keeps saved memberships readable and never fetches pipeline options');

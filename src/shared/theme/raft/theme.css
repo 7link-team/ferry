@@ -61,7 +61,7 @@
 [data-theme="neoBrutalism"]:lang(ko) { --font-sans: "Raft Space Grotesk", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; }
 
 /* Frame and navigation are different surfaces: yellow only belongs to the frame. */
-[data-theme="neoBrutalism"] #root > div > header { background: var(--raft-layer-frame); color: var(--raft-foreground-on-frame); border-color: var(--raft-line-seam); }
+[data-theme="neoBrutalism"] #root header:has(> nav) { background: var(--raft-layer-frame); color: var(--raft-foreground-on-frame); border-color: var(--raft-line-seam); }
 [data-theme="neoBrutalism"] header nav a { color: var(--raft-foreground-on-frame-muted); }
 [data-theme="neoBrutalism"] header nav a[aria-current="page"] { background: var(--raft-layer-frame-active); color: var(--raft-foreground-on-frame-active); border: 1.5px solid var(--raft-line-frame-active); box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); }
 [data-theme="neoBrutalism"] :is(nav.bg-sidebar a[aria-current="page"],aside button[aria-current="page"],aside .group:has(button[aria-current="page"]),[data-slot="tabs-trigger"][data-state="active"]) { background: var(--raft-selected); color: var(--raft-sticker-ink); border: 1.5px solid var(--raft-sticker-ink); border-radius: 8px; box-shadow: 0 0 0 1.5px var(--raft-sticker-edge); font-weight: 700; }

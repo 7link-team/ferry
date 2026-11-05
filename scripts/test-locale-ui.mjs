@@ -75,13 +75,17 @@ try {
   }
 
   await page.goto(origin + '/en-US/platform/settings/1/edit', { waitUntil: 'commit' });
-  const policy = page.getByRole('checkbox').first();
+  await page.getByRole('navigation').getByRole('button', { name: resources['en-US']['runner.settings'], exact: true }).click();
+  const policy = page.getByRole('checkbox', { name: resources['en-US']['runner.defaultAutoUpdate'], exact: true });
   await policy.click();
   const policyLoads = requests.filter(request => request.path === '/platform/settings/1').length;
   for (const locale of Object.keys(resources)) {
     await switchLanguage(page, locale);
-    await page.getByText(resources[locale]['runner.defaultAutoHelp'], { exact: true }).waitFor();
-    assert.equal(await policy.getAttribute('aria-checked'), 'true');
+    const help = page.getByRole('button', { name: `${resources[locale]['runner.defaultAutoUpdate']} · ${common[locale]['field.help']}`, exact: true });
+    await help.focus();
+    await page.getByRole('tooltip').getByText(resources[locale]['runner.defaultAutoHelp'], { exact: true }).waitFor();
+    await help.press('Escape');
+    assert.equal(await page.getByRole('checkbox', { name: resources[locale]['runner.defaultAutoUpdate'], exact: true }).getAttribute('aria-checked'), 'true');
   }
   assert.equal(requests.filter(request => request.path === '/platform/settings/1').length, policyLoads);
 

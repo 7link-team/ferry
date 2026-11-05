@@ -42,7 +42,8 @@ try {
     await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
     assert.notEqual(await empty.locator('svg').evaluate(el => getComputedStyle(el).color), 'rgba(0, 0, 0, 0)');
   }
-  await page.getByRole('link', { name: 'Build', exact: true }).click();
+  await page.getByRole('link', { name: 'Workflows', exact: true }).click();
+  await page.getByRole('link', { name: 'Build pipeline', exact: true }).click();
   await page.waitForURL('**/pipelines');
   await page.locator('table').waitFor();
   assert.equal(preferenceReads, 1, 'ordinary navigation does not reload workspace preferences');

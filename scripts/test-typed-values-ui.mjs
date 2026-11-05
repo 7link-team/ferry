@@ -56,7 +56,7 @@ try {
   await page.goto(`${origin}/zh-CN/workspaces/2/settings/109124836743184391/edit`);
   const heartbeat = page.getByRole('spinbutton', { name: '值', exact: true });
   await heartbeat.waitFor();
-  assert.equal(await page.locator('form section h2').first().innerText(), '当前值');
+  assert.deepEqual(await page.locator('form section h2').allTextContents(), ['基础信息', '值约束', '当前值']);
   assert.equal(await heartbeat.isEnabled(), true);
   assert.equal(await page.getByLabel('值类型', { exact: true }).isDisabled(), true);
   await heartbeat.click();

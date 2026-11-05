@@ -143,6 +143,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed={'marketplace-sources.'+verb for verb in ['read','create','update','delete','sync']} | {'config-templates.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in ['read','create','update','delete']}
                     allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}
+                    allowed |= {'workflows.'+verb for verb in ['read','create','update','delete','run']}
+                    allowed |= {'workflow-groups.'+verb for verb in ['read','create','update','delete']}
+                    allowed |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -191,6 +194,8 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         assert after[key] == before[path].get(key, default), (key, after[key])
                         before[path].setdefault(key, default)
                 if '/pipelines/' in path:
+                    assert after['owner_id'] == before['/me']['user']['id']
+                    before[path]['owner_id'] = after['owner_id']
                     assert after['definition_format']=='github-actions'
                     assert "run: 'true'" in after['definition'] or 'run: true' in after['definition']
                     assert after['executor_bindings']==[{'job_id':'build','target_kind':'host','target_ref':host,'image':'host'}]
@@ -202,7 +207,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                 if '/pipeline-runs/' in path:
-                    for key,value in {'environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy','inputs':{},'definition_snapshot':None}.items():
+                    for key,value in {'revision_id':'0','environment_id':'0','environment_name':'','jobs':[],'definition_format':'legacy','inputs':{},'definition_snapshot':None}.items():
                         assert after[key]==before[path].get(key,value),(key,after[key])
                         before[path].setdefault(key,value)
                     # Runs recorded before name snapshots are named live from their IDs.
@@ -219,6 +224,10 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {'config-templates.'+verb for verb in ['read','create','update','delete']} if role['name'] in ['拥有者','管理员','开发'] else {'config-templates.read'} if role['name']=='只读' else set()
                 expected |= {resource+'.'+verb for resource in ['pipeline-groups','pipeline-environments'] for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'code-insights.'+verb for verb in (['read','create','update','delete','sync'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
+                expected |= {'workflows.'+verb for verb in (['read','create','update','delete','run'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
+                expected |= {'workflow-groups.'+verb for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
+                if role['name'] in ['拥有者','管理员']:
+                    expected |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)
@@ -228,7 +237,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert len(members) == 1 and members[0]['owner'] and members[0]['version'] == 1
             custom = create('roles', {'name':'Migrated custom','permissions':['hosts.create']})
             assert 'hosts.read' in api('/workspaces/upgrade/roles/'+custom)['permissions']
-            print('PASS: existing grants/membership preserved; only new built-in market permissions appended with version bump')
+            print('PASS: existing grants/membership preserved; only specified built-in resource permissions appended with version bump')
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
             assert api('/workspaces/upgrade/deployments/'+deployment)['target_ref']==host
@@ -256,11 +265,9 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert api('/workspaces/upgrade/preferences')['default_page_size']==20
             assert api('/workspaces/upgrade/settings')['total']==5
             seeded_dictionaries = api('/workspaces/upgrade/dictionaries')
-            assert seeded_dictionaries['total'] == 9
+            assert seeded_dictionaries['total'] == 2
             assert {row['key'] for row in seeded_dictionaries['items']} == {
-                'environment', 'app-category', 'host-state',
-                'pipeline-state', 'deployment-state', 'cron-state',
-                'alert-state', 'repository-state', 'insight-state',
+                'environment', 'app-category',
             }
             print('PASS: existing workspace gets typed settings and dictionary defaults after upgrade')
             setup = api('/setup')
