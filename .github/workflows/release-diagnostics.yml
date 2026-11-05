@@ -13,12 +13,12 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            for (const job_id of [127436283149,127441648749]) {
+            for (const job_id of [127452038155]) {
               const {data}=await github.rest.actions.downloadJobLogsForWorkflowRun({...context.repo,job_id});
               const text=typeof data==='string'?data:Buffer.from(data).toString('utf8');
               const lines=text.split('\n');
               const selected=[];
-              lines.forEach((line,index)=>{if(/Traceback|AssertionError|headersUnknown|DENIED|apparmor_restrict|userns_create|"status":|PASS: 16|PASS real OS/.test(line)) selected.push(...lines.slice(Math.max(0,index-1),index+6));});
+              lines.forEach((line,index)=>{if(/Traceback|AssertionError|FAILED|Error:|error:|left:|right:|panic|Fail|unexpected/.test(line)) selected.push(...lines.slice(Math.max(0,index-1),index+12));});
               const excerpt=selected.join('\n');
               for(let start=0;start<excerpt.length;start+=3000)core.notice(excerpt.slice(start,start+3000),{title:`Release job ${job_id} part ${start/3000}`});
             }
