@@ -8,17 +8,17 @@ permissions:
   actions: read
 jobs:
   diagnostics:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/github-script@v7
         with:
           script: |
-            for (const job_id of [127415547794]) {
+            for (const job_id of [127436283149]) {
               const {data}=await github.rest.actions.downloadJobLogsForWorkflowRun({...context.repo,job_id});
               const text=typeof data==='string'?data:Buffer.from(data).toString('utf8');
               const lines=text.split('\n');
               const selected=new Set();
               lines.forEach((line,index)=>{if(/assert|traceback|error:|failed|expected|exception|panic/i.test(line))for(let n=Math.max(0,index-3);n<=Math.min(lines.length-1,index+7);n++)selected.add(n);});
-              const excerpt=[...selected].sort((a,b)=>a-b).map(n=>lines[n]).join('\n').slice(-3500);
-              core.notice(excerpt||lines.slice(-80).join('\n'),{title:`Release gate job ${job_id}`});
+              const excerpt=[...selected].sort((a,b)=>a-b).map(n=>lines[n]).join('\n').slice(-18000);
+              core.notice((excerpt+'\n'+lines.slice(-140).join('\n')).slice(-24000),{title:`Release gate job ${job_id}`});
             }
