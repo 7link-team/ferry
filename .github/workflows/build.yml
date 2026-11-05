@@ -320,6 +320,21 @@ jobs:
       - run: cargo build --locked -p ferry-server -p ferry-runner
       - if: matrix.harness == 'build-ui'
         run: cargo build --locked -p ferry-sandbox
+      - name: Configure and verify Linux expression isolation
+        if: matrix.harness == 'build-ui'
+        run: |
+          # Ubuntu 24.04 restricts unprivileged user namespaces with AppArmor.
+          # Grant only this executable permission; retain the host policy and
+          # the sandbox's low-privilege identity, seccomp and resource limits.
+          cat > "$RUNNER_TEMP/ferry-sandbox.apparmor" <<EOF
+          abi <abi/4.0>,
+          include <tunables/global>
+          profile ferry-ci-sandbox "${GITHUB_WORKSPACE}/target/debug/ferry-sandbox" flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r "$RUNNER_TEMP/ferry-sandbox.apparmor"
+          python3 scripts/test-workflow-sandbox.py target/debug/ferry-sandbox
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-ui.mjs

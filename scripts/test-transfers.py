@@ -245,19 +245,22 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(exported.get('definition_format')=='github-actions','Actions CSV export retains definition format')
         check(json.loads(exported['graph_layout'])==actions_body['graph_layout'],'Actions export preserves canvas layout')
         check(json.loads(exported['checkout_bindings'])==actions_body['checkout_bindings'],'Actions CSV export retains connection, source ref and checkout path')
-        exported={key:value for key,value in exported.items() if key not in ('id','version','created_at','updated_at','group_name','application_name','tags','environments','repository_name','target_name')}
+        exported_owner=exported['owner_id']
+        exported={key:value for key,value in exported.items() if key not in ('id','owner_id','version','created_at','updated_at','group_name','application_name','tags','environments','repository_name','target_name')}
         exported['name']='Actions imported'
         imported=upload('pipelines',[exported]);check(imported['valid'],'Actions export can be imported without converting YAML to legacy JSON');commit('pipelines',imported)
         copied=request(owner,root+'/pipelines?q=Actions%20imported')['items'][0]
+        check(copied['owner_id']==exported_owner,'Actions import assigns the authenticated creator as owner')
         check(copied['definition']==actions_yaml and copied['executor_bindings']==actions_body['executor_bindings'],'Actions import preserves original YAML and executor bindings')
         check(copied['checkout_bindings']==actions_body['checkout_bindings'],'Actions CSV import roundtrip preserves complete checkout binding')
         workbook=openpyxl.load_workbook(io.BytesIO(download('pipelines',fmt='xlsx',query='&q=Actions%20export')))
         sheet_rows=list(workbook.active.values);headers=list(sheet_rows[0]);values=dict(zip(headers,sheet_rows[1]))
-        values={key:value for key,value in values.items() if key not in ('id','version','created_at','updated_at','group_name','application_name','tags','environments','repository_name','target_name')}
+        values={key:value for key,value in values.items() if key not in ('id','owner_id','version','created_at','updated_at','group_name','application_name','tags','environments','repository_name','target_name')}
         values['name']='Actions XLSX imported'
         imported_xlsx=upload('pipelines',raw=xlsx([list(values),list(values.values())]),ext='xlsx')
         check(imported_xlsx['valid'],'Actions XLSX with checkout binding can be imported');commit('pipelines',imported_xlsx)
         copied_xlsx=request(owner,root+'/pipelines?q=Actions%20XLSX%20imported')['items'][0]
+        check(copied_xlsx['owner_id']==exported_owner,'Actions XLSX import assigns the authenticated creator as owner')
         check(copied_xlsx['checkout_bindings']==actions_body['checkout_bindings'],'Actions XLSX roundtrip preserves complete checkout binding')
         check(all(copied[key]==actions_body[key] for key in ['group_id','application_id','tag_ids','environment_ids']),'Actions CSV roundtrip preserves group, application, tags and environments')
         secondary=request(owner,root+'/nodes',{'name':'Actions-only target','connection':'runner'},expected=201)['id']
