@@ -35,7 +35,6 @@
 "actions.conditionCustomHelp": ["Example: run only on main. You may use the variable helper to insert references; existing YAML expressions are preserved.","例如只在 main 分支执行。可用变量助手插入引用；已有 YAML 自定义表达式会保留。","例如僅在 main 分支執行。可用變數助手插入參照；既有 YAML 自訂運算式會保留。","例：main ブランチでのみ実行。変数ヘルパーで参照を挿入できます。既存の YAML 式は保持されます。","예: main 브랜치에서만 실행. 변수 도우미로 참조를 삽입할 수 있으며 기존 YAML 표현식은 유지됩니다.","Contoh: jalankan hanya pada cabang main. Gunakan pembantu pemboleh ubah untuk rujukan; ungkapan YAML sedia ada dikekalkan."],
 "templates": ["Templates","模板","範本","テンプレート","템플릿","Templat"],
 "libraryTabs": ["Workflows and templates","工作流与模板","工作流程與範本","ワークフローとテンプレート","워크플로 및 템플릿","Aliran kerja dan templat"],
-"credentialManagement": ["Credential management","凭据管理","憑證管理","認証情報管理","자격 증명 관리","Pengurusan kelayakan"],
 "credentialScope": ["Usage","用途","用途","用途","용도","Kegunaan"],
 "credentialScope.host": ["Hosts","主机","主機","ホスト","호스트","Hos"],
 "credentialScope.build": ["Build / repository","构建／代码仓库","建置／程式碼儲存庫","ビルド・リポジトリ","빌드 / 저장소","Binaan / repositori"],

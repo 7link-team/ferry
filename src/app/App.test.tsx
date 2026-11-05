@@ -298,7 +298,7 @@ it("scopes credential menus, lists and create payloads to the current module", a
     await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); root.render(<App />); });
     const moduleName = { host: "主机", build: "仓库", deploy: "应用" }[scope];
     const credentialLink = host.querySelector(`nav[aria-label="${moduleName}"] a[aria-current="page"]`);
-    expect(credentialLink?.textContent).toBe("凭据管理");
+    expect(credentialLink?.textContent).toBe("凭据");
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/credentials?") && new URL(String(url), location.origin).searchParams.get("scope") === scope)).toBe(true);
     const create = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "创建")!;
     await act(async () => create.click());
@@ -341,7 +341,7 @@ it("has one repository entry and no separate authorization tabs", async () => {
   history.replaceState({}, "", "/zh-CN/workspaces/2/code-connections");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="仓库"]')!;
-  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "仓库事件", "凭据管理"]);
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "仓库事件", "凭据"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库连接");
   expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
   expect(host.textContent).not.toContain("平台授权");
@@ -370,7 +370,7 @@ it("does not expose repository creation to a credentials-only role", async () =>
   permissions = ["credentials.read"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/credentials");
   await act(async () => root.render(<App />));
-  expect([...host.querySelectorAll('nav[aria-label="工作流"] a')].map(a => a.textContent)).toEqual(["凭据管理"]);
+  expect([...host.querySelectorAll('nav[aria-label="工作流"] a')].map(a => a.textContent)).toEqual(["凭据"]);
   expect(host.querySelector('nav[aria-label="仓库"]')).toBeNull();
   expect([...host.querySelectorAll("button")].some(button => button.textContent === "新建")).toBe(false);
 });
