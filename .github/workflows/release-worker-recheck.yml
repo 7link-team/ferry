@@ -24,5 +24,5 @@ jobs:
             const failures=[...log.matchAll(/--- FAIL: ([^\r\n]+)/g)].map(match=>match[1]);
             if(failures.length!==2 || !failures.some(line=>line.startsWith('TestCompatAudit/shell/powershell ')) || !log.includes('error=context deadline exceeded; elapsed=20.'))throw Error('Failure differs from isolated 20s PowerShell startup timeout');
             core.notice(JSON.stringify({run_id,job_id,failures,reason:'Original 20-second deadline and output assertions retained; five independent native repetitions passed.'}));
-            await github.rest.actions.reRunJob({...repo,job_id,enable_debug_logging:true});
+            await github.request('POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun', {...repo,job_id,enable_debug_logging:true});
             core.notice('Requested one recheck of the exact failed Windows job; source unchanged.');
