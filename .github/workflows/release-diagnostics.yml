@@ -17,8 +17,8 @@ jobs:
               const {data}=await github.rest.actions.downloadJobLogsForWorkflowRun({...context.repo,job_id});
               const text=typeof data==='string'?data:Buffer.from(data).toString('utf8');
               const lines=text.split('\n');
-              const selected=new Set();
-              lines.forEach((line,index)=>{if(/assert|traceback|error:|failed|expected|exception|panic/i.test(line))for(let n=Math.max(0,index-3);n<=Math.min(lines.length-1,index+7);n++)selected.add(n);});
-              const excerpt=[...selected].sort((a,b)=>a-b).map(n=>lines[n]).join('\n').slice(-18000);
-              core.notice((excerpt+'\n'+lines.slice(-140).join('\n')).slice(-24000),{title:`Release gate job ${job_id}`});
+              const selected=[];
+              lines.forEach((line,index)=>{if(/Traceback|AssertionError|headersUnknown|DENIED|apparmor_restrict|userns_create|"status":|PASS: 16|PASS real OS/.test(line)) selected.push(...lines.slice(Math.max(0,index-1),index+6));});
+              const excerpt=selected.join('\n');
+              for(let start=0;start<excerpt.length;start+=3000)core.notice(excerpt.slice(start,start+3000),{title:`Release job ${job_id} part ${start/3000}`});
             }
