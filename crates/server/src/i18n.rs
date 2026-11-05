@@ -918,6 +918,11 @@ mod tests {
             );
             for (key, value) in catalog {
                 assert!(!value.trim().is_empty(), "{key}");
+                assert!(
+                    !value.contains("???"),
+                    "corrupted translation {} {key}",
+                    Locale::ALL[index].tag()
+                );
                 // Protocol notation/composition contains no prose to translate.
                 // "Platform" and "item" also use the same spelling in Malay.
                 let language_neutral = matches!(
