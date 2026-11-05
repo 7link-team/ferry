@@ -1,0 +1,22 @@
+name: Stop obsolete worker retry and release gate
+on:
+  push:
+    branches: [feat/release030-stop-old-worker]
+    paths: [.github/workflows/release-stop-old-worker.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  stop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const obsolete=[[42095525890,'d00c35000a0b765b9d4ae80d755209ce95b4f8a2'],[42091430391,'466ef27336b8cdbb3a64f46a32c7b14b107a747e']];
+            for(const [run_id,sha] of obsolete) {
+              const {data:r}=await github.rest.actions.getWorkflowRun({...context.repo,run_id});
+              if(r.head_sha!==sha)throw Error('Unexpected obsolete source');
+              if(r.status!=='completed')await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel',{...context.repo,run_id});
+              core.notice(`Stopped obsolete ${run_id}`);
+            }
