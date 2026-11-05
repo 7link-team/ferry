@@ -38,11 +38,13 @@ function parseRoute(pathname: string, search: string): Route {
   if (segments[0] === "workspaces") {
     const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
     const scope = new URLSearchParams(search).get("scope");
+    const workflowKind = new URLSearchParams(search).get("workflow_kind");
     const candidates = nav.flatMap(group => group.items
       .filter(item => resourceName(item.resource) === resource)
       .map(item => ({ group, item })));
-    const selected = candidates.find(({ item }) => scope && item.params?.scope === scope)
-      ?? (resource === "credentials" ? candidates.find(({ item }) => item.params?.scope === "build") : undefined)
+    const selected = candidates.find(({item})=>workflowKind && item.params?.workflow_kind===workflowKind)
+      ?? candidates.find(({ item }) => scope && item.params?.scope === scope)
+      ?? (resource === "credentials" ? candidates.find(({ group, item }) => group.key === "workflow" && item.key === "credentials" && !item.params?.scope) : undefined)
       ?? candidates.find(({ item }) => !item.hidden) ?? candidates[0];
     const group = selected?.group ?? nav[0]!;
     const item = selected?.item ?? group.items[0]!;
@@ -55,15 +57,16 @@ function parseRoute(pathname: string, search: string): Route {
     .split("/");
   if (workspace === "_platform") {
     const mode = item === "new" ? "new" : item ? (third === "edit" ? "edit" : "view") : "list";
-    return { workspace, group: "platform", item: ["users", "workspaces", "settings"].includes(group) ? group : "users",
+    return { workspace, group: "platform", item: ["users", "workspaces", "settings", "server-nodes", "monitor"].includes(group) ? group : "workspaces",
       mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
   }
   const fallback = nav[0]!;
-  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "infrastructure" ? "host" : group;
+  const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group;
   const resolved = nav.find((g) => g.key === groupKey) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
   const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
+    group === "workflow" && item === "credentials" ? "ai-credentials" :
     resolved.key === "host" && item === "nodes" ? "hosts" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
   const detail = pipelineGroups ? fourth : third;
@@ -86,7 +89,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
     r.mode === "new" ? "/new" : r.mode === "view" ? `/${r.id}` : r.mode === "edit" ? `/${r.id}/edit` : r.mode === "workspace" ? `/${r.id}/workspace` : "";
   const params = new URLSearchParams(query ? "" : location.search);
   for (const [key, value] of Object.entries(query ?? {})) if (value) params.set(key, value);
-  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group;
+  const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group;
   const item = nav.find(group => group.key === groupKey)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
   if (r.workspace === "_account") return localizedPath("/account", r.locale ?? currentLocale());
@@ -116,6 +119,30 @@ const subscribe = (fn: () => void) => {
   };
 };
 const snapshot = () => location.pathname + location.search;
+
+export const isLoginPath = () => stripLocalePrefix(location.pathname).replace(/\/$/, "") === "/login";
+
+/** Only same-origin relative destinations; never recursively enter login. */
+export function safeLoginRedirect(value: string | null): string | undefined {
+  if (!value?.startsWith("/") || value.startsWith("//") || /[\\\u0000-\u0020]/.test(value)) return;
+  try {
+    const url = new URL(value, location.origin);
+    if (url.origin !== location.origin || stripLocalePrefix(url.pathname).replace(/\/$/, "") === "/login") return;
+    return url.pathname + url.search + url.hash;
+  } catch { return; }
+}
+
+export function replacePath(target: string) {
+  history.replaceState({}, "", target);
+  announce();
+}
+
+export function navigateToLogin(preserveDestination = true) {
+  if (isLoginPath() && preserveDestination) return;
+  const destination = preserveDestination ? safeLoginRedirect(location.pathname + location.search + location.hash) : undefined;
+  const query = destination ? `?${new URLSearchParams({redirect: destination})}` : "";
+  replacePath(localizedPath("/login", currentLocale()) + query);
+}
 
 export function navigate(
   route: Partial<Route>,

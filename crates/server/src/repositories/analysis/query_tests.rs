@@ -162,12 +162,29 @@ async fn insights_merge_rename_and_unmap_independently_without_changing_raw_fact
         .map(|row| row.contributor_id)
         .collect::<BTreeSet<_>>();
     let mut aliases = vec![Alias {
-        name: " alice ".into(),
-        email: String::new(),
+        name: "Alice".into(),
+        email: "one@example.test".into(),
         nickname: "Member".into(),
         contributor_id: String::new(),
     }];
     change_insight_aliases(&s, &mut first, &[], &mut aliases).await;
+    let old = aliases.clone();
+    aliases.push(Alias {
+        name: "Alice".into(),
+        email: "two@example.test".into(),
+        nickname: "Member".into(),
+        contributor_id: String::new(),
+    });
+    change_insight_aliases(&s, &mut first, &old, &mut aliases).await;
+    let independent = insight_contributors(&s, &first).await;
+    assert_eq!(
+        independent.len(),
+        2,
+        "equal nicknames never merge author pairs"
+    );
+    let old = aliases.clone();
+    aliases[1].contributor_id = aliases[0].contributor_id.clone();
+    change_insight_aliases(&s, &mut first, &old, &mut aliases).await;
     let merged = insight_contributors(&s, &first).await;
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].commits, 2);
@@ -189,6 +206,7 @@ async fn insights_merge_rename_and_unmap_independently_without_changing_raw_fact
     tx.rollback().await.unwrap();
     let old = aliases.clone();
     aliases[0].nickname = "Renamed".into();
+    aliases[1].nickname = "Renamed".into();
     change_insight_aliases(&s, &mut first, &old, &mut aliases).await;
     let renamed = insight_contributors(&s, &first).await;
     assert_eq!(renamed[0].contributor_id, merged_id);
@@ -371,6 +389,14 @@ async fn publication_projects_insights_and_ambiguous_mapping_never_blocks_shared
         },
     ];
     change_insight_aliases(&s, &mut first, &[], &mut aliases).await;
+    // Simulate a conflicting persisted configuration; normal saves reject this.
+    aliases[0].email = "mail@example.test".into();
+    aliases[1].name = "Alice".into();
+    first.config = encode(&json!({"enabled":true,"full_history":true,"aliases":aliases})).unwrap();
+    insight_rows::Entity::update(first.clone().into_active_model().reset_all())
+        .exec(&s.db)
+        .await
+        .unwrap();
     let mut value = commit('a');
     value.author_name = "Alice".into();
     value.author_email = "mail@example.test".into();

@@ -1,0 +1,581 @@
+{
+  "contract_version": "1.9-review",
+  "status": "design_only",
+  "scope": "3 S2 built-in data contracts; no provider selection or runtime implementation",
+  "nodes": [
+    {
+      "type": "data.table",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "table_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "operation": {
+            "enum": [
+              "select",
+              "insert",
+              "update",
+              "delete"
+            ]
+          },
+          "values": {
+            "type": "object"
+          },
+          "row_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "column": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "is_null"
+                  ]
+                },
+                "value": {}
+              },
+              "required": [
+                "column",
+                "operator"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "eq",
+                          "ne",
+                          "gt",
+                          "gte",
+                          "lt",
+                          "lte"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "order_by": {
+            "type": "object",
+            "properties": {
+              "column": {
+                "type": "string",
+                "minLength": 1
+              },
+              "direction": {
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              },
+              "nulls": {
+                "enum": [
+                  "first",
+                  "last"
+                ]
+              }
+            },
+            "required": [
+              "column",
+              "direction",
+              "nulls"
+            ],
+            "additionalProperties": false
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "after_row_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          }
+        },
+        "required": [
+          "table_id",
+          "operation"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "const": "select"
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "limit"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "insert",
+                    "update"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "values"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "update",
+                    "delete"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "row_id",
+                "expected_version"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "after_row_id"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "order_by"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "select"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "values"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "row_id"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "expected_version"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "insert"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "row_id"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "expected_version"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "filters"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "order_by"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "limit"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "after_row_id"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "update",
+                    "delete"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "filters"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "order_by"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "limit"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "after_row_id"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "delete"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "values"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "example_params": {
+        "table_id": "31",
+        "operation": "select",
+        "limit": 20
+      },
+      "expression_fields": [
+        "/values/*",
+        "/filters/*/value"
+      ],
+      "semantic_rule": "仅内置表CRUD；按同空间读写权限和column_schema验证类型/必填/null；解析前冻结列/索引schema摘要。select结果每行输出row_id/version/data，不把row元数据混入用户data。update/delete按确切row_id+expected_version CAS；insert冻结生成row_id和意图键，事务重放不重复插入。order_by按声明列与稳定id排序；after_row_id仅适用于默认id升序。忽略字段禁止，未声明列拒绝。",
+      "source_ids": [
+        "B008"
+      ],
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "concurrent_update",
+        "restart_or_replay"
+      ]
+    },
+    {
+      "type": "vector.upsert",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "item_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1
+          },
+          "metadata": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "collection_id",
+          "item_key",
+          "embedding",
+          "metadata"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "collection_id": "41",
+        "item_key": "chapter-1",
+        "embedding": [
+          0.5,
+          0.5
+        ],
+        "metadata": {
+          "chapter": 1
+        }
+      },
+      "expression_fields": [
+        "/item_key",
+        "/embedding",
+        "/metadata"
+      ],
+      "semantic_rule": "仅接受预生成向量，不调用嵌入服务商；collection绑定模型/维度/metric/normalization，维度及有限float32验证，cosine零向量拒绝。item_key同集合唯一，写入锁内upsert及计数；重放同一意图返回原结果，不覆盖后来版本。同键不同意图按提交顺序更新。SQLite/MySQL集合最多20000条，更新已有键不占新额度；collection.version同事务递增用于缓存失效。",
+      "source_ids": [],
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "concurrent_update",
+        "restart_or_replay"
+      ]
+    },
+    {
+      "type": "vector.search",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 1
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "collection_id",
+          "embedding",
+          "top_k"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "collection_id": "41",
+        "embedding": [
+          0.5,
+          0.5
+        ],
+        "top_k": 5
+      },
+      "expression_fields": [
+        "/embedding"
+      ],
+      "semantic_rule": "使用集合已配置metric，不在节点覆盖模型/维度/距离；相同有限float32/维度及cosine非零守卫。返回item_key/metadata/score/metric；cosine与dot高分在前，euclidean距离低值在前，同分按item_key稳定排序。缓存以workspace/collection/version/模型/metric/normalization隔离，读取一致快照；零结果返回空items。不承诺pgvector适配已实现。",
+      "source_ids": [],
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "concurrent_update",
+        "restart_or_replay"
+      ]
+    }
+  ],
+  "capability_sources": [
+    "v3 §7.4 storage and AI text rows",
+    "v3 §12.1",
+    "data model §10.3/§12/§13",
+    "inventory B008 for data.table only"
+  ],
+  "storage_contract": {
+    "text_prefix_bytes": 128,
+    "text_encoding": "strict UTF-8; no normalization or case folding",
+    "text_index": "binary prefix candidates plus full original-value comparison before count/page",
+    "vector_key_hash": "SHA-256 raw 32-byte digest",
+    "vector_key_collision": "full key compare within collection lock; allocate distinct nonnegative key_slot",
+    "version": "1.9-review",
+    "vector_key_storage": "canonical JSON string envelope in TEXT; decode before compare/output; hash original strict UTF-8; escapes NUL for PostgreSQL"
+  }
+}

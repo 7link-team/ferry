@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import {PlatformFrame} from "./app/PlatformFooter";
 import "./shared/i18n/i18n";
 import { initLocale } from "./shared/i18n/locale";
 import { initTheme } from "./shared/theme/theme";
@@ -17,7 +18,7 @@ beginRoute(location.pathname + location.search);
 createRoot(document.getElementById("root")!).render(
   <>
     <ActivityProgress />
-    <App />
+    <PlatformFrame><App /></PlatformFrame>
     <Toaster />
   </>,
 );

@@ -30,6 +30,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
         });
         crate::entities::workspaces::Entity::insert(
@@ -40,6 +41,7 @@ mod tests {
                 owner_id: 1,
                 join_code: "poll-test".into(),
                 pipeline_run_number: 0,
+                workflow_execution_number: 0,
                 created_at: 0,
                 updated_at: 0,
             }
@@ -49,6 +51,166 @@ mod tests {
         .await
         .unwrap();
         (dir, s)
+    }
+
+    #[tokio::test]
+    async fn editing_notifications_preserves_poll_history_and_baseline() {
+        let (_dir, s) = test_state().await;
+        connections::Entity::insert(
+            connections::Model {
+                id: 2,
+                workspace_id: 1,
+                user_id: 1,
+                provider: "codeup".into(),
+                name: "Monitor".into(),
+                description: String::new(),
+                credential_id: 3,
+                account: String::new(),
+                refresh_secret: String::new(),
+                expires_at: 0,
+                state: "connected".into(),
+                last_error: String::new(),
+                client_id: String::new(),
+                config_fingerprint: String::new(),
+                token_config: None,
+                version: 1,
+                created_at: 0,
+                updated_at: 0,
+            }
+            .into_active_model(),
+        )
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let scope = || Scope {
+            workspace_id: 1.into(),
+            user: crate::accounts::auth::User {
+                id: 1.into(),
+                email: "monitor@example.invalid".into(),
+                name: "Monitor".into(),
+                is_superadmin: false,
+            },
+            permissions: [
+                "repositories.read",
+                "repositories.update",
+                "credentials.read",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        };
+        let body = |version, enabled, interval, events: Vec<&str>| {
+            serde_json::from_value::<Body>(json!({
+                "version": version, "enabled": enabled, "mode": "poll",
+                "poll_interval_minutes": interval, "all_repositories": true,
+                "repositories": "", "events": events,
+                "notification_language": "zh-CN", "notification_channels": [],
+            }))
+            .unwrap()
+        };
+        let mut initial = body(0, true, 5, vec!["push", "branch.created"]);
+        initial.notification_language = Some("en-US".into());
+        super::super::update(
+            State(s.clone()),
+            scope(),
+            Path(("1".into(), 2.into())),
+            Json(initial),
+        )
+        .await
+        .unwrap();
+        let baseline = s.vault.seal("{}", &poll_aad(1, 2)).unwrap();
+        let next = db::now() + 600_000;
+        polls::Entity::update_many()
+            .col_expr(polls::Column::Snapshot, Expr::value(baseline.clone()))
+            .col_expr(polls::Column::LastPolledAt, Expr::value(1234_i64))
+            .col_expr(polls::Column::NextPollAt, Expr::value(next))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        // Saving a notification edit (even reordered event selections) keeps
+        // successful history and the next check, while advancing the version fence.
+        super::super::update(
+            State(s.clone()),
+            scope(),
+            Path(("1".into(), 2.into())),
+            Json(body(1, true, 5, vec!["branch.created", "push"])),
+        )
+        .await
+        .unwrap();
+        let poll = polls::Entity::find_by_id(2)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(poll.config_version, 2);
+        assert_eq!(poll.snapshot, baseline);
+        assert_eq!(poll.last_polled_at, 1234);
+        assert_eq!(poll.next_poll_at, next);
+        let Json(view) = super::super::get(State(s.clone()), scope(), Path(("1".into(), 2.into())))
+            .await
+            .unwrap();
+        assert_eq!(view["last_polled_at"], 1234);
+        assert_eq!(
+            view["poll_status"],
+            crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.ready")
+            )
+        );
+        // Pausing, changing the interval, and enabling again retain the baseline
+        // and real failure information; notification edits do not fake recovery.
+        polls::Entity::update_many()
+            .col_expr(polls::Column::LastError, Expr::value("previous error"))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        for (version, enabled, interval) in [(2, false, 5), (3, false, 10), (4, true, 10)] {
+            super::super::update(
+                State(s.clone()),
+                scope(),
+                Path(("1".into(), 2.into())),
+                Json(body(
+                    version,
+                    enabled,
+                    interval,
+                    vec!["push", "branch.created"],
+                )),
+            )
+            .await
+            .unwrap();
+            let poll = polls::Entity::find_by_id(2)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(poll.config_version, version + 1);
+            assert_eq!(poll.snapshot, baseline);
+            assert_eq!(poll.last_polled_at, 1234);
+            assert_eq!(poll.last_error, "previous error");
+        }
+        // A changed sampling scope still establishes a new baseline, rather than
+        // mistaking newly sampled tags for new remote events.
+        super::super::update(
+            State(s.clone()),
+            scope(),
+            Path(("1".into(), 2.into())),
+            Json(body(
+                5,
+                true,
+                10,
+                vec!["push", "branch.created", "tag.created"],
+            )),
+        )
+        .await
+        .unwrap();
+        let poll = polls::Entity::find_by_id(2)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(poll.config_version, 6);
+        assert!(poll.snapshot.is_empty());
+        assert_eq!(poll.last_polled_at, 0);
     }
 
     #[tokio::test]

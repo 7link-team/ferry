@@ -135,23 +135,14 @@ pub async fn execute(
     }
     // Only acquisition is cancellable here. Once execution starts, its existing
     // cancellation path owns remote process termination and credential cleanup.
-    let reservations = {
-        let pending = crate::hosts::runner::reservations::reserve_with(s.cluster.as_ref(), hosts);
-        tokio::pin!(pending);
-        let mut poll = tokio::time::interval(Duration::from_millis(200));
-        loop {
-            if *stop.borrow() || !history::active(s, run.id).await? {
-                return history::finish(s, run.id, "cancelled").await;
-            }
-            tokio::select! {
-                biased;
-                _ = stop.changed() => {
-                    return history::finish(s, run.id, "cancelled").await;
-                }
-                guards = &mut pending => break guards?,
-                _ = poll.tick() => {}
-            }
-        }
+    let reservations = scheduler::wait_for_reservation(
+        crate::hosts::runner::reservations::reserve_with(s.cluster.as_ref(), hosts),
+        stop,
+        || history::active(s, run.id),
+    )
+    .await?;
+    let Some(reservations) = reservations else {
+        return history::finish(s, run.id, "cancelled").await;
     };
     reservations
         .run(execute_reserved(s, run, snapshot, stop))
@@ -299,8 +290,11 @@ async fn execute_reserved(
                                         if changed.is_err() { break; }
                                         if *run_stop.borrow() { cancel.send_replace(true); }
                                     }
-                                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                                        if job_cancelling(&s, id, &key).await.unwrap_or(false) {
+                                    status = async {
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                        job_cancelling(&s, id, &key).await
+                                    } => {
+                                        if status.unwrap_or(false) {
                                             cancel.send_replace(true);
                                         }
                                     }
@@ -391,6 +385,7 @@ async fn execute_reserved(
                             .col_expr(steps::Column::State, Expr::value(terminal))
                             .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
                             .filter(steps::Column::Id.eq(row.id))
+                            .filter(crate::executions::pipeline_fence(run.id))
                             .exec(&s.db)
                             .await?;
                     }
@@ -420,6 +415,7 @@ async fn execute_reserved(
         .col_expr(jobs::Column::State, Expr::value("skipped"))
         .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
         .filter(jobs::Column::RunId.eq(run.id))
+        .filter(crate::executions::pipeline_fence(run.id))
         .filter(jobs::Column::State.eq("queued"))
         .exec(&s.db)
         .await?;
@@ -486,6 +482,7 @@ mod tests {
         }
         let s = std::sync::Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
@@ -502,10 +499,14 @@ mod tests {
             id: 1,
             workspace_id: 1,
             pipeline_id: 1,
+            revision_id: 0,
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
             concurrency_group: String::new(),
+            lease_owner: String::new(),
+            lease_epoch: 0,
+            not_before: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),
@@ -630,6 +631,7 @@ mod tests {
         }
         let s = std::sync::Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
@@ -646,10 +648,14 @@ mod tests {
             id: 1,
             workspace_id: 1,
             pipeline_id: 1,
+            revision_id: 0,
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
             concurrency_group: String::new(),
+            lease_owner: String::new(),
+            lease_epoch: 0,
+            not_before: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

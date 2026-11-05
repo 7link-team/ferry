@@ -1,4 +1,3 @@
-import { DictionaryState } from "../maintenance/DictionaryState";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -112,7 +111,7 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
       const phase = state === "running" ? collectorPhaseLabel(job?.collector_phase) : "";
       const lastError = String(job?.last_error || source.last_error || "");
       return <li key={String(source.repository ?? index)} className="space-y-1 py-3 first:pt-0 last:pb-0">
-        <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all text-sm font-medium">{String(source.repository ?? "—")}</span><span className={`text-xs ${state === "blocked" || state === "failed" ? "text-destructive" : "text-muted-foreground"}`}><DictionaryState dictionary="insight-state" value={state}>{taskStateLabel(state)}</DictionaryState></span></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><span className="break-all text-sm font-medium">{String(source.repository ?? "—")}</span><span className={`text-xs ${state === "blocked" || state === "failed" ? "text-destructive" : "text-muted-foreground"}`}>{taskStateLabel(state)}</span></div>
         <p className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span>{insightText("最近成功分析")}：{Number(source.synced_at) > 0 ? time(source.synced_at) : insightText("尚未成功")}</span>{job?.updated_at ? <span>{insightText("任务状态更新")}：{time(job.updated_at)}</span> : null}{state === "retry_wait" && job?.retry_at ? <span>{insightText("下次重试")}：{time(job.retry_at)}</span> : null}</p>
         {phase && <p className="text-xs text-muted-foreground">{phase}</p>}
         {lastError && <p className="break-words text-xs text-destructive">{lastError}</p>}

@@ -4,6 +4,8 @@
 
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
+mod platform_monitor;
+mod platform_storage;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.
 enum SchemaStatement {
@@ -54,6 +56,9 @@ fn long_text(name: &str, backend: DbBackend) -> ColumnDef {
 }
 
 pub struct Migrator;
+
+#[cfg(test)]
+pub(crate) mod workflow_tests;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -113,8 +118,528 @@ impl MigratorTrait for Migrator {
             Box::new(DeploymentCategory),
             Box::new(crate::repositories::reports::migration::InsightReports),
             Box::new(crate::pipelines::reviews::migration::Migration),
+            Box::new(ExecutionLeases),
+            Box::new(DefinitionRevisions),
+            Box::new(WorkflowStorage),
+            Box::new(DefinitionAcl),
+            Box::new(ContentAssets),
+            Box::new(DefinitionPublications),
+            Box::new(PipelineOwnership),
+            Box::new(AiProviders),
+            Box::new(IntegrationCalls),
+            Box::new(platform_storage::Migration),
+            Box::new(UserLoginMetadata),
+            Box::new(PlatformFooter),
+            Box::new(PlatformScripts),
+            Box::new(PlatformMail),
+            Box::new(FixedStateDictionaryRemoval),
+            Box::new(PipelineCreatorOwnership),
+            Box::new(platform_monitor::Migration),
+            Box::new(platform_monitor::LimitsMigration),
         ]
     }
+}
+
+struct FixedStateDictionaryRemoval;
+impl MigrationName for FixedStateDictionaryRemoval {
+    fn name(&self) -> &str {
+        "fixed_state_dictionary_removal_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for FixedStateDictionaryRemoval {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        use crate::entities::{dictionaries, dictionary_items};
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, QueryTrait};
+        let ids = dictionaries::Entity::find()
+            .select_only()
+            .column(dictionaries::Column::Id)
+            .filter(
+                dictionaries::Column::Key.is_in(
+                    crate::maintenance::RETIRED_STATE_DICTIONARIES
+                        .iter()
+                        .copied(),
+                ),
+            );
+        dictionary_items::Entity::delete_many()
+            .filter(dictionary_items::Column::DictionaryId.in_subquery(ids.into_query()))
+            .exec(m.get_connection())
+            .await?;
+        dictionaries::Entity::delete_many()
+            .filter(
+                dictionaries::Column::Key.is_in(
+                    crate::maintenance::RETIRED_STATE_DICTIONARIES
+                        .iter()
+                        .copied(),
+                ),
+            )
+            .exec(m.get_connection())
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "fixed workflow states are no longer dictionaries".into(),
+        ))
+    }
+}
+
+struct PipelineCreatorOwnership;
+impl MigrationName for PipelineCreatorOwnership {
+    fn name(&self) -> &str {
+        "pipeline_creator_ownership_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineCreatorOwnership {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        // Only an unambiguous creation audit is evidence of ownership. Updates,
+        // executions, workspace ownership and unrelated tenants never qualify.
+        m.get_connection()
+            .execute_unprepared(
+                "UPDATE pipelines SET owner_id = (SELECT MIN(a.actor_id) FROM activity a
+             WHERE a.workspace_id = pipelines.workspace_id AND a.resource = 'pipelines'
+             AND a.resource_id = pipelines.id AND a.action = 'create' AND a.actor_id > 0)
+             WHERE owner_id IS NULL AND
+             (SELECT COUNT(DISTINCT a.actor_id) FROM activity a
+             WHERE a.workspace_id = pipelines.workspace_id AND a.resource = 'pipelines'
+             AND a.resource_id = pipelines.id AND a.action = 'create' AND a.actor_id > 0) = 1
+             AND EXISTS (SELECT 1 FROM users u WHERE u.id =
+             (SELECT MIN(a.actor_id) FROM activity a WHERE a.workspace_id = pipelines.workspace_id
+             AND a.resource = 'pipelines' AND a.resource_id = pipelines.id
+             AND a.action = 'create' AND a.actor_id > 0))",
+            )
+            .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "verified pipeline ownership must be retained".into(),
+        ))
+    }
+}
+
+struct PlatformFooter;
+#[cfg(test)]
+mod compatibility_cleanup_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database};
+
+    #[tokio::test]
+    async fn removes_fixed_state_rows_and_items_only_and_is_repeatable() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        db.execute_unprepared("CREATE TABLE dictionaries (id BIGINT PRIMARY KEY, workspace_id BIGINT, key TEXT); CREATE TABLE dictionary_items (id BIGINT PRIMARY KEY, dictionary_id BIGINT, workspace_id BIGINT);
+            INSERT INTO dictionaries VALUES (1,11,'host-state'),(2,12,'pipeline-state'),(3,11,'environment'),(4,12,'custom');
+            INSERT INTO dictionary_items VALUES (1,1,11),(2,2,12),(3,3,11),(4,4,12)").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        for _ in 0..2 {
+            FixedStateDictionaryRemoval.up(&manager).await.unwrap();
+        }
+        for table in ["dictionaries", "dictionary_items"] {
+            let rows = db
+                .query_all_raw(sea_orm::Statement::from_string(
+                    DbBackend::Sqlite,
+                    format!("SELECT id FROM {table} ORDER BY id"),
+                ))
+                .await
+                .unwrap();
+            let ids: Vec<i64> = rows
+                .into_iter()
+                .map(|row| row.try_get("", "id").unwrap())
+                .collect();
+            assert_eq!(ids, vec![3, 4]);
+        }
+    }
+
+    #[tokio::test]
+    async fn recovers_only_unique_creation_audits_without_reassigning_existing_owners() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        db.execute_unprepared("CREATE TABLE pipelines (id BIGINT PRIMARY KEY, workspace_id BIGINT, owner_id BIGINT); CREATE TABLE activity (workspace_id BIGINT, resource TEXT, resource_id BIGINT, action TEXT, actor_id BIGINT); CREATE TABLE users (id BIGINT PRIMARY KEY);
+            INSERT INTO users VALUES (3),(4);
+            INSERT INTO pipelines VALUES (1,11,NULL),(2,11,NULL),(3,11,NULL),(4,11,NULL),(5,11,4),(6,11,NULL),(7,11,NULL);
+            INSERT INTO activity VALUES (11,'pipelines',1,'create',3),(11,'pipelines',1,'create',3),
+            (11,'pipelines',2,'update',3),(12,'pipelines',3,'create',3),
+            (11,'pipelines',4,'create',3),(11,'pipelines',4,'create',4),
+            (11,'pipelines',5,'create',3),(11,'pipelines',6,'create',99),(11,'workflows',7,'create',3)").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        for _ in 0..2 {
+            PipelineCreatorOwnership.up(&manager).await.unwrap();
+        }
+        let rows = db
+            .query_all_raw(sea_orm::Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT owner_id FROM pipelines ORDER BY id",
+            ))
+            .await
+            .unwrap();
+        let owners: Vec<Option<i64>> = rows
+            .into_iter()
+            .map(|row| row.try_get("", "owner_id").unwrap())
+            .collect();
+        assert_eq!(owners, vec![Some(3), None, None, None, Some(4), None, None]);
+    }
+}
+
+struct PlatformMail;
+impl MigrationName for PlatformMail {
+    fn name(&self) -> &str {
+        "platform_mail_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformMail {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        if !m.has_column("platform_state", "mail_config").await? {
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new("platform_state"))
+                    .add_column(long_text("mail_config", m.get_database_backend()).null())
+                    .to_owned(),
+            )
+            .await?;
+        }
+        m.create_table(
+            Table::create()
+                .table(Alias::new("email_codes"))
+                .if_not_exists()
+                .col(
+                    ColumnDef::new(Alias::new("id"))
+                        .string_len(320)
+                        .not_null()
+                        .primary_key(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("code_hash"))
+                        .string_len(255)
+                        .not_null(),
+                )
+                .col(ColumnDef::new(Alias::new("count")).big_integer().not_null())
+                .col(
+                    ColumnDef::new(Alias::new("expires_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("updated_at"))
+                        .big_integer()
+                        .not_null(),
+                )
+                .col(
+                    ColumnDef::new(Alias::new("config_tag"))
+                        .string_len(64)
+                        .not_null(),
+                )
+                .to_owned(),
+        )
+        .await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Mail verification state must be retained".into(),
+        ))
+    }
+}
+struct PlatformScripts;
+impl MigrationName for PlatformScripts {
+    fn name(&self) -> &str {
+        "platform_scripts_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformScripts {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        if !m.has_column("platform_state", "page_scripts").await? {
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new("platform_state"))
+                    .add_column(long_text("page_scripts", m.get_database_backend()).null())
+                    .to_owned(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Platform script configuration must be retained".into(),
+        ))
+    }
+}
+impl MigrationName for PlatformFooter {
+    fn name(&self) -> &str {
+        "platform_footer_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PlatformFooter {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        if !m.has_column("platform_state", "footer_html").await? {
+            m.alter_table(
+                Table::alter()
+                    .table(Alias::new("platform_state"))
+                    .add_column(long_text("footer_html", m.get_database_backend()).null())
+                    .to_owned(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Platform footer configuration must be retained".into(),
+        ))
+    }
+}
+
+struct UserLoginMetadata;
+impl MigrationName for UserLoginMetadata {
+    fn name(&self) -> &str {
+        "user_login_metadata_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for UserLoginMetadata {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for mut column in [
+            ColumnDef::new(Alias::new("last_login_at"))
+                .big_integer()
+                .null()
+                .to_owned(),
+            ColumnDef::new(Alias::new("last_login_ip"))
+                .string_len(45)
+                .null()
+                .to_owned(),
+        ] {
+            let name = column.get_column_name();
+            if !m.has_column("users", &name).await? {
+                m.alter_table(
+                    Table::alter()
+                        .table(Alias::new("users"))
+                        .add_column(&mut column)
+                        .to_owned(),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("User login metadata must be retained".into()))
+    }
+}
+
+pub(crate) struct IntegrationCalls;
+impl MigrationName for IntegrationCalls {
+    fn name(&self) -> &str {
+        "workflow_integration_calls_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for IntegrationCalls {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        let mut table = create_table("workflow_integration_calls", backend);
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        for field in [
+            "workspace_id",
+            "execution_id",
+            "node_run_id",
+            "item_index",
+            "credential_id",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+            "version",
+        ] {
+            table.col(ColumnDef::new(Alias::new(field)).big_integer().not_null());
+        }
+        for field in ["state", "request_hash"] {
+            table.col(ColumnDef::new(Alias::new(field)).string_len(64).not_null());
+        }
+        table.col(long_text("result", backend).null());
+        execute_schema(m, SchemaStatement::Table(table.to_owned())).await?;
+        let name = "workflow_integration_call_item";
+        let mut index = Index::create();
+        index
+            .name(name)
+            .table(Alias::new("workflow_integration_calls"))
+            .unique();
+        for field in ["workspace_id", "execution_id", "node_run_id", "item_index"] {
+            index.col(Alias::new(field));
+        }
+        execute_schema(
+            m,
+            SchemaStatement::Index("workflow_integration_calls", name, index.to_owned()),
+        )
+        .await
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Integration request outcomes must be retained".into(),
+        ))
+    }
+}
+
+struct AiProviders;
+impl MigrationName for AiProviders {
+    fn name(&self) -> &str {
+        "workflow_ai_providers_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for AiProviders {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let backend = m.get_database_backend();
+        for (name, strings, numbers, texts) in [
+            (
+                "ai_providers",
+                vec!["name", "base_url", "protocol", "currency", "timezone"],
+                vec![
+                    "workspace_id",
+                    "credential_id",
+                    "monthly_limit_micros",
+                    "qps",
+                    "concurrency",
+                    "created_at",
+                    "created_by",
+                    "updated_at",
+                    "updated_by",
+                    "version",
+                ],
+                vec!["prices"],
+            ),
+            (
+                "ai_calls",
+                vec!["operation_key", "currency", "period_key", "state"],
+                vec![
+                    "workspace_id",
+                    "provider_id",
+                    "credential_id",
+                    "execution_id",
+                    "node_run_id",
+                    "reserved_micros",
+                    "actual_micros",
+                    "created_at",
+                    "created_by",
+                    "updated_at",
+                    "updated_by",
+                    "version",
+                ],
+                vec!["price_snapshot"],
+            ),
+        ] {
+            let mut table = create_table(name, backend);
+            table.col(
+                ColumnDef::new(Alias::new("id"))
+                    .big_integer()
+                    .not_null()
+                    .primary_key(),
+            );
+            for field in strings {
+                table.col(
+                    ColumnDef::new(Alias::new(field))
+                        .string_len(match field {
+                            "currency" => 3,
+                            "period_key" => 7,
+                            "protocol" | "state" => 32,
+                            "operation_key" => 128,
+                            _ => 512,
+                        })
+                        .not_null(),
+                );
+            }
+            for field in numbers {
+                table.col(ColumnDef::new(Alias::new(field)).big_integer().not_null());
+            }
+            for field in texts {
+                table.col(long_text(field, backend).not_null());
+            }
+            if name == "ai_calls" {
+                table.col(long_text("result", backend).null());
+            }
+            execute_schema(m, SchemaStatement::Table(table.to_owned())).await?;
+        }
+        for (table, name, columns, unique) in [
+            (
+                "ai_providers",
+                "ai_provider_credential",
+                vec!["workspace_id", "credential_id"],
+                true,
+            ),
+            (
+                "ai_calls",
+                "ai_call_operation",
+                vec!["workspace_id", "operation_key"],
+                true,
+            ),
+            (
+                "ai_calls",
+                "ai_call_budget",
+                vec!["workspace_id", "credential_id", "currency", "period_key"],
+                false,
+            ),
+            (
+                "ai_calls",
+                "ai_call_execution",
+                vec!["workspace_id", "execution_id"],
+                false,
+            ),
+        ] {
+            let mut index = Index::create();
+            index.name(name).table(Alias::new(table));
+            if unique {
+                index.unique();
+            }
+            for column in columns {
+                index.col(Alias::new(column));
+            }
+            execute_schema(m, SchemaStatement::Index(table, name, index.to_owned())).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "AI costs and reservations must be retained".into(),
+        ))
+    }
+}
+
+struct PipelineOwnership;
+impl MigrationName for PipelineOwnership {
+    fn name(&self) -> &str {
+        "pipeline_ownership_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for PipelineOwnership {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        // Historical editors are not evidence of ownership. Unknown stays NULL.
+        execute_schema(m, pipeline_ownership()).await
+    }
+
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "pipeline ownership and grants must be retained".into(),
+        ))
+    }
+}
+
+fn pipeline_ownership() -> SchemaStatement {
+    SchemaStatement::Column(
+        "pipelines",
+        "owner_id",
+        Table::alter()
+            .table(Alias::new("pipelines"))
+            .add_column(ColumnDef::new(Alias::new("owner_id")).big_integer().null())
+            .to_owned(),
+    )
 }
 
 struct LegacyPipelineRemoval;
@@ -1216,10 +1741,15 @@ mod schema_tests {
             repository_analysis_identity,
             code_insights,
             code_insight_schedules,
+            execution_leases,
+            definition_revisions,
+            workflow_storage,
+            definition_acl,
         ]
         .into_iter()
         .flat_map(|schema| schema(DbBackend::MySql))
         .chain(std::iter::once(host_jump()))
+        .chain(std::iter::once(pipeline_ownership()))
         .collect()
     }
 
@@ -1259,13 +1789,29 @@ mod schema_tests {
             ("repositories", "id workspace_id credential_id"),
             (
                 "pipelines",
-                "id workspace_id repository_id target_ref group_id application_id",
+                "id workspace_id owner_id repository_id target_ref group_id application_id",
             ),
             ("pipeline_contexts", "id workspace_id target_ref"),
             ("pipeline_links", "pipeline_id reference_id"),
             (
                 "pipeline_runs",
-                "id workspace_id pipeline_id host_id triggered_by credential_id environment_id",
+                "id workspace_id pipeline_id host_id triggered_by credential_id environment_id revision_id",
+            ),
+            (
+                "definition_revisions",
+                "id workspace_id subject_id created_by",
+            ),
+            (
+                "workflows",
+                "id workspace_id group_id draft_revision_id published_revision_id owner_id trigger_run_as archived_by created_by updated_by",
+            ),
+            (
+                "workflow_executions",
+                "id workspace_id workflow_id revision_id triggered_by parent_execution_id retry_of_id root_execution_id created_by started_by finished_by response_deadline_by response_delivered_by",
+            ),
+            (
+                "workflow_node_runs",
+                "id execution_id output_asset cache_hit_from started_by finished_by",
             ),
             ("pipeline_run_steps", "id run_id"),
             ("pipeline_run_logs", "id run_id"),
@@ -1291,7 +1837,8 @@ mod schema_tests {
             for row in rows {
                 let column = row.try_get::<String>("", "name").unwrap();
                 if column == "id"
-                    || column.ends_with("_id")
+                    || (column.ends_with("_id") && column != "node_id")
+                    || column.ends_with("_by")
                     || [
                         "target_ref",
                         "scope_ref",
@@ -1300,6 +1847,9 @@ mod schema_tests {
                         "triggered_by",
                         "current_revision",
                         "source_revision",
+                        "trigger_run_as",
+                        "output_asset",
+                        "cache_hit_from",
                     ]
                     .contains(&column.as_str())
                 {
@@ -1329,7 +1879,7 @@ mod schema_tests {
                 "{table}"
             );
         }
-        assert_eq!(count, 72);
+        assert_eq!(count, 107);
     }
 
     #[test]
@@ -3437,6 +3987,7 @@ mod credential_scope_tests {
         crate::entities::pipelines::ActiveModel {
             id: Set(1),
             workspace_id: Set(10),
+            owner_id: sea_orm::ActiveValue::NotSet,
             name: Set("legacy".into()),
             definition: Set(original.clone()),
             repository_id: Set(0),
@@ -4987,5 +5538,1046 @@ impl MigrationTrait for HostExecutionCapacity {
     }
     async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
         Err(DbErr::Custom("?????????".into()))
+    }
+}
+
+struct ExecutionLeases;
+impl MigrationName for ExecutionLeases {
+    fn name(&self) -> &str {
+        "execution_leases_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ExecutionLeases {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in execution_leases(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "Execution ownership history must not be removed by an automatic rollback".into(),
+        ))
+    }
+}
+
+fn execution_leases(_: DbBackend) -> Vec<SchemaStatement> {
+    let mut columns = vec![];
+    for (name, column) in [
+        (
+            "lease_owner",
+            ColumnDef::new(Alias::new("lease_owner"))
+                .string_len(128)
+                .not_null()
+                .default("")
+                .to_owned(),
+        ),
+        (
+            "lease_epoch",
+            ColumnDef::new(Alias::new("lease_epoch"))
+                .big_integer()
+                .not_null()
+                .default(0_i64)
+                .to_owned(),
+        ),
+        (
+            "not_before",
+            ColumnDef::new(Alias::new("not_before"))
+                .big_integer()
+                .null()
+                .to_owned(),
+        ),
+    ] {
+        columns.push(SchemaStatement::Column(
+            "pipeline_runs",
+            name,
+            Table::alter()
+                .table(Alias::new("pipeline_runs"))
+                .add_column(column)
+                .to_owned(),
+        ));
+    }
+    columns.push(SchemaStatement::Index(
+        "pipeline_runs",
+        "pipeline_runs_lease_recovery",
+        Index::create()
+            .name("pipeline_runs_lease_recovery")
+            .table(Alias::new("pipeline_runs"))
+            .col(Alias::new("state"))
+            .col(Alias::new("lease_owner"))
+            .to_owned(),
+    ));
+    columns
+}
+
+struct ContentAssets;
+impl MigrationName for ContentAssets {
+    fn name(&self) -> &str {
+        "content_assets_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for ContentAssets {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in content_assets(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "asset references and pending object deletions must be retained".into(),
+        ))
+    }
+}
+fn content_assets(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut assets = create_table("assets", backend);
+    assets.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for name in ["workspace_id", "size", "pinned", "created_at"] {
+        assets.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in [
+        "width",
+        "height",
+        "duration_ms",
+        "thumbnail_asset_id",
+        "execution_id",
+    ] {
+        assets.col(ColumnDef::new(Alias::new(name)).big_integer().null());
+    }
+    for (name, len) in [("sha256", 64), ("mime", 255), ("kind", 32)] {
+        assets.col(ColumnDef::new(Alias::new(name)).string_len(len).not_null());
+    }
+    assets.col(ColumnDef::new(Alias::new("node_id")).string_len(255).null());
+    assets.col(long_text("provenance", backend).null());
+    assets.col(
+        ColumnDef::new(Alias::new("created_by"))
+            .big_integer()
+            .not_null()
+            .default(0_i64),
+    );
+    assets.col(
+        ColumnDef::new(Alias::new("version"))
+            .big_integer()
+            .not_null()
+            .default(1_i64),
+    );
+    let mut refs = create_table("asset_refs", backend);
+    refs.col(
+        ColumnDef::new(Alias::new("asset_id"))
+            .big_integer()
+            .not_null(),
+    )
+    .col(
+        ColumnDef::new(Alias::new("owner_kind"))
+            .string_len(32)
+            .not_null(),
+    )
+    .col(
+        ColumnDef::new(Alias::new("owner_id"))
+            .big_integer()
+            .not_null(),
+    )
+    .col(
+        ColumnDef::new(Alias::new("version"))
+            .big_integer()
+            .not_null()
+            .default(1_i64),
+    );
+    let mut tags = create_table("asset_tags", backend);
+    tags.col(
+        ColumnDef::new(Alias::new("asset_id"))
+            .big_integer()
+            .not_null(),
+    )
+    .col(ColumnDef::new(Alias::new("tag")).string_len(255).not_null())
+    .col(
+        ColumnDef::new(Alias::new("version"))
+            .big_integer()
+            .not_null()
+            .default(1_i64),
+    );
+    let mut gc = create_table("asset_gc_jobs", backend);
+    gc.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for name in ["workspace_id", "asset_id", "eligible_at", "updated_at"] {
+        gc.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in ["eligible_by", "updated_by", "attempt"] {
+        gc.col(
+            ColumnDef::new(Alias::new(name))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+    }
+    gc.col(long_text("storage_key", backend).not_null())
+        .col(
+            ColumnDef::new(Alias::new("state"))
+                .string_len(16)
+                .not_null()
+                .default("candidate"),
+        )
+        .col(long_text("error", backend).null())
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        );
+    let mut statements = vec![
+        SchemaStatement::Table(assets.to_owned()),
+        SchemaStatement::Table(refs.to_owned()),
+        SchemaStatement::Table(tags.to_owned()),
+        SchemaStatement::Table(gc.to_owned()),
+    ];
+    for (table, name, columns, unique) in [
+        (
+            "assets",
+            "assets_sha256",
+            &["workspace_id", "sha256"][..],
+            true,
+        ),
+        (
+            "asset_refs",
+            "asset_refs_owner",
+            &["asset_id", "owner_kind", "owner_id"][..],
+            true,
+        ),
+        (
+            "asset_refs",
+            "asset_refs_lookup",
+            &["owner_kind", "owner_id"][..],
+            false,
+        ),
+        ("asset_tags", "asset_tags_tag", &["tag"][..], false),
+        (
+            "asset_gc_jobs",
+            "gc_asset",
+            &["workspace_id", "asset_id"][..],
+            true,
+        ),
+        (
+            "asset_gc_jobs",
+            "gc_dispatch",
+            &["state", "eligible_at", "id"][..],
+            false,
+        ),
+    ] {
+        let mut index = Index::create();
+        index.name(name).table(Alias::new(table));
+        for column in columns {
+            index.col(Alias::new(*column));
+        }
+        if unique {
+            index.unique();
+        }
+        statements.push(SchemaStatement::Index(table, name, index.to_owned()));
+    }
+    statements
+}
+
+struct DefinitionPublications;
+impl MigrationName for DefinitionPublications {
+    fn name(&self) -> &str {
+        "definition_publications_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DefinitionPublications {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        let mut table = create_table("definition_publications", m.get_database_backend());
+        table.col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        );
+        for field in [
+            "workspace_id",
+            "subject_id",
+            "revision_id",
+            "run_as",
+            "created_at",
+        ] {
+            table.col(ColumnDef::new(Alias::new(field)).big_integer().not_null());
+        }
+        table
+            .col(
+                ColumnDef::new(Alias::new("subject_kind"))
+                    .string_len(16)
+                    .not_null(),
+            )
+            .col(ColumnDef::new(Alias::new("name")).string_len(64).not_null())
+            .col(
+                ColumnDef::new(Alias::new("name_key"))
+                    .string_len(64)
+                    .not_null(),
+            )
+            .col(ColumnDef::new(Alias::new("change_note")).string_len(200))
+            .col(ColumnDef::new(Alias::new("request_key")).string_len(64))
+            .col(
+                ColumnDef::new(Alias::new("created_by"))
+                    .big_integer()
+                    .not_null()
+                    .default(0_i64),
+            )
+            .col(
+                ColumnDef::new(Alias::new("version"))
+                    .big_integer()
+                    .not_null()
+                    .default(1_i64),
+            )
+            .check(Expr::col(Alias::new("subject_kind")).is_in(["workflow", "pipeline"]));
+        execute_schema(m, SchemaStatement::Table(table.to_owned())).await?;
+        for (name, key) in [
+            ("publication_name", "name_key"),
+            ("publication_request", "request_key"),
+        ] {
+            let mut index = Index::create();
+            index
+                .name(name)
+                .table(Alias::new("definition_publications"))
+                .unique();
+            for field in ["workspace_id", "subject_kind", "subject_id", key] {
+                index.col(Alias::new(field));
+            }
+            execute_schema(
+                m,
+                SchemaStatement::Index("definition_publications", name, index.to_owned()),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("publication history must be retained".into()))
+    }
+}
+
+#[cfg(test)]
+mod publication_schema_tests {
+    use super::*;
+    use crate::entities::definition_publications as publications;
+    use sea_orm::{Database, EntityTrait, IntoActiveModel, PaginatorTrait};
+
+    #[tokio::test]
+    async fn publication_upgrade_is_repeatable_preserves_history_and_enforces_subject_uniqueness() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let manager = SchemaManager::new(&db);
+        DefinitionPublications.up(&manager).await.unwrap();
+        let row = publications::Model {
+            id: 1,
+            workspace_id: 11,
+            subject_kind: "workflow".into(),
+            subject_id: 7,
+            revision_id: 8,
+            name: "A".into(),
+            name_key: "A".into(),
+            change_note: Some("Original".into()),
+            run_as: 3,
+            request_key: Some("request-a".into()),
+            created_at: 10,
+            created_by: 3,
+            version: 1,
+        };
+        publications::Entity::insert(row.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        DefinitionPublications.up(&manager).await.unwrap();
+        assert_eq!(
+            publications::Entity::find_by_id(1)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap(),
+            row
+        );
+        let mut changed = row.clone();
+        changed.id = 2;
+        changed.request_key = Some("request-b".into());
+        assert!(
+            publications::Entity::insert(changed.clone().into_active_model())
+                .exec(&db)
+                .await
+                .is_err()
+        );
+        changed.name = "a".into();
+        changed.name_key = "a".into();
+        changed.request_key = row.request_key.clone();
+        assert!(
+            publications::Entity::insert(changed.clone().into_active_model())
+                .exec(&db)
+                .await
+                .is_err()
+        );
+        changed.request_key = None;
+        publications::Entity::insert(changed.clone().into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        changed.id = 3;
+        changed.subject_id = 9;
+        changed.name = "A".into();
+        changed.name_key = "A".into();
+        changed.request_key = row.request_key.clone();
+        publications::Entity::insert(changed.into_active_model())
+            .exec(&db)
+            .await
+            .unwrap();
+        assert_eq!(publications::Entity::find().count(&db).await.unwrap(), 3);
+        assert!(DefinitionPublications.down(&manager).await.is_err());
+        assert_eq!(publications::Entity::find().count(&db).await.unwrap(), 3);
+    }
+}
+
+struct DefinitionAcl;
+impl MigrationName for DefinitionAcl {
+    fn name(&self) -> &str {
+        "definition_acl_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DefinitionAcl {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in definition_acl(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom("definition grants must be retained".into()))
+    }
+}
+fn definition_acl(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut table = create_table("definition_acl", backend);
+    table.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for column in ["workspace_id", "subject_id", "user_id", "created_at"] {
+        table.col(ColumnDef::new(Alias::new(column)).big_integer().not_null());
+    }
+    table
+        .col(
+            ColumnDef::new(Alias::new("subject_kind"))
+                .string_len(16)
+                .not_null(),
+        )
+        .col(ColumnDef::new(Alias::new("role")).string_len(16).not_null())
+        .col(
+            ColumnDef::new(Alias::new("created_by"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        )
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        )
+        .check(Expr::col(Alias::new("role")).is_in(["all", "run", "view"]))
+        .check(Expr::col(Alias::new("subject_kind")).is_in([
+            "pipeline",
+            "workflow",
+            "pipeline_group",
+            "workflow_group",
+        ]));
+    let mut statements = vec![SchemaStatement::Table(table.to_owned())];
+    for (table, name, columns, unique) in [
+        (
+            "definition_acl",
+            "acl_identity",
+            &[
+                "workspace_id",
+                "subject_kind",
+                "subject_id",
+                "user_id",
+                "role",
+            ][..],
+            true,
+        ),
+        (
+            "definition_acl",
+            "acl_principal",
+            &["workspace_id", "user_id", "subject_kind", "subject_id"][..],
+            false,
+        ),
+        (
+            "workflows",
+            "workflow_authorized_list",
+            &["workspace_id", "lifecycle", "updated_at", "id"][..],
+            false,
+        ),
+        (
+            "workflows",
+            "workflow_group_lookup",
+            &["workspace_id", "group_id", "id"][..],
+            false,
+        ),
+        (
+            "pipeline_contexts",
+            "workflow_context_groups",
+            &["workspace_id", "kind", "position", "id"][..],
+            false,
+        ),
+    ] {
+        let mut index = Index::create();
+        index.name(name).table(Alias::new(table));
+        for column in columns {
+            index.col(Alias::new(*column));
+        }
+        if unique {
+            index.unique();
+        }
+        statements.push(SchemaStatement::Index(table, name, index.to_owned()));
+    }
+    statements
+}
+
+struct WorkflowStorage;
+impl MigrationName for WorkflowStorage {
+    fn name(&self) -> &str {
+        "workflow_storage_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for WorkflowStorage {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        for statement in workflow_storage(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "workflow definitions, execution provenance and node attempts must be retained".into(),
+        ))
+    }
+}
+
+/// Full storage target from the workflow model, including its §10.11 increments.
+/// No legacy pipeline is published or assigned an inferred owner by this migration.
+fn workflow_storage(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut definitions = create_table("workflows", backend);
+    definitions
+        .col(
+            ColumnDef::new(Alias::new("id"))
+                .big_integer()
+                .not_null()
+                .primary_key(),
+        )
+        .check(Expr::col(Alias::new("lifecycle")).is_in(["active", "archived"]));
+    for name in [
+        "workspace_id",
+        "group_id",
+        "draft_revision_id",
+        "created_at",
+        "updated_at",
+    ] {
+        definitions.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in [
+        "published_revision_id",
+        "owner_id",
+        "trigger_run_as",
+        "archived_at",
+    ] {
+        definitions.col(ColumnDef::new(Alias::new(name)).big_integer().null());
+    }
+    for name in ["created_by", "updated_by", "archived_by"] {
+        definitions.col(
+            ColumnDef::new(Alias::new(name))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+    }
+    definitions
+        .col(
+            ColumnDef::new(Alias::new("name"))
+                .string_len(255)
+                .not_null(),
+        )
+        .col(
+            ColumnDef::new(Alias::new("lifecycle"))
+                .string_len(16)
+                .not_null()
+                .default("active"),
+        )
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        );
+    for name in ["description", "definition", "settings"] {
+        definitions.col(long_text(name, backend).not_null());
+    }
+
+    let mut executions = create_table("workflow_executions", backend);
+    executions.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for name in [
+        "workspace_id",
+        "workflow_id",
+        "revision_id",
+        "number",
+        "triggered_by",
+        "parent_execution_id",
+        "retry_of_id",
+        "root_execution_id",
+        "cost_micros",
+        "data_bytes",
+        "created_at",
+        "started_at",
+        "finished_at",
+    ] {
+        executions.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in [
+        "created_by",
+        "started_by",
+        "finished_by",
+        "lease_epoch",
+        "priority",
+        "concurrency_limit",
+        "waiting_ms",
+        "response_deadline_by",
+        "response_delivered_by",
+    ] {
+        executions.col(
+            ColumnDef::new(Alias::new(name))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+    }
+    for name in [
+        "not_before",
+        "response_deadline_at",
+        "response_delivered_at",
+    ] {
+        executions.col(ColumnDef::new(Alias::new(name)).big_integer().null());
+    }
+    for (name, length) in [
+        ("mode", 32),
+        ("state", 32),
+        ("trigger_kind", 32),
+        ("trigger_ref", 64),
+    ] {
+        executions.col(
+            ColumnDef::new(Alias::new(name))
+                .string_len(length)
+                .not_null(),
+        );
+    }
+    for (name, length) in [
+        ("lease_owner", 128),
+        ("end_reason", 64),
+        ("concurrency_key", 128),
+        ("queue_reason", 255),
+    ] {
+        executions.col(
+            ColumnDef::new(Alias::new(name))
+                .string_len(length)
+                .not_null()
+                .default(""),
+        );
+    }
+    executions
+        .col(long_text("context", backend).null())
+        .col(
+            ColumnDef::new(Alias::new("response_state"))
+                .string_len(32)
+                .not_null()
+                .default("not_applicable"),
+        )
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        )
+        .check(Expr::col(Alias::new("waiting_ms")).gte(0_i64));
+
+    let mut attempts = create_table("workflow_node_runs", backend);
+    attempts.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for name in [
+        "execution_id",
+        "attempt",
+        "items_in",
+        "items_out",
+        "cost_micros",
+        "started_at",
+        "finished_at",
+    ] {
+        attempts.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    for name in ["output_asset", "cache_hit_from", "seed"] {
+        attempts.col(ColumnDef::new(Alias::new(name)).big_integer().null());
+    }
+    for name in ["started_by", "finished_by", "redo_round"] {
+        attempts.col(
+            ColumnDef::new(Alias::new(name))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        );
+    }
+    for (name, length) in [
+        ("node_id", 255),
+        ("iteration_hash", 64),
+        ("state", 32),
+        ("cache_key", 64),
+    ] {
+        attempts.col(
+            ColumnDef::new(Alias::new(name))
+                .string_len(length)
+                .not_null(),
+        );
+    }
+    for name in ["iteration_path", "output", "error"] {
+        attempts.col(long_text(name, backend).not_null());
+    }
+    attempts
+        .col(long_text("resolved_params", backend).null())
+        .col(
+            ColumnDef::new(Alias::new("error_policy"))
+                .string_len(16)
+                .not_null()
+                .default("stop"),
+        )
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        )
+        .check(Expr::col(Alias::new("redo_round")).gte(0_i64));
+
+    let mut statements = vec![
+        SchemaStatement::Table(definitions.to_owned()),
+        SchemaStatement::Table(executions.to_owned()),
+        SchemaStatement::Table(attempts.to_owned()),
+        SchemaStatement::Column(
+            "workspaces",
+            "workflow_execution_number",
+            Table::alter()
+                .table(Alias::new("workspaces"))
+                .add_column(
+                    ColumnDef::new(Alias::new("workflow_execution_number"))
+                        .big_integer()
+                        .not_null()
+                        .default(0_i64),
+                )
+                .to_owned(),
+        ),
+    ];
+    for (table, name, columns, unique) in [
+        (
+            "workflow_executions",
+            "workflow_executions_dispatch",
+            &["state", "priority", "created_at"][..],
+            false,
+        ),
+        (
+            "workflow_executions",
+            "workflow_executions_workflow",
+            &["workspace_id", "workflow_id", "created_at"][..],
+            false,
+        ),
+        (
+            "workflow_executions",
+            "workflow_execution_number",
+            &["workspace_id", "number"][..],
+            true,
+        ),
+        (
+            "workflow_executions",
+            "workflow_execution_statistics",
+            &["workspace_id", "workflow_id", "state", "finished_at"][..],
+            false,
+        ),
+        (
+            "workflow_node_runs",
+            "workflow_node_runs_attempt",
+            &["execution_id", "node_id", "iteration_hash", "attempt"][..],
+            true,
+        ),
+    ] {
+        let mut index = Index::create();
+        index.name(name).table(Alias::new(table));
+        for column in columns {
+            index.col(Alias::new(*column));
+        }
+        if unique {
+            index.unique();
+        }
+        statements.push(SchemaStatement::Index(table, name, index.to_owned()));
+    }
+    statements
+}
+
+struct DefinitionRevisions;
+impl MigrationName for DefinitionRevisions {
+    fn name(&self) -> &str {
+        "definition_revisions_v1"
+    }
+}
+#[async_trait::async_trait]
+impl MigrationTrait for DefinitionRevisions {
+    async fn up(&self, m: &SchemaManager) -> Result<(), DbErr> {
+        use sea_orm::{ConnectionTrait, TransactionTrait};
+        for statement in definition_revisions(m.get_database_backend()) {
+            execute_schema(m, statement).await?;
+        }
+        let tx = m.get_connection().begin().await?;
+        // Reuse each existing pipeline's Snowflake for its first revision in
+        // this separate table. Do not invent historical authors or publications.
+        let select = Query::select()
+            .column((Alias::new("pipelines"), Alias::new("id")))
+            .column(Alias::new("workspace_id"))
+            .expr(Expr::val("pipeline"))
+            .column((Alias::new("pipelines"), Alias::new("id")))
+            .expr(Expr::val(1_i64))
+            .column(Alias::new("definition"))
+            .expr(Expr::val(crate::db::now()))
+            .from(Alias::new("pipelines"))
+            .and_where(
+                Expr::exists(
+                    Query::select()
+                        .expr(Expr::val(1))
+                        .from(Alias::new("definition_revisions"))
+                        .and_where(Expr::col(Alias::new("subject_kind")).eq("pipeline"))
+                        .and_where(
+                            Expr::col(Alias::new("subject_id"))
+                                .equals((Alias::new("pipelines"), Alias::new("id"))),
+                        )
+                        .to_owned(),
+                )
+                .not(),
+            )
+            .to_owned();
+        let mut insert = Query::insert();
+        insert
+            .into_table(Alias::new("definition_revisions"))
+            .columns(
+                [
+                    "id",
+                    "workspace_id",
+                    "subject_kind",
+                    "subject_id",
+                    "number",
+                    "definition",
+                    "created_at",
+                ]
+                .map(Alias::new),
+            )
+            .select_from(select)
+            .map_err(|e| DbErr::Custom(e.to_string()))?;
+        tx.execute_raw(tx.get_database_backend().build(&insert))
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+    async fn down(&self, _: &SchemaManager) -> Result<(), DbErr> {
+        Err(DbErr::Custom(
+            "definition revisions and run provenance must be retained".into(),
+        ))
+    }
+}
+
+fn definition_revisions(backend: DbBackend) -> Vec<SchemaStatement> {
+    let mut table = create_table("definition_revisions", backend);
+    table.check(Expr::cust(if backend == DbBackend::MySql {
+        "message IS NULL OR CHAR_LENGTH(message) <= 200"
+    } else {
+        "message IS NULL OR length(message) <= 200"
+    }));
+    table.col(
+        ColumnDef::new(Alias::new("id"))
+            .big_integer()
+            .not_null()
+            .primary_key(),
+    );
+    for name in ["workspace_id", "subject_id", "number", "created_at"] {
+        table.col(ColumnDef::new(Alias::new(name)).big_integer().not_null());
+    }
+    table
+        .col(
+            ColumnDef::new(Alias::new("subject_kind"))
+                .string_len(16)
+                .not_null(),
+        )
+        .col(long_text("definition", backend).not_null())
+        .col(ColumnDef::new(Alias::new("message")).string_len(200).null())
+        .col(
+            ColumnDef::new(Alias::new("created_by"))
+                .big_integer()
+                .not_null()
+                .default(0_i64),
+        )
+        .col(
+            ColumnDef::new(Alias::new("version"))
+                .big_integer()
+                .not_null()
+                .default(1_i64),
+        );
+    vec![
+        SchemaStatement::Table(table.to_owned()),
+        SchemaStatement::Index(
+            "definition_revisions",
+            "definition_revisions_number",
+            Index::create()
+                .name("definition_revisions_number")
+                .table(Alias::new("definition_revisions"))
+                .col(Alias::new("subject_kind"))
+                .col(Alias::new("subject_id"))
+                .col(Alias::new("number"))
+                .unique()
+                .to_owned(),
+        ),
+        SchemaStatement::Column(
+            "pipeline_runs",
+            "revision_id",
+            Table::alter()
+                .table(Alias::new("pipeline_runs"))
+                .add_column(
+                    ColumnDef::new(Alias::new("revision_id"))
+                        .big_integer()
+                        .not_null()
+                        .default(0_i64),
+                )
+                .to_owned(),
+        ),
+    ]
+}
+
+#[cfg(test)]
+mod execution_lease_schema_tests {
+    use super::*;
+    use sea_orm::{ConnectionTrait, Database, Statement};
+
+    #[tokio::test]
+    async fn revision_upgrade_preserves_history_and_repeated_upgrade_never_overwrites_it() {
+        use crate::entities::definition_revisions as revisions;
+        use sea_orm::EntityTrait;
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        db.execute_unprepared("CREATE TABLE pipelines (id BIGINT PRIMARY KEY, workspace_id BIGINT NOT NULL, definition TEXT NOT NULL)").await.unwrap();
+        db.execute_unprepared(
+            "CREATE TABLE pipeline_runs (id BIGINT PRIMARY KEY, state TEXT NOT NULL)",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared("INSERT INTO pipelines VALUES (7,11,'{\"original\":true}')")
+            .await
+            .unwrap();
+        db.execute_unprepared("INSERT INTO pipeline_runs VALUES (8,'succeeded')")
+            .await
+            .unwrap();
+        let manager = SchemaManager::new(&db);
+        DefinitionRevisions.up(&manager).await.unwrap();
+        let first = revisions::Entity::find_by_id(7)
+            .one(&db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.number, 1);
+        assert_eq!(first.created_by, 0);
+        assert_eq!(first.definition, r#"{"original":true}"#);
+        db.execute_unprepared("UPDATE pipelines SET definition='{\"later\":true}'")
+            .await
+            .unwrap();
+        DefinitionRevisions.up(&manager).await.unwrap();
+        assert_eq!(
+            revisions::Entity::find_by_id(7)
+                .one(&db)
+                .await
+                .unwrap()
+                .unwrap(),
+            first
+        );
+        let row = db
+            .query_one_raw(Statement::from_string(
+                DbBackend::Sqlite,
+                "SELECT state,revision_id FROM pipeline_runs WHERE id=8",
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.try_get::<String>("", "state").unwrap(), "succeeded");
+        assert_eq!(row.try_get::<i64>("", "revision_id").unwrap(), 0);
+        assert!(DefinitionRevisions.down(&manager).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn lease_upgrade_is_repeatable_and_preserves_legacy_ownership() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        db.execute_unprepared("CREATE TABLE locks (name TEXT PRIMARY KEY, owner TEXT NOT NULL, acquired_at BIGINT NOT NULL, expires_at BIGINT NOT NULL)").await.unwrap();
+        db.execute_unprepared("CREATE TABLE pipeline_runs (id BIGINT PRIMARY KEY, workspace_id BIGINT NOT NULL, state TEXT NOT NULL, started_at BIGINT NOT NULL)").await.unwrap();
+        db.execute_unprepared("INSERT INTO pipeline_runs VALUES (7,11,'running',123)")
+            .await
+            .unwrap();
+        let manager = SchemaManager::new(&db);
+        ExecutionLeases.up(&manager).await.unwrap();
+        ExecutionLeases.up(&manager).await.unwrap();
+        let row = db.query_one_raw(Statement::from_string(DbBackend::Sqlite,
+            "SELECT state,started_at,lease_owner,lease_epoch,not_before FROM pipeline_runs WHERE id=7"
+        )).await.unwrap().unwrap();
+        assert_eq!(row.try_get::<String>("", "state").unwrap(), "running");
+        assert_eq!(row.try_get::<i64>("", "started_at").unwrap(), 123);
+        assert_eq!(row.try_get::<String>("", "lease_owner").unwrap(), "");
+        assert_eq!(row.try_get::<i64>("", "lease_epoch").unwrap(), 0);
+        assert_eq!(row.try_get::<Option<i64>>("", "not_before").unwrap(), None);
+        use crate::executions::lease::{Execution, Kind, Lease};
+        let execution = Execution {
+            kind: Kind::Pipeline,
+            workspace: 11,
+            id: 7,
+        };
+        // A migration never assigns legacy in-flight work to this new process.
+        assert!(
+            Lease::claim(&db, execution, 0, "new:boot", 500)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        db.execute_unprepared("UPDATE pipeline_runs SET state='queued'")
+            .await
+            .unwrap();
+        let lease = Lease::claim(&db, execution, 0, "new:boot", 500)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(lease.epoch(), 1);
+        ExecutionLeases.up(&manager).await.unwrap();
+        assert!(lease.renew(&db, 501).await.unwrap());
+        // Automatic rollback cannot erase the epoch needed to fence old writers.
+        assert!(ExecutionLeases.down(&manager).await.is_err());
+        assert!(lease.renew(&db, 502).await.unwrap());
     }
 }

@@ -24,16 +24,59 @@ pub(super) async fn stream_events(
     let mut exit = None;
     let mut closed = false;
     let mut failure = None;
-    // An interval remains due under continuous output; recreating sleep each
-    // loop would indefinitely postpone cancellation for a noisy command.
-    let mut poll = tokio::time::interval(Duration::from_millis(100));
-    while exit.is_none() || !closed {
+    let mut lines: std::collections::VecDeque<(String, Vec<u8>)> =
+        std::collections::VecDeque::new();
+    let mut processing = FuturesUnordered::new();
+    let mut checks = FuturesUnordered::new();
+    let mut stop_open = true;
+    while exit.is_none() || !closed || !lines.is_empty() || !processing.is_empty() {
+        if *stop.borrow() {
+            cancel.send_replace(true);
+        }
+        if failure.is_some() {
+            lines.clear();
+        }
+        if exit.is_some() && closed && lines.is_empty() && processing.is_empty() {
+            break;
+        }
+        if processing.is_empty()
+            && let Some((stream, line)) = lines.pop_front()
+        {
+            let previous = outcome.take();
+            processing.push(async move {
+                let mut outcome = previous;
+                let result = event(
+                    s,
+                    run,
+                    job,
+                    seq,
+                    &stream,
+                    &line,
+                    credential,
+                    variables,
+                    &mut outcome,
+                    worker,
+                )
+                .await;
+                (result, outcome)
+            });
+        }
+        if watch_run && checks.is_empty() && !*cancel.borrow() && exit.is_none() {
+            // Keep the query future alive across output chunks. Neither a busy
+            // output stream nor a blocked pool may suppress cancellation.
+            checks.push(async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                history::active(s, run.id).await
+            });
+        }
         tokio::select! {
             value=&mut execution, if exit.is_none()=>match value {
                 Ok(code)=>exit=Some(code),
                 Err(error)=>{exit=Some(-1);failure=Some(error);},
             },
-            chunk=receiver.recv(), if !closed=>match chunk {
+            // Preserve transport backpressure while one chunk's log writes are
+            // pending; the command and cancellation stay polled independently.
+            chunk=receiver.recv(), if !closed && processing.is_empty() && lines.is_empty()=>match chunk {
                 None=>closed=true,
                 Some((stream,data))=>{
                     if failure.is_some(){continue;}
@@ -44,20 +87,34 @@ pub(super) async fn stream_events(
                     }
                     while let Some(end)=buffer.iter().position(|byte|*byte==b'\n') {
                         let line:Vec<_>=buffer.drain(..=end).collect();
-                        if let Err(error)=event(s,run,job,seq,&stream,&line,credential,variables,&mut outcome,worker).await {
-                            failure=Some(error);cancel.send_replace(true);break;
-                        }
+                        lines.push_back((stream.clone(), line));
                     }
                 }
             },
-            _=poll.tick()=>{
-                match if watch_run { history::active(s,run.id).await } else { Ok(true) } {
-                    Ok(active)=>{if !active || *stop.borrow(){cancel.send_replace(true);}},
+            result=processing.next(), if !processing.is_empty()=>{
+                let (result, updated) = result.expect("pending event");
+                outcome = updated;
+                if let Err(error) = result {
+                    failure=Some(error);cancel.send_replace(true);
+                }
+            },
+            status=checks.next(), if !checks.is_empty()=>{
+                match status.expect("pending status") {
+                    Ok(false)=>{cancel.send_replace(true);},
+                    Ok(true)=>{},
                     Err(error)=>{failure=Some(error);cancel.send_replace(true);},
                 }
+            },
+            changed=stop.changed(), if stop_open=>{
+                if changed.is_err() { stop_open=false; }
+                if !stop_open || *stop.borrow() { cancel.send_replace(true); }
             }
         }
     }
+    // A status query may hold the only pooled connection while awaiting its
+    // next poll. Release it before flushing a trailing partial output line.
+    drop(checks);
+    drop(processing);
     // Process completion/termination is acknowledged before errors propagate
     // and the caller removes credentials and the job workspace.
     if let Some(error) = failure {
@@ -134,6 +191,7 @@ async fn event(
     {
         steps::Entity::update_many()
             .col_expr(steps::Column::ExitCode, Expr::value(code))
+            .filter(crate::executions::pipeline_fence(run.id))
             .filter(steps::Column::RunId.eq(run.id))
             .filter(steps::Column::StepIndex.eq(step.index))
             .exec(&s.db)
@@ -173,6 +231,7 @@ async fn event(
             }
         };
         update
+            .filter(crate::executions::pipeline_fence(run.id))
             .filter(steps::Column::RunId.eq(run.id))
             .filter(steps::Column::StepIndex.eq(step.index))
             .filter(steps::Column::State.is_in(if terminal.is_some() {
@@ -272,6 +331,99 @@ pub(super) async fn append_failure(
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn blocked_log_pool_cannot_prevent_remote_cancel_acknowledgement() {
+        use crate::pipelines::runs::lease_tests::{BlockedCommand, fixture, run};
+        let (_dir, s, _) = fixture(1).await;
+        let channel = BlockedCommand::new(&s);
+        let (cancel, mut stopped) = tokio::sync::watch::channel(false);
+        let job = super::super::tests::test_job("build", &[]);
+        let run = run(7);
+        let seq = tokio::sync::Mutex::new(0);
+        let variables = BTreeMap::new();
+        let controller = async {
+            channel.started.notified().await;
+            // Let the emitted line reach its SQL insert before signalling stop.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel.send_replace(true);
+        };
+        let stream = stream_events(
+            &s,
+            &run,
+            &job,
+            &seq,
+            None,
+            &variables,
+            &mut stopped,
+            &channel,
+            "command",
+            60,
+            false,
+            true,
+        );
+        let (result, _) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(stream, controller)
+        })
+        .await
+        .expect("SQL persistence must not stop polling remote cancellation");
+        let (code, _, cancelled) = result.unwrap();
+        assert_eq!(code, -130);
+        assert!(cancelled);
+        assert!(
+            channel
+                .acknowledged
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert_eq!(*seq.lock().await, 2);
+    }
+
+    #[tokio::test]
+    async fn failed_log_write_with_queued_lines_still_waits_for_remote_cleanup_and_returns() {
+        use crate::pipelines::runs::lease_tests::{BlockedCommand, fixture, run};
+        let (_dir, s, _) = fixture(1).await;
+        use sea_orm::ConnectionTrait;
+        s.db.execute_unprepared("DROP TABLE pipeline_run_logs")
+            .await
+            .unwrap();
+        let channel = BlockedCommand::new(&s);
+        let (cancel, mut stopped) = tokio::sync::watch::channel(false);
+        let job = super::super::tests::test_job("build", &[]);
+        let run = run(7);
+        let seq = tokio::sync::Mutex::new(0);
+        let variables = BTreeMap::new();
+        let controller = async {
+            channel.started.notified().await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancel.send_replace(true);
+        };
+        let stream = stream_events(
+            &s,
+            &run,
+            &job,
+            &seq,
+            None,
+            &variables,
+            &mut stopped,
+            &channel,
+            "command",
+            60,
+            false,
+            true,
+        );
+        let (result, _) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(stream, controller)
+        })
+        .await
+        .expect("a failed queued line must not leave an idle select after remote exit");
+        assert!(result.is_err());
+        assert!(
+            channel
+                .acknowledged
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        assert_eq!(*seq.lock().await, 0);
+    }
+
+    #[tokio::test]
     async fn execution_logs_preserve_raw_collisions_large_causes_and_reader_locale() {
         use crate::{
             entities::pipeline_run_logs as logs,
@@ -285,6 +437,7 @@ mod tests {
             .unwrap();
         let s = std::sync::Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),

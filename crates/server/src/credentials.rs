@@ -105,7 +105,7 @@ pub struct Body {
 }
 
 fn check_scope(value: &str) -> Result<()> {
-    if !["host", "build", "deploy"].contains(&value) {
+    if !["host", "build", "deploy", "ai", "integration"].contains(&value) {
         return Err(ApiError::localized(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("credentials.scopeInvalid"),
@@ -117,6 +117,15 @@ fn check_scope(value: &str) -> Result<()> {
 fn check(body: &Body, creating: bool) -> Result<String> {
     if let Some(value) = &body.scope {
         check_scope(value)?;
+    }
+    if body.scope.as_deref() == Some("integration")
+        && ((creating && body.kind != "token")
+            || !crate::workflows::integration::credential_profile(body.username.trim()))
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("workflow.integrationInvalid"),
+        ));
     }
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 60 {
@@ -308,6 +317,12 @@ pub async fn update(
         .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(credentials::Column::Id.eq(id))
         .filter(credentials::Column::Version.eq(body.version));
+    // Integration tokens cannot be silently reassigned to another service.
+    update = update.filter(
+        sea_orm::Condition::any()
+            .add(credentials::Column::Scope.ne("integration"))
+            .add(credentials::Column::Username.eq(body.username.trim())),
+    );
     if let Some(module) = &body.scope {
         update = update.filter(credentials::Column::Scope.eq(module));
     }
@@ -349,6 +364,18 @@ pub async fn remove(
     // from the deletion that caused it. Every table that can reference a
     // credential has to be listed here — a new one that is forgotten silently
     // reintroduces the dangling reference.
+    if crate::entities::ai_providers::Entity::find()
+        .filter(crate::entities::ai_providers::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::ai_providers::Column::CredentialId.eq(id))
+        .count(&tx)
+        .await?
+        > 0
+    {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("workflow.aiCredentialReferenced"),
+        ));
+    }
     let used = hosts::Entity::find()
         .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(hosts::Column::CredentialId.eq(id))

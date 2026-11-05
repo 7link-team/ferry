@@ -14,6 +14,8 @@ services:
       FERRY_DATABASE_URL: ${FERRY_DATABASE_URL:-}
       # The address runners and browsers reach this server on.
       FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      FERRY_TRUSTED_PROXIES: ${FERRY_TRUSTED_PROXIES:-}
+      FERRY_REDIS_URL: ${FERRY_REDIS_URL:-}
     volumes:
       - ferry-data:/data
 

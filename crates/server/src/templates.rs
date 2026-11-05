@@ -17,6 +17,42 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+/// Called only while creating a workspace, inside its transaction. These are
+/// ordinary workspace-owned templates, so editing/deleting one is permanent.
+/// Add scenarios here only after real execution acceptance, without local IDs.
+pub(crate) async fn seed_examples(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+) -> Result<()> {
+    use crate::entities::pipeline_templates as rows;
+    let content = convert_legacy_content(include_str!("templates/examples/dependency-build.yml"))?;
+    validate_template(&content, "[]", Kind::Pipeline)?;
+    let now = db::now();
+    rows::Entity::insert(rows::ActiveModel {
+        id: Set(s.next_id()?.into()),
+        workspace_id: Set(workspace.into()),
+        name: Set("示例：Go 上下游依赖构建与产物传递".into()),
+        description: Set("真实 Agent 验证：golang/text v0.28.0 → golang/net v0.43.0。演示任务依赖、步骤/任务输出、产物上传下载和 SHA 校验。使用时为两个任务选择自己的主机；需要 Bash、Git、Go 1.23+，可访问 GitHub 和 Go 模块代理。仅手动运行，不部署。".into()),
+        content: Set(content),
+        parameters: Set("[]".into()),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }).exec(conn).await?;
+    let content =
+        convert_legacy_content(include_str!("templates/examples/repository-report.json"))?;
+    validate_template(&content, "[]", Kind::Pipeline)?;
+    rows::Entity::insert(rows::ActiveModel {
+        id: Set(s.next_id()?.into()), workspace_id: Set(workspace.into()),
+        name: Set("示例：公开仓库信息与 JSON 报告".into()),
+        description: Set("真实执行验证：查询 GitHub 公开仓库 golang/text，生成可下载的 JSON 报告。无需凭据或主机；可在节点表单修改仓库。仅手动运行，需要服务器可访问 GitHub API。".into()),
+        content: Set(content), parameters: Set("[]".into()), version: Set(1),
+        created_at: Set(now), updated_at: Set(now),
+    }).exec(conn).await?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     App,
@@ -480,6 +516,16 @@ fn validate_template(
     } else {
         document(content)?
     };
+    if kind == Kind::Pipeline && doc.get("engine").and_then(Value::as_str) == Some("ferry-graph") {
+        if !definitions.is_empty() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("templates.parametersUnexpected"),
+            ));
+        }
+        crate::workflows::graph::validate(&doc.to_string())?;
+        return Ok((doc, definitions));
+    }
     let mut used = BTreeSet::new();
     expand(&doc, &definitions, None, kind, "", &mut used, 0)?;
     if definitions.keys().any(|name| !used.contains(name)) {
@@ -509,6 +555,9 @@ fn render_content(
             axum::http::StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("templates.parametersUnexpected"),
         ));
+    }
+    if kind == Kind::Pipeline && doc.get("engine").and_then(Value::as_str) == Some("ferry-graph") {
+        return Ok(content.to_owned());
     }
     let mut values = BTreeMap::new();
     for (name, p) in &definitions {
@@ -573,6 +622,14 @@ fn render_content(
 /// Backup storage is handled by the migration; renders and old imports use the same converter.
 pub(crate) fn convert_legacy_content(content: &str) -> Result<String> {
     let doc = document(content)?;
+    if doc.get("engine").and_then(Value::as_str) == Some("ferry-graph") {
+        let mut graph = doc.as_object().cloned().unwrap();
+        graph.remove("engine");
+        // Canonical discriminator prefix supports correct DB pagination/filtering
+        // without another template table, schema migration or JSON SQL dialect.
+        let rest = serde_json::to_string(&graph).map_err(|_| ApiError::missing())?;
+        return Ok(format!("{{\"engine\":\"ferry-graph\",{}", &rest[1..]));
+    }
     if doc.get("engine").and_then(Value::as_str) == Some(crate::pipelines::actions::ENGINE) {
         return Ok(content.to_owned());
     }
@@ -671,8 +728,19 @@ macro_rules! template_api {
             }
             pub async fn list(State(s):State<AppState>,scope:Scope,Query(raw):Query<HashMap<String,String>>) -> Result<Json<Value>> {
                 scope.require(concat!($resource,".read"))?;
-                let q=ListQuery::parse(&SPEC,&raw)?;
-                let (items,total)=resource::list::<rows::Entity,rows::Model>(&s.db,&SPEC,rows::Entity::find(),&scope.workspace_id,&q).await?;
+                let mut list_raw=raw.clone();
+                if $kind==Kind::Pipeline {list_raw.remove("workflow_kind");}
+                let q=ListQuery::parse(&SPEC,&list_raw)?;
+                let mut selection=rows::Entity::find();
+                if $kind==Kind::Pipeline {
+                    match raw.get("workflow_kind").map(String::as_str) {
+                        Some("nodes") => selection=selection.filter(rows::Column::Content.starts_with("{\"engine\":\"ferry-graph\",")),
+                        Some("actions") => selection=selection.filter(rows::Column::Content.not_like("{\"engine\":\"ferry-graph\",%")),
+                        None => {},
+                        _ => return Err(ApiError::localized(StatusCode::BAD_REQUEST, crate::i18n::Message::new("templates.documentInvalid"))),
+                    }
+                }
+                let (items,total)=resource::list::<rows::Entity,rows::Model>(&s.db,&SPEC,selection,&scope.workspace_id,&q).await?;
                 Ok(Json(json!({"items":items.iter().map(json_row).collect::<Vec<_>>(),"total":total,"page":q.page,"page_size":q.page_size})))
             }
             pub async fn get(State(s):State<AppState>,scope:Scope,Path((_,id)):Path<(String,Id)>) -> Result<Json<Value>> {
@@ -765,6 +833,172 @@ template_api!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn workspace_examples_and_template_kind_lists_are_isolated_and_transactional() {
+        use crate::{
+            accounts::{auth::User, workspace},
+            entities::pipeline_templates as rows,
+        };
+        let (dir, db) = crate::lock::tests::database().await;
+        let s = std::sync::Arc::new(crate::state::State {
+            ids: std::sync::Arc::new(
+                crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
+            ),
+            db,
+            data_dir: dir.path().into(),
+            instance_id: "template-examples-test".into(),
+            server_mode: false,
+            secure_cookie: false,
+            bind: "127.0.0.1:0".parse().unwrap(),
+            vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
+            host_monitor: Default::default(),
+            monitor: Default::default(),
+            cluster: None,
+        });
+        let mut workspaces = Vec::new();
+        for slug in ["examples-a", "examples-b", "examples-rollback"] {
+            let tx = s.db.begin().await.unwrap();
+            let result = workspace::create_in(
+                &s,
+                1.into(),
+                serde_json::from_value(json!({"name":slug,"slug":slug})).unwrap(),
+                &tx,
+            )
+            .await
+            .unwrap();
+            let id: Id = serde_json::from_value(result["id"].clone()).unwrap();
+            if slug == "examples-rollback" {
+                tx.rollback().await.unwrap();
+                assert!(
+                    rows::Entity::find()
+                        .filter(rows::Column::WorkspaceId.eq(id))
+                        .all(&s.db)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+            } else {
+                tx.commit().await.unwrap();
+                workspaces.push(id);
+            }
+        }
+        let scope = |workspace_id| Scope {
+            workspace_id,
+            user: User {
+                id: 1.into(),
+                email: "test@example.invalid".into(),
+                name: "Test".into(),
+                is_superadmin: false,
+            },
+            permissions: ["pipeline-templates.read".to_owned()].into_iter().collect(),
+        };
+        let list =
+            |workspace_id, raw| pipelines::list(State(s.clone()), scope(workspace_id), Query(raw));
+        let query = |kind: &str| {
+            HashMap::from([
+                ("workflow_kind".into(), kind.into()),
+                ("page_size".into(), "1".into()),
+            ])
+        };
+        let first = list(workspaces[0], query("actions")).await.unwrap().0;
+        let second = list(workspaces[1], query("actions")).await.unwrap().0;
+        assert_eq!(first["total"], 1);
+        assert_eq!(second["total"], 1);
+        assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
+        let example = &first["items"][0];
+        assert_eq!(example["parameters"], "[]");
+        let content = example["content"].as_str().unwrap();
+        let rendered = render_content(content, "[]", &BTreeMap::new(), Kind::Pipeline).unwrap();
+        let envelope: Value = serde_json::from_str(&rendered).unwrap();
+        assert_eq!(envelope["executor_bindings"], json!([]));
+        let workflow: Value =
+            serde_yaml_ng::from_str(envelope["workflow"].as_str().unwrap()).unwrap();
+        assert_eq!(workflow["on"], "workflow_dispatch");
+        assert_eq!(workflow["jobs"]["idna"]["needs"], json!(["text"]));
+        assert!(
+            workflow["jobs"]["text"]["steps"][0]["run"]
+                .as_str()
+                .unwrap()
+                .contains("v0.28.0")
+        );
+        let seeded = list(workspaces[0], query("nodes")).await.unwrap().0;
+        assert_eq!(seeded["total"], 1);
+        let graph = render_content(
+            seeded["items"][0]["content"].as_str().unwrap(),
+            "[]",
+            &BTreeMap::new(),
+            Kind::Pipeline,
+        )
+        .unwrap();
+        let graph: Value = serde_json::from_str(&graph).unwrap();
+        assert_eq!(graph["nodes"][1]["params"]["repo"], "text");
+        assert!(graph.get("pin_data").is_none());
+        assert!(graph.get("settings").is_none());
+        // Include a canonical graph discriminator to check SQL filtering, count
+        // and pagination alongside the seeded Actions template.
+        rows::Entity::insert(rows::ActiveModel {
+            id: Set(s.next_id().unwrap().into()),
+            workspace_id: Set(workspaces[0].into()),
+            name: Set("A node template".into()),
+            description: Set(String::new()),
+            content: Set("{\"engine\":\"ferry-graph\",\"schema\":1}".into()),
+            parameters: Set("[]".into()),
+            version: Set(1),
+            created_at: Set(0),
+            updated_at: Set(0),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        assert_eq!(
+            list(workspaces[0], query("nodes")).await.unwrap().0["total"],
+            2
+        );
+        assert_eq!(
+            list(workspaces[0], query("actions")).await.unwrap().0["total"],
+            1
+        );
+        assert_eq!(
+            list(workspaces[0], HashMap::new()).await.unwrap().0["total"],
+            3
+        );
+        assert_eq!(
+            list(workspaces[1], query("nodes")).await.unwrap().0["total"],
+            1
+        );
+        assert!(list(workspaces[0], query("invalid")).await.is_err());
+        let mut invalid = query("actions");
+        invalid.insert("unknown".into(), "x".into());
+        assert!(list(workspaces[0], invalid).await.is_err());
+        assert!(
+            configs::list(
+                State(s.clone()),
+                Scope {
+                    permissions: ["config-templates.read".into()].into_iter().collect(),
+                    ..scope(workspaces[0])
+                },
+                Query(query("actions"))
+            )
+            .await
+            .is_err()
+        );
+        // Templates remain ordinary workspace data: deleting one does not
+        // re-create it on subsequent reads or affect another workspace.
+        let example_id: Id = serde_json::from_value(example["id"].clone()).unwrap();
+        rows::Entity::delete_by_id(i64::from(example_id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            list(workspaces[0], query("actions")).await.unwrap().0["total"],
+            0
+        );
+        assert_eq!(
+            list(workspaces[1], query("actions")).await.unwrap().0["total"],
+            1
+        );
+    }
 
     #[test]
     fn invalid_parameter_messages_keep_names_literal_for_all_readers() {

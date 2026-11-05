@@ -1,0 +1,1271 @@
+{
+  "contract_version": "1.10-review",
+  "status": "design_only",
+  "scope": "4 S2 archive/file contracts, not parser implementations or approved limit defaults",
+  "nodes": [
+    {
+      "type": "file.archive_pack",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "enum": [
+              "zip",
+              "tar_gzip"
+            ]
+          },
+          "entries": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "asset": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "path",
+                "asset"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "output_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_files": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_archive_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_uncompressed_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_entry_bytes": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "max_files",
+              "max_archive_bytes",
+              "max_uncompressed_bytes",
+              "max_entry_bytes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "format",
+          "entries",
+          "output_name",
+          "limits"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "format": "zip",
+        "entries": [
+          {
+            "path": "output/data.json",
+            "asset": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "output_name": "result.zip",
+        "limits": {
+          "max_files": 100,
+          "max_archive_bytes": 10485760,
+          "max_uncompressed_bytes": 10485760,
+          "max_entry_bytes": 1048576
+        }
+      },
+      "expression_fields": [
+        "/entries/*/asset"
+      ],
+      "source_ids": [
+        "B005"
+      ],
+      "semantic_rule": "全部源资产先按当前执行身份鉴权并固定引用；虚拟相对路径去重，拒绝穿越/绝对路径/链接。流式压缩同时计输入大小、条目数和输出配额；保留条目顺序，禁止自动跟随主机文件路径。生成资产+输出引用+意图结果同事务，临时对象失败走GC。示例限额非默认，执行取显式值与部署硬上限较严者。 路径、CSV转义、逐格式基数/限额及失败语义以PRD§20为准；这些静态契约不证明真实解析器已通过。",
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "restart_or_replay",
+        "stream_limits",
+        "parser_isolation",
+        "format_roundtrip"
+      ]
+    },
+    {
+      "type": "file.archive_unpack",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "format": {
+            "enum": [
+              "zip",
+              "tar",
+              "tar_gzip"
+            ]
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_files": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_archive_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_uncompressed_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_entry_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_ratio": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "max_files",
+              "max_archive_bytes",
+              "max_uncompressed_bytes",
+              "max_entry_bytes",
+              "max_ratio"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "asset",
+          "format",
+          "limits"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "asset": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "format": "zip",
+        "limits": {
+          "max_files": 100,
+          "max_archive_bytes": 10485760,
+          "max_uncompressed_bytes": 10485760,
+          "max_entry_bytes": 1048576,
+          "max_ratio": 100
+        }
+      },
+      "expression_fields": [
+        "/asset"
+      ],
+      "source_ids": [
+        "B005"
+      ],
+      "semantic_rule": "验证实际容器签名；逐条流式检查路径/类型/数目/实际解压字节/压缩比，拒绝symlink/hardlink/device及路径冲突；不得信任声明大小或先完整解压再计数。输出Item按归档顺序包含path和资产引用，每个paired指回输入；任一条失败不提交部分最终输出，临时对象走GC。加密/多卷归档能力未冻结须明确拒绝，库/OS隔离及恶意样本阶段验收。 路径、CSV转义、逐格式基数/限额及失败语义以PRD§20为准；这些静态契约不证明真实解析器已通过。",
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "restart_or_replay",
+        "stream_limits",
+        "parser_isolation",
+        "format_roundtrip"
+      ]
+    },
+    {
+      "type": "file.encode",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "enum": [
+              "json",
+              "csv",
+              "xlsx",
+              "text",
+              "base64"
+            ]
+          },
+          "output_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "columns": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "value_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "csv": {
+            "type": "object",
+            "properties": {
+              "delimiter": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              },
+              "line_ending": {
+                "enum": [
+                  "lf",
+                  "crlf"
+                ]
+              },
+              "header": {
+                "type": "boolean"
+              },
+              "formula_policy": {
+                "enum": [
+                  "preserve",
+                  "escape"
+                ]
+              }
+            },
+            "required": [
+              "delimiter",
+              "quote",
+              "line_ending",
+              "header",
+              "formula_policy"
+            ],
+            "additionalProperties": false
+          },
+          "sheet_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_input_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_output_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_rows": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_columns": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "max_input_bytes",
+              "max_output_bytes",
+              "max_rows",
+              "max_columns"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "format",
+          "output_name",
+          "output_field",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv",
+                    "xlsx"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "columns"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "csv"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "sheet_name"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "text",
+                    "base64"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "value_path"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "csv"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "sheet_name"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "columns"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv",
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "value_path"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "text",
+                    "base64"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "example_params": {
+        "format": "json",
+        "output_name": "rows.json",
+        "output_field": "file",
+        "limits": {
+          "max_input_bytes": 10485760,
+          "max_output_bytes": 10485760,
+          "max_rows": 1000,
+          "max_columns": 100
+        }
+      },
+      "expression_fields": [],
+      "source_ids": [
+        "B020",
+        "B041",
+        "B057"
+      ],
+      "semantic_rule": "json按Item json数组生成UTF-8；csv按显式列/方言/公式策略，xlsx按列序并将字符串写为字符串单元格；text严格UTF-8取value_path，base64严格解码该路径字符串生成原始字节。输出Item binary[output_field]引用新资产，不把大字节内联到json；paired覆盖参与来源。输出名仅单文件名。转换器版本/选项/源资产入provenance，写入引用与意图结果同事务。 路径、CSV转义、逐格式基数/限额及失败语义以PRD§20为准；这些静态契约不证明真实解析器已通过。",
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "restart_or_replay",
+        "stream_limits",
+        "parser_isolation",
+        "format_roundtrip"
+      ]
+    },
+    {
+      "type": "file.decode",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S2",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "default_cache": "off",
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "asset": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "csv",
+              "xlsx",
+              "docx",
+              "pdf",
+              "text",
+              "base64"
+            ]
+          },
+          "csv": {
+            "type": "object",
+            "properties": {
+              "delimiter": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1
+              },
+              "line_ending": {
+                "enum": [
+                  "lf",
+                  "crlf"
+                ]
+              },
+              "header": {
+                "type": "boolean"
+              },
+              "formula_policy": {
+                "enum": [
+                  "preserve",
+                  "escape"
+                ]
+              }
+            },
+            "required": [
+              "delimiter",
+              "quote",
+              "line_ending",
+              "header",
+              "formula_policy"
+            ],
+            "additionalProperties": false
+          },
+          "sheet_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "formula_policy": {
+            "enum": [
+              "cached_value",
+              "reject"
+            ]
+          },
+          "date_policy": {
+            "enum": [
+              "serial",
+              "iso8601"
+            ]
+          },
+          "source_timezone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "pages": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_input_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_output_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_rows": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "max_columns": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "max_input_bytes",
+              "max_output_bytes",
+              "max_rows",
+              "max_columns"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "asset",
+          "format",
+          "output_field",
+          "limits"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "csv"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              },
+              "required": [
+                "format"
+              ]
+            },
+            "then": {
+              "required": [
+                "sheet_name",
+                "formula_policy",
+                "date_policy"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "date_policy": {
+                  "const": "iso8601"
+                }
+              },
+              "required": [
+                "date_policy"
+              ]
+            },
+            "then": {
+              "required": [
+                "source_timezone"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "source_timezone"
+              ]
+            },
+            "then": {
+              "properties": {
+                "date_policy": {
+                  "const": "iso8601"
+                }
+              },
+              "required": [
+                "date_policy"
+              ]
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "csv"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "csv"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "sheet_name"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "formula_policy"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "date_policy"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "source_timezone"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "xlsx"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "pages"
+              ]
+            },
+            "then": {
+              "properties": {
+                "format": {
+                  "enum": [
+                    "pdf"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "example_params": {
+        "asset": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "format": "pdf",
+        "output_field": "text",
+        "limits": {
+          "max_input_bytes": 10485760,
+          "max_output_bytes": 10485760,
+          "max_rows": 1000,
+          "max_columns": 100
+        }
+      },
+      "expression_fields": [
+        "/asset"
+      ],
+      "source_ids": [
+        "B021",
+        "B041",
+        "B047",
+        "B057"
+      ],
+      "semantic_rule": "json数组逐项输出：对象直接作为Item json，非对象封装到output_field；单对象输出一项，顶层标量同样封装。csv不猜数值/日期，header为true以原头作key且重复报错；无header时每行字符串数组封装在output_field。xlsx读指定sheet，公式按cached_value或reject且不求值，缺缓存报错；date_policy为serial保留序列值，为iso8601需显式IANA source_timezone并按工作簿1900/1904纪元转换，歧义/无效日期报错。docx按文档顺序提取段落/表格，pdf每页输出page_number/text/has_text；无文本时has_text=false，不声称OCR已支持。text严格UTF-8解码，base64将资产字节编码为文本。每项保留paired及源资产引用；解析流执行max_rows/columns/bytes限制，宏/脚本/外部链接不执行。 路径、CSV转义、逐格式基数/限额及失败语义以PRD§20为准；这些静态契约不证明真实解析器已通过。",
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "workspace_denied",
+        "restart_or_replay",
+        "stream_limits",
+        "parser_isolation",
+        "format_roundtrip"
+      ]
+    },
+    {
+      "type": "file.input",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "object",
+            "properties": {
+              "asset": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "asset",
+              "mime",
+              "name",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "file",
+          "field"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "file": {
+          "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "mime": "application/octet-stream",
+          "name": "",
+          "size": 0
+        },
+        "field": "file"
+      }
+    },
+    {
+      "type": "image.input",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "object",
+            "properties": {
+              "asset": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "asset",
+              "mime",
+              "name",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "file",
+          "field"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "file": {
+          "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "mime": "image/png",
+          "name": "",
+          "size": 0
+        },
+        "field": "file"
+      }
+    },
+    {
+      "type": "audio.input",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "object",
+            "properties": {
+              "asset": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "asset",
+              "mime",
+              "name",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "file",
+          "field"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "file": {
+          "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "mime": "audio/mpeg",
+          "name": "",
+          "size": 0
+        },
+        "field": "file"
+      }
+    },
+    {
+      "type": "video.input",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "object",
+            "properties": {
+              "asset": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$"
+              },
+              "mime": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 33554432
+              }
+            },
+            "required": [
+              "asset",
+              "mime",
+              "name",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "file",
+          "field"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "file": {
+          "asset": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "mime": "video/mp4",
+          "name": "",
+          "size": 0
+        },
+        "field": "file"
+      }
+    }
+  ],
+  "source_members": [
+    "B005",
+    "B020",
+    "B021",
+    "B041",
+    "B047",
+    "B057"
+  ],
+  "scope_limits": [
+    "No dependency/parser version selected yet",
+    "Explicit numeric example quotas are examples, not approved defaults",
+    "Third-party format compatibility and all actual parser isolation/roundtrip tests remain pending"
+  ]
+}

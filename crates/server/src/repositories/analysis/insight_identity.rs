@@ -7,7 +7,6 @@ use crate::entities::{
     repository_analysis_commit_identities as raw_authors,
     repository_analysis_identities as identities, repository_analysis_people as legacy_people,
 };
-use identity::{Rule, normalized, same_rule, validate_rules};
 use sea_orm::{
     FromQueryResult,
     sea_query::{Alias as A, JoinType, OnConflict, Query as Q},
@@ -15,13 +14,42 @@ use sea_orm::{
 
 const BATCH: u64 = 500;
 
+struct Rule {
+    name: String,
+    email: String,
+    person: i64,
+}
+impl Rule {
+    fn matches(&self, name: &str, email: &str) -> bool {
+        self.name == name && self.email == email
+    }
+}
+fn same_rule(a: &Alias, b: &Alias) -> bool {
+    a.name == b.name && a.email == b.email
+}
+fn validate_rules(rules: &[Rule]) -> Result<()> {
+    let mut pairs = BTreeMap::new();
+    for rule in rules {
+        if pairs
+            .insert((&rule.name, &rule.email), rule.person)
+            .is_some_and(|person| person != rule.person)
+        {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::CONFLICT,
+                crate::i18n::Message::new("repository.analysis.aliasAmbiguous"),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn rules(aliases: &[Alias]) -> Result<Vec<Rule>> {
     aliases
         .iter()
         .map(|alias| {
             Ok(Rule {
-                name: normalized(&alias.name),
-                email: normalized(&alias.email),
+                name: alias.name.clone(),
+                email: alias.email.clone(),
                 person: alias
                     .contributor_id
                     .parse::<Id>()
@@ -35,6 +63,50 @@ fn rules(aliases: &[Alias]) -> Result<Vec<Rule>> {
             })
         })
         .collect()
+}
+
+/// Present newly collected exact Git author pairs without rewriting user mappings
+/// or changing the insight's configuration version during background collection.
+pub(super) async fn discover_aliases(
+    tx: &impl ConnectionTrait,
+    insight: &code_insights::Model,
+    source_rows: &[sources::Model],
+    aliases: &mut Vec<Alias>,
+) -> Result<()> {
+    let repositories: BTreeSet<_> = source_rows
+        .iter()
+        .filter(|row| row.id > 0)
+        .map(|row| row.repository_id)
+        .collect();
+    if repositories.is_empty() {
+        return Ok(());
+    }
+    let authors = commits::Entity::find()
+        .select_only()
+        .column(commits::Column::AuthorName)
+        .column(commits::Column::AuthorEmail)
+        .distinct()
+        .filter(commits::Column::WorkspaceId.eq(insight.workspace_id))
+        .filter(commits::Column::RepositoryId.is_in(repositories))
+        .order_by_asc(commits::Column::AuthorName)
+        .order_by_asc(commits::Column::AuthorEmail)
+        .into_tuple::<(String, String)>()
+        .all(tx)
+        .await?;
+    let mut known: BTreeSet<_> = aliases
+        .iter()
+        .map(|a| (a.name.clone(), a.email.clone()))
+        .collect();
+    for (name, email) in authors {
+        if known.insert((name.clone(), email.clone())) {
+            aliases.push(Alias {
+                name,
+                email,
+                ..Default::default()
+            });
+        }
+    }
+    Ok(())
 }
 
 async fn person(
@@ -59,10 +131,7 @@ pub(super) async fn prepare_aliases(
     let mut labels = BTreeMap::new();
     for alias in new.iter_mut() {
         alias.nickname = alias.nickname.trim().into();
-        if (normalized(&alias.name).is_empty() && normalized(&alias.email).is_empty())
-            || alias.nickname.is_empty()
-            || alias.nickname.chars().count() > 255
-        {
+        if alias.nickname.is_empty() || alias.nickname.chars().count() > 255 {
             return Err(ApiError::localized(
                 axum::http::StatusCode::BAD_REQUEST,
                 crate::i18n::Message::new("repository.analysis.aliasInvalid"),
@@ -111,36 +180,19 @@ pub(super) async fn prepare_aliases(
         let mut row = if let Some(id) = ids.first() {
             person(tx, insight, *id).await?
         } else {
-            let candidates = people::Entity::find()
-                .filter(people::Column::WorkspaceId.eq(insight.workspace_id))
-                .filter(people::Column::InsightId.eq(insight.id))
-                .filter(people::Column::RawIdentityId.is_null())
-                .filter(people::Column::DisplayName.eq(&alias.nickname))
-                .all(tx)
-                .await?;
-            if candidates.len() > 1 {
-                return Err(ApiError::localized(
-                    axum::http::StatusCode::CONFLICT,
-                    crate::i18n::Message::new("repository.analysis.nicknameAmbiguous"),
-                ));
-            }
-            if let Some(row) = candidates.into_iter().next() {
-                row
-            } else {
-                people::Entity::insert(
-                    people::Model {
-                        insight_id: insight.id,
-                        id: s.next_id()?.into(),
-                        workspace_id: insight.workspace_id,
-                        display_name: alias.nickname.clone(),
-                        version: 1,
-                        raw_identity_id: None,
-                    }
-                    .into_active_model(),
-                )
-                .exec_with_returning(tx)
-                .await?
-            }
+            people::Entity::insert(
+                people::Model {
+                    insight_id: insight.id,
+                    id: s.next_id()?.into(),
+                    workspace_id: insight.workspace_id,
+                    display_name: alias.nickname.clone(),
+                    version: 1,
+                    raw_identity_id: None,
+                }
+                .into_active_model(),
+            )
+            .exec_with_returning(tx)
+            .await?
         };
         let rename = prior.is_empty()
             || prior
@@ -425,9 +477,7 @@ async fn ensure_mode(
             };
             let matching: BTreeSet<_> = rules
                 .iter()
-                .filter(|rule| {
-                    rule.matches(&normalized(&raw.raw_name), &normalized(&raw.raw_email))
-                })
+                .filter(|rule| rule.matches(&raw.raw_name, &raw.raw_email))
                 .map(|rule| rule.person)
                 .collect();
             if matching.len() > 1 {

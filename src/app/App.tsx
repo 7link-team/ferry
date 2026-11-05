@@ -1,4 +1,5 @@
-import { DictionaryContext } from "../features/maintenance/DictionaryState";
+import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
+import { TypedValueList } from "./pages/TypedValueList";
 import { cn } from "cn";
 import { Loader2,LogOut } from "lucide-react";
 import { useEffect,useMemo,useState } from "react";
@@ -6,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Dashboard } from "../features/dashboard/Dashboard";
 import { Invitation } from "../features/workspaces/Invitation";
 import { api,errorText,type Identity } from "../shared/api/api";
-import { commonText,useCommonTranslation } from "../shared/i18n/i18n";
+import { commonText,workflowText,useCommonTranslation } from "../shared/i18n/i18n";
 import { LanguageSwitcher } from "../shared/i18n/LanguageSwitcher";
 import { stripLocalePrefix } from "../shared/i18n/locale";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
@@ -15,6 +16,12 @@ import {
 DropdownMenu,
 DropdownMenuContent,
 DropdownMenuItem,
+DropdownMenuPortal,
+DropdownMenuRadioGroup,
+DropdownMenuRadioItem,
+DropdownMenuSub,
+DropdownMenuSubContent,
+DropdownMenuSubTrigger,
 DropdownMenuTrigger,
 } from "../shared/ui/dropdown-menu";
 import { Account,accountRoute } from "./Account";
@@ -32,7 +39,7 @@ import { Platform,myRole } from "./Platform";
 import { formConfigs,listConfigs } from "./resources";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
-import { href,navigate,useRoute } from "./router";
+import { href,isLoginPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
 
 export function App() {
   useCommonTranslation();
@@ -43,7 +50,16 @@ export function App() {
   const [setupRequired, setSetupRequired] = useState(false);
   const [deferredSetup, setDeferredSetup] = useState(false);
   useEffect(() => {
+    if (!identity?.user.id || isLoginPath()) return;
+    void api("/monitor/pageview", {method:"POST", body:JSON.stringify({path:location.pathname})}).catch(() => {});
+  }, [identity?.user.id, route.workspace, route.group, route.item, route.mode, route.id]);
+  useEffect(() => {
     if (!identity) return;
+    if (isLoginPath()) {
+      const target = safeLoginRedirect(new URLSearchParams(location.search).get("redirect"));
+      replacePath(target ?? href({workspace: identity.workspaces[0]?.id ?? "", group: "host", item: "hosts", mode: "list"}, {}));
+      return;
+    }
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (!current && route.workspace !== "_platform") return;
@@ -73,6 +89,9 @@ export function App() {
   };
   useEffect(reload, []);
   useEffect(() => {
+    if (!loading && !identity && !error) navigateToLogin();
+  }, [loading, identity, error, route]);
+  useEffect(() => {
     const query = new URLSearchParams(location.search);
     if (query.get("oauth_popup") === "1") {
       const message = { type: "repository-authorized", provider: query.get("provider"), status: query.get("authorization"), connection_id: query.get("connection_id") };
@@ -86,34 +105,31 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    // A session that expires mid-use drops back to the entry screen without
-    // changing the URL, so signing in again lands on the same page.
-    const onUnauthorized = () => setIdentity(undefined);
+    const onUnauthorized = () => { setIdentity(undefined); navigateToLogin(); };
     window.addEventListener("ferry:unauthorized", onUnauthorized);
     return () => window.removeEventListener("ferry:unauthorized", onUnauthorized);
   }, []);
 
-  if (loading)
+  if (loading || (identity && isLoginPath()))
     return (
       <div className="grid h-full place-items-center text-muted-foreground">
         <Loader2 className="size-5 animate-spin" />
       </div>
     );
 
-  // The URL is never replaced while unauthenticated: that is what makes a
-  // shared link land on its target page after signing in (§5.3).
+  const signedOut = () => { setIdentity(undefined); navigateToLogin(false); reload(); };
   if (!identity?.workspaces) return <><LanguageSwitcher floating /><Entry onReady={reload} error={error} /></>;
   if (setupRequired && !deferredSetup)
     return <><LanguageSwitcher floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
   if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<LanguageSwitcher />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
-    return <Platform identity={identity} reload={reload} headerActions={<LanguageSwitcher />} />;
+    return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({ workspace: "_platform", item: "workspaces", mode: "list" }, {})} onSignedOut={signedOut} />} />;
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<><LanguageSwitcher /><ThemeSwitcher /></>} />;
   }
-  return <Workspace identity={identity} onSignedOut={reload} />;
+  return <Workspace identity={identity} onSignedOut={signedOut} />;
 }
 
 function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut: () => void }) {
@@ -126,6 +142,22 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     identity.workspaces.find((w) => w.id === route.workspace)
       ?? identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
   const workspaceId = current?.id ?? "";
+  const needsNodeCatalog = route.item === "workflows" || route.item === "workflow-templates" || route.item === "integration-credentials" || (route.group === "workflow" && route.item === "credentials");
+  const [nodeCatalogWorkspace, setNodeCatalogWorkspace] = useState("");
+  const [nodeCatalogError, setNodeCatalogError] = useState("");
+  const [nodeCatalogRetry, setNodeCatalogRetry] = useState(0);
+  useEffect(() => {
+    if (!workspaceId || !needsNodeCatalog || nodeCatalogWorkspace === workspaceId) return;
+    const controller = new AbortController();
+    setNodeCatalogError("");
+    void api<{ nodes: IntegrationManifest[] }>(`/workspaces/${workspaceId}/workflow-node-catalog`, { signal: controller.signal })
+      .then(value => {
+        if (controller.signal.aborted) return;
+        installIntegrationCatalog(value.nodes);
+        setNodeCatalogWorkspace(workspaceId);
+      }).catch(cause => { if (!controller.signal.aborted) setNodeCatalogError(errorText(cause)); });
+    return () => controller.abort();
+  }, [workspaceId, needsNodeCatalog, nodeCatalogWorkspace, nodeCatalogRetry]);
 
   // A URL naming a workspace the account cannot open is corrected once, in
   // place, rather than showing a dead page. Every hook runs before the early
@@ -148,15 +180,15 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     return ()=>{live=false;controller.abort();};
   },[workspaceId,preferencesPage]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, preferences?.dictionaries["host-state"], preferences?.dictionaries), [workspaceId, permissions, onSignedOut, preferences]);
-  const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions]);
+  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, undefined, preferences?.dictionaries), [workspaceId, permissions, onSignedOut, preferences]);
+  const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions, nodeCatalogWorkspace]);
 
   // Keep the form configuration stable while background preferences refresh.
   // ResourceForm reloads its draft when its configuration changes.
   const formConfig = useMemo(() => {
     const item = findItem(route.group, route.item);
-    const config = item && forms[item.resource];
-    return config ? { ...config, blank: { ...config.blank, ...item?.params } } : undefined;
+    const config = item && forms[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
+    return config ? { ...config, blank: { ...config.blank, ...(route.group === "workflow" && item?.key === "credentials" ? {scope:"ai",kind:"token"} : {}), ...item?.params } } : undefined;
   }, [forms, route.group, route.item]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
@@ -187,18 +219,22 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
 
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
   const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
-  const listConfig = lists[item.resource];
+  const listConfig = lists[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
+  const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
+  const nodeCatalogFeedback = nodeCatalogError
+    ? <div className="space-y-3 p-4"><p role="alert">{nodeCatalogError}</p><Button variant="outline" onClick={() => setNodeCatalogRetry(value => value + 1)}>{commonText("common.retry")}</Button></div>
+    : <div role="status" className="p-4"><Loader2 aria-label={commonText("common.loading")} className="size-5 animate-spin" /></div>;
 
-  if ((item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit")) ||
+  if ((formConfig?.editor && route.mode !== "list") || (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit")) ||
       (item.resource === "pipeline-templates" && ["new", "edit", "view"].includes(route.mode)))
     return <div className="h-full min-h-0 min-w-0">
-      {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : formConfig ? (
+      {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : formConfig ? (
         <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace headerActions={<LanguageSwitcher />} />
       ) : <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />}
     </div>;
 
   return (
-    <DictionaryContext.Provider value={preferences?.dictionaries ?? {}}><div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
+    <div className="grid h-full min-w-0 grid-cols-1 grid-rows-[auto_1fr]">
       <header className="flex min-h-12 min-w-0 flex-wrap items-center gap-x-5 gap-y-1 border-b border-border bg-background px-4 py-1">
         <a className="font-semibold tracking-tight" {...to(nav[0]!.key, nav[0]!.items[0]!.key)}>
           Ferry
@@ -219,38 +255,9 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           ))}
         </nav>
         <span className="flex-1" />
-        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "users", mode: "list" }, {})}>{t("app.platform")}</Button>}
+        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
 
-        <LanguageSwitcher />
-        <ThemeSwitcher />
-
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
-              {current.name} · {identity.user.name}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {identity.workspaces.map((w) => (
-              <DropdownMenuItem
-                key={w.id}
-                onClick={() =>
-                  navigate({ workspace: w.id, group: route.group, item: route.item, mode: "list" }, {})
-                }
-              >
-                <span className="flex-1">{w.name}{w.id === current.id && " ✓"}</span>
-                <span className="text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem onClick={() => setJoining(true)}>{t("app.workspaces")}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>{t("app.account")}</DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
-            >
-              <LogOut /> {t("app.signOut")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => setJoining(true)} onSignedOut={onSignedOut} />
       </header>
 
       <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
@@ -324,13 +331,14 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             {route.mode === "edit" && commonText("shell.editSuffix")}
           </h1>
 
-          {relatedItems.length > 1 && parentItem.key !== "pipelines" && <nav aria-label={commonText("shell.relatedPages", { name: parentItem.label })} className="mb-3 flex flex-wrap gap-3">
+          {relatedItems.length > 1 && !["pipelines", "workflows", "credentials"].includes(parentItem.key) && <nav aria-label={commonText("shell.relatedPages", { name: parentItem.label })} className="mb-3 flex flex-wrap gap-3">
             {relatedItems.map(i => <a key={i.key} {...to(group.key, i.key, i.params)} aria-current={i.key === item.key ? "page" : undefined} className={cn("border-b-2 px-1 py-2 text-sm", i.key === item.key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground")}>{i.label}</a>)}
           </nav>}
           {item.description && <p className="mb-3 max-w-4xl text-sm text-muted-foreground">{item.description}</p>}
+          {route.mode === "list" && group.key === "workflow" && ["pipelines","workflows"].includes(parentItem.key) && <nav aria-label={workflowText("libraryTabs")} className="mb-3 flex gap-3">{[findItem("workflow",parentItem.key),findItem("workflow",parentItem.key==="workflows"?"workflow-templates":"pipeline-templates")].filter((entry):entry is NavItem=>!!entry&&canVisit(entry)).map(entry=><a key={entry.key} {...to("workflow",entry.key,entry.params)} aria-current={entry.key===item.key?"page":undefined} className={cn("border-b-2 px-1 py-2 text-sm",entry.key===item.key?"border-primary text-primary":"border-transparent text-muted-foreground hover:text-foreground")}>{entry.key===parentItem.key?workflowText("workflows"):workflowText("templates")}</a>)}</nav>}
           {preferencesError && <p role="alert">{preferencesError}</p>}
           </div>
-          {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : route.mode === "list" ? (
+          {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : route.mode === "list" ? (
             item.resource === "dashboard" ? <Dashboard key={current.id} workspace={current.id} /> : listConfig ? (
               <div className="flex min-h-0 min-w-0 flex-col">
               {item.resource === "members" && permissions.has("members.create") && <Invitation key={current.id} workspace={current.id} />}
@@ -344,7 +352,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }}
                 workspace={current.id}
                 permissions={permissions}
-              /> : <ResourceTable
+              /> : ["settings", "dictionaries"].includes(item.resource) ? <TypedValueList key={`${current.id}/${item.resource}`} config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20 }} workspace={current.id} permissions={permissions} /> : <ResourceTable
                 key={`${current.id}/${item.resource}/${JSON.stringify(item.params ?? {})}`}
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
                 workspace={current.id}
@@ -391,10 +399,57 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
           )}
         </main>
       </div>
-    </div></DictionaryContext.Provider>
+    </div>
   );
 }
 
 const UnavailablePage = ({ onBack }: { onBack: () => void }) => (
   <div role="alert"><p>{commonText("shell.unavailable")}</p><Button variant="outline" onClick={onBack}>{commonText("common.backList")}</Button></div>
 );
+
+function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void; onSignedOut: () => void }) {
+  const { t } = useTranslation();
+  const route = useRoute();
+  return <>
+        <LanguageSwitcher />
+        <ThemeSwitcher />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              {(current?.name ?? t("app.platform"))} · {identity.user.name}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>{workflowText("switchWorkspace")}</DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent collisionPadding={8} className="max-h-[min(60dvh,var(--radix-dropdown-menu-content-available-height),28rem)] min-w-0 w-[min(22rem,var(--radix-dropdown-menu-content-available-width))] overflow-y-auto">
+                  <DropdownMenuRadioGroup
+                    value={current?.id}
+                    onValueChange={(workspace) => {
+                      if (workspace !== current?.id)
+                        navigate({ workspace, group: current ? route.group : nav[0]!.key, item: current ? route.item : nav[0]!.items[0]!.key, mode: "list" }, {});
+                    }}
+                  >
+                    {identity.workspaces.map((w) => (
+                      <DropdownMenuRadioItem key={w.id} value={w.id} className="flex-wrap">
+                        <span className="min-w-0 flex-1 basis-32 break-words">{w.name}</span>
+                        <span className="min-w-0 break-words text-xs text-muted-foreground">{myRole(w.relation, w.role_name)}</span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+            <DropdownMenuItem onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>{t("app.account")}</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
+            >
+              <LogOut /> {t("app.signOut")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+  </>;
+}

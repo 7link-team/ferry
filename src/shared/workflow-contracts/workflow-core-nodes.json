@@ -1,0 +1,5701 @@
+{
+  "contract_version": "1.14-review",
+  "status": "design_only",
+  "scope": "46 canonical S1 core manifests; not third-party format compatibility",
+  "nodes": [
+    {
+      "type": "core.trigger.manual",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "input_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "input_schema"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "manual请求输入先按input_schema校验；不可把公开提交者当执行身份。",
+      "example_params": {
+        "input_schema": {
+          "type": "object"
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B038"
+      ]
+    },
+    {
+      "type": "core.trigger.schedule",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "cron": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "cron",
+          "timezone"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "复用cron_jobs解析器，IANA时区验证；发布创建派生行，草稿不启动。",
+      "example_params": {
+        "cron": "0 9 * * *",
+        "timezone": "UTC"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B006",
+        "B035",
+        "B052"
+      ]
+    },
+    {
+      "type": "core.trigger.webhook",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "endpoint_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "endpoint_id"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "引用webhook_endpoints，方法/认证/测试窗口按入口资源；先校验公开开关与发布版本。",
+      "example_params": {
+        "endpoint_id": "endpoint-reference"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B072"
+      ]
+    },
+    {
+      "type": "core.trigger.form",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label_key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "text",
+                    "number",
+                    "boolean",
+                    "choice",
+                    "file"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "mime_types": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "key",
+                "label_key",
+                "kind",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "选项/上传类型按kind交叉验证；20MB/5文件等已确认限制在服务端强制。",
+      "example_params": {
+        "fields": [
+          {
+            "key": "title",
+            "label_key": "form.title",
+            "kind": "text",
+            "required": true
+          }
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B025"
+      ]
+    },
+    {
+      "type": "core.trigger.subworkflow",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "input_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "input_schema"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "仅由授权父意图创建，继承身份；不创建匿名生产入口。",
+      "example_params": {
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B018"
+      ]
+    },
+    {
+      "type": "core.trigger.error",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "source_subject_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          }
+        },
+        "required": [
+          "source_subject_ids"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "源执行已终态后投递，冻结源身份/ID；链深度与递归检测同子调用。",
+      "example_params": {
+        "source_subject_ids": [
+          "11"
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B015"
+      ]
+    },
+    {
+      "type": "core.trigger.execution_event",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "subject_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "subject_ids",
+          "states"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "订阅授权定义的终态；durable delivery与游标同事务，不把平台内部事件全量承诺为兼容。",
+      "example_params": {
+        "subject_ids": [
+          "11"
+        ],
+        "states": [
+          "succeeded"
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B043",
+        "B073"
+      ]
+    },
+    {
+      "type": "core.trigger.code_event",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "connection_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "repository_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "push",
+                "tag",
+                "pull_request"
+              ]
+            }
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "connection_id",
+          "repository_key",
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "复用规范化代码事件；精确commit，不以当前分支头替换，fork MR不自动执行。",
+      "example_params": {
+        "connection_id": "12",
+        "repository_key": "org/project",
+        "events": [
+          "push"
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
+      "type": "core.if",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "true",
+          "type": "main"
+        },
+        {
+          "port": "false",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "combinator": {
+            "enum": [
+              "and",
+              "or"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "left": {},
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "contains",
+                    "exists",
+                    "matches"
+                  ]
+                },
+                "right": {}
+              },
+              "required": [
+                "left",
+                "operator"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "eq",
+                          "ne",
+                          "gt",
+                          "gte",
+                          "lt",
+                          "lte",
+                          "contains",
+                          "matches"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "right"
+                    ]
+                  }
+                }
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "combinator",
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/rules/*/left",
+        "/rules/*/right"
+      ],
+      "semantic_rule": "每条恰好一分支，缺失与null不同；未知类型比较报错，不隐式转字符串。",
+      "example_params": {
+        "combinator": "and",
+        "rules": [
+          {
+            "left": 1,
+            "operator": "eq",
+            "right": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B034"
+      ]
+    },
+    {
+      "type": "core.switch",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "case",
+          "type": "main"
+        },
+        {
+          "port": "fallback",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "cases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "condition": {
+                  "type": "object",
+                  "properties": {
+                    "combinator": {
+                      "enum": [
+                        "and",
+                        "or"
+                      ]
+                    },
+                    "rules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "left": {},
+                          "operator": {
+                            "enum": [
+                              "eq",
+                              "ne",
+                              "gt",
+                              "gte",
+                              "lt",
+                              "lte",
+                              "contains",
+                              "exists",
+                              "matches"
+                            ]
+                          },
+                          "right": {}
+                        },
+                        "required": [
+                          "left",
+                          "operator"
+                        ],
+                        "additionalProperties": false,
+                        "allOf": [
+                          {
+                            "if": {
+                              "properties": {
+                                "operator": {
+                                  "enum": [
+                                    "eq",
+                                    "ne",
+                                    "gt",
+                                    "gte",
+                                    "lt",
+                                    "lte",
+                                    "contains",
+                                    "matches"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "operator"
+                              ]
+                            },
+                            "then": {
+                              "required": [
+                                "right"
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "combinator",
+                    "rules"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "key",
+                "condition"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "match": {
+            "enum": [
+              "first",
+              "all"
+            ]
+          },
+          "fallback": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cases",
+          "match",
+          "fallback"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/cases/*/condition/rules/*/left",
+        "/cases/*/condition/rules/*/right"
+      ],
+      "semantic_rule": "case端口index对应稳定cases顺序；keys唯一；first只首个命中，all可多路，fallback只在零命中时。",
+      "example_params": {
+        "cases": [
+          {
+            "key": "one",
+            "condition": {
+              "combinator": "and",
+              "rules": [
+                {
+                  "left": 1,
+                  "operator": "eq",
+                  "right": 1
+                }
+              ]
+            }
+          }
+        ],
+        "match": "first",
+        "fallback": true
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B062"
+      ]
+    },
+    {
+      "type": "core.merge",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "input",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "append",
+              "position",
+              "fields",
+              "join"
+            ]
+          },
+          "wait": {
+            "enum": [
+              "any_items",
+              "all_inputs"
+            ]
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "join": {
+            "enum": [
+              "inner",
+              "left",
+              "right",
+              "full"
+            ]
+          },
+          "input_count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "mode",
+          "wait",
+          "input_count"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "fields",
+                    "join"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "keys"
+              ],
+              "properties": {
+                "keys": {
+                  "minItems": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "join"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "join"
+              ]
+            }
+          }
+        ]
+      },
+      "expression_fields": [],
+      "semantic_rule": "等待全部前驱终态后按端口index排序；fields/join必填keys，join模式须明确join种类；不是任意SQL执行器。 input_count显式声明输入端口数，index必须小于该值；样例2不是默认值。 就绪与归一规则见PRD§21及目录merge_readiness；any_items不是竞速首个到达，all_inputs的全空列表仍执行。未终结重试/等待不得封口，未冻结的错误端口投影不得猜为空或跳过。",
+      "example_params": {
+        "mode": "append",
+        "wait": "any_items",
+        "input_count": 2
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B040"
+      ]
+    },
+    {
+      "type": "core.filter",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "combinator": {
+            "enum": [
+              "and",
+              "or"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "left": {},
+                "operator": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "contains",
+                    "exists",
+                    "matches"
+                  ]
+                },
+                "right": {}
+              },
+              "required": [
+                "left",
+                "operator"
+              ],
+              "additionalProperties": false,
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "operator": {
+                        "enum": [
+                          "eq",
+                          "ne",
+                          "gt",
+                          "gte",
+                          "lt",
+                          "lte",
+                          "contains",
+                          "matches"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "operator"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "right"
+                    ]
+                  }
+                }
+              ]
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "combinator",
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/rules/*/left",
+        "/rules/*/right"
+      ],
+      "semantic_rule": "不满足的条目移除；节点执行了但零输出与分支skipped不同。",
+      "example_params": {
+        "combinator": "and",
+        "rules": [
+          {
+            "left": true,
+            "operator": "eq",
+            "right": true
+          }
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B023"
+      ]
+    },
+    {
+      "type": "core.loop",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "derived_from_body",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "for_each",
+              "while"
+            ]
+          },
+          "body": {
+            "type": "object",
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "connections": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            },
+            "required": [
+              "nodes",
+              "connections"
+            ],
+            "additionalProperties": false
+          },
+          "parallelism": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_iterations": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "condition": {
+            "type": "string"
+          },
+          "carry": {},
+          "on_iteration_error": {
+            "enum": [
+              "stop",
+              "continue",
+              "fail_after_all"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "body",
+          "parallelism",
+          "max_iterations",
+          "on_iteration_error"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "while"
+                  ]
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "required": [
+                "condition"
+              ],
+              "properties": {
+                "condition": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "parallelism": {
+                  "const": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "carry"
+              ]
+            },
+            "then": {
+              "properties": {
+                "parallelism": {
+                  "const": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/condition",
+        "/carry"
+      ],
+      "semantic_rule": "body递归用图Schema校验；最多3层；while末轮后求值且parallelism=1；输出按输入序，carry只顺序循环可用。空body合法透传但不能当已验证业务模板。",
+      "example_params": {
+        "kind": "for_each",
+        "body": {
+          "nodes": [],
+          "connections": []
+        },
+        "parallelism": 1,
+        "max_iterations": 10,
+        "on_iteration_error": "continue"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "derived_from_body",
+      "source_ids": [
+        "B056"
+      ]
+    },
+    {
+      "type": "core.split",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "include": {
+            "enum": [
+              "all",
+              "none",
+              "selected"
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "path",
+          "include"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "include": {
+                  "enum": [
+                    "selected"
+                  ]
+                }
+              },
+              "required": [
+                "include"
+              ]
+            },
+            "then": {
+              "required": [
+                "fields"
+              ]
+            }
+          }
+        ]
+      },
+      "expression_fields": [],
+      "semantic_rule": "path必须数组；selected须fields；每个输出paired指回同一输入；不展开字符串。",
+      "example_params": {
+        "path": "parts",
+        "include": "all"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B036",
+        "B069"
+      ]
+    },
+    {
+      "type": "core.aggregate",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "collect",
+              "summary"
+            ]
+          },
+          "group_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "operation": {
+                  "enum": [
+                    "sum",
+                    "count",
+                    "min",
+                    "max",
+                    "average"
+                  ]
+                },
+                "as": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "field",
+                "operation",
+                "as"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "mode",
+          "group_by"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "summary"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "operations"
+              ],
+              "properties": {
+                "operations": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expression_fields": [],
+      "semantic_rule": "summary必填operations；数值聚合拒绝非有限数；每输出paired含全部参与来源；空输入结果与模式明确区分。",
+      "example_params": {
+        "mode": "collect",
+        "group_by": []
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B036",
+        "B065",
+        "B070"
+      ]
+    },
+    {
+      "type": "core.sort",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "direction": {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ]
+                },
+                "nulls": {
+                  "enum": [
+                    "first",
+                    "last"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "direction",
+                "nulls"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "keys"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "稳定排序，相同键按输入序；同字段混类型报错，locale排序需显式设置且入缓存键。",
+      "example_params": {
+        "keys": [
+          {
+            "path": "rank",
+            "direction": "asc",
+            "nulls": "last"
+          }
+        ]
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B036",
+        "B068"
+      ]
+    },
+    {
+      "type": "core.limit",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "count",
+          "offset"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "只切片，不改变来源；count=0产生空列表。",
+      "example_params": {
+        "count": 10,
+        "offset": 0
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B036",
+        "B066"
+      ]
+    },
+    {
+      "type": "core.deduplicate",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "enum": [
+              "execution",
+              "workflow"
+            ]
+          },
+          "keep": {
+            "enum": [
+              "first",
+              "last"
+            ]
+          }
+        },
+        "required": [
+          "keys",
+          "scope",
+          "keep"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "keys空按完整规范JSON去重；workflow范围需要持久trigger_states或专用状态，不得以内存set冒充跨执行去重；workflow+last需要批次语义，不支持时发布拒绝。",
+      "example_params": {
+        "keys": [
+          "id"
+        ],
+        "scope": "execution",
+        "keep": "first"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B036",
+        "B067"
+      ]
+    },
+    {
+      "type": "core.compare",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "left",
+          "type": "main"
+        },
+        {
+          "port": "right",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "include": {
+            "enum": [
+              "equal",
+              "different",
+              "left_only",
+              "right_only",
+              "all"
+            ]
+          }
+        },
+        "required": [
+          "keys",
+          "include"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "按keys规范比较；一对多重复键必须显式按输入序配对并报告重复，不凭hash当唯一；输出带side/source。",
+      "example_params": {
+        "keys": [
+          {
+            "from": "id",
+            "to": "id"
+          }
+        ],
+        "include": "all"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B004"
+      ]
+    },
+    {
+      "type": "core.wait",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "enum": [
+              "duration",
+              "until",
+              "callback"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "until": {
+            "type": "string"
+          },
+          "response_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "duration"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "duration_ms"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "until"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "until"
+              ],
+              "properties": {
+                "until": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "callback"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "response_schema"
+              ]
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/duration_ms",
+        "/until"
+      ],
+      "semantic_rule": "duration需duration_ms，until需带时区时间，callback需response_schema；恢复令牌hash持久化、一次CAS，释放执行槽，不sleep占用进程任务。",
+      "example_params": {
+        "mode": "duration",
+        "duration_ms": 1000
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B071"
+      ]
+    },
+    {
+      "type": "core.stop",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1
+          },
+          "details": {}
+        },
+        "required": [
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/message",
+        "/details"
+      ],
+      "semantic_rule": "按执行策略标失败，不把任意异常堆栈或秘密details写公开回应。",
+      "example_params": {
+        "message": "Validation failed"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B061"
+      ]
+    },
+    {
+      "type": "core.subworkflow",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "revision_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "inputs": {
+            "type": "object"
+          },
+          "wait": {
+            "type": "boolean"
+          },
+          "item_mode": {
+            "enum": [
+              "batch",
+              "per_item"
+            ]
+          }
+        },
+        "required": [
+          "subject_id",
+          "revision_id",
+          "inputs",
+          "wait",
+          "item_mode"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/inputs"
+      ],
+      "semantic_rule": "冻结revision与inputs；主机/子执行意图唯一，等待时挂起；同空间调用名单、身份和深度<=10。",
+      "example_params": {
+        "subject_id": "13",
+        "revision_id": "14",
+        "inputs": {},
+        "wait": true,
+        "item_mode": "batch"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B017"
+      ]
+    },
+    {
+      "type": "core.pipeline",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "subject_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "revision_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "inputs": {
+            "type": "object"
+          },
+          "wait": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "subject_id",
+          "revision_id",
+          "inputs",
+          "wait"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/inputs"
+      ],
+      "semantic_rule": "触发已授权流水线，沿唯一create_run入口；不以inputs重绑环境/主机；await不级联取消已提交部署。",
+      "example_params": {
+        "subject_id": "15",
+        "revision_id": "16",
+        "inputs": {},
+        "wait": true
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
+      "type": "core.no_op",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "严格透传item和paired，不复制或变更资产引用。",
+      "example_params": {},
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B044"
+      ]
+    },
+    {
+      "type": "data.set",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {}
+              },
+              "required": [
+                "path",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "keep_other_fields": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fields",
+          "keep_other_fields"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/fields/*/value"
+      ],
+      "semantic_rule": "path用受限对象路径；拒绝__proto__/constructor/prototype污染，冲突路径报错。",
+      "example_params": {
+        "fields": [
+          {
+            "path": "answer",
+            "value": 42
+          }
+        ],
+        "keep_other_fields": true
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B053"
+      ]
+    },
+    {
+      "type": "data.rename",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "on_collision": {
+            "enum": [
+              "error",
+              "overwrite"
+            ]
+          }
+        },
+        "required": [
+          "mappings",
+          "on_collision"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "同一输入先读所有源再写目标，支持交换字段；不存在源不产生伪值；目标冲突按显式策略。",
+      "example_params": {
+        "mappings": [
+          {
+            "from": "old",
+            "to": "new"
+          }
+        ],
+        "on_collision": "error"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B048"
+      ]
+    },
+    {
+      "type": "data.date_time",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "enum": [
+              "parse",
+              "format",
+              "add",
+              "difference"
+            ]
+          },
+          "value": {},
+          "timezone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "format": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "unit": {
+            "enum": [
+              "milliseconds",
+              "seconds",
+              "minutes",
+              "hours",
+              "days",
+              "months"
+            ]
+          },
+          "other": {}
+        },
+        "required": [
+          "operation",
+          "value",
+          "timezone"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "format"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "format"
+              ],
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "add"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "amount",
+                "unit"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "difference"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "other",
+                "unit"
+              ]
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/value",
+        "/amount",
+        "/other"
+      ],
+      "semantic_rule": "IANA校验；format/add/difference各需对应字段；DST歧义必须显式选择或报错，不按服务器locale猜。",
+      "example_params": {
+        "operation": "parse",
+        "value": "2026-11-03T00:00:00Z",
+        "timezone": "UTC"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B009"
+      ]
+    },
+    {
+      "type": "data.crypto",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {
+        "key": {
+          "required": false,
+          "purpose": "encryption/hmac/totp key only; never params",
+          "accepted_profiles": [
+            "crypto.hmac_sha256",
+            "crypto.aes256_gcm",
+            "crypto.totp"
+          ],
+          "binding_policy": "PRD §23: current workspace/actor/module binding; logical adapter required",
+          "operation_profiles": {
+            "hmac_sha256": "crypto.hmac_sha256",
+            "encrypt_aes_gcm": "crypto.aes256_gcm",
+            "decrypt_aes_gcm": "crypto.aes256_gcm",
+            "totp": "crypto.totp"
+          }
+        }
+      },
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "enum": [
+              "sha256",
+              "sha512",
+              "hmac_sha256",
+              "encrypt_aes_gcm",
+              "decrypt_aes_gcm",
+              "totp"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          },
+          "encoding": {
+            "enum": [
+              "utf8",
+              "base64",
+              "hex"
+            ]
+          },
+          "nonce": {
+            "type": "string"
+          },
+          "period_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "digits": {
+            "enum": [
+              6,
+              8
+            ]
+          },
+          "at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "value",
+          "encoding"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "encrypt_aes_gcm",
+                    "decrypt_aes_gcm"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "nonce"
+              ],
+              "properties": {
+                "nonce": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "totp"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "at",
+                "period_seconds",
+                "digits"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/value",
+        "/at"
+      ],
+      "semantic_rule": "除hash外需key槽；AES256-GCM nonce唯一且认证失败不返回明文，TOTP按RFC6238、Base32密钥和显式时间/period/digits；不提供弱算法兼容承诺。",
+      "example_params": {
+        "operation": "sha256",
+        "value": "message",
+        "encoding": "utf8"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B007",
+        "B064"
+      ]
+    },
+    {
+      "type": "data.parse",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "enum": [
+              "json",
+              "csv",
+              "xml",
+              "html",
+              "markdown"
+            ]
+          },
+          "value": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "header": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "format",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/value"
+      ],
+      "semantic_rule": "XML禁外部实体/DTD，HTML仅解析不执行脚本；CSV方言明确；selector仅HTML；Markdown展示净化另层处理。",
+      "example_params": {
+        "format": "json",
+        "value": "{\"answer\":42}"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B030",
+        "B031",
+        "B039",
+        "B075"
+      ]
+    },
+    {
+      "type": "data.format",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "enum": [
+              "json",
+              "csv",
+              "xml",
+              "html",
+              "markdown"
+            ]
+          },
+          "value": {},
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "delimiter": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/value"
+      ],
+      "semantic_rule": "JSON不可输出NaN/Infinity；HTML/Markdown转义用户正文；CSV公式防注入策略由导出用途显式选择，不偷偷改原始节点数据。",
+      "example_params": {
+        "format": "json",
+        "value": {
+          "answer": 42
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": [
+        "B030",
+        "B039",
+        "B075"
+      ]
+    },
+    {
+      "type": "data.text_split",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "delimiter",
+              "length"
+            ]
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "overlap": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "value",
+          "mode"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "delimiter"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "delimiter"
+              ],
+              "properties": {
+                "delimiter": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "length"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "length"
+              ]
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/value"
+      ],
+      "semantic_rule": "delimiter模式禁止空分隔符；length模式需length且overlap<length；Unicode按码点，来源paired保持。",
+      "example_params": {
+        "value": "one,two",
+        "mode": "delimiter",
+        "delimiter": ","
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": []
+    },
+    {
+      "type": "data.template",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "pure",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "template": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "template",
+          "data"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/data"
+      ],
+      "semantic_rule": "仅Handlebars受限路径/条件/循环子集；不加载helper/module/原型对象，不允许模板执行JS。",
+      "example_params": {
+        "template": "Hello {{name}}",
+        "data": {
+          "name": "reader"
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "auto",
+      "source_ids": []
+    },
+    {
+      "type": "data.annotation",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {}
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/value"
+      ],
+      "semantic_rule": "同执行key条件写execution_annotations，精确过滤hash+原value复核；timeSaved只保存调用方明示量不猜上游算法。",
+      "example_params": {
+        "key": "review",
+        "value": "needed"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B019",
+        "B063"
+      ]
+    },
+    {
+      "type": "code.javascript",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "batch",
+              "per_item"
+            ]
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 300
+          },
+          "deterministic": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "mode",
+          "timeout_seconds",
+          "deterministic"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "独立低权沙箱；128MiB默认限制；纯声明才可缓存，确定模式禁$http并固定time/random；无npm/文件/进程/secrets。",
+      "example_params": {
+        "source": "return $input.all();",
+        "mode": "batch",
+        "timeout_seconds": 30,
+        "deterministic": false
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B003",
+        "B027",
+        "B028"
+      ]
+    },
+    {
+      "type": "code.python",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "batch",
+              "per_item"
+            ]
+          },
+          "interpreter": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "source",
+          "mode",
+          "interpreter"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "源代码作为文件传输，输入JSON/资产由文件提供；仅授权主机解释器；不在server嵌入Python。",
+      "example_params": {
+        "source": "output = items",
+        "mode": "batch",
+        "interpreter": "python3"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B003"
+      ]
+    },
+    {
+      "type": "net.http",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {
+        "auth": {
+          "required": false,
+          "purpose": "HTTP authentication; slot is resolved only by outbound client",
+          "accepted_profiles": [
+            "http.basic",
+            "http.bearer",
+            "http.header",
+            "http.oauth2"
+          ],
+          "binding_policy": "PRD §23: current workspace/actor/module binding; logical adapter required"
+        }
+      },
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+              "HEAD",
+              "OPTIONS"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "body": {},
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "off",
+                  "next_url",
+                  "page_number",
+                  "cursor"
+                ]
+              },
+              "next_path": {
+                "type": "string"
+              },
+              "parameter": {
+                "type": "string"
+              },
+              "max_pages": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "next_url",
+                        "page_number",
+                        "cursor"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "max_pages"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "next_url"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "next_path"
+                  ],
+                  "properties": {
+                    "next_path": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "page_number"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "parameter"
+                  ],
+                  "properties": {
+                    "parameter": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "cursor"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "next_path",
+                    "parameter"
+                  ],
+                  "properties": {
+                    "next_path": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "parameter": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "method",
+          "url",
+          "headers",
+          "query",
+          "timeout_seconds",
+          "pagination"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/url",
+        "/headers/*",
+        "/query/*",
+        "/body"
+      ],
+      "semantic_rule": "统一出站IP固定/每跳校验/跨域去认证/体积限制；分页有max_pages且循环游标检测；非幂等请求自动重试需显式许可和意图，不因GET就默认纯。",
+      "example_params": {
+        "method": "GET",
+        "url": "https://example.invalid/items",
+        "headers": {},
+        "query": {},
+        "timeout_seconds": 30,
+        "pagination": {
+          "mode": "off"
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B032"
+      ]
+    },
+    {
+      "type": "net.respond",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 599
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "body": {}
+        },
+        "required": [
+          "status",
+          "headers",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/body"
+      ],
+      "semantic_rule": "只能回应本执行当前同步连接，一次CAS；禁跳跃响应/Set-Cookie/任意Location凭据泄漏；超时或已202后输出只入执行，不第二次写HTTP。",
+      "example_params": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "ok": true
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B049"
+      ]
+    },
+    {
+      "type": "net.smtp",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {
+        "smtp": {
+          "required": true,
+          "purpose": "SMTP server/TLS/account secret",
+          "accepted_profiles": [
+            "smtp.account"
+          ],
+          "binding_policy": "PRD §23: current workspace/actor/module binding; logical adapter required"
+        }
+      },
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "text",
+              "html"
+            ]
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body",
+          "format"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/to/*",
+        "/subject",
+        "/body",
+        "/attachments/*"
+      ],
+      "semantic_rule": "SMTP注入头部拒绝；每条发送intent持久化，ACK丢失unknown不盲重发；本节点邮件能力不改变D7系统通知无邮件范围。",
+      "example_params": {
+        "to": [
+          "recipient@example.invalid"
+        ],
+        "subject": "Notice",
+        "body": "Completed",
+        "format": "text"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B014"
+      ]
+    },
+    {
+      "type": "human.approval",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "approved",
+          "type": "main"
+        },
+        {
+          "port": "rejected",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "properties": {
+              "user_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              },
+              "role_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              }
+            },
+            "required": [
+              "user_ids",
+              "role_ids"
+            ],
+            "additionalProperties": false
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "min_approvals": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "prevent_self_review": {
+            "type": "boolean"
+          },
+          "on_timeout": {
+            "enum": [
+              "approve",
+              "reject"
+            ]
+          }
+        },
+        "required": [
+          "assignment",
+          "timeout_seconds",
+          "min_approvals",
+          "prevent_self_review",
+          "on_timeout"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "人数去重与当前资格复核；本样例不是默认值授权；保护门独立于图内审批。",
+      "example_params": {
+        "assignment": {
+          "user_ids": [
+            "21"
+          ],
+          "role_ids": []
+        },
+        "timeout_seconds": 86400,
+        "min_approvals": 1,
+        "prevent_self_review": true,
+        "on_timeout": "reject"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
+      "type": "human.form",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "properties": {
+              "user_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              },
+              "role_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              }
+            },
+            "required": [
+              "user_ids",
+              "role_ids"
+            ],
+            "additionalProperties": false
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "response_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "assignment",
+          "timeout_seconds",
+          "response_schema"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "草稿30秒CAS；submit按schema验证，返回修改意见≤500；超时默认fail已确认。",
+      "example_params": {
+        "assignment": {
+          "user_ids": [
+            "21"
+          ],
+          "role_ids": []
+        },
+        "timeout_seconds": 604800,
+        "response_schema": {
+          "type": "object"
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B024"
+      ]
+    },
+    {
+      "type": "human.pick",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "properties": {
+              "user_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              },
+              "role_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              }
+            },
+            "required": [
+              "user_ids",
+              "role_ids"
+            ],
+            "additionalProperties": false
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "candidates_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "min_selected": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_selected": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "allow_redo": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assignment",
+          "timeout_seconds",
+          "candidates_path",
+          "min_selected",
+          "max_selected",
+          "allow_redo"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "返回候选稳定ID且属于冻结列表；min<=max<=候选数；redo仅循环容器内，S3媒体控件另验。",
+      "example_params": {
+        "assignment": {
+          "user_ids": [
+            "21"
+          ],
+          "role_ids": []
+        },
+        "timeout_seconds": 604800,
+        "candidates_path": "choices",
+        "min_selected": 1,
+        "max_selected": 1,
+        "allow_redo": false
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
+      "type": "human.edit",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "assignment": {
+            "type": "object",
+            "properties": {
+              "user_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              },
+              "role_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[1-9][0-9]*$"
+                }
+              }
+            },
+            "required": [
+              "user_ids",
+              "role_ids"
+            ],
+            "additionalProperties": false
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "value": {},
+          "response_schema": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "assignment",
+          "timeout_seconds",
+          "value",
+          "response_schema"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/value"
+      ],
+      "semantic_rule": "不可覆盖原输出；提交新版本结果，草稿仅本人；S3遮罩新建资产不覆盖源文件。",
+      "example_params": {
+        "assignment": {
+          "user_ids": [
+            "21"
+          ],
+          "role_ids": []
+        },
+        "timeout_seconds": 604800,
+        "value": {
+          "text": "draft"
+        },
+        "response_schema": {
+          "type": "object"
+        }
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
+      "type": "host.command",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shell": {
+            "enum": [
+              "auto",
+              "sh",
+              "powershell",
+              "pwsh"
+            ]
+          },
+          "input_env": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          },
+          "input_assets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "command",
+          "shell",
+          "input_env",
+          "input_assets"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/input_env/*",
+        "/input_assets/*"
+      ],
+      "semantic_rule": "command禁止{{和表达式插值；输入只环境/文件，凭据槽安全注入；主机槽/版本/OS/授权/drain运行前复核。",
+      "example_params": {
+        "command": "echo \"$FERRY_INPUT_MESSAGE\"",
+        "shell": "sh",
+        "input_env": {
+          "MESSAGE": "hello"
+        },
+        "input_assets": {}
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B016",
+        "B059"
+      ]
+    },
+    {
+      "type": "host.files",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "enum": [
+              "read",
+              "write",
+              "list"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset": {
+            "type": "string"
+          },
+          "glob": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "path"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "write"
+                  ]
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "required": [
+                "asset"
+              ],
+              "properties": {
+                "asset": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "expression_fields": [
+        "/path",
+        "/asset"
+      ],
+      "semantic_rule": "路径是HostChannel文件参数而非拼shell；write需asset；拒绝穿越运行根/跨空间资产；list稳定排序且明确截断。",
+      "example_params": {
+        "operation": "read",
+        "path": "./output.txt"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B022",
+        "B045",
+        "B046",
+        "B059",
+        "B074"
+      ]
+    },
+    {
+      "type": "host.git",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "enum": [
+              "checkout",
+              "fetch",
+              "status",
+              "diff"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ref": {
+            "type": "string"
+          },
+          "commit": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "submodules": {
+            "enum": [
+              "off",
+              "direct",
+              "recursive"
+            ]
+          }
+        },
+        "required": [
+          "operation",
+          "source_id"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [],
+      "semantic_rule": "源绑定来自版本信封；depth=0完整历史、正数浅克隆；commit优先精确检出且ref只作约束；递归子模块URL逐个鉴权，不给任意外部URL父token。",
+      "example_params": {
+        "operation": "checkout",
+        "source_id": "source_1",
+        "commit": "0123456789abcdef0123456789abcdef01234567",
+        "depth": 0,
+        "submodules": "off"
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": [
+        "B029"
+      ]
+    },
+    {
+      "type": "host.cli",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": true,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "program": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "input": {},
+          "risk_acknowledgement": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "program",
+          "args",
+          "input",
+          "risk_acknowledgement"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/input"
+      ],
+      "semantic_rule": "程序/参数向量非shell拼接；有公开不可信入口时需审批或发布者风险确认审计；ack布尔不能由公开输入伪造。",
+      "example_params": {
+        "program": "agent-cli",
+        "args": [
+          "--stdin"
+        ],
+        "input": {
+          "request": "Review source"
+        },
+        "risk_acknowledgement": false
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    }
+  ],
+  "source_mapping": [
+    {
+      "source_id": "B001",
+      "source_member": "toolExecutor",
+      "phase": "S2",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "执行工具调用",
+      "boundary": "不沿用其内部实现"
+    },
+    {
+      "source_id": "B002",
+      "source_member": "aiTransform",
+      "phase": "S2",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "AI 辅助数据转换",
+      "boundary": "提示生成的转换需用户检查"
+    },
+    {
+      "source_id": "B003",
+      "source_member": "code",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "code.javascript",
+        "code.python"
+      ],
+      "purpose": "运行 JS/Python 数据代码",
+      "boundary": "JS 无 npm/文件/进程；Python 只在主机"
+    },
+    {
+      "source_id": "B004",
+      "source_member": "compareDatasets",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.compare"
+      ],
+      "purpose": "比较两组条目",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B005",
+      "source_member": "compression",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.archive_pack",
+        "file.archive_unpack"
+      ],
+      "purpose": "压缩与解压归档",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B006",
+      "source_member": "cron",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.schedule"
+      ],
+      "purpose": "按 cron 规则触发",
+      "boundary": "旧版，与 scheduleTrigger 合并"
+    },
+    {
+      "source_id": "B007",
+      "source_member": "crypto",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.crypto"
+      ],
+      "purpose": "加密、摘要等密码学转换",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B008",
+      "source_member": "dataTable",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.table"
+      ],
+      "purpose": "读写内置数据表",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B009",
+      "source_member": "dateTime",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.date_time"
+      ],
+      "purpose": "处理日期时间",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B010",
+      "source_member": "e2eTest",
+      "phase": "不对标",
+      "contract_status": "not_in_scope",
+      "ferry_types": [],
+      "purpose": "端到端测试夹具",
+      "boundary": "上游测试专用，不是业务节点"
+    },
+    {
+      "source_id": "B011",
+      "source_member": "e2eTestPollingTrigger",
+      "phase": "不对标",
+      "contract_status": "not_in_scope",
+      "ferry_types": [],
+      "purpose": "轮询端到端测试夹具",
+      "boundary": "上游测试专用，不是业务触发器"
+    },
+    {
+      "source_id": "B012",
+      "source_member": "editImage",
+      "phase": "S3",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "缩放裁剪合成图像",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B013",
+      "source_member": "emailReadImap",
+      "phase": "S2",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "接收 IMAP 邮件",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B014",
+      "source_member": "emailSend",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "net.smtp"
+      ],
+      "purpose": "通过 SMTP 发邮件",
+      "boundary": "S2 批次邮件能力复用；本基础 SMTP 节点 S1"
+    },
+    {
+      "source_id": "B015",
+      "source_member": "errorTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.error"
+      ],
+      "purpose": "工作流失败触发",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B016",
+      "source_member": "executeCommand",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.command"
+      ],
+      "purpose": "执行系统命令",
+      "boundary": "不在服务端执行命令"
+    },
+    {
+      "source_id": "B017",
+      "source_member": "executeWorkflow",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.subworkflow"
+      ],
+      "purpose": "调用子工作流",
+      "boundary": "逐条/全部、调用深度与权限"
+    },
+    {
+      "source_id": "B018",
+      "source_member": "executeWorkflowTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.subworkflow"
+      ],
+      "purpose": "作为子工作流接收输入",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B019",
+      "source_member": "executionData",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.annotation"
+      ],
+      "purpose": "写入执行自定义数据",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B020",
+      "source_member": "convertToFile",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.encode"
+      ],
+      "purpose": "把条目转换为文件",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B021",
+      "source_member": "extractFromFile",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.decode"
+      ],
+      "purpose": "从文件提取条目",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B022",
+      "source_member": "readWriteFile",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.files"
+      ],
+      "purpose": "读取或写入主机文件",
+      "boundary": "路径按主机权限，不暴露服务端文件系统"
+    },
+    {
+      "source_id": "B023",
+      "source_member": "filter",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.filter"
+      ],
+      "purpose": "筛选条目",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B024",
+      "source_member": "form",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "human.form"
+      ],
+      "purpose": "后续表单页与结束页",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B025",
+      "source_member": "formTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.form"
+      ],
+      "purpose": "表单提交触发",
+      "boundary": "稳定生产地址，默认关闭公开访问"
+    },
+    {
+      "source_id": "B026",
+      "source_member": "ftp",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "传输 FTP 文件",
+      "boundary": "协议细项待核实；不以 HTTP 模板冒充 FTP 客户端"
+    },
+    {
+      "source_id": "B027",
+      "source_member": "function",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "code.javascript"
+      ],
+      "purpose": "批量运行旧版 JS",
+      "boundary": "旧版，与 code 合并"
+    },
+    {
+      "source_id": "B028",
+      "source_member": "functionItem",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "code.javascript"
+      ],
+      "purpose": "逐条运行旧版 JS",
+      "boundary": "旧版，与 code 合并"
+    },
+    {
+      "source_id": "B029",
+      "source_member": "git",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.git"
+      ],
+      "purpose": "执行 Git 仓库操作",
+      "boundary": "仓库 Git 操作与 S5 平台源码同步不同"
+    },
+    {
+      "source_id": "B030",
+      "source_member": "html",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.parse",
+        "data.format"
+      ],
+      "purpose": "解析与生成 HTML",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B031",
+      "source_member": "htmlExtract",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.parse"
+      ],
+      "purpose": "从 HTML 提取内容",
+      "boundary": "旧版，与 html 合并"
+    },
+    {
+      "source_id": "B032",
+      "source_member": "httpRequest",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "net.http"
+      ],
+      "purpose": "发送 HTTP 请求",
+      "boundary": "分页、批量、认证、重试；统一出站策略"
+    },
+    {
+      "source_id": "B033",
+      "source_member": "iCal",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "处理日历文件；具体操作待核实",
+      "boundary": "不能仅凭名称承诺全部 iCalendar 操作"
+    },
+    {
+      "source_id": "B034",
+      "source_member": "if",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.if"
+      ],
+      "purpose": "按条件分为两路",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B035",
+      "source_member": "interval",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.schedule"
+      ],
+      "purpose": "按间隔触发",
+      "boundary": "旧版，与 scheduleTrigger 合并"
+    },
+    {
+      "source_id": "B036",
+      "source_member": "itemLists",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.split",
+        "core.aggregate",
+        "core.sort",
+        "core.limit",
+        "core.deduplicate"
+      ],
+      "purpose": "旧版条目列表转换",
+      "boundary": "旧版，与独立转换节点合并"
+    },
+    {
+      "source_id": "B037",
+      "source_member": "localFileTrigger",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "监听本地文件事件",
+      "boundary": "不监听服务端租户任意目录；细项待核实"
+    },
+    {
+      "source_id": "B038",
+      "source_member": "manualTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.manual"
+      ],
+      "purpose": "手动启动",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B039",
+      "source_member": "markdown",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.parse",
+        "data.format"
+      ],
+      "purpose": "转换 Markdown",
+      "boundary": "展示按 §9.6 净化"
+    },
+    {
+      "source_id": "B040",
+      "source_member": "merge",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.merge"
+      ],
+      "purpose": "合并多路条目",
+      "boundary": "全部前驱终态后求值，按端口次序"
+    },
+    {
+      "source_id": "B041",
+      "source_member": "moveBinaryData",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.encode",
+        "file.decode"
+      ],
+      "purpose": "在 JSON 与二进制间转换",
+      "boundary": "旧版，与 convertToFile/extractFromFile 合并"
+    },
+    {
+      "source_id": "B042",
+      "source_member": "n8n",
+      "phase": "S2",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "调用 n8n 平台资源 API",
+      "boundary": "映射自有工作流/流水线资源；不兼容 n8n API，不直接部署"
+    },
+    {
+      "source_id": "B043",
+      "source_member": "n8nTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.execution_event"
+      ],
+      "purpose": "平台事件触发；具体事件待核实",
+      "boundary": "按 Ferry 事件承接，不照搬产品内部事件"
+    },
+    {
+      "source_id": "B044",
+      "source_member": "noOp",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.no_op"
+      ],
+      "purpose": "原样透传数据",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B045",
+      "source_member": "readBinaryFile",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.files"
+      ],
+      "purpose": "读取单个文件",
+      "boundary": "旧版，与 readWriteFile 合并"
+    },
+    {
+      "source_id": "B046",
+      "source_member": "readBinaryFiles",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.files"
+      ],
+      "purpose": "读取多个文件",
+      "boundary": "旧版，与 readWriteFile 合并"
+    },
+    {
+      "source_id": "B047",
+      "source_member": "readPDF",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.decode"
+      ],
+      "purpose": "提取 PDF 文本",
+      "boundary": "旧版，与 extractFromFile 合并"
+    },
+    {
+      "source_id": "B048",
+      "source_member": "renameKeys",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.rename"
+      ],
+      "purpose": "重命名字段",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B049",
+      "source_member": "respondToWebhook",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "net.respond"
+      ],
+      "purpose": "指定 Webhook 响应",
+      "boundary": "SSE 流式扩展 S2，见 C 与 A 流式说明"
+    },
+    {
+      "source_id": "B050",
+      "source_member": "rssFeedRead",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "读取 RSS 内容",
+      "boundary": "长尾批次按需"
+    },
+    {
+      "source_id": "B051",
+      "source_member": "rssFeedReadTrigger",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "RSS 更新触发",
+      "boundary": "长尾批次按需"
+    },
+    {
+      "source_id": "B052",
+      "source_member": "scheduleTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.schedule"
+      ],
+      "purpose": "按时间规则触发",
+      "boundary": "派生 cron_jobs 行只读"
+    },
+    {
+      "source_id": "B053",
+      "source_member": "set",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.set"
+      ],
+      "purpose": "设置/编辑条目字段",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B054",
+      "source_member": "simulate",
+      "phase": "不对标",
+      "contract_status": "not_in_scope",
+      "ferry_types": [],
+      "purpose": "模拟执行测试数据",
+      "boundary": "上游模拟/测试专用；Ferry 用固定数据验收测试，不克隆此节点"
+    },
+    {
+      "source_id": "B055",
+      "source_member": "simulateTrigger",
+      "phase": "不对标",
+      "contract_status": "not_in_scope",
+      "ferry_types": [],
+      "purpose": "模拟触发测试数据",
+      "boundary": "上游模拟/测试专用；Ferry 用测试执行与固定数据"
+    },
+    {
+      "source_id": "B056",
+      "source_member": "splitInBatches",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.loop"
+      ],
+      "purpose": "分批循环处理条目",
+      "boundary": "不是允许画有向环"
+    },
+    {
+      "source_id": "B057",
+      "source_member": "spreadsheetFile",
+      "phase": "S2",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "file.encode",
+        "file.decode"
+      ],
+      "purpose": "电子表格文件与条目互转",
+      "boundary": "旧版，与 extractFromFile/convertToFile 合并"
+    },
+    {
+      "source_id": "B058",
+      "source_member": "sseTrigger",
+      "phase": "S5",
+      "contract_status": "scheduled",
+      "ferry_types": [],
+      "purpose": "接收 SSE 事件触发",
+      "boundary": "SSE 客户端触发不同于 S2 服务端流式响应"
+    },
+    {
+      "source_id": "B059",
+      "source_member": "ssh",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.command",
+        "host.files"
+      ],
+      "purpose": "远程主机执行/传输",
+      "boundary": "复用已管理主机凭据与授权"
+    },
+    {
+      "source_id": "B060",
+      "source_member": "stickyNote",
+      "phase": "S1",
+      "contract_status": "layout_contract",
+      "ferry_types": [],
+      "purpose": "画布便签",
+      "boundary": "布局能力，无运行副作用"
+    },
+    {
+      "source_id": "B061",
+      "source_member": "stopAndError",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.stop"
+      ],
+      "purpose": "停止并抛错",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B062",
+      "source_member": "switch",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.switch"
+      ],
+      "purpose": "多路条件分支",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B063",
+      "source_member": "timeSaved",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.annotation"
+      ],
+      "purpose": "记录节省时间；节点操作细项待核实",
+      "boundary": "不猜测上游内部计量算法"
+    },
+    {
+      "source_id": "B064",
+      "source_member": "totp",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.crypto"
+      ],
+      "purpose": "生成基于时间的一次性口令",
+      "boundary": "算法/编码参数在交付时核实"
+    },
+    {
+      "source_id": "B065",
+      "source_member": "aggregate",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.aggregate"
+      ],
+      "purpose": "聚合条目",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B066",
+      "source_member": "limit",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.limit"
+      ],
+      "purpose": "限制条目数量",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B067",
+      "source_member": "removeDuplicates",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.deduplicate"
+      ],
+      "purpose": "去除重复条目",
+      "boundary": "跨执行去重状态细项需核实"
+    },
+    {
+      "source_id": "B068",
+      "source_member": "sort",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.sort"
+      ],
+      "purpose": "排序条目",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B069",
+      "source_member": "splitOut",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.split"
+      ],
+      "purpose": "拆出列表元素",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    },
+    {
+      "source_id": "B070",
+      "source_member": "summarize",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.aggregate"
+      ],
+      "purpose": "汇总条目字段",
+      "boundary": "这是数据汇总，不是 LLM 摘要"
+    },
+    {
+      "source_id": "B071",
+      "source_member": "wait",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.wait"
+      ],
+      "purpose": "按时间或回调等待",
+      "boundary": "释放槽位，恢复已完成输出"
+    },
+    {
+      "source_id": "B072",
+      "source_member": "webhook",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.webhook"
+      ],
+      "purpose": "HTTP 请求触发",
+      "boundary": "必须实测并发满503、人工202、超时504"
+    },
+    {
+      "source_id": "B073",
+      "source_member": "WorkflowTrigger",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "core.trigger.execution_event"
+      ],
+      "purpose": "工作流事件触发；事件集待核实",
+      "boundary": "保留源 ID 大小写"
+    },
+    {
+      "source_id": "B074",
+      "source_member": "writeBinaryFile",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "host.files"
+      ],
+      "purpose": "写出二进制文件",
+      "boundary": "旧版，与 readWriteFile 合并"
+    },
+    {
+      "source_id": "B075",
+      "source_member": "xml",
+      "phase": "S1",
+      "contract_status": "parameter_contract",
+      "ferry_types": [
+        "data.parse",
+        "data.format"
+      ],
+      "purpose": "XML 与条目转换",
+      "boundary": "Only Ferry capability mapping; source member behavior still needs per-member acceptance."
+    }
+  ],
+  "graph_publication_contract": {
+    "version": "staged-topology-design-1",
+    "source": "PRD §24 / ADR Q06",
+    "stages": [
+      "structure",
+      "resolved_contract",
+      "publication_review",
+      "trigger_start"
+    ],
+    "topology_warning_codes": [
+      "input_unconnected",
+      "merge_input_unconnected",
+      "input_fanin_unfrozen",
+      "not_reachable_from_trigger",
+      "merge_other_entry_dependency",
+      "loop_body_interface_unfrozen"
+    ],
+    "entry_selection": "explicit trigger for trigger-start only; no first-node default",
+    "unfrozen": [
+      "model/main compatibility conflict in v3 §6.3",
+      "multi-producer input ordering",
+      "loop body implicit input/output interface",
+      "generic error output manifest",
+      "typed json/gpu runtime adapters"
+    ],
+    "limits": "Existing 500 total nodes/3 loop layers/2MiB graph and 1MiB pin_data; no new numeric defaults",
+    "nonclaims": [
+      "not a production publisher",
+      "not a trigger scheduler",
+      "warnings do not silently become Q06 publish errors"
+    ]
+  },
+  "credential_contract": {
+    "version": "logical-slots-design-1",
+    "source": "PRD §23",
+    "storage_kinds": [
+      "password",
+      "ssh-key",
+      "token"
+    ],
+    "existing_module_scopes": [
+      "host",
+      "build",
+      "deploy"
+    ],
+    "profiles": {
+      "crypto.hmac_sha256": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "crypto.aes256_gcm": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "crypto.totp": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "http.basic": {
+        "storage_kinds": [
+          "password"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "http.bearer": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "http.header": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "http.oauth2": {
+        "storage_kinds": [
+          "token"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      },
+      "smtp.account": {
+        "storage_kinds": [
+          "password"
+        ],
+        "status": "design_only_adapter_not_implemented"
+      }
+    },
+    "cache_identity_fields": [
+      "workspace_id",
+      "slot",
+      "credential_id",
+      "credential_version",
+      "profile",
+      "adapter_version",
+      "public_config_hash"
+    ],
+    "never_cache_key_fields": [
+      "secret",
+      "secret_hash",
+      "access_token",
+      "refresh_token",
+      "private_key"
+    ],
+    "unfrozen": [
+      "workflow-to-existing-module binding",
+      "typed profile metadata storage/migration",
+      "provider-specific payload versions and OAuth refresh runtime"
+    ],
+    "checks": [
+      "save-reference-shape",
+      "publish-current-metadata-permissions",
+      "attempt-current-metadata-permissions",
+      "cache-hit-current-metadata-permissions",
+      "before-secret-use-current-version"
+    ]
+  },
+  "embedded_schema_contract": {
+    "version": "single-resource-2020-12-design-1",
+    "source": "PRD §22",
+    "status": "design_only",
+    "dialect": "https://json-schema.org/draft/2020-12/schema",
+    "schema_maps": [
+      "properties",
+      "patternProperties",
+      "$defs",
+      "definitions",
+      "dependentSchemas"
+    ],
+    "schema_arrays": [
+      "allOf",
+      "anyOf",
+      "oneOf",
+      "prefixItems"
+    ],
+    "schema_values": [
+      "items",
+      "additionalProperties",
+      "unevaluatedProperties",
+      "unevaluatedItems",
+      "contains",
+      "propertyNames",
+      "contentSchema",
+      "if",
+      "then",
+      "else",
+      "not"
+    ],
+    "leaf_keywords": [
+      "$schema",
+      "$ref",
+      "$anchor",
+      "$comment",
+      "type",
+      "enum",
+      "const",
+      "multipleOf",
+      "maximum",
+      "exclusiveMaximum",
+      "minimum",
+      "exclusiveMinimum",
+      "maxLength",
+      "minLength",
+      "pattern",
+      "maxItems",
+      "minItems",
+      "uniqueItems",
+      "maxContains",
+      "minContains",
+      "maxProperties",
+      "minProperties",
+      "required",
+      "dependentRequired",
+      "format",
+      "contentEncoding",
+      "contentMediaType",
+      "title",
+      "description",
+      "default",
+      "deprecated",
+      "readOnly",
+      "writeOnly",
+      "examples"
+    ],
+    "unsupported": [
+      "$id",
+      "$dynamicRef",
+      "$dynamicAnchor",
+      "$vocabulary",
+      "legacy draft keywords",
+      "unknown extension keywords"
+    ],
+    "example_limits": {
+      "max_document_bytes": 65536,
+      "max_json_depth": 32,
+      "max_json_values": 4096,
+      "max_schema_locations": 512,
+      "max_reference_edges": 128
+    },
+    "limit_status": "explicit checker fixtures only; not approved deployment defaults",
+    "runtime_required": [
+      "max_instance_bytes/depth/values",
+      "max_evaluation_steps",
+      "max_reference_stack",
+      "max_errors",
+      "CPU/memory/wall-clock isolation",
+      "no network or file retrieval"
+    ],
+    "annotations_only": [
+      "format",
+      "contentEncoding",
+      "contentMediaType",
+      "contentSchema",
+      "default",
+      "examples",
+      "readOnly",
+      "writeOnly",
+      "deprecated"
+    ]
+  },
+  "merge_readiness": {
+    "version": 1,
+    "source": "v3 §18.7 / PRD §21",
+    "scope": "design reference, not scheduler execution",
+    "symbols": {
+      "D": "terminal data items",
+      "E": "terminal executed empty list",
+      "S": "terminal skipped edge",
+      "F": "terminal continued error items on connected port"
+    },
+    "terminal_matrix": [
+      {
+        "inputs": [
+          "D",
+          "D"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "D",
+          "E"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "D",
+          "S"
+        ],
+        "any_items": "run",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "D",
+          "F"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "E",
+          "D"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "E",
+          "E"
+        ],
+        "any_items": "skipped",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "E",
+          "S"
+        ],
+        "any_items": "skipped",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "E",
+          "F"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "S",
+          "D"
+        ],
+        "any_items": "run",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "S",
+          "E"
+        ],
+        "any_items": "skipped",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "S",
+          "S"
+        ],
+        "any_items": "skipped",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "S",
+          "F"
+        ],
+        "any_items": "run",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "F",
+          "D"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "F",
+          "E"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      },
+      {
+        "inputs": [
+          "F",
+          "S"
+        ],
+        "any_items": "run",
+        "all_inputs": "skipped"
+      },
+      {
+        "inputs": [
+          "F",
+          "F"
+        ],
+        "any_items": "run",
+        "all_inputs": "run"
+      }
+    ],
+    "gates": [
+      "all connected predecessors settled",
+      "execution active and authorized",
+      "freeze ordered input references before attempt",
+      "fenced atomic output and terminal commit"
+    ],
+    "replay_identity": [
+      "workspace_id",
+      "execution_id",
+      "revision_id",
+      "node_id",
+      "iteration_hash",
+      "attempt",
+      "redo_round"
+    ],
+    "input_projection_fields": [
+      "input_index",
+      "source_node_run_id",
+      "source_attempt",
+      "source_iteration_hash",
+      "source_port",
+      "source_port_index",
+      "symbol",
+      "item_count",
+      "output_ref",
+      "output_sha256"
+    ],
+    "unfrozen": [
+      "multiple producers per input port ordering",
+      "error_output projection on unselected main port",
+      "position/fields collision and join multiplicity semantics"
+    ]
+  },
+  "semantic_checks": [
+    "same-workspace references and current permissions",
+    "node IDs unique and immutable",
+    "ports/indexes match manifest",
+    "acyclic outer graph and each loop body",
+    "at most 3 nested loop containers and 500 total nodes",
+    "definition UTF-8 <= 2MiB and pin_data <= 1MiB",
+    "params resolved schema and expression allowlist",
+    "credentials slot purpose/type and no secret in graph",
+    "runtime binding/OS/version/drain and typed GPU segment",
+    "cache purity and noncacheable side-effect categories",
+    "trigger entry selection and sync concurrency policy"
+  ]
+}

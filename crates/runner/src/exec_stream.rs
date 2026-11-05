@@ -9,7 +9,9 @@ use tokio::{
 
 pub type Chunk = (String, Vec<u8>);
 
+#[cfg(unix)]
 struct ProcessGroup(u32);
+#[cfg(unix)]
 impl ProcessGroup {
     fn signal(&self, force: bool) {
         #[cfg(unix)]
@@ -19,22 +21,9 @@ impl ProcessGroup {
                 if force { libc::SIGKILL } else { libc::SIGTERM },
             );
         }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            let mut command = std::process::Command::new("taskkill");
-            command.args(["/PID", &self.0.to_string(), "/T"]);
-            if force {
-                command.arg("/F");
-            }
-            let _ = command
-                .creation_flags(0x0800_0000)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
     }
 }
+#[cfg(unix)]
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         self.signal(true);
@@ -57,6 +46,11 @@ pub async fn run(
     #[cfg(unix)]
     process.process_group(0);
     let mut child = process.spawn().context("无法启动流水线命令")?;
+    // A root PID can exit before taskkill visits its descendants. The job owns
+    // those descendants independently, including when the Agent itself exits.
+    #[cfg(windows)]
+    let job = crate::process_job::ProcessJob::attach(&child)?;
+    #[cfg(unix)]
     let group = ProcessGroup(child.id().context("命令没有进程标识")?);
     let (mut stdout, mut stderr) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
     let (mut outbuf, mut errbuf) = ([0u8; 8192], [0u8; 8192]);
@@ -93,16 +87,115 @@ pub async fn run(
             _ = &mut deadline => { break -124; }
         }
     };
+    #[cfg(unix)]
     group.signal(false);
+    #[cfg(windows)]
+    job.terminate()?;
     if status.is_none()
         && tokio::time::timeout(Duration::from_secs(70), child.wait())
             .await
             .is_err()
     {
+        #[cfg(unix)]
         group.signal(true);
+        #[cfg(windows)]
+        job.terminate()?;
         let _ = child.wait().await;
     }
     Ok(stopped)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    async fn descendants_stop(cancel_early: bool) {
+        let (output, mut chunks) = mpsc::channel(8);
+        let (stop, cancelled) = watch::channel(false);
+        let command = r#"powershell.exe -NoProfile -NonInteractive -Command "$p = Start-Process -FilePath ping.exe -ArgumentList '127.0.0.1','-t' -WindowStyle Hidden -PassThru; Write-Output $p.Id; Wait-Process -Id $p.Id""#;
+        let task = tokio::spawn(run(
+            command,
+            if cancel_early { 30 } else { 3 },
+            output,
+            cancelled,
+        ));
+        let mut stdout = Vec::new();
+        while !stdout.contains(&b'\n') {
+            let (kind, bytes) = tokio::time::timeout(Duration::from_secs(10), chunks.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if kind == "stdout" {
+                stdout.extend(bytes);
+            }
+        }
+        let pid = String::from_utf8(stdout)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+        };
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        assert!(
+            !handle.is_null(),
+            "descendant must be alive before termination"
+        );
+        if cancel_early {
+            stop.send(true).unwrap();
+        }
+        let code = tokio::time::timeout(Duration::from_secs(20), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let ended = unsafe { WaitForSingleObject(handle, 5000) };
+        unsafe {
+            CloseHandle(handle);
+        }
+        assert_eq!(code, if cancel_early { -130 } else { -124 });
+        assert_eq!(
+            ended, 0,
+            "command must not report termination while its descendant is alive"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_stops_windows_descendants_even_after_root_exit() {
+        descendants_stop(true).await;
+    }
+
+    #[tokio::test]
+    async fn timeout_stops_windows_descendants_even_after_root_exit() {
+        descendants_stop(false).await;
+    }
+
+    #[tokio::test]
+    async fn successful_windows_commands_keep_exit_code_and_both_streams() {
+        let (output, mut chunks) = mpsc::channel(8);
+        let (_stop, cancelled) = watch::channel(false);
+        let code = run(
+            "echo stdout & echo stderr 1>&2 & exit /b 7",
+            10,
+            output,
+            cancelled,
+        )
+        .await
+        .unwrap();
+        assert_eq!(code, 7);
+        let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+        while let Some((kind, bytes)) = chunks.recv().await {
+            if kind == "stdout" {
+                stdout.extend(bytes);
+            } else {
+                stderr.extend(bytes);
+            }
+        }
+        assert_eq!(String::from_utf8(stdout).unwrap().trim(), "stdout");
+        assert_eq!(String::from_utf8(stderr).unwrap().trim(), "stderr");
+    }
 }
 
 #[cfg(all(test, unix))]

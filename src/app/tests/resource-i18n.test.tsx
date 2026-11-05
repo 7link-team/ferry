@@ -81,9 +81,10 @@ it("keeps the enrollment token, server draft and install scope when language cha
 
 it("translates platform policy settings without resetting an unsaved switch", async () => {
   history.replaceState({}, "", "/en-US/platform/settings/1/edit");
-  const fetcher = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ id: "1", version: 1, runner_auto_update: false, registration_enabled: false }) }));
+  const fetcher = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes("/server-nodes") ? {items:[],total:0,page:1,page_size:20,coverage:{online:0}} : ({ id: "1", version: 1, runner_auto_update: false, registration_enabled: false }) }));
   vi.stubGlobal("fetch", fetcher);
-  await act(async () => root.render(<Platform identity={{ user: { id: "1", name: "Operator", email: "operator@example.invalid", is_superadmin: true }, workspaces: [] }} reload={() => {}} />));
+  await act(async () => root.render(<Platform identity={{ user: { id: "1", name: "Operator", email: "operator@example.invalid", is_superadmin: true }, workspaces: [] }} reload={() => {}} onSignedOut={() => {}} />));
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(tab => tab.textContent === commonText("resource-domain:runner.settings"))!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('[role="checkbox"]')!.click());
   const before = fetcher.mock.calls.length;
   for (const locale of locales) {

@@ -1,7 +1,104 @@
 import { beforeEach,describe,expect,it } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
-import { addActionJob,connectActionJobs,DEFAULT_ACTIONS,editActionJob,editActionStep,ensureActionCheckout,parseActions,removeActionJob } from "./actions-workflow";
+import { artifactNames, outputSources } from "./action-references";
+import { actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
+
+it("suggests reachable artifacts and known step outputs without guessing producer expressions", () => {
+ const { jobs } = parseActions(`jobs:
+  build:
+    runs-on: self-hosted
+    outputs:
+      version: \${{ steps.compile.outputs.version }}
+    steps:
+      - id: bundle
+        uses: actions/upload-artifact@v4
+        with: { name: bundle, path: dist }
+      - uses: actions/upload-artifact@v4
+        with: { name: '\${{ matrix.target }}', path: dist }
+  test:
+    needs: build
+    steps:
+      - uses: actions/upload-artifact@v4
+        with: { path: test-results }
+  unrelated:
+    steps:
+      - uses: actions/upload-artifact@v4
+        with: { name: unrelated }
+  release:
+    needs: test
+    steps:
+      - id: local
+        uses: actions/upload-artifact@v4
+        with: { name: local }
+      - id: download
+        uses: actions/download-artifact@v4
+      - uses: actions/upload-artifact@v4
+        with: { name: future }
+`);
+ expect(artifactNames(jobs, "release", 1)).toEqual(["bundle", "artifact", "local"]);
+ const references = outputSources(jobs, "release", 1);
+ expect(references.find(source => source.id === "steps.local")?.outputs).toEqual(["artifact-id", "artifact-url", "artifact-digest"]);
+ expect(references.some(source => source.id === "steps.download")).toBe(false);
+ expect(references.some(source => source.id === "needs.build")).toBe(false);
+ expect(outputSources(jobs, "test").find(source => source.id === "needs.build")?.outputs).toEqual(["version"]);
+});
+
+it("retains a custom runs-on expression through workflow, job, step and fragment edits", () => {
+ const runner = 'runs-on=${{ github.run_id }}/family=c8a+m8a/cpu=4/ram=8+16/image=ubuntu24-full-x64/extras=s3-cache/volume=100gb:gp3';
+ let changed = editActionJob(DEFAULT_ACTIONS, "build", { "runs-on": runner });
+ changed = editActionWorkflow(changed, { name: "Custom runner" });
+ changed = editActionStep(changed, "build", 0, { run: "make test" });
+ changed = editActionFragment(changed, "build", undefined, actionFragment(changed, "build"));
+ expect(parseActions(changed).jobs[0]!.raw["runs-on"]).toBe(runner);
+});
+
+it("copies jobs and steps without losing YAML comments, scalar types or anchor ownership", () => {
+ const original = `env: &global
+  GLOBAL: '001' # shared workflow value
+jobs:
+  build:
+    runs-on: self-hosted
+    env: *global
+    steps:
+      # keep step explanation
+      - id: compile
+        # explain command
+        run: echo compile # keep command comment
+        env: &local
+          FLAG: false # keep boolean comment
+          CODE: '002'
+      - run: echo second
+        env: *local
+`;
+ const copiedJob = duplicateActionJob(original, "build");
+ const copiedStep = duplicateActionStep(copiedJob.source, "build", 0);
+ const value = parseActions(copiedStep).document.toJS();
+ expect(copiedStep.match(/# keep command comment/g)).toHaveLength(3);
+ // This comment belongs to the steps sequence, copied with the job only.
+ expect(copiedStep.match(/# keep step explanation/g)).toHaveLength(2);
+ expect(copiedStep.match(/# explain command/g)).toHaveLength(3);
+ expect(copiedStep.match(/# keep boolean comment/g)).toHaveLength(3);
+ expect(copiedStep).toContain("env: *global");
+ expect(value.jobs.build.steps[2].id).toBe("compile_copy");
+ expect(value.jobs.build.steps[2].env).toEqual({ FLAG: false, CODE: "002" });
+ const edited = editActionStep(copiedStep, copiedJob.id, 0, { env: { FLAG: true, CODE: "003" } });
+ const final = parseActions(edited).document.toJS();
+ expect(final.jobs[copiedJob.id].steps[1].env).toEqual({ FLAG: true, CODE: "003" });
+ expect(final.jobs.build.steps[1].env).toEqual({ FLAG: false, CODE: "002" });
+ expect(final.jobs.build.steps[2].env).toEqual({ FLAG: false, CODE: "002" });
+});
+
+it("inserts on one dependency without changing sibling branches, join dependencies or YAML comments", () => {
+  const source = '# retain comment\non: workflow_dispatch\njobs:\n  a:\n    runs-on: self-hosted\n    steps: [{run: echo a}]\n  b:\n    runs-on: self-hosted\n    steps: [{run: echo b}]\n  join:\n    needs: [a, b]\n    runs-on: self-hosted\n    steps: [{run: echo joined}]\n  sibling:\n    needs: a\n    runs-on: self-hosted\n    steps: [{run: echo sibling}]\n';
+  const added = insertActionJob(source, 'a', 'join');
+  const parsed = parseActions(added.source).jobs;
+  expect(parsed.find(job => job.id === added.id)?.needs).toEqual(['a']);
+  expect(parsed.find(job => job.id === 'join')?.needs).toEqual([added.id, 'b']);
+  expect(parsed.find(job => job.id === 'sibling')?.needs).toEqual(['a']);
+  expect(added.source).toContain('# retain comment');
+  expect(() => insertActionJob(source, 'b', 'sibling')).toThrow();
+});
 
 it("starts with neutral numbered steps and retains Action inputs in YAML", () => {
   expect(parseActions(DEFAULT_ACTIONS).jobs[0]!.steps[0]!.name).toBe("步骤1");
@@ -32,6 +129,103 @@ jobs:
       - run: echo package
 `;
 describe("Actions document editing", () => {
+ it("job YAML edits preserve other jobs, validate needs and retain workflow anchor references", () => {
+   const original = 'env: &shared\n  KEY: value\njobs:\n  first:\n    runs-on: self-hosted\n    env: *shared\n    steps: [{run: echo first}]\n  second:\n    needs: first\n    runs-on: self-hosted\n    steps: [{run: echo second}]\n';
+   const fragment = actionFragment(original,"first");
+   expect(fragment).toContain("env: *shared");
+   const changed=editActionFragment(original,"first",undefined,fragment+'outputs:\n  version: ${{ steps.build.outputs.version }}\n');
+   const value=parseActions(changed).document.toJS();
+   expect(value.jobs.first.env).toEqual({KEY:"value"});
+   expect(value.jobs.first.outputs.version).toBe("${{ steps.build.outputs.version }}");
+   expect(value.jobs.second).toEqual(parseActions(original).document.toJS().jobs.second);
+   expect(()=>editActionFragment(original,"first",undefined,fragment+'needs: second\n')).toThrow(/循环/);
+   expect(()=>editActionFragment(original,"first",undefined,'- invalid shape\n')).toThrow();
+ });
+ it("workflow and job form edits preserve mapping comments, scalar types, expressions and unknown fields", () => {
+   const original = `# workflow header
+name: Before
+on: [push, workflow_dispatch]
+env:
+  KEEP: '001' # keep quote and comment
+  NUMBER: 42 # keep number
+  EMPTY: null
+  FLAG: false
+  EDIT: before # keep edited comment
+defaults:
+  run:
+    shell: bash # keep shell comment
+    working-directory: ./source
+  extension: unchanged
+jobs:
+  build:
+    runs-on:
+      group: build-workers # keep group
+      labels: [self-hosted, linux]
+    env:
+      TOKEN: \${{ secrets.TOKEN }} # keep reference
+      EDIT: before # job comment
+    steps:
+      - run: echo test
+`;
+   const value = parseActions(original).document.toJS();
+   const changed = editActionWorkflow(original, { name: "After", env: { ...value.env, EDIT: "after" }, defaults: { ...value.defaults, run: { ...value.defaults.run, "working-directory": "./app" } } });
+   const job = parseActions(changed).jobs[0]!;
+   expect(job.runsOn).toEqual(["self-hosted", "linux"]);
+   const final = editActionJob(changed, "build", { env: { ...(job.raw.env as object), EDIT: "changed" }, "runs-on": { ...(job.raw["runs-on"] as object), labels: ["self-hosted", "windows"] } });
+   for (const comment of ["# workflow header", "# keep quote and comment", "# keep number", "# keep edited comment", "# keep shell comment", "# keep group", "# keep reference", "# job comment"]) expect(final).toContain(comment);
+   expect(final).toContain("'001'");
+   const result = parseActions(final).document.toJS();
+   expect(result.env).toEqual({ KEEP: "001", NUMBER: 42, EMPTY: null, FLAG: false, EDIT: "after" });
+   expect(result.on).toEqual(["push", "workflow_dispatch"]);
+   expect(result.defaults).toEqual({ run: { shell: "bash", "working-directory": "./app" }, extension: "unchanged" });
+   expect(result.jobs.build["runs-on"]).toEqual({ group: "build-workers", labels: ["self-hosted", "windows"] });
+   expect(result.jobs.build.env.TOKEN).toBe("${{ secrets.TOKEN }}");
+ });
+ it("mapping edits detach an alias without changing the shared source or other jobs", () => {
+   const original = `env: &shared
+  SHARED: 'yes' # source comment
+jobs:
+  first:
+    runs-on: self-hosted
+    env: *shared
+    steps: [{run: echo first}]
+  second:
+    runs-on: self-hosted
+    env: *shared
+    steps: [{run: echo second}]
+`;
+   const changed = editActionJob(original, "first", { env: { SHARED: "changed" } });
+   const value = parseActions(changed).document.toJS();
+   expect(value.env.SHARED).toBe("yes");
+   expect(value.jobs.second.env.SHARED).toBe("yes");
+   expect(value.jobs.first.env.SHARED).toBe("changed");
+   expect(changed).toContain("# source comment");
+   expect(changed).toContain("env: *shared");
+ });
+ it("removing a map row preserves unrelated typed rows and comments", () => {
+   const original = editActionWorkflow(source, { env: { A: "one", B: 42, C: false, D: null } }).replace("B: 42", "B: 42 # typed row");
+   const changed = editActionWorkflow(original, { env: { B: 42, C: false, D: null } });
+   expect(parseActions(changed).document.toJS().env).toEqual({ B: 42, C: false, D: null });
+   expect(changed).toContain("# typed row");
+ });
+ it("approval conversion removes unsupported execution fields and preserves sibling jobs", () => {
+   const original = editActionJob(source, "test", { env: { KEY: "value" }, if: "success()", defaults: { run: { shell: "bash" } }, "continue-on-error": true });
+   const changed = setActionJobApproval(original, "test", true);
+   expect(parseActions(changed).jobs[0]!.raw).toEqual({ "ferry-approval": true });
+   expect(parseActions(changed).jobs[1]!.raw).toEqual(parseActions(original).jobs[1]!.raw);
+   expect(parseActions(setActionJobApproval(changed, "test", false)).jobs[0]!.steps[0]!.run).toBe('echo "CI_${{ github.job }}_STEP_1"');
+ });
+ it("writes a step fragment into the same document while retaining workflow and job configuration", () => {
+   const fragment = actionFragment(source, "test", 1);
+   const changed = editActionFragment(source, "test", 1, fragment + 'if: success()\ncontinue-on-error: true\n');
+   const before = parseActions(source).document.toJS();
+   before.jobs.test.steps[1].if = "success()";
+   before.jobs.test.steps[1]["continue-on-error"] = true;
+   expect(parseActions(changed).document.toJS()).toEqual(before);
+   expect(changed).toContain("# preserved workflow comment");
+   expect(() => editActionFragment(source, "test", 1, "- run: wrong shape\n")).toThrow();
+   expect(() => editActionFragment(source, "test", 1, "with: [broken\n")).toThrow();
+ });
  it("visual command edits retain comments, expressions, unknown job configuration and workflow permissions", () => {
    const changed = editActionStep(source, "test", 1, { run: "npm ci && npm run build", "timeout-minutes": 10 });
    expect(changed).toContain("# preserved workflow comment");
@@ -84,7 +278,7 @@ it("new jobs with a selected repository include checkout before commands", () =>
  const added = addActionJob(DEFAULT_ACTIONS, true);
  const job = parseActions(added.source).jobs.find(job => job.id === added.id)!;
  expect(job.steps[0]?.uses).toBe("actions/checkout@v4");
- expect(job.steps[1]?.run).toBe("echo hello");
+ expect(job.steps[1]?.run).toBe('echo "CI_${{ github.job }}_STEP_2"');
 });
 
 it("serial successors and parallel siblings persist their different dependencies", () => {
@@ -102,5 +296,5 @@ it("checkout steps can be added explicitly without changing command steps", asyn
  const { addActionStep } = await import("./actions-workflow");
  const changed = addActionStep(DEFAULT_ACTIONS, "build", "checkout");
  expect(parseActions(changed).jobs[0]?.steps[1]?.uses).toBe("actions/checkout@v4");
- expect(parseActions(changed).jobs[0]?.steps[0]?.run).toBe("echo hello");
+ expect(parseActions(changed).jobs[0]?.steps[0]?.run).toBe('echo "CI_${{ github.job }}_STEP_1"');
 });

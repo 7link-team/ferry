@@ -10,7 +10,7 @@ it("opens a converted legacy template in the Actions editor with its bindings", 
   expect(generated.definition_format).toBe("github-actions");
   expect(generated.executor_bindings).toEqual([binding]);
   expect(generated.checkout_bindings).toEqual([]);
-  expect(parseActions(String(generated.definition)).jobs[0]?.steps[0]?.run).toBe("echo hello");
+  expect(parseActions(String(generated.definition)).jobs[0]?.steps[0]?.run).toBe('echo "CI_${{ github.job }}_STEP_1"');
   const definitionFields = config.sections.flatMap(section => section.fields).filter(field => field.key === "definition");
   expect(definitionFields).toHaveLength(1);
   expect(definitionFields[0]?.type).toBe("actions-editor");
@@ -20,7 +20,8 @@ it("creates new pipeline templates as Actions workflows", () => {
   const config = formConfigs("ops")["pipeline-templates"]!;
   const content = JSON.parse(String(config.blank.content));
   expect(content.engine).toBe("github-actions");
-  expect(content.workflow).toContain("{{ .Values.command }}");
+  expect(content.workflow).toBe(DEFAULT_ACTIONS);
+  expect(config.blank.parameters).toBe("[]");
   expect(content).not.toHaveProperty("workdir");
   expect(config.sections.flatMap(section => section.fields).find(field => field.key === "content")?.type).toBe("actions-template-editor");
 });

@@ -105,6 +105,10 @@ impl Vault {
     /// `v1.<nonce-hex>.<ciphertext-hex>`. `aad` binds the ciphertext to the row
     /// it belongs to; pass the same value to `open_secret`.
     pub fn seal(&self, plaintext: &str, aad: &str) -> Result<String> {
+        self.seal_bytes(plaintext.as_bytes(), aad)
+    }
+
+    pub(crate) fn seal_bytes(&self, plaintext: &[u8], aad: &str) -> Result<String> {
         let mut nonce = [0u8; NONCE_BYTES];
         rand::thread_rng().fill_bytes(&mut nonce);
         let sealed = self
@@ -112,7 +116,7 @@ impl Vault {
             .encrypt(
                 &XNonce::from(nonce),
                 Payload {
-                    msg: plaintext.as_bytes(),
+                    msg: plaintext,
                     aad: aad.as_bytes(),
                 },
             )
@@ -130,6 +134,15 @@ impl Vault {
     }
 
     pub fn open_secret(&self, stored: &str, aad: &str) -> Result<String> {
+        String::from_utf8(self.open_bytes(stored, aad)?).map_err(|_| {
+            ApiError::localized(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                crate::i18n::Message::new("vault.decryptionFailed"),
+            )
+        })
+    }
+
+    pub(crate) fn open_bytes(&self, stored: &str, aad: &str) -> Result<Vec<u8>> {
         let broken = || {
             ApiError::localized(
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -161,7 +174,7 @@ impl Vault {
             // A wrong master key and a tampered or relocated row are the same
             // failure here on purpose: the response must not say which.
             .map_err(|_| broken())?;
-        String::from_utf8(plain).map_err(|_| broken())
+        Ok(plain)
     }
 }
 

@@ -1,15 +1,20 @@
 # Ferry 工作流平台 PRD
 
+> 2026-11-04 固定范围终审：保留v1.14版本，不再扩展批次。原116格处置及完整设计包保留项见[自查§15](ferry-工作流平台设计评审自查.md#15-固定范围终审与收口2026-11-04)：11格过时技术缺口已修正，当前703覆盖/105待补。评审收口不等于完整设计包齐全，六语言/专属屏/精确契约仍须实际交付，该次评审时PDR未批准；后续用户已授权独立开发，并于2026-11-04确认PDR-01～05。当前不提交、推送、合并、发布，不迁移运行环境。
+
+
+> 2026-11-03 评审更新：本轮先补缺口、评审，不进入开发。当前有效补充为 **§15～24（v1.14-review）**；其明确覆盖的旧缺口以补充为准，§14保留为v1.4发现基线。新增产品建议标PDR，未标为用户已确认；技术模型见数据模型§10～14。文档通过不代表代码、截图或真实环境通过。
+
 ## 1. 文档信息
 
 | 项目 | 内容 |
 |---|---|
-| 版本、日期 | v1.4-draft，2026-11-02 |
-| 状态 | 已按独立评审修订，待复核 |
+| 版本、日期 | v1.14-review，2026-11-03 |
+| 状态 | 文档自评及验收复核完成；产品待确认与阶段实测保留，非独立人员复核 |
 | 读者 | 产品负责人、设计师、前后端开发、测试、部署与运维人员 |
 | 产品范围 | 研发交付、通用自动化、AI 内容生产，共用工作空间、执行、资产与权限体系 |
 | 变更记录 | 2026-11-02：v1.4-draft，新增§1c.1–9及代码/规范证据、既有模块审计事件表；逐格复核338个待补并重分类，保留专属缺项；只修改本PRD及自查，无commit/push。 |
-| 本次变更 | §1c统一审计、删除保留、错误、名称、联动、配置生效、HTML替代及R01；模块与§14同步关闭已解决全局缺口，保留精确专属项。 |
+| 本次变更 | §15～18补G-01～26/状态、46个S1及3个S2契约；§19及模型§13补长文本索引/向量键映射、原值分页排序与碰撞夹具。§20补4个S2文件/归档契约与6个源成员映射；§21补Merge就绪真值表与冻结输入恢复；§22补内嵌Schema单资源局部引用及复杂度边界；§23补凭据逻辑槽/授权与缓存失效矩阵；§24补图阶段检查、端口兼容与显式入口诊断。R01关闭，译文归L10N-01；PDR-01～05已于2026-11-04确认，PDR-06待具体选型。 |
 | 变更记录 | 2026-11-02：v1.3-draft，新增FR-RV-01–26、AC-RV-01–26与G-01–26来源缺口；配套逐功能设计评审自查；仅修改本PRD及自查文档，不提交或推送。 |
 | 变更记录 | 2026-11-02：v1.1-draft，折入 V1–V15、D1–D17 与 Q01–Q15 决议；D4 按发布绑定修订，D5/D6 标明已被实现取代；新增具体 FR/AC，保留 ADR 未覆盖的细节于 §13「仍待澄清」。 |
 | 变更记录 | 2026-11-02 根据独立评审修订（12 Important / 3 Minor） |
@@ -52,7 +57,7 @@
 
 Web与Desktop(Tauri WebView)共用权限/资源契约；公开页仅本次受限提交或任务数据且不读取后台会话；API逐请求鉴权，不能靠隐藏按钮代替。租户=workspace，空间ID由路径提取并验证；门店不适用（无门店业务）。复用owner/admin/developer/operator/viewer及自定义角色；按对应资源view/edit/run等权限。P2对象owner/all/run/view受空间权限上限约束，组与直接授权并集、无deny；reveal、终端和保护绕过独立鉴权。具体模块限制以本功能状态矩阵及FR-AUTH-01–05为准。（来源：总方案 §4/§6；ADR Q03；FR-AUTH-01–05）
 
-Ferry当前无软删除。定义按ADR Q12先归档：撤销发布/停生产触发与公开入口、保历史、恢复仅草稿；仅归档后才可物理删除，仍须引用保护。归档是业务状态，不新增deleted_at/is_deleted。执行/日志/产物/回应/成本遵来源保留策略；活动租约、等待任务、恢复输出与意图不可被终态清理器误清。全局保留、删除弹窗和引用保护按§1c.2/§1c.3；专属GC及覆盖保留载体仍见§14。（来源：ADR Q12；数据模型 §8.3/§8.4；crates/server/src/pipelines.rs物理删除及应用引用保护）
+Ferry当前无软删除。定义按ADR Q12先归档：撤销发布/停生产触发与公开入口、保历史、恢复仅草稿；仅归档后才可物理删除，仍须引用保护。归档是业务状态，不新增deleted_at/is_deleted。执行/日志/产物/回应/成本遵来源保留策略；活动租约、等待任务、恢复输出与意图不可被终态清理器误清。全局保留、删除弹窗和引用保护按§1c.2/§1c.3；专属GC及覆盖保留载体仍见§14。（来源：ADR Q12；数据模型 §8.3/§8.4；crates/server/src/pipelines/mod.rs物理删除及应用引用保护）
 
 每个新业务表及存量新增的每个xx_at，均配同前缀xx_by BIGINT NOT NULL DEFAULT 0，0=system；含created/updated/started/finished/expires/verified/last_used。expires_by记录设定期限的人。triggered_by/user_id不能代替配对。新业务表version BIGINT NOT NULL DEFAULT 1；不为存量原时间批量补列或伪造历史操作者。字段、可空性及单位以数据模型 §2/§4为准；未来缺口字段定型后同样遵守。（来源：用户时间审计要求；数据模型 §1/§2）
 
@@ -60,19 +65,19 @@ up按数据模型 §5.2增量builder与缺失值回填，保快照/原始来源�
 
 ### 文案、配置与响应式
 
-当前没有i18n框架；界面为硬编码zh-CN，日期格式示例见src/components/HostFiles.tsx的toLocaleString("zh-CN")。本稿交付zh-CN关键文案，en-US/ms-MY统一为「仍待澄清 R01」（§1c.9）；是否引入i18n及其分期仅列§13 R01，不在此决定。各文案表的键仅用于审查，不代表已建立翻译资源。（来源：当前src代码；用户明确事实）
+当前已有六语言i18n（src/shared/i18n/locale.ts、crates/server/src/i18n.rs）；新功能须复用现有资源机制，日期与数字使用所选locale格式化、原始时间保持UTC。本稿交付zh-CN关键文案，新增六语言全文案统一为「译文待编制 L10N-01」（§1c.9）；框架沿用既有实现；新增译文和语言variant按L10N-01验收。各文案表的键仅用于审查，不代表已建立翻译资源。（来源：当前src代码；本轮事实复核）
 
-ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文本换行/扩展，不遮挡按钮、帮助和错误；不得将排版占位当真实翻译或已验收多语言。没有Figma；HTML prototypes + PNG screenshots替代screen/variant交付。三端基础尺寸与所有48张截图见RESPONSIVE；异常按§6.16文字，无独立截图；语言variant仍待澄清R01，正常业务专属屏缺映射仍待补（§1c.8）。（来源：用户布局要求；RESPONSIVE共享规则）
+ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文本换行/扩展，不遮挡按钮、帮助和错误；不得将排版占位当真实翻译或已验收多语言。没有Figma；HTML prototypes + PNG screenshots替代screen/variant交付。三端基础尺寸与所有48张截图见RESPONSIVE；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01，正常业务专属屏缺映射仍待补（§1c.8）。（来源：用户布局要求；RESPONSIVE共享规则）
 
 | 共用场景 | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| 保存/运行/取消 | 保存 / 运行 / 取消 | 仍待澄清 R01 | 仍待澄清 R01 | ≥40%更长占位文本，操作可换行 |
-| 并发编辑 | 这条记录已被他人修改，请刷新后重试 | 仍待澄清 R01 | 仍待澄清 R01 | ≥40%更长；整句可读，不遮挡字段 |
-| 权限拒绝 | 你没有处理此任务的权限。 | 仍待澄清 R01 | 仍待澄清 R01 | ≥40%更长；保留返回/刷新入口 |
-| 预算缺价 | 请为该凭据配置单价，否则无法执行预算控制 | 仍待澄清 R01 | 仍待澄清 R01 | ≥40%更长；字段关联可读 |
-| Phone图只读 | 只读节点列表 · 在桌面端编辑 | 仍待澄清 R01 | 仍待澄清 R01 | ≥40%更长；详情与日志入口保留 |
+| 保存/运行/取消 | 保存 / 运行 / 取消 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | ≥40%更长占位文本，操作可换行 |
+| 并发编辑 | 这条记录已被他人修改，请刷新后重试 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | ≥40%更长；整句可读，不遮挡字段 |
+| 权限拒绝 | 你没有处理此任务的权限。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | ≥40%更长；保留返回/刷新入口 |
+| 预算缺价 | 请为该凭据配置单价，否则无法执行预算控制 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | ≥40%更长；字段关联可读 |
+| Phone图只读 | 只读节点列表 · 在桌面端编辑 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | ≥40%更长；详情与日志入口保留 |
 
-共用文案来源：原PRD §6、v3 §18.13及RESPONSIVE；其他关键文案在各功能补充块列出。错误反馈不设错误码，遵§1c.4；英文/马来文仍待澄清R01（§1c.9），不宣称已有翻译资源。税SST/GST、库存扣减、折扣对全部功能不适用（无电商）；成本/预算、统计、限额分别遵§6.10/§8/§7，不得以“不适用”跳过这些数值规则。（来源：用户计算维度要求；ADR Q11；v3 §18.13/§18.15）
+共用文案来源：原PRD §6、v3 §18.13及RESPONSIVE；其他关键文案在各功能补充块列出。错误反馈不设错误码，遵§1c.4；英文/马来文译文待编制L10N-01（§1c.9），不宣称已有翻译资源。税SST/GST、库存扣减、折扣对全部功能不适用（无电商）；成本/预算、统计、限额分别遵§6.10/§8/§7，不得以“不适用”跳过这些数值规则。（来源：用户计算维度要求；ADR Q11；v3 §18.13/§18.15）
 
 ## 1c. 全局通用规则
 
@@ -82,8 +87,8 @@ ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文�
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 存储与事件身份 | 表`activity`含id、workspace_id、actor_id、actor_name、action、resource、resource_id、details（long_text）、created_at。事件身份为(resource, action)，使用create/update/delete及领域动词，不另设event_code。 | [migration.rs](../../crates/server/src/migration.rs#L591) L591–640；[hosts.rs](../../crates/server/src/hosts.rs#L1112) activity_in/activity_record |
-| 写入与原子性 | 变更同一事务中调用`crate::hosts::activity_in(state, tx, scope, action, resource, id, details_json)`，失败一并回滚；真实用户按scope记录，系统动作按system身份。纯拒绝/访问事件记录实际结果，不能伪造修改成功。 | [maintenance.rs](../../crates/server/src/maintenance.rs#L374) L374/482/503；[workspace_admin.rs](../../crates/server/src/workspace_admin.rs#L517) L517 |
+| 存储与事件身份 | 表`activity`含id、workspace_id、actor_id、actor_name、action、resource、resource_id、details（long_text）、created_at。事件身份为(resource, action)，使用create/update/delete及领域动词，不另设event_code。 | [migration.rs](../../crates/server/src/migration.rs) L591–640；[hosts.rs](../../crates/server/src/hosts/mod.rs) activity_in/activity_record |
+| 写入与原子性 | 变更同一事务中调用`crate::hosts::activity_in(state, tx, scope, action, resource, id, details_json)`，失败一并回滚；真实用户按scope记录，系统动作按system身份。纯拒绝/访问事件记录实际结果，不能伪造修改成功。 | [maintenance.rs](../../crates/server/src/maintenance/mod.rs) L374/482/503；[workspace_admin.rs](../../crates/server/src/accounts/workspace_admin.rs) L517 |
 | details与脱敏 | 只记关联ID、编号/计数、变更字段名及结果摘要；绝不记变量值、密钥/token、输入值、提示词、命令或回应正文。意见、成本和结果内容保存在业务记录，审计只关联记录ID；许可确认关联具体模型/许可记录及版本身份。 | v2 §20；v3 §18.14；FR-AUTH-04 |
 | 保留 | 当前没有activity清理代码，操作记录永久保留。这是当前行为，不随history_retention_days清理，也不新设可调期限。 | migration.rs activity；maintenance.rs清理路径；本轮用户核实的无pruning现状 |
 
@@ -127,15 +132,15 @@ ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文�
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 确认 | 共用DeleteConfirmDialog：标题「确认{action}“{target}”？」，默认说明「请确认操作对象。此操作无法撤销。」；取消/确认按钮，无键入名称的确认输入框。提交中禁重复，失败留在弹窗显示错误。 | [DeleteConfirmDialog.tsx](../../src/components/DeleteConfirmDialog.tsx#L6) L6–29 |
-| 删除与级联边界 | 无软删除，物理删除前检查空间、权限及引用；受保护引用存在时拒删，不能因删除父对象级联清除被保护历史、固定资产或共享资源。具体清理对象仍按数据模型§8.3/§8.4；未定GC账本/并发实现仍待补。 | crates/server/src/pipelines.rs delete_many及应用引用保护；v2/v3；数据模型§8.3/§8.4 |
+| 确认 | 共用DeleteConfirmDialog：标题「确认{action}“{target}”？」，默认说明「请确认操作对象。此操作无法撤销。」；取消/确认按钮，无键入名称的确认输入框。提交中禁重复，失败留在弹窗显示错误。 | [DeleteConfirmDialog.tsx](../../src/shared/ui/DeleteConfirmDialog.tsx) L6–29 |
+| 删除与级联边界 | 无软删除，物理删除前检查空间、权限及引用；受保护引用存在时拒删，不能因删除父对象级联清除被保护历史、固定资产或共享资源。具体清理对象仍按数据模型§8.3/§8.4；未定GC账本/并发实现仍待补。 | crates/server/src/pipelines/mod.rs delete_many及应用引用保护；v2/v3；数据模型§8.3/§8.4 |
 | 归档 | Q12适用于工作流/流水线：先归档，撤销发布、停止生产触发/公开入口、保历史；恢复为草稿；仅归档后可物理删除且仍须引用保护。归档不是软删除列。非删除的发布/归档/绕过/转让等确认与可逆性不能由删除弹窗推断。 | ADR Q12；FR-PIPE-14、FR-LIST-05、FR-VER-04 |
 
 ### 1c.3 保留期与清理
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 全局历史 | history_retention_days平台设置默认0=永久，范围0–36500天；执行、日志、产物、报告、投递、审批回应、通知按它保留。repository_event_retention_days同默认/范围，仅用于仓库事件，不用于activity。 | [maintenance.rs](../../crates/server/src/maintenance.rs#L27) SETTINGS L27–48；v2 §21 |
+| 全局历史 | history_retention_days平台设置默认0=永久，范围0–36500天；执行、日志、产物、报告、投递、审批回应、通知按它保留。repository_event_retention_days同默认/范围，仅用于仓库事件，不用于activity。 | [maintenance.rs](../../crates/server/src/maintenance/mod.rs) SETTINGS L27–48；v2 §21 |
 | 资产/缓存/修订例外 | 固定/有引用资产不随来源执行过期删除；无引用资产经24小时宽限复查后GC；缓存按v3 §6.6/§15失效清理；修订保护引用版本及最近50版。主机缓存/24h现场继续遵FR-PIPE-16。不能用全局天数覆盖这些保护。 | v3 §5.5/§6.6/§15；数据模型§8.3/§8.4；§6.8/§6.9；FR-PIPE-16 |
 | 保护及未定项 | 活动租约、等待任务、恢复输出/意图不能作为终态历史清理；定义级覆盖保留、单产物/缓存闲置字段、预算跨月保留边界、对象删除失败恢复账本仍待补。默认0不解决这些专属载体缺口。 | 数据模型§8.4/§9；v2 §21；§14 G-04/16/17 |
 
@@ -143,21 +148,21 @@ ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文�
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 格式与定位 | 不另设错误码，使用HTTP状态+一句完整中文，可选fields映射：`{ "error": "…", "fields": {…} }`。校验错误指出步骤/节点和字段，保留输入并定位修复；无需新增“错误码→文案”字典，模块具体中文优先。 | 总方案§6.2；v2 §7.6；各模块FR/AC |
+| 格式与定位 | 不另设数字错误码，沿用HTTP状态+现有Message本地化反馈，可选fields映射：`{ "error": "…", "fields": {…} }`。校验错误指出步骤/节点和字段，保留输入并定位修复；平台原文/脚本/日志不翻译。 | 总方案§6.2；crates/server/src/i18n.rs；各模块FR/AC；§15.1 |
 | 冲突 | HTTP 409，「这条记录已被他人修改，请刷新后重试」；保留本地草稿，按§6.16刷新/重新处理，不静默覆盖。未定字段合并算法不等于通用反馈缺失。 | 总方案§6.3；FR-EDIT-13；§6.16 |
 
 ### 1c.5 名称与文本校验
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 名称 | trim首尾空白后1–60个字符（服务端Unicode字符计数），全空白非法；默认用于工作流、环境、分组等资源名称。错误句「请填写名称（60 字以内）。」；模块显式例外优先，例如版本名1–64字符。 | [pipelines.rs](../../crates/server/src/pipelines.rs#L123) L123–125；[hosts.rs](../../crates/server/src/hosts.rs#L99) L99–104；FR-VER |
+| 名称 | trim首尾空白后1–60个字符（服务端Unicode字符计数），全空白非法；默认用于工作流、环境、分组等资源名称。错误句「请填写名称（60 字以内）。」；模块显式例外优先，例如版本名1–64字符。 | [pipelines.rs](../../crates/server/src/pipelines/mod.rs) L123–125；[hosts.rs](../../crates/server/src/hosts/mod.rs) L99–104；FR-VER |
 | 其他文本 | 描述、标签、reason、输入键、URL、脚本和节点JSON参数不套名称长度/trim；按模块FR，未定义长度/正则/精度仍待补。SQL列宽不是产品限制。 | 各模块字段/FR；数据模型§1/§4/§7 |
 
 ### 1c.6 字段联动与草稿
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 默认联动 | 上游选择改变后重置依赖选择，重校验可选范围，丢弃旧上下文异步结果，迟到回调不能重新绑定旧仓库/模型/目标；保留用户手工输入的名称、命令及草稿文字。已保存/历史引用不因前端切换静默重写。模块冻结/失效规则优先。 | [T13](../tasks/T13-connected-builds.md) checklist（reset selection、preserve name/commands）及Review focus “stale callbacks after connection change”；[PipelineRepository.tsx](../../src/components/PipelineRepository.tsx#L76) L76–106 |
+| 默认联动 | 上游选择改变后重置依赖选择，重校验可选范围，丢弃旧上下文异步结果，迟到回调不能重新绑定旧仓库/模型/目标；保留用户手工输入的名称、命令及草稿文字。已保存/历史引用不因前端切换静默重写。模块冻结/失效规则优先。 | [T13](../tasks/T13-connected-builds.md) checklist（reset selection、preserve name/commands）及Review focus “stale callbacks after connection change”；[PipelineRepository.tsx](../../src/features/pipelines/PipelineRepository.tsx) L76–106 |
 | 边界 | 解决已知依赖的清空和旧回调，不补造未声明的逐节点依赖图、默认回填来源或失效资源重定向。 | T13；各模块联动；§14 G-01/02/11 |
 
 ### 1c.7 配置来源与生效
@@ -165,10 +170,10 @@ ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文�
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
 | 开发 | 编译期常量/资源DSL/注册表，变更需发布；不承诺热更新。 | src/resources.tsx、src/components/dsl.ts；maintenance.rs SETTINGS；总方案§7/§8 |
-| 运维 | FERRY_*环境变量启动读取，变更需重启；不绕过业务权限。 | [main.rs](../../crates/server/src/main.rs#L72) L72 FERRY_DATABASE_URL、L88 FERRY_BIND的启动参数；FERRY_PUBLIC_ORIGIN；总方案部署配置 |
+| 运维 | FERRY_*环境变量启动读取，变更需重启；不绕过业务权限。 | [main.rs](../../crates/server/src/main.rs) L72 FERRY_DATABASE_URL、L88 FERRY_BIND的启动参数；FERRY_PUBLIC_ORIGIN；总方案部署配置 |
 | 平台 | maintenance设置表，管理员修改，按已声明min/max校验，保存立即生效并审计；未声明的设置不因此变为可配。 | maintenance.rs SETTINGS及更新事务/activity_in（L374/482/503） |
 | 用户 | 资源字段按版本保存；草稿保存影响草稿，生产按模块保存/发布契约及D16生效，运行中快照不改；操作资格由模块规定。 | D16；ADR Q14；§6.8；共享资源version/409契约 |
-| 频率/语言 | 由发布/重启/管理员或用户操作决定，无固定变更周期；当前设置与枚举标签均非多语言。未定枚举、配置载体/操作资格仍须补。 | 当前src硬编码zh-CN；数据模型§6；R01 |
+| 频率/语言 | 由发布/重启/管理员或用户操作决定，无固定变更周期；当前设置/枚举标签已有本地化机制；新功能标签须补六语言资源。未定枚举、配置载体/操作资格仍须补。 | 当前六语言资源；新增文案待交付；数据模型§6；R01 |
 
 ### 1c.8 HTML原型、截图与状态交付
 
@@ -176,13 +181,13 @@ ms-MY长度预留仅是布局验收要求：允许比zh-CN长≥40%的占位文�
 |---|---|---|
 | 替代交付 | 没有Figma；HTML原型+PNG替代并标记。D=1440×900、P=768×1024、M=390×844；全部三布局都有规则→AC→TC→截图文件+callout映射时，验收追踪/响应式格可标「✔ 已覆盖（HTML 原型替代，无 Figma，已标记）」。 | [RESPONSIVE](prototypes/RESPONSIVE.md)；§1a；各FR-RV三端/TC表 |
 | 异常状态 | 异常/空/权限/409/受理后结果视觉交互由§6.16文字规定，没有独立异常截图；不声称已截图实测，也不因无Figma/无独立异常PNG重复记缺口。正常业务专属屏/长尾能力缺映射仍待补。展示状态不要求发明持久化字符串码，实际业务state/event缺码仍须补。 | §6.16、AC-UI-01–04；各模块状态及TC-RV-xx-02/05 |
-| 语言/长度 | 语言variant依R01标「仍待澄清 R01」；ms-MY≥40%更长只是布局占位要求，不是译文或语言验收。 | R01；NFR-UX；RESPONSIVE |
+| 语言/长度 | 语言variant依L10N-01标「译文待编制 L10N-01」；ms-MY≥40%更长只是布局占位要求，不是译文或语言验收。 | R01；NFR-UX；RESPONSIVE |
 
 ### 1c.9 文案与语言范围
 
 | 规则 | 约定 | 精确证据 |
 |---|---|---|
-| 文案 | zh-CN关键文案已在模块/共用表给出，其他错误遵§1c.4完整中文反馈；en-US/ms-MY及语言variant统一「仍待澄清 R01」，不以缺译文记待补，也不默认决定引入i18n。 | §1b/各模块文案表；当前src硬编码zh-CN及HostFiles.tsx/ManifestEditor.tsx日期；§13 R01 |
+| 文案 | zh-CN关键文案已在模块/共用表给出；应用错误复用现有Message按语言协商，平台原文/脚本/日志不翻译。新增六语言全文案和语言variant均为L10N-01待补，不用既有框架抵扣译文交付。 | src/shared/i18n/locale.ts；crates/server/src/i18n.rs；§15.1/15.4 |
 
 ## 2. 产品概述
 
@@ -299,27 +304,27 @@ REST 遵循总方案 §6 与 ADR 2026-11-02 Q13：工作空间资源统一在 `/
 
 **数据模型、时间审计、索引与SQL**：无新增业务表；workspaces及各资源表。无独立新增时间字段；原资源按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：无（导航无独立持久化查询）。SQL证据：无（路由不是SQL资源；资源查询见各模块）。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：总方案 §5–§8；ADR Q13；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：总方案 §5–§8；ADR Q13；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发：菜单树/路由/字段DSL，随版本变化；用户：URL筛选；中文标签硬编码，枚举来自资源配置 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发：菜单树/路由/字段DSL，随版本变化；用户：URL筛选；中文标签硬编码，枚举来自资源配置 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 随各资源交付，沿用菜单树与工作空间路由；不做 不建第二套路由/资源表单；公开页不进入后台导航；灰度 无。核心流程：目标链接→登录层→恢复目标及筛选→服务端空间鉴权→资源页。异常：未登录恢复原URL；越权拒绝；资源读取失败保留目标地址。历史up/down：无独立DDL；资源历史变更随对应模块，数据模型 §5.2；共用回退边界见§1b。三方：无（浏览器 History API 与现有认证）。版本兼容：沿用工作空间路由、共享列表/表单和REST信封；DELETE无body。计算：不适用（导航无数值计算）。（来源：总方案 §5–§8；ADR Q13；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| IA.key | 这条记录已被他人修改，请刷新后重试 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| IA.key | 这条记录已被他人修改，请刷新后重试 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-IA-01 → AC-IA-01 / AC-RV-01 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ①：列表与分组；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/01-workflow-list.html |
-| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ④：公开隔离；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/11-public-form.html |
+| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ①：列表与分组；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/01-workflow-list.html |
+| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ④：公开隔离；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/11-public-form.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -327,7 +332,7 @@ REST 遵循总方案 §6 与 ADR 2026-11-02 Q13：工作空间资源统一在 `/
 | FR-IA-01 → AC-RV-01 | TC-RV-01-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 未登录恢复原URL；越权拒绝；资源读取失败保留目标地址 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-01 | TC-RV-01-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-01 | TC-RV-01-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 无独立DDL；资源历史变更随对应模块，数据模型 §5.2 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-01 | TC-RV-01-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-01 | TC-RV-01-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；总方案 §5–§8；ADR Q13）
 
@@ -353,7 +358,7 @@ AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列
 | FR-PIPE-10 | 暴露重试、并发与取消边界 | 自动重试默认关，总尝试1–5、间隔0–3600秒；审批/部署不自动重试；并发组 none/pipeline/pipeline_ref，限制1–20，事件默认 queue_latest；已发起部署取消不等于停止部署，子执行不级联取消。 | P0/P1 | v2 §7.4、§8.2–§8.7；D12/D13 |
 | FR-PIPE-11 | 手动运行任务到达后等待人工启动 | 手动运行任务在依赖满足后停住并显示等待运行，未点击前不执行任务内容，也不放行依赖其成功的下游。任何具有 pipelines.run 且满足当前对象授权的用户均可在执行详情点击「运行」；不配置审批人、不形成审批结论。取消执行后不能再启动；暂停后继续或故障恢复均保留尚未点击的等待状态，已经受理的启动不得重复执行。其他执行辅助信息见 FR-PIPE-21。 | P1；P2 叠加对象权限 | 流水线清单 B9、§3.2；v2 §8；ADR D14 |
 | FR-PIPE-12 | 支持质量、产物与缓存增强 | 报告、矩阵、缓存等在 P2 交付；包括 JUnit 报告、表达式质量红线、单产物保留与缓存闲置天数。质量红线失败或求值出错均使任务失败。部署状态另按 FR-PIPE-20。 | P2 | v2 §8.8、§11–§13；流水线清单 §3.2；v3 §18.2 |
-| FR-PIPE-13 | 完成补充编辑与诊断能力 | 用户可批量运行、收藏、停用任务及添加注释；画布提供缩略图、命令面板、陈旧结果标记、表达式补全与步骤预设。用户可执行到指定任务、从保留目录打开在线终端，并查看标题进度、复制诊断、搜索日志锚点与执行摘要。模板支持参数和静态校验；定时触发可设仅代码变化时运行，另支持上游完成触发。 | P2 | 流水线清单 §3.2；v2 §19、§24 |
+| FR-PIPE-13 | 完成补充编辑与诊断能力 | 用户可批量运行、收藏、停用任务及添加注释；画布提供缩略图、命令面板、陈旧结果标记、表达式补全与步骤预设。用户可执行到指定任务、从保留目录打开在线终端，并查看标题进度、复制诊断、搜索日志锚点与执行摘要。流水线模板与流水线共用YAML编辑器，支持静态校验、步骤片段应用/取消、全屏及与打开时保存版本的左右对比；新流水线模板取消动态参数定义，存量参数记录保留API兼容，标准workflow_dispatch inputs不受影响。定时触发可设仅代码变化时运行，另支持上游完成触发。 | P2 | 流水线清单 §3.2；v2 §19、§24；2026-11-04用户最新编辑要求 |
 | FR-PIPE-14 | 落实对象授权、发布与通用入口 | D14 流水线级权限见 AUTH；D16 自动触发用发布版、手动可选草稿；D17 secret Webhook 异步运行，body 映射 inputs；D15 管理员不默认绕过；归档自动撤销发布、停止触发与公开入口、保留历史、恢复为草稿，仅归档后可删除。 | P1 D16/D17；P2 D14；S1 归档 | 流水线清单 §3.1 D14–D17；v3 §18.2；ADR 2026-11-02 Q12 |
 | FR-PIPE-15 | 覆盖补充对标能力 | 镜像仓库推送解析模板、交互卡片审批、失败触发错误工作流、按定义保留策略；版本组件批量升级先看影响，资源选择器、限时只读嵌入按规划提供。 | S1 错误/归档；S2 回调/卡片；P2 保留；S5 组件/资源/嵌入 | v3 §18.2；流水线清单 §3.2 |
 | FR-PIPE-16 | 说明主机本地缓存与保留现场边界 | 缓存按工作空间/流水线隔离、不跨主机共享；每流水线每主机2 GiB、每主机全部默认10 GiB可调，超限LRU，支持清空；MR只读不写。actions/cache@v4须真实兼容验证，不兼容时明确拒绝。任务可为本次尝试保留工作目录，24小时后由下次任务启动清理，旧格式用户指定workdir不随此规则删除。 | P2 | v2 §11.2–§11.4、§24 |
@@ -401,7 +406,7 @@ AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列
 | AC-PIPE-22 | Given 为单个产物设置保留期且为缓存设置闲置天数，When 到达各自清理条件，Then 仅符合条件的对象被清理，其他仍有效产物/缓存保留，已清理来源有说明。（FR-PIPE-12/16） |
 | AC-PIPE-23 | Given P2 多条可运行流水线与一条无执行权定义，When 批量运行或收藏筛选，Then 每条执行独立编号，无执行权项被拒绝且不启动；收藏/取消收藏影响筛选，不改变权限。（FR-PIPE-13） |
 | AC-PIPE-24 | Given 停用任务及带注释的画布，When 保存再执行，Then 注释与布局保留，停用任务为 skipped 且不运行任务内容；命令面板/缩略图可定位，配置变化使受影响旧结果标为陈旧。（FR-PIPE-13） |
-| AC-PIPE-25 | Given 表达式编辑器及步骤预设，When 使用补全插入已有上下文字段并应用预设，Then 生成可继续编辑的字段/步骤配置，静态校验定位不支持语法；参数模板实例按填写值生成且缺必填时拒绝。（FR-PIPE-13） |
+| AC-PIPE-25 | Given 表达式编辑器及步骤预设，When 使用补全插入已有上下文字段并应用预设，Then 生成可继续编辑的字段/步骤配置，静态校验定位不支持语法；新流水线模板默认完整YAML且没有动态参数定义入口，片段取消不修改工作流、应用须通过校验；diff左侧为打开时保存版本。存量参数模板通过既有API生成时保留必填校验；应用/配置模板参数与标准workflow_dispatch inputs保持原语义。（FR-PIPE-13） |
 | AC-PIPE-26 | Given 目标任务及其上游和无关分支，When 选择执行到该任务，Then 仅运行目标必要上游及目标，仍执行前置环境门禁；运行时浏览器标题显示进度、结束后显示真实状态。（FR-PIPE-13） |
 | AC-PIPE-27 | Given 保留工作目录的失败任务，When 有主机终端权限者打开在线终端，Then 定位该目录；无终端权限直接请求被拒绝，目录已清理时说明原因而非进入错误路径。（FR-PIPE-13/16） |
 | AC-PIPE-28 | Given 包含已知关键词的任务日志，When 搜索并打开锚点、复制诊断或查看摘要，Then 定位到对应任务/日志位置，摘要关联真实结果，复制内容脱敏且不含凭据正文。（FR-PIPE-13） |
@@ -418,7 +423,7 @@ AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列
 
 **模式差异（入口/操作/可编辑范围）**：列表复制/最近状态筛选；新增编辑名称与定义；编辑YAML/画布；历史版本仅查看，修改必须回到草稿。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；总方案 §5/§7/§8）
 
-**字段与校验**：现有流水线名称required、maxLength=60（src/components/ResourceForm.tsx）；定义≤128KiB；jobs 1–50，展开≤200，矩阵≤64；代码源0–10；输入string/choice/boolean/number/environment；各输入名正则和精确长度源未定义，待补。资源名称默认trim后1–60字符（§1c.5），模块显式例外优先；其他字段来源/默认/回填/可编辑条件及未定长度/正则/上下限不从原型推导；未列出的节点/JSON子字段约束为「源未定义，待补」，不将DDL映射宽度当产品限制。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；数据模型 §1/§4/§7）
+**字段与校验**：现有流水线名称required、maxLength=60（src/app/resources/ResourceForm.tsx）；定义≤128KiB；jobs 1–50，展开≤200，矩阵≤64；代码源0–10；输入string/choice/boolean/number/environment；各输入名正则和精确长度源未定义，待补。资源名称默认trim后1–60字符（§1c.5），模块显式例外优先；其他字段来源/默认/回填/可编辑条件及未定长度/正则/上下限不从原型推导；未列出的节点/JSON子字段约束为「源未定义，待补」，不将DDL映射宽度当产品限制。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；数据模型 §1/§4/§7）
 
 **字段联动与清空**：needs决定依赖，阶段仅布局；环境/应用/主机绑定在信封中，不许通过inputs重绑；子模块/克隆深度按配置检出，具体范围源未定义，待补。已保存/历史引用不得因前端切换静默改写；已知依赖选择重置、旧异步结果和手工草稿按§1c.6；未声明的逐节点依赖/回填来源仍按模块缺口。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；总方案 §8；数据模型 §7）
 
@@ -436,26 +441,26 @@ AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列
 
 **数据模型、时间审计、索引与SQL**：pipelines、definition_revisions；JSON信封不擅自拆新表。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：definition_revisions_number(subject_kind,subject_id,number)唯一；发布名唯一键仍待定。SQL证据：数据模型 §8.3：按subject_kind/subject_id查询最近50版本。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发：语法/输入类型/固定上限；用户：YAML、needs、阶段、绑定、输入；中文提示硬编码；配置随定义版本变化 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发：语法/输入类型/固定上限；用户：YAML、needs、阶段、绑定、输入；提示使用本地化资源键；配置随定义版本变化 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1 YAML/DAG/输入，P2阶段/预设/矩阵等效率增强；不做 不做Go template预渲染；不将阶段当needs；不另保留旧JSON引擎；灰度 无（按P1/P2交付；未交付入口不开放）。核心流程：读取草稿→编辑YAML或图→同源校验→定位字段→修复保存→发布确认→运行冻结版本。异常：不支持语法/循环依赖/非法绑定拒绝；校验和字段定位一致；409保留本地稿。历史up/down：数据模型 §5.2第2/4项：现存定义number=1；旧执行revision_id=0表示未知，不冒用当前版；共用回退边界见§1b。三方：Actions worker/act、Git；具体版本兼容需真实用例。版本兼容：v1信封可读可执行可编辑；旧JSON已迁移为Actions；YAML原文/注释保留。计算：限额按字节/任务数量校验；税SST/GST、库存扣减、折扣不适用（无电商）。（来源：v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PE.key | 请选择本次执行使用的定义版本。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PE.key | 请选择本次执行使用的定义版本。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-01/02/03/13/21 → AC-PIPE-01/18/24/25 / AC-RV-02 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ①②③：校验、依赖、输入；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
+| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ①②③：校验、依赖、输入；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -463,7 +468,7 @@ AC-RV-01：本功能已定规则按上述测试规格及既有AC验收；G-01列
 | FR-PIPE-01/02/03/13/21 → AC-RV-02 | TC-RV-02-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 不支持语法/循环依赖/非法绑定拒绝；校验和字段定位一致；409保留本地稿 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-02 | TC-RV-02-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-02 | TC-RV-02-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第2/4项：现存定义number=1；旧执行revision_id=0表示未知，不冒用当前版 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-02 | TC-RV-02-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-02 | TC-RV-02-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-02：本功能已定规则按上述测试规格及既有AC验收；G-02列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §7、§19、§21、§23；流水线清单 B/C；ADR D5 superseded、Q06）
 
@@ -493,27 +498,27 @@ AC-RV-02：本功能已定规则按上述测试规格及既有AC验收；G-02列
 
 **数据模型、时间审计、索引与SQL**：trigger_bindings、trigger_deliveries、pipeline_runs、pipelines、cron_jobs。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：trigger_bindings_lookup；trigger_deliveries_dedupe/dispatch/history；workflow泛化键待补。SQL证据：数据模型 §8.1发件箱事务条件更新、§8.2绑定查询。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §9；流水线清单 C；ADR D3/D11/D13/D16/D17、Q05/Q14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §9；流水线清单 C；ADR D3/D11/D13/D16/D17、Q05/Q14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：触发过滤、inputs和环境映射；开发：事件适配/去重规则；运维/用户定时资源按既有权限；多语言标签仍待澄清R01 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：触发过滤、inputs和环境映射；开发：事件适配/去重规则；运维/用户定时资源按既有权限；多语言标签译文待编制L10N-01 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1事件/手动/通用Webhook，P2上游与仅代码变化定时；不做 fork MR不自动运行；YAML on.schedule拒绝；不自动重投失败事件；灰度 草稿/发布：自动入口只用发布版，保存草稿不影响生产。核心流程：发布派生绑定→事件验签/过滤→冻结SHA/ref→事务写投递→创建执行→关联run；人工重投新增记录。异常：路径比较失败/未知不静默执行；环境不匹配skipped；secret错误拒绝；merge SHA不替换head。历史up/down：数据模型 §5.2第6项：停dispatcher再回退，保留pending账本；不从旧事件补投；共用回退边界见§1b。三方：GitHub/GitLab/Gitee/Codeup等按v2 §9.3a逐平台验签与事件映射。版本兼容：同语义去重；无历史自动补投；D4保存重绑由Q14发布重绑取代。计算：每事件最多触发50流水线；不适用税/库存/折扣。（来源：v2 §9；流水线清单 C；ADR D3/D11/D13/D16/D17、Q05/Q14；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PT.key | 该合并请求来自外部仓库，不会自动执行。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PT.key | 该合并请求来自外部仓库，不会自动执行。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-03/09/14/18/19 → AC-PIPE-02/11/12/29/30/31 / AC-RV-03 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ③：事件声明；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
-| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ⑤：触发详情；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
+| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ③：事件声明；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
+| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ⑤：触发详情；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -521,7 +526,7 @@ AC-RV-02：本功能已定规则按上述测试规格及既有AC验收；G-02列
 | FR-PIPE-03/09/14/18/19 → AC-RV-03 | TC-RV-03-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 路径比较失败/未知不静默执行；环境不匹配skipped；secret错误拒绝；merge SHA不替换head | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-03 | TC-RV-03-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-03 | TC-RV-03-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第6项：停dispatcher再回退，保留pending账本；不从旧事件补投 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-03 | TC-RV-03-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-03 | TC-RV-03-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-03：本功能已定规则按上述测试规格及既有AC验收；G-03列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §9；流水线清单 C；ADR D3/D11/D13/D16/D17、Q05/Q14）
 
@@ -551,26 +556,26 @@ AC-RV-03：本功能已定规则按上述测试规格及既有AC验收；G-03列
 
 **数据模型、时间审计、索引与SQL**：pipeline_runs、pipeline_run_jobs/steps/logs、pipeline_artifacts、definition_revisions、execution_intents。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：pipeline_runs_dispatch/concurrency/root/pipeline；pipeline_run_steps_attempt_order；pipeline_artifacts_run/lookup。SQL证据：数据模型 §8.1租约条件写，§8.2尝试和日志游标查询。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §8、§11、§19、§23；流水线清单 F/G/J；ADR D9；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §8、§11、§19、§23；流水线清单 F/G/J；ADR D9；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：重试/并发/保留策略；运维：实例槽/存储；开发：状态码与上限；默认queue_latest用于事件 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：重试/并发/保留策略；运维：实例槽/存储；开发：状态码与上限；默认queue_latest用于事件 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P0租约/并发/版本，P1 DAG重跑，P2缓存/报告/现场诊断；不做 不覆盖旧执行；不跨主机共享缓存；不承诺取消已发部署或级联取消子执行；灰度 P0-1全停升级；无滚动混跑或feature flag。核心流程：统一create_run→排队/租约→任务尝试→日志产物→终态；重跑新编号→闭包重算→成功产物复制→新链路。异常：失租约旧实例拒写；主机断连；超时；重试用尽；产物superseded不消费；日志到限标截断。历史up/down：数据模型 §5.2第1/3/9项：attempt=1/job_key=''；先新唯一键后删旧键；产物先可空回填再收紧，解析失败待补；共用回退边界见§1b。三方：Runner/SSH、act worker、local/S3 ArtifactStore；真实取消需主机。版本兼容：Windows既有act主机模式；容器Linux-only；Windows强杀可能无post；不另造P3执行器。计算：缓存每流水线每主机2GiB/每主机默认10GiB、LRU；日志32/128MiB；税/库存/折扣不适用。（来源：v2 §8、§11、§19、§23；流水线清单 F/G/J；ADR D9；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PR.key | 部署已启动，请前往部署记录处理停止或回滚。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PR.key | 部署已启动，请前往部署记录处理停止或回滚。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-05/06/07/08/10/16/21 → AC-PIPE-03/04/08/17/20/22/26/27/28 / AC-RV-04 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ①②③④⑤：新执行、门禁、复用及详情；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
+| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ①②③④⑤：新执行、门禁、复用及详情；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -578,7 +583,7 @@ AC-RV-03：本功能已定规则按上述测试规格及既有AC验收；G-03列
 | FR-PIPE-05/06/07/08/10/16/21 → AC-RV-04 | TC-RV-04-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 失租约旧实例拒写；主机断连；超时；重试用尽；产物superseded不消费；日志到限标截断 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-04 | TC-RV-04-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-04 | TC-RV-04-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第1/3/9项：attempt=1/job_key=''；先新唯一键后删旧键；产物先可空回填再收紧，解析失败待补 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-04 | TC-RV-04-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-04 | TC-RV-04-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-04：本功能已定规则按上述测试规格及既有AC验收；G-04列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §8、§11、§19、§23；流水线清单 F/G/J；ADR D9）
 
@@ -608,26 +613,26 @@ AC-RV-04：本功能已定规则按上述测试规格及既有AC验收；G-04列
 
 **数据模型、时间审计、索引与SQL**：pipeline_run_jobs、pipeline_runs；手动受理持久化载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：沿用jobs既有键；手动启动防重键源未定义，待补。SQL证据：数据模型 §8.2按run_id/job_key/attempt查历史；启动受理条件写SQL因载体未知源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：流水线清单 B9、§3.2；ADR Q04/Q16、review follow-up；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：流水线清单 B9、§3.2；ADR Q04/Q16、review follow-up；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：手动任务模式、跳过原因；开发：资格与状态判定；中文按钮硬编码 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：手动任务模式、跳过原因；开发：资格与状态判定；中文按钮硬编码 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 手动启动P1；受控跳过P2与D14同交付；不做 不把run权限当all；不跳审批/部署/环境门；跳过不新增attempt；灰度 无（P2前不开放跳过入口）。核心流程：依赖满足→等待点击→run授权启动一次→结果推进；失败主机任务→all填写reason跳过→下游继续。异常：重复点击不得双执行；取消后拒绝启动；恢复保持未点击等待；无all直接API跳过拒绝。历史up/down：数据模型 §5.2第13项及§9第11项：P2 skipped_by/reason；不补造历史跳过；共用回退边界见§1b。三方：Runner/SSH执行主机任务；无额外审批服务。版本兼容：手动等待不是审批；与D14同步交付，无临时all替代。计算：跳过attempt增量=0；税/库存/折扣不适用。（来源：流水线清单 B9、§3.2；ADR Q04/Q16、review follow-up；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PM.key | 你没有处理此任务的权限。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PM.key | 你没有处理此任务的权限。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-11/17/21 → AC-PIPE-07/09/10/13/14/15 / AC-RV-05 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ④⑤：任务处理与历史；跳过/手动专属状态截图待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
+| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ④⑤：任务处理与历史；跳过/手动专属状态截图待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -635,7 +640,7 @@ AC-RV-04：本功能已定规则按上述测试规格及既有AC验收；G-04列
 | FR-PIPE-11/17/21 → AC-RV-05 | TC-RV-05-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 重复点击不得双执行；取消后拒绝启动；恢复保持未点击等待；无all直接API跳过拒绝 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-05 | TC-RV-05-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-05 | TC-RV-05-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第13项及§9第11项：P2 skipped_by/reason；不补造历史跳过 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-05 | TC-RV-05-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-05 | TC-RV-05-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-05：本功能已定规则按上述测试规格及既有AC验收；G-05列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；流水线清单 B9、§3.2；ADR Q04/Q16、review follow-up）
 
@@ -665,26 +670,26 @@ AC-RV-05：本功能已定规则按上述测试规格及既有AC验收；G-05列
 
 **数据模型、时间审计、索引与SQL**：pipeline_contexts.protection、human_tasks/responses、pipeline_run_jobs __environment__。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：human_responses_once；环境沿用既有索引；通用人工关联键待补。SQL证据：数据模型 §8.2尝试查询；会签事务完整SQL源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §13.0–§13.1；ADR D12/D15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §13.0–§13.1；ADR D12/D15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户（环境编辑权）：人员角色/ref/会签/超时/自审绕过；开发：默认关闭与校验；多语言枚举仍待澄清R01 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户（环境编辑权）：人员角色/ref/会签/超时/自审绕过；开发：默认关闭与校验；多语言枚举译文待编制L10N-01 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1独立环境门禁；重跑同样生效；不做 不通过删除YAML审批绕过；不默认允许自审/管理员绕过；灰度 环境显式自审/绕过开关默认关闭；不是发布灰度设施。核心流程：创建校验ref→__environment__门→人员角色实时判资格→会签/拒绝/超时→通过后下发变量→任务。异常：非法ref手动400，事件skipped/protection_denied；删除角色导致空资格保持等待；重复同人不增票。历史up/down：数据模型 §5.2第7/8项：protection NULL保持原行为；旧审批迁移待补；旧版无保护禁止无隔离回退；共用回退边界见§1b。三方：无新增三方；可选机器人交互仍走人工资格。版本兼容：保护独立于YAML；管理员身份不等于绕过；历史不伪造审批。计算：会签计不同人，1–10；超时0无限；税/库存/折扣不适用。（来源：v2 §13.0–§13.1；ADR D12/D15；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PG.key | 执行正在等待环境审批，受保护变量尚未下发。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PG.key | 执行正在等待环境审批，受保护变量尚未下发。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-04/06/14；FR-ENV-01/02/03/04 → AC-PIPE-03/10；AC-ENV-01/02/03/04 / AC-RV-06 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ①②③④：门禁、会签、ref、自审绕过；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/14-environment-protection.html |
+| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ①②③④：门禁、会签、ref、自审绕过；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/14-environment-protection.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -692,7 +697,7 @@ AC-RV-05：本功能已定规则按上述测试规格及既有AC验收；G-05列
 | FR-PIPE-04/06/14；FR-ENV-01/02/03/04 → AC-RV-06 | TC-RV-06-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 非法ref手动400，事件skipped/protection_denied；删除角色导致空资格保持等待；重复同人不增票 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-06 | TC-RV-06-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-06 | TC-RV-06-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第7/8项：protection NULL保持原行为；旧审批迁移待补；旧版无保护禁止无隔离回退 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-06 | TC-RV-06-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-06 | TC-RV-06-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-06：本功能已定规则按上述测试规格及既有AC验收；G-06列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §13.0–§13.1；ADR D12/D15）
 
@@ -722,27 +727,27 @@ AC-RV-06：本功能已定规则按上述测试规格及既有AC验收；G-06列
 
 **数据模型、时间审计、索引与SQL**：execution_intents、deployment_revisions.pipeline_intent_id、pipeline_artifacts、pipeline_contexts。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：execution_intents_once；deployment_revisions_pipeline_intent可空唯一；产物lookup。SQL证据：数据模型 §8.2意图/下游关联查询；写入与租约需完整事务。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §7.3、§8.5、§12–§13；流水线清单 I、§3.2；ADR V14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §7.3、§8.5、§12–§13；流水线清单 I、§3.2；ADR V14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：应用与环境映射、产物选择；应用模块：部署策略；开发：服务端任务类型与状态适配 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：应用与环境映射、产物选择；应用模块：部署策略；开发：服务端任务类型与状态适配 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1部署任务状态/跳转；K8s策略随应用能力交付；不做 不从工作流直接部署绕过应用/流水线；不将流水线取消当停止部署；不跳过部署任务；灰度 无（K8s灰度是应用发布策略，不是平台功能开关）。核心流程：环境映射→门禁→选择有效产物→意图持久化→应用部署→跟踪分批/暂停→应用继续/回滚→结果。异常：产物不存在或superseded拒绝；部署未知先查意图；回滚失败显示失败。历史up/down：数据模型 §5.2第9/10项：旧部署保留NULL唯一意图；不造历史意图；回退停部署且保留账本；共用回退边界见§1b。三方：应用部署引擎、Runner/SSH/目标平台；S3产物按部署配置。版本兼容：旧部署不强填0；K8s蓝绿/分批/灰度随应用计划，不承诺当前全有。计算：不适用（部署无计价；资源限额沿NFR，税/库存/折扣不适用）。（来源：v2 §7.3、§8.5、§12–§13；流水线清单 I、§3.2；ADR V14；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PD.key | 部署已启动，请前往部署记录处理停止或回滚。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PD.key | 部署已启动，请前往部署记录处理停止或回滚。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PIPE-04/06/20 → AC-PIPE-03/10/19 / AC-RV-07 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ④：应用产物绑定；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
-| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ②⑤：门禁和部署入口；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
+| [Desktop](images/12-pipeline-editor.png) / [Pad](images/pad/12-pipeline-editor.png) / [Phone](images/phone/12-pipeline-editor.png) | ④：应用产物绑定；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/12-pipeline-editor.html |
+| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ②⑤：门禁和部署入口；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -750,7 +755,7 @@ AC-RV-06：本功能已定规则按上述测试规格及既有AC验收；G-06列
 | FR-PIPE-04/06/20 → AC-RV-07 | TC-RV-07-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 产物不存在或superseded拒绝；部署未知先查意图；回滚失败显示失败 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-07 | TC-RV-07-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-07 | TC-RV-07-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第9/10项：旧部署保留NULL唯一意图；不造历史意图；回退停部署且保留账本 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-07 | TC-RV-07-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-07 | TC-RV-07-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-07：本功能已定规则按上述测试规格及既有AC验收；G-07列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §7.3、§8.5、§12–§13；流水线清单 I、§3.2；ADR V14）
 
@@ -780,26 +785,26 @@ AC-RV-07：本功能已定规则按上述测试规格及既有AC验收；G-07列
 
 **数据模型、时间审计、索引与SQL**：pipeline_run_notifications、execution_intents；通用workflow通知归属待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：pipeline_run_notifications_once(run_id,job_key,event,channel_index)。SQL证据：数据模型 §8.2意图恢复；通知pending/sending不自动重发；完整通用投递SQL待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §14；ADR D7；v3 §18.8；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §14；ADR D7；v3 §18.8；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：通知事件、渠道与提及；运维：服务端密钥存储；开发：渠道枚举/至多一次策略 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：通知事件、渠道与提及；运维：服务端密钥存储；开发：渠道枚举/至多一次策略 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1机器人/Webhook；S2交互卡片；不做 不含邮件；不重发unknown；不跟重定向、不记录响应正文；灰度 无。核心流程：执行事件→渠道选择→写sending→单次服务端投递→sent/failed；接管sending变unknown。异常：失败仅警告不改执行结果；URL/密钥不发主机、定义或日志；卡片回调须资格和一次回应。历史up/down：数据模型 §5.2第11项：不补发旧事件；回退先停发并保留账本；共用回退边界见§1b。三方：钉钉/飞书/企业微信/Webhook接收端。版本兼容：至多一次投递语义；started为event不是run.state；D7无邮件。计算：单次投递；不适用税/库存/折扣。（来源：v2 §14；ADR D7；v3 §18.8；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PN.key | 通知发送失败，执行结果不受影响。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PN.key | 通知发送失败，执行结果不受影响。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-NOTIFY-01/02/03 → AC-NOTIFY-01/02 / AC-RV-08 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ⑤：仅关联执行历史，通知专属屏/状态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
+| [Desktop](images/13-pipeline-run-graph.png) / [Pad](images/pad/13-pipeline-run-graph.png) / [Phone](images/phone/13-pipeline-run-graph.png) | ⑤：仅关联执行历史，通知专属屏/状态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/13-pipeline-run-graph.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -807,7 +812,7 @@ AC-RV-07：本功能已定规则按上述测试规格及既有AC验收；G-07列
 | FR-NOTIFY-01/02/03 → AC-RV-08 | TC-RV-08-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 失败仅警告不改执行结果；URL/密钥不发主机、定义或日志；卡片回调须资格和一次回应 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-08 | TC-RV-08-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-08 | TC-RV-08-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第11项：不补发旧事件；回退先停发并保留账本 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-08 | TC-RV-08-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-08 | TC-RV-08-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-08：本功能已定规则按上述测试规格及既有AC验收；G-08列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §14；ADR D7；v3 §18.8）
 
@@ -863,26 +868,26 @@ AC-RV-08：本功能已定规则按上述测试规格及既有AC验收；G-08列
 
 **数据模型、时间审计、索引与SQL**：workflows、definition_revisions；分组/收藏/标签/归档正式载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：workflows无新增二级索引；收藏/组继承/版本名键待补。SQL证据：数据模型 §8.3版本引用保护；列表排序/ACL完整SQL源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.1、§9.2、§18.3；能力清单 A；ADR Q11/Q12；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.1、§9.2、§18.3；能力清单 A；ADR Q11/Q12；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：分组、标签、描述、收藏及URL过滤；开发：状态标签/菜单；不新增字典体系 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：分组、标签、描述、收藏及URL过滤；开发：状态标签/菜单；不新增字典体系 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S0列表版本状态，S1分组/收藏/归档，S2成本；不做 不跨空间分组或收藏授权；不直接删除未归档定义；灰度 草稿/发布隔离；归档撤销生产入口。核心流程：搜索筛选→打开/复制/运行→归档停止入口保留历史→恢复草稿或受保护物理删除。异常：无权对象连总数均不可见；空库与无匹配区分；归档后链接停止。历史up/down：数据模型 §5.2第4/12项，无历史工作流回填；§9收藏/归档缺口不造列；共用回退边界见§1b。三方：无额外三方；执行/成本依相应模块。版本兼容：共享列表信封；恢复不发布；物理删除不能抹历史快照。计算：近7日成本按凭据币种汇总，无价/无AI为—；不适用税/库存/折扣。（来源：v3 §5.1、§9.2、§18.3；能力清单 A；ADR Q11/Q12；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| LIST.key | 这条记录已被他人修改，请刷新后重试 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| LIST.key | 这条记录已被他人修改，请刷新后重试 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-LIST-01/02/03/04/05/06 → AC-LIST-01/02/03/04/05 / AC-RV-09 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ①②③④：组织、发布状态、成本及操作；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/01-workflow-list.html |
+| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ①②③④：组织、发布状态、成本及操作；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/01-workflow-list.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -890,7 +895,7 @@ AC-RV-08：本功能已定规则按上述测试规格及既有AC验收；G-08列
 | FR-LIST-01/02/03/04/05/06 → AC-RV-09 | TC-RV-09-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 无权对象连总数均不可见；空库与无匹配区分；归档后链接停止 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-09 | TC-RV-09-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-09 | TC-RV-09-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第4/12项，无历史工作流回填；§9收藏/归档缺口不造列 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-09 | TC-RV-09-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-09 | TC-RV-09-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-09：本功能已定规则按上述测试规格及既有AC验收；G-09列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.1、§9.2、§18.3；能力清单 A；ADR Q11/Q12）
 
@@ -982,28 +987,28 @@ AC-RV-09：本功能已定规则按上述测试规格及既有AC验收；G-09列
 
 **数据模型、时间审计、索引与SQL**：workflows、definition_revisions、workflow_node_runs、node_cache、assets。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：node_cache_key；workflow_node_runs_attempt；节点Schema内部字段不额外建列。SQL证据：数据模型 §8.2节点意图查询、§8.3资产引用查询；图JSON不伪造可移植JSON索引。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §6、§9.2、§18.7/18.9/18.11；ADR Q06；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §6、§9.2、§18.7/18.9/18.11；ADR Q06；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发：注册表Schema/纯度/端口类型；用户：节点参数/缓存/目标/固定数据；运维：平台限额 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发：注册表Schema/纯度/端口类型；用户：节点参数/缓存/目标/固定数据；运维：平台限额 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1类型化编排/文本，S3媒体，S4模型检查，S5版本组件；不做 不让表达式读$env/secrets；人工/等待/触发/发送禁止缓存；Phone图只读；灰度 草稿保存与生产发布隔离，无额外开关。核心流程：搜节点→连线/参数→逐条预览→分阶段校验→保存草稿→发布→测试或生产；错误定位回字段。异常：语法/命令{{阻保存；缺凭据/主机/模型阻发布；预算缺价/目标未ready阻执行；其他警告。历史up/down：数据模型 §5.2第12/15项，graph schema/type_version按FR-PLAT-17检查；seed/组件载体待补；共用回退边界见§1b。三方：ferry-sandbox、节点适配器；媒体/模型依各分期。版本兼容：Ferry图JSON与Actions YAML并存；不导入n8n/ComfyUI格式；节点升级须确认。计算：默认并行循环4、执行节点并发8上限64；纯缓存20GiB/LRU；不适用税/库存/折扣。（来源：v3 §6、§9.2、§18.7/18.9/18.11；ADR Q06；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| EDIT.key | 请为该凭据配置单价，否则无法执行预算控制 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| EDIT.key | 请为该凭据配置单价，否则无法执行预算控制 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-EDIT-01–15 → AC-EDIT-01–11；AC-UI-01 / AC-RV-10 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①②③④⑤：连线、循环、缓存、位置、结果；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
-| [Desktop](images/03-node-detail.png) / [Pad](images/pad/03-node-detail.png) / [Phone](images/phone/03-node-detail.png) | ①②③④：输入参数输出；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/03-node-detail.html |
-| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：分阶段问题；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/04-problems-panel.html |
+| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①②③④⑤：连线、循环、缓存、位置、结果；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
+| [Desktop](images/03-node-detail.png) / [Pad](images/pad/03-node-detail.png) / [Phone](images/phone/03-node-detail.png) | ①②③④：输入参数输出；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/03-node-detail.html |
+| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：分阶段问题；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/04-problems-panel.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1011,7 +1016,7 @@ AC-RV-09：本功能已定规则按上述测试规格及既有AC验收；G-09列
 | FR-EDIT-01–15 → AC-RV-10 | TC-RV-10-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 语法/命令{{阻保存；缺凭据/主机/模型阻发布；预算缺价/目标未ready阻执行；其他警告 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-10 | TC-RV-10-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-10 | TC-RV-10-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第12/15项，graph schema/type_version按FR-PLAT-17检查；seed/组件载体待补 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-10 | TC-RV-10-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-10 | TC-RV-10-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-10：本功能已定规则按上述测试规格及既有AC验收；G-10列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §6、§9.2、§18.7/18.9/18.11；ADR Q06）
 
@@ -1064,26 +1069,26 @@ AC-RV-10：本功能已定规则按上述测试规格及既有AC验收；G-10列
 
 **数据模型、时间审计、索引与SQL**：注册表以代码/声明为源，无独立node_registry表；图内type_version；data_tables/rows、vector_collections/items见模型。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：数据表最多5索引列，i1..i5类型/索引待补；向量键与维度待补。SQL证据：已知意图查询见数据模型 §8.2；数据表/向量完整查询SQL因schema缺失源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §7.1/7.4、§18.3–§18.5；能力清单 B–H；ADR V6/V7/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §7.1/7.4、§18.3–§18.5；能力清单 B–H；ADR V6/V7/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发/扩展作者：节点Schema及版本枚举；用户：参数/绑定；服务商/家族待V6/V7选择，非硬编码全候选 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发/扩展作者：节点Schema及版本枚举；用户：参数/绑定；服务商/家族待V6/V7选择，非硬编码全候选 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1基础，S2AI/集成，S3云媒体，S4本地，S5长尾；清单逐行逐成员验收；不做 不兼容第三方插件/源码/格式；不提前承诺全部模型或完整训练；灰度 无（未验证成员保持未开始；按发布版本交付）。核心流程：分类/端口搜索→选节点版本→配置Schema与凭据→校验→运行→逐成员证据。异常：未知type/version拒绝、不静默丢字段；缺能力/平台不兼容说明原因。历史up/down：数据模型 §5.2第12/14/15/16项；未知格式不得隐式迁移；共用回退边界见§1b。三方：逐成员集成/API/数据库/模型服务商；V6/V7按S4/S3前选型。版本兼容：自有声明式/WASM/主机扩展；不加载n8n custom-node或ComfyUI插件。计算：表≤100000行/5索引列，SQLite/MySQL向量≤20000；不适用税/库存/折扣。（来源：v3 §7.1/7.4、§18.3–§18.5；能力清单 B–H；ADR V6/V7/Q15；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| NODE.key | 该节点尚未在当前分期交付，请查看能力清单。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| NODE.key | 该节点尚未在当前分期交付，请查看能力清单。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-NODE-01–06 → AC-NODE-01/02/03 / AC-RV-11 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①：节点库/类型过滤；各长尾成员专属设计待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
+| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①：节点库/类型过滤；各长尾成员专属设计待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1091,7 +1096,7 @@ AC-RV-10：本功能已定规则按上述测试规格及既有AC验收；G-10列
 | FR-NODE-01–06 → AC-RV-11 | TC-RV-11-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 未知type/version拒绝、不静默丢字段；缺能力/平台不兼容说明原因 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-11 | TC-RV-11-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-11 | TC-RV-11-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第12/14/15/16项；未知格式不得隐式迁移 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-11 | TC-RV-11-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-11 | TC-RV-11-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-11：本功能已定规则按上述测试规格及既有AC验收；G-11列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §7.1/7.4、§18.3–§18.5；能力清单 B–H；ADR V6/V7/Q15）
 
@@ -1152,26 +1157,26 @@ AC-RV-11：本功能已定规则按上述测试规格及既有AC验收；G-11列
 
 **数据模型、时间审计、索引与SQL**：webhook_endpoints、trigger_bindings/deliveries、workflow_executions、cron_jobs；trigger_state未定载体。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：webhook_endpoints_id及route唯一存在冲突评审缺口；bindings_lookup。SQL证据：数据模型 §8.1/8.2；测试窗口/轮询游标SQL源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.2、§12.2、§18.3/18.6/18.10；ADR D3/D11/D17/Q05；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.2、§12.2、§18.3/18.6/18.10；ADR D3/D11/D17/Q05；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：认证/来源/IP/回应模式/cron；运维：in-flight与公开来源；开发：协议/状态码；枚举原码未定待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：认证/来源/IP/回应模式/cron；运维：in-flight与公开来源；开发：协议/状态码；枚举原码未定待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1手动/定时/Webhook/表单，S2聊天/轮询；流水线上游P2；不做 不双写cron可编辑源；不让同步入口使用queue_latest/cancel_in_progress；灰度 测试仅调试窗口；生产需发布；公开访问空间默认关闭。核心流程：认证/CORS/IP→解析输入→容量校验→创建执行→即时/末节点/Respond回应→超时或等待可追踪。异常：认证失败不启动；满组503+Retry-After；等待202+执行ID；超时504后台继续；断连标未送达。历史up/down：数据模型 §5.2第6/12/14项，保留游标/投递账本，不补投旧事件；共用回退边界见§1b。三方：外部调用方、代码平台、轮询集成；验证码若启用依具体方案待补。版本兼容：Actions schedule拒绝；工作流cron节点唯一源；同步连接故障不可恢复。计算：同步30秒/1–300秒、64 in-flight仍受组限制；税/库存/折扣不适用。（来源：v3 §5.2、§12.2、§18.3/18.6/18.10；ADR D3/D11/D17/Q05；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| TRIG.key | 请求过于频繁，请稍后重试。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| TRIG.key | 请求过于频繁，请稍后重试。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-TRIG-01–07 → AC-TRIG-01–06；AC-PIPE-30 / AC-RV-12 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ①③④：公开触发；Webhook专属屏/状态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/11-public-form.html |
+| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ①③④：公开触发；Webhook专属屏/状态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/11-public-form.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1179,7 +1184,7 @@ AC-RV-11：本功能已定规则按上述测试规格及既有AC验收；G-11列
 | FR-TRIG-01–07 → AC-RV-12 | TC-RV-12-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 认证失败不启动；满组503+Retry-After；等待202+执行ID；超时504后台继续；断连标未送达 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-12 | TC-RV-12-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-12 | TC-RV-12-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第6/12/14项，保留游标/投递账本，不补投旧事件 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-12 | TC-RV-12-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-12 | TC-RV-12-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-12：本功能已定规则按上述测试规格及既有AC验收；G-12列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.2、§12.2、§18.3/18.6/18.10；ADR D3/D11/D17/Q05）
 
@@ -1259,27 +1264,27 @@ AC-RV-12：本功能已定规则按上述测试规格及既有AC验收；G-12列
 
 **数据模型、时间审计、索引与SQL**：workflow_executions/node_runs/execution_logs、execution_intents/parents、node_cache、execution_annotations。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：workflow_executions_dispatch/workflow/number；node_runs_attempt；logs_seq；execution_intents_once；标注索引未定。SQL证据：数据模型 §8.1租约、§8.2意图/父执行及日志；每次时间更新同时写xx_by。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.3/5.7、§18.6–§18.10/18.15；ADR Q10；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.3/5.7、§18.6–§18.10/18.15；ADR Q10；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：重跑范围/循环/并发/保存策略；运维：实例槽与树限额；开发：租约与状态枚举 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：重跑范围/循环/并发/保存策略；运维：实例槽与树限额；开发：租约与状态枚举 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S0执行列表，S1运行/重跑/队列，S3轮次/媒体，S4GPU等待；不做 不混cached/reused；不承诺外部exactly-once；数据清理后不局部重跑；灰度 无；P0可靠性升级全停；手动/生产版本选择不等于功能灰度。核心流程：身份/调用准入→排队租约→节点/轮次→人工/外部挂起→持久化恢复→终态→新重跑关联。异常：失租约拒写；预算不足/审核拒绝不重试；unknown不自动重提；数据清理解释原因。历史up/down：数据模型 §5.2第4/10/12项；不清意图/恢复输出；旧版不能执行图需隔离或备份恢复；共用回退边界见§1b。三方：Runner/SSH、外部服务适配器、GPU；各自幂等能力单独验证。版本兼容：生产身份发布者/重跑操作者/子继承；新旧轮次不可覆盖；全局队列仅当前空间可见。计算：节点次数默认5000上限50000；树默认20000；实例流水线4/工作流16/同步64独立；不适用税/库存/折扣。（来源：v3 §5.3/5.7、§18.6–§18.10/18.15；ADR Q10；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| RUN.key | 当前执行身份已无权访问目标主机，执行未启动。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| RUN.key | 当前执行身份已无权访问目标主机，执行未启动。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-RUN-01–13 → AC-RUN-01–13；AC-UI-02 / AC-RV-13 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/05-execution-detail.png) / [Pad](images/pad/05-execution-detail.png) / [Phone](images/phone/05-execution-detail.png) | ①②③④⑤：身份、轮次、复用与操作；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/05-execution-detail.html |
-| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ①②③④：筛选与集群等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/06-executions-queue.html |
+| [Desktop](images/05-execution-detail.png) / [Pad](images/pad/05-execution-detail.png) / [Phone](images/phone/05-execution-detail.png) | ①②③④⑤：身份、轮次、复用与操作；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/05-execution-detail.html |
+| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ①②③④：筛选与集群等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/06-executions-queue.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1287,7 +1292,7 @@ AC-RV-12：本功能已定规则按上述测试规格及既有AC验收；G-12列
 | FR-RUN-01–13 → AC-RV-13 | TC-RV-13-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 失租约拒写；预算不足/审核拒绝不重试；unknown不自动重提；数据清理解释原因 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-13 | TC-RV-13-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-13 | TC-RV-13-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第4/10/12项；不清意图/恢复输出；旧版不能执行图需隔离或备份恢复 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-13 | TC-RV-13-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-13 | TC-RV-13-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-13：本功能已定规则按上述测试规格及既有AC验收；G-13列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.3/5.7、§18.6–§18.10/18.15；ADR Q10）
 
@@ -1363,27 +1368,27 @@ AC-RV-13：本功能已定规则按上述测试规格及既有AC验收；G-13列
 
 **数据模型、时间审计、索引与SQL**：human_tasks/responses、workflow_node_runs、assets；30秒草稿/外链撤销已用与轮次关联字段待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：human_responses_once为流水线关联；图/外审/轮次幂等键缺口待补。SQL证据：数据模型 §8.2尝试查询；通用人工回应条件推进SQL缺键，源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.4、§10、§18.6–§18.8；v2 §13.1；ADR Q08/Q17；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.4、§10、§18.6–§18.8；v2 §13.1；ADR Q08/Q17；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：人员/角色/截止/策略/挑选N；开发：默认7天、72h、30秒和资格；完整枚举待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：人员/角色/截止/策略/挑选N；开发：默认7天、72h、30秒和资格；完整枚举待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1审批/表单/文本编辑；S2写作；S3媒体挑选编辑；不做 外部不成为空间成员；返回修改不原任务自动重开；自动保存不唤醒；灰度 公开/外审空间默认关闭，外链72h一次性可撤销。核心流程：节点挂起→资格/指派→30秒草稿→提交/退回→加密回应持久化→一次唤醒→图分支/重做→历史。异常：过期/撤销/已用拒绝；多人抢答只受理一次；超时非审批7天fail；取消后不再回应。历史up/down：数据模型 §5.2第7项：旧requires_approval不删，过渡策略待补；回退停接回应保留未完任务；共用回退边界见§1b。三方：无必选三方；机器人卡片可选；媒体预览依资产/服务商。版本兼容：审批重跑重做；表单挑选编辑默认复用可逐项改选；旧任务关联不伪造。计算：非审批7天fail；外链72h；自动保存30秒；重做遵while上限非固定3轮；税/库存/折扣不适用。（来源：v3 §5.4、§10、§18.6–§18.8；v2 §13.1；ADR Q08/Q17；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| HUM.key | 该审批任务已处理，请查看最新状态。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| HUM.key | 该审批任务已处理，请查看最新状态。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-HUM-01–11 → AC-HUM-01–13 / AC-RV-14 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/07-human-pick.png) / [Pad](images/pad/07-human-pick.png) / [Phone](images/phone/07-human-pick.png) | ①②③④：选择/反馈/重做/截止；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/07-human-pick.html |
-| [Desktop](images/08-human-edit.png) / [Pad](images/pad/08-human-edit.png) / [Phone](images/phone/08-human-edit.png) | ①②③④：编辑、对比、carry、退回提交；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/08-human-edit.html |
+| [Desktop](images/07-human-pick.png) / [Pad](images/pad/07-human-pick.png) / [Phone](images/phone/07-human-pick.png) | ①②③④：选择/反馈/重做/截止；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/07-human-pick.html |
+| [Desktop](images/08-human-edit.png) / [Pad](images/pad/08-human-edit.png) / [Phone](images/phone/08-human-edit.png) | ①②③④：编辑、对比、carry、退回提交；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/08-human-edit.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1391,7 +1396,7 @@ AC-RV-13：本功能已定规则按上述测试规格及既有AC验收；G-13列
 | FR-HUM-01–11 → AC-RV-14 | TC-RV-14-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 过期/撤销/已用拒绝；多人抢答只受理一次；超时非审批7天fail；取消后不再回应 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-14 | TC-RV-14-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-14 | TC-RV-14-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第7项：旧requires_approval不删，过渡策略待补；回退停接回应保留未完任务 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-14 | TC-RV-14-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-14 | TC-RV-14-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-14：本功能已定规则按上述测试规格及既有AC验收；G-14列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.4、§10、§18.6–§18.8；v2 §13.1；ADR Q08/Q17）
 
@@ -1448,26 +1453,26 @@ AC-RV-14：本功能已定规则按上述测试规格及既有AC验收；G-14列
 
 **数据模型、时间审计、索引与SQL**：definition_revisions、workflows/pipelines发布指针；正式发布名/归档字段待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：definition_revisions_number；版本名定义内唯一的正式键待补。SQL证据：数据模型 §8.3最近50/引用保护；发布名检查完整SQL因列未定待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §15；v3 §5.1、§18.6；ADR Q07/Q12/Q14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §15；v3 §5.1、§18.6；ADR Q07/Q12/Q14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：版本名/说明/发布确认；开发：版本比较/唯一规则；不由运维随时改历史 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：版本名/说明/发布确认；开发：版本比较/唯一规则；不由运维随时改历史 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S0版本与指针；P1流水线生产发布；S1完整编辑；不做 不覆盖不可变版本；不把元数据变化算实质版本；不清被引用/最近50版；灰度 草稿/发布是生产切换机制，无feature flag。核心流程：保存草稿→版本差异→填版本名/说明→确认身份→发布指针→后续触发；撤销/归档停止入口。异常：版本重名/为空/过长拒绝；身份未确认不切；409不覆盖其他修改。历史up/down：数据模型 §5.2第2/4项，现存定义首版、旧执行未知0；存量首次生产授权待补；共用回退边界见§1b。三方：无。版本兼容：D4由保存重绑修订为发布重绑；历史执行不改；恢复不自动生产。计算：保留最近50版与全部被执行引用版本；税/库存/折扣不适用。（来源：v2 §15；v3 §5.1、§18.6；ADR Q07/Q12/Q14；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| VER.key | 请选择本次执行使用的定义版本。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| VER.key | 请选择本次执行使用的定义版本。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-VER-01–04 → AC-VER-01–05 / AC-RV-15 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/15-publish-diff.png) / [Pad](images/pad/15-publish-diff.png) / [Phone](images/phone/15-publish-diff.png) | ①②③④：差异、名称、影响、身份确认；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/15-publish-diff.html |
+| [Desktop](images/15-publish-diff.png) / [Pad](images/pad/15-publish-diff.png) / [Phone](images/phone/15-publish-diff.png) | ①②③④：差异、名称、影响、身份确认；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/15-publish-diff.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1475,7 +1480,7 @@ AC-RV-14：本功能已定规则按上述测试规格及既有AC验收；G-14列
 | FR-VER-01–04 → AC-RV-15 | TC-RV-15-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 版本重名/为空/过长拒绝；身份未确认不切；409不覆盖其他修改 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-15 | TC-RV-15-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-15 | TC-RV-15-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第2/4项，现存定义首版、旧执行未知0；存量首次生产授权待补 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-15 | TC-RV-15-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-15 | TC-RV-15-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-15：本功能已定规则按上述测试规格及既有AC验收；G-15列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §15；v3 §5.1、§18.6；ADR Q07/Q12/Q14）
 
@@ -1529,26 +1534,26 @@ AC-RV-15：本功能已定规则按上述测试规格及既有AC验收；G-15列
 
 **数据模型、时间审计、索引与SQL**：assets、asset_refs、asset_tags；GC标记/固定资产历史追溯缺口。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：assets_sha256(workspace_id,sha256)唯一；asset_refs_owner唯一；asset_tags_tag。SQL证据：数据模型 §8.3去重、候选、引用保护SQL；NOT EXISTS只是候选非完整GC。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.5、§9.4、§12.1、§18.4/18.15；ADR V11/D2/D9；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.5、§9.4、§12.1、§18.4/18.15；ADR V11/D2/D9；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：标签/固定/上传；运维或空间配额管理资格源未定义，待补；开发：hash/引用策略；local/S3部署配置 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：标签/固定/上传；运维或空间配额管理资格源未定义，待补；开发：hash/引用策略；local/S3部署配置 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S0资产/存储，S3媒体预览与生成参数；不做 不跨空间共享权限；不将路径式流水线产物强转sha资产；不删仍有引用/固定资产；灰度 无。核心流程：上传/生成→同空间hash去重→建引用→浏览/插入/下载/追源→取消引用→无引用标记→24h复查→物理GC。异常：配额不足拒绝；文件/预览失败说明；删除并发新引用要保护；对象删除失败账本待补。历史up/down：数据模型 §5.2第5/15项：内容资产与路径产物并存，GC载体完整前不得启动物理GC；共用回退边界见§1b。三方：默认local，集群S3兼容存储；媒体元数据在主机/GPU产生。版本兼容：不跨库依赖JSON索引；对象存储与DB无跨系统原子承诺。计算：50GiB配额、同空间hash去重、24h引用宽限；税/库存/折扣不适用。（来源：v3 §5.5、§9.4、§12.1、§18.4/18.15；ADR V11/D2/D9；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| ASSET.key | 存储配额不足，请清理资产或调整工作空间配额。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| ASSET.key | 存储配额不足，请清理资产或调整工作空间配额。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-ASSET-01–04 → AC-ASSET-01/02；AC-UI-04 / AC-RV-16 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/09-assets-library.png) / [Pad](images/pad/09-assets-library.png) / [Phone](images/phone/09-assets-library.png) | ①②③：类型配额追溯；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/09-assets-library.html |
+| [Desktop](images/09-assets-library.png) / [Pad](images/pad/09-assets-library.png) / [Phone](images/phone/09-assets-library.png) | ①②③：类型配额追溯；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/09-assets-library.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1556,7 +1561,7 @@ AC-RV-15：本功能已定规则按上述测试规格及既有AC验收；G-15列
 | FR-ASSET-01–04 → AC-RV-16 | TC-RV-16-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 配额不足拒绝；文件/预览失败说明；删除并发新引用要保护；对象删除失败账本待补 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-16 | TC-RV-16-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-16 | TC-RV-16-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第5/15项：内容资产与路径产物并存，GC载体完整前不得启动物理GC | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-16 | TC-RV-16-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-16 | TC-RV-16-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-16：本功能已定规则按上述测试规格及既有AC验收；G-16列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.5、§9.4、§12.1、§18.4/18.15；ADR V11/D2/D9）
 
@@ -1617,26 +1622,26 @@ AC-RV-16：本功能已定规则按上述测试规格及既有AC验收；G-16列
 
 **数据模型、时间审计、索引与SQL**：cost_records、execution_intents、既有凭据/设置；credential关联/价格/预留结算载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：cost_records_workspace/execution；execution_intents_once；按credential账本键待补。SQL证据：数据模型 §8.2按币种SUM(amount_micros)；按凭据明细因credential关联待补不能声称完整。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §5.6、§7.5、§18.8/18.13；ADR Q06/Q11/V7；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §5.6、§7.5、§18.8/18.13；ADR Q06/Q11/V7；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：单价/币种/预算/max_cost/QPS并发；开发：计费单位与适配器幂等声明；无硬编码价格；修改周期由用户决定 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：单价/币种/预算/max_cost/QPS并发；开发：计费单位与适配器幂等声明；无硬编码价格；修改周期由用户决定 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S2文本AI/成本预算，S3媒体计费/幂等；不做 不内置服务商价表；不换汇；不把预算等同最终账单；不重提无幂等unknown；灰度 无（预算启用是业务配置，不是feature flag）。核心流程：配置凭据/模型/单价/币种→测试→预算校验→估算预留→调用→实际用量结算/释放→追踪账本。异常：预算启用缺价/不足拒执行；超QPS共同受限；内容审核拒绝不重试；未知提交人工核对。历史up/down：数据模型 §5.2第14/15项：无历史价格回填，不将缺价填0；回退保留预算/意图账本；共用回退边界见§1b。三方：模型API/原生适配器、账单用量；V7具体服务商S3前选。版本兼容：不同计费单位/币种分开；无价为—；预算预留不能用浮点金额。计算：cost=单价×实际用量，以整数micros记；余额=预算−已用−预留；每凭据币种不换汇，先预留后结算；舍入/跨月待补；税/库存/折扣不适用。（来源：v3 §5.6、§7.5、§18.8/18.13；ADR Q06/Q11/V7；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| AI.key | 请为该凭据配置单价，否则无法执行预算控制 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| AI.key | 请为该凭据配置单价，否则无法执行预算控制 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-AI-01–06；FR-EDIT-12；FR-STAT-02 → AC-AI-01–07；AC-STAT-03 / AC-RV-17 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/16-provider-credential.png) / [Pad](images/pad/16-provider-credential.png) / [Phone](images/phone/16-provider-credential.png) | ①②③④⑤：连接、价格、限流、预算、幂等；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/16-provider-credential.html |
+| [Desktop](images/16-provider-credential.png) / [Pad](images/pad/16-provider-credential.png) / [Phone](images/phone/16-provider-credential.png) | ①②③④⑤：连接、价格、限流、预算、幂等；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/16-provider-credential.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1644,7 +1649,7 @@ AC-RV-16：本功能已定规则按上述测试规格及既有AC验收；G-16列
 | FR-AI-01–06；FR-EDIT-12；FR-STAT-02 → AC-RV-17 | TC-RV-17-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 预算启用缺价/不足拒执行；超QPS共同受限；内容审核拒绝不重试；未知提交人工核对 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-17 | TC-RV-17-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-17 | TC-RV-17-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第14/15项：无历史价格回填，不将缺价填0；回退保留预算/意图账本 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-17 | TC-RV-17-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-17 | TC-RV-17-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-17：本功能已定规则按上述测试规格及既有AC验收；G-17列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §5.6、§7.5、§18.8/18.13；ADR Q06/Q11/V7）
 
@@ -1700,26 +1705,26 @@ AC-RV-17：本功能已定规则按上述测试规格及既有AC验收；G-17列
 
 **数据模型、时间审计、索引与SQL**：models、host_models、hosts.gpu_slots。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：models/host_models无新增二级索引；主机模型去重键源未定义，待补。SQL证据：模型§4 DDL可查字段；主机模型筛选/并发下载SQL与索引源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §8、§12.1、§18.4；能力清单 F/H；ADR V6/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §8、§12.1、§18.4；能力清单 F/H；ADR V6/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：模型/许可记录与目标主机；开发：已支持模型矩阵；运维：驱动/CUDA；家族开放集合待V6 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：模型/许可记录与目标主机；开发：已支持模型矩阵；运维：驱动/CUDA；家族开放集合待V6 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S4首批本地推理，S5长尾/训练辅助；不做 不镜像分发上游权重；不承诺所有硬件/单模型多GPU分片/完整训练平台；灰度 无（首批家族S4前选，未验证保留未开始）。核心流程：登记许可/版本/hash→首用限制确认→主机直下载→hash验证ready→GPU排队→加载推理→预览/取消/卸载。异常：hash错不ready；显存不足排队不崩溃；许可缺失/拒绝确认不启动；断网下载失败可查。历史up/down：数据模型 §5.2第16项：GPU槽0不影响旧Runner；回退停GPU调度保留权重/记录；共用回退边界见§1b。三方：NVIDIA驱动/CUDA、上游模型权重/许可；用户Windows/Linux真实主机。版本兼容：仅明确支持矩阵；V6型号待选；多槽不等单模型分片；原主机流水线槽不批量重分。计算：gpu_slots=首次GPU数量后用户可调；实际显存等待；税/库存/折扣不适用。（来源：v3 §8、§12.1、§18.4；能力清单 F/H；ADR V6/Q15；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| GPU.key | 目标主机缺少该模型，请先下载并校验。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| GPU.key | 目标主机缺少该模型，请先下载并校验。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-GPU-01–05 → AC-GPU-01/02/03；AC-UI-04 / AC-RV-18 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/10-model-library.png) / [Pad](images/pad/10-model-library.png) / [Phone](images/phone/10-model-library.png) | ①②③④：模型许可、主机状态、确认、下载；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/10-model-library.html |
+| [Desktop](images/10-model-library.png) / [Pad](images/pad/10-model-library.png) / [Phone](images/phone/10-model-library.png) | ①②③④：模型许可、主机状态、确认、下载；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/10-model-library.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1727,7 +1732,7 @@ AC-RV-17：本功能已定规则按上述测试规格及既有AC验收；G-17列
 | FR-GPU-01–05 → AC-RV-18 | TC-RV-18-02 | Given 本功能异常或边界输入，When 执行对应操作，Then hash错不ready；显存不足排队不崩溃；许可缺失/拒绝确认不启动；断网下载失败可查 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-18 | TC-RV-18-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-18 | TC-RV-18-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第16项：GPU槽0不影响旧Runner；回退停GPU调度保留权重/记录 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-18 | TC-RV-18-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-18 | TC-RV-18-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-18：本功能已定规则按上述测试规格及既有AC验收；G-18列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §8、§12.1、§18.4；能力清单 F/H；ADR V6/Q15）
 
@@ -1790,26 +1795,26 @@ AC-RV-18：本功能已定规则按上述测试规格及既有AC验收；G-18列
 
 **数据模型、时间审计、索引与SQL**：webhook_endpoints、workspaces公开开关、workflow_executions、assets、human_tasks；上传/聊天配置载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：入口唯一键、资产hash键；会话/限频窗口持久化索引源未定义，待补。SQL证据：数据模型 §8.3上传去重/引用；公开会话/结果授权完整SQL源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §9.5/9.6、§18.6；ADR V9/V15/Q09/Q18；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §9.5/9.6、§18.6；ADR V9/V15/Q09/Q18；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户/管理员：字段/限制/验证码开关（资格细节待补）；运维：FERRY_PUBLIC_ORIGIN；开发：CSP与默认限制 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户/管理员：字段/限制/验证码开关（资格细节待补）；运维：FERRY_PUBLIC_ORIGIN；开发：CSP与默认限制 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1表单/外审，S2聊天，S3应用模式，S5只读分享；不做 公开者不获得后台会话/菜单/执行身份；不默认开放匿名访问；灰度 workspace公开访问默认关闭，开启后生成链接；生产使用发布版。核心流程：公开开关/发布→填写/上传→认证/限频/清洗→受理执行→等待→受限结果；失败区分未受理与已受理。异常：类型/大小/数量/配额错误就地；超频拒绝；失败保留文本/有效引用；已受理不自动重投。历史up/down：数据模型 §5.2第4/12/14项；公开开关不能迁移为默认开；历史受限token不扩大权限；共用回退边界见§1b。三方：对象存储与模型服务；验证码供应商源未定义，待补；浏览器公开origin。版本兼容：FERRY_PUBLIC_ORIGIN推荐，未配同源CSP回退不读会话；后台登录Cookie不成为公开权限。计算：文件与请求限额按服务端生效值；税/库存/折扣不适用。（来源：v3 §9.5/9.6、§18.6；ADR V9/V15/Q09/Q18；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PUBLIC.key | 文件不符合此表单的类型、大小或数量限制，请调整后重试。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PUBLIC.key | 文件不符合此表单的类型、大小或数量限制，请调整后重试。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PUBLIC-01–06 → AC-PUBLIC-01–09；AC-UI-03 / AC-RV-19 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ①②③④：多页/上传/限频/隔离；结果异常态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/11-public-form.html |
+| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ①②③④：多页/上传/限频/隔离；结果异常态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/11-public-form.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1817,7 +1822,7 @@ AC-RV-18：本功能已定规则按上述测试规格及既有AC验收；G-18列
 | FR-PUBLIC-01–06 → AC-RV-19 | TC-RV-19-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 类型/大小/数量/配额错误就地；超频拒绝；失败保留文本/有效引用；已受理不自动重投 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-19 | TC-RV-19-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-19 | TC-RV-19-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第4/12/14项；公开开关不能迁移为默认开；历史受限token不扩大权限 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-19 | TC-RV-19-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-19 | TC-RV-19-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-19：本功能已定规则按上述测试规格及既有AC验收；G-19列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §9.5/9.6、§18.6；ADR V9/V15/Q09/Q18）
 
@@ -1866,26 +1871,26 @@ AC-RV-19：本功能已定规则按上述测试规格及既有AC验收；G-19列
 
 **数据模型、时间审计、索引与SQL**：pipeline_run_notifications、execution_intents、human_responses；workflow通用通知归属待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：pipeline_run_notifications_once；图通知唯一键源未定义，待补。SQL证据：数据模型 §8.2意图查询；workflow通知SQL缺归属待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §14；v3 §18.2/18.8；ADR D7；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §14；v3 §18.2/18.8；ADR D7；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：事件/渠道/提及；开发：渠道适配与状态；运维：服务端密钥；i18n未引入 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：事件/渠道/提及；开发：渠道适配与状态；运维：服务端密钥；i18n未引入 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1/S1通用通知，S2人工卡片回调；不做 不含邮件；不重发unknown，不形成审批旁路；灰度 无。核心流程：定义配置→启动/等待/终态事件→发送账本→单次投递→失败警告；卡片回调→同人工回应闭环。异常：重定向拒随；服务失败不改执行结果；接管未知不重发；重复卡片回应拒绝。历史up/down：数据模型 §5.2第11项：保留sending/unknown账本、回退停发；不补发旧事件；共用回退边界见§1b。三方：Webhook/钉钉/飞书/企业微信。版本兼容：事件started与执行running区分；至多一次，不声称exactly-once。计算：通知每次仅单次投递；税/库存/折扣不适用。（来源：v2 §14；v3 §18.2/18.8；ADR D7；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| NOTIFY.key | 通知发送失败，执行结果不受影响。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| NOTIFY.key | 通知发送失败，执行结果不受影响。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-NOTIFY-01/02/03 → AC-NOTIFY-01/02 / AC-RV-20 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/05-execution-detail.png) / [Pad](images/pad/05-execution-detail.png) / [Phone](images/phone/05-execution-detail.png) | ⑤：关联执行/人工状态，专属通知屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/05-execution-detail.html |
+| [Desktop](images/05-execution-detail.png) / [Pad](images/pad/05-execution-detail.png) / [Phone](images/phone/05-execution-detail.png) | ⑤：关联执行/人工状态，专属通知屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/05-execution-detail.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1893,7 +1898,7 @@ AC-RV-19：本功能已定规则按上述测试规格及既有AC验收；G-19列
 | FR-NOTIFY-01/02/03 → AC-RV-20 | TC-RV-20-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 重定向拒随；服务失败不改执行结果；接管未知不重发；重复卡片回应拒绝 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-20 | TC-RV-20-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-20 | TC-RV-20-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第11项：保留sending/unknown账本、回退停发；不补发旧事件 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-20 | TC-RV-20-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-20 | TC-RV-20-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-20：本功能已定规则按上述测试规格及既有AC验收；G-20列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §14；v3 §18.2/18.8；ADR D7）
 
@@ -1961,27 +1966,27 @@ AC-RV-20：本功能已定规则按上述测试规格及既有AC验收；G-20列
 
 **数据模型、时间审计、索引与SQL**：既有成员/角色/操作记录；Q03 ACL正式表未给；发布身份列见模型。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：ACL/审计扩展检索索引源未定义，待补；不造ACL表。SQL证据：空间作用域提取沿既有代码；对象ACL完整SQL源未定义，待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：总方案 §4/§6/§8；v3 §11/§18.6；ADR Q03/Q14/D14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：总方案 §4/§6/§8；v3 §11/§18.6；ADR Q03/Q14/D14；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户（权限管理资格）：成员/角色/对象授权；开发：判定公式和权限依赖；运维不靠环境变量绕过对象鉴权 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户（权限管理资格）：成员/角色/对象授权；开发：判定公式和权限依赖；运维不靠环境变量绕过对象鉴权 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 现有空间扁平权限；P2对象/分组授权；随模块记录关键事件；不做 无显式deny；对象授权不能突破空间上限；画像不新增内置角色；灰度 无；D14 P2，不造临时all替代。核心流程：路径提取空间→成员/空间权限上限→对象与组并集→敏感操作/执行身份复核→审计结果。异常：跨空间/越权/撤权实时拒绝；隐藏入口不能替代API鉴权；不得伪造公开/子调用身份。历史up/down：数据模型 §5.2第4/13项及§9 ACL缺口；不回填虚假历史操作者；旧权限行为不能混入新all；共用回退边界见§1b。三方：无新增必选三方；外部OAuth2/密钥库按PLAT分期。版本兼容：空间权限仍上限；D14 P2；D4按发布重绑修订；既有角色继续有效。计算：权限集合交并集，无金额；税/库存/折扣不适用。（来源：总方案 §4/§6/§8；v3 §11/§18.6；ADR Q03/Q14/D14；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| AUTH.key | 你没有处理此任务的权限。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| AUTH.key | 你没有处理此任务的权限。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-AUTH-01–05 → AC-AUTH-01–07 / AC-RV-21 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/15-publish-diff.png) / [Pad](images/pad/15-publish-diff.png) / [Phone](images/phone/15-publish-diff.png) | ④：身份确认；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/15-publish-diff.html |
-| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ④：绕过；专属ACL屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/14-environment-protection.html |
+| [Desktop](images/15-publish-diff.png) / [Pad](images/pad/15-publish-diff.png) / [Phone](images/phone/15-publish-diff.png) | ④：身份确认；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/15-publish-diff.html |
+| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ④：绕过；专属ACL屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/14-environment-protection.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -1989,7 +1994,7 @@ AC-RV-20：本功能已定规则按上述测试规格及既有AC验收；G-20列
 | FR-AUTH-01–05 → AC-RV-21 | TC-RV-21-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 跨空间/越权/撤权实时拒绝；隐藏入口不能替代API鉴权；不得伪造公开/子调用身份 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-21 | TC-RV-21-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-21 | TC-RV-21-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第4/13项及§9 ACL缺口；不回填虚假历史操作者；旧权限行为不能混入新all | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-21 | TC-RV-21-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-21 | TC-RV-21-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-21：本功能已定规则按上述测试规格及既有AC验收；G-21列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；总方案 §4/§6/§8；v3 §11/§18.6；ADR Q03/Q14/D14）
 
@@ -2045,26 +2050,26 @@ AC-RV-21：本功能已定规则按上述测试规格及既有AC验收；G-21列
 
 **数据模型、时间审计、索引与SQL**：pipeline_contexts.protection、human_tasks/responses、pipeline_run_jobs。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：human_responses_once；环境沿用已有键；图通用人审键待补。SQL证据：数据模型 §8.2尝试读取；完整会签条件写因通用关联缺口待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §13.0–§13.1；ADR D12/D15；流水线清单 H；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §13.0–§13.1；ADR D12/D15；流水线清单 H；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 环境编辑者：人员/角色/会签/ref/超时动作/自审绕过；开发：默认false和数值范围；枚举源见模型§6 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 环境编辑者：人员/角色/会签/ref/超时动作/自审绕过；开发：默认false和数值范围；枚举源见模型§6 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 P1环境配置/门禁/会签；不做 不以平台管理员默认绕过；环境规则不属于YAML可删除节点；灰度 自审与管理员绕过每环境显式开启，默认关闭；无feature flag。核心流程：环境编辑保存保护→ref准入→前置门→会签→通过下发变量；拒绝/超时按策略终止。异常：角色删除资格为空继续等待；同人重复票无效；非法ref拒绝；0分钟无限。历史up/down：数据模型 §5.2第7/8项：NULL原行为，不删旧requires_approval；旧版无门禁不能直接回退；共用回退边界见§1b。三方：无新增三方；通知卡片可选。版本兼容：重跑重新门禁/审批，不复用保护结论；旧审批过渡待补。计算：不同人数会签1–10；超时0–43200分钟；税/库存/折扣不适用。（来源：v2 §13.0–§13.1；ADR D12/D15；流水线清单 H；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| ENV.key | 拒绝执行前，请填写意见。 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| ENV.key | 拒绝执行前，请填写意见。 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-ENV-01–04 → AC-ENV-01–04 / AC-RV-22 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ①②③④：全保护配置及阻断执行；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/14-environment-protection.html |
+| [Desktop](images/14-environment-protection.png) / [Pad](images/pad/14-environment-protection.png) / [Phone](images/phone/14-environment-protection.png) | ①②③④：全保护配置及阻断执行；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/14-environment-protection.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -2072,7 +2077,7 @@ AC-RV-21：本功能已定规则按上述测试规格及既有AC验收；G-21列
 | FR-ENV-01–04 → AC-RV-22 | TC-RV-22-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 角色删除资格为空继续等待；同人重复票无效；非法ref拒绝；0分钟无限 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-22 | TC-RV-22-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-22 | TC-RV-22-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第7/8项：NULL原行为，不删旧requires_approval；旧版无门禁不能直接回退 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-22 | TC-RV-22-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-22 | TC-RV-22-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-22：本功能已定规则按上述测试规格及既有AC验收；G-22列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §13.0–§13.1；ADR D12/D15；流水线清单 H）
 
@@ -2124,28 +2129,28 @@ AC-RV-22：本功能已定规则按上述测试规格及既有AC验收；G-22列
 
 **数据模型、时间审计、索引与SQL**：无新增状态页表；依原执行/任务/资产/模型表。无独立新增时间字段；原资源按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：无（复用原资源查询索引）。SQL证据：无独立SQL；读取证据见数据模型 §8.2/8.3。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：总方案 §7–§8；v3 §9.2–§9.6、§18.7/18.14；ADR Q08/Q09；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：总方案 §7–§8；v3 §9.2–§9.6、§18.7/18.14；ADR Q08/Q09；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发：状态视图/中文整句；用户：保留的本地输入与URL过滤；不新增状态配置中心 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发：状态视图/中文整句；用户：保留的本地输入与URL过滤；不新增状态配置中心 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 随页面交付加载/空态/错误/并发/恢复；不做 不把错误当空图/伪成功；不在受理后自动创建第二执行；灰度 无。核心流程：首次加载/刷新→状态区分→保留本地输入→显示错误/有效历史→显式重试→核对版本→恢复或只读。异常：编辑失败、409、节点未运行/未保存/已清理、任务竞争、公开受理后失败、资产/模型空库。历史up/down：无独立迁移；数据清理/旧状态识别依数据模型 §5.2/§6；共用回退边界见§1b。三方：无额外三方；读取依所属资源。版本兼容：共享错误/空态/409规则，HTML静态按钮不当后端实现。计算：不适用（页面状态无独立计算；税/库存/折扣不适用）。（来源：总方案 §7–§8；v3 §9.2–§9.6、§18.7/18.14；ADR Q08/Q09；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| UI.key | 这条记录已被他人修改，请刷新后重试 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| UI.key | 这条记录已被他人修改，请刷新后重试 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-EDIT-13；FR-RUN-10；FR-PUBLIC-01；FR-AUTH-01 → AC-UI-01–04；AC-HUM-13；AC-PUBLIC-08/09 / AC-RV-23 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：仅校验错误；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/04-problems-panel.html |
-| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ③④：等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/06-executions-queue.html |
-| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ②③：上传/限频；其他异常态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/11-public-form.html |
+| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：仅校验错误；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/04-problems-panel.html |
+| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ③④：等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/06-executions-queue.html |
+| [Desktop](images/11-public-form.png) / [Pad](images/pad/11-public-form.png) / [Phone](images/phone/11-public-form.png) | ②③：上传/限频；其他异常态待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/11-public-form.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -2153,7 +2158,7 @@ AC-RV-22：本功能已定规则按上述测试规格及既有AC验收；G-22列
 | FR-EDIT-13；FR-RUN-10；FR-PUBLIC-01；FR-AUTH-01 → AC-RV-23 | TC-RV-23-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 编辑失败、409、节点未运行/未保存/已清理、任务竞争、公开受理后失败、资产/模型空库 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-23 | TC-RV-23-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-23 | TC-RV-23-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 无独立迁移；数据清理/旧状态识别依数据模型 §5.2/§6 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-23 | TC-RV-23-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-23 | TC-RV-23-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-23：本功能已定规则按上述测试规格及既有AC验收；G-23列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；总方案 §7–§8；v3 §9.2–§9.6、§18.7/18.14；ADR Q08/Q09）
 
@@ -2319,27 +2324,27 @@ AC-RV-23：本功能已定规则按上述测试规格及既有AC验收；G-23列
 
 **数据模型、时间审计、索引与SQL**：execution_annotations、data_tables/rows、definition_revisions、图JSON；扩展/组件/同步完整载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：标注检索/data_rows索引/组件引用键源未定义，待补；不猜value_hash。SQL证据：数据模型 §8.2/8.3已知意图/版本；评测/标注/Git/扩展完整SQL因schema缺口待补。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v3 §9/§15/§18.2–§18.5；能力清单 A/E；ADR V12/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v3 §9/§15/§18.2–§18.5；能力清单 A/E；ADR V12/Q15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发/扩展作者：schema/SDK；用户：模板、设置、目的地/同步；运维：外部密钥服务；完整枚举待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发/扩展作者：schema/SDK；用户：模板、设置、目的地/同步；运维：外部密钥服务；完整枚举待补 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1导航/Schema/设置/标注/模板，S2MCP/评测/规范，S3组件/批次，S5同步/外送/密钥库/SDK/AI编排；不做 不嵌第三方代码/插件；不将评测当生产成功；不自动发布AI生成/Git拉取；队首不抢占；灰度 草稿/发布；其他无；证据缺口保持未开始。核心流程：清单行→成员→FR/AC→配置/执行→实际结果→证据状态；生成/同步只进草稿→校验→用户发布。异常：未知版本拒绝；Git冲突保原定义；外部密钥失败零调用；外送脱敏失败可查；过期结果不当有效。历史up/down：数据模型 §5.2第12/14/15项；旧图版本检查；新扩展隔离，不改冻结历史；共用回退边界见§1b。三方：OAuth2/MCP/OTLP/Vault/KMS/Git/LLM与节点服务商按成员验证。版本兼容：type_version检查不静默丢字段；第三方格式不导入；节点版本升级需确认。计算：批次每项独立编号；无抢占；评测未运行/失败不算通过；税/库存/折扣不适用。（来源：v3 §9/§15/§18.2–§18.5；能力清单 A/E；ADR V12/Q15；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| PLAT.key | 主机节点以 Runner 的身份执行 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| PLAT.key | 主机节点以 Runner 的身份执行 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：FR-PLAT-01–20；FR-LIST-06 → AC-PLAT-01–20；AC-LIST-05 / AC-RV-24 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①⑤：节点与结果；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
-| [Desktop](images/03-node-detail.png) / [Pad](images/pad/03-node-detail.png) / [Phone](images/phone/03-node-detail.png) | ③④：设置/输出；S2–S5专属屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/03-node-detail.html |
+| [Desktop](images/02-workflow-editor.png) / [Pad](images/pad/02-workflow-editor.png) / [Phone](images/phone/02-workflow-editor.png) | ①⑤：节点与结果；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/02-workflow-editor.html |
+| [Desktop](images/03-node-detail.png) / [Pad](images/pad/03-node-detail.png) / [Phone](images/phone/03-node-detail.png) | ③④：设置/输出；S2–S5专属屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/03-node-detail.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -2347,7 +2352,7 @@ AC-RV-23：本功能已定规则按上述测试规格及既有AC验收；G-23列
 | FR-PLAT-01–20；FR-LIST-06 → AC-RV-24 | TC-RV-24-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 未知版本拒绝；Git冲突保原定义；外部密钥失败零调用；外送脱敏失败可查；过期结果不当有效 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-24 | TC-RV-24-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-24 | TC-RV-24-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第12/14/15项；旧图版本检查；新扩展隔离，不改冻结历史 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-24 | TC-RV-24-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-24 | TC-RV-24-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-24：本功能已定规则按上述测试规格及既有AC验收；G-24列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v3 §9/§15/§18.2–§18.5；能力清单 A/E；ADR V12/Q15）
 
@@ -2440,27 +2445,27 @@ AC-RV-24：本功能已定规则按上述测试规格及既有AC验收；G-24列
 
 **数据模型、时间审计、索引与SQL**：租约/执行/日志/意图/资产表；无独立nfr表。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：执行dispatch/concurrency、logs_seq、意图唯一；数据/向量缺口沿模型。SQL证据：数据模型 §8.1条件租约SQL；§5.1三库方言差异；不将候选SQL当完整安全调度。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：v2 §8/§19.5/§21–§25；v3 §14/§18.10–§18.15；总方案 §7–§8；ADR V13/V15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：v2 §8/§19.5/§21–§25；v3 §14/§18.10–§18.15；总方案 §7–§8；ADR V13/V15；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 开发：固定安全边界；运维/平台：实例槽、白名单、树限额；用户：定义限额；各值来源见NFR-CAP，不全当可配 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 开发：固定安全边界；运维/平台：实例槽、白名单、树限额；用户：定义限额；各值来源见NFR-CAP，不全当可配 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 各分期容量/恢复/安全/三库/两形态/响应式；不做 不发明页面毫秒SLA；不承诺外部exactly-once或主机代码沙箱；不声称三库迁移已验证；灰度 P0-1全停升级；公开访问默认关闭；无feature flag。核心流程：配置限额→边界校验→超限反馈→运行/降级→故障接管→审计与证据；真实环境验收另存证据。异常：租约栅栏/45秒接管、SSE降级、DNS重绑定/SSRF、沙箱恶性正则中断、限额/截断、窗口/取消。历史up/down：数据模型 §5.2全部：追加builder、schema_tests三库，自动down返回错误；旧唯一键验证；回退全停备份保schema；共用回退边界见§1b。三方：数据库三种、S3可选、Runner/SSH、sandbox、GPU驱动/服务商；真实外部验收前置。版本兼容：Docker/桌面Tauri；Windows/Linux Runner；Windows act既有模式；PG pgvector可选，不能强加其他库。计算：45秒接管/漂移<5秒；所有CAP上下界；税/库存/折扣不适用。（来源：v2 §8/§19.5/§21–§25；v3 §14/§18.10–§18.15；总方案 §7–§8；ADR V13/V15；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| NFR.key | 我了解提示注入风险 | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| NFR.key | 我了解提示注入风险 | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：NFR-CAP-01–10；NFR-REL-01–03；NFR-SEC-01–05；NFR-COMP-01–03；NFR-OBS-01；NFR-UX-01/02 → AC-CAP-01–04；§10验收总则 / AC-RV-25 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ③④：容量/等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/06-executions-queue.html |
-| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：问题；故障/拒绝完整状态设计待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/04-problems-panel.html |
+| [Desktop](images/06-executions-queue.png) / [Pad](images/pad/06-executions-queue.png) / [Phone](images/phone/06-executions-queue.png) | ③④：容量/等待；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/06-executions-queue.html |
+| [Desktop](images/04-problems-panel.png) / [Pad](images/pad/04-problems-panel.png) / [Phone](images/phone/04-problems-panel.png) | ①②③④：问题；故障/拒绝完整状态设计待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/04-problems-panel.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -2468,7 +2473,7 @@ AC-RV-24：本功能已定规则按上述测试规格及既有AC验收；G-24列
 | NFR-CAP-01–10；NFR-REL-01–03；NFR-SEC-01–05；NFR-COMP-01–03；NFR-OBS-01；NFR-UX-01/02 → AC-RV-25 | TC-RV-25-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 租约栅栏/45秒接管、SSE降级、DNS重绑定/SSRF、沙箱恶性正则中断、限额/截断、窗口/取消 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-25 | TC-RV-25-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-25 | TC-RV-25-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2全部：追加builder、schema_tests三库，自动down返回错误；旧唯一键验证；回退全停备份保schema | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-25 | TC-RV-25-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-25 | TC-RV-25-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-25：本功能已定规则按上述测试规格及既有AC验收；G-25列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；v2 §8/§19.5/§21–§25；v3 §14/§18.10–§18.15；总方案 §7–§8；ADR V13/V15）
 
@@ -2525,27 +2530,27 @@ AC-RV-25：本功能已定规则按上述测试规格及既有AC验收；G-25列
 
 **数据模型、时间审计、索引与SQL**：pipeline_runs/jobs、workflow_executions/node_runs、cost_records、pipeline_run_reports；等待累计/时区载体待补。本模块新表/存量新增时间按数据模型 §2配每个xx_at同前缀xx_by BIGINT NOT NULL DEFAULT 0；0=system；不回填猜测历史操作者。索引：runs_pipeline/workflow_executions_workflow、cost_records_workspace/execution、reports_run；等待桶索引未定。SQL证据：数据模型 §8.2分币SUM；统计成功率/MTTR示例见本节评审补充，等待/凭据键缺失不伪造完整SQL。（来源：数据模型 §2/§4/§5/§8/§9）
 
-**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前无多语言设置。（来源：ADR Q11/Q19/review follow-up；流水线清单 M1；v3 §5.6/5.7、§18.13；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状无i18n）：
+**配置来源表**：按§1c.7对应开发发布/运维重启/平台立即/用户保存发布生效，当前已有语言设置，新功能复用六语言资源。（来源：ADR Q11/Q19/review follow-up；流水线清单 M1；v3 §5.6/5.7、§18.13；总方案 §7/§8；src/components/dsl.ts、ResourceForm.tsx；现状已有六语言i18n）：
 
 | 配置项/来源 | 修改主体与频率 | 多语言/枚举 |
 |---|---|---|
-| 用户：筛选和凭据单价；空间时区默认服务器，配置权限/载体源未定义，待补；开发：公式/空样本规则；枚举随真实状态 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示中文硬编码，en-US/ms-MY仍待澄清R01 |
+| 用户：筛选和凭据单价；空间时区默认服务器，配置权限/载体源未定义，待补；开发：公式/空样本规则；枚举随真实状态 | 按已授权用户/开发/运维来源修改；生效按§1c.7：开发发布/运维重启/平台立即/用户保存发布，无固定周期 | 业务枚举见数据模型 §6；展示沿用现有六语言资源机制，en-US/ms-MY译文待编制L10N-01 |
 | 原型数据/截图 | 静态示意，非配置中心 | 不得将示例金额/模型/人员或3轮当平台默认 |
 
 **影响与兼容**：本期 S1工作流统计/待办，S2成本/评测，P2流水线MTTR/job失败率/报告；不做 不换汇；不把无价/无分母当0；不重复计reused；评测不算生产成功率；灰度 无。核心流程：选择空间/定义/时间/版本→权限过滤样本→时区分桶→公式聚合→原始执行对账→跳回样本。异常：零分母—；未恢复单列；缺价—不混金额总额；无权样本不入列表和总数。历史up/down：数据模型 §5.2第3/13/14项，旧revision未知0；不回填猜测等待/价格/来源；共用回退边界见§1b。三方：无新增必选三方；用量来自服务商，不等最终账单；评测LLM可选。版本兼容：Q11与M1口径统一；原始执行不因聚合重写；reused不重复记运行。计算：成功率=succeeded/(succeeded+failed)；job失败率=failed/(succeeded+failed)仅实际执行；耗时扣排队/纯等待；MTTR为同定义失败结束至下次成功结束间隔的已恢复均值；成本按凭据币种micros不换汇；税/库存/折扣不适用。（来源：ADR Q11/Q19/review follow-up；流水线清单 M1；v3 §5.6/5.7、§18.13；数据模型 §5.2；NFR-COMP-01–03）
 
-**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一仍待澄清R01（§1c.9））：
+**文案表**（zh-CN来自原PRD提示/必需文案、v3、共享组件或RESPONSIVE中的原文；不据此引入i18n。en-US/ms-MY统一译文待编制L10N-01（§1c.9））：
 
 | 场景/文案键（评审标识） | zh-CN | en-US | ms-MY | ms-MY 长度预留 |
 |---|---|---|---|---|
-| STAT.key | — | 仍待澄清 R01 | 仍待澄清 R01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
+| STAT.key | — | 译文待编制 L10N-01 | 译文待编制 L10N-01 | 允许比zh-CN长≥40%；换行/区域滚动保持完整操作，不代表已有翻译 |
 
 **验收追踪与响应式交付**：STAT-01–04；FR-STAT-01–04 → AC-STAT-01–06 / AC-RV-26 → 下表测试规格。规则对应原型编号；异常按§6.16文字，无独立截图，正常业务专属屏缺口仍逐项列出（§1c.8）；无Figma，Figma screen/variant不适用（当前交付为HTML+PNG），不能声称Figma覆盖。D=1440×900、P=768×1024、M=390×844，full-page PNG可高于视口；断点/键盘/Phone只读图规则见[RESPONSIVE.md](prototypes/RESPONSIVE.md)。
 
 | Desktop / Pad / Phone截图 | 编号与覆盖边界 |
 |---|---|
-| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ③：近7日成本；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/01-workflow-list.html |
-| [Desktop](images/16-provider-credential.png) / [Pad](images/pad/16-provider-credential.png) / [Phone](images/phone/16-provider-credential.png) | ④：已用/预留；MTTR/job失败率专属屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant仍待澄清R01（§1c.8）；HTML为prototypes/16-provider-credential.html |
+| [Desktop](images/01-workflow-list.png) / [Pad](images/pad/01-workflow-list.png) / [Phone](images/phone/01-workflow-list.png) | ③：近7日成本；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/01-workflow-list.html |
+| [Desktop](images/16-provider-credential.png) / [Pad](images/pad/16-provider-credential.png) / [Phone](images/phone/16-provider-credential.png) | ④：已用/预留；MTTR/job失败率专属屏待补；异常/权限视觉按§6.16文字，无独立截图；长文本按RESPONSIVE验收，语言variant译文待编制L10N-01（§1c.8）；HTML为prototypes/16-provider-credential.html |
 
 | 规则→AC | 测试用例（规格，未执行） | Given / When / Then | 设计/状态证据 |
 |---|---|---|---|
@@ -2553,7 +2558,7 @@ AC-RV-25：本功能已定规则按上述测试规格及既有AC验收；G-25列
 | STAT-01–04；FR-STAT-01–04 → AC-RV-26 | TC-RV-26-02 | Given 本功能异常或边界输入，When 执行对应操作，Then 零分母—；未恢复单列；缺价—不混金额总额；无权样本不入列表和总数 | 异常视觉交互见§6.16文字，无独立截图，不代表已实测（§1c.8） |
 | FR-AUTH-01–05 → AC-RV-26 | TC-RV-26-03 | Given 跨空间/无权成员或失效公开令牌，When 绕过界面直接请求，Then 拒绝且不产生本次业务副作用；公开者不获得后台权限 | 权限拒绝专属状态待补 |
 | 数据模型 §5.2 → AC-RV-26 | TC-RV-26-04 | Given 升级前历史夹具与新状态，When 按迁移方案up/人工回退评审，Then 数据模型 §5.2第3/13/14项，旧revision未知0；不回填猜测等待/价格/来源 | 后端迁移规格，无Figma/截图适用 |
-| §1b/RESPONSIVE → AC-RV-26 | TC-RV-26-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant仍待澄清R01（§1c.8） |
+| §1b/RESPONSIVE → AC-RV-26 | TC-RV-26-05 | Given 三布局与中文及长度≥140%的排版占位文本，When 查看本功能操作与错误，Then 核心字段/按钮不被遮挡；Phone图只读、区域内滚动；翻译内容未验收 | 三端基础PNG+callout见上表；异常按§6.16文字，无独立截图；语言variant译文待编制L10N-01（§1c.8） |
 
 AC-RV-26：本功能已定规则按上述测试规格及既有AC验收；G-26列出的来源缺口须补来源/设计后才可认定对应能力验收通过。本次为需求文档审查，不声称运行测试、迁移或真实三方通过。（来源：用户评审清单；§10；ADR Q11/Q19/review follow-up；流水线清单 M1；v3 §5.6/5.7、§18.13）
 
@@ -2679,11 +2684,11 @@ AC-RV-26：本功能已定规则按上述测试规格及既有AC验收；G-26列
 | Q18 | 上传类型由字段声明，配置上限200 MB/文件及20文件；聊天每会话每分钟20条，上传沿用表单规则 | FR-PUBLIC-02/03/06；AC-PUBLIC-06/07 | 2026-11-02 |
 | Q19 | 按工作空间时区（默认服务器时区）分桶，耗时排除纯等待，零分母「—」；恢复时间按同定义失败至下次成功的间隔求平均，补充按任务失败率 | FR-STAT-01/03/04；AC-STAT-02/04–06；STAT-01 | 2026-11-02 |
 
-### 仍待澄清
+### 语言事项与待决入口
 
 | 编号 | 仍待澄清事项 | 已知事实/不作决定 | 影响与追踪 |
 |---|---|---|---|
-| R01 | 是否引入i18n，以及若引入时的范围、交付分期、语言资源维护责任与验收方式，由产品负责人确认。 | 当前无i18n框架，UI为硬编码zh-CN；本稿仅交付关键中文，en-US/ms-MY均仍待澄清R01；≥40%长度预留只是布局要求。 | 全模块文案/配置；§1b及所有模块文案表；不由本稿默认引入或排除i18n。 |
+| R01 | 已关闭：当前已有六语言i18n，无需重新引入。 | locale.ts、server/src/i18n.rs；新功能译文归L10N-01。 | 本轮事实修正，非新产品决定；PDR-01～06见§15.10。 |
 
 原Q04、Q08/Q09、Q11细节已由ADR follow-up解决并记Q16–Q19；未定物理字段/来源证据按§14标待补，不重新打开已确认决议。
 
@@ -2729,8 +2734,8 @@ AC-RV-26：本功能已定规则按上述测试规格及既有AC验收；G-26列
 | 共用缺口 | 状态与处理 | 追踪 |
 |---|---|---|
 | 完整字段/状态码与物理Schema | 待补：数据模型 §9专属物理缺口保留，已由§1c解决的全局口径（如许可审计载荷、默认保留/名称）不再算缺口，包括发布名/归档、人工/外审/草稿、数据/向量、GC、身份/计数器/时区/等待、成本预留、完整码、Webhook、ACL/公开配置（许可审计details按§1c.1）、历史过渡、手动任务/备注/收藏/名单/保留策略；不可部署占位DDL | 各G-01–26；数据模型 §5.2/§9 |
-| 文案与翻译 | zh-CN关键文案已列；错误按§1c.4；所有en-US/ms-MY仍待澄清R01（§1c.9） | 各模块文案表；§1b；R01 |
-| 设计稿/状态variants | 无Figma，HTML+48张三端PNG已标记替代；异常/空/权限/409/受理后结果按§6.16文字，无独立截图；语言仍待澄清R01；正常长尾专属屏仍待补（§1c.8） | 各模块三端表/TC-RV-xx-05；RESPONSIVE |
+| 文案与翻译 | zh-CN关键文案已列；错误按§1c.4；所有en-US/ms-MY译文待编制L10N-01（§1c.9） | 各模块文案表；§1b；R01 |
+| 设计稿/状态variants | 无Figma，HTML+48张三端PNG已标记替代；异常/空/权限/409/受理后结果按§6.16文字，无独立截图；语言译文待编制L10N-01；正常长尾专属屏仍待补（§1c.8） | 各模块三端表/TC-RV-xx-05；RESPONSIVE |
 | 发布/测试/真实环境证据 | 文档自查不是实现测试；AC与TC为验收规格，三库迁移、旧数据up/down、Runner/SSH/GPU/三方幂等与真实账单需后续实现阶段举证 | §10；NFR；数据模型 §5.2 |
 
 ### 14.3 SQL示例的使用范围
@@ -2758,3 +2763,621 @@ GROUP BY currency;
 ~~~
 
 租约/发件箱、尝试日志/意图、引用/两阶段GC候选SQL分别引用数据模型 §8.1/§8.2/§8.3。执行非终态、资产仍有引用、已固定或GC宽限未过时不得以候选查询直接物理删除。所有新时间写入配xx_by；存量原时间不批量补审计。索引名/字段及三库差异以数据模型 §4/§5.1为准。（来源：数据模型 §2/§8）
+
+## 15. v1.5 缺口补充与评审（2026-11-03）
+
+### 15.1 效力、现状与评审方法
+
+本轮由用户要求“先补充缺口，做好评审”。§1–14的FR/AC/TC编号及已确认产品决定保留。§14的G编号是稳定发现编号；下表给出当前处理，不再把“源未定义”本身当交付。来源分为：**事实修正**（当前代码可证）、**技术补充**（本轮为已确认功能选择实现契约，未开发）、**产品建议PDR**（有具体方案，但等待产品确认）、**阶段验收**（有测试规格，尚无实现证据）。后两类不计为已确认/已实测。
+
+本轮直接执行，未委派代理；先自评，再以ADR、原始33维清单和失败场景作第二遍验收审查。第二遍是同一执行者复核，不冒称独立人员评审。评审范围为PRD、数据模型、自查三份文档，不重新设计界面或制造截图。
+
+| 旧结论 | 当前事实及证据 | 对本设计的影响 |
+|---|---|---|
+| 无i18n、是否引入框架待决 | `src/shared/i18n/locale.ts`已有en-US/zh-CN/zh-TW/ja-JP/ko-KR/ms-MY，默认en-US；`crates/server/src/i18n.rs`有相同Locale和请求协商 | R01范围疑问关闭；复用六语言。新功能全文案资源仍待交付，不能拿既有资源证明新功能译文完成。 |
+| 流水线调度串行、触发全是manual | `crates/server/src/pipelines/runs.rs`已有JoinSet、workspace并发限制和trigger_as；`crates/server/src/cron_jobs.rs`传schedule | 保留既有行为；P0只补缺失的租约、栅栏、安全恢复及持久化容量控制。 |
+| 重启恢复已经安全 | runs.rs scheduler仍清扫全部running/cancelling；finish和append_record无执行租约条件 | P0-1仍阻断多实例执行交付；洞察采集租约不等于流水线租约。 |
+| 时间单位未知 | `crates/server/src/db.rs::now`返回UTC Unix毫秒 | 新列统一毫秒，duration_ms/waiting_ms毫秒；不得改存量时间尺度。 |
+| 每次保存等于发布 | ADR Q14：发布才绑定自动执行身份 | 草稿保存不重绑、不启动生产触发；版本名是发布标签，与每次保存的修订号分开。 |
+
+### 15.2 共用数据与API契约
+
+**资源定位。** 定义统一用`(workspace_id, subject_kind, subject_id)`，执行统一用`(workspace_id, subject_kind, execution_id)`；kind仅pipeline/workflow。API路径中的workspace由Scope验证；每次加载关联项再次验证同空间、正确kind和父子关系。全局雪花ID不能替代空间过滤。前端ID始终字符串，数据库BIGINT。旧`pipeline_id/run_id`在尚未上线的新共用表中直接使用通用列名；现有pipeline_*业务表保留旧列，适配器转换，不对已发布API破坏性改名。
+
+**写入。** 配置对象使用version条件写，冲突409；不可变修订与运行快照禁止PATCH。运行者写入runs/jobs/steps/logs/output/intent/预算结算须校验当前执行lease_epoch；人工回应等用户写入独立鉴权并在事务中唤醒执行，不伪装为运行者。指令受理返回202与操作/执行ID，终态结果从资源读取，不把202当执行成功。API错误沿用项目本地化Message/fields机制，不另建数字错误码。
+
+**版本。** 保存规范化信封：对象键稳定排序，YAML源文本保留字节和注释；与当前草稿相同不增修订。修订号在定义锁/事务内分配。发布标签单独绑定不可变revision_id，名称遵已确认Q07的1–64字符、同定义唯一；原message是修订说明，发布change_note是独立≤200字符。不同发布可指向同一修订，生产身份由实际发布动作记录；重复请求须依幂等键返回原发布，不重复授权。恢复历史只产生新草稿，不修改旧快照。
+
+**列表与恢复。** 失效资源返回404，详情页保留地址并给返回当前资源列表入口；无权返回403，不自动导航到其他空间，也不泄露名称。保存冲突保留本地草稿，刷新先显示服务端差异；“重新应用”只重放用户选中的字段，对图按稳定node/edge ID展示冲突，不自动合并YAML、脚本或删除节点。提交仍带新version，冲突再次409。没有持久化副作用的新建草稿关闭前提示有未保存修改。
+
+**删除和归档。** 已确认Q12不变：归档撤销生产入口、保留历史，恢复为草稿。状态列为active/archived，未发布指针用NULL，归档事务同时清空published_revision_id。没有用户明确授权时不把老流水线自动发布；迁移策略见PDR-04。删除只接受归档定义，检查活动执行、等待任务和被引用修订；删除定义不能级联删除固定资产或别的定义。保留期0永久，不新增默认30/90天；未设置覆盖值用NULL继承空间配置，显式0仍永久。
+
+### 15.3 G-01～G-26逐项补充与验收
+
+| 编号 | 补充契约与具体处理 | 本轮结论 / 验收条件 |
+|---|---|---|
+| G-01 | 失效/无权资源按§15.2；返回列表保留合法筛选，引用不存在显示既有“已删除（ID …）”，不以0作名称。 | 技术补充完成；TC-G01：删除资源后刷新详情404，原筛选可恢复；跨空间403且无名称。 |
+| G-02 | 五类输入的Schema、标识、发布标签、收藏/备注模型按§15.4和模型§10；收藏属于用户关系，备注属于执行，不塞YAML。 | 输入长度等新增产品上限依PDR-01；发布名及关联技术补齐。TC-G02：相同定义不增版、注释保留、重名发布409、秘密不入导出。 |
+| G-03 | trigger_bindings.subject_id、trigger_deliveries.execution_id；投递唯一键含workspace/kind/subject/dedupe/redelivery_seq。发布事务更新绑定，投递消费时冻结revision/identity。 | 模型§10.2/10.7；TC-G03：同事件同目标只一执行；不同目标/手动redelivery隔离；归档后无新生产执行。 |
+| G-04 | 执行备注单独带作者/version；缓存失效与单产物保留用可空覆盖设置。旧产物无法解析时保留原文件和行，标legacy_unresolved，拒绝被新部署/重跑自动使用并列出人工映射入口；禁止伪造哈希/名称。 | 不可解析策略为保护历史的技术处理；保留默认不变。TC-G04：回填可重入、原字节不变、修复映射后校验hash再使用。 |
+| G-05 | 手动任务复用human_tasks(kind=manual_start)，启动用version/状态条件写，至多一次；失败跳过仅P2且对象all、仅failed/timed_out主机job，保留原attempt/日志。已跳过不可“撤销”改写历史；要重新执行走新run。 | 撤销行为建议PDR-02；TC-G05：双击/双客户端一次受理、拒绝跳过审批/部署/保护门。 |
+| G-06 | 环境保护配置schema及ref匹配按§15.5；旧requires_approval保留兼容读取，存量waiting审批不迁移成通过，不删除旧字段。新任务/回应模型按§10。 | 超时/绕过细节依PDR-02/04；TC-G06：去掉YAML审批仍被门禁阻挡，门禁前不下发secret。 |
+| G-07 | deploy意图unknown不自动重试。展示脱敏目标、意图ID、发起时间、已知external_id；有部署读取权限才能看外部详情。人工关联已有部署须同空间同目标、核验时间与输入摘要并记录审计；不能只输入“成功”。 | 手工处置权限和确认输入依PDR-02；TC-G07：提交后宕机仅查询/关联，不第二次部署。K8s蓝绿/灰度仍跟应用计划，原型缺口不声称补图。 |
+| G-08 | 通知账本通用subject_kind/execution_id；event闭集见§15.6；同channel/event的至多一次状态CAS先标started再外发，接管不重复发。channel地址是凭据引用，模板脱敏。 | 手动补发依PDR-03；TC-G08：发送后宕机不重发，未知显示可能已发送，不能承诺必达。 |
+| G-09 | workflows.group_id复用pipeline_contexts的workflow_group；用户收藏表独立，归档按§15.2；definition_tags关联既有tags，不复用host_tags。模型§11.1给授权先于分页/计数SQL及索引。 | 描述/标签长度依PDR-01。TC-G09：A收藏不影响B、改组不改直接对象ACL但实时重算分组继承权限、归档停入口。 |
+| G-10 | 图schema/type_version固定；节点端口/参数manifest见§15.4，执行参数和种子在node_run快照，iteration_path/redo_round入缓存身份；组件引用绑定不可变版本。 | Schema技术契约补齐；每个节点成员manifest和S3组件专属图仍为阶段交付。TC-G10：升级先diff、未知版本拒绝、重做产生新键、历史参数不漂移。 |
+| G-11 | 节点注册表以type+type_version为主键，manifest含参数Schema/端口/位置/纯度/权限/凭据槽/能力证据。数据表/向量模型按§10.3。 | V6/V7选型依PDR-06，不能为了销项指定账号或模型；每个清单成员保留未开始直至行为证据。TC-G11：拒绝未知参数、维度错误、跨空间读写。 |
+| G-12 | endpoint_id全局随机唯一；method/mode是同一入口配置，不用一个ID挂多个地址资源；测试窗口和响应状态单独表。稳定生产URL由发布指针解析，不能被草稿覆盖。轮询游标先落durable delivery再推进。 | 认证格式、唯一键见模型§10.7；HTTP方法等产品集合依PDR-03。TC-G12：测试过期拒绝、同入口方法不匹配405、同步503/202/504、接管后未送达可查。 |
+| G-13 | 图终态及节点完整状态见§15.6；运行/等待区间由execution_waits持久化，转换时更新waiting_ms；标注、备注、调用许可模型见§10。 | 字段补齐；排队优先级权限依PDR-05。TC-G13：重启不重复累计、暂停恢复不换revision、清理中间数据后拒绝局部重跑。 |
+| G-14 | human_tasks包含状态/执行/节点/iteration/attempt/round/指派快照/截止；human_responses引用task_id，唯一(task_id,responder_key)。草稿独立、按本人version保存，回应事务使任务终结或推进会签。外审token只存hash、72小时、可撤销，轮换旧token失效。 | 非审批默认7天fail、返回意见≤500已确认；会签N须1≤N≤去重后可响应人数，角色成员资格提交时复查，不借历史快照扩权。外部资格依PDR-02。TC-G14：并发同一人一票、草稿不算回应、撤销后零副作用。 |
+| G-15 | 发布标签/日志和current指针分开，草稿/发布/归档原子写；执行冻结revision_id与发布身份快照。 | 模型§10.2；历史生产授权依PDR-04。TC-G15：保存不发布/不重绑；发布失败不替换旧入口；恢复只生成草稿。 |
+| G-16 | asset_gc_jobs存待删除对象/最早删除时间/尝试/错误；按资产短锁串行“建引用/固定/开始删除”。先删对象成功再删元数据；未知删除结果通过HEAD/重试核对。已开始删除的对象拒绝新增引用，上传相同哈希等待清理完成再重建。参数摘要/来源保留在资产provenance，日志清理不移除固定资产追溯。 | 24小时宽限沿用v3；模型§10.4。TC-G16：在宽限内重新引用取消GC；删除失败重试；没有跨DB/对象存储原子事务承诺。 |
+| G-17 | 成本表加id/credential/quantity_micros/price快照和reservation关联；budget_buckets与reservations原子预留，外部未知结果不释放预留；实付超估算记真实值并标overrun。 | 舍入/跨月/限流建议PDR-05；模型§10.5。TC-G17：并发只一预留、不重复结算、不混币、unknown不凭超时释放、跨月按原桶结算。 |
+| G-18 | host_models唯一(workspace,host,model)，下载任务按该键持久化状态与已收字节/hash错误；临时文件完成后校验sha256再原子改名ready。失败残留不被推理读取，清理须确认无活动下载/推理引用。许可确认沿用activity details，不另造授权许可证。 | 模型§10.6；gpu_slots范围/型号硬件依PDR-01/06。TC-G18：重复下载只有一个写者、坏hash不ready、drain不接新槽。 |
+| G-19 | 公共配置在定义版本中，链接/会话/上传限频为独立资源；token只存hash，查询只见本会话执行。上传上限按已确认Q09/Q18，类型按字段声明，入站流式先限额再存储；不直接请求用户提供的URL。 | 验证码服务商依PDR-06；会话时长等新默认依PDR-03。TC-G19：关闭空间公开立即拒绝、过期/撤销拒绝、上传超限中止且无孤儿资产、无后台cookie授权。 |
+| G-20 | 与G-08使用同一通知服务与账本；workflow错误触发也必须有源execution_id和链路深度，不能通知循环无限创建执行。 | 重发与失败重试语义依PDR-03；TC-G20：相同工作流通知不重复、跨空间凭据拒绝、通知失败不改源运行终态。 |
+| G-21 | ACL表按(workspace,subject_kind,subject_id,user_id,role)唯一，owner来自定义owner_id；对资源分组的授权与直接对象授权取并集后与workspace权限取交集，服务端先过滤再分页/计数。转让事务核对新owner仍有edit，CAS写owner与审计。 | 模型§10.8；转让确认输入依PDR-02。TC-G21：有对象all但无workspace edit仍拒绝、对象移组后旧组继承权限立即失效、总数不泄露。 |
+| G-22 | 共用G-06 schema；环境policy随执行保存快照，但在授予secret前再次核对授权和环境状态；审批通过不等于允许已删除目标。 | 审批默认/旧规则过渡依PDR-02/04。TC-G22：旧审批不自动放行、bypass仅开关启用且独立权限/审计。 |
+| G-23 | 409只提供三方差异和用户显式选择，不默认字段覆盖；重放请求用新version仍可能409。提交受理与最终结果分开；删除/权限丢失保留本地草稿供脱敏复制。 | 技术补充完成；TC-G23：同时修改同字段/删节点/改脚本均无静默合并，离线失败不清本地草稿。 |
+| G-24 | §15.7给20项逐项输入/持久化/状态/验收交付，不以画布入口算实现；组件/同步/扩展用版本化文档而非无限新增SQL表。 | TC-G24：逐项执行§15.7正反例，关联原AC-PLAT-01～20。长尾专属屏、manifest及三方行为证据是阶段门槛；评测/同步技术载体补齐，未提前宣称可开发全部S2–S5。 |
+| G-25 | §15.8给双实例/三库/Runner/SSH/GPU/沙箱明确实验矩阵，不能用空SQLite DDL证明迁移。新配置须声明来源、单位、默认、上限、权限及何时生效。 | 安全底座P0/S1为阻断门；资源上限PDR-01。TC-G25：断DB22秒自熔断、旧epoch所有写拒绝、断桥/SSH真实进程状态留证。 |
+| G-26 | timezone配置来自空间设置并按已确认默认回退服务器；统计窗口UTC毫秒[start,end)，分桶采用IANA时区并处理DST。成功率/恢复时间/等待按§15.9与模型§10.9。 | 时间窗口为现有SQL一致的技术补充，时区写权限依PDR-05；统计专属屏仍待阶段交付。TC-G26：跨月/DST/零分母/多币/未恢复/反复等待对账。 |
+
+### 15.4 输入Schema、节点manifest与文案
+
+已确认输入五类型不变。输入定义对象为`{name,type,description,required,default,options}`；boolean默认必须布尔，number必须有限数，choice默认必须属于去重后的options，environment的值是本空间环境ID且要校验访问资格；string不隐式trim用户正文。未知输入按现有dispatch_inputs行为处理，新增节点参数对unknownProperties必须在manifest明确allow或reject，禁止悄悄丢失。产品上限、number范围及键正则建议见PDR-01，不能用VARCHAR宽度当校验规则。
+
+节点manifest版本化文档包含`type/type_version/impl_version`、`input_schema/output_ports`、`parameter_schema`、`credential_slots`、`location`、`purity`、`required_permissions`、`limits`、`capability_ids`。Schema子集以§16及[可机读契约说明](schemas/README.md)的实际关键字为准；不接受远程$ref或可执行默认值。端口兼容、表达式返回类型和绑定范围在保存/发布/运行分别按Q06校验；某节点无manifest禁止发布，不能把通用JSON当“全部节点字段已定义”。
+
+代码/JS/HTTP/媒体等每个清单成员实施前必须交付：完整manifest、最小成功样例、输入边界、错误/限流/超时、权限/凭据、缓存/幂等、导入导出往返、三布局与六语言、许可/真实平台证据。模型/服务商具体参数以选型和官方API版本冻结后写入，不提前编造。
+
+语言事实以§15.1为准，复用现有t()/Message，不新增翻译框架；不翻译用户脚本、平台原始错误、节点数据和日志。语言切换不改数据；请求和通知语言分别解析，后台投递不依赖浏览器当前语言。新增通知语言配置仍是设计，不能宣称当前已支持多渠道语言。以下为本稿新增关键文案候选，尚未经人工母语审核；其余文案表的“译文待编制L10N-01”不可算翻译验收。
+
+| key | zh-CN | en-US | ms-MY |
+|---|---|---|---|
+| workflow.revisionConflict | 定义已被修改，请比较差异后重试。 | The definition has changed. Review the differences and try again. | Definisi telah berubah. Semak perbezaan dan cuba lagi. |
+| workflow.leaseLost | 执行控制权已转移，正在停止本实例的任务。 | Execution ownership has changed. Stopping this instance's tasks. | Pemilikan pelaksanaan telah berubah. Tugas pada tika ini sedang dihentikan. |
+| workflow.responseUndelivered | 同步回应未送达，执行仍在继续。 | The synchronous response was not delivered. Execution is continuing. | Respons segerak tidak dapat dihantar. Pelaksanaan masih diteruskan. |
+| workflow.intentUnknown | 外部操作结果未知，请核对后处理。 | The external operation's result is unknown. Verify it before taking action. | Keputusan operasi luaran tidak diketahui. Sahkan sebelum mengambil tindakan. |
+| workflow.budgetPriceMissing | 请为该凭据配置单价，否则无法执行预算控制。 | Configure unit prices for this credential before enforcing budgets. | Tetapkan harga unit bagi kelayakan ini sebelum menguatkuasakan bajet. |
+| workflow.dataExpired | 中间数据已清理，只能全部重跑。 | Intermediate data has been removed. Only a full rerun is available. | Data perantaraan telah dipadamkan. Hanya pelaksanaan semula penuh tersedia. |
+
+zh-TW/ja-JP/ko-KR及上述候选人工校对并入L10N-01；任何新页面的发布门槛为六语言键/插值/复数/日期/错误一致、无原始键泄漏、ms-MY长文不遮挡。现有48截图没有这些语言variant，不能抵扣此项。
+
+### 15.5 环境保护与Webhook配置
+
+保护JSON对象：`{allowed_refs, reviewers:{user_ids,role_ids,min_approvals,prevent_self_review}, timeout_minutes,on_timeout,allow_admin_bypass}`。ID为字符串，引用只能同空间且去重；min_approvals不超过当前可响应人集合。allowed_refs匹配事件的完整`refs/heads/...`或`refs/tags/...`；建议glob采用与现有分支过滤相同的`*`/`**`规则，保存时编译校验，拒绝负模式和非法表达式；按已确认PDR-02，空列表不额外限制ref，默认审批24小时且超时reject。不能把匹配展示分支名误当完整ref。
+
+Webhook认证为带类型的配置：`none`、`secret_header`（header_name及credential_ref）、`basic`（credential_ref）；实际允许的种类由PDR-03定。密钥只由vault引用，不进图/URL/审计。入口method明确列表、auth schema不能混用；同endpoint_id只允许一个配置资源，test/production窗口以mode作请求路由校验，不撤销ID唯一性。CORS是精确origin列表，带cookie/credentials的通配符拒绝；IP允许列表解析CIDR，客户端IP只信受信代理。SSRF/出站代理策略复用既有主机/HTTP安全约束，不能由节点绕过。
+
+### 15.6 状态、原因码与通知
+
+| 对象 | 状态闭集 / 语义 |
+|---|---|
+| 定义 | active/archived；draft/published由指针表达，不能把有新草稿等同已撤销发布 |
+| workflow_execution | queued/running/waiting/cancelling/succeeded/failed/cancelled；cancelling为取消已受理且清理未完，不得直接当终态 |
+| node_run | pending/queued/running/waiting/succeeded/failed/timed_out/cancelled/skipped/bypassed/cached/pinned/reused；失败但继续以failed+error_policy=continue及错误条目表达，不伪装成功；主执行按图策略聚合 |
+| pipeline_step | queued/running/succeeded/failed/cancelled/skipped；timeout用failed+end_reason=step_timeout，不能套job的approved/reused |
+| human_task | waiting/completed/rejected/returned/expired/cancelled；decision允许approve/reject/submit/returned/start，必须与kind匹配；终态不可重开，重跑新建任务 |
+| trigger_delivery | pending/processing/created/skipped/failed；processing有租约，created必须已有execution_id，执行与投递状态同事务提交 |
+| intent | pending/started/done/unknown；unknown只能核对外部结果再关联或按产品授权人工解决，不能因租约过期自动重发 |
+| notification | pending/started/sent/failed/unknown；状态迁移提供至多一次而非必达；started后崩溃记unknown |
+| host_model | missing/downloading/verifying/ready/failed/removing；模型ready必须hash验证通过 |
+
+新增状态码为本轮技术设计闭集，不代表当前API已支持；实施前应对现有worker事件做映射回归。end_reason按已有v2取值，图侧补paused、node_failed、budget_exceeded、model_unavailable、permission_revoked、execution_timeout；消息通过本地化key映射，不能把自由错误文本存进码。
+
+通知建议事件为execution.succeeded/failed/cancelled/waiting与job.failed/skipped；每条配置显式订阅，不自动给所有旧渠道加新事件。skip指单job被人工跳过，与整个执行cancelled区分。新增event及重发产品策略按已确认PDR-03；同一事件需同时含对象类型、执行ID、节点可空、event_key与revision，旧pipeline通知adapter可继续使用原事件名。
+
+### 15.7 二十项平台能力的交付契约
+
+共用：配置随图修订保存；事件/游标/执行结果与不可变图分开。下面每项均须更新原AC-PLAT同编号的验收夹具与证据，不能用一个通用manifest关闭所有能力。
+
+| FR-PLAT | 输入/持久化与状态 | 正例和失败验收 |
+|---|---|---|
+| 01 画布辅助 | graph.ui存节点/组/中转/便签/布局，不参与执行语义hash | 重新打开一致；键盘可用；改颜色不使节点重跑 |
+| 02 过期标记 | draft变化集按node_id+下游闭包计算，旧node_run保持不可变 | 一支参数变化只使该闭包过期，不改另一支输出 |
+| 03 搜索/入口 | manifest索引；运行请求entry_node_id，冻结进执行context | 多入口必须选择；非法/无权入口400/403且无run |
+| 04 日志进度 | 运行事件seq；按node/iteration汇总已终态/已展开节点数，未知总数显示进行中 | SSE续接不重复；扩展循环不能以假100%提前结束 |
+| 05 标注 | execution_annotations含执行复合键、key/value及检索hash | 节点写入后授权列表可搜；跨空间计数不可见 |
+| 06 设置 | settings JSON绑定修订，timezone/timeout/save_data/error_workflow引用校验 | 关保存警告；错误处理链不得无限自调；运行快照不随草稿变 |
+| 07 OAuth2 | 复用凭据/OAuth生命周期，state一次性并绑定发起者/空间，令牌vault封装 | 拒绝state复用、错误回调/过期授权、导出无令牌 |
+| 08 变量 | 现有variables解析，授权读取时快照，敏感值只走凭据 | 变量改动不改旧历史；表达式无$env/secrets读取旁路 |
+| 09 模板导入导出 | Ferry schema文档、节点版本和binding引用，导入先内存校验后保存草稿 | 往返不丢参数；未知版本拒绝且原草稿不变 |
+| 10 MCP | 工具Schema映射workflow入口，auth执行身份及call_allowlist | 非白名单/跨空间/输入不合法零子执行；深度受限 |
+| 11 评测 | evaluation模式，context记录数据表版本/行ID/评分规则；逐行结果在node输出资产 | 运行中缺失/失败不能计pass；不同样本版本禁止当同批对比 |
+| 12 外送 | settings中目的地凭据引用；delivery复用outbox机制但独立event_key | 重试/unknown可查；脱敏失败不发；消费者按事件键去重 |
+| 13 外密钥 | credential配置provider/ref/version；按执行身份取值不落图 | KMS/Vault不可用零下游调用，无空值或旧明文回退 |
+| 14 Git同步 | graph settings记录连接/仓库/ref/path；sync_state记录last_commit/hash/version | pull只草稿，冲突展示base/local/remote；push用预期SHA防覆盖 |
+| 15 SDK | 扩展manifest/type_version/包hash/许可；验证后注册，禁任意服务端脚本加载 | 权限和沙箱不可绕过，未知接口版本拒绝，旧修订仍可解析 |
+| 16 AI编排 | 输入目标和当前图，输出仅候选patch/图；校验通过才可用户保存草稿 | 幻觉节点/越权绑定拒绝，LLM结果不自动发布/执行 |
+| 17 版本检查 | graph.schema_version+各node.type_version，升级器输出diff | 无升级器时只读/拒绝运行，不静默删字段 |
+| 18 组件 | 内联组件文档含ports/subgraph；引用组件绑定revision+hash | 内部类型不越GPU运行段；升级不变旧发布版本 |
+| 19 批次/队首 | run.context.batch_id/index；优先级来自已授权操作，不能写任意SQL优先级 | 重试请求不重复批次，队首不抢占，限额按PDR-05 |
+| 20 精确参数 | node_run.resolved_params/seed/redo_round，媒体输入为资产ID/hash；历史只读 | 重开旧执行参数逐字一致；遮罩生成新资产；过期资产明确不可恢复 |
+
+### 15.8 验收分层与阻断门槛
+
+| 阶段 | 必须保存的真实证据 | 不得替代 |
+|---|---|---|
+| 文档本轮 | 表格列数、858矩阵逐格一致、所有G映射、DDL字段/索引/审计配对、SQLite约束正反例、有效本地链接 | 这不是运行引擎/迁移/三方验收 |
+| P0 | 双实例共享DB：kill A→45秒内接管；启动B不改A；旧epoch对runs/jobs/steps/logs/intent写均拒绝；DB断22秒取消流；4槽+审批挂起；同实例同主机1槽互斥 | 单实例unit/空表DDL不能证明集群安全 |
+| S0/P1 | SQLite/PG/MySQL旧数据升级和重跑、停止旧实例检查、发布身份撤销、重复事件/意图、对象GC并发、旧产物保护；Runner真实命令与SSH真实sshd断连 | 保留原业务数据与凭据，不在用户生产实例注入故障 |
+| S1 | 独立低权沙箱Win/Linux（macOS方案须现平台验证）、超内存/超时/正则中断/吞吐；图恢复与Merge/Loop真值表；同步HTTP503/202/504 | QuickJS可编译不证明OS隔离；macOS sandbox-exec可用性未证实，必须验证后再承诺 |
+| S2 | 预算并发/跨月/unknown、数据表类型/索引、向量维度/距离/20000边界、样本评测；全币种逐凭据对账 | 假账单/估算不等于真实付费验收 |
+| S3–S5 | 具体云服务商/模型/硬件/许可冻结；下载故障/GPU显存与取消；SDK与各清单成员的成功/失败/幂等 | 服务商占位、模型家族名、菜单按钮不等于已覆盖 |
+| 视觉/语言 | 缺少的手动任务、unknown、统计、ACL、应用聊天和长尾专属屏，三布局与六语言、键盘、明暗主题及真实交互 | 现48张静态原型不抵扣新增屏/variant；本轮未重绘/重渲染 |
+
+P0未过，不能以新触发器放大既有执行风险；S1沙箱未过，不开放不受信JS；V6/V7未定，不承诺具体节点参数和效果。阶段顺序仍沿用ADR，本轮不创建开发任务分解。
+
+### 15.9 统计与金额的精确定义
+
+取样窗口UTC毫秒`start <= finished_at < end`，前端发送ISO/IANA选择，服务端解析为UTC；未终态、cancelled不进成功率分母。日/月桶边界用空间IANA时区构造后转UTC，不能把一天固定为86400000毫秒；时区变更只影响下一次查询，历史原始时间不改。
+
+active_duration_ms=`max(0, finished_at-started_at-waiting_ms)`；排队从created到首次started另列；waiting区间必须不重叠，恢复同一等待段只关闭一次；运行尚未结束时显示实时累计并标非最终。审批、暂停、重试延迟等纯等待排除，主机任务实际运行不排除。缓存/复用展示耗时与实际计算耗时区分，不重复计成本。
+
+恢复时间：对窗口内每次failed执行f，找同一工作空间、同一定义中完成时间严格晚于f的第一条succeeded执行s，间隔=s.finished_at-f.finished_at；s可在窗口结束后但不晚于查询as_of，统一as_of冻结。没有s的失败显示未恢复数，不按0计均值；多次失败可以对应同一恢复，均值分母为已恢复失败数。job失败率仅实际终态succeeded/failed/timed_out，分母三者；skipped/reused/cached不作实际运行，重试attempt分别可见，报表明确聚合层级。此处是对Q11的精化，口径改变必须连同查询/报表版本记录。
+
+金额不用浮点：数量quantity_micros为单位的百万分之一，单价unit_price_micros为每单位币种微量，单次金额用整数乘除；具体舍入取PDR-05建议。所有显示保留币种，不汇率换算；按credential_id+currency分组，即使同币种不同凭据也不能共用预算。真实实付高于预留仍记实付，不截断为上限；标overrun并阻止后续新预留，预算不能保证外部服务商绝不超扣。
+
+### 15.10 产品规则确认（PDR-01～05已确认，PDR-06待选型）
+
+2026-11-04用户通过两组明确答复，分别选择“采用文档中的推荐方案”（PDR-01～03）与“采用文档中的推荐规则”（PDR-04～05）。以下对应五条完整规则已确认，可按文档实施，不再以缺少产品确认阻断；PDR-06仍待具体服务商/模型/硬件选型。确认升级行为不等于授权对运行中环境执行生产迁移。后续按用户授权已迁回主目录的feat/workflow-platform独立分支开发测试；未提交、推送、合入main或发布。
+
+| 编号 | 推荐方案 | 原因 / 影响及阻断阶段 |
+|---|---|---|
+| PDR-01 校验/资源上限 | 输入键`[A-Za-z_][A-Za-z0-9_]{0,63}`；输入≤50项、choice≤100项；短描述≤200、长描述≤2000、标签trim后1–60且≤20个；reason必填trim后1–500；URL≤4096；GPU槽1–8默认1；发布名trim后按大小写精确唯一；不得限制用户JSON/脚本为名称长度 | 明确表单/API同一校验；产品规则已确认，相关P1/S1/S4字段须按本行实现并验收后销项。 |
+| PDR-02 人工操作/保护 | allowed_refs空=不额外限ref；默认审批24小时且超时reject，非审批仍已确认7天；bypass要求独立权限+开关+必填reason，不键入名称；转让普通确认弹窗；unknown关联要求deployments.apply与对象all、必填reason；skip不撤销，只重跑；外审每个被指派人独立token | 减少误放行和假成功，不借admin泛权；旧规则不自动变更。规则已确认，覆盖P1-4/P2/S1相关动作。 |
+| PDR-03 入口/通知 | Webhook允许GET/POST/PUT/PATCH/DELETE（按入口单选），认证none/header/basic；测试窗口5分钟、公共会话24小时可撤销；验证码使用可配置适配器默认关闭；通知新增事件显式订阅，至多一次账本不自动补发，手动重发新操作且警告可能重复 | 对齐现HTTP/至多一次承诺，避免不知情重复副作用；secret只vault引用。规则已确认，覆盖相关入口/通知新增设置。 |
+| PDR-04 存量升级 | 不自动把旧编辑者变发布者；旧流水线停触发并显示“待确认生产授权”，管理员逐条发布后恢复定时/事件；历史审批继续原版本处理，新的审批门才用新schema | 安全但需维护窗口和明确升级提示；升级行为已确认，但本轮仍不执行运行环境的生产迁移。 |
+| PDR-05 计费/运营 | 金额按调用维度向上取整至1微币、quantity支持6位小数；max_cost按credential/currency设额度，禁止单一数值跨币比较；预留按创建时空间时区月份固定，跨月settle不挪桶；unknown冻结预留直至对账；QPS/并发按workspace+credential跨实例共享；队首需对象all且批次1–100；空间时区/配额由workspace settings写权限管理 | 防并发透支/隐含舍入差异；超实付如实记账而非截断。规则已确认，S2预算及S3队列配置按本行实施。 |
+| PDR-06 外部选型 | S3前提交国内外候选服务商与可用账号、价格/幂等/地区/许可对照；S4前提交图像/视频/TTS各一模型和实测硬件，按既有V6/V7由产品选；验证码同批选择适配器 | 依赖用户账号/采购/部署，不伪造三方事实；不阻断P0/S0文档和可靠性设计。 |
+
+### 15.11 本轮评审结论与修订记录
+
+**自评：文档补充可供评审；全平台开发就绪 NOT READY。** 已把26个G缺口映射到技术契约、明确PDR或阶段验收，不把保留缺口偷偷改成已实现。数据模型§10补充通用键、人工/发布/预算/GC/数据向量/ACL等技术目标及DDL；基础SQL与审计由结构检查验证，真实迁移未运行。
+
+第二遍复核发现并修正的主要问题：旧i18n事实失效；版本名与修订说明混淆；通用表仍残留pipeline_id/run_id；等待累计缺持久化；预算unknown不能超时释放；GC与建引用竞态；同一endpoint唯一与组合唯一口径冲突；升级自动授权无依据；沙箱的macOS隔离没有实证。处理分别见§15.1/2/3/8及模型§10，未用修改旧测试口径代替验证。
+
+| 评审发现 | 级别 | 处理及当前状态 |
+|---|---|---|
+| REV-01 语言框架与证据路径过时 | Major | 已修正六语言事实和8处失效源码链接；新译文保留L10N-01，不把框架存在当译文完成。 |
+| REV-02 资源分组授权误读为人员组 | Critical | 对照清单A9修正：ACL的subject是资源或资源分组，授权给空间成员；移动资源后重算继承权限。未新增用户组体系。 |
+| REV-03 通用关联、发布标签和人工幂等无物理约束 | Major | 模型§10已补字段/唯一键/状态条件；外审轮换保持token身份，不能重复投票。SQLite验证不替代真实并发回应测试。 |
+| REV-04 GC删除与新增引用竞态 | Critical | 模型§10.4补短锁、删除状态及失败恢复。外部删除结果不确定时不得重用对象键；HEAD只作核对，不能证明仍在途的旧删除请求已完成。 |
+| REV-05 未知调用释放预算、跨币比较额度 | Critical | 模型§10.5补预留/执行额度及unknown冻结；币种隔离、舍入与跨月业务规则按已确认PDR-05实施。 |
+| REV-06 共享物理i1..i5类型不确定 | Major | 模型§10.3给每逻辑槽文本/数字双列方案，仍须S2三库排序与类型实测；不将旧占位表宣称可直接迁移。 |
+| REV-07 存量自动发布身份无法可信回填 | Blocker（生产升级） | PDR-04方案已确认；实施后仍需P0验收，且本轮未授权对运行环境执行迁移。 |
+| REV-08 双实例栅栏、SSH/沙箱/GPU缺真实证据 | Blocker（对应执行阶段） | §15.8冻结验收矩阵，当前没有执行证据；P0和S1/S4各自过门，不能被本轮静态检查抵扣。 |
+
+**阶段结论：** 可以继续评审补充方案和PDR；PDR-04确认已落实，P0故障验收与运行环境迁移授权落实前不能执行生产迁移；PDR-01/02/03接口按已确认规则定稿；V6/V7与长尾成员Schema/专属屏在对应阶段前补齐。静态文档结构PASS不等于产品方案全确认或执行引擎验收PASS。自查统计以配套自查的v1.5重算结果为准，旧§14与旧309列盘点只代表v1.4基线。
+
+## 16. v1.6-review 核心契约与恢复守卫补充
+
+### 16.1 可机读交付及范围
+
+新增[图结构Schema](../../src/shared/workflow-contracts/workflow-graph.schema.json)、[核心节点目录](../../src/shared/workflow-contracts/workflow-core-nodes.json)、[校验器](schemas/check_contracts.py)及[使用说明](schemas/README.md)。全部为design_only，不注册到当前产品。目录提供46个S1规范节点的解析后参数Schema/样例、端口、执行位置、凭据槽用途、缓存资格、表达式字段白名单和逐节点语义规则；不是第三方节点格式兼容承诺。
+
+B001～B075逐成员映射：S1 53项、S2 11项、S3 1项、S5 6项、不对标4项。旧节点合并和布局映射不算漏项，也不算已运行验收。目录使用`params_schema/inputs/outputs/runtime/source_ids`表达§15.4对应投影；权限矩阵、配额、实现包/许可和完整输入输出Item类型仍依赖总体设计及各阶段实现，禁止将本目录当完整插件SDK。S2～S5及服务商/模型参数仍须独立契约。
+
+### 16.2 结构、表达式与条件语义
+
+沿用已确认图上限：总计500节点包含所有循环body、最多3层循环、定义UTF-8不超过2MiB、固定数据不超过1MiB。每层节点ID唯一，连接不得越层；每层均为DAG，循环只能通过容器语义执行。端口名、类型和index须与具体节点匹配：普通端口index=0，Switch case索引按cases顺序，Merge input索引由已配置输入数校验；重复连接、无效index及不兼容类型不得在发布时漏过。此句仅代表v1.6阶段；当前参考检查的端口/index/兼容关系与未冻结边界见§17/§24，不代表运行端口语义已实现。
+
+保存时校验结构及表达式语法；发布时校验可解析版本/绑定/身份；节点尝试开始前，先在冻结上下文解析白名单字段，再用params_schema校验结果并执行semantic_rule。条件规则包括Switch key唯一、Loop while条件、Merge模式所需keys、HTTP认证所需槽及人工任务资格；样例通过不能证明所有组合通过。自由JSON允许任意合法值，不允许NaN/Infinity；JSON对象重复键应在接口解析层拒绝，当前文档校验器未覆盖该项。
+
+凭据只存ID，不接受明文或借表达式读取vault；发布和运行均验证槽的凭据类型/用途/同空间授权。host.command脚本文本禁止拼入不可信表达式，用户输入通过显式环境/参数通道交给执行器且按执行器规则编码；CLI参数用数组，不拼shell字符串。主机绑定合格还需OS/架构/版本/排空和当前权限守卫。host.git的depth/submodules为目标字段，当前checkout实现不能据此视为已支持。
+
+缓存以v3 §18.9覆盖§6.1的早期简写：触发、人工、等待、发送和响应禁止缓存；其他副作用仅显式opt-in，缓存命中仍检查权限、资产存续和版本。JS pure声明须有deterministic沙箱保障，循环纯度取body最弱成员。未验证沙箱前，不以布尔声明绕过隔离门槛。
+
+### 16.3 状态迁移、守卫与幂等
+
+下面精化§15.6状态闭集，不改变PDR业务默认；事务均限定workspace，执行写入须匹配当前lease_owner/epoch、预期状态及version，影响行数不为1视为竞争失败并重读。状态和对应事件/等待记录同事务提交，外部副作用不放在数据库锁内。
+
+| 对象/迁移 | 前置守卫及持久化 | 重复/崩溃处理 |
+|---|---|---|
+| execution queued→running | 当前租约、已冻结修订/发布身份、并发与主机槽成功取得 | 按execution键只记一次started；启动前崩溃由租约恢复，不另建执行 |
+| execution running→waiting | 所有可运行分支均被等待阻断，等待段唯一键存在 | 单节点等待不暂停其他可运行分支；重放不重复打开等待区间 |
+| execution waiting→running | 等待事件去重，重新取得所需槽，重验权限/预算 | 同一等待段仅关闭一次；权限撤销按既有失败策略处理，不静默恢复 |
+| execution queued/running/waiting→cancelling | 取消权限、预期非终态；持久化取消事件 | 重复取消返回当前状态；中断节点并清理后才转cancelled，不伪装即时停止 |
+| execution running/cancelling→终态 | 无活动节点/未清理副作用；按图策略聚合，cancelling最终为cancelled | 终态不可原地重开；重试为新attempt/执行，按已有重试语义关联 |
+| node pending→queued→running | 依赖已满足、输入固定、当前attempt及执行栅栏，节点资格守卫通过 | attempt键去重；旧worker的完成/日志/资产写均拒绝 |
+| node running→waiting→queued | 创建持久等待，再由一次性事件解除等待并重排 | 恢复不得重新发送已started外部操作；重算槽位，不能继承失效的主机占用 |
+| node running→succeeded/failed/timed_out | 输出资产引用及结果同事务；继续错误仍记failed+策略 | 重复完成不覆盖旧结果；超时先停止实际执行，未知副作用按intent处理 |
+| human waiting→completed/rejected/returned/expired/cancelled | task版本、当前响应资格、responder唯一；轮换token身份不变 | 终态不可重开；重复同响应返回既有结果，冲突响应拒绝；超时/取消与提交竞争只允许一方成功 |
+| trigger pending→processing→created/skipped/failed | 投递幂等键、处理租约、发布有效性；created同事务绑定execution | 重放返回既有execution；同步HTTP断开不创建第二次执行 |
+| intent pending→started→done/unknown | 外部调用前持久化started及稳定operation_key | started后失联为unknown；禁止因租约到期盲目重发；核对/人工处置另留审计 |
+| notification pending→started→sent/failed/unknown | 稳定event_key、订阅与语言快照、脱敏通过 | started后崩溃记unknown，不能承诺必达；重发策略仍待PDR-03 |
+
+### 16.4 排队与等待原因
+
+| 展示原因 | 作用对象与解除条件 | 不得混淆 |
+|---|---|---|
+| workspace/definition/concurrency_group | queued执行；相应计数/互斥键可取得 | 不抢占已有任务，优先级只改变候选顺序 |
+| host_capacity/host_unavailable/host_draining | queued节点；授权主机存在且在线、有槽、未排空 | CPU/内存利用率不是任务槽；断连后外部结果可能unknown |
+| gpu_capacity/model_unavailable | queued或运行前阻断；合格GPU段/模型就绪 | 未选定服务商/硬件不能虚构可运行资格 |
+| approval/human/timer/webhook_resume | waiting节点；一次性响应/到期/回调被接受 | 只在无其他可运行分支时聚合execution waiting |
+| retry_delay | waiting节点；达到已持久化next_attempt_at | 重启不能重置延迟或增加最大尝试次数 |
+
+预算超额、权限撤销、无效绑定按既有错误规则阻断，不伪装为会自动恢复的容量排队；具体API reason码在实现阶段对齐现有枚举，表中名称为语义映射。等待时长按§15.9合并不重叠区间；集群队列只返回当前空间且有权查看的对象，权限过滤必须先于计数与分页。
+
+### 16.5 本批验证边界
+
+校验器实跑158例，包括46套参数正反例和选定静态图规则；源清单75项名称/分期直接与B节比对，证据保存到本地`data/maintenance/workflow-contract-validation.json`并包含交付物SHA256。新增循环边界夹具验证3层允许/4层拒绝、包含body的500允许/501拒绝。此前检查漏算跨循环总节点数已修正。
+
+未执行表达式、完整条件组合/端口index、真实权限服务、DB并发恢复、OS沙箱、主机/服务商调用及页面语言验收。核心节点契约批次未关闭混合了后续节点和真实验收的整格；随后模型§11补齐G-09组织关联、索引与授权分页SQL，关闭3个技术设计格，当前690覆盖/118待补/31不适用/19无，详见自查§6。自评与原需求验收复核均由同一执行者完成；全平台开发就绪仍NOT READY。
+
+模型补充同时给出公共会话与执行的一对多归属、提交键/输入hash去重，以及跨实例滚动分钟限流的锁行/事件方案。SQLite空结构验证包含会话隔离/撤销/过期、授权过滤先于分页和滚动边界；不能用顺序SQL夹具代替真实权限服务与多实例竞态。没有将公共入口的未确认默认、凭据并发或预算冻结规则改为已决议。
+
+## 17. v1.7-review 条件参数与静态语义
+
+### 17.1 本轮补充与优先级
+
+本节精化§16.2及[契约说明](schemas/README.md)，将已有semantic_rule中能由文档静态检查的部分落入params_schema与校验器。保持46个节点、75源成员和分期；未添加运行时实现、产品默认或外部选型。当前参数Schema增加allOf/if/then；anyOf已用于图设置，支持关键字以契约说明为准，不继续沿用旧的简略白名单。
+
+| 条件 | 必须满足的结构/语义 | 尚不能由此证明 |
+|---|---|---|
+| Merge fields/join | 显式input_count正整数，无默认值；keys存在且非空；join指定inner/left/right/full | 真实条目配对、重复键、全前驱终态真值表 |
+| Loop while/carry | while有非空condition且parallelism=1；carry存在时也必须串行 | 条件每轮结束求值、carry持久化及重启恢复 |
+| Split/Aggregate | selected有fields；summary有非空operations | Item来源与空输入结果 |
+| Wait | duration有duration_ms；until有非空时间字符串；callback有response_schema | 时间格式/时区、恢复令牌一次性CAS |
+| 日期与文本 | format/add/difference有对应字段；分隔符非空，length模式有length，overlap小于length | DST歧义、Unicode执行行为与有限数运算 |
+| 密码学 | AES-GCM有nonce，TOTP有at/period/digits；非hash操作必须绑定key凭据引用 | 凭据真实类型/授权、nonce唯一、认证标签与算法平台实测 |
+| HTTP分页/文件 | 开启分页有max_pages及相应路径/参数；write有asset引用 | SSRF每跳保护、游标去重、路径沙箱与资产资格 |
+| 比较/Switch/人工选择 | exists以外的比较有right；Switch key唯一；min_selected≤max_selected | 表达式返回类型、当前候选/人员资格、会签并发 |
+
+### 17.2 图端口与JSON入口
+
+普通端口index必须为0；Switch case index必须落在cases范围，fallback=false时不得连接fallback；相同起终点的完整重复连接拒绝。Merge新增显式input_count，input index必须小于声明数量，关闭§16.2中“按已配置输入数校验”的承载缺口；不设置产品默认，也不以任意最大index推断有效端口数。是否每个输入已连接及运行时全前驱终态真值表另验。跨GPU类型和可用性仍按对应阶段验证。
+
+严格JSON解析拒绝重复对象键、NaN/Infinity及指数溢出的非有限数，防止不同解析器对同一定义产生不同参数。内嵌input_schema/response_schema按Draft 2020-12检查元结构并拒绝外部引用；遍历Schema子结构，不执行数据中的类似文本。局部引用存在性、任意输入Schema的全部受支持关键字与复杂度、时间/正则/表达式语义仍未完成，不把元Schema通过当沙箱安全证据。
+
+### 17.3 评审与验收
+
+校验器当前215例PASS，保留原158例，新增57例覆盖条件正反例、端口、严格JSON和凭据槽存在性。自评发现并修正：内嵌SchemaError需转换为明确的参数错误；浮点1e400不经过parse_constant，需在parse_float拒绝非有限值；Schema关键字清单遗漏anyOf与新条件关键字，已同步。Merge端口数量承载缺口以显式必填字段补齐，不新增默认值。
+
+矩阵仍为690覆盖/118待补/31不适用/19无。G-10/11包含完整节点与后续阶段，不以本批静态语义关闭整格。原需求验收复核限定“补缺口并评审”的文档交付，同一执行者完成两遍；运行引擎、实际权限/三库竞态、OS隔离、长尾选型/页面/六语言仍未通过，产品整体NOT READY。PDR-01～06没有新增确认，未提交推送或部署。
+
+## 18. v1.8-review 内置数据节点与查询评审
+
+新增[3个S2节点契约](../../src/shared/workflow-contracts/workflow-data-nodes.json)，与原46个S1节点一起由同一文档校验器检查；不是把阶段提前到S1。B008映射data.table，vector.upsert/search按v3 §7.4/§12.1独立追踪，不伪造清单成员或服务商选型。
+
+数据表CRUD显式操作字段和单行version CAS，拒绝不适用参数；向量节点使用集合已绑定的模型/维度/metric，接收预生成向量，不调用尚未选定的嵌入提供方。节点默认缓存关闭，显式opt-in仍须冻结的资源版本、权限与资产/集合存续检查。样例值不是产品默认。
+
+模型§12提供索引映射、参数化读取、容量/版本CAS、单行更新删除、向量快照读取与互斥insert/update事务骨架。先检查空间和资源资格，用户列名只能映射白名单槽位；值不得拼SQL。data.table输出的row_id/version与用户data分层，查询游标只承诺其能表达的排序。容量写锁、意图完成与实际数据共同提交，不能把“本地数据库副作用”当作无需幂等/租约栅栏。
+
+复核发现：float32转换可使极小非零数变为零，cosine需在转换后判零；upsert已有键不得消耗新增额度；集合缓存必须每次检索核对数据库version并在一致快照中装载；同一个row_id游标不能通用于任意字段排序。契约与SQL已按这些边界补充。
+
+当前49个参数manifest、75源映射、243文档用例PASS，保留原215例。数据库结构仍为26表/298字段；数据查询新增5组SQLite夹具，容量部分仅用合成计数验证SQL守卫，不冒称真实10万行/2万向量性能或并发测试。G-11仅SQL示例技术格关闭，当前691覆盖/117待补/31不适用/19无。索引顺序已给出，但长字符串及向量键跨库映射尚未冻结，索引设计保留待补；完整模型、其余节点契约/真实成员验收、字段联动、选型与页面语言亦待补。
+
+自评及原需求验收复核均由同一执行者完成：只补文档/校验契约，未改运行引擎/实例，未迁移/提交推送/发布；PDR-01～06未新增批准。静态文档交付PASS，全平台开发就绪NOT READY。
+
+## 19. v1.9-review 长文本索引与向量键
+
+模型§13和[索引参考夹具](schemas/check_index_contracts.py)补齐G-11索引技术设计：iN改为原文本严格UTF-8前128字节的二进制候选键，原文在data保留；向量完整item_key使用TEXT，新增32字节item_key_hash及非负key_slot，索引只存有界二进制值。没有将物理索引长度变成用户正文上限，也没有截断原值。
+
+相同前缀/相同hash均须核对完整原值；gt/lt以包含相等前缀桶的保守条件取候选，ne不能跳过同前缀桶。授权、全文残余过滤和桶内精确排序都先于最终计数/分页。null与字段缺失仍区分，文本order_by显式指定nulls=first/last，复用核心Sort已有语义，不新增默认值。完整原值比较不交给部署数据库默认collation。
+
+向量hash桶内以完整键比较，再在集合锁中更新旧item_id或分配新key_slot；强制hash碰撞也允许不同完整键共存，不把hash唯一当作逻辑键唯一。原键通过JSON字符串封装转义NUL后存TEXT，读取后解码，hash基于原键而非封装文本，避免PG TEXT的NUL限制改变逻辑键。完整键唯一依赖所有写入路径使用同一集合锁，SQLite物理唯一键不是三库并发证明。原键/向量字节、计数、intent完成及执行栅栏同事务要求不变。
+
+当前49参数manifest/75映射、245参数图用例、32索引参考用例PASS；完整目标26表/300字段逐列核对，旧SQLite查询夹具继续回归。夹具覆盖中文中间字节截断、emoji、空/NUL、Unicode组合形式与大小写、共享前缀全文比较/排序/分页、缺失/null、hash碰撞、空间集合隔离和字节类型/长度约束。
+
+只关闭G-11索引设计技术格，当前692覆盖/116待补/31不适用/19无。三库真实类型/执行计划/锁隔离、规模资源、历史迁移、运行引擎、其余节点/屏幕六语言仍未验；当前设计可评审，整个平台NOT READY。两遍复核由同一执行者完成，未开发产品或迁移/提交推送/发布，PDR-01～06未新增确认。
+
+## 20. v1.10-review 文件与归档契约
+
+### 20.1 来源、分期与输入输出
+
+新增[文件节点契约](../../src/shared/workflow-contracts/workflow-file-nodes.json)，合计53个design_only节点（46个S1、7个S2）。75源成员及原分期不变，以下只补参数契约，不改清单验收状态；向量节点另有v3来源。默认缓存关闭，限额全部显式必填，样例数字不是产品默认或已批准部署上限。
+
+| 源成员 | 契约 | 逐源验收要求（真实格式测试待执行） |
+|---|---|---|
+| B005 compression | file.archive_pack / file.archive_unpack | zip和tar_gzip打包；zip/tar/tar_gzip解包；资产字节往返、路径/类型/资源恶意样本 |
+| B020 convertToFile | file.encode | JSON/CSV/XLSX/text/base64逐格式输出资产；列、编码、空输入与错误类型 |
+| B021 extractFromFile | file.decode | JSON/CSV/XLSX/DOCX/PDF/text/base64逐格式读取；无文本PDF与非对象JSON |
+| B041 moveBinaryData | file.encode / file.decode | JSON与二进制互转；类型/编码与资产引用，保留旧版功能承接、不承诺参数兼容 |
+| B047 readPDF | file.decode | PDF按页提取文本、指定页、空文本及损坏文件；不以OCR替代文本提取 |
+| B057 spreadsheetFile | file.encode / file.decode | XLSX读写、指定sheet、公式缓存、1900/1904日期与时区；旧格式支持边界必须另验 |
+
+源名称以能力清单及机器映射为准；本表描述承接方向，不承诺旧节点格式/参数兼容。主机文件读写由既有io.file的主机沙箱契约承接，本批资产转换不能代替该运行验收。
+
+archive_pack一次消费显式entries中的资产，输出一项json含资产path清单，binary.file为归档资产，paired覆盖参与输入；entries次序保留。archive_unpack和file.decode按输入Item顺序解析已解析参数中的asset，每个输入对应一个源资产，输出项paired指回该输入，provenance保留源资产。pack/encode中的output_name只作下载名，不作为存储路径。
+
+file.encode的JSON/CSV/XLSX按整个输入批次生成一个资产，paired覆盖所有输入；空批次分别为[]、按header配置输出表头或空内容、含指定sheet的空工作簿。text/base64按每个输入Item的value_path（RFC 6901 JSON Pointer）生成一项，空批次无输出；路径缺失或值非字符串报错。JSON Pointer只取数据，不执行表达式。每个输出binary[output_field]指向资产，json保留来源信息，不内联大字节。批次中任何资产失败，不提交部分最终输出。
+
+### 20.2 格式与有损边界
+
+| 格式 | 编码/读取的明确规则 |
+|---|---|
+| JSON | encode为Item json数组、严格UTF-8；decode数组逐项输出，对象直接作Item json，非对象封装于output_field；单对象一项，标量同样封装。沿用严格JSON入口，重复键/非有限数拒绝 |
+| CSV | columns明确输出列序，只读各Item json顶层同名字段；缺失/null输出空字段，布尔/有限数用JSON字面量，字符串保留，复合值拒绝。header显式，输入有头时原头作key且重复头拒绝；无头时每行字符串数组封装于output_field，不猜数值/日期。记录列数不一致拒绝，空文件零项；不承诺CSV类型/空值无损往返 |
+| XLSX | encode依显式columns写单sheet，缺失/null为空单元格，字符串强制字符串单元格，布尔/有限数保留类型，复合值拒绝。decode指定sheet，首行作非空且唯一的字符串列名，后续行映射对象；空sheet零项，超出表头的非空单元格拒绝。空单元格为null。公式cached_value只取缓存，缺缓存报错；reject拒绝含公式单元格，从不求值。serial保留日期序列；iso8601依工作簿纪元及显式IANA source_timezone转换，DST歧义/无效日期及1900伪闰日拒绝，不借服务端本地时区猜测 |
+| DOCX | 只读，按文档顺序输出段落或表格块（kind及text或rows，封装于output_field），不下载外链、不执行嵌入对象；不承诺排版、图片OCR或完整Office兼容 |
+| PDF | 只读，每页一项，output_field中为page_number/text/has_text；页码从1开始，指定pages按升序处理，越界拒绝。无文本页输出空text及has_text=false，不静默丢页、不声称OCR |
+| text / base64 | text严格UTF-8；base64 encode节点把路径中的RFC 4648标准带填充Base64字符串严格解码为资产，拒绝空白/非规范填充/URL变体，空字符串合法；decode节点将资产原字节编码为标准带填充Base64文本。两种decode都封装于output_field，不按行拆分 |
+
+CSV delimiter/quote各为单个Unicode字符，二者不同且不得为CR/LF/NUL；输出line_ending按lf/crlf，内部字段按quote包围并将quote翻倍。输入支持所选记录换行及引号内换行，结构不完整报错。formula_policy显式preserve或escape：对每个字符串，跳过前导空格、TAB、CR、LF后若首字符为=、+、-、@，或原字符串首字符为TAB/CR/LF，则escape在原字符串前加一个ASCII单引号；无此条件不变。规则用于encode的单元格和表头，以及decode产出的字符串和表头；原始/转换后重复头均拒绝。只变换输出，不修改上游Item或源资产；不自动去掉单引号，escape是有损转换，不保证所有电子表格客户端安全。
+
+XLSX sheet_name非空、最多31个UTF-16代码单元，不含控制字符或[]:*?/反斜杠，首尾不得为单引号。date_policy/source_timezone仅用于XLSX；source_timezone仅可在iso8601出现。pages仅用于PDF；无关格式参数拒绝，不能静默忽略。输出名必须是非空单文件名。
+
+### 20.3 归档路径与资源守卫
+
+虚拟文件路径只允许用/分隔的相对路径；拒绝空段、.、..、开头/、反斜杠、冒号、控制字符和NUL，不作URL解码或Unicode归一化。按严格UTF-8原字符串判重；同名或文件与其子路径并存均拒绝。目录元数据条目只允许去掉一个结尾/后按相同规则检查，纳入条目数，不产出文件Item；目录重复也拒绝，文件与目录同名拒绝。输出只保存路径元数据和资产，不落入主机真实目录，不借OS大小写/保留名规则重命名用户文件。
+
+解包必须核对实际容器签名与声明format，只允许普通文件和目录；symlink/hardlink/device/FIFO/socket、加密、多卷及无法辨识类型明确拒绝。禁止跟随主机路径、自动递归解包嵌套归档或联网取外部内容。签名只能筛选，完整结构及尾部校验仍由隔离解析器验证。
+
+pack的limits为max_files/max_archive_bytes/max_uncompressed_bytes/max_entry_bytes：分别约束条目数、输出归档字节、累计源字节及单条源字节。unpack还必须给max_ratio，max_archive_bytes约束输入原字节，其余按实际输出计数；总解压字节不得超过max_ratio乘max(1,输入归档实际总字节)，ZIP单条目还按实际压缩字节计相同比例。比值用整数交叉乘法避免溢出/浮点误差，不能信任声明大小；流式读取每块即检查字节限额，不能先完整解压再计数。目录计入max_files，包内文件包括空文件；pack输出元数据的时间/顺序/编码由冻结转换器版本固定，不能读运行时墙钟造成无意差异。
+
+file.encode/decode均显式给max_input_bytes/max_output_bytes/max_rows/max_columns。encode输入按规范UTF-8 Item json序列化字节累计，输出按实际资产字节；decode输入按源资产字节，输出按规范UTF-8输出Item json累计，不含资产本体或paired元数据（它们仍受平台通用限制）。max_rows约束JSON条目、表格数据行、DOCX块、PDF页，text/base64为一项；max_columns约束对象顶层键/数组元素或表格列，标量为一列；DOCX表格还累计其内部行/列，防止单块绕过。限额按整次节点尝试累加，单文件/单格式均不能绕过；输入内嵌压缩容器（XLSX/DOCX等）仍须部署级解包/CPU/内存/墙钟硬限制。执行取显式限额与部署硬上限较严者，硬上限具体值及解析库版本留待实施前冻结，不由样例自动补默认。
+
+### 20.4 权限、失败与验收门槛
+
+所有资产在当前空间按执行绑定身份鉴权；内容hash不是访问令牌。输入固定引用，输出资产/引用/意图结果复用既有同事务协议；对象字节先临时写，失败临时对象走GC，不提前暴露部分输出。重启/重试复用已提交意图结果，不能用再次解析代替结果去重；未提交尝试可重新生成临时对象。解析错误、格式不支持、路径冲突、限额和权限拒绝保留不同错误原因与脱敏审计，不记录源文件内容/密钥，不新增虚构API错误码。
+
+缓存默认off；opt-in键包含源资产/Item内容、格式选项、转换器及依赖版本、限额和空间/授权版本。命中仍重查当前授权及资产保留状态，不能跨空间用hash绕过权限。server执行面不等于在API进程内加载不可信解析库：实施需离线受限worker，无主机任意读写/外网/宏脚本执行，设置CPU/内存/墙钟和临时目录隔离，所有中止路径清理临时对象。
+
+校验器只执行参数Schema、格式条件、虚拟路径/冲突、CSV字符和sheet名称等静态夹具。所需真实验收包括每种支持格式正常/错误样本、压缩炸弹/伪声明大小/链接、解析器超时内存中止、跨空间拒绝、撤权后的缓存拒绝、崩溃点重放与临时GC、paired/provenance、空/Unicode/二进制及有损格式预期。没有解析库/版本或真实环境结果前，不得声称格式往返、隔离或节点已实现。
+
+本阶段未关闭混合长尾/运行证据的G-11整格，矩阵仍692覆盖/116待补/31不适用/19无。IMAP/iCalendar/外部服务商/AI模型及其他后续成员仍待契约或选型，PDR-01～06与V6/V7具体选型没有因“继续”变为批准；平台整体NOT READY。
+
+## 21. v1.11-review Merge就绪与恢复契约
+
+### 21.1 既有规则与输入归一
+
+本节精化v3 §18.7及本PRD §16/17，沿用B040 core.merge的mode、wait、input_count，不改节点数/分期，不增加产品默认。机器真值表位于[核心契约目录](../../src/shared/workflow-contracts/workflow-core-nodes.json)的merge_readiness；校验器只提供参考决策，不是产品调度器。输入条目如何按位置/字段碰撞或连接重复键组合仍须完整数据代数契约，不能由本节就绪表代替。
+
+“全部前驱终态”指冻结图、当前执行及同一轮次中的所有连接来源都已完成最终尝试，并提交相应端口输出；不是查询MAX(attempt)或读取第一个已完成分支。失败尝试已终态但仍计划重试时，该逻辑前驱尚未封口；retry_delay、人工作业、排队、运行中部分输出都不能当作空列表。
+
+| 符号 | 已封口输入投影 | 与节点状态的关系 |
+|---|---|---|
+| D | 有普通条目 | succeeded/cached/pinned/reused/bypassed且所连端口有已提交条目；复用来源仍须有效及授权 |
+| E | 执行后空列表 | 上述可消费终态在所连端口确有零项；不是缺失输出、未命中分支或已清理历史 |
+| S | 明确跳过 | 分支未命中/静音等已提交的边级跳过；If节点本身成功不代表所有输出端口有数据，未选端口须有独立S投影 |
+| F | 失败但继续的错误条目 | 最终失败保留failed/timed_out及策略，on_error=continue的main，或error_output已选error端口；错误条目作为输入，不把源节点涂成成功 |
+
+非终态P、停止失败H、来源取消C及未冻结投影U是本文校验标签，不新增数据库state。on_error=stop不能变成F；continue却没有已提交错误条目属于无效输出，不能默认为E。error_output失败时未选main端口究竟标E还是S，现有来源未冻结，本批标U保留设计门槛，不借合并真值表自行决定。通用error端口如何进入每个manifest及图校验也未完整交付，不能把参考投影用例当可发布连线支持。
+
+### 21.2 两输入完整真值表与多输入公式
+
+以下仅在执行允许调度、所有输入都已封口且可读取时使用。`执行`仅代表进入Merge运算；执行后零输出仍可为succeeded。any_items在全部前驱封口后判定，绝不竞速启动；all_inputs遇E仍执行，全E也执行。不同mode共用就绪门槛，实际输出条数由相应数据运算决定，不承诺join遇空仍有输出。
+
+| 输入0 | 输入1 | any_items | all_inputs |
+|---|---|---|---|
+| D | D | 执行 | 执行 |
+| D | E | 执行 | 执行 |
+| D | S | 执行 | 跳过 |
+| D | F | 执行 | 执行 |
+| E | D | 执行 | 执行 |
+| E | E | 跳过 | 执行 |
+| E | S | 跳过 | 跳过 |
+| E | F | 执行 | 执行 |
+| S | D | 执行 | 跳过 |
+| S | E | 跳过 | 跳过 |
+| S | S | 跳过 | 跳过 |
+| S | F | 执行 | 跳过 |
+| F | D | 执行 | 执行 |
+| F | E | 执行 | 执行 |
+| F | S | 执行 | 跳过 |
+| F | F | 执行 | 执行 |
+
+N输入公式：any_items在至少一个D/F时执行，否则skipped；all_inputs在至少一个S时skipped，否则执行。前提N=input_count且N≥1，每个声明输入都能解析到明确连接投影；未连输入不能伪造E来通过all_inputs。单输入同公式，不新增最少2输入约束。当前图Schema允许保存未连草稿；发布完整性与同端口多来源的归并规则仍待补，不能宣称本批已检查所有发布拓扑。
+
+| 先决条件/更高优先级门槛 | 处理与不能误算的行为 |
+|---|---|
+| execution cancelling/cancelled | 不启动新Merge，执行已取消语义优先于数据就绪 |
+| execution已成功/失败/超时关闭 | 不创建新的尝试；查看已提交结果不构成再次调度 |
+| execution暂停/等待/排队 | 先由既有恢复机制使执行可运行，再重算门槛；不因输入有数据自行越过暂停 |
+| 最终前驱stop失败H | 交给既有执行失败/停止传播；即使兄弟尚在运行也不得启动Merge，不伪造Merge业务失败结果 |
+| 来源取消C但执行尚未取消 | 阻止消费，交取消传播核对；不能当S令另一分支继续 |
+| 未冻结端口投影U | 保留契约阻断；不得猜E/S来凑齐输入 |
+| 任一来源P | 等待来源封口；已经完成的其他分支只保存引用，不重复执行 |
+| 全部为D/E/S/F | 按上述表求值，随后仍需权限、资产存续、配额、执行租约与当前状态检查 |
+
+输出顺序以输入port index及每个来源的已提交条目序号为准，与到达时间无关；不能把多个输入重新按完成时间排序。多来源接同端口的细分顺序仍未冻结，本批不新增“每端口仅一条线”的产品约束，也不声称支持任意fan-in。append可按既定输入序串接；position/fields/join的数据值冲突、重复键扩张、空侧输出及paired完整规则仍为后续设计门槛。
+
+“始终输出”只在本次确实执行且运算成功但零项时，把结果变成一个空Item；被跳过、等待、停止或取消均不得因此运行。F是输入错误条目，v3 §18.9禁止将错误条目或含失败上下文的结果作为正常纯缓存复用；不能靠Merge纯度声明洗掉错误语义。缓存读取发生在完整门槛与当前授权之后，不能把尚有P的输入当空列表命中缓存。
+
+### 21.3 冻结输入、重放与故障点
+
+先按[模型§14](ferry-工作流平台数据模型.md)在执行租约与version栅栏内冻结有序输入引用，再启动Merge尝试。标识包含workspace/execution/revision/node/iteration_hash/attempt/redo_round，来源引用指确切node_run及attempt、轮次、端口、输出hash；不能从正在变化的latest读取。快照的E/S差别必须保存，不能只存拼平后的items，否则恢复会改变all_inputs结果。
+
+| 故障/重放点 | 必须保持的行为 | 后续真实验收 |
+|---|---|---|
+| 第一个前驱已完成，其他尚P时崩溃 | 读取已提交来源；继续等待，不能补E或重跑已成功前驱 | 两实例/多次唤醒，完成顺序全部置换 |
+| 冻结快照及尝试事务提交前崩溃 | 全回滚；重建同一激活，不留下只绑定半数来源的可运行尝试 | 中断事务与接管并发 |
+| 快照已提交，输出提交前崩溃 | 仍用同一快照/attempt；纯Merge可以重算，不产生第二份可见终态 | 大输出临时资产与GC |
+| 输出/引用/终态提交后、唤醒前崩溃 | 返回既有结果；重复唤醒不得重复尝试或发布下游结果 | 调度扫描/通知重放去重 |
+| 接管后旧owner仍完成 | 旧lease_owner/epoch拒写；新owner按冻结快照接管，禁止覆盖 | 三库锁隔离、时序故障注入 |
+| 取消在计算期间到达 | 终态提交需再次检查执行状态，不能把取消后输出提交为新成功 | cancel与commit双向竞态 |
+| 同执行新尝试/用户新重跑/新轮次 | 各自独立激活；用户重跑是新execution，按闭包绑定可复用来源，历史不可改写 | 轮次/redo/attempt与权限隔离 |
+| 来源输出已被清理/资产撤权或损坏 | 明确不可恢复，沿既有清理后仅全部重跑规则；不猜空数据，不回跑旧副作用 | 保留策略/撤权/资产hash校验 |
+
+这是一组恢复不变量，不承诺当前引擎具备该协议，也不承诺外部副作用恰好一次。Merge依赖输入的纯重算与可见结果去重必须分开描述；失败继续的上游副作用不因此自动重发。
+
+### 21.4 本阶段验证边界
+
+53个manifest及75源映射保持；376个文档用例通过（原303+73）：32个两输入真值表决策、1组N=1/2/3及完成顺序不变性、10个门槛、16个来源归一、5个无效投影、9个SQLite最小列事务参考例。SQLite仅模拟回滚、写栅栏/版本、重复完成与取消提交检查，不执行真实进程崩溃、调度唤醒、资产事务或生产迁移；原32索引参考例仍保留。
+
+692覆盖/116待补/31不适用/19无不变。本阶段仅补就绪与恢复技术契约，Merge数据运算、端口投影/发布完整性及真实阶段证据仍待补，不关闭包含这些内容的G-10/11混合整格。Direct同一执行者自评与原需求验收两遍，文档阶段PASS，平台整体NOT READY；PDR-01～06和V6/V7具体选型未获新确认，未开发产品、提交推送或发布。
+
+## 22. v1.12-review 内嵌Schema局部引用与复杂度
+
+### 22.1 范围、方言与编译阶段
+
+本节补§15.4/§17.2中的局部引用缺口，仅约束节点input_schema/response_schema的设计子集，不更换图结构Schema，不把业务输入五类型或工作空间授权变成Schema判断。单资源配置标识为single-resource-2020-12-design-1，机器定义见[核心契约](../../src/shared/workflow-contracts/workflow-core-nodes.json)的embedded_schema_contract。此为design_only，不能宣称兼容任意JSON Schema、现有外部表单格式或已上线校验服务。
+
+方言固定Draft 2020-12；根可声明精确的https://json-schema.org/draft/2020-12/schema，省略时也按该方言，不能随用户$schema下载元Schema或选择其它版本。input_schema/response_schema在当前manifest中根仍要求对象；其内合法子Schema可以是对象或布尔。参考编译函数单独支持布尔根，用于引用测试，不表示节点参数根已放宽。
+
+编译顺序：严格JSON入口拒绝重复键/非有限数 → 原始请求字节与解析深度守卫 → 已解析树的显式编译预算 → 固定本地元Schema → 支持关键字与Schema位置注册 → 局部引用解析与环检测 → 冻结版本/hash。参考校验器只覆盖已解析树之后的静态步骤，Python JSON解析并非流式防护，运行实例的数据校验/中止仍未实现。图定义2MiB等已有上限不等于任意嵌套JSON或编译成本都安全。
+
+| Schema子位置类别 | 会注册为可引用Schema的值 |
+|---|---|
+| 对象映射 | properties、patternProperties、$defs、definitions、dependentSchemas的每个成员值 |
+| 数组 | allOf、anyOf、oneOf、prefixItems的每个元素，索引使用规范十进制字符串 |
+| 单一子Schema | items、additionalProperties、unevaluatedProperties、unevaluatedItems、contains、propertyNames、contentSchema、if、then、else、not |
+| 普通关键字/注解 | 完整拼写白名单见embedded_schema_contract.leaf_keywords；const/enum/default/examples中的对象不是Schema子位置，不把其中$ref或$id作为指令 |
+
+白名单之外的关键字明确报unsupported，不由校验库静默忽略：包括$id、$dynamicRef/$dynamicAnchor、$vocabulary、旧草案tuple items/additionalItems/dependencies等及未知扩展。禁止$id是本单资源配置的边界，避免局部#引用因嵌套资源切换基址；并非宣称这些关键字在标准中非法。若未来需要多资源或动态作用域，必须另定配置版本、完整解析与兼容测试，不能直接把$dynamicRef当$ref使用。未被引用的$defs也要检查，不允许隐藏坏引用。
+
+format、contentEncoding/contentMediaType/contentSchema、default/examples、readOnly/writeOnly/deprecated在本配置只作注解，不因schema提交而执行解码、网络获取、默认填充、字段裁剪、强制日期邮箱或权限控制。contentSchema内部仍检查Schema位置和引用；它不代表实例内容已被解码验证。数值/字符串/集合/组合等断言遵循固定方言，$ref的兄弟断言同样有效，不能替换$ref对象时丢失兄弟约束。实际断言执行、跨语言数值和正则兼容仍须运行实现验证。
+
+### 22.2 局部引用算法与失效处理
+
+所有$ref必须以#开头，不接受HTTP(S)、file、相对文件名、网络路径或其它资源标识；解析时不打开文件、不发起网络请求。严格校验百分号序列，用严格UTF-8百分号解码一次，不重复解码，不做Unicode归一化。
+
+| 引用形式 | 精确含义与反例 |
+|---|---|
+| # | 当前内嵌Schema根；自引用合法但需要运行资源守卫 |
+| #/… | 解码后以/开头的JSON Pointer，按/切分token，再一次性~1→/、~0→~；裸~或~2等非法 |
+| #name | 同一内嵌资源中唯一$anchor；名称按[A-Za-z_][-A-Za-z0-9._]*，前向引用可用；缺失或重复锚点报错 |
+| 指向数组元素 | 只接受实际Schema位置，例如#/allOf/0；00、-或越界不能当同一数组元素 |
+| 指向字面量/容器 | #/default即使值为{}也不是Schema位置；#/type、#/properties映射容器也不是子Schema；明确拒绝 |
+| 空名称/转义名称 | properties中的空名可由#/properties/引用；a/b~c以a~1b~0c引用，~01只解为~1，不能再次变成/ |
+
+解析按真实Schema位置索引判断存在性及目标资格，而不是“能找到一个JSON对象就算成功”。布尔false是合法引用目标，表示断言总不通过，不能因false是假值误判不存在。错误归因分为元结构错误、配置不支持、坏引用和资源预算；对外只返回必要位置与原因，不回显敏感default/样例正文，不新增未经对齐的产品错误码。
+
+引用图保留共享节点及环，不展开复制。循环引用本身不是非法：递归对象可能是有效模型。静态环标记也不证明运行能终止，尤其#→#等不消耗实例层级的循环不能无限执行；运行时应按固定配置的步数、引用栈与截止时间中止，不能将预算耗尽报告成“数据不符合Schema”。不自行删除环、补空Schema或截断后宣称校验成功。
+
+### 22.3 显式资源预算与版本冻结
+
+| 编译预算 | 计量方式 |
+|---|---|
+| max_document_bytes | ensure_ascii=false、无额外空白的严格UTF-8 JSON序列化字节；另保留原始请求字节守卫，不以规范化后的变小长度绕过接入限制 |
+| max_json_depth | 已解析JSON树根深度0，每个成员值/数组元素深度+1；注解和字面量里的嵌套同样计入 |
+| max_json_values | 根及所有对象成员值/数组元素总数；键名不另计值，但全部计入字节大小 |
+| max_schema_locations | 根及上述各类实际Schema子位置数；不展开引用，同一目标共享使用不复制 |
+| max_reference_edges | 所有实际Schema位置的$ref出现次数，含未引用定义；不按目标去重，不能用共享定义绕过边预算 |
+
+编译配置五项都必须显式给正整数；未提供或非法配置明确拒绝编译，不偷偷补数值默认。目录example_limits=65536字节/32深度/4096值/512位置/128引用边，仅供本地文档夹具；它们不是用户已批准配额或部署配置。运行部署还须冻结按请求/发布图聚合的总编译预算、实例字节/深度/值数、求值步数、引用栈、错误输出数量以及CPU/内存/墙钟；不能把500个节点各自通过预算当作整图安全。
+
+预算检查先于递归元Schema检查；参考函数通过迭代遍历计树/位置/环，但它仍处理内存中完整JSON，不是流式解析器或OS沙箱。实例校验中的oneOf/anyOf分支、contains、uniqueItems、正则与unevaluated*可能放大成本，不能用静态位置数推导最坏执行时间。正则须按既有沙箱中断规则受控执行，生产正则方言和实现版本另冻结；当前Python jsonschema元Schema/正则行为不能冒充Rust/浏览器一致性证据。
+
+保存草稿可以显示不支持/坏引用/预算错误，发布必须有可用的完整配置与实现版本；运行绑定修订中的Schema内容hash、方言/配置版本、校验器实现版本和预算配置hash。不能读取最新定义更改历史回应规则；表单回调及人工提交仍复查当前身份、任务状态和一次性CAS，不因Schema通过就获得授权。预算或schema失败不能推进waiting任务，也不能自动清空字段或新增默认值；草稿处理沿既有协议。
+
+### 22.4 本阶段验证与门槛
+
+430个文档契约用例通过（原376+54）：37个Schema/引用正反例、2个环/共享DAG、10个预算等值/越界、1个缺配置、3组所有子位置遍历及1个注解深度守卫。覆盖前向引用、布尔false目标、空/Unicode名称、百分号/Pointer一次解码、数组索引、非Schema位置、远程/文件/相对资源拒绝和不支持配置；原376例保留，原32索引参考例另行通过。
+
+没有执行不可信实例的运行断言、流式解析/中止、完整编译缓存、任务提交、跨语言方言兼容及真实权限服务。数值部署配额和运行机制仍待实施前冻结。53节点/75源成员、858格及692覆盖116待补31不适用19无不变；局部编译契约不能关闭仍含完整运行/长尾/页面语言的G-10/11整格。Direct同一执行者两遍复核，文档阶段PASS，平台整体NOT READY；PDR/模型选型没有因“继续”获批准，未开发产品、迁移、提交推送或发布。
+
+## 23. v1.13-review 凭据槽、当前授权与缓存失效
+
+### 23.1 既有存储与逻辑类型的边界
+
+以ADR分模块凭据决议、总方案§9.6及v3 §3/§18.6/18.9/18.11为准：沿用统一vault和当前credentials资源，不新建独立密钥库或workflow模块scope。当前源码[credentials.rs](../../crates/server/src/credentials.rs)的存储kind仅password/ssh-key/token，scope仅host/build/deploy且创建后固定；列表/详情返回has_secret与version，不返回secret。当前update使用version条件写并递增version；受管连接令牌另有更新路径，不能据此宣称所有轮换路径已验证。
+
+kind描述存储形式，不足以证明HTTP认证、SMTP或加密算法的完整类型。核心目录[credential_contract](../../src/shared/workflow-contracts/workflow-core-nodes.json)及三个节点的credential_slots新增逻辑profile设计；profile是类型适配门槛，不是已存在的数据库列/服务商注册表，也不是用户已选V6/V7。typed配置的存储迁移、适配器payload版本及工作流如何绑定现有module scope仍未冻结，本阶段保留实施前门槛；不得把“workflow”塞进现有scope枚举，或默认所有节点能读取host/deploy凭据。
+
+| 节点/槽 | 逻辑profile设计 | 存储形式兼容设计 | 必填及真实验收要求 |
+|---|---|---|---|
+| data.crypto/key | crypto.hmac_sha256 | token | hmac_sha256必填；密钥字节编码、长度/算法参数由匹配适配器验证，不以token标签替代 |
+| data.crypto/key | crypto.aes256_gcm | token | encrypt/decrypt_aes_gcm必填；实际解码后256位密钥、nonce/认证失败等沿节点规则验收 |
+| data.crypto/key | crypto.totp | token | totp必填；Base32实际解码及RFC6238参数，不能自动拿HTTP bearer令牌当TOTP密钥 |
+| net.http/auth | http.basic | password | 槽可选；已绑定时校验用户名/秘密及请求目标适配，不从用户名推断模块资格 |
+| net.http/auth | http.bearer / http.header | token | 槽可选；认证头名、固定目标与外发能力配置须由匹配适配器验证 |
+| net.http/auth | http.oauth2 | token | 仅逻辑类型；issuer/client/授权域/刷新令牌及刷新并发尚需完整适配验收，未承诺真实OAuth2运行 |
+| net.smtp/smtp | smtp.account | password | 必填；SMTP host/port/TLS/账号配置不在现有通用凭据摘要中，完整配置适配器尚未交付 |
+
+hash类sha256/sha512不必提供key；若显式绑定仍检查该引用的空间/模块/类型/授权，不以“不用”绕过外来引用检查，不解密无用秘密。其它节点当前没有直接凭据槽，不因本批新增通用秘密注入；host.command/host.checkout等从已授权主机/连接间接使用凭据，须沿既有目标权限与连接规则复查。file/data/vector的资产/集合授权也不能借无凭据槽跳过。
+
+### 23.2 各阶段检查与身份
+
+| 阶段 | 必须检查的内容 | 禁止误算 |
+|---|---|---|
+| 保存草稿 | credentials只含已声明槽，值为正整数ID字符串，不允许内联秘密；必填条件按已解析操作判断 | 缺失/不可访问绑定归已确认Q06发布门槛；允许编辑不完整草稿不等于允许发布。参考图夹具是完整契约检查，不冒称草稿API |
+| 发布 | 发布操作者当前资格、同空间引用、明确module绑定、逻辑profile/实际kind、适配器与必要配置存在；检查所有可达节点 | 列表可见或credentials.read不能自动推导执行使用许可；实际权限映射沿现有scope/object检查，不新增虚构credentials.use键 |
+| 节点尝试前/重试恢复 | 按冻结执行身份及当前成员/对象权限重新检查上述元数据与资产/目标权限，复查最终操作所需profile | 手动及用户重跑按操作者，自动/生产按发布绑定身份，子工作流继承父身份；公开提交者不成为执行身份 |
+| 缓存命中 | 先复查当前执行/空间/module/profile/适配器与凭据有效性，再匹配版本投影和资产存续 | 缓存不是授权快照；撤权时拒绝而不是泄漏旧结果或回退发真实请求 |
+| 取秘密与真正外发前 | 授权后仅由对应执行客户端解密；核对凭据version仍与本尝试冻结版本一致，OAuth刷新/分页/重试新请求同样复查 | 发布通过不保证未来仍可用；轮换竞态不能在同一冻结尝试里悄悄换成新秘密 |
+| 输出/历史读取 | 当前执行和资产读取权限、脱敏及保留策略 | 删除/撤权不追改旧日志或历史执行身份，也不代表旧秘密可继续解密重放 |
+
+列表/选择器按真实module过滤；服务端必须再次校验，不能信任请求体workspace_id/profile/scope。适配器的逻辑profile来自受控元数据，不由普通图参数自报。引用存在性/跨空间/无权限对外沿现有无泄漏错误处理，日志只留必要ID、槽与原因，不返回加密密文或秘密样本。
+
+出站HTTP还要执行既有SSRF/每跳目标校验和跨域去认证；绑定凭据不等于允许任意URL接收认证信息。凭据注入和用户headers冲突必须明确拒绝或按已冻结适配协议处理，不能无声覆盖/叠加；本批不实现HTTP适配器。主机经受限环境/临时文件注入且不进命令行，Windows需等效ACL，不把POSIX 0600字样当Windows实测证据。
+
+### 23.3 版本投影与缓存矩阵
+
+本节精化v3 §18.9：完整节点签名继续包含规范参数/输入/模型/实现/空间/redo等；每个已绑定凭据额外按slot排序加入非敏感投影：workspace_id、slot、credential_id、credential_version、profile、adapter_version、public_config_hash。credential_version复用现有行version，允许名称/说明修改造成保守失效；不新增秘密hash或新世代列。public_config_hash仅从适配器白名单内非敏感配置计算，不能对整个secret JSON、访问/刷新令牌、私钥或低熵密码求hash后冒充非敏感键。
+
+任何能改变秘密、认证主体或结果语义的更新路径都必须原子递增相应版本，包括导入、受管连接令牌轮换及后续OAuth刷新；当前CRUD版本递增不能替代这些路径审计。若实现无法提供可靠版本与非敏感配置投影，该绑定节点在补齐前不得启用缓存，不能只拿相同ID/URL判命中。投影函数刻意不读取secret；测试中仅改秘密而不增version得到相同投影，是对版本写入协议依赖的展示，不是合法轮换可复用旧缓存的保证。
+
+| 当前变化/条件 | 缓存与执行处理 | 待实施验收 |
+|---|---|---|
+| 空间、槽、凭据ID或逻辑profile变化 | 不匹配旧分区；全部按当前绑定重新授权 | 同参数/不同租户或同kind不同profile不串用 |
+| 同ID秘密轮换、账号/公开配置变化 | version或公开配置投影变化，旧缓存不命中；不可在旧冻结尝试里换密钥 | HMAC/AES/TOTP与远端账号的实际结果验证，全部写路径原子递增 |
+| 适配器实现/类型配置版本变化 | 新键；按新协议重新校验配置 | 旧版本结果仍只作历史，不反写定义 |
+| 当前身份被移出空间/撤销对象权限/凭据删除 | 拒绝消费缓存与新秘密使用，不发替代请求 | 队列中撤权、缓存命中前撤权、身份差异及跨空间反例 |
+| 撤权/轮换发生在授权后、取密前 | version/当前资格复查拒绝陈旧快照；按已有尝试策略处理，不自动产生隐藏尝试 | 两客户端竞态、重启及分页/刷新路径 |
+| 外部请求已发送后撤权 | 阻止后续新调用；在途结果沿既有取消/unknown、审计及当前读取授权处理 | 不宣称撤回远端副作用或轮换能让已发送token立即失效 |
+| SMTP、人工、触发、等待、响应等禁止缓存节点 | 凭据投影合格也不能打开缓存 | 重发/等待规则按既有节点契约，不冒充缓存命中 |
+| HTTP等副作用节点 | 默认off；仅在既有显式opt-in、幂等/数据版本与授权条件满足后使用 | GET不自动纯，投影完整不代表服务商结果永远不变 |
+
+秘密仅在被授权的执行客户端内存/受控注入范围短暂出现；不得进入Item、表达式、resolved_params、node_cache、图导出、错误日志和审计正文。HMAC/加密/TOTP等节点按业务生成的结果不是密钥原文，但仍遵执行数据/资产权限和脱敏规则。缓存命中不需要先解密秘密；has_secret只表示存在，不能证明密文可解/远端令牌有效，实际解密和调用失败仍须独立验收。
+
+### 23.4 证据与尚未验收部分
+
+本阶段53manifest/75源映射保持，新增三个槽的accepted_profiles/密码学操作映射及credential_contract设计。文档校验器473例通过（原430+43）：15个元数据资格、11个绑定/身份条件、8个密码学操作与类型匹配、1个SMTP类型、4个撤权阶段、4个缓存投影参考例。参考记录的active/allowed_actors/profile等是合成的有效资格投影，不是当前数据库字段；module_scope=build只是夹具显式取值，不代表工作流模块映射已批准。
+
+这些夹具没有调用vault、权限服务、OAuth、HTTP或SMTP，也没有读写真实凭据或缓存。逻辑profile完整配置/存储及module绑定仍是实施门槛；真实撤权竞态、所有轮换写路径、主机注入/清理与外部平台认证未验。原32索引参考例与文档结构/SQLite模型夹具继续验证，证据按内容hash留存。692覆盖/116待补/31不适用/19无不变；Direct同一执行者两遍复核，文档阶段PASS，平台整体NOT READY。PDR/V6/V7没有新增批准，本轮未开发产品、迁移、提交推送、更新实例或发布。
+
+## 24. v1.14-review 图完整性、端口与入口检查
+
+### 24.1 阶段及既有严重度
+
+本节精化§16/17/21/23，机器检查目录为[graph_publication_contract](../../src/shared/workflow-contracts/workflow-core-nodes.json)。沿用ADR Q06：语法错误/主机命令表达式插值阻断保存；缺凭据、主机绑定、模型阻断发布；预算开启但缺价格、目标模型未就绪阻断执行；其它问题告警。不能把本轮拓扑诊断擅自升级成新的发布阻断产品规则。未知manifest/版本及非法图结构仍按已有§16安全契约处理，不把Q06告警口径解释为允许运行未知代码。
+
+| 阶段 | 检查及输入 | 不能因此声称 |
+|---|---|---|
+| 草稿保存 | JSON/图结构与表达式语法，节点/层级/端口引用，主机命令插值禁止；未完整绑定可保持可编辑 | 本地structure夹具仍使用解析后参数，不是真实表达式语法分析器或允许所有半填参数的草稿API |
+| 完整参数契约检查 | 现有params_schema/semantic_rule、必填凭据/主机绑定、循环/端口及图上限 | 本地resolved_contract通过不代表发布授权/实现版本存在/凭据真实类型/主机可用 |
+| 发布评审 | 冻结修订，检查当前身份与所有可达节点的实现/凭据/绑定/模型；汇总拓扑告警并保留定位 | 拓扑告警不自动变发布错误；S1/S2 design_only节点仍不是已安装实现 |
+| 触发方式启动 | 针对本次明确入口及执行身份构建计划，复查数据/资产/配额/目标及运行时输入投影 | 不按nodes数组首项或第一个触发器启动，不把所有候选入口一起触发 |
+| 尝试与接管恢复 | 沿冻结计划/轮次/输入引用与lease/version，按§21～23复查条件/权限 | 不能重读latest或因上游缺失自动补空Item、跳过、补线 |
+
+校验器新增structure/resolved_contract两个静态模式，仅把既有缺必填凭据/host绑定的检查从结构参考模式分开；其它已解析参数、元Schema和安全检查仍执行。它不是产品保存接口，也没有降低旧默认resolved_contract夹具要求。真实保存草稿中的不完整条件字段、表达式语法和问题面板API仍须实现验收。
+
+### 24.2 拓扑诊断与定位
+
+连接端点包含同层node/port/index；完整重复边拒绝。普通端口index=0；Switch case依cases顺序，fallback关闭时不能连接；Merge input为0～input_count-1，不能拿已见最大index推断声明数量。节点ID只在所在图层唯一，所有循环body计总节点数；跨层连接不得直接引用，循环通过容器边界，外层及各body保持DAG。已有53个契约的端口类型当前都是main，本批不添加虚构的GPU/模型manifest。
+
+| 诊断标识（仅本地语义标签） | 条件与处理 |
+|---|---|
+| input_unconnected | 声明输入槽没有来源；定位node/port/index，告警，不自动补入口或输入 |
+| merge_input_unconnected | 某个声明Merge输入未连；端口0有两条线也不代表端口1已连，不能伪造E满足all_inputs |
+| input_fanin_unfrozen | 同一输入槽有多个不同来源；与完整重复边不同。排序/归并尚未冻结，不新增“只能一条线”的保存约束 |
+| not_reachable_from_trigger | 顶层节点不在任一已声明触发器的可达集合；作为数据流诊断，不把组件子图或AI无触发器图直接判非法 |
+| merge_other_entry_dependency | 从选定触发器可达的Merge，其某连线来源不在该入口可达集合；不能暗中再启动另一个触发器或从其它执行抓输出 |
+| loop_body_interface_unfrozen | 循环body根的容器输入/输出映射未完整冻结；此处定位容器，不能把body中无触发器当不可达错误 |
+
+诊断是确定排序的列表，保留node/port/index及warning标签，避免节点或连接数组重排改变显示结果；新增代码不是已对外发布的API错误码。当前拓扑函数仅分析已通过结构检查的顶层图，不递归宣称body接口合格，也不查询真实发布元数据。未接的If/Switch输出允许是合法分支，不要求为每个输出制造无操作终点；有输入的末端节点没有后继也不是孤立错误，Stop无输出是正常声明。
+
+告警不等于运行计划可构造。启动时仍必须能确定每个实际要消费的来源及投影；无法解析时明确返回运行未就绪/原因，而不是等一个永远不会来的“空输入”。这一技术前提不新增发布严重度，也不替用户决定多来源排序或未选入口投影。真实问题面板的文案/六语言、跳转定位、并发编辑版本仍待验收。
+
+### 24.3 端口兼容关系与待冻结冲突
+
+| 声明关系 | 静态参考结论 | 运行边界 |
+|---|---|---|
+| main与main/text/image/video/audio/file | compatible | main桥接不意味着内容转换；消费端仍校验所需字段、mime/资产资格 |
+| 相同普通具体类型 | compatible | 相同标签不证明实际Item满足约定 |
+| 不同普通具体类型且不含main | incompatible | 给明确原因，不自动插入转换节点或改端口类型 |
+| model与model | compatible | 模型ID、当前可用性及目标权限另验 |
+| main与model | unfrozen | v3 §6.3“main可连任何非内部类型”与“model只能连model”冲突，保留待冻结，不擅自选一方 |
+| model与其它普通具体类型 | incompatible | 不把模型引用当媒体字节 |
+| 相同gpu:*且明确同分段 | compatible | 仅类型关系；还须GPU节点/主机/分段资格与句柄生命周期验证 |
+| gpu:*不同类型、跨分段或桥到main | incompatible | 跨GPU分段保存拒绝沿v3已有规则，不新增隐式拷贝/序列化 |
+| gpu:*分段未知、json<schema>或未知类型 | unfrozen | 要完整typed配置/Schema及适配器；不能只比字符串就承诺兼容 |
+
+compatible只代表静态连接关系，不代表Item有效或服务端已支持该节点。当前53节点全main，图参考检查可检查已明确incompatible的声明关系；unfrozen不伪装为已支持，也不靠本地例子新增产品节点。GPU/typed子集在其阶段实施前必须冻结真实配置与拒绝原因；普通不兼容问题在真实UI/API的严重度按既有Q06及明确GPU例外处理，本函数返回值不是保存接口错误码。
+
+### 24.4 显式入口与执行边界
+
+同一顶层可有多个触发候选；发布索引依各个已授权trigger binding关联冻结修订，事件只选匹配入口。手动触发菜单显式选择入口，未选不能采用nodes[0]；本地require_entry仅针对“由触发器启动”的参考检查。指定节点必须存在于同层且为触发节点，不能把普通Merge或循环body中同名节点当入口。测试触发、生产、错误、子工作流入口的资格分别沿既有绑定规则，不从类型前缀推导事件可随意调用。
+
+以入口a启动时，入口b仍只是候选，不并入本次可达计划。若Merge需要b专属来源，返回清晰依赖告警/计划门槛，不伪造b的E/S、不启动b或等待另一次execution；其精确“未选入口”投影策略仍待冻结。节点/边数组重排不改变入口、可达集合或诊断顺序。
+
+“执行到此节点”、从节点重跑、循环按轮次重跑和AI目标输出入队按各自闭包/来源规则，不受本触发入口函数强加“图必须有trigger”约束；固定数据是测试/既有复用策略的输入，不能替代生产授权或自动补充未连Merge端口。真实planner、已发布绑定切换、触发索引/发件箱原子性和运行方式鉴权仍未实施验收。
+
+### 24.5 既有容量守卫与阶段证据
+
+保持500总节点/3层循环/2MiB定义/1MiB固定数据，不新增配额默认。修正文档校验器pin_data字节计量：按ensure_ascii=false、严格UTF-8且无额外空白的JSON封装计算，避免中文被ASCII转义导致误算双倍；根键/Item封装也计入。原始请求字节及深度仍需接入侧限额，不能借规范序列化代替流式保护。固定数据真实资产引用/来源权限、生产使用策略与分层总预算另验。
+
+505个文档用例通过（原473+32）：16个端口关系、5个结构/完整参数阶段区别、9个拓扑/入口用例、2个Unicode固定数据1MiB及+1字节边界；原32索引参考例保留。参考检查未执行发布/触发/planner、GPU句柄、真实表达式或页面六语言。本阶段53manifest/75映射、692覆盖116待补31不适用19无及858格不变，未以部分静态矩阵关闭G-10/11混合整格。Direct同一执行者两遍复核，文档阶段PASS，平台整体NOT READY；PDR/模型选型未获新确认，未开发产品/迁移/提交推送/更新实例/发布。

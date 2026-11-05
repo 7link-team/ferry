@@ -2,9 +2,11 @@ import { act } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { parseActions } from "../features/pipelines/actions-workflow";
+import integrationCatalog from "../shared/workflow-contracts/workflow-integration-nodes.json";
 import { i18n } from "../shared/i18n/i18n";
 import { setLocale } from "../shared/i18n/locale";
 import { App } from "./App";
+import { Entry } from "./Entry";
 import { RepositoryMonitor,repositoryEventList } from "./pages/RepositoryMonitor";
 import { navigate } from "./router";
 
@@ -37,6 +39,13 @@ beforeEach(() => {
   } })));
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
+it("restores login redirect before mounting the user's default workspace", async () => {
+  required = false;
+  const target="/zh-CN/workspaces/2/nodes?tab=events#latest";
+  history.replaceState({},"","/zh-CN/login?redirect="+encodeURIComponent(target));
+  await act(async()=>root.render(<App/>));
+  expect(location.pathname+location.search+location.hash).toBe(target);
+});
 it("reuses workspace preferences during ordinary navigation and refreshes after maintenance without unloading the page", async () => {
   required = false; permissions = ["hosts.read", "pipelines.read", "settings.read"];
   const original = vi.mocked(fetch).getMockImplementation()!;
@@ -103,6 +112,36 @@ it("offers the eight-character minimum on the registration form", async () => {
   const password = host.querySelector<HTMLInputElement>('input[name="password"]')!;
   expect(password.minLength).toBe(8);
   expect(password.placeholder).toContain("至少 8");
+});
+it("moves an expired session to login with an explicit deep-link destination", async () => {
+  required = false;
+  await act(async () => root.render(<App />));
+  history.replaceState({}, "", "/zh-CN/workspaces/2/code-connections/42?tab=events#latest");
+  await act(async () => window.dispatchEvent(new Event("ferry:unauthorized")));
+  expect(location.pathname).toBe("/zh-CN/login");
+  expect(new URLSearchParams(location.search).get("redirect")).toBe("/zh-CN/workspaces/2/code-connections/42?tab=events#latest");
+  expect(host.querySelector('input[name="password"]')).not.toBeNull();
+});
+it("shows sign-in immediately while setup is pending, preserves typed values on failure, and can retry first-time setup", async () => {
+  let rejectSetup!: (error: Error) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise((_resolve, reject) => { rejectSetup = reject; })));
+  await act(async () => root.render(<Entry error="" onReady={() => {}} />));
+  const email = host.querySelector<HTMLInputElement>('input[name="email"]')!;
+  expect(email).not.toBeNull();
+  expect(host.querySelector('input[name="password"]')).not.toBeNull();
+  expect(host.textContent).not.toContain("正在检查平台初始化状态");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(email, "typed@example.invalid");
+    email.dispatchEvent(new Event("input", {bubbles:true}));
+  });
+  await act(async () => rejectSetup(new Error("network unavailable")));
+  expect(host.querySelector<HTMLInputElement>('input[name="email"]')?.value).toBe("typed@example.invalid");
+  vi.stubGlobal("fetch", vi.fn(async () => ({ok:true,status:200,json:async()=>({required:true,has_users:false,registration_enabled:false})})));
+  const retry = [...host.querySelectorAll('button')].find(button => button.textContent === i18n.t("auth.recheck", {ns:"common-domain"}))!;
+  expect(retry).toBeTruthy();
+  await act(async () => retry.click());
+  expect(host.textContent).toContain("初始化平台超级管理员");
+  expect(host.textContent).not.toContain("正在检查平台初始化状态");
 });
 it("shows alert rules and events for the current host", async () => {
   required = false;
@@ -254,9 +293,12 @@ it.each([false, true])("blocks Git monitoring without a selected Runner when opt
 it("scopes credential menus, lists and create payloads to the current module", async () => {
   required = false;
   permissions = ["credentials.read", "credentials.create"];
-  for (const scope of ["host", "build", "deploy"]) {
+  for (const scope of ["host", "build", "deploy"] as const) {
     history.replaceState({}, "", `/zh-CN/workspaces/2/credentials?scope=${scope}`);
     await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); root.render(<App />); });
+    const moduleName = { host: "主机", build: "仓库", deploy: "应用" }[scope];
+    const credentialLink = host.querySelector(`nav[aria-label="${moduleName}"] a[aria-current="page"]`);
+    expect(credentialLink?.textContent).toBe("凭据管理");
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/credentials?") && new URL(String(url), location.origin).searchParams.get("scope") === scope)).toBe(true);
     const create = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === "创建")!;
     await act(async () => create.click());
@@ -270,13 +312,36 @@ it("scopes credential menus, lists and create payloads to the current module", a
   }
 });
 
+it("blocks an editor with an unavailable node catalog and retries without creating a draft", async () => {
+  required = false;
+  permissions = ["workflows.read", "workflows.create"];
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  let unavailable = true;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith("/workflow-node-catalog")) return {ok:!unavailable,status:unavailable ? 503 : 200,json:async()=>unavailable ? {error:"Catalog unavailable"} : {nodes:integrationCatalog.nodes,packages:[]}};
+    return original(url, options);
+  }));
+  history.replaceState({}, "", "/zh-CN/workspaces/2/workflows/new");
+  await act(async () => root.render(<App />));
+  expect(host.querySelector('[role="alert"]')?.textContent, host.textContent ?? "").toBe("Catalog unavailable");
+  expect(host.querySelector(".react-flow")).toBeNull();
+  unavailable = false;
+  const retry = [...host.querySelectorAll("button")].find(button => button.textContent?.trim() === "重试")!;
+  expect(retry).toBeDefined();
+  await act(async () => retry.click());
+  expect(host.textContent).not.toContain("Catalog unavailable");
+  expect(host.querySelector(".react-flow")).not.toBeNull();
+  // Pageview telemetry is allowed; opening/retrying the editor must not mutate business data.
+  expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST").map(([url]) => String(url))).toEqual(["/api/monitor/pageview"]);
+});
+
 it("has one repository entry and no separate authorization tabs", async () => {
   required = false;
   permissions = ["repositories.read", "repositories.create", "credentials.read", "credentials.create"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/code-connections");
   await act(async () => root.render(<App />));
   const sidebar = host.querySelector('nav[aria-label="仓库"]')!;
-  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "仓库事件", "凭据"]);
+  expect([...sidebar.querySelectorAll("a")].map(a => a.textContent)).toEqual(["仓库连接", "仓库事件", "凭据管理"]);
   expect(sidebar.querySelector('[aria-current="page"]')?.textContent).toBe("仓库连接");
   expect(host.querySelector('nav[aria-label="仓库页面"]')).toBeNull();
   expect(host.textContent).not.toContain("平台授权");
@@ -305,7 +370,9 @@ it("does not expose repository creation to a credentials-only role", async () =>
   permissions = ["credentials.read"];
   history.replaceState({}, "", "/zh-CN/workspaces/2/credentials");
   await act(async () => root.render(<App />));
-  expect([...host.querySelectorAll('nav[aria-label="仓库"] a')].map(a => a.textContent)).toEqual(["凭据"]);
+  expect([...host.querySelectorAll('nav[aria-label="工作流"] a')].map(a => a.textContent)).toEqual(["凭据管理"]);
+  expect(host.querySelector('nav[aria-label="仓库"]')).toBeNull();
+  expect([...host.querySelectorAll("button")].some(button => button.textContent === "新建")).toBe(false);
 });
 it("gives pipeline creation a full-page editor with its own action bar", async () => {
   required = false;
@@ -316,6 +383,10 @@ it("gives pipeline creation a full-page editor with its own action bar", async (
   expect(host.querySelector('nav[aria-label="构建"]')).toBeNull();
   expect(host.querySelector('input[aria-label="流水线名称"]')).not.toBeNull();
   expect(host.querySelector('button[value="save-run"]')?.textContent).toContain("保存并执行");
+  expect(host.querySelector('[aria-label="流水线画布"]')).not.toBeNull();
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "高级 YAML")!.click());
+  expect(host.querySelector('[aria-label="GitHub Actions YAML"]')).not.toBeNull();
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === "可视化")!.click());
   expect(host.querySelector('[aria-label="流水线画布"]')).not.toBeNull();
   const settings = [...host.querySelectorAll("button")].find(button => button.textContent === "流水线设置")!;
   expect(settings.parentElement?.querySelector('[role="tablist"]')).not.toBeNull();

@@ -628,7 +628,7 @@ pub async fn report(
     validate_kind(&kind)?;
     let mut owned = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(crate::repositories::auth::connection_access(scope.user.id))
         .filter(connections::Column::State.eq("connected"));
     if let Some(id) = raw.get("connection_id").filter(|v| !v.is_empty()) {
         let id: Id = id.parse().map_err(|_| ApiError::missing())?;

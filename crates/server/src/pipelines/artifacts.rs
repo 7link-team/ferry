@@ -1,4 +1,6 @@
 //! Immutable build outputs streamed from HostChannel, retained with run history.
+use crate::accounts::workspace_admin;
+use crate::definitions::access::{self, Operation};
 use crate::error::{Json, Path, Query};
 use crate::{
     accounts::workspace::Scope,
@@ -67,6 +69,17 @@ pub fn directory(s: &ServerState, run: i64) -> PathBuf {
 }
 pub fn file_path(s: &ServerState, row: &artifacts::Model) -> PathBuf {
     directory(s, row.run_id).join(row.id.to_string())
+}
+pub(crate) async fn available_path(s: &ServerState, row: &artifacts::Model) -> Result<PathBuf> {
+    let path = file_path(s, row);
+    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
+        let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+        backend
+            .download_file(&format!("artifacts/{}/{}", row.run_id, row.id), &path)
+            .await
+            .map_err(|_| ApiError::missing())?;
+    }
+    Ok(path)
 }
 
 /// The archive name identifies the original logical path, independently of the
@@ -187,11 +200,15 @@ fn restore_legacy_mode(path: &std::path::Path, mode: u32) -> Result<(String, u64
 fn public(r: &artifacts::Model) -> Value {
     json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"run_id":Id::from(r.run_id),"path":r.path,"sha256":r.sha256,"size":r.size,"mode":r.mode,"created_at":r.created_at,"expires_at":r.expires_at})
 }
-pub async fn for_run(s: &ServerState, workspace: i64, run: i64) -> Result<Value> {
+pub(crate) async fn for_run_in(
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: i64,
+    run: i64,
+) -> Result<Value> {
     let rows = artifacts::Entity::find()
         .filter(artifacts::Column::WorkspaceId.eq(workspace))
         .filter(artifacts::Column::RunId.eq(run))
-        .all(&s.db)
+        .all(conn)
         .await?;
     Ok(json!(rows.iter().map(public).collect::<Vec<_>>()))
 }
@@ -200,19 +217,23 @@ pub async fn list(
     scope: Scope,
     Query(raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
-    scope.require("pipelines.read")?;
+    let tx = access::snapshot(&s.db).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.read").await?;
     let q = ListQuery::parse(&SPEC, &raw)?;
     let (rows, total) = resource::list(
-        &s.db,
+        &tx,
         &SPEC,
-        artifacts::Entity::find(),
+        artifacts::Entity::find().filter(
+            artifacts::Column::PipelineId
+                .in_subquery(access::pipeline_ids(&scope, Operation::View)?),
+        ),
         &scope.workspace_id,
         &q,
     )
     .await?;
     let mut items: Vec<Value> = rows.iter().map(public).collect();
     crate::resources::names::attach(
-        &s.db,
+        &tx,
         scope.workspace_id,
         &mut items,
         &[
@@ -229,6 +250,7 @@ pub async fn list(
         ],
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(
         json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
@@ -238,14 +260,15 @@ pub async fn download(
     scope: Scope,
     Path((_, id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
-    scope.require("pipelines.read")?;
+    let scope = workspace_admin::authorize(&s.db, &scope, "pipelines.read").await?;
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let row = artifacts::Entity::find_by_id(i64::from(id))
         .filter(artifacts::Column::WorkspaceId.eq(scope.workspace_id))
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let file = tokio::fs::File::open(file_path(&s, &row))
+    access::require_pipeline(&s.db, &scope, row.pipeline_id.into(), Operation::View).await?;
+    let file = tokio::fs::File::open(available_path(&s, &row).await?)
         .await
         .map_err(|_| ApiError::missing())?;
     let stream = futures::stream::try_unfold(file, |mut file| async move {
@@ -397,6 +420,18 @@ pub(crate) async fn collect_with_modes(
                 },
             });
         }
+        if crate::artifact_store::ArtifactStore::is_remote(s).await? {
+            let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+            for row in &rows {
+                backend
+                    .upload_file(
+                        &format!("artifacts/{}/{}", row.run_id, row.id),
+                        &file_path(s, row),
+                    )
+                    .await
+                    .map_err(|_| ApiError::missing())?;
+            }
+        }
         // Bytes are staged under globally unique artifact IDs, never the
         // shared logical path. Serialize publication across all server tasks;
         // a losing upload removes only its own staged files below.
@@ -418,7 +453,9 @@ pub(crate) async fn collect_with_modes(
         // jobs (`if: always()`/`cancelled()`) uploaded; interrupted workers
         // return before collection.
         if pipeline_runs::Entity::find_by_id(run.id)
+            .filter(crate::executions::pipeline_fence(run.id))
             .filter(pipeline_runs::Column::State.is_in(["running", "cancelling"]))
+            .lock_exclusive()
             .one(&tx)
             .await?
             .is_none()
@@ -497,6 +534,15 @@ pub async fn prune_expired(s: &AppState) -> Result<()> {
 async fn delete_rows(s: &AppState, rows: Vec<artifacts::Model>) -> Result<()> {
     if rows.is_empty() {
         return Ok(());
+    }
+    if crate::artifact_store::ArtifactStore::is_remote(s).await? {
+        let backend = crate::artifact_store::ArtifactStore::for_state(s).await?;
+        for row in &rows {
+            backend
+                .delete(&format!("artifacts/{}/{}", row.run_id, row.id))
+                .await
+                .map_err(|_| ApiError::missing())?;
+        }
     }
     artifacts::Entity::delete_many()
         .filter(artifacts::Column::Id.is_in(rows.iter().map(|row| row.id)))
@@ -587,6 +633,7 @@ mod tests {
             vault: crate::vault::Vault::open(dir.path(), true).unwrap(),
             cluster: None,
             host_monitor: Default::default(),
+            monitor: Default::default(),
         });
         pipelines::Entity::insert(pipelines::ActiveModel {
             id: Set(1),
@@ -611,6 +658,7 @@ mod tests {
             id: Set(10),
             workspace_id: Set(1),
             pipeline_id: Set(1),
+            revision_id: Set(0),
             environment_id: Set(0),
             environment_name: Set(String::new()),
             host_id: Set(1),
@@ -619,6 +667,9 @@ mod tests {
             triggered_by_name: Set(String::new()),
             inputs: Set(None),
             concurrency_group: Set(String::new()),
+            lease_owner: Set(String::new()),
+            lease_epoch: Set(0),
+            not_before: Set(None),
             number: Set(1),
             state: Set("succeeded".into()),
             trigger_kind: Set("manual".into()),
@@ -831,7 +882,7 @@ pub(crate) async fn resolve(
         } else {
             reference.path.clone()
         };
-        let local = file_path(s, &row);
+        let local = available_path(s, &row).await?;
         let lookup = member.clone();
         let selected = tokio::task::spawn_blocking(move || inspect_member(&local, &lookup))
             .await
@@ -931,6 +982,13 @@ pub(crate) async fn deployment_file(s: &ServerState, reference: &Value) -> Resul
             )
         })?;
     let path = directory(s, run).join(id.to_string());
+    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
+        crate::artifact_store::ArtifactStore::for_state(s)
+            .await?
+            .download_file(&format!("artifacts/{run}/{id}"), &path)
+            .await
+            .map_err(|_| ApiError::missing())?;
+    }
     if let Some(member) = reference["zip_member"].as_str() {
         let member = member.to_owned();
         let (file, hash, _, _) =

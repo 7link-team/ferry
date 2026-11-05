@@ -31,6 +31,7 @@ pub(super) async fn acquire_job_group(
     let replace = |state: &'static str, from: &'static str| {
         jobs::Entity::update_many()
             .col_expr(jobs::Column::State, Expr::value(state))
+            .filter(crate::executions::pipeline_fence(run))
             .filter(jobs::Column::ConcurrencyGroup.eq(own.concurrency_group.clone()))
             .filter(jobs::Column::State.eq(from))
             .filter(jobs::Column::Id.ne(own.id))
@@ -158,11 +159,16 @@ pub(super) async fn job_state(
             .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
             .col_expr(jobs::Column::Outputs, Expr::value(outputs))
     };
-    update
+    let changed = update
+        .filter(crate::executions::pipeline_fence(run))
         .filter(jobs::Column::RunId.eq(run))
         .filter(jobs::Column::JobKey.eq(key))
         .exec(&s.db)
-        .await?;
+        .await?
+        .rows_affected;
+    if changed == 0 && crate::executions::current().is_some() {
+        return Err(crate::executions::ownership_lost());
+    }
     Ok(())
 }
 
@@ -251,6 +257,7 @@ async fn execute_job(
     if leg.matrix.is_none() && !leg.plan {
         if let Err(error) = jobs::Entity::update_many()
             .col_expr(jobs::Column::HostId, Expr::value(lease.host))
+            .filter(crate::executions::pipeline_fence(run.id))
             .filter(jobs::Column::RunId.eq(run.id))
             .filter(jobs::Column::JobKey.eq(&job.key))
             .exec(&s.db)
@@ -667,14 +674,15 @@ async fn execute_private(
                 Message::new("execution.prepareArtifactDir"),
             ));
         }
-        let file = tokio::fs::File::open(crate::pipelines::artifacts::file_path(s, artifact))
-            .await
-            .map_err(|_| {
-                ApiError::localized(
-                    StatusCode::BAD_REQUEST,
-                    Message::new("execution.artifactMissing"),
-                )
-            })?;
+        let file =
+            tokio::fs::File::open(crate::pipelines::artifacts::available_path(s, artifact).await?)
+                .await
+                .map_err(|_| {
+                    ApiError::localized(
+                        StatusCode::BAD_REQUEST,
+                        Message::new("execution.artifactMissing"),
+                    )
+                })?;
         let stream = futures::stream::try_unfold(file, |mut file| async move {
             let mut bytes = vec![0; 65536];
             let count = file.read(&mut bytes).await.map_err(|_| {
@@ -1117,6 +1125,71 @@ pub(super) async fn execute_legs(
 mod lease_polling_tests {
     use super::*;
     use sea_orm::{ConnectionTrait, TransactionTrait};
+
+    #[tokio::test]
+    async fn a_replaced_execution_cannot_publish_job_outputs() {
+        use crate::{
+            executions::{
+                self,
+                lease::{Execution, Kind, Lease},
+            },
+            pipelines::runs::lease_tests::fixture,
+        };
+        let (_dir, a, b) = fixture(1).await;
+        let execution = Execution {
+            kind: Kind::Pipeline,
+            workspace: 11,
+            id: 7,
+        };
+        let old = Lease::claim(&a.db, execution, 0, "a:boot", db::now())
+            .await
+            .unwrap()
+            .unwrap();
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        let result = executions::supervise(old, &a.db, stopped, |_| async {
+            job_state(&a, 7, "build", "running", None).await.unwrap();
+            a.db.execute_unprepared("UPDATE locks SET expires_at=0")
+                .await
+                .unwrap();
+            let successor = Lease::claim(&b.db, execution, 1, "b:boot", db::now())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                job_state(
+                    &a,
+                    7,
+                    "build",
+                    "succeeded",
+                    Some("stale secret output".into())
+                )
+                .await
+                .is_err()
+            );
+            let row = jobs::Entity::find_by_id(71)
+                .one(&b.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.state, "running");
+            assert!(row.outputs.is_none());
+            let (_stop, stopped) = tokio::sync::watch::channel(false);
+            executions::supervise(successor, &b.db, stopped, |_| async {
+                job_state(&b, 7, "build", "succeeded", Some("current output".into())).await
+            })
+            .await
+            .unwrap();
+            Err::<(), _>(executions::ownership_lost())
+        })
+        .await;
+        assert!(result.is_err());
+        let row = jobs::Entity::find_by_id(71)
+            .one(&b.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.outputs.as_deref(), Some("current output"));
+    }
 
     #[tokio::test]
     async fn renewal_keeps_polling_execution_that_owns_the_only_connection() {

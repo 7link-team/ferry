@@ -392,6 +392,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
         });
         crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
@@ -401,6 +402,7 @@ mod tests {
             owner_id: Set(1),
             join_code: Set("monitor-test".into()),
             pipeline_run_number: Set(0),
+            workflow_execution_number: Set(0),
             created_at: Set(0),
             updated_at: Set(0),
         })

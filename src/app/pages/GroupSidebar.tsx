@@ -12,9 +12,9 @@ import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
 import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 
-type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number };
-export function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect }: {
-  workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups"; noun: string; active: string; onSelect: (id: string) => void;
+export type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number; count?: number };
+export function GroupSidebar({ workspace, permissions, resource, noun, active, onSelect, groups: suppliedGroups, total }: {
+  workspace: string; permissions: Set<string>; resource: "host-groups" | "pipeline-groups" | "settings" | "dictionaries"; noun: string; active: string; onSelect: (id: string) => void; groups?: GroupNode[]; total?: number;
 }) {
   useCommonTranslation();
   const [groups, setGroups] = useState<GroupNode[]>([]);
@@ -25,10 +25,11 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
-  const canCreate = permissions.has(`${resource}.create`);
-  const canUpdate = permissions.has(`${resource}.update`);
-  const canDelete = permissions.has(`${resource}.delete`);
+  const canCreate = suppliedGroups === undefined && permissions.has(`${resource}.create`);
+  const canUpdate = suppliedGroups === undefined && permissions.has(`${resource}.update`);
+  const canDelete = suppliedGroups === undefined && permissions.has(`${resource}.delete`);
   useEffect(() => {
+    if (suppliedGroups !== undefined) { setGroups(suppliedGroups); return; }
     let live = true;
     const load = async () => {
       const rows: GroupNode[] = [];
@@ -41,7 +42,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     };
     void load().catch(cause => { if (live) setError(errorText(cause)); });
     return () => { live = false; };
-  }, [workspace, resource, revision]);
+  }, [workspace, resource, revision, suppliedGroups]);
   const open = (group?: GroupNode, parentId = "") => { setEditing({ ...(group ? { group } : {}), parentId }); setName(group?.name ?? ""); setDescription(group?.description ?? ""); setError(""); };
   const siblings = (parentId: string) => groups.filter(group => (group.parent_id || "0") === (parentId || "0"))
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, currentLocale()) || a.id.localeCompare(b.id));
@@ -62,7 +63,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
   };
   const renderGroup = (group: GroupNode, depth: number): React.ReactNode => <div key={group.id}>
     <div className={cn("group flex min-w-0 items-center rounded", active === group.id ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} style={{ paddingLeft: depth * 12 }}>
-      <button type="button" aria-current={active === group.id ? "page" : undefined} className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}>{group.name}</button>
+      <button type="button" aria-current={active === group.id ? "page" : undefined} className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-1.5 text-left text-sm" title={group.name} onClick={() => onSelect(group.id)}><span className="truncate">{group.name}</span>{group.count !== undefined && <span className="shrink-0 tabular-nums opacity-70">{group.count}</span>}</button>
       {(canUpdate || canDelete || (resource === "host-groups" && canCreate)) && <DropdownMenu>
         <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-7 text-inherit hover:bg-foreground/15 hover:text-inherit focus-visible:bg-foreground/15" aria-label={`${commonText("table.actions")} · ${group.name}`} title={commonText("table.actions")}><EllipsisVertical className="size-4" /></Button></DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -85,8 +86,8 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     <div className="mb-1 flex items-center gap-1 rounded-md bg-muted/70 px-2 text-sm font-medium text-foreground"><FolderTree className="size-4" />{commonText("table.groups")}<span className="flex-1" />
       {canCreate && <Button variant="ghost" size="icon" className="size-7 hover:bg-foreground/15 focus-visible:bg-foreground/15" aria-label={commonText("group.create")} title={commonText("group.create")} onClick={() => open()}><Plus className="size-4" /></Button>}
     </div>
-    <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("")}>{commonText("group.all")}</button>
-    <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("0")}>{commonText("group.ungrouped")}</button>
+    <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("")}>{commonText("group.all")}{total !== undefined && <span className="tabular-nums opacity-70">{total}</span>}</button>
+    {suppliedGroups === undefined && <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("0")}>{commonText("group.ungrouped")}</button>}
     {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)) : groups).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, currentLocale())).map(group => renderGroup(group, 0))}
     {error && !editing && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
     <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">

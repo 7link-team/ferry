@@ -18,9 +18,16 @@ services:
       FERRY_ALLOWED_HOSTS: ${FERRY_ALLOWED_HOSTS:?Run scripts/quickstart.sh first}
       FERRY_MASTER_KEY: ${FERRY_MASTER_KEY:?Required}
       FERRY_SECURE_COOKIE: ${FERRY_SECURE_COOKIE:-false}
+      FERRY_TRUSTED_PROXIES: ${FERRY_TRUSTED_PROXIES:-}
       FERRY_NATS_URL: nats://ferry:${NATS_PASSWORD:?Required}@nats:4222
       FERRY_NATS_REPLICAS: "1"
       FERRY_CLUSTER_NAMESPACE: ${COMPOSE_PROJECT_NAME:-ferry}
+      # Monitor the existing optional Redis profile; never used for SQL/NATS coordination.
+      FERRY_REDIS_HOST: ${FERRY_REDIS_HOST:-redis}
+      FERRY_REDIS_ENABLED: ${FERRY_REDIS:-false}
+      FERRY_REDIS_PORT: ${FERRY_REDIS_PORT:-6379}
+      FERRY_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      FERRY_REDIS_DB: ${FERRY_REDIS_DB:-0}
     depends_on:
       nats: { condition: service_healthy }
     volumes: ["./data/ferry:/data"]
@@ -47,7 +54,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Reserved for integrations: Ferry currently uses SQL + NATS, not Redis.
+  # Optional integrations service; visible in platform system monitoring.
   redis:
     <<: *service
     profiles: [redis]

@@ -63,6 +63,7 @@ jobs:
           # stand-in for the host triple.
           mkdir -p desktop/binaries
           touch "desktop/binaries/ferry-server-$(rustc -vV | sed -n 's/^host: //p')"
+          touch "desktop/binaries/ferry-sandbox-$(rustc -vV | sed -n 's/^host: //p')"
           cd desktop
           cargo check --locked
           cargo test --locked --lib
@@ -317,6 +318,8 @@ jobs:
         run: npm run build
       - run: bash scripts/build-actions-workers.sh
       - run: cargo build --locked -p ferry-server -p ferry-runner
+      - if: matrix.harness == 'build-ui'
+        run: cargo build --locked -p ferry-sandbox
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-ui.mjs
@@ -329,9 +332,15 @@ jobs:
       - name: Template browser acceptance
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-templates-ui.mjs
+      - name: Login routing and platform account information in Chromium
+        if: matrix.harness == 'build-ui'
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-auth-ui.mjs
       - name: Visual pipeline template browser acceptance
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-pipeline-template-editor-ui.mjs
+      - name: Node workflow editing, inline insertion, publication and execution in Chromium
+        if: matrix.harness == 'build-ui'
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-workflow-editor-ui.mjs
       - name: Deployment form browser acceptance (three consecutive runs)
         if: matrix.harness == 'build-ui'
         run: |
@@ -528,7 +537,7 @@ jobs:
           mkdir -p harness-logs
           bash scripts/build-actions-workers.sh desktop/resources/actions-workers > harness-logs/workers.log 2>&1 &
           workers=$!
-          python .github/scripts/annotate-failures.py --run cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner
+          python .github/scripts/annotate-failures.py --run cargo build --locked --release --target ${{ matrix.target }} -p ferry-server -p ferry-runner -p ferry-sandbox
           if ! wait "$workers"; then
             cat harness-logs/workers.log
             python .github/scripts/annotate-failures.py harness-logs/workers.log
@@ -549,6 +558,8 @@ jobs:
           mkdir -p desktop/binaries
           cp "target/${{ matrix.target }}/release/ferry-server$exe" \
             "desktop/binaries/ferry-server-${{ matrix.target }}$exe"
+          cp "target/${{ matrix.target }}/release/ferry-sandbox$exe" \
+            "desktop/binaries/ferry-sandbox-${{ matrix.target }}$exe"
       - name: Verify bundled service startup and lifecycle
         if: runner.os != 'Windows'
         shell: bash

@@ -80,5 +80,22 @@
   "permission.action.invite": "邀請",
   "permission.action.change_role": "變更角色",
   "permission.action.remove": "移除",
-  "permission.action.manage": "重新命名／邀請碼／轉讓"
+  "permission.action.manage": "重新命名／邀請碼／轉讓",
+  "permission.group.workflows": "工作流程",
+  "permission.group.workflow-groups": "工作流程群組",
+  "permission.action.use": "使用憑證",
+  "permission.action.updatePrice": "管理 AI 價格",
+  "permission.action.updateBudget": "管理 AI 預算與對帳",
+  "platform.storageChangeRequiresMigration": "存储位置已有文件需先迁移；集群仅支持 S3；环境变量配置须在服务器修改。",
+  "platform.footerInvalid": "頁尾內容不得超過 65,536 個 UTF-8 位元組，且不得包含空字元。",
+  "platform.scriptsInvalid": "指令碼設定無效：請檢查 GA4 ID、JavaScript 長度及完整 HTTP(S) 來源。",
+  "mail.invalid": "郵件設定無效，請檢查 SMTP 伺服器、連接埠、寄件人及加密方式。",
+  "mail.sendFailed": "郵件寄送失敗，請檢查設定與網路。",
+  "mail.rateLimit": "寄送過於頻繁，請稍後重試。",
+  "mail.codeInvalid": "驗證碼錯誤、已失效或嘗試次數過多，請重新取得。",
+  "mail.testSubject": "郵件設定測試",
+  "mail.testBody": "這是一封郵件設定測試信。",
+  "mail.codeSubject": "註冊信箱驗證碼",
+  "mail.codeBody": "您的註冊驗證碼為 {code}，10 分鐘有效，請勿洩露。",
+  "monitor.nodeChanged": "回應伺服器與目前顯示節點不同，請重新整理統計後重試；未重設任何節點。"
 }

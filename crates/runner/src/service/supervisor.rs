@@ -256,7 +256,7 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
                 Err(error) => return Err(error),
             };
             #[cfg(windows)]
-            let _job = WorkerJob::attach(&child)?;
+            let _job = crate::process_job::ProcessJob::attach(&child)?;
             let result = monitor(
                 &mut child,
                 &expected,
@@ -306,47 +306,6 @@ pub(super) async fn run(config: PathBuf, mut stopped: watch::Receiver<bool>) -> 
             }
             Err(error) => return Err(error),
             Ok(Outcome::Failed) => anyhow::bail!("代理进程意外退出，由系统服务恢复"),
-        }
-    }
-}
-
-// SCM owns the supervisor, not its child. Closing this handle also terminates
-// an unresponsive worker if the supervisor crashes or the machine stops it.
-#[cfg(windows)]
-struct WorkerJob(windows_sys::Win32::Foundation::HANDLE);
-#[cfg(windows)]
-impl WorkerJob {
-    fn attach(child: &Child) -> anyhow::Result<Self> {
-        use windows_sys::Win32::System::JobObjects::*;
-        unsafe {
-            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            ensure!(!handle.is_null(), "无法创建代理进程作业");
-            let job = Self(handle);
-            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            ensure!(
-                SetInformationJobObject(
-                    handle,
-                    JobObjectExtendedLimitInformation,
-                    &limits as *const _ as *const _,
-                    std::mem::size_of_val(&limits) as u32
-                ) != 0,
-                "无法配置代理进程恢复边界"
-            );
-            let process = child.raw_handle().context("代理进程句柄不可用")?;
-            ensure!(
-                AssignProcessToJobObject(handle, process as _) != 0,
-                "无法绑定代理进程作业"
-            );
-            Ok(job)
-        }
-    }
-}
-#[cfg(windows)]
-impl Drop for WorkerJob {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.0);
         }
     }
 }

@@ -1,4 +1,3 @@
-import { DictionaryState } from "../maintenance/DictionaryState";
 import { Tooltip } from "radix-ui";
 import { AnalysisTooltip, metricClass } from "./AnalysisTooltip";
 import { Pencil } from "lucide-react";
@@ -199,6 +198,16 @@ export function AnalysisSummary({
     Number.isFinite(last) && Number.isFinite(start)
       ? Math.floor((last - start) / 86400000) + 1
       : 0;
+  const monthLabels: { week: number; date: Date }[] = [];
+  for (let week = 0; week < Math.ceil(days / 7); week++) {
+    const date = new Date(Math.max(first, start + week * 7 * dayMs));
+    const previous = monthLabels.at(-1);
+    if (previous && previous.date.getUTCMonth() === date.getUTCMonth()
+      && previous.date.getUTCFullYear() === date.getUTCFullYear()) continue;
+    // A short partial month at the left edge must not collide with the next label.
+    if (previous && (week - previous.week) * 16 < 40) monthLabels.pop();
+    monthLabels.push({ week, date });
+  }
   return (
     <Tooltip.Provider delayDuration={100}><div className="space-y-3 rounded-md border p-3">
       {reportCoverage && (
@@ -229,16 +238,14 @@ export function AnalysisSummary({
                   aria-label={insightText(
                     "每日提交热力图，深色表示更多提交，下方表格提供精确数值",
                   )}
-                  width={Math.max(340, 60 + Math.ceil(days / 7) * 16)}
+                  width={Math.max(340, 92 + Math.ceil(days / 7) * 16)}
                   height="156"
                   className="text-primary"
                 >
                   {Array.from({ length: 7 }, (_, index) => <text key={index} x="0" y={34 + index * 16} fill="var(--foreground)" fontSize="11">{new Intl.DateTimeFormat(currentLocale(), { weekday: "short", timeZone: "UTC" }).format(Date.UTC(2024, 0, 1 + index))}</text>)}
-                  {Array.from({ length: Math.ceil(days / 7) }, (_, week) => {
-                    const date = new Date(start + week * 7 * dayMs);
-                    if (week && date.getUTCMonth() === new Date(start + (week - 1) * 7 * dayMs).getUTCMonth()) return null;
-                    return <text key={week} x={60 + week * 16} y="14" fill="var(--foreground)" fontSize="11">{new Intl.DateTimeFormat(currentLocale(), { month: "short", year: "numeric", timeZone: "UTC" }).format(date)}</text>;
-                  })}
+                  {monthLabels.map(({ week, date }) => <text key={week} x={60 + week * 16} y="14" fill="var(--foreground)" fontSize="11"
+                    aria-label={new Intl.DateTimeFormat(currentLocale(), { month: "long", year: "numeric", timeZone: "UTC" }).format(date)}
+                  >{date.toISOString().slice(2, 7)}</text>)}
                   {Array.from({ length: days }, (_, index) => {
                     const date = new Date(start + index * 86400000)
                       .toISOString()
@@ -538,11 +545,11 @@ export function analysisConfig(
             span: 2,
             record: {
               title: (row) => String(row.repository ?? ""),
-              meta: (row) => <><DictionaryState dictionary="insight-state" value={String(row.state)}>{analysisState(row.state)}</DictionaryState> ? {coverage(row.coverage_start)} ? {timestamp(row.synced_at)}</>,
+              meta: (row) => <>{analysisState(row.state)} ? {coverage(row.coverage_start)} ? {timestamp(row.synced_at)}</>,
               body: (row) => {
                 const job = row.job as Row | undefined;
                 const state = String(job?.effective_state ?? job?.state ?? "");
-                return <>{job && <DictionaryState dictionary="insight-state" value={state}>{analysisState(state)}</DictionaryState>}{[...new Set([row.last_error, job?.last_error].filter(Boolean))].map(error => <span key={String(error)} className="block">{String(error)}</span>)}</>;
+                return <>{job && analysisState(state)}{[...new Set([row.last_error, job?.last_error].filter(Boolean))].map(error => <span key={String(error)} className="block">{String(error)}</span>)}</>;
               },
             },
           },

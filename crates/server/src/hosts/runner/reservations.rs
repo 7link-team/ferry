@@ -1,12 +1,55 @@
 //! Host reservations keep agent upgrades outside complete tasks, including gaps
 //! between Actions jobs and between individual command/file sessions.
 
+use crate::error::Result;
+use futures::{StreamExt, stream::FuturesUnordered};
+use std::time::Duration;
 use std::{
     collections::HashMap,
     future::Future,
     sync::{Arc, LazyLock, Mutex, Weak},
 };
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+
+/// Reservation acquisition can itself own the only SQL connection. Poll it
+/// alongside status reads, and drop both futures before the caller finalizes.
+pub(crate) async fn wait_for_reservation<T, Pending, A, Active>(
+    pending: Pending,
+    stop: &mut tokio::sync::watch::Receiver<bool>,
+    mut active: A,
+) -> Result<Option<T>>
+where
+    Pending: std::future::Future<Output = Result<T>>,
+    A: FnMut() -> Active,
+    Active: std::future::Future<Output = Result<bool>>,
+{
+    if *stop.borrow() || !active().await? {
+        return Ok(None);
+    }
+    tokio::pin!(pending);
+    let mut checks = FuturesUnordered::new();
+    loop {
+        if *stop.borrow() {
+            return Ok(None);
+        }
+        if checks.is_empty() {
+            let check = active();
+            checks.push(async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                check.await
+            });
+        }
+        tokio::select! {
+            value = &mut pending => return value.map(Some),
+            _ = stop.changed() => return Ok(None),
+            status = checks.next() => {
+                if !status.expect("pending reservation status")? {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+}
 
 static HOSTS: LazyLock<Mutex<HashMap<String, Weak<RwLock<()>>>>> = LazyLock::new(Default::default);
 pub(crate) type Lease = Arc<Guard>;

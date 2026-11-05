@@ -65,6 +65,17 @@ fn io_error(error: std::io::Error) -> ApiError {
     )
 }
 async fn metadata(s: &AppState, workspace: Id, id: Id) -> Result<Metadata> {
+    let path = directory(s, workspace, id).join("metadata.json");
+    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
+        crate::artifact_store::ArtifactStore::for_state(s)
+            .await?
+            .download_file(
+                &format!("value-files/{workspace}/{id}/metadata.json"),
+                &path,
+            )
+            .await
+            .map_err(|_| ApiError::missing())?;
+    }
     let bytes = tokio::fs::read(directory(s, workspace, id).join("metadata.json"))
         .await
         .map_err(|_| ApiError::missing())?;
@@ -160,6 +171,18 @@ async fn upload(
         tokio::fs::write(dir.join("metadata.json"), bytes)
             .await
             .map_err(io_error)?;
+        if crate::artifact_store::ArtifactStore::is_remote(&s).await? {
+            let backend = crate::artifact_store::ArtifactStore::for_state(&s).await?;
+            for name in ["content", "metadata.json"] {
+                backend
+                    .upload_file(
+                        &format!("value-files/{}/{id}/{name}", scope.workspace_id),
+                        &dir.join(name),
+                    )
+                    .await
+                    .map_err(|_| ApiError::missing())?;
+            }
+        }
         Ok((StatusCode::CREATED, Json(json!(meta))))
     }
     .await;
@@ -186,6 +209,17 @@ async fn download(
     let meta = metadata(&s, scope.workspace_id, id).await?;
     resource(&meta.resource)?;
     scope.require(&format!("{}.read", meta.resource))?;
+    let path = directory(&s, scope.workspace_id, id).join("content");
+    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(&s).await? {
+        crate::artifact_store::ArtifactStore::for_state(&s)
+            .await?
+            .download_file(
+                &format!("value-files/{}/{id}/content", scope.workspace_id),
+                &path,
+            )
+            .await
+            .map_err(|_| ApiError::missing())?;
+    }
     let file = tokio::fs::File::open(directory(&s, scope.workspace_id, id).join("content"))
         .await
         .map_err(|_| ApiError::missing())?;

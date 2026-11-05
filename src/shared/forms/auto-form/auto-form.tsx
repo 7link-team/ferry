@@ -13,6 +13,7 @@ type ReactNode,
 } from "react";
 import { Checkbox } from "../../ui/checkbox";
 import { Input } from "../../ui/input";
+import { FieldCaption } from "../FieldHelp";
 import {
 Select,
 SelectContent,
@@ -99,7 +100,7 @@ export function AutoField({
           if ("name" in control && !(control as HTMLInputElement).name)
             (control as HTMLInputElement).name = name ?? id;
           if (label && !control.hasAttribute("aria-label"))
-            control.setAttribute("aria-labelledby", `${id}-label`);
+            control.setAttribute("aria-labelledby", caption?.querySelector<HTMLElement>("[data-field-caption-text]")?.id ?? `${id}-label`);
           const existing = (control.getAttribute("aria-describedby") ?? "")
             .split(" ")
             .filter(
@@ -129,7 +130,7 @@ export function AutoField({
             hideLabel && "sr-only",
           )}
         >
-          <span id={`${id}-label`}>{label}</span>
+          <span id={`${id}-label`}>{hideLabel ? label : <FieldCaption label={label} help={help} />}</span>
           {required && (
             <span className="ml-1 text-destructive" aria-hidden="true">
               *

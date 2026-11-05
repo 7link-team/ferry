@@ -36,13 +36,13 @@ export function ago(at: number) {
 }
 
 export const namedOptions =
-  <T extends { id: string; name: string } = { id: string; name: string }>(workspace: string, resource: string, render?: (row: T) => ReactNode) => async (): Promise<Option[]> => {
+  <T extends { id: string; name: string } = { id: string; name: string }>(workspace: string, resource: string, render?: (row: T) => ReactNode, conditions: Record<string, string> = {}) => async (): Promise<Option[]> => {
     const items: Option[] = [];
     for (let page = 1; ; page += 1) {
       const result = await listResource<T>(
         workspace,
         resource,
-        { page, page_size: 200 },
+        { ...conditions, page, page_size: 200 },
       );
       items.push(
         ...result.items.map((row) => ({ value: row.id, label: row.name, ...(render ? { content: render(row) } : {}) })),
@@ -62,6 +62,7 @@ export const cronDate = (value: number) =>
   value ? new Date(value).toLocaleString(currentLocale()) : "—";
 
 export type ResourceConfigContext = {
+  renderTable?: (config: ListConfig<Record<string, unknown>>, refreshKey?: number) => ReactNode;
   workspace: string;
   permissions?: Set<string> | undefined;
   onChanged?: (() => void) | undefined;

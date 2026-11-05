@@ -51,7 +51,7 @@ pub async fn lock(conn: &impl ConnectionTrait) -> Result<platform_state::Model> 
         .await?
         .ok_or_else(ApiError::missing)
 }
-async fn check_admin(conn: &impl ConnectionTrait, admin: &Admin) -> Result<()> {
+pub(crate) async fn check_admin(conn: &impl ConnectionTrait, admin: &Admin) -> Result<()> {
     let allowed = users::Entity::find_by_id(i64::from(admin.0.user.id))
         .filter(users::Column::Active.eq(1))
         .filter(users::Column::IsSuperadmin.eq(1))
@@ -104,6 +104,7 @@ pub async fn status(State(s): State<AppState>) -> Result<impl axum::response::In
             "required": row.initialized == 0,
             "has_users": users::Entity::find().count(&s.db).await? > 0,
             "registration_enabled": row.initialized != 0 && row.registration_enabled != 0,
+            "email_verification_required": super::mail::Configuration::read(&s,row.mail_config.as_deref())?.required(),
         })),
     ))
 }
@@ -174,6 +175,8 @@ pub async fn initialize(
             email: Set(email.clone()),
             name: Set(name.clone()),
             password_hash: Set(auth::hash(&body.credentials.password)?),
+            last_login_at: Set(None),
+            last_login_ip: Set(None),
             active: Set(1),
             is_superadmin: Set(1),
             version: Set(1),
@@ -231,8 +234,8 @@ pub(crate) async fn audit(
 }
 const USER_SPEC: Spec = Spec {
     search: &["name", "email"],
-    filters: &[],
-    sortable: &["name", "email", "created_at"],
+    filters: &["active", "is_superadmin"],
+    sortable: &["name", "email", "created_at", "last_login_at"],
     default_sort: "-created_at",
 };
 #[derive(FromQueryResult)]
@@ -244,10 +247,12 @@ struct PublicUser {
     is_superadmin: i64,
     version: i64,
     created_at: i64,
+    last_login_at: Option<i64>,
+    last_login_ip: Option<String>,
 }
 impl PublicUser {
     fn json(self) -> Value {
-        json!({"id": Id::from(self.id), "email": self.email, "name": self.name, "active": self.active != 0, "is_superadmin": self.is_superadmin != 0, "version": self.version, "created_at": self.created_at})
+        json!({"id": Id::from(self.id), "email": self.email, "name": self.name, "active": self.active != 0, "is_superadmin": self.is_superadmin != 0, "version": self.version, "created_at": self.created_at, "last_login_at":self.last_login_at,"last_login_ip":self.last_login_ip})
     }
 }
 fn public_users() -> sea_orm::Select<users::Entity> {
@@ -259,6 +264,8 @@ fn public_users() -> sea_orm::Select<users::Entity> {
         users::Column::IsSuperadmin,
         users::Column::Version,
         users::Column::CreatedAt,
+        users::Column::LastLoginAt,
+        users::Column::LastLoginIp,
     ])
 }
 pub async fn list_users(
@@ -266,15 +273,32 @@ pub async fn list_users(
     admin: Admin,
     Query(raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
-    let q = ListQuery::parse(&USER_SPEC, &raw)?;
-    let (rows, total) = resource::global_list::<users::Entity, PublicUser>(
-        &s.db,
-        &admin,
-        &USER_SPEC,
-        public_users(),
-        &q,
-    )
-    .await?;
+    let mut q = ListQuery::parse(&USER_SPEC, &raw)?;
+    let mut select = public_users();
+    // These flags are stored as integers on all supported databases. Bind
+    // integers rather than strings (PostgreSQL does not coerce text to bigint).
+    for (name, values) in std::mem::take(&mut q.filters) {
+        let column = match name.as_str() {
+            "active" => users::Column::Active,
+            "is_superadmin" => users::Column::IsSuperadmin,
+            _ => unreachable!("validated by USER_SPEC"),
+        };
+        let flags = values
+            .iter()
+            .map(|value| match value.as_str() {
+                "0" => Ok(0_i64),
+                "1" => Ok(1_i64),
+                _ => Err(ApiError::localized(
+                    axum::http::StatusCode::BAD_REQUEST,
+                    crate::i18n::Message::new("request.query"),
+                )),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        select = select.filter(column.is_in(flags));
+    }
+    let (rows, total) =
+        resource::global_list::<users::Entity, PublicUser>(&s.db, &admin, &USER_SPEC, select, &q)
+            .await?;
     Ok(Json(
         json!({"items": rows.into_iter().map(PublicUser::json).collect::<Vec<_>>(), "total": total, "page": q.page, "page_size": q.page_size}),
     ))
@@ -467,18 +491,65 @@ pub async fn list_workspaces(
 }
 pub async fn get_workspace(
     State(s): State<AppState>,
-    _: Admin,
+    admin: Admin,
     Path(id): Path<Id>,
 ) -> Result<Json<Value>> {
-    Ok(Json(
-        public_workspaces()
-            .filter(workspaces::Column::Id.eq(i64::from(id)))
-            .into_model::<PublicWorkspace>()
-            .one(&s.db)
-            .await?
-            .ok_or_else(ApiError::missing)?
-            .json(),
-    ))
+    let row = public_workspaces()
+        .filter(workspaces::Column::Id.eq(i64::from(id)))
+        .into_model::<PublicWorkspace>()
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    let owner = users::Entity::find_by_id(row.owner_id).one(&s.db).await?;
+    let mut value = relations(&s.db, admin.0.user.id, vec![row])
+        .await?
+        .remove(0);
+    value["owner_name"] = json!(owner.as_ref().map(|user| &user.name));
+    value["owner_id"] = json!(owner.as_ref().map(|user| Id::from(user.id)));
+    let mut counts = serde_json::Map::new();
+    macro_rules! count {
+        ($entity:ident) => {
+            counts.insert(
+                stringify!($entity).into(),
+                json!(
+                    crate::entities::$entity::Entity::find()
+                        .filter(crate::entities::$entity::Column::WorkspaceId.eq(i64::from(id)))
+                        .count(&s.db)
+                        .await?
+                ),
+            );
+        };
+    }
+    counts.insert(
+        "members".into(),
+        json!(
+            workspace_members::Entity::find()
+                .filter(workspace_members::Column::WorkspaceId.eq(i64::from(id)))
+                .filter(workspace_members::Column::State.eq("active"))
+                .count(&s.db)
+                .await?
+        ),
+    );
+    count!(hosts);
+    count!(repository_connections);
+    count!(credentials);
+    count!(pipelines);
+    count!(workflows);
+    let assets = crate::platform_monitor::query(
+        &s.db,
+        "SELECT COUNT(*) AS count FROM assets WHERE workspace_id = $1",
+        vec![i64::from(id).into()],
+    )
+    .await?;
+    counts.insert(
+        "assets".into(),
+        assets
+            .first()
+            .map(|row| row["count"].clone())
+            .unwrap_or(json!(0)),
+    );
+    value["resource_counts"] = Value::Object(counts);
+    Ok(Json(value))
 }
 pub async fn create_workspace(
     State(s): State<AppState>,
@@ -567,8 +638,78 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
     view["id"] = json!("1");
     view["registration_enabled"] = json!(row.registration_enabled != 0);
     view["runner_auto_update"] = json!(row.runner_auto_update != 0);
+    view["footer_html"] = json!(row.footer_html.as_deref().unwrap_or_default());
+    view.as_object_mut().unwrap().extend(
+        crate::platform_monitor::retention::Limits::read(row.monitor_config.as_deref())?
+            .view()
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
+    view.as_object_mut().unwrap().extend(
+        super::mail::Configuration::read(&s, row.mail_config.as_deref())?
+            .view()
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
+    view.as_object_mut().unwrap().extend(
+        json!(super::platform_scripts::Configuration::read(
+            row.page_scripts.as_deref()
+        )?)
+        .as_object()
+        .unwrap()
+        .clone(),
+    );
     view["version"] = json!(row.version);
+    view["system_version"] = json!(env!("CARGO_PKG_VERSION"));
+    view["system_protocol"] = json!(ferry_protocol::VERSION.to_string());
+    view["system_instance"] = json!(s.instance_id);
+    view["system_runtime"] = json!(format!(
+        "{} / {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    view["system_mode"] = json!(if s.server_mode {
+        "Server"
+    } else {
+        "Desktop / standalone"
+    });
+    let storage = crate::artifact_store::Configuration::read(&s, row.file_storage.as_deref())
+        .map_err(|_| crate::content_assets::unavailable())?;
+    view.as_object_mut()
+        .unwrap()
+        .extend(storage.view().as_object().unwrap().clone());
     Ok(Json(view))
+}
+pub async fn server_nodes(
+    State(s): State<AppState>,
+    _: Admin,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    let now = db::now();
+    let rows = crate::entities::worker_ids::Entity::find()
+        .all(&s.db)
+        .await?;
+    let items=rows.into_iter().map(|r| {
+        let info=r.info.as_deref().and_then(|v|serde_json::from_str::<Value>(v).ok()).unwrap_or(json!({}));
+        json!({"worker_id":r.worker_id,"instance_id":r.instance_id,"heartbeat_at":r.heartbeat_at,"online":r.heartbeat_at>now-crate::snowflake::TTL.as_millis() as i64,"current":r.instance_id==s.instance_id,"info":info})
+    }).collect::<Vec<_>>();
+    let total = items.len();
+    let online = items.iter().filter(|v| v["online"] == true).count();
+    let size = raw
+        .get("page_size")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(20)
+        .clamp(1, 200);
+    let page = raw
+        .get("page")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1)
+        .clamp(1, 1024);
+    Ok(Json(
+        json!({"items":items.into_iter().skip((page-1)*size).take(size).collect::<Vec<_>>(),"total":total,"page":page,"page_size":size,"coverage":{"online":online,"cluster":s.cluster.is_some()}}),
+    ))
 }
 #[derive(Deserialize)]
 pub struct SettingsUpdate {
@@ -576,6 +717,8 @@ pub struct SettingsUpdate {
     registration_enabled: bool,
     #[serde(default)]
     runner_auto_update: Option<bool>,
+    #[serde(default)]
+    footer_html: Option<String>,
     #[serde(flatten)]
     oauth: serde_json::Map<String, Value>,
 }
@@ -593,11 +736,42 @@ pub async fn update_settings(
             crate::i18n::Message::new("platform.settingsChanged"),
         ));
     }
+    if body
+        .footer_html
+        .as_ref()
+        .is_some_and(|content| content.len() > 65536 || content.contains('\0'))
+    {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("platform.footerInvalid"),
+        ));
+    }
+    let footer_html = body
+        .footer_html
+        .clone()
+        .or(row.footer_html.clone())
+        .filter(|content| !content.trim().is_empty());
+    let page_scripts =
+        super::platform_scripts::Configuration::update(row.page_scripts.as_deref(), &body.oauth)?;
+    let mail_config =
+        super::mail::Configuration::update(&s, row.mail_config.as_deref(), &body.oauth)?;
+    let monitor_limits = crate::platform_monitor::retention::Limits::update(
+        row.monitor_config.as_deref(),
+        &body.oauth,
+    )?;
+    let monitor_config = serde_json::to_string(&monitor_limits).map_err(std::io::Error::other)?;
     let runner_auto_update = body
         .runner_auto_update
         .map(i64::from)
         .unwrap_or(row.runner_auto_update);
     let mut repository_oauth = row.repository_oauth.clone();
+    let file_storage = crate::artifact_store::Configuration::update(
+        &s,
+        &tx,
+        row.file_storage.as_deref(),
+        &body.oauth,
+    )
+    .await?;
     let oauth_changed = body.oauth.keys().any(|key| {
         key == "oauth_public_url"
             || ["github", "gitlab", "gitee", "gitea"]
@@ -611,6 +785,20 @@ pub async fn update_settings(
         repository_oauth = Some(config.seal(&s)?);
     }
     platform_state::Entity::update_many()
+        .col_expr(platform_state::Column::FooterHtml, Expr::value(footer_html))
+        .col_expr(
+            platform_state::Column::PageScripts,
+            Expr::value(page_scripts),
+        )
+        .col_expr(platform_state::Column::MailConfig, Expr::value(mail_config))
+        .col_expr(
+            platform_state::Column::MonitorConfig,
+            Expr::value(monitor_config),
+        )
+        .col_expr(
+            platform_state::Column::FileStorage,
+            Expr::value(file_storage),
+        )
         .col_expr(
             platform_state::Column::RunnerAutoUpdate,
             Expr::value(runner_auto_update),
@@ -637,9 +825,24 @@ pub async fn update_settings(
         "update",
         "platform-settings",
         Id::from(1),
-        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed}),
+        json!({"registration_enabled": body.registration_enabled, "runner_auto_update":runner_auto_update != 0, "repository_oauth_updated": oauth_changed, "footer_updated":body.footer_html.is_some(), "scripts_updated":body.oauth.keys().any(|key|key.starts_with("analytics_"))}),
     )
     .await?;
     tx.commit().await?;
+    if let Ok(mut limits) = s.monitor.limits.lock() {
+        *limits = monitor_limits;
+    }
     Ok(Json(json!({"id": "1", "version": row.version + 1})))
+}
+
+/// Deployment identity is public; never expose the rest of platform settings.
+pub async fn footer(State(s): State<AppState>) -> Result<impl axum::response::IntoResponse> {
+    let row = platform_state::Entity::find_by_id(1)
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"content":row.footer_html.unwrap_or_default()})),
+    ))
 }

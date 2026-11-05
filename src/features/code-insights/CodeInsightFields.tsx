@@ -234,15 +234,10 @@ export function CodeInsightAliases({
   const aliases = Array.isArray(value)
     ? (value as Record<string, unknown>[])
     : [];
-  const incomplete = aliases.some(
-    (alias) =>
-      !String(alias.nickname ?? "").trim() ||
-      (!String(alias.name ?? "").trim() && !String(alias.email ?? "").trim()),
-  );
   useEffect(() => {
-    onValidityChange(!readOnly && incomplete);
+    onValidityChange(false);
     return () => onValidityChange(false);
-  }, [readOnly, incomplete, onValidityChange]);
+  }, [onValidityChange]);
   const update = (index: number, key: string, text: string) =>
     onChange(
       aliases.map((alias, position) =>
@@ -256,7 +251,7 @@ export function CodeInsightAliases({
     >
       <div className="flex flex-wrap items-start justify-between gap-3"><p className="min-w-0 flex-1 text-sm leading-6 text-muted-foreground">
         {insightText(
-          "将不同提交姓名或邮箱映射到同一昵称，统一贡献统计。仅影响当前洞察，不会重新采集代码。",
+          "authorDiscoveryHelp",
         )}
       </p>
       {!readOnly && !aliases.length && <Button type="button" size="sm" variant="outline" onClick={() => onChange([{ name: "", email: "", nickname: "" }])}><Plus aria-hidden="true" className="size-4" />{insightText("添加作者映射")}</Button>}
@@ -286,7 +281,6 @@ export function CodeInsightAliases({
               <AutoField
                 key={key}
                 label={insightText(label)}
-                required={key === "nickname"}
                 className="block min-w-0 space-y-2"
               >
                 {readOnly ? (
@@ -297,7 +291,6 @@ export function CodeInsightAliases({
                   <Input
                     aria-label={insightText(label) + " " + (index + 1)}
                     value={String(alias[key] ?? "")}
-                    required={key === "nickname"}
                     onChange={(event) => update(index, key, event.target.value)}
                   />
                 )}
@@ -320,11 +313,6 @@ export function CodeInsightAliases({
           </div>
         ))}
       </div>
-      {!readOnly && incomplete && (
-        <p role="alert" className="text-sm text-destructive">
-          {insightText("每条作者映射须填写姓名或邮箱，以及显示昵称。")}
-        </p>
-      )}
     </section>
   );
 }

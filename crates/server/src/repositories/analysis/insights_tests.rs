@@ -8,6 +8,138 @@ use sea_orm::PaginatorTrait;
 use sync::tests::{claimed, commit, fixture, queued_repository};
 
 #[tokio::test]
+async fn discovered_author_pairs_are_exact_optional_and_isolated_per_insight() {
+    let (_dir, s) = fixture().await;
+    grant(&s).await;
+    managed(&s, 4).await;
+    let first = create_one(&s, body("First", vec![member(4, "team/repo")])).await;
+    let second = create_one(&s, body("Second", vec![member(4, "team/repo")])).await;
+    let claim = claimed(&s).await;
+    for (index, (name, email)) in [
+        ("Alice", "a@example.test"),
+        ("Alice", "b@example.test"),
+        ("Bob", "a@example.test"),
+        ("Alice", ""),
+        ("", "a@example.test"),
+        ("Alice", "a@example.test"),
+        ("alice", "a@example.test"),
+        ("", ""),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut fact = commit(char::from(b'a' + index as u8));
+        fact.sha = format!("{:040x}", index + 1);
+        fact.author_name = name.into();
+        fact.author_email = email.into();
+        sync::store(&s, &claim, fact).await.unwrap();
+    }
+    let initial = detail(&s, first).await;
+    let aliases: Vec<Alias> = serde_json::from_value(initial["aliases"].clone()).unwrap();
+    assert_eq!(
+        aliases.len(),
+        7,
+        "only a byte-identical name/email pair deduplicates"
+    );
+    assert!(
+        aliases
+            .iter()
+            .all(|alias| alias.nickname.is_empty() && alias.contributor_id.is_empty())
+    );
+    let collectors = collector(&s).await;
+    edit(&s, first, |body| {
+        for alias in &mut body.config.aliases {
+            if alias.name == "Alice" && alias.email == "a@example.test" {
+                alias.nickname = "First nickname".into();
+            }
+        }
+    })
+    .await;
+    edit(&s, second, |body| {
+        for alias in &mut body.config.aliases {
+            if alias.name == "Alice" && alias.email == "a@example.test" {
+                alias.nickname = "Second nickname".into();
+            }
+        }
+    })
+    .await;
+    for (id, nickname) in [(first, "First nickname"), (second, "Second nickname")] {
+        let value = detail(&s, id).await;
+        assert_eq!(value["aliases"].as_array().unwrap().len(), 7);
+        let mapped: Vec<_> = value["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|alias| alias["nickname"] != "")
+            .collect();
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["name"], "Alice");
+        assert_eq!(mapped[0]["email"], "a@example.test");
+        assert_eq!(mapped[0]["nickname"], nickname);
+        let row = insights::Entity::find_by_id(id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        let links = crate::entities::code_insight_identity_links::Entity::find()
+            .filter(crate::entities::code_insight_identity_links::Column::InsightId.eq(id))
+            .all(&s.db)
+            .await
+            .unwrap();
+        let config = decode(&row).unwrap();
+        let mapped_id: i64 = config.aliases[0].contributor_id.parse().unwrap();
+        assert_eq!(
+            links
+                .iter()
+                .filter(|link| link.contributor_id == mapped_id)
+                .count(),
+            1,
+            "matching only a name or email must not merge another pair"
+        );
+    }
+    let mut new_author = commit('9');
+    new_author.author_name = "New".into();
+    new_author.author_email = "new@example.test".into();
+    sync::store(&s, &claim, new_author).await.unwrap();
+    assert_eq!(
+        detail(&s, first).await["aliases"].as_array().unwrap().len(),
+        8
+    );
+    assert_eq!(
+        detail(&s, second).await["aliases"]
+            .as_array()
+            .unwrap()
+            .len(),
+        8
+    );
+    edit(&s, first, |body| {
+        for alias in &mut body.config.aliases {
+            alias.nickname.clear();
+        }
+    })
+    .await;
+    assert!(
+        detail(&s, first).await["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|alias| alias["nickname"] == "")
+    );
+    assert!(
+        detail(&s, second).await["aliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|alias| alias["nickname"] == "Second nickname")
+    );
+    assert_eq!(
+        collector(&s).await,
+        collectors,
+        "display edits never requeue collection"
+    );
+}
+
+#[tokio::test]
 async fn insight_collection_status_distinguishes_pending_revisions_retries_and_native_fallback() {
     let (_dir, s) = fixture().await;
     grant(&s).await;
@@ -226,6 +358,7 @@ async fn pipeline(s: &AppState, id: i64, workspace: i64) {
         pipelines::Model {
             id,
             workspace_id: workspace,
+            owner_id: None,
             name: format!("collector-{id}"),
             group_id: 0,
             application_id: 0,
@@ -246,7 +379,7 @@ async fn pipeline(s: &AppState, id: i64, workspace: i64) {
 }
 
 #[tokio::test]
-async fn insight_crud_checks_versions_permissions_owner_and_workspace() {
+async fn insight_crud_shares_with_workspace_members_and_checks_versions_and_permissions() {
     let (_dir, s) = fixture().await;
     grant(&s).await;
     managed(&s, 4).await;
@@ -332,20 +465,156 @@ async fn insight_crud_checks_versions_permissions_owner_and_workspace() {
         .await
         .unwrap();
     let other = Scope::for_actor(&s, 1.into(), 99.into()).await.unwrap();
+    let shared = get(
+        State(s.clone()),
+        other.clone(),
+        Path(("1".into(), id.into())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(shared["name"], "First");
     assert_eq!(
-        get(State(s.clone()), other, Path(("1".into(), id.into())))
-            .await
-            .unwrap_err()
-            .0,
-        StatusCode::NOT_FOUND
-    );
-    let other = Scope::for_actor(&s, 1.into(), 99.into()).await.unwrap();
-    assert_eq!(
-        list(State(s.clone()), other, Query(HashMap::new()))
+        list(State(s.clone()), other.clone(), Query(HashMap::new()))
             .await
             .unwrap()
             .0["total"],
-        0
+        1
+    );
+    assert_eq!(shared["repository_count"], 1);
+    let connections = crate::repositories::auth::list_connections(
+        State(s.clone()),
+        other.clone(),
+        Query(HashMap::new()),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(connections["total"], 1);
+    assert_eq!(
+        crate::repositories::auth::get_connection(
+            State(s.clone()),
+            other.clone(),
+            Path(("1".into(), "4".into()))
+        )
+        .await
+        .unwrap()
+        .0["id"],
+        "4"
+    );
+    let mut edited: Body = serde_json::from_value(shared).unwrap();
+    edited.description = "Updated by another workspace member".into();
+    edited.config.reconcile_minutes = 3;
+    update(
+        State(s.clone()),
+        other.clone(),
+        Path(("1".into(), id.into())),
+        Json(edited),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        insights::Entity::find_by_id(id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .user_id,
+        1,
+        "editing a shared insight must preserve its creator and identity mapping scope"
+    );
+    assert!(
+        super::super::decode(&collector(&s).await.0)
+            .unwrap()
+            .enabled
+    );
+    let mut second = body("Another member's insight", vec![member(4, "team/repo")]);
+    second.config.reconcile_minutes = 2;
+    let (_, Json(second)) = create(State(s.clone()), other.clone(), Json(second))
+        .await
+        .unwrap();
+    assert_eq!(
+        super::super::decode(&collector(&s).await.0)
+            .unwrap()
+            .reconcile_minutes,
+        2
+    );
+    delete(
+        State(s.clone()),
+        other.clone(),
+        Path(("1".into(), second["id"].as_str().unwrap().parse().unwrap())),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        super::super::decode(&collector(&s).await.0)
+            .unwrap()
+            .reconcile_minutes,
+        3,
+        "deleting another member's insight must retain the first creator's collection demand"
+    );
+    retry(
+        State(s.clone()),
+        other.clone(),
+        Path(("1".into(), id.into())),
+    )
+    .await
+    .unwrap();
+    let audit = crate::entities::activity::Entity::find()
+        .filter(crate::entities::activity::Column::ResourceId.eq(id))
+        .filter(crate::entities::activity::Column::Action.eq("sync"))
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        audit.actor_id, 99,
+        "manual collection records the submitting actor"
+    );
+    let mut denied = other.clone();
+    denied.permissions.remove("repositories.read");
+    assert_eq!(
+        crate::repositories::auth::list_connections(
+            State(s.clone()),
+            denied,
+            Query(HashMap::new())
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let mut denied = other.clone();
+    denied.permissions.remove("code-insights.read");
+    assert_eq!(
+        get(State(s.clone()), denied, Path(("1".into(), id.into())))
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let mut private = connections::Entity::find_by_id(4)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    private.id = 101;
+    private.name.clear();
+    connections::Entity::insert(private.into_active_model())
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        crate::repositories::auth::get_connection(
+            State(s.clone()),
+            other.clone(),
+            Path(("1".into(), "101".into()))
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::NOT_FOUND,
+        "OAuth setup remains private"
     );
     queued_repository(&s, 20, 16, 2).await;
     let foreign = Scope::for_actor(&s, 2.into(), 1.into()).await.unwrap();
@@ -469,7 +738,7 @@ async fn overlapping_insights_reuse_collection_and_local_edits_do_not_requeue() 
     assert_eq!(value["aliases"][0]["nickname"], "Maintainer");
     assert_eq!(
         detail(&s, first).await["aliases"],
-        json!([]),
+        json!([{"name":"Author", "email":"author@example.test", "nickname":""}]),
         "identity rules belong to one insight"
     );
 }

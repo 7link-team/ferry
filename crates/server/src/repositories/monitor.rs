@@ -426,6 +426,22 @@ pub async fn update(
             crate::i18n::Message::new("repository.monitor.eventInvalid"),
         ));
     }
+    // Delivery settings and scheduling do not change what was sampled. Keep that
+    // baseline so editing a notification cannot silently discard unseen changes.
+    let same_sampling = old.is_some()
+        && previous.mode == Mode::Poll
+        && body.mode == Mode::Poll
+        && previous.provider == connection.provider
+        && (connection.provider != "git" || previous.runner_id == body.runner_id)
+        && previous.all_repositories == body.all_repositories
+        && (body.all_repositories || previous.repositories == repositories)
+        && previous
+            .events
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            == body.events.iter().collect::<std::collections::HashSet<_>>();
+    let reschedule = (!previous.enabled && body.enabled)
+        || previous.poll_interval_minutes != body.poll_interval_minutes;
     let secret = if body.secret.is_empty() {
         previous.secret
     } else {
@@ -548,8 +564,23 @@ pub async fn update(
         )
         .exec_without_returning(&tx)
         .await?;
-    polls::Entity::delete_by_id(connection.id).exec(&tx).await?;
-    if config.enabled && config.mode == Mode::Poll {
+    let poll = polls::Entity::find_by_id(connection.id).one(&tx).await?;
+    let preserve_poll = same_sampling
+        && poll
+            .as_ref()
+            .is_some_and(|poll| poll.config_version == body.version);
+    if preserve_poll {
+        let mut update = polls::Entity::update_many()
+            .col_expr(polls::Column::ConfigVersion, Expr::value(row.version))
+            .filter(polls::Column::Id.eq(connection.id));
+        if reschedule {
+            update = update.col_expr(polls::Column::NextPollAt, Expr::value(db::now()));
+        }
+        update.exec(&tx).await?;
+    } else {
+        polls::Entity::delete_by_id(connection.id).exec(&tx).await?;
+    }
+    if !preserve_poll && config.enabled && config.mode == Mode::Poll {
         polls::Entity::insert(polls::ActiveModel {
             id: Set(connection.id),
             workspace_id: Set(connection.workspace_id),
@@ -824,7 +855,7 @@ pub(crate) async fn latest_commit_events(
     }
     Ok(result)
 }
-/// Events of every connection the caller owns in this workspace, newest first.
+/// Events of every connection accessible to the caller in this workspace, newest first.
 pub async fn workspace_history(
     State(s): State<AppState>,
     scope: Scope,
@@ -833,7 +864,7 @@ pub async fn workspace_history(
     scope.require("repositories.read")?;
     let owned = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(crate::repositories::auth::connection_access(scope.user.id))
         .all(&s.db)
         .await?;
     let names: HashMap<i64, String> = owned.iter().map(|c| (c.id, c.name.clone())).collect();

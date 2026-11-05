@@ -1,10 +1,9 @@
-import { useContext,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { base,operationResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import { executionText,useCommonTranslation } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
-import { DictionaryContext, DictionaryState, dictionaryStateLabel } from "../maintenance/DictionaryState";
 import { Button } from "../../shared/ui/button";
 import { artifactDiff,deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
 
@@ -12,8 +11,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   workspace: string; deploymentId?: string; revisionId?: string; permissions: Set<string>;
 }) {
   useCommonTranslation();
-  const dictionaries = useContext(DictionaryContext);
-  const stateLabel = (value: string) => dictionaryStateLabel(dictionaries, "deployment-state", value, deploymentState(value));
+  const stateLabel = deploymentState;
   const [app, setApp] = useState<Deployment>();
   const [revision, setRevision] = useState<Revision>();
   const [preview, setPreview] = useState<Preview>();
@@ -73,7 +71,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
   return <div className="min-h-0 overflow-auto space-y-5 pb-6">
     <header className="flex flex-wrap items-center gap-3 border-b pb-4">
-      <h2 className="text-lg font-semibold">{app.name}</h2><DictionaryState dictionary="deployment-state" value={app.state}>{deploymentState(app.state)}</DictionaryState>
+      <h2 className="text-lg font-semibold">{app.name}</h2>{deploymentState(app.state)}
       <span className="text-sm text-muted-foreground">{executionText("deployment.composeTarget", { id: app.target_ref })}</span>
     </header>
     <div className="flex flex-wrap gap-2" aria-busy={busy}>
@@ -108,7 +106,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     {!!app.current_targets?.length && <details><summary className="cursor-pointer text-sm">{executionText("deployment.hostRevisions")}</summary><ul className="mt-2 space-y-1 text-sm">{app.current_targets.map((target) => <li key={target.host_id}>{executionText("deployment.hostRevision", { id: target.host_id, revision: target.current_revision })}</li>)}</ul></details>}
     {revision && <section className="space-y-3"><h3 className="font-semibold">{executionText("deployment.revisionTitle", { number: revision.number, action: revision.action === "rollback" ? executionText("shared.resource.deployment.rollback") : executionText("shared.resource.variable.deploy"), state: stateLabel(revision.state) })}</h3>
       <pre aria-label={executionText("shared.resource.cron.output")} className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/30 p-4 text-xs">{revision.output || executionText("deployment.resultPending")}</pre>
-      {!!revision.targets?.length && <section aria-label={executionText("deployment.perHostResults")} className="space-y-2"><h4 className="text-sm font-medium">{executionText("deployment.sequentialHosts")}</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">{executionText("deployment.hostNumber", { id: target.host_id })} · <DictionaryState dictionary="deployment-state" value={target.state}>{deploymentState(target.state)}</DictionaryState></summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || executionText("deployment.waiting")}</pre></details></li>)}</ol></section>}
+      {!!revision.targets?.length && <section aria-label={executionText("deployment.perHostResults")} className="space-y-2"><h4 className="text-sm font-medium">{executionText("deployment.sequentialHosts")}</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">{executionText("deployment.hostNumber", { id: target.host_id })} · {deploymentState(target.state)}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || executionText("deployment.waiting")}</pre></details></li>)}</ol></section>}
       <details><summary className="cursor-pointer text-sm">{executionText("deployment.savedArtifact")}</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || executionText("deployment.artifactPending")}</pre></details>
     </section>}
   </div>;

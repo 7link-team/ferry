@@ -8,7 +8,8 @@
 | 版本基线 | n8n 2.45.7；其 n8n-nodes-base 与 @n8n/n8n-nodes-langchain 均为 2.45.6。ComfyUI v0.43.0，按用户提供的本机清点快照核对 |
 | 节点证据位置 | D:\bench\inv\n8n-codex.json；n8n-integrations.md；n8n-n8n-nodes-langchain-2.45.6/package/package.json 的 n8n.nodes；comfy-nodes.md；comfy/comfy_api_nodes/nodes_*.py |
 | 截图证据位置 | D:\bench\shots\n8n\ 与 D:\bench\shots\comfyui\；本文仅引用相对文件名，不复制第三方界面到公开仓库 |
-| 与 v3 的关系 | 本清单是验收依据，分期以 v3 为准；§18 是规范性补充，覆盖前文冲突。V13、V14、V15 已确认（ADR 2026-11-02）；V6、V7、V10、V12 等仍按 v3 的待确认状态处理，不把推荐写成已批准或已实现 |
+| 与 v3 的关系 | 本清单是验收依据，分期以 v3 为准；§18 是规范性补充，覆盖前文冲突。ADR 2026-11-02后续条目已确认V1～V15推荐方向；V6/V7具体模型家族/服务商仍在S4/S3前选择，不将方向确认等同具体选型或实现 |
+| 可机读设计映射 | [节点契约说明](prd/schemas/README.md)：46个S1核心+3个S2内置数据+4个S2文件/归档节点（共53个）；B001～B075逐成员映射，B008及B005/B020/B021/B041/B047/B057已补参数契约；design_only，其余后续成员保留scheduled，不改变本清单“未开始/已交付”的验收状态 |
 
 ## 使用方式
 

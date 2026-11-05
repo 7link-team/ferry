@@ -33,7 +33,7 @@ export function Account({ identity, reload, headerActions }: { identity: Identit
   // so the form reloads the stored record and clears the password inputs.
   const [saves, setSaves] = useState(0);
   const back = () => navigate(identity.user.is_superadmin && !identity.workspaces.length
-    ? { workspace: "_platform", group: "platform", item: "users", mode: "list" }
+    ? { workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }
     : { workspace: identity.workspaces[0]?.id ?? "_platform", mode: "list" }, {});
   return <div className="flex h-full flex-col">
     <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">

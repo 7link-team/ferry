@@ -1,11 +1,41 @@
 import { beforeEach,describe,expect,it } from "vitest";
 import { setLocale } from "../shared/i18n/locale";
-import { href,parse } from "./router";
+import { href,navigateToLogin,parse,safeLoginRedirect } from "./router";
 import { nav } from "./nav";
 
 beforeEach(() => { localStorage.clear(); history.replaceState({}, "", "/en-US/"); setLocale("en-US", false); });
 
 const workspace = "109124796398174208";
+it("uses an explicit login URL and preserves deep-link query and hash only for reauthentication", () => {
+  const target = `/en-US/workspaces/${workspace}/code-connections/42?tab=events&page=2#latest`;
+  history.replaceState({}, "", target);
+  navigateToLogin();
+  expect(location.pathname).toBe("/en-US/login");
+  expect(new URLSearchParams(location.search).get("redirect")).toBe(target);
+  navigateToLogin();
+  expect(new URLSearchParams(location.search).get("redirect")).toBe(target);
+  navigateToLogin(false);
+  expect(location.pathname).toBe("/en-US/login");
+  expect(location.search).toBe("");
+});
+it("rejects offsite and recursive login destinations", () => {
+  for (const target of [null,"https://example.com/","//example.com/","/\\example.com/","/en-US/login?redirect=/account","/login/","/\n/evil","javascript:alert(1)"]) {
+    expect(safeLoginRedirect(target)).toBeUndefined();
+  }
+  expect(safeLoginRedirect("/en-US/account?tab=profile#name")).toBe("/en-US/account?tab=profile#name");
+});
+it("unifies both editors without changing resource URLs or legacy AI credential bookmarks", () => {
+  for (const resource of ["pipelines", "workflows"]) {
+    for (const suffix of ["", "/new", "/123", "/123/edit"]) {
+      const path = `/workspaces/${workspace}/${resource}${suffix}`;
+      expect(parse(path, "")).toMatchObject({ group: "workflow", item: resource });
+      expect(href(parse(path, ""), {})).toBe(`/en-US${path}`);
+    }
+  }
+  const legacy = parse(`/${workspace}/workflow/credentials/new`, "");
+  expect(legacy).toMatchObject({ group: "workflow", item: "ai-credentials", mode: "new" });
+  expect(href(legacy, {})).toBe(`/en-US/workspaces/${workspace}/credentials/new?scope=ai&kind=token`);
+});
 it("preserves each module through credential list, create, detail and edit links", () => {
   for (const scope of ["host", "build", "deploy"]) {
     for (const suffix of ["", "/new", "/123", "/123/edit"]) {
@@ -15,11 +45,12 @@ it("preserves each module through credential list, create, detail and edit links
       expect(href(route, {})).toBe(`/en-US${path}?scope=${scope}`);
     }
   }
-  expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("repository");
+  expect(parse(`/workspaces/${workspace}/credentials`, "").group).toBe("workflow");
 });
 it("places repository management between build and hosts and preserves old bookmarks", () => {
   const keys = nav.map(group => group.key);
-  expect(keys.indexOf("repository")).toBe(keys.indexOf("build") + 1);
+  expect(keys.indexOf("repository")).toBe(keys.indexOf("workflow") + 1);
+  expect(keys).not.toContain("build");
   expect(keys.indexOf("host")).toBe(keys.indexOf("repository") + 1);
   const repositoryItems = nav.find(group => group.key === "repository")!.items;
   const events = repositoryItems.findIndex(item => item.key === "repository-events");
@@ -45,6 +76,12 @@ it("resolves legacy host bookmarks into canonical resource paths", () => {
   }
 });
 describe("platform route boundary", () => {
+  it("defaults platform entry to workspaces and preserves the server nodes route", () => {
+    for (const path of ["/platform", "/_platform", "/zh-CN/platform"]) {
+      expect(parse(path, "")).toMatchObject({ workspace: "_platform", item: "workspaces", mode: "list" });
+    }
+    expect(href(parse("/platform/server-nodes", ""), {})).toBe("/en-US/platform/server-nodes");
+  });
   it("reserves platform paths outside ID-scoped workspaces", () => {
     expect(parse(`/workspaces/${workspace}/nodes`).workspace).toBe(workspace);
     expect(parse('/platform/users').workspace).toBe('_platform');
@@ -59,7 +96,7 @@ describe("platform route boundary", () => {
 it("uses resource names for pipeline groups and preserves legacy group IDs", () => {
   for (const suffix of ['', '/new', '/123', '/123/edit']) {
     const path = `/workspaces/${workspace}/pipeline-groups${suffix}`;
-    expect(parse(path)).toMatchObject({ workspace, group: 'build', item: 'pipeline-groups' });
+    expect(parse(path)).toMatchObject({ workspace, group: 'workflow', item: 'pipeline-groups' });
     expect(href(parse(path), {})).toBe(`/en-US${path}`);
     expect(href(parse(`/${workspace}/build/pipelines/groups${suffix}`), {})).toBe(`/en-US${path}`);
   }
@@ -70,7 +107,7 @@ it("keeps shared resource menu contexts in query parameters", () => {
     const url = new URL(path, 'http://localhost');
     expect(url.pathname).toBe(`/en-US/workspaces/${workspace}/cron-jobs`);
     expect(url.searchParams.get('scope')).toBe(group);
-    expect(parse(url.pathname, url.search)).toMatchObject({ group, item: 'cron-jobs' });
+    expect(parse(url.pathname, url.search)).toMatchObject({ group: group === 'build' ? 'workflow' : group, item: 'cron-jobs' });
   }
 });
 

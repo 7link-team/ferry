@@ -1,5 +1,7 @@
 //! Worker slots are allocated under a transactional database lock. A lease is
 //! refreshed only by an owner-matched database write, never just by a timer.
+mod resources;
+
 use crate::{
     lock,
     snowflake::{Generator, TTL},
@@ -18,6 +20,8 @@ pub struct Worker {
     pub generator: Arc<Generator>,
     id: i64,
     instance: String,
+    started_at: i64,
+    report_tick: tokio::sync::watch::Sender<()>,
 }
 impl Worker {
     pub async fn allocate(db: &DatabaseConnection, instance: &str) -> anyhow::Result<Self> {
@@ -53,6 +57,7 @@ impl Worker {
             worker_id: id,
             instance_id: instance.into(),
             heartbeat_at: now,
+            info: None,
         };
         if let Some(previous) = rows.iter().find(|r| r.worker_id == id) {
             let changed = Entity::update_many()
@@ -94,11 +99,49 @@ impl Worker {
         let generator = Arc::new(Generator::new(id as u16, started)?);
         // Also refuse startup when a database operation took longer than TTL.
         generator.next_id()?;
+        let (report_tick, _) = tokio::sync::watch::channel(());
         Ok(Self {
             generator,
             id,
             instance: instance.into(),
+            started_at: now,
+            report_tick,
         })
+    }
+    pub async fn describe(&self, s: &crate::state::AppState) -> anyhow::Result<()> {
+        let hostname = std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_default();
+        let data = s.data_dir.clone();
+        let (resources, addresses) =
+            tokio::task::spawn_blocking(move || resources::sample(data)).await?;
+        let _report = s.monitor.sql_report.lock().await;
+        let snapshot = s
+            .monitor
+            .sql
+            .lock()
+            .map(|rows| {
+                rows.iter()
+                    .take(20)
+                    .map(|(template, stat)| (template.clone(), stat.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let sql = snapshot
+            .iter()
+            .map(|(template, stat)| serde_json::json!({"template":template,"metrics":stat}))
+            .collect::<Vec<_>>();
+        let info = serde_json::json!({"hostname":hostname,"addresses":addresses,"bind":s.bind.to_string(),"version":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"started_at":self.started_at,"cluster":s.cluster.is_some(),"resources":resources,"database_pool":crate::platform_monitor::database::pool(&s.db),"sql":sql});
+        Entity::update_many()
+            .col_expr(Column::Info, Expr::value(Some(info.to_string())))
+            .filter(Column::WorkerId.eq(self.id))
+            .filter(Column::InstanceId.eq(&self.instance))
+            .exec(&s.db)
+            .await?;
+        Ok(())
+    }
+    pub fn resource_updates(&self) -> tokio::sync::watch::Receiver<()> {
+        self.report_tick.subscribe()
     }
     async fn heartbeat(&self, db: &DatabaseConnection) -> anyhow::Result<()> {
         let started = Instant::now();
@@ -136,7 +179,10 @@ impl Worker {
             tokio::select! {
                 biased;
                 _ = stop.changed() => break,
-                _ = interval.tick() => if let Err(error) = self.heartbeat(db).await { tracing::error!(%error, "worker heartbeat failed"); }
+                _ = interval.tick() => match self.heartbeat(db).await {
+                    Ok(()) => { self.report_tick.send_replace(()); }
+                    Err(error) => tracing::error!(%error, "worker heartbeat failed"),
+                }
             }
         }
     }
@@ -201,6 +247,7 @@ mod tests {
                     worker_id: id,
                     instance_id: format!("instance-{id}"),
                     heartbeat_at: now,
+                    info: None,
                 }
                 .into_active_model()
             }))

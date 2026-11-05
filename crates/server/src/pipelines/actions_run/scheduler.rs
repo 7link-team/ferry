@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) use crate::hosts::runner::reservations::wait_for_reservation;
+
 /// Whether a job may still run once its run is cancelled: GitHub evaluates a
 /// pending job's `if` with cancelled() true, so only a condition calling
 /// always() or cancelled() can pass. The worker evaluates the condition.
@@ -151,6 +153,66 @@ mod tests {
     use super::super::tests::test_job;
     use super::*;
     use sea_orm::ConnectionTrait;
+
+    #[tokio::test]
+    async fn reservation_holding_only_connection_keeps_progressing_during_status_check() {
+        use sea_orm::TransactionTrait;
+        let (_dir, db, _) = crate::executions::lease::tests::database().await;
+        let (_stop, mut stop) = tokio::sync::watch::channel(false);
+        let pending = async {
+            let tx = db.begin().await?;
+            tokio::time::sleep(Duration::from_millis(350)).await;
+            tx.rollback().await?;
+            Ok(42)
+        };
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_reservation(pending, &mut stop, || async {
+                db.execute_unprepared("SELECT 1").await?;
+                Ok(true)
+            }),
+        )
+        .await
+        .expect("status must not suspend the connection owner")
+        .unwrap();
+        assert_eq!(result, Some(42));
+        tokio::time::timeout(Duration::from_secs(1), db.execute_unprepared("SELECT 1"))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancelled_reservation_drops_connection_before_finalization() {
+        use sea_orm::TransactionTrait;
+        let (_dir, db, _) = crate::executions::lease::tests::database().await;
+        let (cancel, mut stop) = tokio::sync::watch::channel(false);
+        let started = tokio::sync::Notify::new();
+        let pending = async {
+            let _tx = db.begin().await?;
+            started.notify_one();
+            std::future::pending::<Result<i32>>().await
+        };
+        let request = async {
+            started.notified().await;
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            cancel.send_replace(true);
+        };
+        let waiting = wait_for_reservation(pending, &mut stop, || async {
+            db.execute_unprepared("SELECT 1").await?;
+            Ok(true)
+        });
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(waiting, request)
+        })
+        .await
+        .expect("cancellation must not wait for the status connection");
+        assert_eq!(result.unwrap(), None);
+        tokio::time::timeout(Duration::from_secs(1), db.execute_unprepared("SELECT 1"))
+            .await
+            .unwrap()
+            .unwrap();
+    }
     fn success() -> Outcome {
         Outcome {
             state: "success".into(),

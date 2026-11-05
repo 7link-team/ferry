@@ -19,6 +19,7 @@
 
 pub mod contribution;
 pub mod release;
+pub mod sandbox;
 
 use serde::{Deserialize, Serialize};
 

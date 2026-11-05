@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Workflow graph structural contract, design only",
+  "type": "object",
+  "properties": {
+    "engine": {
+      "const": "ferry-graph"
+    },
+    "schema": {
+      "const": 1
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+          },
+          "type": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          },
+          "type_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "params": {
+            "type": "object"
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "settings": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "active",
+                  "bypass",
+                  "mute"
+                ]
+              },
+              "runtime": {
+                "enum": [
+                  null,
+                  "server",
+                  "host",
+                  "gpu"
+                ]
+              },
+              "cache": {
+                "enum": [
+                  "auto",
+                  "off",
+                  "force_refresh"
+                ]
+              },
+              "purity": {
+                "enum": [
+                  "default",
+                  "pure",
+                  "side_effect"
+                ]
+              },
+              "on_error": {
+                "enum": [
+                  "stop",
+                  "continue",
+                  "error_output"
+                ]
+              },
+              "retry": {
+                "type": "object",
+                "properties": {
+                  "max_tries": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "wait_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "max_tries",
+                  "wait_ms"
+                ],
+                "additionalProperties": false
+              },
+              "always_output": {
+                "type": "boolean"
+              },
+              "execute_once": {
+                "type": "boolean"
+              },
+              "notes": {
+                "type": "string"
+              },
+              "target_kind": {
+                "enum": [
+                  "host",
+                  "host_group"
+                ]
+              },
+              "target_ref": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$"
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "position": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "type_version",
+          "name",
+          "params",
+          "position"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 500
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "port": {
+                "type": "string",
+                "minLength": 1
+              },
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "node",
+              "port",
+              "index"
+            ],
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "node": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "port": {
+                "type": "string",
+                "minLength": 1
+              },
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "node",
+              "port",
+              "index"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "color": {
+                "type": "string"
+              },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "nodes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "text": {
+                "type": "string"
+              },
+              "position": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "required": [
+              "id",
+              "text",
+              "position"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reroutes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "connection_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "position": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "required": [
+              "id",
+              "connection_index",
+              "position"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_workflow_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            },
+            {
+              "const": ""
+            }
+          ]
+        },
+        "save_data": {
+          "type": "object",
+          "properties": {
+            "success": {
+              "enum": [
+                "all",
+                "none"
+              ]
+            },
+            "error": {
+              "enum": [
+                "all",
+                "none"
+              ]
+            },
+            "manual": {
+              "type": "boolean"
+            },
+            "progress": {
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "concurrency": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "enum": [
+                "none",
+                "workflow",
+                "workflow_ref"
+              ]
+            },
+            "policy": {
+              "enum": [
+                "queue",
+                "queue_latest",
+                "cancel_in_progress"
+              ]
+            },
+            "max_parallel": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "scope",
+            "policy",
+            "max_parallel"
+          ],
+          "additionalProperties": false
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "enum": [
+                "server",
+                "host"
+              ]
+            },
+            "target_kind": {
+              "enum": [
+                "host",
+                "host_group"
+              ]
+            },
+            "target_ref": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "pin_data": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "json": {
+              "type": "object"
+            },
+            "binary": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "asset": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "mime": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "asset",
+                  "mime",
+                  "name",
+                  "size"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "paired": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "node": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                  },
+                  "iteration_hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "index": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "node",
+                  "iteration_hash",
+                  "index"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "json"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "required": [
+    "engine",
+    "schema",
+    "nodes",
+    "connections"
+  ],
+  "additionalProperties": false
+}

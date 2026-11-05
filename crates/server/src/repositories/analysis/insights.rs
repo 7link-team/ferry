@@ -109,7 +109,6 @@ pub(crate) async fn owned(
 ) -> Result<insights::Model> {
     insights::Entity::find_by_id(i64::from(id))
         .filter(insights::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(insights::Column::UserId.eq(scope.user.id))
         .one(tx)
         .await?
         .ok_or_else(ApiError::missing)
@@ -158,7 +157,7 @@ async fn selected_sources_mode(
     let authorized: BTreeSet<_> = connections::Entity::find()
         .filter(connections::Column::Id.is_in(connection_ids))
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(crate::repositories::auth::connection_access(scope.user.id))
         .filter(connections::Column::State.eq("connected"))
         .all(tx)
         .await?
@@ -267,7 +266,7 @@ pub async fn list(
         .map(|v| v.parse::<Id>().map_err(|_| ApiError::missing()))
         .transpose()?;
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let mut select = insights::Entity::find().filter(insights::Column::UserId.eq(scope.user.id));
+    let mut select = insights::Entity::find();
     if let Some(connection) = connection {
         owned_connection(&s.db, &scope, connection).await?;
         let subquery = selections::Entity::find()
@@ -310,7 +309,7 @@ pub async fn get(
     let members = members(&s.db, &row).await?;
     let connections: HashMap<i64, connections::Model> = connections::Entity::find()
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(crate::repositories::auth::connection_access(scope.user.id))
         .filter(connections::Column::Id.is_in(members.iter().map(|m| m.connection_id)))
         .all(&s.db)
         .await?
@@ -318,6 +317,7 @@ pub async fn get(
         .map(|c| (c.id, c))
         .collect();
     let sources = selected_sources(&s.db, &scope, &row).await?;
+    insight_identity::discover_aliases(&s.db, &row, &sources, &mut config.aliases).await?;
     let jobs = jobs::Entity::find()
         .filter(jobs::Column::Id.is_in(sources.iter().filter(|r| r.id > 0).map(|r| r.id)))
         .all(&s.db)
@@ -637,7 +637,10 @@ async fn save(
     let mut row = insights::Model {
         id: id.into(),
         workspace_id: scope.workspace_id.into(),
-        user_id: scope.user.id.into(),
+        user_id: old
+            .as_ref()
+            .map(|r| r.user_id)
+            .unwrap_or_else(|| scope.user.id.into()),
         name: body.name.trim().into(),
         description: body.description,
         config: String::new(),
@@ -653,6 +656,11 @@ async fn save(
     };
     // Clients cannot hide a runtime mapping conflict by posting a status field.
     body.config.identity_error.clear();
+    // Blank nicknames are discovered candidates, not identity/grouping rules.
+    // Clearing a nickname removes only this insight's display override.
+    body.config
+        .aliases
+        .retain(|alias| !alias.nickname.trim().is_empty());
     insight_identity::prepare_aliases(s, &tx, &row, &previous.aliases, &mut body.config.aliases)
         .await?;
     row.config = encode(&body.config)?;
@@ -746,7 +754,6 @@ async fn aggregate(
         .await?;
     let parents: HashMap<i64, insights::Model> = insights::Entity::find()
         .filter(insights::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(insights::Column::UserId.eq(scope.user.id))
         .filter(insights::Column::Id.is_in(rows.iter().map(|r| r.insight_id)))
         .all(tx)
         .await?
@@ -1101,6 +1108,16 @@ pub async fn retry(
             .exec(&tx)
             .await?;
     }
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "sync",
+        "code-insights",
+        &id,
+        json!({"manual":true}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({"id":id,"queued":true})))
 }
@@ -1185,7 +1202,9 @@ async fn enqueue_scheduled(
     let authorized = connections::Entity::find()
         .filter(connections::Column::Id.is_in(ids))
         .filter(connections::Column::WorkspaceId.eq(row.workspace_id))
-        .filter(connections::Column::UserId.eq(row.user_id))
+        .filter(crate::repositories::auth::connection_access(
+            row.user_id.into(),
+        ))
         .filter(connections::Column::State.eq("connected"))
         .all(tx)
         .await?;

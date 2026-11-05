@@ -1,6 +1,9 @@
 import { api } from "../../shared/api/api";
 import { deleteResource } from "../../shared/api/resource";
-import { commonText } from "../../shared/i18n/i18n";
+import { commonText, workflowText } from "../../shared/i18n/i18n";
+import { emptyGraph, parseGraph } from "../workflows/graph";
+import { WorkflowEditor } from "../workflows/WorkflowEditor";
+import { WorkflowDraftAssetsContext } from "../workflows/WorkflowAssets";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import {
   type AnyRow,
@@ -132,10 +135,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
             : JSON.stringify(
                 {
                   engine: "github-actions",
-                  workflow: DEFAULT_ACTIONS.replace(
-                    "echo hello",
-                    "{{ .Values.command }}",
-                  ),
+                  workflow: DEFAULT_ACTIONS,
                   executor_bindings: [],
                   checkout_bindings: [],
                   graph_layout: {},
@@ -144,7 +144,9 @@ export const templateForm = (resource: string, application: boolean, workspace =
                 2,
               ),
       parameters:
-        resource === "config-templates"
+        resource === "pipeline-templates"
+          ? "[]"
+          : resource === "config-templates"
           ? JSON.stringify(
               [
                 {
@@ -198,6 +200,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
           },
           {
             key: "parameters",
+            when: () => resource !== "pipeline-templates",
             label: "参数定义（JSON 数组）",
             labelKey: "resource-domain:template.parametersJson",
             type: "code",
@@ -246,8 +249,9 @@ export const templateGenerator = (
   workspace: string,
   resource: string,
   field: string,
+  workflowKind: "actions" | "nodes" = "actions",
 ): NonNullable<FormConfig<AnyRow>["generator"]> => ({
-  options: namedOptions(workspace, resource),
+  options: namedOptions(workspace, resource, undefined, resource === "pipeline-templates" ? {workflow_kind:workflowKind} : {}),
   load: async (id) => {
     const row = await api<Template>(
       `/workspaces/${workspace}/${resource}/${id}`,
@@ -334,6 +338,11 @@ export const templateGenerator = (
         string,
         unknown
       >;
+      if (workflowKind === "nodes") {
+        const definition = JSON.stringify(rendered);
+        parseGraph(definition);
+        return {definition};
+      }
       if (
         (rendered.engine === "github-actions" ||
           rendered.engine === "actions") &&
@@ -389,6 +398,7 @@ export function templatesLists({
       "build",
       "pipelines",
     ),
+    "workflow-templates": {...templateList(workspace,"pipeline-templates","workflows","workflow","workflows"),fixed:{workflow_kind:"nodes"}},
   };
 }
 
@@ -400,5 +410,11 @@ export function templatesForms({ workspace, permissions }: ResourceConfigContext
     "config-templates": templateForm("config-templates", false),
     "app-templates": templateForm("app-templates", true),
     "pipeline-templates": templateForm("pipeline-templates", false, workspace, permissions),
+    "workflow-templates": nodeTemplateForm(workspace, permissions),
   };
+}
+
+function nodeTemplateForm(workspace: string, permissions = new Set<string>()): FormConfig<AnyRow> {
+  const original = templateForm("pipeline-templates",false,workspace,permissions);
+  return {...original,editor:{field:"content",get nameLabel(){return workflowText("name");}},blank:{...original.blank,content:JSON.stringify(emptyGraph())},sections:original.sections.map(section=>({...section,fields:section.fields.map(field=>field.key!=="content"?field:{...field,type:"custom",render:({draft,readOnly,onPatch,onValidityChange})=><WorkflowDraftAssetsContext.Provider value={null}><WorkflowEditor workspace={workspace} templateMode draft={{name:String(draft.name??""),definition:String(draft.content??"")}} readOnly={readOnly} permissions={permissions} onPatch={patch=>{if(patch.definition!==undefined)onPatch({content:patch.definition});}} onValidityChange={onValidityChange}/></WorkflowDraftAssetsContext.Provider>})}))};
 }

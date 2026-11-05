@@ -49,6 +49,7 @@ async fn fixture_in(
         bind: "127.0.0.1:0".parse().unwrap(),
         vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
         host_monitor: Default::default(),
+        monitor: Default::default(),
         cluster: None,
     });
     users::Entity::insert(
@@ -57,6 +58,8 @@ async fn fixture_in(
             email: "author@example.test".into(),
             name: "Author".into(),
             password_hash: String::new(),
+            last_login_at: None,
+            last_login_ip: None,
             is_superadmin: 0,
             version: 1,
             active: 1,
@@ -76,6 +79,7 @@ async fn fixture_in(
             owner_id: 1,
             join_code: "analysis-test".into(),
             pipeline_run_number: 0,
+            workflow_execution_number: 0,
             created_at: 0,
             updated_at: 0,
         }
@@ -510,7 +514,7 @@ async fn revoked_credential_permission_fences_a_claimed_worker() {
 }
 
 #[tokio::test]
-async fn reports_exclude_other_connection_owners_and_require_read_permission() {
+async fn reports_share_workspace_connections_and_require_read_permission() {
     let (_dir, s) = fixture().await;
     let claim = claimed(&s).await;
     let a = store(&s, &claim, commit('a')).await.unwrap();
@@ -518,6 +522,14 @@ async fn reports_exclude_other_connection_owners_and_require_read_permission() {
     assert_eq!(report_for(&s, "commits", &[]).await["total"], 1);
     connections::Entity::update_many()
         .col_expr(connections::Column::UserId, Expr::value(99_i64))
+        .filter(connections::Column::Id.eq(4))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(report_for(&s, "commits", &[]).await["total"], 1);
+    queued_repository(&s, 20, 16, 2).await;
+    connections::Entity::update_many()
+        .col_expr(connections::Column::WorkspaceId, Expr::value(2_i64))
         .filter(connections::Column::Id.eq(4))
         .exec(&s.db)
         .await
@@ -1032,6 +1044,7 @@ pub(crate) async fn queued_repository(
                 owner_id: 1,
                 join_code: format!("join-{workspace}"),
                 pipeline_run_number: 0,
+                workflow_execution_number: 0,
                 created_at: 0,
                 updated_at: 0,
             }
@@ -1147,6 +1160,7 @@ pub(crate) fn replica(s: &AppState) -> AppState {
         bind: "127.0.0.1:0".parse().unwrap(),
         vault: crate::vault::Vault::open(&s.data_dir, false).unwrap(),
         host_monitor: Default::default(),
+        monitor: Default::default(),
         cluster: None,
     })
 }

@@ -148,6 +148,7 @@ export function ResourceTable<T>({
   conditions,
   refreshKey = 0,
   hideToolbar = false,
+  onLoaded,
 }: {
   config: ListConfig<T>;
   workspace: string;
@@ -156,6 +157,7 @@ export function ResourceTable<T>({
   conditions?: Record<string, string>;
   refreshKey?: number;
   hideToolbar?: boolean;
+  onLoaded?: () => void;
 }) {
   useCommonTranslation();
   const route = useRoute();
@@ -219,6 +221,7 @@ export function ResourceTable<T>({
         .then((envelope) => {
           setData(envelope);
           setError("");
+          onLoaded?.();
         })
         .catch((cause: unknown) => {
           if (cause instanceof DOMException && cause.name === "AbortError") return;
@@ -226,7 +229,7 @@ export function ResourceTable<T>({
         })
         .finally(() => setLoading(false));
     },
-    [workspace, config.resource, config.endpoint, params, grouped],
+    [workspace, config.resource, config.endpoint, params, grouped, onLoaded],
   );
 
   useEffect(() => {
@@ -506,7 +509,7 @@ export function ResourceTable<T>({
                                   : {})}
                               />
                             ))}</>; } : undefined}
-        footerContent={<>        {!!selected.size && (
+        footerContent={<>{data && !loading && !error && config.footerSummary?.(data)}{!!selected.size && (
           <>
             <span className="text-muted-foreground">{commonText("table.selected", { count: selected.size })}</span>
             {visibleBulk.map((action) => (

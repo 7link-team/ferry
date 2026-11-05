@@ -1,0 +1,3938 @@
+{
+  "contract_version": 1,
+  "nodes": [
+    {
+      "type": "integration.github.repository.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.issue.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/page",
+        "/per_page",
+        "/state"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 1000000,
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          },
+          "state": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ],
+            "default": "open"
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "page": 1,
+        "per_page": 30,
+        "state": "open"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues",
+        "query": {
+          "page": "page",
+          "per_page": "per_page",
+          "state": "state"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.issue.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/issue_number"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "issue_number"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "issue_number": 1
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.issue.create",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/title",
+        "/body"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "title_key": "integration.title",
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea"
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "title": "New issue"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.create",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github"
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "POST",
+        "path": "/repos/{owner}/{repo}/issues",
+        "query": {},
+        "body": {
+          "title": "title",
+          "body": "body"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.issue.update",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/issue_number",
+        "/title",
+        "/body",
+        "/state"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          },
+          "title": {
+            "type": "string",
+            "title_key": "integration.title",
+            "maxLength": 256
+          },
+          "body": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea"
+          },
+          "state": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "open",
+              "closed"
+            ]
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "issue_number"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "issue_number": 1
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.update",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github"
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "PATCH",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}",
+        "query": {},
+        "body": {
+          "title": "title",
+          "body": "body",
+          "state": "state"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.comment.create",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/issue_number",
+        "/body"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          },
+          "body": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "issue_number",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "issue_number": 1,
+        "body": "Comment"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.comment",
+        "operation_key": "integration.operation.create",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github"
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "POST",
+        "path": "/repos/{owner}/{repo}/issues/{issue_number}/comments",
+        "query": {},
+        "body": {
+          "body": "body"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.pull_request.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/page",
+        "/per_page",
+        "/state"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 1000000,
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          },
+          "state": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ],
+            "default": "open"
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "page": 1,
+        "per_page": 30,
+        "state": "open"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.pullRequest",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/pulls",
+        "query": {
+          "page": "page",
+          "per_page": "per_page",
+          "state": "state"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.pull_request.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/pull_number"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "pull_number": {
+            "type": "integer",
+            "title_key": "integration.pullNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "pull_number"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "pull_number": 1
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.pullRequest",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/pulls/{pull_number}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.workflow.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/page",
+        "/per_page"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 1000000,
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "page": 1,
+        "per_page": 30
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.workflow",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github",
+          "optional": true
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "GET",
+        "path": "/repos/{owner}/{repo}/actions/workflows",
+        "query": {
+          "page": "page",
+          "per_page": "per_page"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.github.workflow.dispatch",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/owner",
+        "/repo",
+        "/workflow",
+        "/ref"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "owner": {
+            "type": "string",
+            "title_key": "integration.owner",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "repo": {
+            "type": "string",
+            "title_key": "integration.repository",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "workflow": {
+            "type": "string",
+            "title_key": "integration.workflow",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "ref": {
+            "type": "string",
+            "title_key": "integration.ref",
+            "maxLength": 200,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "owner",
+          "repo",
+          "workflow",
+          "ref"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "owner": "octocat",
+        "repo": "Hello-World",
+        "workflow": "configure-workflow.yml",
+        "ref": "main"
+      },
+      "ui": {
+        "application": "github",
+        "resource_key": "integration.resource.workflow",
+        "operation_key": "integration.operation.dispatch",
+        "credential_help_key": "integration.githubCredentialHelp",
+        "aliases": [
+          "git",
+          "github",
+          "issue",
+          "pull request",
+          "actions"
+        ],
+        "application_name": "GitHub"
+      },
+      "http": {
+        "origin": "https://api.github.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "github"
+        },
+        "headers": {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        "method": "POST",
+        "path": "/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+        "query": {},
+        "body": {
+          "ref": "ref"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.project.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project"
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.project",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/v4/projects/{project}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.issue.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/page",
+        "/per_page",
+        "/state"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 1000000,
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          },
+          "state": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "opened",
+              "closed",
+              "all"
+            ],
+            "default": "opened"
+          }
+        },
+        "required": [
+          "credential_id",
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "page": 1,
+        "per_page": 30,
+        "state": "opened"
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/v4/projects/{project}/issues",
+        "query": {
+          "page": "page",
+          "per_page": "per_page",
+          "state": "state"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.issue.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/issue_number"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "project",
+          "issue_number"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "issue_number": 1
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/v4/projects/{project}/issues/{issue_number}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.issue.create",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/title",
+        "/description"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "title_key": "integration.title",
+            "maxLength": 256,
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea"
+          }
+        },
+        "required": [
+          "credential_id",
+          "project",
+          "title"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "title": "New issue"
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.create",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "POST",
+        "path": "/api/v4/projects/{project}/issues",
+        "query": {},
+        "body": {
+          "title": "title",
+          "description": "description"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.issue.update",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/issue_number",
+        "/title",
+        "/description",
+        "/state_event"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          },
+          "title": {
+            "type": "string",
+            "title_key": "integration.title",
+            "maxLength": 256
+          },
+          "description": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea"
+          },
+          "state_event": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "close",
+              "reopen"
+            ]
+          }
+        },
+        "required": [
+          "credential_id",
+          "project",
+          "issue_number"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "issue_number": 1
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.issue",
+        "operation_key": "integration.operation.update",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "PUT",
+        "path": "/api/v4/projects/{project}/issues/{issue_number}",
+        "query": {},
+        "body": {
+          "title": "title",
+          "description": "description",
+          "state_event": "state_event"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.comment.create",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/issue_number",
+        "/body"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "issue_number": {
+            "type": "integer",
+            "title_key": "integration.issueNumber",
+            "minimum": 1,
+            "maximum": 2147483647,
+            "default": 1
+          },
+          "body": {
+            "type": "string",
+            "title_key": "integration.body",
+            "maxLength": 65536,
+            "control": "textarea",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "project",
+          "issue_number",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "issue_number": 1,
+        "body": "Comment"
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.comment",
+        "operation_key": "integration.operation.create",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "POST",
+        "path": "/api/v4/projects/{project}/issues/{issue_number}/notes",
+        "query": {},
+        "body": {
+          "body": "body"
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.gitlab.pull_request.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/project",
+        "/page",
+        "/per_page",
+        "/state"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "project": {
+            "type": "string",
+            "title_key": "integration.project",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 1000000,
+            "default": 1
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 30
+          },
+          "state": {
+            "type": "string",
+            "title_key": "integration.state",
+            "maxLength": 4096,
+            "enum": [
+              "opened",
+              "closed",
+              "merged",
+              "all"
+            ],
+            "default": "opened"
+          }
+        },
+        "required": [
+          "credential_id",
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "project": "configure-project",
+        "page": 1,
+        "per_page": 30,
+        "state": "opened"
+      },
+      "ui": {
+        "application": "gitlab",
+        "resource_key": "integration.resource.pullRequest",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.gitlabCredentialHelp",
+        "aliases": [
+          "git",
+          "gitlab",
+          "project",
+          "issue"
+        ],
+        "application_name": "GitLab"
+      },
+      "http": {
+        "origin": "https://gitlab.com",
+        "auth": {
+          "header": "PRIVATE-TOKEN",
+          "prefix": "",
+          "profile": "gitlab"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/v4/projects/{project}/merge_requests",
+        "query": {
+          "page": "page",
+          "per_page": "per_page",
+          "state": "state"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.channel.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/limit",
+        "/cursor"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "limit": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100
+          },
+          "cursor": {
+            "type": "string",
+            "title_key": "integration.cursor",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "credential_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "limit": 100
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.channel",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/conversations.list",
+        "query": {
+          "limit": "limit",
+          "cursor": "cursor"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.channel.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel"
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.channel",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/conversations.info",
+        "query": {
+          "channel": "channel"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.message.create",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel",
+        "/text"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          },
+          "text": {
+            "type": "string",
+            "title_key": "integration.message",
+            "maxLength": 40000,
+            "minLength": 1,
+            "control": "textarea"
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel",
+        "text": "Message"
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.message",
+        "operation_key": "integration.operation.create",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "POST",
+        "path": "/api/chat.postMessage",
+        "query": {},
+        "body": {
+          "channel": "channel",
+          "text": "text"
+        },
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.message.update",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel",
+        "/text",
+        "/ts"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          },
+          "text": {
+            "type": "string",
+            "title_key": "integration.message",
+            "maxLength": 40000,
+            "minLength": 1,
+            "control": "textarea"
+          },
+          "ts": {
+            "type": "string",
+            "title_key": "integration.timestamp",
+            "maxLength": 64,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel",
+          "text",
+          "ts"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel",
+        "text": "Message",
+        "ts": "configure-timestamp"
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.message",
+        "operation_key": "integration.operation.update",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "POST",
+        "path": "/api/chat.update",
+        "query": {},
+        "body": {
+          "channel": "channel",
+          "text": "text",
+          "ts": "ts"
+        },
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.message.delete",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel",
+        "/ts"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          },
+          "ts": {
+            "type": "string",
+            "title_key": "integration.timestamp",
+            "maxLength": 64,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel",
+          "ts"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel",
+        "ts": "configure-timestamp"
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.message",
+        "operation_key": "integration.operation.delete",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "POST",
+        "path": "/api/chat.delete",
+        "query": {},
+        "body": {
+          "channel": "channel",
+          "ts": "ts"
+        },
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.message.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel",
+        "/limit",
+        "/cursor"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 15
+          },
+          "cursor": {
+            "type": "string",
+            "title_key": "integration.cursor",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel",
+        "limit": 15
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.message",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/conversations.history",
+        "query": {
+          "channel": "channel",
+          "limit": "limit",
+          "cursor": "cursor"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.message.replies",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/channel",
+        "/ts",
+        "/limit",
+        "/cursor"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "channel": {
+            "type": "string",
+            "title_key": "integration.channel",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.channel.list",
+              "items": "/channels",
+              "value": "id",
+              "label": "name"
+            }
+          },
+          "ts": {
+            "type": "string",
+            "title_key": "integration.timestamp",
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 15
+          },
+          "cursor": {
+            "type": "string",
+            "title_key": "integration.cursor",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "credential_id",
+          "channel",
+          "ts"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "channel": "configure-channel",
+        "ts": "configure-timestamp",
+        "limit": 15
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.message",
+        "operation_key": "integration.operation.replies",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/conversations.replies",
+        "query": {
+          "channel": "channel",
+          "ts": "ts",
+          "limit": "limit",
+          "cursor": "cursor"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.user.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/limit",
+        "/cursor"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "limit": {
+            "type": "integer",
+            "title_key": "integration.pageSize",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 100
+          },
+          "cursor": {
+            "type": "string",
+            "title_key": "integration.cursor",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "credential_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "limit": 100
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.user",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/users.list",
+        "query": {
+          "limit": "limit",
+          "cursor": "cursor"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.slack.user.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/user"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "user": {
+            "type": "string",
+            "title_key": "integration.user",
+            "maxLength": 100,
+            "minLength": 1,
+            "options_source": {
+              "type": "integration.slack.user.list",
+              "items": "/members",
+              "value": "id",
+              "label": "name"
+            }
+          }
+        },
+        "required": [
+          "credential_id",
+          "user"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "user": "configure-user"
+      },
+      "ui": {
+        "application": "slack",
+        "resource_key": "integration.resource.user",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.slackCredentialHelp",
+        "aliases": [
+          "slack",
+          "chat",
+          "message",
+          "channel",
+          "team"
+        ],
+        "application_name": "Slack"
+      },
+      "http": {
+        "origin": "https://slack.com",
+        "auth": {
+          "header": "Authorization",
+          "prefix": "Bearer ",
+          "profile": "slack"
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/api/users.info",
+        "query": {
+          "user": "user"
+        },
+        "body": {},
+        "success": {
+          "pointer": "/ok",
+          "equals": true
+        },
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.codeup.repository.get",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/organization_id",
+        "/repository_id"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "organization_id": {
+            "type": "string",
+            "title_key": "integration.organizationId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "repository_id": {
+            "type": "string",
+            "title_key": "integration.repositoryId",
+            "maxLength": 200,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "credential_id",
+          "organization_id",
+          "repository_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "organization_id": "your-organization-id",
+        "repository_id": "your-repository-id"
+      },
+      "ui": {
+        "application": "codeup",
+        "application_name": "Codeup",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.get",
+        "credential_help_key": "integration.codeupCredentialHelp",
+        "aliases": [
+          "codeup",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "http": {
+        "origin": "https://openapi-rdc.aliyuncs.com",
+        "auth": {
+          "header": "x-yunxiao-token",
+          "prefix": "",
+          "profile": "codeup",
+          "optional": false
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/oapi/v1/codeup/organizations/{organization_id}/repositories/{repository_id}",
+        "query": {},
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.codeup.branch.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/organization_id",
+        "/repository_id",
+        "/page",
+        "/per_page"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "organization_id": {
+            "type": "string",
+            "title_key": "integration.organizationId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "repository_id": {
+            "type": "string",
+            "title_key": "integration.repositoryId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.perPage",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "credential_id",
+          "organization_id",
+          "repository_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "organization_id": "your-organization-id",
+        "repository_id": "your-repository-id",
+        "page": 1,
+        "per_page": 20
+      },
+      "ui": {
+        "application": "codeup",
+        "application_name": "Codeup",
+        "resource_key": "integration.resource.branch",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.codeupCredentialHelp",
+        "aliases": [
+          "codeup",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "http": {
+        "origin": "https://openapi-rdc.aliyuncs.com",
+        "auth": {
+          "header": "x-yunxiao-token",
+          "prefix": "",
+          "profile": "codeup",
+          "optional": false
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/oapi/v1/codeup/organizations/{organization_id}/repositories/{repository_id}/branches",
+        "query": {
+          "page": "page",
+          "perPage": "per_page"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.codeup.commit.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/organization_id",
+        "/repository_id",
+        "/page",
+        "/per_page",
+        "/ref"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "organization_id": {
+            "type": "string",
+            "title_key": "integration.organizationId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "repository_id": {
+            "type": "string",
+            "title_key": "integration.repositoryId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.perPage",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "ref": {
+            "type": "string",
+            "title_key": "integration.ref",
+            "maxLength": 200,
+            "minLength": 0
+          }
+        },
+        "required": [
+          "credential_id",
+          "organization_id",
+          "repository_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "organization_id": "your-organization-id",
+        "repository_id": "your-repository-id",
+        "page": 1,
+        "per_page": 20
+      },
+      "ui": {
+        "application": "codeup",
+        "application_name": "Codeup",
+        "resource_key": "integration.resource.commit",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.codeupCredentialHelp",
+        "aliases": [
+          "codeup",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "http": {
+        "origin": "https://openapi-rdc.aliyuncs.com",
+        "auth": {
+          "header": "x-yunxiao-token",
+          "prefix": "",
+          "profile": "codeup",
+          "optional": false
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/oapi/v1/codeup/organizations/{organization_id}/repositories/{repository_id}/commits",
+        "query": {
+          "page": "page",
+          "perPage": "per_page",
+          "refName": "ref"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.codeup.merge_request.list",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server",
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/organization_id",
+        "/repository_id",
+        "/page",
+        "/per_page"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "title_key": "integration.credential",
+            "maxLength": 32,
+            "pattern": "^[0-9]+$"
+          },
+          "organization_id": {
+            "type": "string",
+            "title_key": "integration.organizationId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "repository_id": {
+            "type": "string",
+            "title_key": "integration.repositoryId",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "page": {
+            "type": "integer",
+            "title_key": "integration.page",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "per_page": {
+            "type": "integer",
+            "title_key": "integration.perPage",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "credential_id",
+          "organization_id",
+          "repository_id"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "credential_id": "0",
+        "organization_id": "your-organization-id",
+        "repository_id": "your-repository-id",
+        "page": 1,
+        "per_page": 20
+      },
+      "ui": {
+        "application": "codeup",
+        "application_name": "Codeup",
+        "resource_key": "integration.resource.merge_request",
+        "operation_key": "integration.operation.list",
+        "credential_help_key": "integration.codeupCredentialHelp",
+        "aliases": [
+          "codeup",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "http": {
+        "origin": "https://openapi-rdc.aliyuncs.com",
+        "auth": {
+          "header": "x-yunxiao-token",
+          "prefix": "",
+          "profile": "codeup",
+          "optional": false
+        },
+        "headers": {},
+        "method": "GET",
+        "path": "/oapi/v1/codeup/organizations/{organization_id}/repositories/{repository_id}/mergeRequests",
+        "query": {
+          "page": "page",
+          "perPage": "per_page"
+        },
+        "body": {},
+        "max_response_bytes": 1048576,
+        "timeout_seconds": 30
+      }
+    },
+    {
+      "type": "integration.git.repository.remote_refs",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/url"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "title_key": "integration.gitUrl",
+            "maxLength": 2048,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "url": "https://github.com/octocat/Hello-World.git"
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.remote_refs",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "remote_refs"
+      }
+    },
+    {
+      "type": "integration.git.repository.status",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/directory"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "directory": "/srv/workflows/repository"
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.status",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "status"
+      }
+    },
+    {
+      "type": "integration.git.repository.log",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/directory",
+        "/limit"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "title_key": "integration.gitLimit",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "directory": "/srv/workflows/repository",
+        "limit": 20
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.log",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "log"
+      }
+    },
+    {
+      "type": "integration.git.repository.branches",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/directory"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "directory": "/srv/workflows/repository"
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.branches",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "branches"
+      }
+    },
+    {
+      "type": "integration.git.repository.tags",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/directory"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "directory": "/srv/workflows/repository"
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.tags",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "tags"
+      }
+    },
+    {
+      "type": "integration.git.repository.clone",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/url",
+        "/directory",
+        "/depth"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "title_key": "integration.gitUrl",
+            "maxLength": 2048,
+            "minLength": 1
+          },
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          },
+          "depth": {
+            "type": "integer",
+            "title_key": "integration.gitDepth",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "url",
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "url": "https://github.com/octocat/Hello-World.git",
+        "directory": "/srv/workflows/repository",
+        "depth": 1
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.clone",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "clone"
+      }
+    },
+    {
+      "type": "integration.git.repository.fetch",
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "host",
+        "allowed": [
+          "host"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "expression_fields": [
+        "/directory"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "title_key": "integration.gitDirectory",
+            "maxLength": 4096,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "directory": "/srv/workflows/repository"
+      },
+      "ui": {
+        "application": "git",
+        "application_name": "Git",
+        "resource_key": "integration.resource.repository",
+        "operation_key": "integration.operation.fetch",
+        "credential_help_key": "integration.gitHelp",
+        "aliases": [
+          "git",
+          "git",
+          "repository",
+          "仓库",
+          "分支",
+          "提交"
+        ]
+      },
+      "git": {
+        "operation": "fetch"
+      }
+    }
+  ]
+}

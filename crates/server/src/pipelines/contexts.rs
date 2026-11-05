@@ -129,13 +129,22 @@ async fn create_in(
     kind: &str,
     resource: &str,
 ) -> Result<(StatusCode, Json<Value>)> {
+    let fresh = if kind == "workflow_group" {
+        Some(
+            crate::accounts::workspace_admin::authorize(tx, scope, "workflow-groups.create")
+                .await?,
+        )
+    } else {
+        None
+    };
+    let scope = fresh.as_ref().unwrap_or(scope);
     check(tx, scope, kind, &body).await?;
     let id = s.next_id()?;
     let now = db::now();
-    let position = if kind == "group" {
+    let position = if matches!(kind, "group" | "workflow_group") {
         rows::Entity::find()
             .filter(rows::Column::WorkspaceId.eq(scope.workspace_id))
-            .filter(rows::Column::Kind.eq("group"))
+            .filter(rows::Column::Kind.eq(kind))
             .all(tx)
             .await?
             .iter()
@@ -191,6 +200,12 @@ async fn update(
     resource: &str,
 ) -> Result<Json<Value>> {
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = if matches!(kind, "workflow_group" | "group") {
+        crate::accounts::workspace_admin::authorize(&tx, &scope, &format!("{resource}.update"))
+            .await?
+    } else {
+        scope
+    };
     let current = scoped(&tx, scope.workspace_id, kind, id).await?;
     if current.version != body.version {
         return Err(ApiError::localized(
@@ -252,12 +267,26 @@ async fn remove(
     resource: &str,
 ) -> Result<StatusCode> {
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = if matches!(kind, "workflow_group" | "group") {
+        crate::accounts::workspace_admin::authorize(&tx, &scope, &format!("{resource}.delete"))
+            .await?
+    } else {
+        scope
+    };
     scoped(&tx, scope.workspace_id, kind, id).await?;
     ensure_unreferenced(&tx, scope.workspace_id, kind, &[id]).await?;
     if kind == "environment" {
         crate::variables::check_object_removal(&tx, scope.workspace_id, "environment", id).await?;
     }
     rows::Entity::delete_by_id(id).exec(&tx).await?;
+    if matches!(kind, "workflow_group" | "group") {
+        let subject = if kind == "group" {
+            "pipeline_group"
+        } else {
+            kind
+        };
+        crate::definitions::access::delete_grants(&tx, scope.workspace_id, subject, id).await?;
+    }
     crate::hosts::activity_in(&s, &tx, &scope, "delete", resource, &id, json!({})).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
@@ -326,6 +355,7 @@ macro_rules! context_api {
 }
 context_api!(groups, "group", "pipeline-groups");
 context_api!(environments, "environment", "pipeline-environments");
+context_api!(workflow_groups, "workflow_group", "workflow-groups");
 
 #[derive(Deserialize)]
 pub struct ReorderGroupsBody {
@@ -502,6 +532,13 @@ pub async fn ensure_unreferenced(
         return Ok(());
     }
     let count = match kind {
+        "workflow_group" => {
+            crate::entities::workflows::Entity::find()
+                .filter(crate::entities::workflows::Column::WorkspaceId.eq(workspace))
+                .filter(crate::entities::workflows::Column::GroupId.is_in(ids.iter().copied()))
+                .count(conn)
+                .await?
+        }
         "group" => {
             pipelines::Entity::find()
                 .filter(pipelines::Column::WorkspaceId.eq(workspace))

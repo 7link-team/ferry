@@ -6,13 +6,12 @@ import { api,errorText } from "../../shared/api/api";
 import { base,named } from "../../shared/api/resource";
 import { executionText,useCommonTranslation } from "../../shared/i18n/i18n";
 import type { Navigation } from "../../shared/routing/types";
-import { DictionaryState } from "../maintenance/DictionaryState";
 import { Button } from "../../shared/ui/button";
 import { duration,isActive,mergeLogs,stateBadge,type LogPage,type PipelineRun,type RunLog } from "./pipeline";
 
 function PipelineState({ value }: { value: string }) {
   const { label, ...props } = stateBadge(value);
-  return <DictionaryState dictionary="pipeline-state" value={value}><Badge {...props}>{label}</Badge></DictionaryState>;
+  return <Badge {...props}>{label}</Badge>;
 }
 
 const CANCEL_NOTICE = "run.stopNotice";

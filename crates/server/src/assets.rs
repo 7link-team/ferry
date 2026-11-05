@@ -6,10 +6,44 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use rust_embed::Embed;
+use sea_orm::EntityTrait;
 
 #[derive(Embed)]
 #[folder = "../../dist"]
 struct Web;
+
+pub async fn serve_configured(
+    axum::extract::State(s): axum::extract::State<crate::state::AppState>,
+    uri: Uri,
+) -> crate::error::Result<Response> {
+    let path = uri.path().trim_start_matches('/');
+    // Static assets retain their immutable caching and never query platform settings.
+    if path != "index.html" && Web::get(path).is_some() {
+        return Ok(serve(uri).await);
+    }
+    let row = crate::entities::platform_state::Entity::find_by_id(1)
+        .one(&s.db)
+        .await?;
+    let config = crate::accounts::platform_scripts::Configuration::read(
+        row.as_ref().and_then(|r| r.page_scripts.as_deref()),
+    )?;
+    if let Some((script, policy)) = config.document() {
+        if let Some(file) = Web::get("index.html") {
+            let html =
+                String::from_utf8_lossy(&file.data).replace("</head>", &format!("{script}</head>"));
+            let mut response =
+                ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response();
+            response.headers_mut().insert(
+                header::CONTENT_SECURITY_POLICY,
+                policy
+                    .parse()
+                    .map_err(|_| crate::error::ApiError::missing())?,
+            );
+            return Ok(response);
+        }
+    }
+    Ok(serve(uri).await)
+}
 
 pub async fn serve(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');

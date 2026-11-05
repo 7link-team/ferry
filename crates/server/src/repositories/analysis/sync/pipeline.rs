@@ -153,7 +153,7 @@ pub(super) async fn collect(s: &AppState, claim: &Claim) -> Result<()> {
         if row.path != "contribution-analysis.json" && !row.path.ends_with(".zip") {
             continue;
         }
-        let bytes = tokio::fs::read(crate::pipelines::artifacts::file_path(s, &row))
+        let bytes = tokio::fs::read(crate::pipelines::artifacts::available_path(s, &row).await?)
             .await
             .map_err(|_| {
                 ApiError::localized(

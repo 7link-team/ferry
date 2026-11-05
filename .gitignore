@@ -20,3 +20,5 @@ __pycache__/
 
 # Cross-compiled Actions workers bundled as desktop resources
 desktop/resources/actions-workers/actions-worker-*
+
+.worktrees/

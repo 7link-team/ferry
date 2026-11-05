@@ -8,6 +8,8 @@
 mod cli;
 mod enrollment;
 mod exec_stream;
+#[cfg(windows)]
+mod process_job;
 mod runtime;
 mod service;
 mod session;

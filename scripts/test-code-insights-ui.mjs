@@ -301,9 +301,9 @@ try {
   assert.equal(writes.at(-1).data.aliases[0].nickname, "Alice combined");
   await page.getByRole("button", { name: "在第 1 行下方添加映射", exact: true }).click();
   await page.waitForFunction(
-    () => document.querySelector('button[type="submit"]')?.disabled,
+    () => document.querySelector('button[type="submit"]')?.disabled === false,
   );
-  assert.equal(await save.isDisabled(), true);
+  assert.equal(await save.isEnabled(), true, "Empty nicknames are optional");
   await page
     .getByLabel("提交邮箱 2", { exact: true })
     .fill("alice2@example.invalid");

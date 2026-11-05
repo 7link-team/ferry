@@ -1,0 +1,13 @@
+{
+  "engine": "ferry-graph",
+  "schema": 1,
+  "nodes": [
+    {"id":"start","name":"手动开始","type":"core.trigger.manual","type_version":1,"position":[0,160],"params":{"input_schema":{"type":"object"}}},
+    {"id":"repository","name":"查询公开仓库","type":"integration.github.repository.get","type_version":1,"position":[320,160],"params":{"credential_id":"0","owner":"golang","repo":"text"}},
+    {"id":"report","name":"生成 JSON 报告","type":"file.encode","type_version":1,"position":[640,160],"params":{"format":"json","output_name":"repository-report.json","output_field":"report","limits":{"max_input_bytes":10485760,"max_output_bytes":10485760,"max_rows":1000,"max_columns":100}}}
+  ],
+  "connections": [
+    {"from":{"node":"start","port":"main","index":0},"to":{"node":"repository","port":"main","index":0}},
+    {"from":{"node":"repository","port":"main","index":0},"to":{"node":"report","port":"main","index":0}}
+  ]
+}

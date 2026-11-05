@@ -317,7 +317,7 @@ pub(crate) async fn owned_connection(
 ) -> Result<connections::Model> {
     connections::Entity::find_by_id(i64::from(id))
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(connection_access(scope.user.id))
         .one(conn)
         .await?
         .ok_or_else(ApiError::missing)
@@ -369,7 +369,7 @@ pub async fn list_connections(
             &s.db,
             &CONNECTION_SPEC,
             connections::Entity::find()
-                .filter(connections::Column::UserId.eq(scope.user.id))
+                .filter(connection_access(scope.user.id))
                 .filter(connections::Column::Name.ne("")),
             &scope.workspace_id,
             &query,
@@ -636,7 +636,7 @@ pub async fn update_connection(
         )
         .filter(connections::Column::Id.eq(id))
         .filter(connections::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(connections::Column::UserId.eq(scope.user.id))
+        .filter(connection_access(scope.user.id))
         .filter(connections::Column::Version.eq(body.version));
     if let Some((credential, account, config, fingerprint)) = replacement {
         require_credential_in(&tx, &scope, credential).await?;

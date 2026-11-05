@@ -1,3 +1,5 @@
+use crate::accounts::workspace_admin;
+use crate::definitions::access::{self, Operation};
 pub(crate) mod actions;
 pub(crate) mod actions_run;
 pub(crate) mod artifacts;
@@ -36,6 +38,7 @@ fn to_json(row: &pipelines::Model) -> Value {
     let mut value = json!({
         "id": Id::from(row.id),
         "name": row.name,
+        "owner_id": row.owner_id.map(Id::from),
         "repository_id": Id::from(row.repository_id),
         "group_id": Id::from(row.group_id),
         "application_id": Id::from(row.application_id),
@@ -54,6 +57,8 @@ fn to_json(row: &pipelines::Model) -> Value {
 #[derive(Deserialize)]
 pub struct Body {
     name: String,
+    #[serde(default)]
+    message: Option<String>,
     #[serde(default)]
     group_id: Option<String>,
     #[serde(default)]
@@ -257,7 +262,10 @@ pub async fn list(
     Query(mut raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
-    let mut select = pipelines::Entity::find();
+    let tx = access::snapshot(&s.db).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.read").await?;
+    let mut select =
+        pipelines::Entity::find().filter(access::pipeline_visible(&scope, Operation::View)?);
     for (key, kind) in [("tag_id", "tag"), ("environment_id", "environment")] {
         if let Some(id) = raw.remove(key).filter(|id| !id.is_empty()) {
             use crate::entities::pipeline_links as links;
@@ -275,15 +283,15 @@ pub async fn list(
         }
     }
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) = resource::list(&s.db, &SPEC, select, &scope.workspace_id, &query).await?;
+    let (rows, total) = resource::list(&tx, &SPEC, select, &scope.workspace_id, &query).await?;
     let mut items = crate::pipelines::contexts::decorate(
-        &s.db,
+        &tx,
         scope.workspace_id,
         rows.iter().map(to_json).collect(),
     )
     .await?;
     crate::resources::names::attach(
-        &s.db,
+        &tx,
         scope.workspace_id,
         &mut items,
         &[
@@ -296,6 +304,7 @@ pub async fn list(
         ],
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({
         "items": items,
         "total": total, "page": query.page, "page_size": query.page_size,
@@ -309,17 +318,100 @@ pub async fn get(
 ) -> Result<Json<Value>> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.read")?;
+    let tx = access::snapshot(&s.db).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.read").await?;
+    access::require_pipeline(&tx, &scope, id, Operation::View).await?;
     let row = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::Id.eq(id))
-        .one(&s.db)
+        .one(&tx)
         .await?
         .ok_or_else(ApiError::missing)?;
-    Ok(Json(
-        crate::pipelines::contexts::decorate(&s.db, scope.workspace_id, vec![to_json(&row)])
-            .await?
-            .remove(0),
-    ))
+    let value = crate::pipelines::contexts::decorate(&tx, scope.workspace_id, vec![to_json(&row)])
+        .await?
+        .remove(0);
+    tx.commit().await?;
+    Ok(Json(value))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Transfer {
+    owner_id: Id,
+    version: i64,
+}
+
+pub async fn transfer(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_, id)): Path<(String, Id)>,
+    Json(body): Json<Transfer>,
+) -> Result<Json<Value>> {
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.update").await?;
+    access::require_pipeline(&tx, &scope, id, Operation::Edit).await?;
+    let current = pipelines::Entity::find_by_id(i64::from(id))
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .one(&tx)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    if current.owner_id != Some(scope.user.id.into()) {
+        return Err(ApiError::forbidden());
+    }
+    if current.version != body.version {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("execution.versionConflict"),
+        ));
+    }
+    let member = crate::entities::workspace_members::Entity::find()
+        .filter(crate::entities::workspace_members::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(crate::entities::workspace_members::Column::UserId.eq(body.owner_id))
+        .filter(crate::entities::workspace_members::Column::State.eq("active"))
+        .count(&tx)
+        .await?;
+    if member == 0 {
+        return Err(ApiError::forbidden());
+    }
+    let mut target = scope.clone();
+    target.user.id = body.owner_id;
+    let target = workspace_admin::authorize(&tx, &target, "pipelines.update").await?;
+    access::require_pipeline(&tx, &target, id, Operation::Edit).await?;
+    let version = current.version.checked_add(1).ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("execution.versionConflict"),
+        )
+    })?;
+    let now = db::now();
+    let changed = pipelines::Entity::update_many()
+        .col_expr(pipelines::Column::OwnerId, Expr::value(body.owner_id))
+        .col_expr(pipelines::Column::UpdatedAt, Expr::value(now))
+        .col_expr(pipelines::Column::Version, Expr::value(version))
+        .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(pipelines::Column::Id.eq(id))
+        .filter(pipelines::Column::OwnerId.eq(scope.user.id))
+        .filter(pipelines::Column::Version.eq(body.version))
+        .exec(&tx)
+        .await?
+        .rows_affected;
+    if changed != 1 {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("execution.versionConflict"),
+        ));
+    }
+    crate::hosts::activity_in(&s, &tx, &scope, "transfer", "pipelines", &id,
+        json!({"old_owner_id":current.owner_id.map(Id::from),"new_owner_id":body.owner_id,"version":version})).await?;
+    let mut row = current;
+    row.owner_id = Some(body.owner_id.into());
+    row.version = version;
+    row.updated_at = now;
+    let value = crate::pipelines::contexts::decorate(&tx, scope.workspace_id, vec![to_json(&row)])
+        .await?
+        .remove(0);
+    tx.commit().await?;
+    Ok(Json(value))
 }
 
 pub async fn create(
@@ -338,7 +430,8 @@ pub(crate) async fn create_in(
     scope: &Scope,
     mut body: Body,
 ) -> Result<(StatusCode, Json<Value>)> {
-    scope.require("pipelines.create")?;
+    let scope = workspace_admin::authorize(tx, scope, "pipelines.create").await?;
+    let scope = &scope;
     if let Some(selection) = body.repository_selection.take() {
         body.repository_id = crate::repositories::bind_selection(s, tx, scope, selection).await?;
     }
@@ -347,6 +440,7 @@ pub(crate) async fn create_in(
     pipelines::Entity::insert(pipelines::ActiveModel {
         id: Set(i64::from(id)),
         workspace_id: Set(i64::from(scope.workspace_id)),
+        owner_id: Set(Some(scope.user.id.into())),
         name: Set(name.clone()),
         group_id: Set(Id::reference(body.group_id.as_deref().unwrap_or(""))?.into()),
         application_id: Set(Id::reference(body.application_id.as_deref().unwrap_or(""))?.into()),
@@ -361,6 +455,17 @@ pub(crate) async fn create_in(
         ..Default::default()
     })
     .exec(tx)
+    .await?;
+    crate::definitions::record(
+        s,
+        tx,
+        scope.workspace_id,
+        "pipeline",
+        id,
+        &body.stored_definition()?,
+        scope.user.id,
+        body.message.as_deref(),
+    )
     .await?;
     crate::pipelines::contexts::replace_links(
         tx,
@@ -402,6 +507,8 @@ pub async fn update(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.update")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.update").await?;
+    access::require_pipeline(&tx, &scope, id, Operation::Edit).await?;
     let current = pipelines::Entity::find()
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(pipelines::Column::Id.eq(id))
@@ -488,6 +595,17 @@ pub async fn update(
         )
         .await?);
     }
+    crate::definitions::record(
+        &s,
+        &tx,
+        scope.workspace_id,
+        "pipeline",
+        id,
+        &body.stored_definition()?,
+        scope.user.id,
+        body.message.as_deref(),
+    )
+    .await?;
     crate::pipelines::contexts::replace_links(
         &tx,
         scope.workspace_id,
@@ -526,6 +644,8 @@ pub async fn remove(
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     scope.require("pipelines.delete")?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.delete").await?;
+    access::require_pipeline(&tx, &scope, id, Operation::Delete).await?;
     crate::cron_jobs::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id]).await?;
     crate::notifications::alerts::ensure_unreferenced(&tx, scope.workspace_id, "pipeline", &[id])
         .await?;
@@ -560,8 +680,9 @@ pub async fn remove(
         .filter(crate::entities::pipeline_links::Column::PipelineId.eq(id))
         .exec(&tx)
         .await?;
+    access::delete_grants(&tx, scope.workspace_id, "pipeline", id).await?;
+    crate::hosts::activity_in(&s, &tx, &scope, "delete", "pipelines", &id, json!({})).await?;
     tx.commit().await?;
-    crate::hosts::activity(&s, &scope, "delete", "pipelines", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -13,7 +13,7 @@ it("pipeline classification uses shared resource forms and filters", () => {
  expect(filters).not.toContain("environment_id");
  expect(formConfigs("ops")["pipeline-groups"]).toBeDefined();
  expect(listConfigs("ops")["pipeline-groups"]).toBeDefined();
- expect(nav.find(group=>group.key==="build")!.items.find(item=>item.resource==="pipeline-groups")?.parent).toBe("pipelines");
+ expect(nav.find(group=>group.key==="workflow")!.items.find(item=>item.resource==="pipeline-groups")?.parent).toBe("pipelines");
 });
 it("existing pipeline editors can edit without fetching newly introduced classification permissions", () => {
  const fields=formConfigs("ops",new Set(["pipelines.read","pipelines.update","hosts.read","host-groups.read","repositories.read"])).pipelines!.sections.flatMap(section=>section.fields);

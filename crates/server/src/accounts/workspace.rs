@@ -29,6 +29,21 @@ use std::collections::HashSet;
 /// `{resource}.{action}` where the resource is the REST resource name.
 pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     (
+        "credentials.use",
+        "permission.group.credentials",
+        "permission.action.use",
+    ),
+    (
+        "credentials.update_price",
+        "permission.group.credentials",
+        "permission.action.updatePrice",
+    ),
+    (
+        "credentials.update_budget",
+        "permission.group.credentials",
+        "permission.action.updateBudget",
+    ),
+    (
         "dashboard.read",
         "permission.group.dashboard",
         "permission.action.read",
@@ -191,6 +206,51 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     (
         "pipeline-environments.delete",
         "permission.group.pipeline-environments",
+        "permission.action.delete",
+    ),
+    (
+        "workflows.read",
+        "permission.group.workflows",
+        "permission.action.read",
+    ),
+    (
+        "workflows.create",
+        "permission.group.workflows",
+        "permission.action.create",
+    ),
+    (
+        "workflows.update",
+        "permission.group.workflows",
+        "permission.action.update",
+    ),
+    (
+        "workflows.delete",
+        "permission.group.workflows",
+        "permission.action.delete",
+    ),
+    (
+        "workflows.run",
+        "permission.group.workflows",
+        "permission.action.run",
+    ),
+    (
+        "workflow-groups.read",
+        "permission.group.workflow-groups",
+        "permission.action.read",
+    ),
+    (
+        "workflow-groups.create",
+        "permission.group.workflow-groups",
+        "permission.action.create",
+    ),
+    (
+        "workflow-groups.update",
+        "permission.group.workflow-groups",
+        "permission.action.update",
+    ),
+    (
+        "workflow-groups.delete",
+        "permission.group.workflow-groups",
         "permission.action.delete",
     ),
     (
@@ -632,6 +692,8 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 "repositories",
                 "code-insights",
                 "pipelines",
+                "workflows",
+                "workflow-groups",
                 "pipeline-templates",
                 "credentials",
                 "deployments",
@@ -650,6 +712,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
             })
             .chain([
                 "pipelines.run".into(),
+                "workflows.run".into(),
                 "code-insights.sync".into(),
                 "deployments.apply".into(),
                 "dashboard.read".into(),
@@ -701,6 +764,14 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
                     || p.starts_with("config-templates.")
                     || p.starts_with("pipeline-groups.")
                     || p.starts_with("pipeline-environments.")
+                    || p.starts_with("workflows.")
+                    || p.starts_with("workflow-groups.")
+                    || matches!(
+                        p.as_str(),
+                        "credentials.use"
+                            | "credentials.update_price"
+                            | "credentials.update_budget"
+                    )
             })
             .collect::<Vec<_>>();
         if additions.is_empty() {
@@ -947,6 +1018,7 @@ pub(crate) async fn create_in(
         owner_id: Set(i64::from(user_id)),
         join_code: Set(code.clone()),
         pipeline_run_number: Set(0),
+        workflow_execution_number: Set(0),
         created_at: Set(now),
         updated_at: Set(now),
     })
@@ -984,6 +1056,7 @@ pub(crate) async fn create_in(
     .exec(conn)
     .await?;
     crate::maintenance::seed(s, conn, id).await?;
+    crate::templates::seed_examples(s, conn, id).await?;
     Ok(json!({"id": id, "slug": slug, "name": name, "join_code": code}))
 }
 
@@ -1093,6 +1166,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
@@ -1102,6 +1176,7 @@ mod tests {
             owner_id: Set(1),
             join_code: Set("legacy-permissions-code".into()),
             pipeline_run_number: Set(0),
+            workflow_execution_number: Set(0),
             created_at: Set(1234),
             updated_at: Set(1234),
         })

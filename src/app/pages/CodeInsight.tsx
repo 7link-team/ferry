@@ -31,9 +31,6 @@ export function CodeInsightDetail({
     () => ({
       ...form,
       description: "",
-      incompleteMessage: "每条作者映射须填写姓名或邮箱，以及显示昵称。",
-      incompleteMessageKey:
-        "insight-domain:每条作者映射须填写姓名或邮箱，以及显示昵称。",
       sections: [
         {
           title: "作者昵称映射",

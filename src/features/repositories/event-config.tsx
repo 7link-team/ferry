@@ -362,7 +362,7 @@ export function repositoryEventList(
       },
       { key: "reference", label: hostRepositoryText("repository-monitor.015") },
       { key: "summary", label: hostRepositoryText("repository-monitor.094") },
-      { key: "actor", label: hostRepositoryText("repository-monitor.016") },
+      { key: "actor", label: hostRepositoryText("repository-monitor.016"), render: row => <span title={row.source === "polling" ? hostRepositoryText("repository-monitor.021") : undefined}>{String(row.actor || commonText("dashboard.unknown"))}</span> },
       { key: "action", label: hostRepositoryText("repository-monitor.017") },
       { key: "delivery", label: hostRepositoryText("repository-monitor.022") },
     ],

@@ -14,6 +14,7 @@ pub struct State {
     pub vault: crate::vault::Vault,
     pub cluster: Option<Arc<crate::cluster::Cluster>>,
     pub host_monitor: crate::hosts::monitor::Store,
+    pub monitor: crate::platform_monitor::Store,
 }
 pub type AppState = Arc<State>;
 

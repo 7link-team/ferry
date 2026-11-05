@@ -80,5 +80,22 @@
   "permission.action.invite": "招待",
   "permission.action.change_role": "ロールを変更",
   "permission.action.remove": "削除",
-  "permission.action.manage": "名前変更・招待コード・譲渡"
+  "permission.action.manage": "名前変更・招待コード・譲渡",
+  "permission.group.workflows": "ワークフロー",
+  "permission.group.workflow-groups": "ワークフローグループ",
+  "permission.action.use": "認証情報を使用",
+  "permission.action.updatePrice": "AI 料金を管理",
+  "permission.action.updateBudget": "AI 予算と照合を管理",
+  "platform.storageChangeRequiresMigration": "保存先の変更前に既存ファイルを移行してください。クラスターではS3が必要です。環境変数の設定はサーバー側で変更してください。",
+  "platform.footerInvalid": "フッター内容は UTF-8 で65,536バイト以内とし、ヌル文字は含められません。",
+  "platform.scriptsInvalid": "スクリプト設定が無効です。GA4 ID、JavaScript（最大65,536バイト、ヌル文字や終了scriptタグ不可）、HTTP(S)オリジン（最大8,192バイト、パス不可）を確認してください。",
+  "mail.invalid": "SMTP設定を確認してください。",
+  "mail.sendFailed": "メール送信に失敗しました。設定とネットワークを確認してください。",
+  "mail.rateLimit": "リクエストが多すぎます。後で再試行してください。",
+  "mail.codeInvalid": "コードが無効、期限切れ、または試行回数超過です。再取得してください。",
+  "mail.testSubject": "メール設定テスト",
+  "mail.testBody": "メール設定のテストメッセージです。",
+  "mail.codeSubject": "登録確認コード",
+  "mail.codeBody": "登録コードは {code} です。有効期限は10分です。他人に教えないでください。",
+  "monitor.nodeChanged": "応答サーバーが表示中のノードと異なります。統計を更新して再試行してください。リセットは実行されていません。"
 }

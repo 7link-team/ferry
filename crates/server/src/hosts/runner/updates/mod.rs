@@ -109,6 +109,7 @@ mod tests {
         scratch.db.execute_unprepared("CREATE TRIGGER fail_update_status BEFORE UPDATE OF agent_update ON hosts WHEN NEW.agent_update LIKE '%failed%' BEGIN SELECT RAISE(FAIL, 'status unavailable'); END").await.unwrap();
         let s = Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
             db: scratch.db.clone(),
@@ -235,6 +236,7 @@ mod tests {
         .unwrap();
         let s = Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
             db: scratch.db.clone(),
@@ -336,6 +338,7 @@ mod tests {
         let state = |cluster: Arc<crate::cluster::Cluster>| {
             Arc::new(crate::state::State {
                 host_monitor: Default::default(),
+                monitor: Default::default(),
                 cluster: Some(cluster),
                 ids: Arc::new(
                     crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),

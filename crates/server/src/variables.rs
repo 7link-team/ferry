@@ -506,6 +506,33 @@ pub(crate) struct ActionsSnapshot {
     pub(crate) sources: Vec<Value>,
 }
 
+/// Workflow expressions see workspace-wide plain variables only. Build/deploy
+/// overrides and secret ciphertext are excluded in the database projection.
+pub(crate) async fn snapshot_for_workflow(
+    s: &AppState,
+    conn: &impl ConnectionTrait,
+    workspace: Id,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    use variables::Column as C;
+    let rows = summary_query()
+        .filter(C::WorkspaceId.eq(workspace))
+        .filter(C::Scope.eq("global"))
+        .filter(C::ScopeRef.eq(0))
+        .filter(C::Kind.eq("plain"))
+        .into_model::<Summary>()
+        .all(conn)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            let value = s.vault.open_secret(
+                &row.plain_value,
+                &vault::aad(&workspace.to_string(), "variables", &row.id.to_string()),
+            )?;
+            Ok((row.name, value))
+        })
+        .collect()
+}
+
 /// Snapshot GitHub contexts without broadening the existing workspace/scope rules.
 /// Missing properties are empty strings; whole vars contexts never disclose secrets.
 pub(crate) async fn snapshot_for_actions(
@@ -708,6 +735,7 @@ mod tests {
                 owner_id: Set(1),
                 join_code: Set(format!("join-{id}")),
                 pipeline_run_number: Set(0),
+                workflow_execution_number: Set(0),
                 created_at: Set(0),
                 updated_at: Set(0),
             })
@@ -717,6 +745,7 @@ mod tests {
         }
         let state = Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, Instant::now()).unwrap()),
             db,

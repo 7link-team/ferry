@@ -91,6 +91,7 @@ export interface ListConfig<T> {
   filterPresets?: { label: string; labelKey?: string | undefined; presets: { label: string; labelKey?: string | undefined; values: Record<string, string> | (() => Record<string, string>) }[] }[];
   /** A report summary shares the table's committed filters, loading and refresh. */
   summary?: (data: Envelope<T>) => ReactNode;
+  footerSummary?: (data: Envelope<T>) => ReactNode;
   permissionResource?: string;
   /** REST resource name; the URL is /api/workspaces/{ws}/{resource}. */
   resource: string;
@@ -175,6 +176,8 @@ export interface FormField<T> {
   repositoryAddLabelKey?: string;
   /** Metadata key for a stored secret's presence (never its value). */
   stored?: string;
+  /** Suppress optional write-only value status copy in compact configuration forms. */
+  hideSecretStatus?: boolean;
   /** Explicitly opt into replacing an existing write-only value, including with empty text. */
   replaceOnEdit?: boolean;
   /** Optional audited plaintext action, only offered on the detail page. */
@@ -199,6 +202,8 @@ export interface FormField<T> {
 }
 
 export interface FormConfig<T> {
+  /** A resource-specific editor inside the shared full-height form workspace. */
+  editor?: { field: string; nameLabel: string };
   width?: "full";
   /** Numbered, framed sections for forms with distinct setup responsibilities. */
   presentation?: "sections";

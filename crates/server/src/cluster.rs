@@ -1384,6 +1384,7 @@ mod tests {
                 bind: "127.0.0.1:0".parse().unwrap(),
                 vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
                 host_monitor: Default::default(),
+                monitor: Default::default(),
                 cluster: Some(cluster),
             })
         };

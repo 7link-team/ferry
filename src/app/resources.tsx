@@ -1,4 +1,4 @@
-import { DictionaryState, stateDictionary } from "../features/maintenance/DictionaryState";
+import { workflowsForms, workflowsLists } from "../features/workflows/resource-config";
 import { activityLists } from "../features/activity/resource-config";
 import { alertsForms, alertsLists } from "../features/alerts/resource-config";
 import {
@@ -55,6 +55,7 @@ import type { AnyRow } from "../shared/resources/config";
 import type { FormConfig, ListConfig, Option } from "../shared/resources/types";
 import { exportResources, importResources } from "./resources/ResourceTransfer";
 import { navigate } from "./router";
+import { ResourceTable } from "./resources/ResourceTable";
 export type { Activity } from "../features/activity/resource-config";
 export type { Credential } from "../features/credentials/types";
 export type { Host, HostGroup } from "../features/hosts/resource-config";
@@ -80,6 +81,7 @@ export function listConfigs(
     ...deploymentsLists(context),
     ...codeInsightsLists(context),
     ...pipelinesLists(context),
+    ...workflowsLists(context),
     ...hostsLists(context),
     ...tagsLists(context),
     ...variablesLists(context),
@@ -91,16 +93,6 @@ export function listConfigs(
       key,
       {
         ...config,
-        ...(stateDictionary[key] && key !== "hosts" ? {
-          columns: config.columns.map(column => column.key === "state" ? {
-            ...column,
-            render: (row: AnyRow) => <DictionaryState dictionary={stateDictionary[key]!} value={String(row.state)}>{column.render ? column.render(row) : String(row.state)}</DictionaryState>,
-          } : column),
-          filters: (config.filters ?? []).map(filter => filter.key === "state" && dictionaries[stateDictionary[key]!] ? {
-            ...filter,
-            options: dictionaries[stateDictionary[key]!]!.map(option => ({ ...option, content: <DictionaryState dictionary={stateDictionary[key]!} value={option.value}>{option.label}</DictionaryState> })),
-          } : filter),
-        } : {}),
         toolbar: {
           ...config.toolbar,
           import: !config.endpoint && importResources.has(config.resource),
@@ -115,7 +107,9 @@ export function formConfigs(
   workspace: string,
   permissions?: Set<string>,
 ): Record<string, FormConfig<AnyRow>> {
-  const context = { workspace, permissions, hostStates: STATES, navigate };
+  const context = { workspace, permissions, hostStates: STATES, navigate,
+    renderTable: (config: ListConfig<Record<string, unknown>>, refreshKey = 0) => <ResourceTable config={config} workspace={workspace} permissions={permissions ?? new Set()} refreshKey={refreshKey} />,
+  };
   return {
     ...marketplaceForms(context),
     ...alertsForms(context),
@@ -127,6 +121,7 @@ export function formConfigs(
     ...deploymentsForms(context),
     ...codeInsightsForms(context),
     ...pipelinesForms(context),
+    ...workflowsForms(context),
     ...hostsForms(context),
     ...variablesForms(context),
     ...credentialsForms(context),

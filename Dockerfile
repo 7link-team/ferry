@@ -25,6 +25,7 @@ WORKDIR /build
 ARG BUILD_JOBS=2
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY src/shared/workflow-contracts ./src/shared/workflow-contracts
 COPY desktop/tauri.conf.json ./desktop/tauri.conf.json
 COPY scripts/runner-install.sh scripts/runner-install.ps1 ./scripts/
 COPY --from=web /build/dist ./dist
@@ -32,9 +33,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
     cargo test --locked --jobs ${BUILD_JOBS} && \
-    cargo build --locked --release --jobs ${BUILD_JOBS} -p ferry-server -p ferry-runner && \
+    cargo build --locked --release --jobs ${BUILD_JOBS} -p ferry-server -p ferry-runner -p ferry-sandbox && \
     install -D target/release/ferry-server /out/ferry-server && \
-    install -D target/release/ferry-runner /out/ferry-runner
+    install -D target/release/ferry-runner /out/ferry-runner && \
+    install -D target/release/ferry-sandbox /out/ferry-sandbox
 
 # The runner binaries the host-enrollment command downloads.
 FROM scratch AS artifacts
@@ -48,6 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && useradd --uid 10001 --gid ferry --no-create-home ferry \
     && mkdir /data && chown ferry:ferry /data
 COPY --from=server /out/ferry-server /usr/local/bin/ferry-server
+COPY --from=server /out/ferry-sandbox /usr/local/bin/ferry-sandbox
 COPY --from=actions /out/actions-workers /usr/local/bin/actions-workers
 COPY --from=server /out/ferry-runner /usr/local/share/ferry/runner/linux-amd64/ferry-runner
 ENV FERRY_DATA_DIR=/data FERRY_BIND=0.0.0.0:4290 FERRY_SERVER_MODE=true

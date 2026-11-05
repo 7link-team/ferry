@@ -1,4 +1,8 @@
 //! Pipeline run history, immutable snapshots and Actions scheduling.
+use crate::accounts::workspace_admin;
+use crate::definitions::access::{self, Operation};
+#[cfg(test)]
+pub(crate) mod lease_tests;
 use crate::error::{Json, Path, Query};
 use crate::i18n::Message;
 use crate::{
@@ -17,8 +21,8 @@ use crate::{
 use axum::{extract::State, http::StatusCode};
 use bytes::Bytes;
 use sea_orm::{
-    ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Set,
-    TransactionTrait,
+    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, Set, TransactionTrait,
     sea_query::{Expr, ExprTrait},
 };
 use serde_json::{Value, json};
@@ -99,7 +103,7 @@ const RUN_NAMES: [crate::resources::names::Ref; 3] = [
     crate::resources::names::of("host_id", "host_name", crate::resources::names::Kind::Host),
 ];
 fn run_json(r: &runs::Model) -> Value {
-    json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"host_id":Id::from(r.host_id),
+    json!({"id":Id::from(r.id),"pipeline_id":Id::from(r.pipeline_id),"revision_id":Id::from(r.revision_id),"host_id":Id::from(r.host_id),
         "environment_id":Id::from(r.environment_id),"environment_name":r.environment_name,
         "number":r.number,"state":r.state,"trigger_kind":r.trigger_kind,
         "definition_format":if crate::pipelines::actions::snapshot(&r.definition).is_some(){"github-actions"}else{"legacy"},
@@ -108,13 +112,27 @@ fn run_json(r: &runs::Model) -> Value {
         "inputs":r.inputs.as_deref().and_then(|text| serde_json::from_str::<Value>(text).ok()).unwrap_or_else(|| json!({})),
         "created_at":r.created_at,"started_at":r.started_at,"finished_at":r.finished_at})
 }
-async fn scoped(s: &AppState, scope: &Scope, id: &str) -> Result<runs::Model> {
+fn operation_permission(operation: Operation) -> &'static str {
+    match operation {
+        Operation::View => "pipelines.read",
+        _ => "pipelines.run",
+    }
+}
+async fn scoped(
+    conn: &impl ConnectionTrait,
+    scope: &Scope,
+    id: &str,
+    operation: Operation,
+) -> Result<runs::Model> {
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
-    runs::Entity::find_by_id(i64::from(id))
+    let scope = workspace_admin::authorize(conn, scope, operation_permission(operation)).await?;
+    let row = runs::Entity::find_by_id(i64::from(id))
         .filter(runs::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
+        .one(conn)
         .await?
-        .ok_or_else(ApiError::missing)
+        .ok_or_else(ApiError::missing)?;
+    access::require_pipeline(conn, &scope, row.pipeline_id.into(), operation).await?;
+    Ok(row)
 }
 pub async fn list(
     State(s): State<AppState>,
@@ -122,11 +140,22 @@ pub async fn list(
     Query(raw): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
+    let tx = access::snapshot(&s.db).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.read").await?;
     let q = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) =
-        resource::list(&s.db, &SPEC, runs::Entity::find(), &scope.workspace_id, &q).await?;
+    let (rows, total) = resource::list(
+        &tx,
+        &SPEC,
+        runs::Entity::find().filter(
+            runs::Column::PipelineId.in_subquery(access::pipeline_ids(&scope, Operation::View)?),
+        ),
+        &scope.workspace_id,
+        &q,
+    )
+    .await?;
     let mut items: Vec<Value> = rows.iter().map(run_json).collect();
-    crate::resources::names::attach(&s.db, scope.workspace_id, &mut items, &RUN_NAMES).await?;
+    crate::resources::names::attach(&tx, scope.workspace_id, &mut items, &RUN_NAMES).await?;
+    tx.commit().await?;
     Ok(Json(
         json!({"items":items,"total":total,"page":q.page,"page_size":q.page_size}),
     ))
@@ -137,15 +166,16 @@ pub async fn get(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let tx = access::snapshot(&s.db).await?;
+    let r = scoped(&tx, &scope, &id, Operation::View).await?;
     let rows = steps::Entity::find()
         .filter(steps::Column::RunId.eq(r.id))
         .order_by_asc(steps::Column::StepIndex)
-        .all(&s.db)
+        .all(&tx)
         .await?;
     let mut v = run_json(&r);
     crate::resources::names::attach(
-        &s.db,
+        &tx,
         scope.workspace_id,
         std::slice::from_mut(&mut v),
         &RUN_NAMES,
@@ -176,7 +206,7 @@ pub async fn get(
     );
     let jobs = crate::entities::pipeline_run_jobs::Entity::find()
         .filter(crate::entities::pipeline_run_jobs::Column::RunId.eq(r.id))
-        .all(&s.db)
+        .all(&tx)
         .await?;
     v["jobs"] = json!(jobs.iter().map(|job| {
         let definition = snapshot.as_ref().and_then(|s| s.jobs.iter().find(|item| item.key == job.job_key));
@@ -184,7 +214,8 @@ pub async fn get(
             "step_indices":definition.map(|item| item.steps.iter().map(|step| step.index).collect::<Vec<_>>()).unwrap_or_default(),
             "host_id":Id::from(job.host_id),"state":job.state,"started_at":job.started_at,"finished_at":job.finished_at})
     }).collect::<Vec<_>>());
-    v["artifacts"] = crate::pipelines::artifacts::for_run(s.as_ref(), r.workspace_id, r.id).await?;
+    v["artifacts"] = crate::pipelines::artifacts::for_run_in(&tx, r.workspace_id, r.id).await?;
+    tx.commit().await?;
     Ok(Json(v))
 }
 fn display_step_name(
@@ -213,7 +244,8 @@ pub async fn log_list(
     Query(q): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.read")?;
-    let r = scoped(&s, &scope, &id).await?;
+    let tx = access::snapshot(&s.db).await?;
+    let r = scoped(&tx, &scope, &id, Operation::View).await?;
     let after = q
         .get("after")
         .map(|v| v.parse::<i64>())
@@ -236,8 +268,9 @@ pub async fn log_list(
         .filter(logs::Column::Seq.gt(after))
         .order_by_asc(logs::Column::Seq)
         .limit(200)
-        .all(&s.db)
+        .all(&tx)
         .await?;
+    tx.commit().await?;
     Ok(Json(
         json!({"items":rows.iter().map(|v|json!({"seq":v.seq,"step_index":v.step_index,
         "stream":v.stream,"chunk":crate::i18n::display_text_stored(&v.chunk)})).collect::<Vec<_>>(),
@@ -381,6 +414,8 @@ pub(crate) async fn trigger_with_analysis_source(
     };
     let id = id.parse::<Id>().map_err(|_| ApiError::missing())?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.run").await?;
+    access::require_pipeline(&tx, &scope, id, Operation::Run).await?;
     let mut p = pipelines::Entity::find_by_id(i64::from(id))
         .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
         .one(&tx)
@@ -389,6 +424,17 @@ pub(crate) async fn trigger_with_analysis_source(
     if crate::pipelines::reviews::migration::owns_pipeline(&tx, i64::from(id)).await? {
         return Err(ApiError::missing());
     }
+    let revision = crate::definitions::record(
+        &s,
+        &tx,
+        scope.workspace_id,
+        "pipeline",
+        id,
+        &p.definition,
+        Id::from(0),
+        None,
+    )
+    .await?;
     if let Some((connection, url)) = source {
         let mut document = crate::pipelines::actions::document(&p.definition).ok_or_else(|| {
             ApiError::localized(
@@ -833,7 +879,11 @@ pub(crate) async fn trigger_with_analysis_source(
         id: run_id,
         workspace_id: i64::from(scope.workspace_id),
         pipeline_id: p.id,
+        revision_id: revision.id,
         concurrency_group,
+        lease_owner: String::new(),
+        lease_epoch: 0,
+        not_before: None,
         pipeline_name: p.name.clone(),
         host_id,
         host_name,
@@ -925,10 +975,13 @@ pub async fn cancel(
     Path((_, id)): Path<(String, String)>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.run")?;
-    let r = scoped(&s, &scope, &id).await?;
-    request_cancel(&s, &r).await?;
-    crate::hosts::activity(
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.run").await?;
+    let r = scoped(&tx, &scope, &id, Operation::Run).await?;
+    request_cancel_in(&tx, &r).await?;
+    crate::hosts::activity_in(
         &s,
+        &tx,
         &scope,
         "cancel",
         "pipeline-runs",
@@ -936,17 +989,24 @@ pub async fn cancel(
         json!({}),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }
 /// A queued run ends as cancelled; a running Actions run moves to
 /// cancelling so its scheduler stops workers and cleans up.
 pub(crate) async fn request_cancel(s: &AppState, r: &runs::Model) -> Result<()> {
+    let tx = s.db.begin().await?;
+    request_cancel_in(&tx, r).await?;
+    tx.commit().await?;
+    Ok(())
+}
+async fn request_cancel_in(conn: &impl ConnectionTrait, r: &runs::Model) -> Result<()> {
     if crate::pipelines::actions::snapshot(&r.definition).is_some() {
-        if mark_cancelling(&s.db, r).await? {
-            finish(s, r.id, "cancelled").await?;
+        if mark_cancelling(conn, r).await? {
+            finish_in(conn, r.id, "cancelled").await?;
         }
     } else {
-        finish(s, r.id, "cancelled").await?;
+        finish_in(conn, r.id, "cancelled").await?;
     }
     Ok(())
 }
@@ -1007,7 +1067,9 @@ pub async fn approve(
     Path((_, id, key)): Path<(String, String, String)>,
 ) -> Result<Json<Value>> {
     scope.require("pipelines.run")?;
-    let run = scoped(&s, &scope, &id).await?;
+    let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
+    let scope = workspace_admin::authorize(&tx, &scope, "pipelines.run").await?;
+    let run = scoped(&tx, &scope, &id, Operation::Run).await?;
     let snapshot =
         crate::pipelines::actions::snapshot(&run.definition).ok_or_else(ApiError::missing)?;
     if run.state != "running" || !snapshot.jobs.iter().any(|job| job.key == key) {
@@ -1022,7 +1084,7 @@ pub async fn approve(
         .filter(jobs::Column::RunId.eq(run.id))
         .filter(jobs::Column::JobKey.eq(&key))
         .filter(jobs::Column::State.eq("waiting"))
-        .exec(&s.db)
+        .exec(&tx)
         .await?
         .rows_affected;
     if changed == 0 {
@@ -1031,8 +1093,9 @@ pub async fn approve(
             Message::new("execution.approvalProcessed"),
         ));
     }
-    crate::hosts::activity(
+    crate::hosts::activity_in(
         &s,
+        &tx,
         &scope,
         "approve",
         "pipeline-runs",
@@ -1040,18 +1103,28 @@ pub async fn approve(
         json!({"job":key}),
     )
     .await?;
+    tx.commit().await?;
     Ok(Json(json!({"ok":true})))
 }
 pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
     let tx = s.db.begin().await?;
+    finish_in(&tx, id, state).await?;
+    tx.commit().await?;
+    Ok(())
+}
+async fn finish_in(conn: &impl ConnectionTrait, id: i64, state: &str) -> Result<()> {
     let changed = runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value(state))
         .col_expr(runs::Column::FinishedAt, Expr::value(db::now()))
         .filter(runs::Column::Id.eq(id))
+        .filter(crate::executions::pipeline_condition(id))
         .filter(runs::Column::State.is_in(["queued", "running", "cancelling"]))
-        .exec(&tx)
+        .exec(conn)
         .await?
         .rows_affected;
+    if changed == 0 && crate::executions::current().is_some() {
+        return Err(crate::executions::ownership_lost());
+    }
     if changed > 0 {
         // Recovery and queued cancellation also finish Actions job rows.
         // Normal orchestration already finalized its jobs; only unfinished
@@ -1069,14 +1142,14 @@ pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
             .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
             .filter(jobs::Column::RunId.eq(id))
             .filter(jobs::Column::State.is_in(["running", "waiting", "approved"]))
-            .exec(&tx)
+            .exec(conn)
             .await?;
         jobs::Entity::update_many()
             .col_expr(jobs::Column::State, Expr::value("skipped"))
             .col_expr(jobs::Column::FinishedAt, Expr::value(db::now()))
             .filter(jobs::Column::RunId.eq(id))
             .filter(jobs::Column::State.eq("queued"))
-            .exec(&tx)
+            .exec(conn)
             .await?;
         steps::Entity::update_many()
             .col_expr(
@@ -1090,21 +1163,21 @@ pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
             .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
             .filter(steps::Column::RunId.eq(id))
             .filter(steps::Column::State.eq("running"))
-            .exec(&tx)
+            .exec(conn)
             .await?;
         steps::Entity::update_many()
             .col_expr(steps::Column::State, Expr::value("skipped"))
             .col_expr(steps::Column::FinishedAt, Expr::value(db::now()))
             .filter(steps::Column::RunId.eq(id))
             .filter(steps::Column::State.eq("queued"))
-            .exec(&tx)
+            .exec(conn)
             .await?;
     }
-    tx.commit().await?;
     Ok(())
 }
 pub(crate) async fn active(s: &AppState, id: i64) -> Result<bool> {
     Ok(runs::Entity::find_by_id(id)
+        .filter(crate::executions::pipeline_condition(id))
         .one(&s.db)
         .await?
         .is_some_and(|r| r.state == "running"))
@@ -1115,10 +1188,12 @@ pub async fn scheduler(
     mut stop: tokio::sync::watch::Receiver<bool>,
     mut drain: tokio::sync::watch::Receiver<bool>,
 ) {
-    // No leases/multi-instance support yet. Interrupted runs cannot be resumed
-    // safely: a remote command might have completed before the server crashed.
+    let boot = format!("{}:{}", s.instance_id, uuid::Uuid::new_v4());
+    // Legacy unowned Actions runs retain their interruption policy. Never sweep
+    // a leased run belonging to another live server instance.
     if let Ok(rows) = runs::Entity::find()
         .filter(runs::Column::State.is_in(["running", "cancelling"]))
+        .filter(runs::Column::LeaseOwner.eq(""))
         .all(&s.db)
         .await
     {
@@ -1127,21 +1202,13 @@ pub async fn scheduler(
         }
     }
     let mut next_cleanup = std::time::Instant::now();
-    // Runs execute concurrently, at most `pipeline_concurrent_runs` per
-    // workspace (0 = unlimited); finished tasks report their workspace back.
+    // The database, rather than this process's JoinSet, owns concurrency limits.
     let mut running = tokio::task::JoinSet::new();
-    let mut busy: HashMap<i64, i64> = HashMap::new();
     loop {
         if *stop.borrow() || *drain.borrow() {
             break;
         }
-        while let Some(done) = running.try_join_next() {
-            if let Ok(workspace) = done
-                && let Some(count) = busy.get_mut(&workspace)
-            {
-                *count -= 1;
-            }
-        }
+        while running.try_join_next().is_some() {}
         if std::time::Instant::now() >= next_cleanup {
             if let Err(error) = crate::maintenance::prune_history(&s, false).await {
                 tracing::error!(%error,"历史清理失败");
@@ -1151,16 +1218,38 @@ pub async fn scheduler(
             }
             next_cleanup = std::time::Instant::now() + Duration::from_secs(60);
         }
-        match claim(&s, &busy).await {
-            Ok(Some(r)) => {
-                *busy.entry(r.workspace_id).or_default() += 1;
-                let (s, mut stop) = (s.clone(), stop.clone());
+        match claim(&s, &boot).await {
+            Ok(Some((r, lease, interrupted))) => {
+                let (s, stop) = (s.clone(), stop.clone());
                 running.spawn(async move {
-                    let workspace = r.workspace_id;
-                    if dispatch(&s, r, &mut stop).await.is_err() {
+                    let database = s.db.clone();
+                    let result = crate::executions::supervise(
+                        lease,
+                        &database,
+                        stop,
+                        |mut stop| async move {
+                            if interrupted {
+                                // Actions has no durable per-command replay contract.
+                                // Recover ownership before finalizing, never rerun effects.
+                                finish(
+                                    &s,
+                                    r.id,
+                                    if r.state == "cancelling" {
+                                        "cancelled"
+                                    } else {
+                                        "failed"
+                                    },
+                                )
+                                .await
+                            } else {
+                                dispatch(&s, r, &mut stop).await
+                            }
+                        },
+                    )
+                    .await;
+                    if result.is_err() {
                         tracing::error!("流水线调度失败；稍后检查队列。");
                     }
-                    workspace
                 });
                 // Claim the next eligible run without waiting.
                 continue;
@@ -1174,55 +1263,91 @@ pub async fn scheduler(
     while running.join_next().await.is_some() {}
 }
 
-/// The oldest queued run whose workspace is below its concurrency limit,
-/// atomically moved to running so other server instances cannot claim it.
-async fn claim(s: &AppState, busy: &HashMap<i64, i64>) -> Result<Option<runs::Model>> {
+/// Serialize capacity, group exclusion and execution CAS on the workspace row.
+async fn claim(
+    s: &AppState,
+    boot: &str,
+) -> Result<Option<(runs::Model, crate::executions::lease::Lease, bool)>> {
+    use crate::executions::lease::{Execution, Kind, Lease};
+    let mut candidates = runs::Entity::find()
+        .filter(runs::Column::State.is_in(["running", "cancelling"]))
+        .filter(runs::Column::LeaseOwner.ne(""))
+        .order_by_asc(runs::Column::CreatedAt)
+        .all(&s.db)
+        .await?;
     let queued = runs::Entity::find()
         .filter(runs::Column::State.eq("queued"))
         .order_by_asc(runs::Column::CreatedAt)
         .limit(500)
         .all(&s.db)
         .await?;
-    let mut limits: HashMap<i64, i64> = HashMap::new();
-    for r in queued {
-        let limit = match limits.get(&r.workspace_id) {
-            Some(limit) => *limit,
-            None => {
-                let limit = crate::maintenance::setting(
-                    &s.db,
-                    Id::from(r.workspace_id),
-                    "pipeline_concurrent_runs",
-                )
-                .await?;
-                limits.insert(r.workspace_id, limit);
-                limit
-            }
+    candidates.extend(queued);
+    for candidate in candidates {
+        let tx = crate::variables::transaction(s, candidate.workspace_id.into()).await?;
+        let Some(mut r) = runs::Entity::find_by_id(candidate.id).one(&tx).await? else {
+            tx.rollback().await?;
+            continue;
         };
-        if limit > 0 && busy.get(&r.workspace_id).copied().unwrap_or(0) >= limit {
+        let interrupted = matches!(r.state.as_str(), "running" | "cancelling");
+        if !interrupted && r.state != "queued" {
+            tx.rollback().await?;
             continue;
         }
-        if !r.concurrency_group.is_empty()
+        let limit =
+            crate::maintenance::setting(&tx, r.workspace_id.into(), "pipeline_concurrent_runs")
+                .await?;
+        if !interrupted
+            && limit > 0
+            && runs::Entity::find()
+                .filter(runs::Column::WorkspaceId.eq(r.workspace_id))
+                .filter(runs::Column::State.is_in(["running", "cancelling"]))
+                .count(&tx)
+                .await?
+                >= limit as u64
+        {
+            tx.rollback().await?;
+            continue;
+        }
+        if !interrupted
+            && !r.concurrency_group.is_empty()
             && runs::Entity::find()
                 .filter(runs::Column::WorkspaceId.eq(r.workspace_id))
                 .filter(runs::Column::ConcurrencyGroup.eq(r.concurrency_group.clone()))
                 .filter(runs::Column::State.is_in(["running", "cancelling"]))
-                .one(&s.db)
+                .one(&tx)
                 .await?
                 .is_some()
         {
+            tx.rollback().await?;
             continue;
         }
-        let claimed = runs::Entity::update_many()
-            .col_expr(runs::Column::State, Expr::value("running"))
-            .col_expr(runs::Column::StartedAt, Expr::value(db::now()))
-            .filter(runs::Column::Id.eq(r.id))
-            .filter(runs::Column::State.eq("queued"))
-            .exec(&s.db)
-            .await?
-            .rows_affected;
-        if claimed == 1 {
-            return Ok(Some(r));
+        let now = db::now();
+        let Some(lease) = Lease::claim_in(
+            &tx,
+            Execution {
+                kind: Kind::Pipeline,
+                workspace: r.workspace_id,
+                id: r.id,
+            },
+            r.lease_epoch,
+            boot,
+            now,
+        )
+        .await?
+        else {
+            tx.rollback().await?;
+            continue;
+        };
+        tx.commit().await?;
+        r.lease_owner = boot.into();
+        r.lease_epoch = lease.epoch();
+        if r.started_at == 0 {
+            r.started_at = now;
         }
+        if !interrupted {
+            r.state = "running".into();
+        }
+        return Ok(Some((r, lease, interrupted)));
     }
     Ok(None)
 }
@@ -1328,17 +1453,40 @@ async fn append_record(
     stream: &str,
     chunk: String,
 ) -> Result<()> {
-    *seq += 1;
-    logs::Entity::insert(logs::ActiveModel {
-        id: Set(i64::from(s.next_id()?)),
-        run_id: Set(run),
-        seq: Set(*seq),
-        step_index: Set(index),
-        stream: Set(stream.into()),
-        chunk: Set(chunk),
-    })
-    .exec(&s.db)
-    .await?;
+    use sea_orm::sea_query::Query as SqlQuery;
+    let next = *seq + 1;
+    // INSERT SELECT keeps the ownership check and log publication atomic.
+    let select = SqlQuery::select()
+        .expr(Expr::val(i64::from(s.next_id()?)))
+        .expr(Expr::val(run))
+        .expr(Expr::val(next))
+        .expr(Expr::val(index))
+        .expr(Expr::val(stream))
+        .expr(Expr::val(chunk))
+        .and_where(crate::executions::pipeline_fence(run))
+        .to_owned();
+    let mut insert = SqlQuery::insert();
+    insert
+        .into_table(logs::Entity)
+        .columns([
+            logs::Column::Id,
+            logs::Column::RunId,
+            logs::Column::Seq,
+            logs::Column::StepIndex,
+            logs::Column::Stream,
+            logs::Column::Chunk,
+        ])
+        .select_from(select)
+        .map_err(|error| ApiError::from(sea_orm::DbErr::Custom(error.to_string())))?;
+    if s.db
+        .execute_raw(s.db.get_database_backend().build(&insert))
+        .await?
+        .rows_affected()
+        != 1
+    {
+        return Err(crate::executions::ownership_lost());
+    }
+    *seq = next;
     Ok(())
 }
 async fn execute(
@@ -1464,6 +1612,11 @@ mod tests {
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
         let schema = Schema::new(db.get_database_backend());
         for table in [
+            schema.create_table_from_entity(crate::entities::users::Entity),
+            schema.create_table_from_entity(crate::entities::workspace_roles::Entity),
+            schema.create_table_from_entity(crate::entities::workspace_members::Entity),
+            schema.create_table_from_entity(crate::entities::definition_acl::Entity),
+            schema.create_table_from_entity(pipelines::Entity),
             schema.create_table_from_entity(runs::Entity),
             schema.create_table_from_entity(steps::Entity),
             schema.create_table_from_entity(crate::entities::pipeline_run_jobs::Entity),
@@ -1471,8 +1624,41 @@ mod tests {
         ] {
             db.execute(&table).await.unwrap();
         }
+        db.execute_unprepared(
+            "INSERT INTO users (id,email,name,password_hash,is_superadmin,version,active,created_at,updated_at) VALUES (1,'reader@example.invalid','Reader','unused',0,1,1,1,1)",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared(
+            r#"INSERT INTO workspace_roles VALUES (1,1,'reader','["pipelines.read"]',0,1,1,1)"#,
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared("INSERT INTO workspace_members VALUES (1,1,1,1,'active',1,1,1)")
+            .await
+            .unwrap();
+        pipelines::Entity::insert(pipelines::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(1),
+            owner_id: Set(Some(1)),
+            name: Set("literal pipeline".into()),
+            group_id: Set(0),
+            application_id: Set(0),
+            repository_id: Set(0),
+            definition: Set("{}".into()),
+            target_kind: Set("host".into()),
+            target_ref: Set(1),
+            description: Set(String::new()),
+            created_at: Set(1),
+            updated_at: Set(1),
+            version: Set(1),
+        })
+        .exec(&db)
+        .await
+        .unwrap();
         let s = std::sync::Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: std::sync::Arc::new(
                 crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap(),
@@ -1498,10 +1684,14 @@ mod tests {
             id: Set(1),
             workspace_id: Set(1),
             pipeline_id: Set(1),
+            revision_id: Set(0),
             environment_id: Set(0),
             environment_name: Set(String::new()),
             inputs: Set(None),
             concurrency_group: Set(String::new()),
+            lease_owner: Set(String::new()),
+            lease_epoch: Set(0),
+            not_before: Set(None),
             pipeline_name: Set("literal pipeline".into()),
             host_name: Set("literal host".into()),
             triggered_by_name: Set("literal user".into()),
@@ -1738,10 +1928,14 @@ mod tests {
             id: 1,
             workspace_id: 1,
             pipeline_id: 1,
+            revision_id: 0,
             environment_id: 0,
             environment_name: String::new(),
             inputs: None,
             concurrency_group: String::new(),
+            lease_owner: String::new(),
+            lease_epoch: 0,
+            not_before: None,
             pipeline_name: String::new(),
             host_name: String::new(),
             triggered_by_name: String::new(),

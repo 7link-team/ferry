@@ -39,24 +39,30 @@ async fn fixture_at(legacy: bool) -> (tempfile::TempDir, AppState) {
         bind: "127.0.0.1:0".parse().unwrap(),
         vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
         host_monitor: Default::default(),
+        monitor: Default::default(),
         cluster: None,
     });
-    workspaces::Entity::insert(
-        workspaces::Model {
-            id: 1,
-            slug: "identity-test".into(),
-            name: "Identity".into(),
-            owner_id: 1,
-            join_code: "identity-test".into(),
-            pipeline_run_number: 0,
-            created_at: 0,
-            updated_at: 0,
-        }
-        .into_active_model(),
-    )
-    .exec(&s.db)
-    .await
-    .unwrap();
+    let mut workspace = workspaces::Model {
+        id: 1,
+        slug: "identity-test".into(),
+        name: "Identity".into(),
+        owner_id: 1,
+        join_code: "identity-test".into(),
+        pipeline_run_number: 0,
+        workflow_execution_number: 0,
+        created_at: 0,
+        updated_at: 0,
+    }
+    .into_active_model();
+    if legacy {
+        // This fixture intentionally stops before the Workflow migration.
+        // Do not write a future column into the historical schema under test.
+        workspace.workflow_execution_number = sea_orm::ActiveValue::NotSet;
+    }
+    workspaces::Entity::insert(workspace)
+        .exec(&s.db)
+        .await
+        .unwrap();
     source(&s, 4, 7, 6, 1, vec![]).await;
     (dir, s)
 }

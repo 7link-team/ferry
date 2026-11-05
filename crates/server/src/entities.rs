@@ -11,7 +11,30 @@ pub mod platform_state {
         pub registration_enabled: i64,
         pub runner_auto_update: i64,
         pub repository_oauth: Option<String>,
+        pub file_storage: Option<String>,
+        pub footer_html: Option<String>,
+        pub page_scripts: Option<String>,
+        pub mail_config: Option<String>,
+        pub monitor_config: Option<String>,
         pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod email_codes {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "email_codes")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub code_hash: String,
+        pub count: i64,
+        pub expires_at: i64,
+        pub updated_at: i64,
+        pub config_tag: String,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -28,6 +51,8 @@ pub mod users {
         pub email: String,
         pub name: String,
         pub password_hash: String,
+        pub last_login_at: Option<i64>,
+        pub last_login_ip: Option<String>,
         pub is_superadmin: i64,
         pub version: i64,
         pub active: i64,
@@ -70,6 +95,7 @@ pub mod workspaces {
         pub owner_id: i64,
         pub join_code: String,
         pub pipeline_run_number: i64,
+        pub workflow_execution_number: i64,
         pub created_at: i64,
         pub updated_at: i64,
     }
@@ -301,6 +327,169 @@ pub mod repositories {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod definition_acl {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "definition_acl")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub subject_kind: String,
+        pub subject_id: i64,
+        pub user_id: i64,
+        pub role: String,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod workflows {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "workflows")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub group_id: i64,
+        pub description: String,
+        pub definition: String,
+        pub draft_revision_id: i64,
+        pub published_revision_id: Option<i64>,
+        pub settings: String,
+        pub owner_id: Option<i64>,
+        pub trigger_run_as: Option<i64>,
+        pub lifecycle: String,
+        pub archived_at: Option<i64>,
+        pub archived_by: i64,
+        pub created_by: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod workflow_executions {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "workflow_executions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub workflow_id: i64,
+        pub revision_id: i64,
+        pub number: i64,
+        pub mode: String,
+        pub state: String,
+        pub trigger_kind: String,
+        pub trigger_ref: String,
+        pub triggered_by: i64,
+        pub parent_execution_id: i64,
+        pub retry_of_id: i64,
+        pub root_execution_id: i64,
+        pub cost_micros: i64,
+        pub data_bytes: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub started_at: i64,
+        pub started_by: i64,
+        pub finished_at: i64,
+        pub finished_by: i64,
+        pub lease_owner: String,
+        pub lease_epoch: i64,
+        pub priority: i64,
+        pub not_before: Option<i64>,
+        pub end_reason: String,
+        pub concurrency_key: String,
+        pub concurrency_limit: i64,
+        pub queue_reason: String,
+        pub context: Option<String>,
+        pub waiting_ms: i64,
+        pub response_state: String,
+        pub response_deadline_at: Option<i64>,
+        pub response_deadline_by: i64,
+        pub response_delivered_at: Option<i64>,
+        pub response_delivered_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod workflow_integration_calls {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "workflow_integration_calls")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub execution_id: i64,
+        pub node_run_id: i64,
+        pub item_index: i64,
+        pub credential_id: i64,
+        pub request_hash: String,
+        pub state: String,
+        pub result: Option<String>,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod workflow_node_runs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "workflow_node_runs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub execution_id: i64,
+        pub node_id: String,
+        pub iteration_path: String,
+        pub iteration_hash: String,
+        pub attempt: i64,
+        pub state: String,
+        pub items_in: i64,
+        pub items_out: i64,
+        pub output: String,
+        pub output_asset: Option<i64>,
+        pub error: String,
+        pub cache_key: String,
+        pub cache_hit_from: Option<i64>,
+        pub cost_micros: i64,
+        pub started_at: i64,
+        pub started_by: i64,
+        pub finished_at: i64,
+        pub finished_by: i64,
+        pub resolved_params: Option<String>,
+        pub seed: Option<i64>,
+        pub redo_round: i64,
+        pub error_policy: String,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod pipelines {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
@@ -309,6 +498,7 @@ pub mod pipelines {
         #[sea_orm(primary_key, auto_increment = false)]
         pub id: i64,
         pub workspace_id: i64,
+        pub owner_id: Option<i64>,
         pub name: String,
         pub group_id: i64,
         pub application_id: i64,
@@ -351,6 +541,7 @@ pub mod worker_ids {
         pub worker_id: i64,
         pub instance_id: String,
         pub heartbeat_at: i64,
+        pub info: Option<String>,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -366,6 +557,7 @@ pub mod pipeline_runs {
         pub id: i64,
         pub workspace_id: i64,
         pub pipeline_id: i64,
+        pub revision_id: i64,
         pub environment_id: i64,
         pub environment_name: String,
         pub host_id: i64,
@@ -377,6 +569,9 @@ pub mod pipeline_runs {
         pub inputs: Option<String>,
         /// Evaluated GitHub concurrency group; "" when the workflow has none.
         pub concurrency_group: String,
+        pub lease_owner: String,
+        pub lease_epoch: i64,
+        pub not_before: Option<i64>,
         pub number: i64,
         pub state: String,
         pub trigger_kind: String,
@@ -390,6 +585,53 @@ pub mod pipeline_runs {
         pub created_at: i64,
         pub started_at: i64,
         pub finished_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod definition_publications {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "definition_publications")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub subject_kind: String,
+        pub subject_id: i64,
+        pub revision_id: i64,
+        pub name: String,
+        pub name_key: String,
+        pub change_note: Option<String>,
+        pub run_as: i64,
+        pub request_key: Option<String>,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod definition_revisions {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "definition_revisions")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub subject_kind: String,
+        pub subject_id: i64,
+        pub number: i64,
+        pub definition: String,
+        pub message: Option<String>,
+        pub created_by: i64,
+        pub created_at: i64,
+        pub version: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}
@@ -1420,6 +1662,156 @@ pub mod host_execution_slots {
         pub run_id: i64,
         pub job_key: String,
         pub expires_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_providers {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_providers")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub credential_id: i64,
+        pub base_url: String,
+        pub protocol: String,
+        pub currency: String,
+        pub timezone: String,
+        pub monthly_limit_micros: i64,
+        pub qps: i64,
+        pub concurrency: i64,
+        pub prices: String,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_calls {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_calls")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub provider_id: i64,
+        pub credential_id: i64,
+        pub execution_id: i64,
+        pub node_run_id: i64,
+        pub operation_key: String,
+        pub currency: String,
+        pub period_key: String,
+        pub state: String,
+        pub reserved_micros: i64,
+        pub actual_micros: i64,
+        pub price_snapshot: String,
+        pub result: Option<String>,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod platform_observations {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "platform_observations")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub at: i64,
+        pub event_day: i64,
+        pub user_id: i64,
+        pub instance_id: String,
+        pub kind: String,
+        pub method: String,
+        pub route: String,
+        pub file_path: String,
+        pub status: i32,
+        pub elapsed_ms: i64,
+        pub response_bytes: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod content_assets {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "assets")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub sha256: String,
+        pub size: i64,
+        pub mime: String,
+        pub kind: String,
+        pub width: Option<i64>,
+        pub height: Option<i64>,
+        pub duration_ms: Option<i64>,
+        pub thumbnail_asset_id: Option<i64>,
+        pub execution_id: Option<i64>,
+        pub node_id: Option<String>,
+        pub pinned: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub version: i64,
+        pub provenance: Option<String>,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod asset_refs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "asset_refs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub asset_id: i64,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub owner_kind: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub owner_id: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod asset_gc_jobs {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "asset_gc_jobs")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub asset_id: i64,
+        pub storage_key: String,
+        pub state: String,
+        pub eligible_at: i64,
+        pub eligible_by: i64,
+        pub attempt: i64,
+        pub error: Option<String>,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

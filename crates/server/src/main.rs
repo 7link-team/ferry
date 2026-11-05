@@ -1,12 +1,16 @@
 mod accounts;
+mod artifact_store;
 mod assets;
 mod cluster;
+mod content_assets;
 mod credentials;
 mod cron_jobs;
 mod db;
+mod definitions;
 mod deployments;
 mod entities;
 mod error;
+mod executions;
 mod hosts;
 mod i18n;
 mod lock;
@@ -15,6 +19,7 @@ mod marketplace;
 mod migration;
 mod notifications;
 mod pipelines;
+mod platform_monitor;
 mod repositories;
 mod resources;
 mod snowflake;
@@ -23,6 +28,7 @@ mod templates;
 mod variables;
 mod vault;
 mod worker;
+mod workflows;
 
 use axum::{
     Router,
@@ -30,7 +36,7 @@ use axum::{
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use clap::Parser;
 use fs2::FileExt;
@@ -73,6 +79,9 @@ struct Config {
     /// Hostnames browsers may reach this server on. localhost is always allowed.
     #[arg(long, env = "FERRY_ALLOWED_HOSTS", value_delimiter = ',')]
     allowed_hosts: Vec<String>,
+    /// Trusted reverse-proxy networks allowed to supply X-Forwarded-For.
+    #[arg(long, env = "FERRY_TRUSTED_PROXIES")]
+    trusted_proxies: Option<String>,
 }
 
 #[tokio::main]
@@ -104,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("该数据目录已有服务运行，不能重复启动。"))?;
 
     let instance_id = instance_id(&cfg.data_dir)?;
-    let db = match &cfg.database_url {
+    let mut db = match &cfg.database_url {
         Some(url) => Database::connect(db::utc_options(ConnectOptions::new(url.clone()))).await?,
         None => {
             let path = cfg.data_dir.canonicalize()?.join("ferry.sqlite");
@@ -119,7 +128,14 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     migration::Migrator::up(&db, None).await?;
+    let monitor = platform_monitor::Store::default();
+    let sql_monitor = monitor.clone();
+    db.set_metric_callback(move |info| sql_monitor.record(info));
 
+    workflows::extensions::initialize(
+        &cfg.data_dir,
+        cfg.nats_url.as_deref().is_some_and(|url| !url.is_empty()),
+    )?;
     let vault = vault::Vault::open(&cfg.data_dir, cfg.server_mode)?;
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
     let worker = Arc::new(
@@ -157,6 +173,7 @@ async fn main() -> anyhow::Result<()> {
         None => None,
     };
     let s: state::AppState = Arc::new(state::State {
+        monitor,
         host_monitor: Default::default(),
         cluster,
         db,
@@ -169,6 +186,20 @@ async fn main() -> anyhow::Result<()> {
         ids: worker.generator.clone(),
     });
 
+    worker.describe(&s).await?;
+    let monitor_writer = s.monitor.start(&s);
+    let metrics_state = s.clone();
+    let metrics_worker = worker.clone();
+    let mut resource_updates = worker.resource_updates();
+    let (metrics_stop, mut metrics_rx) = tokio::sync::watch::channel(false);
+    let metrics_task = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _=metrics_rx.changed()=>break,
+                _=resource_updates.changed()=>if metrics_worker.describe(&metrics_state).await.is_err(){tracing::warn!("node resource report unavailable");}
+            }
+        }
+    });
     hosts::runner::recover_updates(&s)
         .await
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
@@ -210,6 +241,12 @@ async fn main() -> anyhow::Result<()> {
         drain_rx.clone(),
     ));
     let (cron_stop, cron_rx) = tokio::sync::watch::channel(false);
+    let (workflow_stop, workflow_rx) = tokio::sync::watch::channel(false);
+    let workflow_task = tokio::spawn(workflows::run::scheduler(
+        s.clone(),
+        workflow_rx,
+        drain_rx.clone(),
+    ));
     let cron_task = tokio::spawn(cron_jobs::scheduler(s.clone(), cron_rx, drain_rx.clone()));
     let runner_auto_update_task = tokio::spawn(hosts::runner::automatic_updates(
         s.clone(),
@@ -401,6 +438,14 @@ async fn main() -> anyhow::Result<()> {
             post(cron_jobs::acknowledge),
         )
         .route("/{workspace}/preferences", get(maintenance::preferences))
+        .route(
+            "/{workspace}/settings/categories",
+            get(maintenance::setting_categories),
+        )
+        .route(
+            "/{workspace}/dictionaries/categories",
+            get(maintenance::dictionary_categories),
+        )
         .route(
             "/{workspace}/settings",
             get(maintenance::list_settings).post(maintenance::create_setting),
@@ -678,6 +723,123 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route(
+            "/{workspace}/workflows",
+            get(workflows::list)
+                .post(workflows::create)
+                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/{workspace}/workflows/{id}",
+            get(workflows::get)
+                .patch(workflows::update)
+                .delete(workflows::remove)
+                .layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/revisions",
+            get(workflows::revisions),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/executions",
+            get(workflows::run::list).post(workflows::run::create),
+        )
+        .route(
+            "/{workspace}/workflow-executions/{id}",
+            get(workflows::run::get),
+        )
+        .route(
+            "/{workspace}/workflow-executions/{id}/cancellations",
+            post(workflows::run::cancel),
+        )
+        .route(
+            "/{workspace}/workflow-executions/{id}/node-runs/{node}/output",
+            get(workflows::run::node_output),
+        )
+        .route(
+            "/{workspace}/workflow-executions/{id}/node-runs/{node}/data",
+            get(workflows::run::node_data),
+        )
+        .route(
+            "/{workspace}/workflow-executions/{id}/node-runs",
+            get(workflows::run::node_runs),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/expression-previews",
+            post(workflows::preview).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/owner-transfers",
+            post(workflows::transfer),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/publications",
+            get(workflows::publication::list).post(workflows::publication::create),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/unpublication",
+            post(workflows::publication::unpublish),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/revisions/{revision}",
+            get(workflows::revision),
+        )
+        .route(
+            "/{workspace}/workflow-groups",
+            get(pipelines::contexts::workflow_groups::list)
+                .post(pipelines::contexts::workflow_groups::create),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}/owner-transfers",
+            post(pipelines::transfer),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}/acl",
+            get(definitions::access::pipeline::list).post(definitions::access::pipeline::create),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}/acl/{grant}",
+            delete(definitions::access::pipeline::remove),
+        )
+        .route(
+            "/{workspace}/pipeline-groups/{id}/acl",
+            get(definitions::access::pipeline_groups::list)
+                .post(definitions::access::pipeline_groups::create),
+        )
+        .route(
+            "/{workspace}/pipeline-groups/{id}/acl/{grant}",
+            delete(definitions::access::pipeline_groups::remove),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/acl",
+            get(definitions::access::workflow::list).post(definitions::access::workflow::create),
+        )
+        .route(
+            "/{workspace}/workflows/{id}/acl/{grant}",
+            delete(definitions::access::workflow::remove),
+        )
+        .route(
+            "/{workspace}/workflow-groups/{id}/acl",
+            get(definitions::access::groups::list).post(definitions::access::groups::create),
+        )
+        .route(
+            "/{workspace}/workflow-groups/{id}/acl/{grant}",
+            delete(definitions::access::groups::remove),
+        )
+        .route(
+            "/{workspace}/workflow-groups/{id}",
+            get(pipelines::contexts::workflow_groups::get)
+                .patch(pipelines::contexts::workflow_groups::update)
+                .delete(pipelines::contexts::workflow_groups::remove),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}/revisions",
+            get(definitions::pipeline_list),
+        )
+        .route(
+            "/{workspace}/pipelines/{id}/revisions/{revision}",
+            get(definitions::pipeline_get),
+        )
+        .route(
             "/{workspace}/pipelines/{id}",
             get(pipelines::get)
                 .patch(pipelines::update)
@@ -718,9 +880,21 @@ async fn main() -> anyhow::Result<()> {
     let workspace_api = workspace_api
         .merge(resources::transfers::routes())
         .merge(maintenance::files::routes())
+        .merge(workflows::media::routes())
+        .merge(workflows::ai::routes())
+        .merge(workflows::integration::routes())
         .fallback(|| async { error::ApiError::missing() });
 
     let draining = drain.subscribe();
+    let trusted_proxies = cfg
+        .trusted_proxies
+        .as_deref()
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::parse)
+        .collect::<Result<Vec<ipnet::IpNet>, _>>()?;
     let app = Router::new()
         .route("/api/status", get(status))
         // A runner is not a browser: it proves itself with the protocol's Hello
@@ -736,6 +910,7 @@ async fn main() -> anyhow::Result<()> {
             get(accounts::platform::status).post(accounts::platform::initialize),
         )
         .route("/api/platform/users", get(accounts::platform::list_users))
+        .route("/api/platform/footer", get(accounts::platform::footer))
         .route(
             "/api/platform/users/{id}",
             get(accounts::platform::get_user).patch(accounts::platform::update_user),
@@ -752,7 +927,18 @@ async fn main() -> anyhow::Result<()> {
             "/api/platform/settings/1",
             get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
         )
+        .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
+        .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
+        .route("/api/platform/monitor/database/sql/reset",post(platform_monitor::database::reset_sql))
+        .route("/api/platform/monitor/database/table",get(platform_monitor::database::table))
+        .route("/api/platform/monitor/redis",get(platform_monitor::cache::overview))
+        .route("/api/platform/monitor/usage",get(platform_monitor::usage))
+        .route("/api/platform/monitor/files",get(platform_monitor::files))
+        .route("/api/platform/monitor/files/catalog",get(platform_monitor::catalog::list))
+        .route("/api/monitor/pageview",post(platform_monitor::pageview))
         .route("/api/users", post(accounts::auth::register))
+        .route("/api/registration-code", post(accounts::mail::request_code))
+        .route("/api/platform/mail-test", post(accounts::mail::test))
         .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
         .route("/api/me", get(accounts::auth::me))
         .route(
@@ -764,7 +950,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/workspaces", post(accounts::workspace::create))
         .route("/api/workspace-memberships", post(accounts::workspace::join))
         .nest("/api/workspaces", workspace_api)
-        .fallback(assets::serve)
+        .fallback(assets::serve_configured)
+        .layer(axum::Extension(accounts::auth::TrustedProxies(trusted_proxies)))
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let hosts = hosts.clone();
@@ -782,6 +969,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }))
         .layer(middleware::from_fn(i18n::middleware))
+        .layer(middleware::from_fn_with_state(s.clone(),platform_monitor::middleware))
         .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%request.uri().path())))
         .with_state(s.clone());
 
@@ -803,6 +991,7 @@ async fn main() -> anyhow::Result<()> {
             let _ = cron_stop.send(true);
             let _ = deployment_stop.send(true);
             let _ = pipeline_stop.send(true);
+            let _ = workflow_stop.send(true);
             None
         }
         _ = desktop_shutdown(cfg.desktop_control) => {
@@ -818,6 +1007,7 @@ async fn main() -> anyhow::Result<()> {
     repository_analysis_task.await?;
     recovery_task.await?;
     cron_task.await?;
+    workflow_task.await?;
     deployment_task.await?;
     pipeline_task.await?;
     let _ = cluster_stop.send(true);
@@ -830,6 +1020,10 @@ async fn main() -> anyhow::Result<()> {
         Some(result) => result?,
         None => http_task.await?,
     };
+    let _ = metrics_stop.send(true);
+    metrics_task.await?;
+    s.monitor.stop();
+    monitor_writer.await?;
     let _ = heartbeat_stop.send(true);
     let heartbeat_result = heartbeat_task.await;
     let released = worker.release(&s.db).await;
@@ -964,9 +1158,8 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
         .parse()
         .unwrap(),
     );
-    headers.insert(
-        header::CONTENT_SECURITY_POLICY,
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
             .parse()
             .unwrap(),
     );

@@ -26,6 +26,84 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub const COOKIE: &str = "ferry_session";
+#[derive(Clone, Default)]
+pub struct TrustedProxies(pub Vec<ipnet::IpNet>);
+
+pub(crate) fn login_ip(
+    peer: std::net::IpAddr,
+    headers: &HeaderMap,
+    proxies: &TrustedProxies,
+) -> std::net::IpAddr {
+    let trusted = |ip| proxies.0.iter().any(|network| network.contains(&ip));
+    if !trusted(peer) {
+        return peer;
+    }
+    let values = headers.get_all("x-forwarded-for");
+    let mut chain = Vec::new();
+    for value in values.iter() {
+        let Ok(text) = value.to_str() else {
+            return peer;
+        };
+        if text.len() > 4096 {
+            return peer;
+        }
+        for item in text.split(',') {
+            let Ok(ip) = item.trim().parse::<std::net::IpAddr>() else {
+                return peer;
+            };
+            chain.push(ip);
+            if chain.len() > 32 {
+                return peer;
+            }
+        }
+    }
+    if chain.is_empty() {
+        return headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(peer);
+    }
+    // The rightmost untrusted hop is the client visible to our trusted proxy;
+    // entries supplied to its left by an untrusted client cannot override it.
+    let mut ip = peer;
+    for forwarded in chain.into_iter().rev() {
+        if !trusted(ip) {
+            break;
+        }
+        ip = forwarded;
+    }
+    ip
+}
+
+#[cfg(test)]
+mod login_ip_tests {
+    use super::*;
+    #[test]
+    fn only_trusted_proxy_hops_can_supply_client_ips() {
+        let peer = "10.0.0.2".parse().unwrap();
+        let trusted = TrustedProxies(vec!["10.0.0.0/8".parse().unwrap()]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "192.0.2.99, 203.0.113.5, 10.0.0.3".parse().unwrap(),
+        );
+        assert_eq!(login_ip(peer, &headers, &TrustedProxies::default()), peer);
+        assert_eq!(
+            login_ip(peer, &headers, &trusted).to_string(),
+            "203.0.113.5"
+        );
+        headers.insert("x-forwarded-for", "invalid, 10.0.0.3".parse().unwrap());
+        assert_eq!(login_ip(peer, &headers, &trusted), peer);
+        headers.remove("x-forwarded-for");
+        headers.insert("x-real-ip", "2001:db8::5".parse().unwrap());
+        assert_eq!(
+            login_ip(peer, &headers, &trusted).to_string(),
+            "2001:db8::5"
+        );
+        assert_eq!(login_ip(peer, &headers, &TrustedProxies::default()), peer);
+    }
+}
 /// Idle timeout. Every authenticated request pushes it out.
 pub(crate) const SESSION_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 
@@ -96,6 +174,12 @@ impl FromRequestParts<AppState> for Account {
             return Err(ApiError::unauthorized());
         }
         let session_id = Id::from(row.session_id);
+        if let Some(user) = parts
+            .extensions
+            .get::<crate::platform_monitor::RequestUser>()
+        {
+            user.0.store(row.id, std::sync::atomic::Ordering::Relaxed);
+        }
         sessions::Entity::update_many()
             .col_expr(sessions::Column::SeenAt, Expr::value(db::now()))
             .col_expr(
@@ -173,7 +257,7 @@ pub(crate) fn verify(password: &str, stored: &str) -> bool {
 }
 
 /// The stored form of a login email: trimmed and lower-cased.
-fn email(raw: &str) -> Result<String> {
+pub(crate) fn email(raw: &str) -> Result<String> {
     let email = raw.trim().to_lowercase();
     if !email.contains('@') || email.len() > 254 {
         return Err(ApiError::localized(
@@ -214,16 +298,33 @@ pub(crate) fn check(credentials: &Credentials, require_name: bool) -> Result<Str
     Ok(email)
 }
 
+#[derive(Deserialize)]
+pub struct Registration {
+    #[serde(flatten)]
+    credentials: Credentials,
+    #[serde(default)]
+    verification_code: String,
+}
 pub async fn register(
     State(s): State<AppState>,
-    Json(body): Json<Credentials>,
+    Json(request): Json<Registration>,
 ) -> Result<impl axum::response::IntoResponse> {
+    let body = request.credentials;
     let email = check(&body, true)?;
     use sea_orm::TransactionTrait;
     let tx = s.db.begin().await?;
     let platform = crate::accounts::platform::lock(&tx).await?;
     if platform.initialized == 0 || platform.registration_enabled == 0 {
         return Err(ApiError::forbidden());
+    }
+    let mail = super::mail::Configuration::read(&s, platform.mail_config.as_deref())?;
+    if !super::mail::consume(&tx, &mail, &email, &request.verification_code).await? {
+        // Failed attempts must survive the rejected registration transaction.
+        tx.commit().await?;
+        return Err(ApiError::localized(
+            axum::http::StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("mail.codeInvalid"),
+        ));
     }
     if users::Entity::find()
         .filter(users::Column::Email.eq(email.clone()))
@@ -242,6 +343,8 @@ pub async fn register(
         email: Set(email.clone()),
         name: Set(body.name.trim().to_owned()),
         password_hash: Set(hash(&body.password)?),
+        last_login_at: Set(None),
+        last_login_ip: Set(None),
         active: Set(1),
         is_superadmin: Set(0),
         version: Set(1),
@@ -260,6 +363,9 @@ pub async fn register(
 
 pub async fn login(
     State(s): State<AppState>,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    axum::Extension(proxies): axum::Extension<TrustedProxies>,
+    headers: HeaderMap,
     Json(body): Json<Credentials>,
 ) -> Result<impl axum::response::IntoResponse> {
     let email = body.email.trim().to_lowercase();
@@ -280,7 +386,19 @@ pub async fn login(
         return Err(refused());
     }
     let id = Id::from(row.id);
-    let session = start_session(&s, &id, &s.db).await?;
+    use sea_orm::TransactionTrait;
+    let tx = s.db.begin().await?;
+    let session = start_session(&s, &id, &tx).await?;
+    users::Entity::update_many()
+        .col_expr(users::Column::LastLoginAt, Expr::value(db::now()))
+        .col_expr(
+            users::Column::LastLoginIp,
+            Expr::value(login_ip(peer.ip(), &headers, &proxies).to_string()),
+        )
+        .filter(users::Column::Id.eq(row.id))
+        .exec(&tx)
+        .await?;
+    tx.commit().await?;
     Ok((
         set_cookie(&s, &session, SESSION_MS / 1000),
         Json(json!({"id": id, "email": email})),

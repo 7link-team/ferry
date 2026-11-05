@@ -1,0 +1,62 @@
+# Select your own execution host for both jobs before saving the pipeline.
+# Requires Bash, Git, Go >= 1.23 and access to GitHub and the Go module proxy.
+# Manual execution only; builds fixed public versions without deployment.
+name: Real x/text → x/net dependency build
+on: workflow_dispatch
+jobs:
+  text:
+    name: 构建与测试 x/text
+    runs-on: self-hosted
+    timeout-minutes: 10
+    outputs:
+      text_sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - name: 检出固定版本并构建上游
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v0.28.0 https://github.com/golang/text.git text
+          cd text
+          go test ./unicode/norm ./transform
+          go build ./...
+          echo UPSTREAM_TEXT_OK
+      - name: 记录上游提交
+        id: version
+        shell: bash
+        run: echo "sha=$(git -C text rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: 打包上游源码
+        shell: bash
+        run: tar -czf text-source.tar.gz text
+      - name: 上传上游产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: text-source
+          path: text-source.tar.gz
+  idna:
+    name: 用上游产物构建与测试 x/net/idna
+    needs: [text]
+    runs-on: self-hosted
+    timeout-minutes: 10
+    env:
+      UPSTREAM_SHA: ${{ needs.text.outputs.text_sha }}
+    steps:
+      - name: 下载上游产物
+        uses: actions/download-artifact@v4
+        with:
+          name: text-source
+          path: dependencies
+      - name: 验证上游产物版本
+        shell: bash
+        run: |
+          tar -xzf dependencies/text-source.tar.gz
+          test "$(git -C text rev-parse HEAD)" = "$UPSTREAM_SHA"
+          echo ARTIFACT_SHA_OK
+      - name: 检出下游并使用本地产物构建
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v0.43.0 https://github.com/golang/net.git net
+          cd net
+          go mod edit -replace=golang.org/x/text=../text
+          go test ./idna
+          go build ./idna
+          go list -m -json golang.org/x/text
+          echo DOWNSTREAM_IDNA_OK

@@ -80,5 +80,22 @@
   "permission.action.invite": "Jemput",
   "permission.action.change_role": "Tukar peranan",
   "permission.action.remove": "Keluarkan",
-  "permission.action.manage": "Namakan semula / kod jemputan / pindah milik"
+  "permission.action.manage": "Namakan semula / kod jemputan / pindah milik",
+  "permission.group.workflows": "Aliran kerja",
+  "permission.group.workflow-groups": "Kumpulan aliran kerja",
+  "permission.action.use": "Guna kelayakan",
+  "permission.action.updatePrice": "Urus harga AI",
+  "permission.action.updateBudget": "Urus bajet dan penyelarasan AI",
+  "platform.storageChangeRequiresMigration": "Pindahkan fail sedia ada sebelum menukar lokasi storan. Kluster memerlukan S3. Tetapan persekitaran mesti diubah pada pelayan.",
+  "platform.footerInvalid": "Kandungan pengaki mesti paling banyak 65,536 bait UTF-8 dan tidak boleh mengandungi aksara nol.",
+  "platform.scriptsInvalid": "Tetapan skrip tidak sah. Semak ID GA4, JavaScript (maksimum 65,536 bait, tanpa aksara nol atau tag script penutup), dan origin HTTP(S) (maksimum 8,192 bait, tanpa laluan).",
+  "mail.invalid": "Tetapan SMTP tidak sah.",
+  "mail.sendFailed": "Penghantaran gagal. Semak tetapan SMTP dan rangkaian.",
+  "mail.rateLimit": "Terlalu banyak permintaan. Cuba lagi kemudian.",
+  "mail.codeInvalid": "Kod tidak sah, tamat tempoh atau terlalu banyak cubaan. Minta kod baharu.",
+  "mail.testSubject": "Ujian konfigurasi e-mel",
+  "mail.testBody": "Ini ialah mesej ujian konfigurasi e-mel.",
+  "mail.codeSubject": "Kod pengesahan pendaftaran",
+  "mail.codeBody": "Kod pendaftaran anda ialah {code}. Tamat tempoh dalam 10 minit. Jangan kongsi.",
+  "monitor.nodeChanged": "Pelayan respons berbeza daripada nod dipaparkan. Segar semula statistik dan cuba lagi; tiada statistik ditetapkan semula."
 }

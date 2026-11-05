@@ -130,6 +130,7 @@ impl Fixture {
         crate::migration::Migrator::up(&db, None).await.unwrap();
         let s = Arc::new(crate::state::State {
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
             ids: Arc::new(crate::snowflake::Generator::new(1, std::time::Instant::now()).unwrap()),
             db,

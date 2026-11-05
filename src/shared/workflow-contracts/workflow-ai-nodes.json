@@ -1,0 +1,341 @@
+{
+  "nodes": [
+    {
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "type": "ai.llm.chat",
+      "search_aliases": ["openai", "anthropic", "claude", "chatgpt", "vision"],
+      "expression_fields": [
+        "/prompt"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "max_cost_micros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "image_field": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32768
+          }
+        },
+        "required": [
+          "provider_id",
+          "model",
+          "output_field",
+          "max_cost_micros",
+          "prompt",
+          "image_field",
+          "max_tokens"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "provider_id": "0",
+        "model": "configure-model",
+        "output_field": "result",
+        "max_cost_micros": 1000000,
+        "prompt": "={{ .prompt }}",
+        "image_field": "",
+        "max_tokens": 1024
+      }
+    },
+    {
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "type": "ai.image.generate",
+      "search_aliases": ["openai", "image", "images"],
+      "expression_fields": [
+        "/prompt"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "max_cost_micros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "1024x1024",
+              "1024x1536",
+              "1536x1024",
+              "auto"
+            ]
+          }
+        },
+        "required": [
+          "provider_id",
+          "model",
+          "output_field",
+          "max_cost_micros",
+          "prompt",
+          "size"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "provider_id": "0",
+        "model": "configure-model",
+        "output_field": "result",
+        "max_cost_micros": 1000000,
+        "prompt": "={{ .prompt }}",
+        "size": "1024x1024"
+      }
+    },
+    {
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "type": "ai.audio.speech",
+      "search_aliases": ["openai", "speech", "tts"],
+      "expression_fields": [
+        "/prompt"
+      ],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "max_cost_micros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "voice": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "provider_id",
+          "model",
+          "output_field",
+          "max_cost_micros",
+          "prompt",
+          "voice"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "provider_id": "0",
+        "model": "configure-model",
+        "output_field": "result",
+        "max_cost_micros": 1000000,
+        "prompt": "={{ .text }}",
+        "voice": "alloy"
+      }
+    },
+    {
+      "type_version": 1,
+      "impl_version": "1",
+      "phase": "S2",
+      "status": "implemented",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "per_item",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "type": "ai.audio.transcribe",
+      "search_aliases": ["openai", "transcription", "whisper", "stt"],
+      "expression_fields": [],
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "output_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "max_cost_micros": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "file_field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "provider_id",
+          "model",
+          "output_field",
+          "max_cost_micros",
+          "file_field"
+        ],
+        "additionalProperties": false
+      },
+      "example_params": {
+        "provider_id": "0",
+        "model": "configure-model",
+        "output_field": "result",
+        "max_cost_micros": 1000000,
+        "file_field": "file"
+      }
+    }
+  ]
+}

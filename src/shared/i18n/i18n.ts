@@ -9,6 +9,7 @@ import insightZh from "./locales/insight-zh.json";
 import resourceMessages from "./locales/resource-domain.json";
 import themeMessages from "./locales/theme.json";
 import typedMessages from "./locales/typed-domain.json";
+import workflowMessages from "./locales/workflow-domain.json";
 
 // Column order is explicit so adding/reordering supported locales cannot change translations.
 const typedLocales = ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"];
@@ -23,6 +24,12 @@ void i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
   initAsync: false,
 });
+
+for (const locale of typedLocales) i18n.addResourceBundle(locale, "workflow-domain", Object.fromEntries(Object.entries(workflowMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
+
+export function workflowText(key: keyof typeof workflowMessages): string {
+  return i18n.t(key, { ns: "workflow-domain", keySeparator: false });
+}
 
 function syncLanguage() {
   const locale = currentLocale();

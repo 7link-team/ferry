@@ -28,9 +28,9 @@ it("supports every reference value type with valid initial serialized data", () 
   expect(VALUE_TYPES).toHaveLength(12);
   for (const [type] of VALUE_TYPES) expect(typedValueError(type, initialValue(type), {}), type).toBe("");
 });
-it("edits and clears translated names without changing controlled values or legacy serialization", async () => {
-  await act(async () => root.render(<Harness initial={{ key: "host-state", controlled: true, value_type: "selection", value_json: JSON.stringify([{ value: "online", label: "Online", labels: { "zh-CN": "在线" } }]) }} />));
-  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')?.disabled).toBe(true);
+it("edits and clears translated names without changing option values or legacy serialization", async () => {
+  await act(async () => root.render(<Harness initial={{ key: "custom-options", value_type: "selection", value_json: JSON.stringify([{ value: "online", label: "Online", labels: { "zh-CN": "在线" } }]) }} />));
+  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')?.disabled).toBe(false);
   await fill("选项 1 显示名称", "已连接");
   const option = () => parseJson<{ value: string; label: string; labels: Record<string,string> }[]>(saved.value_json, [])[0]!;
   expect(option()).toEqual({ value: "online", label: "Online", labels: { "zh-CN": "已连接" } });
@@ -98,16 +98,17 @@ it("edits and reorders options while keeping legacy items synchronized", async (
   expect(blocked).toHaveBeenLastCalledWith(false);
   await click("删除选项 3"); expect(parseJson<unknown[]>(saved.value_json, [])).toHaveLength(2);
 });
-it.each(["host-state", "pipeline-state", "deployment-state", "cron-state", "alert-state", "repository-state", "insight-state"])("locks %s keys and deletions but permits labels and ordering", async (key) => {
-  await act(async () => root.render(<Harness initial={{ key, builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online"},{"value":"offline","label":"Offline"}]' }} />));
-  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')!.disabled).toBe(true);
-  expect(host.querySelector<HTMLButtonElement>('[aria-label="删除选项 1"]')!.disabled).toBe(true);
-  expect(host.textContent).not.toContain("添加选项");
-  await fill("选项 1 显示名称", "Connected"); await click("下移选项 1");
-  expect(parseJson<Record<string, string>[]>(saved.value_json, [])[1]!.label).toBe("Connected");
+it.each(["environment", "app-category"])("lets users maintain the business options of %s", async (key) => {
+  await act(async () => root.render(<Harness initial={{ key, builtin: true, value_type: "selection", value_json: '[{"value":"a","label":"A"},{"value":"b","label":"B"}]' }} />));
+  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 1 值"]')!.disabled).toBe(false);
+  await fill("选项 1 值", "changed");
+  await click("删除选项 2");
+  expect(JSON.parse(saved.value_json!)).toHaveLength(1);
+  await click("添加选项");
+  expect(JSON.parse(saved.value_json!)).toHaveLength(2);
 });
-it("edits and clears controlled-state colors without losing them on label edits or reordering", async () => {
-  await act(async () => root.render(<Harness initial={{ key: "host-state", builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online","color":"#123456"},{"value":"offline","label":"Offline"}]' }} />));
+it("edits and clears business-option colors without losing them on label edits or reordering", async () => {
+  await act(async () => root.render(<Harness initial={{ key: "environment", builtin: true, value_type: "selection", value_json: '[{"value":"online","label":"Online","color":"#123456"},{"value":"offline","label":"Offline"}]' }} />));
   await fill("选项 1 显示名称", "Connected");
   expect(JSON.parse(saved.value_json!)[0].color).toBe("#123456");
   await fill("选项 1 显示名称 颜色", "#abcdef");
@@ -117,7 +118,7 @@ it("edits and clears controlled-state colors without losing them on label edits 
   expect(JSON.parse(saved.value_json!)[1].color).toBe("#abcdef");
   await click("清空 选项 2 显示名称 颜色");
   expect(JSON.parse(saved.value_json!)[1]).toEqual({ value: "online", label: "Connected" });
-  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 2 值"]')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLInputElement>('[aria-label="选项 2 值"]')!.disabled).toBe(false);
   expect(typedValueError("selection", '[{"value":"online","label":"Online","color":"url(x)"}]', {})).not.toBe("");
 });
 it("preserves an explicit zero constraint and can remove it", async () => {
@@ -154,4 +155,13 @@ it("keeps built-in identities protected and enables typed custom configuration c
   const list = typedResourceList("ops", "settings");
   expect(list.toolbar?.create).not.toBe(false);
   expect(list.actions!.find(action => action.label === "删除")!.when!({ builtin: true } as TypedValueRow)).toBe(false);
+});
+
+it.each(["settings", "dictionaries"] as const)("puts identity and type before constraints and the typed value in %s", resource => {
+ const sections = typedResourceForm(resource).sections;
+ expect(sections[0]!.fields.map(field => field.key)).toContain("value_type");
+ expect(sections[0]!.fields.map(field => field.key)).not.toContain("value_json");
+ expect(sections[1]!.fields[0]!.key).toBe("schema_json");
+ expect(sections[2]!.fields[0]!.key).toBe("value_json");
+ expect(sections[2]!.fields[0]!.type).toBe("custom");
 });

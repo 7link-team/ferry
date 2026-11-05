@@ -80,5 +80,22 @@
   "permission.action.invite": "초대",
   "permission.action.change_role": "역할 변경",
   "permission.action.remove": "제거",
-  "permission.action.manage": "이름 변경 / 초대 코드 / 양도"
+  "permission.action.manage": "이름 변경 / 초대 코드 / 양도",
+  "permission.group.workflows": "워크플로",
+  "permission.group.workflow-groups": "워크플로 그룹",
+  "permission.action.use": "자격 증명 사용",
+  "permission.action.updatePrice": "AI 가격 관리",
+  "permission.action.updateBudget": "AI 예산 및 대조 관리",
+  "platform.storageChangeRequiresMigration": "저장 위치를 바꾸기 전에 기존 파일을 이전하세요. 클러스터에는 S3가 필요합니다. 환경 설정은 서버에서 변경해야 합니다.",
+  "platform.footerInvalid": "바닥글은 UTF-8 기준 65,536바이트 이내여야 하며 null 문자를 포함할 수 없습니다.",
+  "platform.scriptsInvalid": "스크립트 설정이 올바르지 않습니다. GA4 ID, JavaScript(최대 65,536바이트, 널 문자 및 닫는 script 태그 금지), HTTP(S) 출처(최대 8,192바이트, 경로 금지)를 확인하세요.",
+  "mail.invalid": "SMTP 설정을 확인하세요.",
+  "mail.sendFailed": "이메일 발송 실패. SMTP 설정과 네트워크를 확인하세요.",
+  "mail.rateLimit": "요청이 너무 많습니다. 나중에 다시 시도하세요.",
+  "mail.codeInvalid": "코드가 잘못되었거나 만료되었거나 시도 횟수를 초과했습니다. 새로 요청하세요.",
+  "mail.testSubject": "이메일 설정 테스트",
+  "mail.testBody": "이메일 설정 테스트 메시지입니다.",
+  "mail.codeSubject": "가입 인증 코드",
+  "mail.codeBody": "가입 코드는 {code}입니다. 10분 동안 유효합니다. 공유하지 마세요.",
+  "monitor.nodeChanged": "응답 서버가 표시된 노드와 다릅니다. 통계를 새로 고친 후 다시 시도하세요. 초기화는 실행되지 않았습니다."
 }

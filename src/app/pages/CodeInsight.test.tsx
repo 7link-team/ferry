@@ -166,12 +166,13 @@ it("edits author mappings without JSON and preserves contributor IDs across loca
   await act(async () => root.render(<Editor />));
   expect(host.querySelector('textarea')).toBeNull();
   const input = host.querySelector<HTMLInputElement>('input[aria-label="统一昵称 1"]')!;
-  await setInput(input, ""); expect(blocked).toBe(true); expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  await setInput(input, ""); expect(blocked).toBe(false); expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(input.required).toBe(false);
   for (const locale of ["en-US", "ja-JP", "zh-CN"]) {
     await act(async () => { await i18n.changeLanguage(locale); });
     expect(input.value).toBe("");
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe(insightText("每条作者映射须填写姓名或邮箱，以及显示昵称。"));
-    expect(blocked).toBe(true);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(blocked).toBe(false);
   }
   await setInput(input, 'New name');
   expect(blocked).toBe(false); expect(value).toEqual([{ email: "alice@example.invalid", nickname: "New name", contributor_id: "123" }]);

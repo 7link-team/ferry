@@ -80,5 +80,22 @@
   "permission.action.invite": "Invite",
   "permission.action.change_role": "Change role",
   "permission.action.remove": "Remove",
-  "permission.action.manage": "Rename / invitation code / transfer"
+  "permission.action.manage": "Rename / invitation code / transfer",
+  "permission.group.workflows": "Workflows",
+  "permission.group.workflow-groups": "Workflow groups",
+  "permission.action.use": "Use credentials",
+  "permission.action.updatePrice": "Manage AI prices",
+  "permission.action.updateBudget": "Manage AI budgets and reconciliation",
+  "platform.storageChangeRequiresMigration": "Migrate existing files before changing storage location. Clusters require S3. Environment settings must be changed on the server.",
+  "platform.footerInvalid": "Footer content must be at most 65,536 UTF-8 bytes and cannot contain null characters.",
+  "platform.scriptsInvalid": "Invalid script settings: check GA4 ID, JavaScript (max 65,536 bytes, no null or closing script tag), and HTTP(S) origins (max 8,192 bytes, no paths).",
+  "mail.invalid": "Invalid email settings. Check SMTP host, port, sender and security.",
+  "mail.sendFailed": "Email sending failed. Check SMTP settings and network.",
+  "mail.rateLimit": "Too many requests. Try again later.",
+  "mail.codeInvalid": "Invalid or expired code, or too many attempts. Request a new code.",
+  "mail.testSubject": "Email configuration test",
+  "mail.testBody": "This is an email configuration test message.",
+  "mail.codeSubject": "Registration verification code",
+  "mail.codeBody": "Your registration code is {code}. It expires in 10 minutes. Do not share it.",
+  "monitor.nodeChanged": "The responding server differs from the displayed node. Refresh the statistics and retry; no statistics were reset."
 }

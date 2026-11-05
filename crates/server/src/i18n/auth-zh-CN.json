@@ -80,5 +80,22 @@
   "permission.action.invite": "邀请",
   "permission.action.change_role": "改角色",
   "permission.action.remove": "移除",
-  "permission.action.manage": "改名/邀请码/转让"
+  "permission.action.manage": "改名/邀请码/转让",
+  "permission.group.workflows": "工作流",
+  "permission.group.workflow-groups": "工作流分组",
+  "permission.action.use": "使用凭据",
+  "permission.action.updatePrice": "管理 AI 价格",
+  "permission.action.updateBudget": "管理 AI 预算及对账",
+  "platform.storageChangeRequiresMigration": "存储位置已有文件需先迁移；集群仅支持 S3；环境变量配置须在服务器修改。",
+  "platform.footerInvalid": "页脚内容不能超过 65,536 个 UTF-8 字节，且不能包含空字符。",
+  "platform.scriptsInvalid": "脚本配置无效：测量 ID 应为 G- 加大写字母/数字；JavaScript 最多 65,536 字节且不含空字符或结束 script 标签；域名最多 8,192 字节，仅接受完整 HTTP(S) 来源。",
+  "mail.invalid": "邮箱配置无效，请检查服务器、端口、发件人和加密方式。",
+  "mail.sendFailed": "邮件发送失败，请检查 SMTP 配置和网络后重试。",
+  "mail.rateLimit": "发送过于频繁，请稍后重试。",
+  "mail.codeInvalid": "邮箱验证码错误、已失效或尝试次数过多，请重新获取。",
+  "mail.testSubject": "邮箱配置测试",
+  "mail.testBody": "这是一封邮箱配置测试邮件。",
+  "mail.codeSubject": "注册邮箱验证码",
+  "mail.codeBody": "您的注册验证码是：{code}。10 分钟内有效，请勿泄露。",
+  "monitor.nodeChanged": "响应服务器与当前展示节点不同，请刷新统计后重试；未重置任何节点。"
 }

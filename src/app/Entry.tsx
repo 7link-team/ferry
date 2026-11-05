@@ -3,10 +3,9 @@ import { commonText,useCommonTranslation } from "../shared/i18n/i18n";
 /**
  * Register / sign in / create or join a workspace.
  *
- * Rendered in place of the shell, on whatever URL the visitor arrived at —
- * never by redirecting to a login route. That is what makes a shared deep
- * link work: sign in and the same URL renders its target page, with its
- * filters and scroll offset intact (§5.3).
+ * Unauthenticated deep links use the login route's validated redirect query.
+ * App restores the destination after authentication; setup and workspace
+ * creation continue to use this same entry form.
  */
 import { Loader2 } from "lucide-react";
 import { useEffect,useState } from "react";
@@ -17,7 +16,7 @@ import { navigate,parse } from "./router";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
 
-type SetupStatus = { required: boolean; has_users: boolean; registration_enabled: boolean };
+type SetupStatus = { required: boolean; has_users: boolean; registration_enabled: boolean; email_verification_required?:boolean };
 // Remove the local sidecar proof before any API request; never persist it.
 let desktopSetupToken = new URLSearchParams(location.hash.slice(1)).get("setup") ?? "";
 if (desktopSetupToken) history.replaceState(history.state, "", location.pathname + location.search);
@@ -40,6 +39,11 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
   }, [signedIn, initialize, attempt]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(outerError);
+  const [codeBusy,setCodeBusy]=useState(false);
+  const [codeRetryAt,setCodeRetryAt]=useState(0);
+  const [codeSeconds,setCodeSeconds]=useState(0);
+  const [codeSent,setCodeSent]=useState(false);
+  useEffect(()=>{if(!codeRetryAt)return;const update=()=>setCodeSeconds(Math.max(0,Math.ceil((codeRetryAt-Date.now())/1000)));update();const timer=setInterval(update,1000);return()=>clearInterval(timer);},[codeRetryAt]);
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -74,7 +78,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
           </p>
         )}
 
-        {!setup && <div role="status"><p>{commonText("auth.checking")}</p><Button variant="outline" onClick={() => setAttempt(n => n + 1)}>{commonText("auth.recheck")}</Button></div>}
+        {!setup && error && <Button variant="outline" onClick={() => { setError(""); setAttempt(n => n + 1); }}>{commonText("auth.recheck")}</Button>}
 
         {setup && step === "setup" && (
           <AutoForm className="space-y-4" onSubmit={event => {
@@ -118,7 +122,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
           </AutoForm>
         )}
 
-        {setup && step === "sign-in" && (
+        {step === "sign-in" && (
           <AutoForm
             className="space-y-3"
             columns={1}
@@ -137,14 +141,14 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
           >
             <Button type="submit" className="w-full" disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}{commonText("auth.signIn")}</Button>
-            {setup.registration_enabled && <Button
+            {setup?.registration_enabled && <Button
               type="button"
               variant="link"
               className="w-full"
               onClick={() => (setStep("register"), setError(""))}
             >
               {commonText("auth.registerPrompt")}</Button>}
-            {setup.required && <Button type="button" variant="link" className="w-full" onClick={() => setStep("setup")}>{commonText("auth.setupTitle")}</Button>}
+            {setup?.required && <Button type="button" variant="link" className="w-full" onClick={() => setStep("setup")}>{commonText("auth.setupTitle")}</Button>}
           </AutoForm>
         )}
 
@@ -161,12 +165,23 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               event.preventDefault();
               const body = fields(event.currentTarget);
               void run(async () => {
-                await api("/users", { method: "POST", body: JSON.stringify(body) });
+                try { await api("/users", { method: "POST", body: JSON.stringify(body) }); }
+                catch(e) { void api<SetupStatus>("/setup",{cache:"no-store"}).then(setSetup).catch(()=>{});throw e; }
                 // Registration signs you in, but you have no workspace yet.
                 setStep("workspace");
               });
             }}
           >
+            {setup?.email_verification_required&&<AutoField label={commonText("resource-domain:platform.mailCode")} help={commonText("resource-domain:platform.mailCodeHelp")}><div className="space-y-2"><div className="flex gap-2">
+              <Input aria-label={commonText("resource-domain:platform.mailCode")} className="min-w-0 flex-1" name="verification_code" required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code"/>
+              <Button type="button" variant="outline" disabled={codeBusy||codeSeconds>0||busy} onClick={async event=>{
+                const email=event.currentTarget.form?.elements.namedItem("email") as HTMLInputElement|null;
+                if(!email?.reportValidity())return;
+                setCodeBusy(true);setError("");setCodeSent(false);
+                try { const response=await api<{retry_after:number}>("/registration-code",{method:"POST",body:JSON.stringify({email:email.value})});setCodeRetryAt(Date.now()+response.retry_after*1000);setCodeSent(true); }
+                catch(e){setError(errorText(e));}finally{setCodeBusy(false);}
+              }}>{codeSeconds>0?`${codeSeconds}s`:commonText("resource-domain:platform.mailSendCode")}</Button>
+            </div>{codeSent&&<p role="status" className="text-sm text-muted-foreground">{commonText("resource-domain:platform.mailCodeSent")}</p>}</div></AutoField>}
             <Button type="submit" className="w-full" disabled={busy}>
               {busy && <Loader2 className="animate-spin" />}{commonText("auth.register")}</Button>
             <Button

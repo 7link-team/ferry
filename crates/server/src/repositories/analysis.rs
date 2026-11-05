@@ -512,6 +512,16 @@ pub async fn retry(
             .await?;
         dirty(&s, &tx, row.id, row.workspace_id).await?;
     }
+    crate::hosts::activity_in(
+        &s,
+        &tx,
+        &scope,
+        "sync",
+        "repositories",
+        &id,
+        json!({"analysis":true,"manual":true}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(json!({"id":id,"queued":true})))
 }

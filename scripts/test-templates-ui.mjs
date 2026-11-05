@@ -66,16 +66,16 @@ try {
       await p.getByLabel('应用模板（YAML / JSON）',{exact:false}).fill(JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
     }
     if (!app) {
-      await p.getByRole('button',{name:'配置',exact:true}).click();
-      await p.getByLabel('参数定义（JSON 数组）',{exact:false}).fill(JSON.stringify([{name:'command',label:'构建命令',type:'string',default:'echo build'},{name:'flag',label:'布尔参数',type:'boolean',default:false},{name:'timeout',label:'超时',type:'integer',min:1,max:60}]));
-      await p.getByRole('button',{name:'配置',exact:true}).click();
-      await p.getByRole('tab',{name:'YAML',exact:true}).click();
-      await p.locator('.monaco-editor .view-lines').click();
-      await p.evaluate(() => navigator.clipboard.writeText('name: Template\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    defaults:\n      run:\n        working-directory: /tmp/build/${{ github.run_number }}\n    steps:\n      - name: test\n        run: "{{ .Values.command }} {{ .Values.flag }}"\n        timeout-minutes: 1\n        env:\n          TIMEOUT: "{{ .Values.timeout }}"\n'));
-      await p.keyboard.press('ControlOrMeta+A');
-      await p.keyboard.press('ControlOrMeta+V');
+      assert.equal(await p.getByLabel('参数定义（JSON 数组）',{exact:false}).count(),0,'new pipeline templates no longer expose dynamic parameters');
+      // Seed a legacy record through the API; the UI must preserve compatibility
+      // while new templates use complete Actions YAML without dynamic parameters.
+      await post(owner,root+'/'+resource,{
+        name,parameters:JSON.stringify([{name:'command',label:'构建命令',type:'string',default:'echo build'},{name:'flag',label:'布尔参数',type:'boolean',default:false},{name:'timeout',label:'超时',type:'integer',min:1,max:60}]),
+        content:JSON.stringify({engine:'github-actions',workflow:'name: Template\non: workflow_dispatch\njobs:\n  build:\n    runs-on: self-hosted\n    defaults:\n      run:\n        working-directory: /tmp/build/${{ github.run_number }}\n    steps:\n      - name: test\n        run: "{{ .Values.command }} {{ .Values.flag }}"\n        timeout-minutes: 1\n        env:\n          TIMEOUT: "{{ .Values.timeout }}"\n',executor_bindings:[],checkout_bindings:[],graph_layout:{}}),
+      });
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}`);
     }
-    await p.getByRole('button',{name:'创建',exact:true}).click();
+    if (app) await p.getByRole('button',{name:'创建',exact:true}).click();
     let row=p.getByRole('row').filter({hasText:name});
     await row.getByRole('link',{name:'复制',exact:true}).click();
     await p.getByLabel('名称',{exact:false}).fill(name+' copy');

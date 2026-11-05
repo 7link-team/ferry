@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "id": "public_repository",
+  "version": 1,
+  "name": "Public repository extension",
+  "nodes": [{
+    "type": "integration.ext.public_repository.v1.read",
+    "type_version": 1,
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "credential_id": {"type": "string", "title_key": "literal:Connection", "pattern": "^[0-9]+$", "maxLength": 32},
+        "owner": {"type": "string", "title_key": "literal:Repository owner", "minLength": 1, "maxLength": 100},
+        "repo": {"type": "string", "title_key": "literal:Repository name", "minLength": 1, "maxLength": 100}
+      },
+      "required": ["credential_id", "owner", "repo"],
+      "additionalProperties": false
+    },
+    "example_params": {"credential_id": "0", "owner": "octocat", "repo": "Hello-World"},
+    "expression_fields": ["/owner", "/repo"],
+    "ui": {
+      "resource_key": "literal:Repository",
+      "operation_key": "literal:Read",
+      "credential_help_key": "literal:Public repositories can be read without a token. A token created here is isolated to this extension version.",
+      "aliases": ["git", "extension", "repository"]
+    },
+    "http": {
+      "origin": "https://api.github.com",
+      "path": "/repos/{owner}/{repo}",
+      "method": "GET",
+      "auth": {"header": "Authorization", "prefix": "Bearer ", "profile": "ext.public_repository.v1", "optional": true},
+      "headers": {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+      "query": {},
+      "body": {}
+    }
+  }]
+}

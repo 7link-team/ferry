@@ -1362,6 +1362,7 @@ mod tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
         });
         let user_id = crate::snowflake::Id::from(10);
@@ -1370,6 +1371,8 @@ mod tests {
             email: Set("owner@example.test".into()),
             name: Set("用户原文".into()),
             password_hash: Set(crate::accounts::auth::hash("valid-password").unwrap()),
+            last_login_at: Set(None),
+            last_login_ip: Set(None),
             active: Set(1),
             is_superadmin: Set(0),
             version: Set(1),
@@ -1412,10 +1415,20 @@ mod tests {
                 get(crate::accounts::workspace_admin::members),
             )
             .layer(middleware::from_fn(super::middleware))
+            .layer(axum::Extension(
+                crate::accounts::auth::TrustedProxies::default(),
+            ))
             .with_state(s.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await
+            .unwrap()
+        });
         let client = reqwest::Client::new();
         for (locale, email_error, login_error, owner, dashboard) in [
             (
@@ -1544,8 +1557,13 @@ mod tests {
                 .json::<serde_json::Value>()
                 .await
                 .unwrap();
-            assert_eq!(permissions["items"][0]["key"], "dashboard.read");
-            assert_eq!(permissions["items"][0]["group"], dashboard);
+            let permission = permissions["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|permission| permission["key"] == "dashboard.read")
+                .unwrap();
+            assert_eq!(permission["group"], dashboard);
             let members = request(
                 reqwest::Method::GET,
                 &format!("/api/workspaces/{workspace_id}/members"),

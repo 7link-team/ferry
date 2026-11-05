@@ -69,6 +69,46 @@ try {
   await until(async()=>{if(runner.launchError)throw runner.launchError;assert.equal(runner.exitCode,null,'Runner exited before connecting');return(await api(B,root)).state==='online';},'Runner control on A');
   const result=await api(B,root+'/connection-tests',{});assert(result.ok);
   console.log('PASS command from B, control on A, dedicated session callback forced to C');
+  if(process.env.FERRY_TEST_CLUSTER_EXECUTIONS==='1'){
+    const workspaceRoot=`/workspaces/${ws}`;
+    let limit=(await api(B,workspaceRoot+'/settings')).items.find(row=>row.key==='pipeline_concurrent_runs');
+    assert(limit,'workspace concurrency setting');
+    limit=await api(B,workspaceRoot+'/settings/'+limit.id,{version:limit.version,value:1},'PATCH');
+    const marker=join(work,'execution-markers.txt').replaceAll('\\','/');
+    const command=(label,hold)=>process.platform==='win32'
+      ? `Add-Content -LiteralPath '${marker.replaceAll("'","''")}' -Value '${label}'; Write-Output ${label}_RUN_MARKER; Start-Sleep -Seconds ${hold}`
+      : `printf '${label}\\n' >> '${marker.replaceAll("'","'\\''")}'; printf '${label}_RUN_MARKER\\n'; sleep ${hold}`;
+    const pipeline=async(label,hold)=>(await api(B,workspaceRoot+'/pipelines',{
+      name:`Cluster ownership ${label}`,definition_format:'github-actions',
+      definition:JSON.stringify({on:'workflow_dispatch',jobs:{build:{'runs-on':'self-hosted',steps:[{run:command(label,hold)}]}}}),
+      executor_bindings:[{job_id:'build',target_kind:'host',target_ref:host,image:'host'}],
+    },'POST',201)).id;
+    const start=async pipeline=>(await api(B,`${workspaceRoot}/pipelines/${pipeline}/runs`,{},'POST',201)).id;
+    const state=id=>api(B,`${workspaceRoot}/pipeline-runs/${id}`);
+    const output=async id=>(await api(B,`${workspaceRoot}/pipeline-runs/${id}/logs?after=0`)).items.map(row=>row.chunk).join('');
+    const first=await start(await pipeline('FIRST',90));
+    await until(async()=>(await output(first)).includes('FIRST_RUN_MARKER'),'first real Actions command',90);
+    const second=await start(await pipeline('SECOND',0));
+    // Starting another scheduler while a lease is live must not sweep the run.
+    const fourthPort=await port(),fourthDir=join(work,'server-3');await mkdir(fourthDir);
+    const fourth=await launch(serverBinary,['--data-dir',fourthDir,'--bind',`127.0.0.1:${fourthPort}`],env,'server-3');
+    servers.push(fourth);
+    await until(async()=>{assert.equal(fourth.exitCode,null);return(await api(`http://127.0.0.1:${fourthPort}`,'/status')).ok;},'fourth scheduler startup');
+    for(let n=0;n<32;n++){
+      const [one,two]=await Promise.all([state(first),state(second)]);
+      assert.equal(one.state,'running','a live leased run survives other scheduler startups and renews beyond 30s TTL');
+      assert.equal(two.state,'queued','the workspace slot is global across all scheduler processes');
+      await sleep(1000);
+    }
+    console.log('PASS four schedulers respect one workspace slot beyond lease TTL; startup preserves live ownership');
+    await api(B,`${workspaceRoot}/pipeline-runs/${first}/cancellations`,{});
+    await until(async()=>(await state(first)).state==='cancelled','first remote command cancellation',90);
+    await until(async()=>(await state(second)).state==='succeeded','queued command starts after cleanup',90);
+    assert.deepEqual((await readFile(marker,'utf8')).trim().split(/\r?\n/),['FIRST','SECOND'],'both remote side effects occur exactly once');
+    assert((await output(second)).includes('SECOND_RUN_MARKER'));
+    limit=await api(B,workspaceRoot+'/settings/'+limit.id,{version:limit.version,value:10},'PATCH');
+    console.log('PASS cross-instance cancellation waits for remote cleanup and admits the next command exactly once');
+  }
   await until(async()=>(await api(B,root+'/metrics?window_seconds=3600&step_seconds=5')).samples?.length>=2,'real monitor history');
   const history=await api(B,root+'/metrics?window_seconds=3600&step_seconds=5');
   assert(history.samples.length>=2);assert(history.samples.every((sample,index,all)=>!index||sample.sampled_at>all[index-1].sampled_at));
@@ -126,6 +166,7 @@ try {
   if(gateway)await new Promise(done=>gateway.close(done));
   for(const child of processes.reverse())await stop(child);
   for(const log of logs)await log.close();
+  if(process.env.KEEP_CLUSTER_TEST_DATA==='1')console.log('Cluster acceptance evidence:',work);
   if(!failed&&process.env.KEEP_CLUSTER_TEST_DATA!=='1'){
     assert(resolve(work).startsWith(resolve(tmpdir())+'/')||resolve(work).startsWith(resolve(tmpdir())+'\\'));
     assert(work.includes('cluster-acceptance-'));

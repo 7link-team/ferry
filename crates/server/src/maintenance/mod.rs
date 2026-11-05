@@ -12,14 +12,23 @@ use crate::{
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
+    ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    TransactionTrait,
     sea_query::{Expr, ExprTrait},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-mod states;
+pub(crate) const RETIRED_STATE_DICTIONARIES: &[&str] = &[
+    "host-state",
+    "pipeline-state",
+    "deployment-state",
+    "cron-state",
+    "alert-state",
+    "repository-state",
+    "insight-state",
+];
 mod values;
 
 #[cfg(test)]
@@ -44,6 +53,7 @@ mod locale_tests {
             bind: "127.0.0.1:0".parse().unwrap(),
             vault: crate::vault::Vault::open(dir.path(), false).unwrap(),
             host_monitor: Default::default(),
+            monitor: Default::default(),
             cluster: None,
         });
         workspaces::Entity::insert(workspaces::ActiveModel {
@@ -53,6 +63,7 @@ mod locale_tests {
             owner_id: Set(1),
             join_code: Set("maintenance-test".into()),
             pipeline_run_number: Set(0),
+            workflow_execution_number: Set(0),
             created_at: Set(0),
             updated_at: Set(0),
         })
@@ -162,113 +173,45 @@ mod locale_tests {
             assert_eq!(view["category"], "operations");
             assert_eq!(view["description"], "User description");
         }
-        for key in std::iter::once("host-state").chain(
-            states::definitions()
-                .iter()
-                .map(|(key, _, _)| *key)
-                .collect::<Vec<_>>(),
-        ) {
-            let dictionary = dictionaries::Entity::find()
-                .filter(dictionaries::Column::Key.eq(key))
-                .one(&s.db)
-                .await
-                .unwrap()
-                .unwrap();
-            let id = Id::from(dictionary.id);
-            let Json(original) = get_dictionary(State(s.clone()), scope(), Path(("1".into(), id)))
-                .await
-                .unwrap();
-            let options: Value =
-                serde_json::from_str(original["value_json"].as_str().unwrap()).unwrap();
-            for invalid in [
-                json!([]),
-                json!([{"value":"injected","label":"Injected"}]),
-                {
-                    let mut missing = options.clone();
-                    missing.as_array_mut().unwrap().pop();
-                    missing
-                },
-                {
-                    let mut renamed = options.clone();
-                    renamed[0]["value"] = json!("renamed");
-                    renamed
-                },
-            ] {
-                let mut body = original.clone();
-                body["items"] = json!(invalid.to_string());
-                assert!(
-                    update_dictionary(
-                        State(s.clone()),
-                        scope(),
-                        Path(("1".into(), id)),
-                        Json(serde_json::from_value(body).unwrap())
-                    )
-                    .await
-                    .is_err(),
-                    "{key}: reject changed machine values"
-                );
-            }
-            let mut wrong_type = original.clone();
-            wrong_type["value_type"] = json!("text");
-            wrong_type["value_json"] = json!("\"text\"");
+        for key in RETIRED_STATE_DICTIONARIES {
             assert!(
-                update_dictionary(
-                    State(s.clone()),
-                    scope(),
-                    Path(("1".into(), id)),
-                    Json(serde_json::from_value(wrong_type).unwrap())
-                )
-                .await
-                .is_err()
-            );
-            assert!(
-                delete_dictionary(State(s.clone()), scope(), Path(("1".into(), id)))
+                dictionaries::Entity::find()
+                    .filter(dictionaries::Column::Key.eq(*key))
+                    .one(&s.db)
                     .await
-                    .is_err()
+                    .unwrap()
+                    .is_none(),
+                "fixed states must not be seeded"
             );
-            // Import uses this same creation helper, including reserved-key protection.
             let tx = s.db.begin().await.unwrap();
+            let body = serde_json::from_value(
+                json!({"key":key,"name":"Fixed state","items":"[]","version":1}),
+            )
+            .unwrap();
             assert!(
-                create_dictionary_in(
-                    &s,
-                    &tx,
-                    &scope(),
-                    serde_json::from_value(original.clone()).unwrap()
-                )
-                .await
-                .is_err()
+                create_dictionary_in(&s, &tx, &scope(), body).await.is_err(),
+                "fixed states cannot return through create/import"
             );
             tx.rollback().await.unwrap();
-            let mut edited = options.clone();
-            edited.as_array_mut().unwrap().reverse();
-            edited[0]["labels"]["ja-JP"] = json!("Custom Japanese status");
-            edited[0]["color"] = json!("#123456");
-            let mut body = original;
-            body["items"] = json!(edited.to_string());
-            update_dictionary(
-                State(s.clone()),
-                scope(),
-                Path(("1".into(), id)),
-                Json(serde_json::from_value(body).unwrap()),
-            )
+        }
+        let Json(counts) = dictionary_categories(State(s.clone()), scope())
             .await
             .unwrap();
-            let stored = dictionaries::Entity::find_by_id(dictionary.id)
-                .one(&s.db)
+        assert_eq!(counts["total"], 2);
+        assert_eq!(counts["items"][0]["count"], 2);
+        let mut forbidden = scope();
+        forbidden.permissions.clear();
+        assert!(
+            dictionary_categories(State(s.clone()), forbidden)
                 .await
-                .unwrap()
-                .unwrap();
-            let persisted: Value =
-                serde_json::from_str(stored.value_json.as_deref().unwrap()).unwrap();
-            assert_eq!(persisted[0]["value"], edited[0]["value"]);
-            assert_eq!(persisted[0]["labels"]["ja-JP"], "Custom Japanese status");
-            assert_eq!(persisted[0]["color"], "#123456");
-            let view = dict_json(stored);
-            assert_eq!(view["controlled"], true);
-            let readback: Value =
-                serde_json::from_str(view["value_json"].as_str().unwrap()).unwrap();
-            assert_eq!(readback[0]["labels"]["ja-JP"], "Custom Japanese status");
-        }
+                .is_err()
+        );
+        let mut foreign = scope();
+        foreign.workspace_id = 999.into();
+        let Json(empty) = dictionary_categories(State(s.clone()), foreign)
+            .await
+            .unwrap();
+        assert_eq!(empty["total"], 0);
         let mut custom = row;
         custom.key = "custom".into();
         custom.name = "用户 {name} 原文".into();
@@ -402,16 +345,7 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
             .exec(conn)
             .await?;
     }
-    let mut builtin_dictionaries = vec![
-        (
-            "host-state",
-            crate::i18n::message("maintenance.hostStateName"),
-            vec![
-                ("online", crate::i18n::message("maintenance.online")),
-                ("offline", crate::i18n::message("maintenance.offline")),
-                ("unknown", crate::i18n::message("maintenance.unknown")),
-            ],
-        ),
+    let builtin_dictionaries = vec![
         (
             "environment",
             crate::i18n::message("maintenance.environmentName"),
@@ -431,7 +365,6 @@ pub async fn seed(s: &AppState, conn: &impl ConnectionTrait, workspace: Id) -> R
             ],
         ),
     ];
-    builtin_dictionaries.extend(states::definitions());
     for (key, name, items) in builtin_dictionaries {
         if dictionaries::Entity::find()
             .filter(dictionaries::Column::WorkspaceId.eq(workspace))
@@ -986,18 +919,47 @@ pub(crate) async fn dictionary_contains(
         .any(|item| item.value == value))
 }
 fn dict_json(row: dictionaries::Model) -> Value {
-    let controlled = states::controlled_values(&row.key);
-    let mut raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
-    if states::controlled_values(&row.key).is_some() {
-        if let Ok(options) = serde_json::from_str(&raw) {
-            raw = states::presentation(&row.key, options).to_string();
-        }
-    }
+    let raw = row.value_json.clone().unwrap_or_else(|| "[]".into());
     json!({"id":Id::from(row.id),"key":row.key,"name":row.name,"description":row.description,
         "category":row.category,"value_type":row.value_type,"value_json":raw,
         "schema_json":row.schema_json.unwrap_or_else(|| "{}".into()),"value_summary":values::summary(&raw),
-        "builtin":row.builtin==1,"controlled":controlled.is_some(),"controlled_values":controlled,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
+        "builtin":row.builtin==1,"version":row.version,"created_at":row.created_at,"updated_at":row.updated_at})
 }
+pub async fn dictionary_categories(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
+    scope.require("dictionaries.read")?;
+    let rows = dictionaries::Entity::find()
+        .select_only()
+        .column(dictionaries::Column::Category)
+        .column_as(dictionaries::Column::Id.count(), "count")
+        .filter(dictionaries::Column::WorkspaceId.eq(scope.workspace_id))
+        .group_by(dictionaries::Column::Category)
+        .order_by_asc(dictionaries::Column::Category)
+        .into_tuple::<(String, i64)>()
+        .all(&s.db)
+        .await?;
+    Ok(category_counts(rows))
+}
+pub async fn setting_categories(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
+    scope.require("settings.read")?;
+    let rows = settings::Entity::find()
+        .select_only()
+        .column(settings::Column::Category)
+        .column_as(settings::Column::Id.count(), "count")
+        .filter(settings::Column::WorkspaceId.eq(scope.workspace_id))
+        .group_by(settings::Column::Category)
+        .order_by_asc(settings::Column::Category)
+        .into_tuple::<(String, i64)>()
+        .all(&s.db)
+        .await?;
+    Ok(category_counts(rows))
+}
+fn category_counts(rows: Vec<(String, i64)>) -> Json<Value> {
+    let total: i64 = rows.iter().map(|(_, count)| count).sum();
+    Json(
+        json!({"items": rows.into_iter().map(|(category,count)| json!({"category":category,"count":count})).collect::<Vec<_>>(), "total":total}),
+    )
+}
+
 pub async fn list_dictionaries(
     State(s): State<AppState>,
     scope: Scope,
@@ -1060,11 +1022,7 @@ pub async fn get_dictionary(
     let legacy = model.value_json.is_none();
     let mut row = dict_json(model);
     let options = if legacy {
-        states::presentation(
-            row["key"].as_str().unwrap_or_default(),
-            json!(items(&s.db, scope.workspace_id, id).await?),
-        )
-        .to_string()
+        json!(items(&s.db, scope.workspace_id, id).await?).to_string()
     } else {
         values::options(
             &serde_json::from_str::<Value>(row["value_json"].as_str().unwrap_or("[]"))
@@ -1108,7 +1066,7 @@ pub(crate) async fn create_dictionary_in(
     body: DictionaryBody,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("dictionaries.create")?;
-    if states::controlled_values(&body.key).is_some() {
+    if RETIRED_STATE_DICTIONARIES.contains(&body.key.as_str()) {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("maintenance.stateControlled"),
@@ -1199,29 +1157,12 @@ pub async fn update_dictionary(
             crate::i18n::Message::new("maintenance.dictionaryKeyImmutable"),
         ));
     }
-    if (old.builtin == 1 || states::controlled_values(&old.key).is_some())
-        && !matches!(body.value_type.as_str(), "selection" | "tab")
-    {
+    if old.builtin == 1 && !matches!(body.value_type.as_str(), "selection" | "tab") {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("maintenance.systemDictionaryTypeRequired"),
         ));
     }
-    if let Some(expected) = states::controlled_values(&old.key) {
-        if values
-            .iter()
-            .map(|item| item.value.as_str())
-            .collect::<HashSet<_>>()
-            != expected.iter().copied().collect::<HashSet<_>>()
-        {
-            return Err(ApiError::localized(
-                StatusCode::BAD_REQUEST,
-                crate::i18n::Message::new("maintenance.stateControlled"),
-            ));
-        }
-    }
-    let mut typed = typed;
-    states::normalize(&old.key, &mut typed.value);
     let n = dictionaries::Entity::update_many()
         .col_expr(dictionaries::Column::Name, Expr::value(body.name))
         .col_expr(dictionaries::Column::Category, Expr::value(body.category))
@@ -1281,7 +1222,7 @@ pub async fn delete_dictionary(
     let tx = s.db.begin().await?;
     lock(&tx, scope.workspace_id).await?;
     let old = dict_row(&tx, scope.workspace_id, id).await?;
-    if old.builtin == 1 || states::controlled_values(&old.key).is_some() {
+    if old.builtin == 1 {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("maintenance.systemDictionaryDeleteForbidden"),
@@ -1334,7 +1275,7 @@ pub async fn preferences(State(s): State<AppState>, scope: Scope) -> Result<Json
             .filter(Value::is_array)
             .map(|value| values::options(&value))
             .unwrap_or_else(|| json!(grouped.remove(&row.id).unwrap_or_default()));
-        dicts.insert(row.key.clone(), states::presentation(&row.key, options));
+        dicts.insert(row.key.clone(), options);
     }
     Ok(Json(
         json!({"default_page_size":setting(&s.db,scope.workspace_id,"default_page_size").await?,"dictionaries":dicts}),

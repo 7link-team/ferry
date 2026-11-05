@@ -32,6 +32,13 @@ pub use provider::ensure_fresh;
 pub(crate) use provider::{MonitorAccess, OAuthSettings};
 // Keep the existing request and response types available at the domain entry point.
 pub(crate) use connection::owned_connection;
+// Named connections are workspace resources. Unnamed OAuth setup sessions
+// remain private to the account currently authorizing the provider.
+pub(crate) fn connection_access(user: Id) -> sea_orm::Condition {
+    sea_orm::Condition::any()
+        .add(connections::Column::Name.ne(""))
+        .add(connections::Column::UserId.eq(user))
+}
 #[allow(unused_imports)]
 pub use connection::{BranchQuery, ConnectionBody, RepositoryPage};
 pub use connection::{

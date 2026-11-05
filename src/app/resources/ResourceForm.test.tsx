@@ -5,6 +5,10 @@ import { DEFAULT_ACTIONS } from "../../features/pipelines/actions-workflow";
 import { i18n } from "../../shared/i18n/i18n";
 import { formConfigs } from "../resources";
 import { ResourceActionDialog, ResourceForm } from "./ResourceForm";
+vi.mock("../../features/pipelines/YamlEditor", () => ({
+  YamlEditor: ({ value, readOnly, onChange }: { value: string; readOnly: boolean; onChange: (value: string) => void }) =>
+    <textarea aria-label="GitHub Actions YAML" value={value} readOnly={readOnly} onChange={event => onChange(event.target.value)} />,
+}));
 let root: Root, host: HTMLDivElement, requests: { url: string; method: string | undefined; body: string | undefined }[];
 let stored: Record<string, unknown>;
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);

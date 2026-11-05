@@ -54,25 +54,48 @@ try {
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`pipeline form overflows at ${width}`);
  }
  await page.setViewportSize({width:1440,height:1000});
- await page.getByRole('tab',{name:'YAML',exact:true}).click();
+ await page.getByRole('tab',{name:'高级 YAML',exact:true}).click();
  await setYaml(`# keep workflow comment
 name: Browser workflow
 on: workflow_dispatch
 jobs:
   build:
     name: Compile
-    runs-on: self-hosted
+    runs-on:
+      group: preview-workers # preserve group comment
+      labels: [self-hosted]
+    env:
+      JOB_MARKER: before # preserve job env comment
     steps:
       - name: Compile source
         run: echo BEFORE
 `);
  await page.getByRole('tab',{name:'可视化',exact:true}).click();
  await page.getByRole('button',{name:/Compile source/}).click();
- await page.getByLabel('执行命令',{exact:true}).fill('echo ACTIONS_BROWSER_OK');
- await page.getByLabel('超时（分钟）',{exact:true}).fill('2');
+ await page.locator('summary').filter({hasText:'高级 YAML'}).evaluate(el=>{el.parentElement.open=true});
+ await page.getByRole('button',{name:'步骤 YAML',exact:true}).click();
+ await setYaml('name: Compile source\nrun: echo ACTIONS_BROWSER_OK ${{ env.WORKFLOW_MARKER }} ${{ env.JOB_MARKER }}\ntimeout-minutes: 2\n');
+ await page.getByRole('dialog').getByRole('button',{name:'应用到工作流',exact:true}).click();
  await page.getByRole('button',{name:'关闭配置面板',exact:true}).click();
+ await page.getByRole('button',{name:'工作流设置',exact:true}).click();
+ await page.getByLabel('工作流名称',{exact:true}).fill('Shared form and YAML');
+ await page.getByRole('region',{name:'环境变量',exact:true}).getByRole('button',{name:'添加参数',exact:true}).click();
+ await page.getByLabel('环境变量 · 参数名 key',{exact:true}).fill('WORKFLOW_MARKER');
+ await page.getByLabel('环境变量.key',{exact:true}).click();
+ await page.getByLabel('环境变量.WORKFLOW_MARKER',{exact:true}).fill('WORKFLOW_ENV_OK');
+ await page.getByLabel('命令默认设置 · working-directory',{exact:true}).fill('.');
+ await page.getByRole('tab',{name:'高级 YAML',exact:true}).click();
+ const workflowYaml=await readYaml();
+ assert.equal(parseDocument(workflowYaml).toJS().env.WORKFLOW_MARKER,'WORKFLOW_ENV_OK');
+ assert.equal(parseDocument(workflowYaml).toJS().defaults.run['working-directory'],'.');
+ await page.getByRole('tab',{name:'可视化',exact:true}).click();
  await page.getByRole('button',{name:'Compile',exact:true}).click();
  await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
+ await page.getByLabel('环境变量.JOB_MARKER',{exact:true}).fill('JOB_ENV_OK');
+ await page.getByLabel('运行条件（if）',{exact:true}).fill('success()');
+ await page.getByLabel('执行器标签（runs-on） 1',{exact:true}).fill('self-hosted');
+ await page.getByRole('button',{name:'添加执行器标签',exact:true}).click();
+ await page.getByLabel('执行器标签（runs-on） 2',{exact:true}).fill('linux');
  await page.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
  const grip=page.locator('.react-flow__node[data-id="build"] .job-drag svg');
  await grip.scrollIntoViewIfNeeded();
@@ -96,9 +119,12 @@ jobs:
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();await page.getByRole('checkbox',{name:'Serial successor',exact:true}).click();
  await page.getByRole('alert').filter({hasText:'循环'}).waitFor();assert(!(await page.getByRole('checkbox',{name:'Serial successor',exact:true}).isChecked()));
  await page.getByLabel('任务名称',{exact:true}).fill('Compile intermediate');await page.getByLabel('任务名称',{exact:true}).fill('Compile edited');
- await page.getByRole('tab',{name:'YAML',exact:true}).click();
+ await page.getByRole('tab',{name:'高级 YAML',exact:true}).click();
  const yaml=await readYaml();
  const jobs=parseDocument(yaml).toJS().jobs;assert.deepEqual(jobs.job_1.needs,['build']);assert.deepEqual(jobs.job_2.needs,['build']);
+ assert.equal(jobs.build.env.JOB_MARKER,'JOB_ENV_OK');assert.equal(jobs.build.if,'success()');
+ assert.deepEqual(jobs.build['runs-on'],{group:'preview-workers',labels:['self-hosted','linux']});
+ for(const comment of ['# preserve group comment','# preserve job env comment'])assert(yaml.includes(comment));
  for (const preserved of ['# keep workflow comment', 'ACTIONS_BROWSER_OK', 'timeout-minutes: 2']) assert(yaml.includes(preserved), `YAML lost ${preserved}: ${yaml}`);
  await setYaml('jobs:\n  a:\n    needs: b\n  b:\n    needs: a\n');
  await page.getByRole('alert').filter({hasText:'循环'}).waitFor();
@@ -112,11 +138,15 @@ jobs:
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await page.getByRole('button',{name:'Compile edited',exact:true}).waitFor();
  await page.getByRole('button',{name:/Compile source/}).click();
- assert.equal(await page.getByLabel('执行命令',{exact:true}).inputValue(),'echo ACTIONS_BROWSER_OK');
+ assert.equal(await page.getByLabel('执行命令',{exact:true}).inputValue(),'echo ACTIONS_BROWSER_OK ${{ env.WORKFLOW_MARKER }} ${{ env.JOB_MARKER }}');
  assert.equal(pipeline.environments.length,0);
  assert.equal(pipeline.group_name,'Browser group');assert.equal(pipeline.tag_ids.length,1);
  assert.deepEqual(pipeline.executor_bindings.find(binding=>binding.job_id==='build'),{job_id:'build',target_kind:'host',target_ref:host.id,image:'host'});
  assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_1.needs,['build']);assert.deepEqual(parseDocument(pipeline.definition).toJS().jobs.job_2.needs,['build']);
+ await page.getByRole('button',{name:'工作流设置',exact:true}).click();
+ assert.equal(await page.getByLabel('工作流名称',{exact:true}).inputValue(),'Shared form and YAML');
+ assert.equal(await page.getByLabel('环境变量.WORKFLOW_MARKER',{exact:true}).inputValue(),'WORKFLOW_ENV_OK');
+ await page.getByRole('button',{name:'关闭配置面板',exact:true}).click();
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();assert.equal(await page.getByLabel('任务执行器',{exact:true}).inputValue(),host.id);
  for(const width of [1280,900,390]) {await page.setViewportSize({width,height:1000});await eventually(async()=>page.getByLabel('流水线画布',{exact:true}).evaluate(canvas=>{const bounds=canvas.getBoundingClientRect();return [...canvas.querySelectorAll('.react-flow__node')].every(node=>{const box=node.getBoundingClientRect();return box.left>=bounds.left-1&&box.right<=bounds.right+1;});}));assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`canvas overflow at ${width}`);}
  await page.setViewportSize({width:1440,height:1000});
@@ -129,11 +159,14 @@ jobs:
  const logs=await(await context.request.get(origin+'/api'+root+'/pipeline-runs/'+run.id+'/logs')).json();
  assert.equal(result.state,'succeeded',JSON.stringify(result));
  assert(logs.items.some(row=>row.chunk.includes('ACTIONS_BROWSER_OK')));
+ // PowerShell echo writes each argument on its own line; require both actual
+ // values in this job's persisted output without assuming a shell's line format.
+ for(const marker of ['WORKFLOW_ENV_OK','JOB_ENV_OK']) assert(logs.items.some(row=>row.step_index===0&&row.chunk.includes(marker)),`${marker} did not reach the actual worker`);
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id);
  await page.getByRole('button',{name:'Compile edited',exact:true}).click();
  assert(await page.getByLabel('任务名称',{exact:true}).isDisabled());
  assert.equal(await page.locator('button[title="在此任务后添加串行任务"],button[title="添加并行任务"]').count(),0);
- await page.getByRole('tab',{name:'YAML',exact:true}).click();
+ await page.getByRole('tab',{name:'高级 YAML',exact:true}).click();
  const readonlyYaml=await readYaml();await setYaml('jobs: {}');assert.equal(await readYaml(),readonlyYaml);
  await page.getByRole('tab',{name:'可视化',exact:true}).click();
  const readonlyNode=page.locator('.react-flow__node[data-id="build"]');
@@ -151,6 +184,9 @@ jobs:
  const members=await(await context.request.get(origin+'/api'+root+'/members')).json();
  const member=members.items.find(row=>row.email==='editor@example.invalid');assert(member);
  const assigned=await context.request.patch(origin+'/api'+root+'/members/'+member.id,{headers:{'X-Ferry-Request':'1','Accept-Language':'zh-CN'},data:{role_id:role.id,version:member.version}});assert(assigned.ok(),await assigned.text());
+ // Workspace permissions and object ACL are both required by the workflow base.
+ const denied=await restricted.request.get(origin+'/api'+root+'/pipelines/'+pipeline.id);assert.equal(denied.status(),403);
+ await post(root+'/pipelines/'+pipeline.id+'/acl',{user_id:member.user_id,role:'all'});
  const editor=await restricted.newPage();editor.on('pageerror',error=>errors.push(error.stack??error.message));
  await editor.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await editor.getByLabel('流水线名称').fill('Restricted edit saved');

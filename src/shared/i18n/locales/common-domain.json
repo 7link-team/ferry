@@ -1,5 +1,13 @@
 {
   "en-US": {
+    "field.text": "Enter the text value for this field.",
+    "field.select": "Choose a value from the available options.",
+    "field.multiline": "Enter text on one or more lines. Line breaks are preserved.",
+    "field.number": "Enter a number within the limits shown by the field.",
+    "field.toggle": "Select to enable this option; clear to disable it.",
+    "field.example": "Example / format: ",
+    "field.required": "This field is required.",
+    "field.help": "Usage help",
     "invitation.title": "Invite members",
     "invitation.view": "View invitation code",
     "invitation.copy": "Copy invitation code",
@@ -388,6 +396,14 @@
     "state.reauthorizationRequired": "Reauthorization required"
   },
   "zh-CN": {
+    "field.text": "填写此字段的文本值。",
+    "field.select": "从下拉列表中选择一个可用值。",
+    "field.multiline": "可填写一行或多行文本，换行会保留。",
+    "field.number": "填写数字，并遵守字段显示的取值范围。",
+    "field.toggle": "勾选表示启用该选项，取消勾选表示关闭。",
+    "field.example": "示例 / 格式：",
+    "field.required": "此字段为必填项。",
+    "field.help": "用法帮助",
     "invitation.title": "邀请成员",
     "invitation.view": "查看邀请码",
     "invitation.copy": "复制邀请码",
@@ -776,6 +792,14 @@
     "state.reauthorizationRequired": "需重新授权"
   },
   "zh-TW": {
+    "field.text": "填寫此欄位的文字值。",
+    "field.select": "從下拉清單中選擇可用值。",
+    "field.multiline": "可填寫一行或多行文字，換行會保留。",
+    "field.number": "填寫數字，並遵守欄位顯示的範圍。",
+    "field.toggle": "勾選表示啟用此選項，取消勾選表示關閉。",
+    "field.example": "範例 / 格式：",
+    "field.required": "此欄位為必填。",
+    "field.help": "用法說明",
     "invitation.title": "邀請成員",
     "invitation.view": "查看邀請碼",
     "invitation.copy": "複製邀請碼",
@@ -1164,6 +1188,14 @@
     "state.reauthorizationRequired": "需重新授權"
   },
   "ja-JP": {
+    "field.text": "この項目のテキストを入力します。",
+    "field.select": "一覧から値を選択します。",
+    "field.multiline": "複数行のテキストを入力できます。改行は保持されます。",
+    "field.number": "項目に表示された範囲内の数値を入力します。",
+    "field.toggle": "チェックで有効、解除で無効にします。",
+    "field.example": "例 / 形式：",
+    "field.required": "必須項目です。",
+    "field.help": "使い方",
     "invitation.title": "メンバーを招待",
     "invitation.view": "招待コードを表示",
     "invitation.copy": "招待コードをコピー",
@@ -1552,6 +1584,14 @@
     "state.reauthorizationRequired": "再認証が必要"
   },
   "ko-KR": {
+    "field.text": "이 필드의 텍스트 값을 입력하세요.",
+    "field.select": "목록에서 사용 가능한 값을 선택하세요.",
+    "field.multiline": "여러 줄 텍스트를 입력할 수 있으며 줄 바꿈이 유지됩니다.",
+    "field.number": "필드에 표시된 범위 내의 숫자를 입력하세요.",
+    "field.toggle": "선택하면 활성화되고 해제하면 비활성화됩니다.",
+    "field.example": "예 / 형식: ",
+    "field.required": "필수 필드입니다.",
+    "field.help": "사용 도움말",
     "invitation.title": "멤버 초대",
     "invitation.view": "초대 코드 보기",
     "invitation.copy": "초대 코드 복사",
@@ -1940,6 +1980,14 @@
     "state.reauthorizationRequired": "재인증 필요"
   },
   "ms-MY": {
+    "field.text": "Masukkan nilai teks untuk medan ini.",
+    "field.select": "Pilih nilai daripada pilihan tersedia.",
+    "field.multiline": "Masukkan satu atau beberapa baris teks. Pemisah baris dikekalkan.",
+    "field.number": "Masukkan nombor dalam had yang ditunjukkan.",
+    "field.toggle": "Tandakan untuk mengaktifkan pilihan; kosongkan untuk menyahaktifkan.",
+    "field.example": "Contoh / format: ",
+    "field.required": "Medan ini wajib diisi.",
+    "field.help": "Bantuan penggunaan",
     "invitation.title": "Jemput ahli",
     "invitation.view": "Lihat kod jemputan",
     "invitation.copy": "Salin kod jemputan",
