@@ -24,9 +24,9 @@ try {
     await page.getByRole('heading',{name:'产物差异',exact:true}).waitFor();
     assert((await page.locator('body').textContent()).includes('历史目标列表'));
     await page.goto(`${origin}/zh-CN/workspaces/${workspaceId}/deployments/new`);
-    await page.getByLabel('目标类型',{exact:false}).click();
+    await page.getByRole('combobox',{name:'目标类型',exact:true}).click();
     await page.getByRole('option',{name:'主机组（逐台执行）',exact:true}).click();
-    await page.getByLabel('目标主机组',{exact:false}).click();
+    await page.getByRole('combobox',{name:'目标主机组',exact:true}).click();
     await page.getByRole('option',{name:'Deployment group',exact:true}).click();
     assert.equal(await page.getByLabel('目标主机',{exact:true}).count(),0);
     assert.deepEqual(errors,[]);

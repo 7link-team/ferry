@@ -89,6 +89,14 @@ pub(crate) async fn require_pipeline(
         .await?
         == 0
     {
+        if pipelines::Entity::find_by_id(i64::from(id))
+            .filter(pipelines::Column::WorkspaceId.eq(scope.workspace_id))
+            .count(conn)
+            .await?
+            == 0
+        {
+            return Err(ApiError::missing());
+        }
         return Err(ApiError::forbidden());
     }
     Ok(())
@@ -667,11 +675,36 @@ mod tests {
         .unwrap();
         grant(&db, 1, 11, "workflow", 7, "all").await;
         grant(&db, 2, 12, "pipeline", 7, "all").await;
-        assert!(
+        assert_eq!(
             require_pipeline(&db, &scope, 7.into(), Operation::View)
                 .await
-                .is_err()
+                .unwrap_err()
+                .0,
+            StatusCode::FORBIDDEN
         );
+        for operation in [
+            Operation::View,
+            Operation::Run,
+            Operation::Edit,
+            Operation::Delete,
+        ] {
+            assert_eq!(
+                require_pipeline(&db, &scope, 8.into(), operation)
+                    .await
+                    .unwrap_err()
+                    .0,
+                StatusCode::NOT_FOUND
+            );
+            scope.workspace_id = 12.into();
+            assert_eq!(
+                require_pipeline(&db, &scope, 7.into(), operation)
+                    .await
+                    .unwrap_err()
+                    .0,
+                StatusCode::NOT_FOUND
+            );
+            scope.workspace_id = 11.into();
+        }
         grant(&db, 3, 11, "pipeline", 7, "view").await;
         require_pipeline(&db, &scope, 7.into(), Operation::View)
             .await

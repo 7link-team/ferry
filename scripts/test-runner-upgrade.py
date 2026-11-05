@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
     # Source and binaries are isolated; production executables are never overwritten.
     fixture_target = repo/'target/runner-upgrade-fixture'
     source = root/'source'
-    for crate in ['runner', 'protocol']:
+    for crate in ['runner', 'protocol', 'sandbox']:
         shutil.copytree(repo/'crates'/crate, source/'crates'/crate)
     (source/'desktop').mkdir(parents=True)
     shutil.copy2(repo/'desktop/tauri.conf.json', source/'desktop/tauri.conf.json')
@@ -103,6 +103,10 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         # The production server has no alternate trust/key/URL configuration.
         # Compile a throwaway source copy against the fixture's signed TLS catalog.
         shutil.copytree(repo/'crates/server', source/'crates/server')
+        shutil.copytree(repo/'src/shared/workflow-contracts', source/'src/shared/workflow-contracts')
+        fixture = Path('examples/workflow-extensions/public-repository.json')
+        (source/fixture).parent.mkdir(parents=True)
+        shutil.copy2(repo/fixture, source/fixture)
         shutil.copytree(repo/'dist', source/'dist')
         (source/'scripts').mkdir()
         for script in ['runner-install.sh', 'runner-install.ps1']:

@@ -97,14 +97,14 @@ try {
   await page.route('**/preferences', async route => { await preferencesGate; await route.continue(); });
   await page.getByRole('link', { name: '仓库', exact: true }).click();
   await page.getByRole('button', { name: '创建连接', exact: true }).click();
-  await page.getByLabel('名称', { exact: false }).fill('UI repository');
+  await page.getByRole('textbox', { name: '连接名称', exact: true }).fill('UI repository');
   await page.getByRole('combobox', {name:'代码平台',exact:true}).selectOption('git');
   await page.getByLabel('Git 仓库地址（可选）', { exact: true }).fill(`http://127.0.0.1:${gitPort}/source.git`);
   assert.equal(await page.getByLabel('默认分支', { exact: false }).count(),0);
   const preferencesLoaded = page.waitForResponse(response => response.url().endsWith('/preferences'));
   releasePreferences(); await preferencesLoaded;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await page.getByLabel('名称', { exact: false }).inputValue(), 'UI repository', 'background preferences refresh discarded the form draft');
+  assert.equal(await page.getByRole('textbox', { name: '连接名称', exact: true }).inputValue(), 'UI repository', 'background preferences refresh discarded the form draft');
   assert.equal(await page.getByLabel('Git 仓库地址（可选）', { exact: true }).inputValue(), `http://127.0.0.1:${gitPort}/source.git`);
   await page.unroute('**/preferences');
   await page.getByRole('button', { name: '创建', exact: true }).click();
@@ -131,7 +131,7 @@ try {
   // and edited in the Actions editor like any other pipeline.
   const legacy=await api(`/workspaces/${workspace_ops}/pipelines`,{name:'Legacy seed',target_kind:'host',target_ref:host.id,repository_id:repository.id,definition:JSON.stringify(definition)});
   await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/pipelines/${legacy.id}/edit`);
-  await page.getByLabel('名称', { exact: false }).fill('UI pipeline');
+  await page.getByRole('textbox', { name: '流水线名称', exact: true }).fill('UI pipeline');
   assert.equal(await page.getByLabel('定义（JSON）', { exact: false }).count(), 0, 'the legacy JSON editor is gone');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await page.getByRole('cell', { name: 'UI pipeline', exact: true }).waitFor();
@@ -187,9 +187,9 @@ try {
   if (process.platform === 'win32') await mkdir(directory);
   // Initial directory loading normalizes the path input when it finishes.
   // Wait for that load before entering a different directory.
-  await page.getByLabel('目录路径').waitFor();
+  await page.getByLabel('目录路径', { exact: true }).waitFor();
   await page.getByRole('button', { name: '刷新', exact: true }).locator('.animate-spin').waitFor({ state: 'hidden' });
-  await page.getByLabel('目录路径').fill(directory);
+  await page.getByLabel('目录路径', { exact: true }).fill(directory);
   await Promise.all([
     page.waitForResponse(response => new URL(response.url()).searchParams.get('path') === directory && response.ok()),
     page.getByRole('button', { name: '转到目录', exact: true }).click(),

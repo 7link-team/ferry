@@ -46,7 +46,7 @@ try {
   let globalId;
   for (const [group, scope] of [['ops', 'global'], ['deploy', 'deploy'], ['build', 'build']]) {
     await page.goto(`${origin}/zh-CN/workspaces/${workspace_ops}/variables/new?scope=${scope}`);
-    await page.getByLabel('名称', { exact: false }).fill('shared-url');
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill('shared-url');
     await page.getByLabel('密钥值', { exact: true }).fill(secret);
     await page.getByRole('button', { name: '创建', exact: true }).click();
     await page.getByRole('cell', { name: 'shared-url', exact: true }).waitFor();

@@ -228,7 +228,7 @@ CMD ["sh", "-c", "ssh-keygen -q -t ed25519 -N '' -f /etc/ssh/ssh_host_ed25519_ke
         repo_id = create('repositories', {'name': 'private', 'url': repo_url, 'default_branch': 'main', 'credential_id': cred})
         sampler = threading.Thread(target=sample, daemon=True)
         sampler.start()
-        all_runs, successful = [], []
+        all_runs, successful, deleted_run_logs = [], [], {}
         if os.environ.get('FERRY_TEST_ACTIONS'):
             import runpy
             runpy.run_path(str(Path(__file__).with_name('test-actions-execution.py')))['accept'](dict(globals(), **locals()))
@@ -437,6 +437,10 @@ jobs:
             undefined=trigger(build)['id'];all_runs.append(undefined)
             check(kind+' undefined Actions secret resolves to empty string',done(undefined)['state']=='succeeded')
             api(f'/workspaces/{workspace_ops}/variables/'+object_var,method='DELETE',status=204)
+            # Definition ACLs also govern historical logs. Capture bytes while
+            # the definition still exists so the later secret scan covers them.
+            for run_id in [rid, undefined]:
+                deleted_run_logs[run_id] = logs(run_id)
             api(f'/workspaces/{workspace_ops}/pipelines/'+build,method='DELETE',status=204)
         api(f'/workspaces/{workspace_ops}/variables/'+build_var,method='DELETE',status=204)
         api(f'/workspaces/{workspace_ops}/variables/'+global_var,method='DELETE',status=204)
@@ -583,7 +587,8 @@ jobs:
             check(f'7 {kind} target ps contains no credential plaintext', secret not in joined and username not in joined and all(value not in joined for value in variable_secrets)
                   and ('/workflow/' in joined or '/step' in joined), f'samples={len(data)}, observed step argv={"/workflow/" in joined or "/step" in joined}, username absent={username not in joined}, password absent={secret not in joined}')
         activity = json.dumps(api(f'/workspaces/{workspace_ops}/activity?page_size=200'))
-        all_text = ''.join(i['chunk'] for rid in all_runs for i in logs(rid))
+        all_text = ''.join(i['chunk'] for rid in all_runs
+                           for i in (deleted_run_logs[rid] if rid in deleted_run_logs else logs(rid)))
         check('7 all stored logs and activity omit credential plaintext',
               all(value not in text for value in [secret, username, *variable_secrets] for text in [activity, all_text]))
         check('server log contains no credential plaintext', secret not in (work / 'server.log').read_text())

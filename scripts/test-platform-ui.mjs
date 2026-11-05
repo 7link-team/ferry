@@ -63,8 +63,8 @@ try {
   assert.equal(await concurrentPage.getByRole('button', { name: '初始化并进入平台' }).count(), 0, 'concurrent setup loser can immediately sign in');
   assert.equal(new URL(page.url()).pathname, '/zh-CN/platform/workspaces');
   await page.getByRole('button', { name: '创建工作空间', exact: true }).click();
-  await page.getByLabel('名称', { exact: false }).fill('First workspace');
-  await page.getByLabel('标识', { exact: false }).fill('first');
+  await page.getByRole('textbox', { name: '名称', exact: true }).fill('First workspace');
+  await page.getByRole('textbox', { name: '标识', exact: true }).fill('first');
   await page.getByRole('button', { name: '创建', exact: true }).click();
   await page.getByRole('cell', { name: 'First workspace', exact: true }).waitFor();
   await page.getByRole('row').filter({ hasText: 'First workspace' }).getByRole('cell', { name: '拥有者（我创建的）', exact: true }).waitFor();
@@ -79,6 +79,9 @@ try {
   await page.getByRole('button', { name: '平台管理', exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, entryPath, 'new workspace can be entered without stale identity redirect');
   await page.getByRole('button', { name: '平台管理', exact: true }).click();
+  await page.waitForURL('**/zh-CN/platform/workspaces');
+  await page.getByRole('cell', { name: 'First workspace', exact: true }).waitFor();
+  await page.getByRole('link', { name: '平台用户', exact: true }).click();
   await page.getByRole('cell', { name: 'admin@example.invalid', exact: true }).waitFor();
   await page.getByRole('row').filter({ hasText: 'admin@example.invalid' }).getByRole('link', { name: '编辑', exact: true }).click();
   await page.getByRole('checkbox').nth(1).click();
@@ -101,7 +104,8 @@ try {
   assert.equal((await (await context.request.get(`${origin}/api/setup`)).json()).registration_enabled, false);
   await page.screenshot({ path: '/tmp/platform-settings.png', fullPage: true });
   // Own profile: reachable from platform management and from the workspace account menu.
-  await page.getByRole('button', { name: '个人资料', exact: true }).click();
+  await page.getByRole('button', { name: /Platform Admin/ }).click();
+  await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
   await page.getByRole('heading', { name: '个人资料', exact: true }).first().waitFor();
   assert.equal(new URL(page.url()).pathname, '/zh-CN/account');
   const nameField = page.getByLabel('姓名', { exact: true }), emailField = page.getByLabel('登录邮箱', { exact: true });
@@ -132,7 +136,9 @@ try {
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), 'Renamed Admin', 'cancel discards unsaved edits');
   await page.goto(`${origin}${entryPath}`);
   await page.getByRole('button', { name: /Renamed Admin/ }).click();
-  assert.match(await page.getByRole('menuitem').filter({ hasText: 'First workspace' }).textContent(), /拥有者（我创建的）/, 'workspace menu shows the role in each workspace');
+  await page.getByRole('menuitem', { name: '切换空间', exact: true }).hover();
+  assert.match(await page.getByRole('menuitemradio').filter({ hasText: 'First workspace' }).textContent(), /拥有者（我创建的）/, 'workspace menu shows the role in each workspace');
+  await page.keyboard.press('ArrowLeft');
   await page.getByRole('menuitem', { name: '个人资料', exact: true }).click();
   await page.getByLabel('登录邮箱', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname, '/zh-CN/account', 'workspace account menu opens the profile');
