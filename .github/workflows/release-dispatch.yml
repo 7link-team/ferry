@@ -1,0 +1,81 @@
+name: Verify and publish v0.3.0-alpha.1
+on:
+  push:
+    branches: [feat/release-030-alpha1-dispatch-2]
+    paths: [.github/workflows/release-dispatch.yml]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: release-030-alpha1-controller-2
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sha='45658eef992fdc473caa11b02a179218282a1fc0';
+            const tag='v0.3.0-alpha.1';
+            const repo=context.repo;
+            async function requireMain() {
+              const {data}=await github.rest.repos.getCommit({...repo,ref:'main'});
+              if(data.sha!==sha)throw Error('Main changed; refusing publication');
+            }
+            async function runs(workflow,event) {
+              return (await github.rest.actions.listWorkflowRuns({...repo,workflow_id:workflow,event,head_sha:sha})).data.workflow_runs;
+            }
+            async function waitFor(workflow,event) {
+              for(let attempt=0;attempt<170;attempt++) {
+                const matching=await runs(workflow,event);
+                if(matching.length>1)throw Error('Ambiguous source runs '+workflow);
+                const run=matching[0];
+                if(run) {
+                  if(run.head_sha!==sha || run.head_branch!=='main')throw Error('Unexpected source');
+                  core.info(`${workflow} ${run.id}: ${run.status} ${run.conclusion||''}`);
+                  if(run.status==='completed') {
+                    if(run.conclusion!=='success')throw Error(`Required ${workflow} ${run.id} ${run.conclusion}`);
+                    return run;
+                  }
+                }
+                await new Promise(resolve=>setTimeout(resolve,60000));
+              }
+              throw Error('Timed out; inspect existing run before retry');
+            }
+            await requireMain();
+            // Only this release task's exact superseded runs are cancelled.
+            for (const [run_id,head_sha] of [[42059027867,'d6422e00a46b0081e28f9b4361a789734786db07'],[42058877994,'20ec1515752f3de1493bc0bc4514433a8d48f991'],[42058877940,'20ec1515752f3de1493bc0bc4514433a8d48f991']]) {
+              const {data:run}=await github.rest.actions.getWorkflowRun({...repo,run_id});
+              if(run.head_sha!==head_sha)throw Error('Unexpected superseded run');
+              if(run.status!=='completed')await github.rest.actions.cancelWorkflowRun({...repo,run_id});
+            }
+            await waitFor('build.yml','push');
+            if((await runs('build.yml','workflow_dispatch')).length)throw Error('Release build already dispatched; inspect first');
+            await requireMain();
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
+            const build=await waitFor('build.yml','workflow_dispatch');
+            const image=await waitFor('server-image.yml','push');
+            core.notice(`Verified release build ${build.id} and source image ${image.id}`);
+            await requireMain();
+            if((await runs('publish-verified.yml','workflow_dispatch')).length)throw Error('Publication already dispatched; inspect first');
+            const notes = `工作流与平台能力的 alpha 预发布。
+
+            - 统一工作流入口：构建流水线支持可视化表单和高级 YAML；节点工作流提供画布、节点参数、连线插入、快捷操作、测试运行及执行记录。
+            - 补充文件、媒体、AI 协议接入与主机执行能力；JSON 声明扩展及内置 JS/WASM/Lua 隔离引擎随本版发布，具体节点按实际执行器校验。
+            - 文件存储支持本地单机和 S3；增加平台数据库、Redis、文件、访问统计及服务器节点监控。
+            - 完善注册邮箱验证、邮件模板、页脚与页面脚本配置、账号筛选、类型化配置编辑和模板入口。
+            - 仓库连接与代码洞察按工作空间角色授权共享；超管无需加入空间，查询不创建业务活动，提交操作记录真实操作者；保留跨空间隔离。
+            - 修正洞察作者候选、界面布局、导航、固定流程状态及多语言显示，README 增加界面示例。
+
+            兼容与限制：升级前备份数据库、数据目录和加密主密钥。本版不代表 PRD 全部能力或 n8n/ComfyUI 插件兼容均已完成；第三方商业账号和自有主机需按实际环境验收。表达式沙箱支持 Windows/Linux；Linux 非 root 需要允许用户命名空间，容器/内核拒绝隔离时会明确拒绝执行。macOS 尚不支持表达式沙箱执行。Redis 为可选监控连接，单机 SQLite 不依赖 Redis/NATS；集群需共享数据库及既有协调和存储配置。`;
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'publish-verified.yml',ref:'main',inputs:{run_id:String(build.id),title:tag,notes}});
+            const publication=await waitFor('publish-verified.yml','workflow_dispatch');
+            const {data:release}=await github.rest.repos.getReleaseByTag({...repo,tag});
+            if(release.draft || !release.prerelease)throw Error('Unexpected release state');
+            core.notice(`Published ${tag}: ${publication.id}`);
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'server-image.yml',ref:'main',inputs:{release_tag:tag}});
+            const versioned=await waitFor('server-image.yml','workflow_dispatch');
+            core.notice(`Versioned image: ${versioned.id}`);
+            await core.summary.addHeading(tag).addRaw(`Source: ${sha}\nBuild: ${build.html_url}\nImage: ${image.html_url}\nRelease: ${release.html_url}\nVersioned image: ${versioned.html_url}`).write();
