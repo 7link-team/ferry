@@ -164,11 +164,23 @@ def main():
 
                     current = detail(first)
                     stale = dict(current)
-                    current["aliases"] = [
-                        {"name": "", "email": "first@example.invalid", "nickname": "Combined"},
-                        {"name": "", "email": "second@example.invalid", "nickname": "Combined"}]
+                    pairs = {(alias["name"], alias["email"]) for alias in current["aliases"]}
+                    assert len(pairs) == 3
+                    assert all(not alias["nickname"] for alias in current["aliases"])
+                    first_alias = next(alias for alias in current["aliases"]
+                                       if alias["email"] == "first@example.invalid")
+                    first_alias["nickname"] = "Combined"
                     request(endpoint + "/" + first, current, method="PATCH")
                     request(endpoint + "/" + first, stale, method="PATCH", expected=409)
+                    # Equal nicknames never implicitly merge identities. Explicitly
+                    # reuse the saved contributor ID to test intentional grouping.
+                    current = detail(first)
+                    person = next(alias["contributor_id"] for alias in current["aliases"]
+                                  if alias["email"] == "first@example.invalid")
+                    second_alias = next(alias for alias in current["aliases"]
+                                        if alias["email"] == "second@example.invalid")
+                    second_alias.update(nickname="Combined", contributor_id=person)
+                    request(endpoint + "/" + first, current, method="PATCH")
                     time.sleep(2.2)
                     assert persisted() == state, "mapping edits changed collection or immutable facts"
                     assert fixture.calls[("github", "request")] == calls
@@ -176,7 +188,10 @@ def main():
                     assert len(mapped) == 2
                     assert next(row for row in mapped if row["nickname"] == "Combined")["commits"] == 2
                     assert len(report(independent, "contributors")["items"]) == 3
-                    assert detail(independent)["aliases"] == []
+                    independent_aliases = detail(independent)["aliases"]
+                    assert {(alias["name"], alias["email"]) for alias in independent_aliases} == pairs
+                    assert all(not alias["nickname"] and not alias.get("contributor_id")
+                               for alias in independent_aliases)
                     print("PASS mapping and stale-version HTTP updates: local identities, unchanged provider/jobs/facts", flush=True)
 
                     other = request("/workspaces", {"name": "Other", "slug": "other-insights"})["id"]

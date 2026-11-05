@@ -64,10 +64,17 @@ fn io_error(error: std::io::Error) -> ApiError {
         crate::i18n::Message::new("files.storageUnavailable"),
     )
 }
-async fn metadata(s: &AppState, workspace: Id, id: Id) -> Result<Metadata> {
+async fn metadata(
+    s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
+    workspace: Id,
+    id: Id,
+) -> Result<Metadata> {
     let path = directory(s, workspace, id).join("metadata.json");
-    if !path.exists() && crate::artifact_store::ArtifactStore::is_remote(s).await? {
-        crate::artifact_store::ArtifactStore::for_state(s)
+    if !path.exists()
+        && crate::artifact_store::ArtifactStore::is_remote_for_connection(s, conn).await?
+    {
+        crate::artifact_store::ArtifactStore::for_connection(s, conn)
             .await?
             .download_file(
                 &format!("value-files/{workspace}/{id}/metadata.json"),
@@ -206,7 +213,7 @@ async fn download(
     scope: Scope,
     Path((_, id)): Path<(String, Id)>,
 ) -> Result<Response> {
-    let meta = metadata(&s, scope.workspace_id, id).await?;
+    let meta = metadata(&s, &s.db, scope.workspace_id, id).await?;
     resource(&meta.resource)?;
     scope.require(&format!("{}.read", meta.resource))?;
     let path = directory(&s, scope.workspace_id, id).join("content");
@@ -246,6 +253,7 @@ async fn download(
 }
 pub async fn validate_references(
     s: &AppState,
+    conn: &impl sea_orm::ConnectionTrait,
     workspace: Id,
     kind: &str,
     value: &Value,
@@ -264,7 +272,7 @@ pub async fn validate_references(
                     crate::i18n::Message::new("files.uploadRequired"),
                 )
             })?;
-        let meta = metadata(s, workspace, id).await?;
+        let meta = metadata(s, conn, workspace, id).await?;
         if meta.resource != kind
             || item.get("url").and_then(Value::as_str) != Some(meta.url.as_str())
             || item.get("size").and_then(Value::as_u64) != Some(meta.size as u64)

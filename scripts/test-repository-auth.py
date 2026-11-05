@@ -221,8 +221,14 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(owner,root+'/credentials/'+shared,method='DELETE',expected=409)
         request(owner,root+'/credentials/'+shared,{'name':'Rotated shared PAT','kind':'token','username':'authorized-user','secret':'valid-personal-token-rotated','version':credential_before['version']},method='PATCH')
         check(request(owner,root+'/code-connections/'+linked['id']+'/repositories')['items'],'referenced PAT can rotate through existing credential resource')
-        check(request(guest,root+'/code-connections')['items']==[],'named connections remain private to authorizing user')
-        request(guest,root+'/code-connections/'+linked['id'],expected=404)
+        visible = request(guest,root+'/code-connections')['items']
+        check({linked['id'], linked2['id']}.issubset(row['id'] for row in visible),
+              'workspace readers share saved named connections')
+        check(request(guest,root+'/code-connections/'+linked['id'])['id']==linked['id'],
+              'workspace reader can open a saved connection')
+        request(guest,root+'/code-connections/'+linked['id'],
+                dict(connection_body,version=linked['version']),method='PATCH',expected=403)
+        request(guest,root+'/code-connections/'+linked['id'],method='DELETE',expected=403)
         renamed=request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,name='Renamed team',version=linked['version']),method='PATCH')
         check(renamed['name']=='Renamed team' and request(owner,root+'/code-connections/'+linked2['id'])['name']=='Second GitHub','update targets only selected named connection')
         request(owner,root+'/code-connections/'+linked['id'],dict(connection_body,version=linked['version']),method='PATCH',expected=409)
@@ -239,7 +245,10 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         initial=request(owner,monitor)
         check(initial['version']==0 and not initial['enabled'],'monitor starts disabled without pretending platform subscription exists')
         check(initial['notification_language']=='en-US','legacy and new subscriptions have an explicit compatible notification language')
-        request(guest,monitor,expected=404)
+        check(not request(guest,monitor)['enabled'],'workspace reader can inspect monitor state')
+        request(guest,monitor,{'version':0,'enabled':True,'all_repositories':False,
+                             'repositories':'owner/repository','events':['push']},
+                method='PATCH',expected=403)
         request(outsider,f'/workspaces/{workspace_other}/code-connection-monitors/'+linked['id'],expected=404)
         settings={'version':0,'enabled':True,'all_repositories':False,'repositories':'owner/repository','events':['push','pull_request','repository.created','repository.deleted','branch.deleted'],'secret':secret,'webhook':api_base+'/notifications'}
         settings['notification_language']='zh-CN'
@@ -444,7 +453,8 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         request(owner,root+'/credentials/'+no_username,method='DELETE',expected=204)
         request(owner,root+'/code-connections',dict(codeup_body,organization='bad/organization'),expected=400)
         request(owner,root+'/code-connections',dict(codeup_body,api_url='',organization=''),expected=400)
-        request(guest,codeup_root+'/repositories',expected=404)
+        check(request(guest,codeup_root+'/repositories')['items'],
+              'workspace reader browses repositories using the saved connection')
         request(outsider,f'/workspaces/{workspace_other}/code-connections/'+codeup['id']+'/repositories',expected=404)
         request(owner,codeup_root+'/repositories?page=0',expected=400)
         request(owner,codeup_root+'/branches'+branch_query+'&page=10001',expected=400)

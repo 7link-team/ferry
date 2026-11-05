@@ -129,10 +129,10 @@ export function App() {
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<><LanguageSwitcher /><ThemeSwitcher /></>} />;
   }
-  return <Workspace identity={identity} onSignedOut={signedOut} />;
+  return <Workspace identity={identity} reload={reload} onSignedOut={signedOut} />;
 }
 
-function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut: () => void }) {
+function Workspace({ identity, reload, onSignedOut }: { identity: Identity; reload: () => void; onSignedOut: () => void }) {
   useCommonTranslation();
   const { t } = useTranslation();
   const route = useRoute();
@@ -180,7 +180,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
     return ()=>{live=false;controller.abort();};
   },[workspaceId,preferencesPage]);
   const permissions = useMemo(() => new Set(current?.permissions ?? []), [current?.permissions]);
-  const lists = useMemo(() => listConfigs(workspaceId, permissions, onSignedOut, undefined, preferences?.dictionaries), [workspaceId, permissions, onSignedOut, preferences]);
+  const lists = useMemo(() => listConfigs(workspaceId, permissions, reload, undefined, preferences?.dictionaries), [workspaceId, permissions, reload, preferences]);
   const forms = useMemo(() => formConfigs(workspaceId, permissions), [workspaceId, permissions, nodeCatalogWorkspace]);
 
   // Keep the form configuration stable while background preferences refresh.
@@ -192,8 +192,8 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
   }, [forms, route.group, route.item]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
-  if (joining) return <div className="h-full"><LanguageSwitcher floating /><Button className="absolute top-4 left-4" variant="outline" onClick={() => setJoining(false)}>{commonText("shell.backWorkspace")}</Button><Entry onReady={() => { setJoining(false); onSignedOut(); }} error="" signedIn /></div>;
-  if (!current) return <><LanguageSwitcher floating /><Entry onReady={onSignedOut} error="" signedIn /></>;
+  if (joining) return <div className="h-full"><LanguageSwitcher floating /><Button className="absolute top-4 left-4" variant="outline" onClick={() => setJoining(false)}>{commonText("shell.backWorkspace")}</Button><Entry onReady={() => { setJoining(false); reload(); }} error="" signedIn /></div>;
+  if (!current) return <><LanguageSwitcher floating /><Entry onReady={reload} error="" signedIn /></>;
 
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
@@ -388,7 +388,7 @@ function Workspace({ identity, onSignedOut }: { identity: Identity; onSignedOut:
             <div className="min-h-0 overflow-auto">
               <ResourceForm
                 key={`${current.id}/${route.group}/${item.resource}/${route.id ?? "new"}/${route.mode}`}
-                {...(item.resource === "roles" || item.resource === "members" ? { onSaved: onSignedOut } : {})}
+                {...(item.resource === "roles" || item.resource === "members" ? { onSaved: reload } : {})}
                 config={formConfig}
                 workspace={current.id}
                 permissions={permissions}

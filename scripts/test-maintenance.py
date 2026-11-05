@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(categories=={'default_page_size':'general','heartbeat_timeout_seconds':'hosts','history_retention_days':'history','pipeline_concurrent_runs':'pipelines','repository_event_retention_days':'repositories'},'builtin settings have meaningful persisted categories')
         check(request(owner,root+'/settings?category=hosts')['total']==1,'category filtering uses persisted category keys')
         prefs=request(guest,root+'/preferences')
-        check(prefs['default_page_size']==20 and len(prefs['dictionaries']['host-state'])==3,'members receive presentation preferences')
+        check(prefs['default_page_size']==20 and len(prefs['dictionaries']['environment'])==3,'members receive presentation preferences')
         setting=next(r for r in settings if r['key']=='default_page_size'); sid=setting['id']
         request(guest,root+'/settings/'+sid,{'version':1,'value':37},'PATCH',403)
         request(outsider,f'/workspaces/{workspace_other}/settings/'+sid,expected=404)
@@ -98,43 +98,24 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(json.loads(request(owner,url)['items'])==[{'value':'b','label':'Revised'}],'dictionary update replaces children atomically')
         request(outsider,f'/workspaces/{workspace_other}/dictionaries/'+did,expected=404)
         check(request(owner,root+'/dictionaries?q=custom')['total']==1,'dictionary search works')
-        controlled = {
-            'pipeline-state': {'queued','cancelling','running','waiting','pending','approved','succeeded','failed','cancelled','timed_out','skipped'},
-            'deployment-state': {'pending','skipped','idle','queued','running','succeeded','failed','needs-review'},
-            'cron-state': {'queued','running','succeeded','failed','skipped','needs-review'},
-            'alert-state': {'firing','recovered'},
-            'repository-state': {'connected','refreshing','reauthorize'},
-            'insight-state': {'pending','queued','running','complete','failed','partial','unsupported','blocked','retry_wait','unavailable'},
-        }
+        retired = {'host-state', 'pipeline-state', 'deployment-state', 'cron-state',
+                   'alert-state', 'repository-state', 'insight-state'}
         dictionary_rows = request(owner,root+'/dictionaries?page_size=200')['items']
-        for key, expected_states in controlled.items():
-            state_row = next(row for row in dictionary_rows if row['key'] == key)
-            state_url = root+'/dictionaries/'+state_row['id']
-            state_body = request(owner,state_url)
-            state_options = json.loads(state_body['items'])
-            check({item['value'] for item in state_options} == expected_states, key+' seeds canonical values')
-            request(owner,state_url,dict(state_body,items=json.dumps(state_options[:-1])),'PATCH',400)
-            request(owner,state_url,dict(state_body,items=json.dumps(state_options+[{'value':'invented','label':'Invented'}])),'PATCH',400)
-            request(owner,state_url,dict(state_body,key=key+'-renamed'),'PATCH',400)
-            request(owner,state_url,dict(state_body,value_type='text',value_json='"invalid"'),'PATCH',400)
-            request(owner,state_url,method='DELETE',expected=400)
-            state_options.reverse()
-            state_options[0].update(label='Custom '+key,color='#123456')
-            # Editing the default name makes this a literal workspace alias;
-            # generated default translations are read-time presentation metadata.
-            state_options[0].pop('labels', None)
-            request(owner,state_url,dict(state_body,items=json.dumps(state_options)),'PATCH')
-            check(request(guest,root+'/preferences')['dictionaries'][key] == state_options, key+' exposes labels colors and order to members')
-            other_options = request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries'][key]
-            check(all(item['label'] != 'Custom '+key for item in other_options),key+' presentation stays workspace scoped')
-            request(owner,state_url,dict(state_body,items=json.dumps(state_options)),'PATCH',409)
-        builtin=next(r for r in request(owner,root+'/dictionaries')['items'] if r['key']=='host-state')
+        check(not retired.intersection(row['key'] for row in dictionary_rows),
+              'fixed workflow states are absent from editable dictionaries')
+        for account, workspace in [(guest, workspace_tenant), (outsider, workspace_other)]:
+            check(not retired.intersection(request(account,f'/workspaces/{workspace}/preferences')['dictionaries']),
+                  'fixed workflow states are absent from workspace preferences')
+        for key in retired:
+            request(owner,root+'/dictionaries',dict(body,key=key),expected=400)
+        check(True,'retired fixed-state keys cannot be recreated as dictionaries')
+        builtin=next(r for r in request(owner,root+'/dictionaries')['items'] if r['key']=='environment')
         built=request(owner,root+'/dictionaries/'+builtin['id'])
         changed=json.loads(built['items']);changed[0]['label']='Connected';changed[0]['color']='#12Ab34'
         changed[0].pop('labels', None)
         request(owner,root+'/dictionaries/'+builtin['id'],dict(built,items=json.dumps(changed)),'PATCH')
-        check(request(guest,root+'/preferences')['dictionaries']['host-state'][0]['label']=='Connected','dictionary labels consumed by member preferences')
-        check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'batched preferences preserve every state value, label and position')
+        check(request(guest,root+'/preferences')['dictionaries']['environment'][0]['label']=='Connected','dictionary labels consumed by member preferences')
+        check(request(guest,root+'/preferences')['dictionaries']['environment']==changed,'batched preferences preserve every state value, label and position')
         color_row=request(owner,root+'/dictionaries/'+builtin['id'])
         check(json.loads(color_row['items'])==changed and json.loads(color_row['value_json'])==changed,'dictionary canonical and legacy option APIs retain colors')
         color_list=next(r for r in request(owner,root+'/dictionaries')['items'] if r['id']==builtin['id'])
@@ -142,16 +123,19 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         for invalid_color in ['red','#12','#12345678','url(javascript:alert(1))',None,42]:
             invalid_items=[dict(item,color=invalid_color) if index==0 else item for index,item in enumerate(changed)]
             request(owner,root+'/dictionaries/'+builtin['id'],dict(color_row,items=json.dumps(invalid_items)),'PATCH',400)
-        check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'invalid colors cannot alter controlled dictionary presentation')
-        check(request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries']['host-state'][0]['label']!='Connected','dictionary presentation overrides remain workspace isolated')
+        check(request(guest,root+'/preferences')['dictionaries']['environment']==changed,'invalid colors cannot alter business dictionary presentation')
+        check(request(outsider,f'/workspaces/{workspace_other}/preferences')['dictionaries']['environment'][0]['label']!='Connected','dictionary presentation overrides remain workspace isolated')
         check('custom' not in request(guest,root+'/preferences')['dictionaries'],'preferences expose only builtin dictionaries')
-        request(owner,root+'/dictionaries/'+builtin['id'],dict(built,version=2,items='[]'),'PATCH',400)
+        request(owner,root+'/dictionaries/'+builtin['id'],dict(built,version=2,items='[]'),'PATCH')
+        check(json.loads(request(owner,root+'/dictionaries/'+builtin['id'])['items'])==[],
+              'business option lists can be emptied without inventing fixed states')
+        request(owner,root+'/dictionaries/'+builtin['id'],dict(built,version=3,items=json.dumps(changed)),'PATCH')
         request(owner,root+'/dictionaries/'+builtin['id'],method='DELETE',expected=400)
         request(owner,url,method='DELETE',expected=204)
         request(owner,url,expected=404)
-        check(True,'builtin machine states protected and custom dictionaries deletable')
+        check(True,'builtin business options protected and custom dictionaries deletable')
         events=request(owner,root+'/activity?resource=dictionaries')['items']
-        check(len(events)==4+len(controlled),'successful dictionary writes audited exactly once; rejected edits are not audited')
+        check(len(events)==6,'successful dictionary writes audited exactly once; rejected edits are not audited')
         typed_samples = {
             'text': 'A typed value', 'num': 0, 'tab': [{'key':'a','label':'Alpha','color':'#AbC'}],
             'selection': [{'value':'a','label':'Alpha','color':'#123456'}], 'image': [], 'video': [], 'file': [],
@@ -260,10 +244,10 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
                 conn.execute('UPDATE deployments SET state=?,current_revision=? WHERE id=?',('succeeded',102,app))
                 conn.execute('UPDATE deployments SET state=? WHERE id=?',('needs-review',uncertain))
             proc=launch()
-            check(request(guest,root+'/preferences')['dictionaries']['host-state']==changed,'controlled state colors and labels survive restart and builtin seeding')
+            check(request(guest,root+'/preferences')['dictionaries']['environment']==changed,'business option colors and labels survive restart and builtin seeding')
             restarted_preferences=request(guest,root+'/preferences')['dictionaries']
-            for key in controlled:
-                check(restarted_preferences[key][0]['label']=='Custom '+key and restarted_preferences[key][0]['color']=='#123456',key+' presentation survives restart')
+            check(not retired.intersection(restarted_preferences),
+                  'restart never restores retired fixed-state dictionaries')
             for resource in ['settings','dictionaries']:
                 persisted=request(owner,root+'/'+resource+'/'+typed_ids[(resource,'json')])
                 check(json.loads(persisted['value_json'])==typed_samples['json'],resource+' typed contents persist across restart')

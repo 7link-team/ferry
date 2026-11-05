@@ -53,7 +53,8 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     proc = launch()
     try:
         status = request(anonymous, '/setup')
-        check(status == {'required': True, 'has_users': False, 'registration_enabled': False}, 'fresh install requires initialization')
+        check(status == {'required': True, 'has_users': False, 'registration_enabled': False,
+                         'email_verification_required': False}, 'fresh install requires initialization')
         token = (data / 'setup-token').read_text().strip()
         check(len(token) >= 32, 'operator proof has random secret length')
         if os.name != 'nt': check((data / 'setup-token').stat().st_mode & 0o777 == 0o600, 'operator proof file is private')

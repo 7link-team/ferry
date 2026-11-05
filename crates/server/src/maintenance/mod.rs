@@ -588,6 +588,7 @@ pub(crate) async fn create_setting_in(
     if matches!(kind.as_str(), "image" | "video" | "file") {
         crate::maintenance::files::validate_references(
             s,
+            tx,
             scope.workspace_id,
             "settings",
             &typed.value,
@@ -693,6 +694,7 @@ pub async fn update_setting(
     if matches!(kind.as_str(), "image" | "video" | "file") {
         crate::maintenance::files::validate_references(
             &s,
+            &tx,
             scope.workspace_id,
             "settings",
             &typed.value,
@@ -1077,6 +1079,7 @@ pub(crate) async fn create_dictionary_in(
     if matches!(body.value_type.as_str(), "image" | "video" | "file") {
         crate::maintenance::files::validate_references(
             s,
+            tx,
             scope.workspace_id,
             "dictionaries",
             &typed.value,
@@ -1141,6 +1144,7 @@ pub async fn update_dictionary(
     if matches!(body.value_type.as_str(), "image" | "video" | "file") {
         crate::maintenance::files::validate_references(
             &s,
+            &s.db,
             scope.workspace_id,
             "dictionaries",
             &typed.value,

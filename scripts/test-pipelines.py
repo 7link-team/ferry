@@ -641,9 +641,21 @@ jobs:
             states = [job['state'] for job in recovered['jobs']]
             check('restart finalizes interrupted Actions jobs and skips queued jobs', recovered['state']=='failed' and sorted(states)==['failed', 'skipped'], str(states))
         # A real read-only membership exercises permission gates, not a mock Scope.
+        owner_opener = opener
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users', {'email': 'viewer@example.invalid', 'password': 'correct-horse-battery', 'name': 'viewer'})
         api('/workspace-memberships', {'code': workspace['join_code']})
+        viewer_id = api('/me')['user']['id']
+        viewed_run = all_runs[0]
+        check('workspace read permission alone does not expose private runs',
+              api(f'/workspaces/{workspace_ops}/pipeline-runs')['total'] == 0)
+        api(f'/workspaces/{workspace_ops}/pipeline-runs/{viewed_run}', status=403)
+        viewer_opener = opener
+        opener = owner_opener
+        viewed_pipeline = detail(viewed_run)['pipeline_id']
+        api(f'/workspaces/{workspace_ops}/pipelines/{viewed_pipeline}/acl',
+            {'user_id': viewer_id, 'role': 'view'}, status=201)
+        opener = viewer_opener
         for suffix in ['', '/' + all_runs[0], '/' + all_runs[0] + '/logs?after=0']:
             api(f'/workspaces/{workspace_ops}/pipeline-runs' + suffix)
             check('read-only user can read run ' + suffix, True, 'HTTP 200')

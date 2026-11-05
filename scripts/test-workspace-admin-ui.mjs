@@ -71,11 +71,11 @@ try {
   await g.getByPlaceholder('邀请码',{exact:true}).fill(code);
   await g.getByRole('button',{name:'加入',exact:true}).click();
   await g.waitForURL(`**/workspaces/${workspace_tenant}/**`);
-  await g.getByRole('heading',{name:'仪表盘',exact:true}).waitFor();
+  await g.getByRole('heading',{name:'最近活动',exact:true}).waitFor();
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/roles`);
   const builtin = p.getByRole('row').filter({hasText:'只读'});
   await builtin.getByRole('link',{name:'复制',exact:true}).click();
-  await p.getByLabel('名称',{exact:false}).fill('Custom role');
+  await p.getByRole('textbox',{name:'名称',exact:true}).fill('Custom role');
   const hostGroup = p.locator('fieldset p').filter({hasText:/^主机$/}).locator('..');
   await hostGroup.getByRole('checkbox',{name:'新增',exact:true}).check();
   assert.equal(await hostGroup.getByRole('checkbox',{name:'查看',exact:true}).isChecked(),true);
@@ -88,7 +88,7 @@ try {
   await p.getByRole('cell',{name:'Custom role',exact:true}).waitFor();
   const custom = p.getByRole('row').filter({hasText:'Custom role'});
   await custom.getByRole('link',{name:'编辑',exact:true}).click();
-  await p.getByLabel('名称',{exact:false}).fill('Custom edited');
+  await p.getByRole('textbox',{name:'名称',exact:true}).fill('Custom edited');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   await p.getByRole('cell',{name:'Custom edited',exact:true}).waitFor();
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/members`);

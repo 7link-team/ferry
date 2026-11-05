@@ -187,11 +187,17 @@ pub(crate) struct ArtifactStore(Arc<dyn ObjectStore>);
 
 impl ArtifactStore {
     pub(crate) async fn is_remote(s: &crate::state::State) -> crate::error::Result<bool> {
+        Self::is_remote_for_connection(s, &s.db).await
+    }
+    pub(crate) async fn is_remote_for_connection(
+        s: &crate::state::State,
+        conn: &impl sea_orm::ConnectionTrait,
+    ) -> crate::error::Result<bool> {
         if let Ok(kind) = std::env::var("FERRY_ARTIFACT_STORE") {
             return Ok(kind == "s3");
         }
         let row = crate::entities::platform_state::Entity::find_by_id(1)
-            .one(&s.db)
+            .one(conn)
             .await?
             .ok_or_else(crate::content_assets::unavailable)?;
         Ok(Configuration::read(s, row.file_storage.as_deref())
