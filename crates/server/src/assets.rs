@@ -27,6 +27,12 @@ pub async fn serve_configured(
     let config = crate::accounts::platform_scripts::Configuration::read(
         row.as_ref().and_then(|r| r.page_scripts.as_deref()),
     )?;
+    let turnstile = crate::accounts::login_guard::Configuration::read(
+        &s,
+        row.as_ref().and_then(|r| r.login_security.as_deref()),
+    )?
+    .mode
+        == "turnstile";
     if let Some((script, policy)) = config.document() {
         if let Some(file) = Web::get("index.html") {
             let html =
@@ -39,10 +45,45 @@ pub async fn serve_configured(
                     .parse()
                     .map_err(|_| crate::error::ApiError::missing())?,
             );
+            allow_turnstile(&mut response, turnstile)?;
             return Ok(response);
         }
     }
-    Ok(serve(uri).await)
+    let mut response = serve(uri).await;
+    allow_turnstile(&mut response, turnstile)?;
+    Ok(response)
+}
+
+fn allow_turnstile(response: &mut Response, enabled: bool) -> crate::error::Result<()> {
+    if !enabled {
+        return Ok(());
+    }
+    let policy = response
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or(crate::DEFAULT_CSP);
+    let mut directives = policy
+        .split(';')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            if v.starts_with("script-src ") || v.starts_with("connect-src ") {
+                format!("{v} https://challenges.cloudflare.com")
+            } else {
+                v.to_owned()
+            }
+        })
+        .collect::<Vec<_>>();
+    directives.push("frame-src 'self' https://challenges.cloudflare.com".into());
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        directives
+            .join("; ")
+            .parse()
+            .map_err(|_| crate::error::ApiError::missing())?,
+    );
+    Ok(())
 }
 
 pub async fn serve(uri: Uri) -> Response {

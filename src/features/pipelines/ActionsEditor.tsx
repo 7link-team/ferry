@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { ActionFragmentYaml, WorkflowFragmentEditor } from "./WorkflowFragmentEditor";
 import { ActionsJobSettings, ActionsRunnerFields, ActionsWorkflowSettings } from "./ActionsSettings";
 import { ActionsConditionField, ActionsPhase } from "./ActionsExecutionFields";
@@ -221,7 +222,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
     {mode === undefined && <div className="flex gap-1" role="tablist" aria-label={executionText("editor.mode")}>{([["visual", executionText("shared.common.form.visual")], ["yaml", workflowText("advancedYaml")]] as const).map(([key, title]) => <Button key={key} type="button" role="tab" aria-selected={tab === key} variant={tab === key ? "secondary" : "ghost"} onClick={() => setTab(key)}>{title}</Button>)}</div>}
     {tab === "visual" && !parsed.error && <div className="flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-muted-foreground">GitHub Actions</span><div className="flex gap-2">{!readOnly && <Button type="button" variant="outline" size="sm" aria-pressed={variableHelper} onClick={() => setVariableHelper(current => !current)}>{workflowText("actions.variableHelper")}</Button>}<Button type="button" variant="outline" size="sm" aria-pressed={workflowSettings} onClick={() => { setSelection(undefined); setWorkflowSettings(true); }}>{workflowText("actions.workflowSettings")}</Button></div></div>}
     {tab === "yaml" && missingHosts.length > 0 && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{executionText("editor.missingHosts")}{missingHosts.map(row => <Button key={row.id} type="button" variant="outline" size="sm" onClick={() => { setSelection({ job: row.id }); setTab("visual"); }}>{row.name}</Button>)}</div>}
-    {tab === "yaml" ? <Suspense fallback={<div role="status" className="grid h-[520px] place-items-center text-sm text-muted-foreground">{executionText("editor.loadingYaml")}</div>}><YamlEditor value={source} originalValue={originalSource.current} readOnly={readOnly} fillHeight={fillHeight} onChange={definition => {
+    {tab === "yaml" ? <Suspense fallback={<LoadingSkeleton variant="editor" label={executionText("editor.loadingYaml")} className="h-[520px]" />}><YamlEditor value={source} originalValue={originalSource.current} readOnly={readOnly} fillHeight={fillHeight} onChange={definition => {
       try { parseActions(definition); } catch { onChange({ definition }); return; }
       change(() => definition);
     }} /></Suspense> : <div className={cn("flex min-h-[520px] flex-col overflow-hidden rounded-lg border lg:flex-row", fillHeight ? "flex-1 lg:min-h-0" : "lg:h-[620px]")}>

@@ -175,6 +175,11 @@ export function ResourceTable<T>({
   const filterKeys = useMemo(() => (config.filters ?? []).map((f) => f.key), [config.filters]);
   const [committed, setCommitted] = useState<Record<string, string>>(() => readFilters(filterKeys, config.queryPrefix));
   const [draft, setDraft] = useState<Record<string, string>>(committed);
+  useEffect(() => {
+    const restore = () => { const values = readFilters(filterKeys, config.queryPrefix); setCommitted(values); setDraft(values); };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [filterKeys, config.queryPrefix]);
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
 
   const [data, setData] = useState<Envelope<T>>();

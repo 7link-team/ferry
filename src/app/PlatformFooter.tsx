@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import {lazy, Suspense, useEffect, useMemo, useState, type ReactNode} from "react";
 import {api} from "../shared/api/api";
 import {commonText as t, useCommonTranslation} from "../shared/i18n/i18n";
@@ -45,7 +46,7 @@ export function PlatformFooterEditor({value, readOnly, onChange}: {value:string;
   return <AutoField label={t("resource-domain:platform.footerContent")} help={t("resource-domain:platform.footerHelp")}><div className="min-w-0 space-y-3">
     <Tabs value={advanced?"html":"rich"} onValueChange={value=>setAdvanced(value==="html")}><TabsList><TabsTrigger value="rich">{typedText("type.richtext")}</TabsTrigger><TabsTrigger value="html">{t("resource-domain:platform.footerHtml")}</TabsTrigger></TabsList></Tabs>
     {advanced ? <AutoField label={t("resource-domain:platform.footerHtml")}><textarea aria-label={t("resource-domain:platform.footerHtml")} className="min-h-36 w-full rounded-md border bg-background px-3 py-2 font-mono text-sm" maxLength={65536} value={value} disabled={readOnly} onChange={event=>onChange(event.target.value)} /></AutoField>
-      : <Suspense fallback={<div className="h-60 animate-pulse rounded border bg-muted" />}><RichTextEditor value={value} readOnly={readOnly} onChange={onChange} /></Suspense>}
+      : <Suspense fallback={<LoadingSkeleton variant="editor" />}><RichTextEditor value={value} readOnly={readOnly} onChange={onChange} /></Suspense>}
     <div className="border-t pt-3" data-footer-preview><FooterContent value={value} /></div>
   </div></AutoField>;
 }

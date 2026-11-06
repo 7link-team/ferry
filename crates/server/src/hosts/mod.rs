@@ -1287,7 +1287,7 @@ pub(crate) async fn activity_record(
     Ok(())
 }
 
-fn activity_actor_name(actor_id: i64, name: &str) -> String {
+pub(crate) fn activity_actor_name(actor_id: i64, name: &str) -> String {
     if actor_id == 0 {
         crate::i18n::render(
             crate::i18n::current_locale(),

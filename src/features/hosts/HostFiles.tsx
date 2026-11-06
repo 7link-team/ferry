@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { decodeTextFile, encodeTextFile, textFileLanguage, type TextEncoding } from "./text-file";
 import { AutoField,AutoForm } from "../../shared/forms/auto-form";
 import { hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
@@ -514,7 +515,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
     </div>
     {terminalDirectory && !onOpenTerminal && <aside aria-label={hostRepositoryText("host-files.058")} className="flex min-h-[360px] min-w-0 flex-col border-t pt-3 lg:min-h-0 lg:w-[min(42vw,40rem)] lg:shrink-0 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-3">
       <div className="mb-2 flex items-center gap-2"><SquareTerminal className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate font-mono text-sm" title={terminalDirectory}>{terminalDirectory}</span><Button type="button" variant="ghost" size="icon" aria-label={hostRepositoryText("host-files.059")} onClick={() => setTerminalDirectory(undefined)}><X className="size-4" /></Button></div>
-      <div className="min-h-0 flex-1"><Suspense fallback={<p role="status">{hostRepositoryText("host.079")}</p>}><HostTerminal workspace={workspace} hostId={hostId} directory={terminalDirectory} /></Suspense></div>
+      <div className="min-h-0 flex-1"><Suspense fallback={<LoadingSkeleton variant="editor" label={hostRepositoryText("host.079")} />}><HostTerminal workspace={workspace} hostId={hostId} directory={terminalDirectory} /></Suspense></div>
     </aside>}
     <Dialog.Root open={!!preview} onOpenChange={open => { if (!open) closePreview(); }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
@@ -527,7 +528,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
           </div>
           {error && <p role="alert" className="border-b px-3 py-2 text-sm text-destructive">{error}</p>}
           {preview?.kind === "image" ? <div className="grid min-h-0 flex-1 place-items-center overflow-auto p-4"><img src={preview.url} alt={preview.name} className="max-h-full max-w-full object-contain" /></div> :
-            <div className="flex min-h-0 flex-1 flex-col">{preview?.readOnly && <p role="status" className="border-b px-3 py-2 text-sm text-muted-foreground">{hostRepositoryText("host-files.encodingReadOnly", { encoding: preview.encoding })}</p>}<div className="min-h-0 flex-1"><Suspense fallback={<Loader2 className="m-4 size-5 animate-spin" />}><CodeEditor value={preview?.value ?? ""} language={textFileLanguage(preview?.name ?? "")} path={`file:///hosts/${encodeURIComponent(workspace)}/${encodeURIComponent(hostId)}/${encodeURIComponent(preview?.path ?? "")}`} label={hostRepositoryText("host-files.063")} readOnly={preview?.readOnly ?? false} onChange={value => setPreview(current => current ? { ...current, value } : current)} /></Suspense></div></div>}
+            <div className="flex min-h-0 flex-1 flex-col">{preview?.readOnly && <p role="status" className="border-b px-3 py-2 text-sm text-muted-foreground">{hostRepositoryText("host-files.encodingReadOnly", { encoding: preview.encoding })}</p>}<div className="min-h-0 flex-1"><Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={preview?.value ?? ""} language={textFileLanguage(preview?.name ?? "")} path={`file:///hosts/${encodeURIComponent(workspace)}/${encodeURIComponent(hostId)}/${encodeURIComponent(preview?.path ?? "")}`} label={hostRepositoryText("host-files.063")} readOnly={preview?.readOnly ?? false} onChange={value => setPreview(current => current ? { ...current, value } : current)} /></Suspense></div></div>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

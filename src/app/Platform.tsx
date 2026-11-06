@@ -10,6 +10,7 @@ import { nav } from "./nav";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
 import { PlatformServerNodes } from "./PlatformServerNodes";
+import { PlatformActivity } from "./PlatformActivity";
 import { PlatformMonitor, monitorSections } from "./PlatformMonitor";
 import {FOOTER_UPDATED, PlatformFooterEditor} from "./PlatformFooter";
 import {PlatformMailTest} from "./PlatformMailTest";
@@ -107,8 +108,14 @@ const forms: Record<string, FormConfig<Row>> = {
   ] }, { title: "文件存储", titleKey: "resource-domain:platform.fileStorage", group: "文件存储", groupKey: "resource-domain:platform.fileStorage", fields: [
     {key:"storage_kind",label:"文件存储",labelKey:"resource-domain:platform.fileStorage",type:"select",options:[{value:"local",label:"本地文件（仅单机）",labelKey:"resource-domain:platform.storageLocal"},{value:"s3",label:"S3（单机或集群）",labelKey:"resource-domain:platform.storageS3"}],helpKey:"resource-domain:platform.storageHelp",disabled:d=>d.storage_source==="environment"},
     {key:"storage_source",label:"配置来源",labelKey:"resource-domain:platform.configSource",type:"text",immutable:true},
+    {key:"storage_local_path",label:"本机存储路径",labelKey:"resource-domain:platform.storageLocalPath",type:"custom",span:2,when:d=>d.storage_kind==="local",render:({draft})=><code className="block select-all whitespace-normal break-all rounded border bg-muted/30 p-3 text-sm">{String(draft.storage_local_path??"")}</code>,helpKey:"resource-domain:platform.storageLocalPathHelp"},
     ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"], ["region","Region"], ["access_key","Access Key ID"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
     {key:"storage_secret_key",label:"Secret Access Key",type:"secret",stored:"storage_has_secret_key",replaceOnEdit:true,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment",helpKey:"resource-domain:platform.storageSecretHelp"},
+  ] }, { title: "登录防护", titleKey:"resource-domain:loginGuard.settings",group:"登录防护",groupKey:"resource-domain:loginGuard.settings",fields:[
+    {key:"login_guard_mode",label:"验证码方式",labelKey:"resource-domain:loginGuard.mode",type:"select",options:[{value:"local",label:"本地随机验证码",labelKey:"resource-domain:loginGuard.local"},{value:"turnstile",label:"Cloudflare Turnstile"}],helpKey:"resource-domain:loginGuard.help"},
+    {key:"login_turnstile_site_key",label:"Site Key",type:"text",when:d=>d.login_guard_mode==="turnstile"},
+    {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
+    {key:"login_turnstile_hostname",label:"Turnstile 站点域名",labelKey:"resource-domain:loginGuard.hostname",type:"text",when:d=>d.login_guard_mode==="turnstile",helpKey:"resource-domain:loginGuard.hostnameHelp"},
   ] }, { title: "账号注册", titleKey: "resource-domain:platform.registration", group: "账号注册", groupKey: "resource-domain:platform.registration", fields: [
     { key: "registration_enabled", label: "允许注册新账号", labelKey: "resource-domain:platform.allowRegistration", type: "switch", help: "关闭后已有账号仍可登录，公开注册入口将关闭。", helpKey: "resource-domain:platform.registrationHelp" },
   ] }, { title: "公共配置", titleKey: "resource-domain:platform.publicConfig", group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", fields: [
@@ -135,7 +142,7 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     else if (item === "server-nodes" || legacyServerNodes) navigate({ workspace: "_platform", item: "monitor", id: "server-nodes", mode: "view" }, {}, { replace: true });
     else if (item === "settings" && !route.id) navigate({ ...route, id: "1", mode: "edit" }, {}, { replace: true });
   }, [route.workspace, route.id, item, legacyServerNodes]);
-  if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><p>{commonText("resource-domain:platform.forbidden")}</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>{commonText("common-domain:shell.backWorkspace")}</Button></div>;
+  if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><div className="flex justify-end">{headerActions}</div><p>{commonText("resource-domain:platform.forbidden")}</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>{commonText("common-domain:shell.backWorkspace")}</Button></div>;
   if (item === "server-nodes" || legacyServerNodes) return null;
   const form = forms[item]!;
   return <div className="flex h-full flex-col">
@@ -159,10 +166,10 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     </div>
     <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
       {item === "monitor" && <nav aria-label={commonText("resource-domain:monitor.title")} className="flex shrink-0 gap-1 overflow-auto border-b p-3 sm:w-48 sm:flex-col sm:border-r sm:border-b-0">
-        {["server-nodes", ...monitorSections].map(section => <a key={section} className={`rounded px-3 py-2 text-sm ${(route.id ?? "database") === section ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`} aria-current={(route.id ?? "database") === section ? "page" : undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section === "server-nodes" ? "resource-domain:platform.serverNodes" : `resource-domain:monitor.${section}`)}</a>)}
+        {["server-nodes", ...monitorSections, "activity"].map(section => <a key={section} className={`rounded px-3 py-2 text-sm ${(route.id ?? "database") === section ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`} aria-current={(route.id ?? "database") === section ? "page" : undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section === "server-nodes" ? "resource-domain:platform.serverNodes" : `resource-domain:monitor.${section}`)}</a>)}
       </nav>}
     <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
-      {item === "monitor" ? serverNodes ? <PlatformServerNodes /> : <PlatformMonitor key={route.id ?? "database"} section={route.id ?? "database"} /> : route.mode === "list" && item !== "settings" ? <ResourceTable key={item} config={lists[item]!} workspace="_platform" permissions={permissions} />
+      {item === "monitor" ? serverNodes ? <PlatformServerNodes /> : route.id === "activity" ? <PlatformActivity /> : <PlatformMonitor key={route.id ?? "database"} section={route.id ?? "database"} /> : route.mode === "list" && item !== "settings" ? <ResourceTable key={item} config={lists[item]!} workspace="_platform" permissions={permissions} />
         : <div className="min-h-0 space-y-8 overflow-auto"><ResourceForm key={`${item}/${route.id}/${route.mode}`} config={form} workspace="_platform" permissions={permissions}
           onSaved={() => { if (item === "settings") {toast.success(commonText("resource-domain:platform.saved")); window.dispatchEvent(new Event(FOOTER_UPDATED));} reload(); }} /></div>}
     </main>

@@ -90,6 +90,10 @@ class Receiver(BaseHTTPRequestHandler):
             payload=json.dumps(value).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
         if parsed.path.endswith('/branches'):
             payload=json.dumps([{'name':'develop'},{'name':'release/test'}]).encode();self.send_response(200);self.send_header('Content-Length',str(len(payload)));self.end_headers();self.wfile.write(payload);return
+        if '/compare/' in parsed.path:
+            # Optional notification statistics are unavailable in this fixture.
+            # Repository monitoring may use its still-valid pinned access token.
+            self.send_response(404);self.end_headers();return
         if not parsed.path.endswith('/user'):assert 'renewed-access' in access, 'market fetch must use refreshed OAuth token'
         if parsed.path.endswith('/user'):value={'login':'authorized-user','username':'authorized-user'}
         else:
@@ -376,7 +380,7 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
             pushed=by_event['push']
             sent=next(item for item in notifications if item['connection_id']==codeup['id'] and item['event']=='push' and item['data']['reference']=='main')
             japanese=json.loads(Path('crates/server/src/i18n/repository-ja-JP.json').read_text(encoding='utf-8'))
-            check(sent['data']['action']==japanese['repository.monitor.detectedPush'],'background polling sends the subscription language independently of the Chinese UI and request locale')
+            check(sent['data']['action']==japanese['repository.monitor.push'],'background polling renders the event in the subscription language without the polling method prefix')
             # Polling cannot know who pushed: no operator; the author stays on the commit.
             check(pushed['actor']=='' and pushed['detail']['commits'][0]['author']=='Bob' and pushed['summary']=='fix: second' and pushed['detail']['total_commits']==1 and [c['id'] for c in pushed['detail']['commits']]==['b'] and pushed['detail']['commits'][0]['message']=='fix: second\n\nbody','polling push records the commit range, message and author since the previous revision')
             check('bob@example.invalid' not in json.dumps(rows) and 'fay@example.invalid' not in json.dumps(rows),'event detail never stores author e-mail addresses')

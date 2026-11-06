@@ -865,6 +865,38 @@ pub async fn ensure_fresh(s: &AppState, workspace: Id, credential: Id) -> Result
 }
 /// Reuse browsing authorization/refresh and construct pages locally, never
 /// forwarding credentials to an untrusted provider pagination link.
+fn comparison_stats(
+    provider: &str,
+    before: &str,
+    value: &Value,
+    more: Option<bool>,
+) -> Option<(i64, i64)> {
+    if more == Some(true)
+        || ["compare_timeout", "truncated", "overflow"]
+            .iter()
+            .any(|k| value[*k] == true)
+    {
+        return None;
+    }
+    // GitHub comparisons use a merge base. A rewritten history must never be
+    // reported as the direct before/after diff when that base differs.
+    if provider == "github"
+        && value
+            .pointer("/merge_base_commit/sha")
+            .and_then(Value::as_str)
+            != Some(before)
+    {
+        return None;
+    }
+    let files = value["files"]
+        .as_array()
+        .or_else(|| value["diffs"].as_array())?;
+    if (provider == "github" && files.len() >= 300) || files.len() > 1000 {
+        return None;
+    }
+    crate::repositories::analysis::notification_diff_totals(files).ok()
+}
+
 pub(crate) struct MonitorAccess {
     provider: String,
     config: Provider,
@@ -877,6 +909,48 @@ pub(crate) struct MonitorPage {
     pub has_more: bool,
 }
 impl MonitorAccess {
+    /// A bounded, best-effort comparison for one notification, using the same
+    /// authenticated endpoint and diff parser as code insights.
+    pub(crate) async fn change_stats(
+        &self,
+        path: &str,
+        before: &str,
+        after: &str,
+    ) -> Option<(i64, i64)> {
+        if !ferry_protocol::contribution::valid_sha(before)
+            || !ferry_protocol::contribution::valid_sha(after)
+            || before.chars().all(|c| c == '0')
+            || after.chars().all(|c| c == '0')
+        {
+            return None;
+        }
+        let compare = format!("{before}...{after}");
+        let request = async {
+            let (value, more) = if self.provider == "gitlab" {
+                self.analysis_request(
+                    path,
+                    &["compare"],
+                    &[
+                        ("from", before.into()),
+                        ("to", after.into()),
+                        ("straight", "true".into()),
+                    ],
+                )
+                .await
+                .ok()?
+            } else {
+                self.analysis_request(path, &["compare", &compare], &[])
+                    .await
+                    .ok()?
+            };
+            comparison_stats(&self.provider, before, &value, more)
+        };
+        tokio::time::timeout(Duration::from_secs(5), request)
+            .await
+            .ok()
+            .flatten()
+    }
+
     /// Analysis uses the same pinned endpoint, token refresh and redirect policy
     /// as browsing. Resource segments are encoded individually, never URLs.
     pub(crate) async fn analysis_request(
@@ -1115,6 +1189,38 @@ impl MonitorAccess {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notification_comparison_requires_complete_direct_diff() {
+        let before = "a".repeat(40);
+        let value = serde_json::json!({"merge_base_commit":{"sha":before},"files":[{"additions":12,"deletions":3}]});
+        assert_eq!(
+            super::comparison_stats("github", &before, &value, Some(false)),
+            Some((12, 3))
+        );
+        assert_eq!(
+            super::comparison_stats("github", &before, &value, Some(true)),
+            None
+        );
+        let mut bad = value.clone();
+        bad["merge_base_commit"]["sha"] = serde_json::json!("b".repeat(40));
+        assert_eq!(super::comparison_stats("github", &before, &bad, None), None);
+        let gitlab = serde_json::json!({"diffs":[{"diff":"@@ -1 +1,2 @@\n-old\n+one\n+two\n"}]});
+        assert_eq!(
+            super::comparison_stats("gitlab", &before, &gitlab, None),
+            Some((2, 1))
+        );
+        for flag in ["compare_timeout", "truncated", "overflow"] {
+            let mut bad = gitlab.clone();
+            bad[flag] = serde_json::json!(true);
+            assert_eq!(super::comparison_stats("gitlab", &before, &bad, None), None);
+        }
+        let missing = serde_json::json!({"files":[{"status":"modified"}]});
+        assert_eq!(
+            super::comparison_stats("gitea", &before, &missing, None),
+            None
+        );
+    }
+
     use super::*;
     #[tokio::test]
     async fn validation_errors_retain_identity_and_render_for_each_reader() {

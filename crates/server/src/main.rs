@@ -1,4 +1,5 @@
 mod accounts;
+const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 mod artifact_store;
 mod assets;
 mod cluster;
@@ -928,6 +929,7 @@ async fn main() -> anyhow::Result<()> {
             get(accounts::platform::get_settings).patch(accounts::platform::update_settings),
         )
         .route("/api/platform/server-nodes",get(accounts::platform::server_nodes))
+        .route("/api/platform/monitor/activity",get(accounts::platform::list_activity))
         .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
         .route("/api/platform/monitor/database/sql/reset",post(platform_monitor::database::reset_sql))
         .route("/api/platform/monitor/database/table",get(platform_monitor::database::table))
@@ -940,6 +942,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/registration-code", post(accounts::mail::request_code))
         .route("/api/platform/mail-test", post(accounts::mail::test))
         .route("/api/sessions", post(accounts::auth::login).delete(accounts::auth::logout))
+        .route("/api/sessions/challenge", post(accounts::login_guard::challenge))
+        .route("/api/sessions/challenge/verify", post(accounts::login_guard::verify))
         .route("/api/me", get(accounts::auth::me))
         .route(
             "/api/profile/1",
@@ -1158,11 +1162,9 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
         .parse()
         .unwrap(),
     );
-    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-            .parse()
-            .unwrap(),
-    );
+    headers
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert(DEFAULT_CSP.parse().unwrap());
     headers
         .entry(header::CACHE_CONTROL)
         .or_insert("no-store".parse().unwrap());

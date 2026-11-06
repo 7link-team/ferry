@@ -338,6 +338,14 @@ jobs:
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-ui.mjs
+      - name: Login protection, global audit and appearance entry acceptance
+        if: matrix.harness == 'build-ui'
+        run: |
+          sudo apt-get install -y redis-server
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-login-guard-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-activity-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-theme-entry-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-alpha2-ux-ui.mjs
       - name: Workspace management browser acceptance
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-workspace-admin-ui.mjs

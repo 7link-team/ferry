@@ -7,6 +7,7 @@ mod git;
 mod git_facts;
 mod pipeline;
 mod provider;
+pub(crate) use provider::totals as notification_diff_totals;
 
 #[cfg(test)]
 #[path = "tests.rs"]

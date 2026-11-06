@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { ArrowDown,ArrowUp,Plus,Trash2,Upload } from "lucide-react";
 import { lazy,Suspense,useEffect,useRef,useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -125,7 +126,7 @@ export function TypedValueEditor(props: Props) {
       : type === "num" ? <AutoField label={typedText("value")}><Input aria-label={typedText("value")} type="number" value={typeof value === "number" ? value : ""} min={schema.min as number | undefined} max={schema.max as number | undefined} step={schema.decimals === undefined ? "any" : 10 ** -Number(schema.decimals)} disabled={readOnly} onChange={event => { if (!event.target.value || !Number.isFinite(event.target.valueAsNumber)) { setRawError("invalidNumber"); onPatch({ value_json: "null" }); } else emit(event.target.valueAsNumber); }} /></AutoField>
       : type === "json" ? <CodeValue label={typedText("jsonValue")} value={raw} language="json" readOnly={readOnly} onChange={next => { setRawError(""); onPatch({ value_json: next }); }} />
       : type === "code" ? <CodeValue label={typedText("codeValue")} value={text} language={String(schema.lang ?? "text")} readOnly={readOnly} onChange={emit} />
-      : type === "richtext" ? <AutoField label={typedText("richValue")}><Suspense fallback={<p role="status">{typedText("loadingRich")}</p>}><RichTextEditor value={text} readOnly={readOnly} onChange={emit} /></Suspense></AutoField>
+      : type === "richtext" ? <AutoField label={typedText("richValue")}><Suspense fallback={<LoadingSkeleton variant="editor" label={typedText("loadingRich")} />}><RichTextEditor value={text} readOnly={readOnly} onChange={emit} /></Suspense></AutoField>
       : <AutoField label={typedText("value")}><textarea aria-label={typedText("value")} className="min-h-36 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={text} maxLength={Number(schema.maxLength) || undefined} disabled={readOnly} onChange={event => emit(event.target.value)} /></AutoField>}
     {["markdown", "html", "richtext"].includes(type) && <details open={readOnly}><summary className="cursor-pointer text-sm font-medium">{typedText("preview")}</summary><SafePreview value={text} markdown={type === "markdown"} /></details>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
@@ -165,12 +166,12 @@ function CodeValue({ label, value, language, readOnly, onChange }: { label: stri
   useTranslation("typed-domain");
   const theme = useTheme();
   const [advanced, setAdvanced] = useState(false);
-  return <div className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm font-medium">{label}</span><Button type="button" size="sm" variant="outline" onClick={() => setAdvanced(!advanced)}>{advanced ? typedText("plainEditor") : typedText("codeEditor")}</Button></div><AutoField label={label} hideLabel>{advanced ? <div className="h-80 overflow-hidden rounded-md border"><Suspense fallback={<p role="status">{typedText("loadingEditor")}</p>}><Editor value={value} language={language === "text" ? "plaintext" : language} theme={theme.resolved === "dark" ? "vs-dark" : "vs"} onChange={next => onChange(next ?? "")} options={{ ariaLabel: label, readOnly, automaticLayout: true, minimap: { enabled: false }, wordWrap: "on", scrollBeyondLastLine: false, occurrencesHighlight: "off" }} /></Suspense></div> : <textarea aria-label={label} className="min-h-48 w-full rounded-md border bg-background p-3 font-mono text-sm" value={value} disabled={readOnly} spellCheck={false} onChange={event => onChange(event.target.value)} />}</AutoField></div>;
+  return <div className="space-y-2"><div className="flex flex-wrap items-center justify-between gap-3"><span className="text-sm font-medium">{label}</span><Button type="button" size="sm" variant="outline" onClick={() => setAdvanced(!advanced)}>{advanced ? typedText("plainEditor") : typedText("codeEditor")}</Button></div><AutoField label={label} hideLabel>{advanced ? <div className="h-80 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" label={typedText("loadingEditor")} />}><Editor value={value} language={language === "text" ? "plaintext" : language} theme={theme.resolved === "dark" ? "vs-dark" : "vs"} onChange={next => onChange(next ?? "")} options={{ ariaLabel: label, readOnly, automaticLayout: true, minimap: { enabled: false }, wordWrap: "on", scrollBeyondLastLine: false, occurrencesHighlight: "off" }} /></Suspense></div> : <textarea aria-label={label} className="min-h-48 w-full rounded-md border bg-background p-3 font-mono text-sm" value={value} disabled={readOnly} spellCheck={false} onChange={event => onChange(event.target.value)} />}</AutoField></div>;
 }
 
 function SafePreview({ value, markdown }: { value: string; markdown?: boolean }) {
   useTranslation("typed-domain");
-  if (markdown) return <Suspense fallback={<p role="status">{typedText("loadingPreview")}</p>}><MarkdownPreview value={value} /></Suspense>;
+  if (markdown) return <Suspense fallback={<LoadingSkeleton variant="editor" label={typedText("loadingPreview")} />}><MarkdownPreview value={value} /></Suspense>;
   return <iframe title={typedText("contentPreview")} sandbox="" referrerPolicy="no-referrer" className="mt-2 min-h-64 w-full rounded-md border bg-white" srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src 'none'; form-action 'none'; base-uri 'none'"><style>body{font:14px/1.6 system-ui;padding:16px;overflow-wrap:anywhere}img,video{max-width:100%}pre{white-space:pre-wrap}</style></head><body>${value}</body></html>`} />;
 }
 

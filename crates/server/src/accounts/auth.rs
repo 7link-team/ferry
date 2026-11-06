@@ -230,6 +230,8 @@ pub struct Credentials {
     pub(crate) password: String,
     #[serde(default)]
     pub(crate) name: String,
+    #[serde(flatten)]
+    pub(crate) proof: super::login_guard::Proof,
 }
 
 /// Argon2 with per-password salt. The cost parameters are the crate defaults,
@@ -369,6 +371,14 @@ pub async fn login(
     Json(body): Json<Credentials>,
 ) -> Result<impl axum::response::IntoResponse> {
     let email = body.email.trim().to_lowercase();
+    let ip = login_ip(peer.ip(), &headers, &proxies).to_string();
+    if email.len() > 320 || body.password.len() > 1024 {
+        return Err(ApiError::localized(
+            axum::http::StatusCode::UNAUTHORIZED,
+            crate::i18n::Message::new("auth.login_invalid"),
+        ));
+    }
+    super::login_guard::admit(&s, &email, &ip, &body.proof).await?;
     let row = users::Entity::find()
         .filter(users::Column::Email.eq(email.clone()))
         .one(&s.db)
@@ -381,13 +391,24 @@ pub async fn login(
             crate::i18n::Message::new("auth.login_invalid"),
         )
     };
-    let row = row.ok_or_else(refused)?;
-    if row.active == 0 || !verify(&body.password, &row.password_hash) {
+    if row
+        .as_ref()
+        .is_none_or(|row| row.active == 0 || !verify(&body.password, &row.password_hash))
+    {
+        if super::login_guard::failed(&s, &email, &ip).await? {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::PRECONDITION_REQUIRED,
+                crate::i18n::Message::new("auth.captchaRequired"),
+            ));
+        }
         return Err(refused());
     }
+    let row = row.ok_or_else(refused)?;
     let id = Id::from(row.id);
     use sea_orm::TransactionTrait;
     let tx = s.db.begin().await?;
+    super::platform::lock(&tx).await?;
+    super::login_guard::succeeded(&tx, &email).await?;
     let session = start_session(&s, &id, &tx).await?;
     users::Entity::update_many()
         .col_expr(users::Column::LastLoginAt, Expr::value(db::now()))

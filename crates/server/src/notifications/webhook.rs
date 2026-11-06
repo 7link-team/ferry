@@ -72,8 +72,39 @@ pub(super) fn robot(url: &reqwest::Url) -> Option<Robot> {
 /// JSON event for every other webhook.
 pub struct Notice<'a> {
     pub title: &'a str,
+    pub accent: Option<Accent>,
+    pub field_links: Vec<(String, String)>,
+    pub field_accents: Vec<(String, Accent)>,
     pub fields: Vec<(String, String)>,
     pub generic: Value,
+}
+
+#[derive(Clone, Copy)]
+pub enum Accent {
+    Blue,
+    Green,
+    Purple,
+    Red,
+}
+
+impl Accent {
+    fn feishu(self) -> &'static str {
+        match self {
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Purple => "purple",
+            Self::Red => "red",
+        }
+    }
+
+    fn rgb(self) -> u32 {
+        match self {
+            Self::Blue => 0x2563eb,
+            Self::Green => 0x15803d,
+            Self::Purple => 0x7e22ce,
+            Self::Red => 0xb91c1c,
+        }
+    }
 }
 
 fn clean(value: &str, limit: usize) -> String {
@@ -109,6 +140,15 @@ fn link_url(value: &str) -> Option<String> {
         && url.username().is_empty()
         && url.password().is_none())
     .then(|| url.to_string())
+}
+
+fn field_url(notice: &Notice<'_>, name: &str, value: &str) -> Option<String> {
+    notice
+        .field_links
+        .iter()
+        .find(|(key, _)| key == name)
+        .and_then(|(_, url)| link_url(url))
+        .or_else(|| link_url(value))
 }
 
 fn html(value: &str) -> String {
@@ -148,10 +188,10 @@ fn escape(robot: Robot, value: &str) -> String {
     }
 }
 
-fn formatted_field(robot: Robot, name: &str, value: &str) -> String {
+fn formatted_field(robot: Robot, name: &str, value: &str, url: Option<String>) -> String {
     let name = escape(robot, name);
-    if let Some(url) = link_url(value) {
-        let text = escape(robot, &url);
+    if let Some(url) = url {
+        let text = escape(robot, value);
         let link = match robot {
             Robot::Telegram => format!("<a href=\"{}\">{text}</a>", html(&url)),
             Robot::Slack => format!(
@@ -175,17 +215,56 @@ fn formatted_field(robot: Robot, name: &str, value: &str) -> String {
 
 fn formatted(robot: Robot, notice: &Notice<'_>) -> String {
     std::iter::once(escape(robot, &clean(notice.title, 100)))
-        .chain(lines(notice).map(|(name, value)| formatted_field(robot, name, &value)))
+        .chain(lines(notice).map(|(name, value)| styled_field(robot, notice, name, &value)))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
+fn styled_field(robot: Robot, notice: &Notice<'_>, name: &str, value: &str) -> String {
+    let text = formatted_field(robot, name, value, field_url(notice, name, value));
+    let accent = notice
+        .field_accents
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, accent)| accent);
+    match (robot, accent) {
+        (Robot::Feishu, Some(accent)) => format!("<font color='{}'>{text}</font>", accent.feishu()),
+        (Robot::WeCom, Some(accent)) => format!(
+            "<font color=\"{}\">{text}</font>",
+            if matches!(accent, Accent::Green) {
+                "info"
+            } else {
+                "warning"
+            }
+        ),
+        _ => text,
+    }
+}
+
 fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, Message> {
     let title = clean(notice.title, 100);
-    let markdown = std::iter::once(format!("### {}", markdown(&title)))
+    let heading = if robot == Robot::WeCom {
+        notice.accent.map(|accent| {
+            format!(
+                "### <font color=\"{}\">{}</font>",
+                match accent {
+                    Accent::Red => "warning",
+                    Accent::Green => "info",
+                    _ => "comment",
+                },
+                markdown(&title)
+            )
+        })
+    } else {
+        None
+    }
+    .unwrap_or_else(|| format!("### {}", markdown(&title)));
+    let markdown = std::iter::once(heading)
         .chain(lines(notice).map(|(name, value)| {
-            if link_url(&value).is_some() {
-                format!("> {}", formatted_field(robot, name, &value))
+            if field_url(notice, name, &value).is_some()
+                || notice.field_accents.iter().any(|(key, _)| key == name)
+            {
+                format!("> {}", styled_field(robot, notice, name, &value))
             } else {
                 format!("> **{}**：{}", markdown(name), markdown(&value))
             }
@@ -196,9 +275,18 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
         Robot::WeCom => json!({"msgtype":"markdown","markdown":{"content":markdown}}),
         Robot::DingTalk => json!({"msgtype":"markdown","markdown":{"title":title,"text":markdown}}),
         Robot::Feishu => {
+            if let Some(accent) = notice.accent {
+                let elements: Vec<Value> = lines(notice)
+                    .map(|(name, value)| json!({"tag":"div","text":{"tag":"lark_md","content":styled_field(robot,notice,name,&value)}}))
+                    .collect();
+                return Ok(json!({"msg_type":"interactive","card":{
+                    "header":{"template":accent.feishu(),"title":{"tag":"plain_text","content":title}},
+                    "elements":elements
+                }}));
+            }
             let content: Vec<Value> = lines(notice)
-                .map(|(name, value)| match link_url(&value) {
-                    Some(url) => json!([{"tag":"text","text":format!("{name}：")},{"tag":"a","text":url,"href":url}]),
+                .map(|(name, value)| match field_url(notice,name,&value) {
+                    Some(url) => json!([{"tag":"text","text":format!("{name}：")},{"tag":"a","text":value,"href":url}]),
                     None => json!([{"tag":"text","text":format!("{name}：{value}")}]),
                 })
                 .collect();
@@ -213,6 +301,9 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
                 .ok_or_else(|| Message::new("webhook.chatMissing"))?;
             json!({"chat_id":chat,"text":formatted(robot, notice),"parse_mode":"HTML","disable_web_page_preview":true})
         }
+        Robot::Slack if notice.accent.is_some() => json!({"text":title,"attachments":[{
+            "color":format!("#{:06x}",notice.accent.unwrap().rgb()),"text":formatted(robot,notice),"mrkdwn_in":["text"]
+        }]}),
         Robot::Slack | Robot::GoogleChat => json!({"text":formatted(robot, notice)}),
         // Keep whole lines: cutting the message could break a link's destination.
         Robot::Discord => {
@@ -229,7 +320,11 @@ fn body(robot: Robot, url: &reqwest::Url, notice: &Notice<'_>) -> Result<Value, 
                 }
                 content.push_str(line);
             }
-            json!({"content":content,"allowed_mentions":{"parse":[]}})
+            if let Some(accent) = notice.accent {
+                json!({"embeds":[{"title":title,"color":accent.rgb(),"description":content}],"allowed_mentions":{"parse":[]}})
+            } else {
+                json!({"content":content,"allowed_mentions":{"parse":[]}})
+            }
         }
     })
 }
@@ -385,6 +480,62 @@ pub async fn deliver_configured(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repository_cards_color_titles_stats_and_link_the_repository_name() {
+        let notice = Notice {
+            title: "Code push",
+            accent: Some(Accent::Blue),
+            fields: vec![
+                ("Repository".into(), "team/app".into()),
+                ("Added".into(), "12 lines".into()),
+                ("Deleted".into(), "3 lines".into()),
+            ],
+            field_links: vec![(
+                "Repository".into(),
+                "https://example.invalid/team/app".into(),
+            )],
+            field_accents: vec![
+                ("Added".into(), Accent::Green),
+                ("Deleted".into(), Accent::Red),
+            ],
+            generic: json!({}),
+        };
+        let url = reqwest::Url::parse("https://example.invalid").unwrap();
+        let card = body(Robot::Feishu, &url, &notice).unwrap();
+        assert_eq!(card["card"]["header"]["template"], "blue");
+        assert_eq!(card["card"]["header"]["title"]["content"], "Code push");
+        let elements = card["card"]["elements"].to_string();
+        assert!(elements.contains("[team/app](https://example.invalid/team/app)"));
+        assert!(elements.contains("<font color='green'>Added：12 lines</font>"));
+        assert!(elements.contains("<font color='red'>Deleted：3 lines</font>"));
+        assert_eq!(
+            body(Robot::Slack, &url, &notice).unwrap()["attachments"][0]["color"],
+            "#2563eb"
+        );
+        let discord = body(Robot::Discord, &url, &notice).unwrap();
+        assert_eq!(discord["embeds"][0]["color"], 0x2563eb);
+        for robot in [
+            Robot::WeCom,
+            Robot::DingTalk,
+            Robot::Slack,
+            Robot::Discord,
+            Robot::GoogleChat,
+        ] {
+            let payload = body(robot, &url, &notice).unwrap().to_string();
+            assert!(payload.contains("team/app"));
+            assert!(payload.contains("12 lines"));
+            assert!(!payload.contains("!["));
+        }
+        let mut invalid = notice;
+        invalid.field_links[0].1 = "javascript:alert(1)".into();
+        assert!(
+            !body(Robot::Feishu, &url, &invalid)
+                .unwrap()
+                .to_string()
+                .contains("javascript:")
+        );
+    }
+
     use super::*;
 
     // Existing provider-verdict goldens also verify legacy Chinese rendering.
@@ -460,6 +611,9 @@ mod tests {
     fn builds_each_platforms_readable_message_without_empty_or_control_fields() {
         let notice = Notice {
             title: "仓库事件：push",
+            field_links: vec![],
+            field_accents: vec![],
+            accent: None,
             fields: vec![
                 ("仓库".into(), "group/app".into()),
                 ("引用".into(), "main\nx".into()),
@@ -519,6 +673,9 @@ mod tests {
         let url = "https://example.invalid/commit/abc?left=1&right=2";
         let notice = Notice {
             title: "Push <tag>",
+            field_links: vec![],
+            field_accents: vec![],
+            accent: None,
             fields: vec![
                 ("Commit".into(), url.into()),
                 ("Author".into(), "<script>*name*".into()),
@@ -579,13 +736,13 @@ mod tests {
             url
         );
         assert_eq!(
-            formatted_field(Robot::WeCom, "链接", url),
+            formatted_field(Robot::WeCom, "链接", url, link_url(url)),
             format!("链接：[{url}]({url})")
         );
         assert!(link_url("javascript:alert(1)").is_none());
         assert!(link_url("https://user:password@example.invalid/").is_none());
         let long = format!("https://example.invalid/{}", "a".repeat(500));
-        assert!(formatted_field(Robot::DingTalk, "Commit", &long).contains(&long));
+        assert!(formatted_field(Robot::DingTalk, "Commit", &long, link_url(&long)).contains(&long));
     }
 
     #[test]

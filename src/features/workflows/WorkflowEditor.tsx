@@ -1,3 +1,5 @@
+import { AutoField } from "../../shared/forms/auto-form";
+import { useQueryValue } from "../../shared/routing/url-state";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import {
   Background,
@@ -299,7 +301,7 @@ export function WorkflowEditor({
     }
   }, [draft.definition]);
   const graph = parsed.graph;
-  const [selected, setSelected] = useState("");
+  const [selected, setSelected] = useQueryValue("node", "");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const returnToInspector = useRef(false);
   const [selectedLink, setSelectedLink] = useState<number>();
@@ -311,7 +313,8 @@ export function WorkflowEditor({
   const [measurements, setMeasurements] = useState<
     Record<string, { width: number; height: number }>
   >({});
-  const [tab, setTab] = useState<"canvas" | "history" | "executions">("canvas");
+  const [view, setTab] = useQueryValue("view", "canvas");
+  const tab = view === "history" || view === "executions" ? view : "canvas";
   const [pickerOpen, setPickerOpen] = useState(false);
   const [insertAt, setInsertAt] = useState<number>();
   const [adjacent, setAdjacent] = useState<{
@@ -539,6 +542,7 @@ export function WorkflowEditor({
     permissions.has("workflows.run") &&
     !!draft.id &&
     draft.lifecycle !== "archived";
+  const manualEntries = (runRevision === "published" ? publishedGraph : graph)?.nodes.filter(node => node.type === "core.trigger.manual") ?? [];
   const inputSchema = ((runRevision === "published"
     ? publishedGraph
     : graph
@@ -1310,25 +1314,15 @@ export function WorkflowEditor({
                         {t("published")}
                       </option>
                     </select>
-                    <label className="block space-y-2 text-sm">
-                      <span><FieldCaption label={<>{t("entry")}</>} /></span>
-                      <select
-                        className={control}
-                        value={entry}
-                        onChange={(event) => setEntry(event.target.value)}
-                      >
-                        {(runRevision === "published"
-                          ? publishedGraph
-                          : graph
-                        )?.nodes
-                          .filter((node) => node.type === "core.trigger.manual")
-                          .map((node) => (
-                            <option key={node.id} value={node.id}>
-                              {node.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
+                    <AutoField label={t("entry")} help={t("entryHelp")}>
+                      {manualEntries.length ? <select aria-label={t("entry")} className={control} value={entry} onChange={event => setEntry(event.target.value)}>
+                        {manualEntries.map(node => <option key={node.id} value={node.id}>{node.name || node.id}</option>)}
+                      </select> : <div className="space-y-3 rounded-md border bg-muted/30 p-3"><p role="status" className="text-sm text-muted-foreground">{t("entryMissing")}</p>{!readOnly && runRevision === "draft" && <Button type="button" variant="outline" onClick={() => {
+                        if (!graph) return;
+                        const created = newNode(graph, "core.trigger.manual", nodeTitle("core.trigger.manual"));
+                        change({...graph,nodes:[...graph.nodes,created]});setSelected(created.id);setInspectorOpen(true);setDialog(null);
+                      }}>{t("entryAdd")}</Button>}</div>}
+                    </AutoField>
                     <WorkflowRunInputs
                       schema={inputSchema}
                       value={input}

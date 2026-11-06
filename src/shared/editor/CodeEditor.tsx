@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../ui/loading-skeleton";
 import Editor, { DiffEditor } from "@monaco-editor/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
@@ -26,12 +27,12 @@ export function CodeEditor({ value, language, path, label, readOnly = false, ori
     models?.original.dispose();
     models?.modified.dispose();
   }, [comparing]);
-  if (originalValue !== undefined) return <DiffEditor originalModelPath={`${path}.original`} modifiedModelPath={path}
+  if (originalValue !== undefined) return <DiffEditor loading={<LoadingSkeleton variant="editor" />} originalModelPath={`${path}.original`} modifiedModelPath={path}
     original={originalValue} modified={value} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
     onMount={editor => { diffEditor.current = editor; subscription.current?.dispose(); subscription.current = editor.getModifiedEditor().onDidChangeModelContent(() => change.current(editor.getModifiedEditor().getValue())); }}
     options={{ occurrencesHighlight: "off", ariaLabel: label, editContext: false, readOnly, originalEditable: false, automaticLayout: true, renderSideBySide: true, useInlineViewWhenSpaceIsLimited: false,
       minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, wordWrap: "on", renderOverviewRuler: false }} />;
-  return <Editor path={path} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
+  return <Editor loading={<LoadingSkeleton variant="editor" />} path={path} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
     value={value} onChange={next => onChange(next ?? "")}
     options={{ occurrencesHighlight: "off", ariaLabel: label, readOnly, automaticLayout: true,
       // Use Monaco's established textarea input path for controlled React models.

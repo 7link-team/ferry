@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useRef,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { base,operationResource } from "../../shared/api/resource";
@@ -67,6 +68,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
     if (!confirm(rollback ? executionText("deployment.rollbackConfirm", { number: revision?.number }) : executionText("deployment.applyConfirm"))) return;
     void action(rollback ? "rollback" : "apply", { version: app.version, expected_hash: preview.expected_hash, preview_token: preview.preview_token, ...(preview.target_hashes ? { target_hashes: preview.target_hashes } : {}), ...(rollback ? { revision_id: revision?.id } : {}) });
   };
+  if (!app && !error) return <LoadingSkeleton variant="page" label={executionText("deployment.loading")} />;
   if (!app) return <div role={error ? "alert" : "status"}>{error || executionText("deployment.loading")}{error && <Button onClick={() => setReload((n) => n + 1)}>{executionText("shared.common.common.retry")}</Button>}</div>;
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
   return <div className="min-h-0 overflow-auto space-y-5 pb-6">

@@ -11,12 +11,14 @@
  * Filters, `page`, `page_size` and `at` (scroll offset) live in the query and
  * are written with replaceState, so typing in a filter never grows history.
  */
-import { useCallback,useEffect,useRef,useState,useSyncExternalStore } from "react";
+import { useEffect,useSyncExternalStore } from "react";
+import { announce,subscribe,snapshot } from "../shared/routing/url-state";
+export { useQueryValue,useScrollSync } from "../shared/routing/url-state";
 import { resourceName } from "../shared/api/resource";
-import { currentLocale,LOCALE_EVENT,localizedPath,pathLocale,stripLocalePrefix } from "../shared/i18n/locale";
+import { currentLocale,localizedPath,pathLocale,stripLocalePrefix } from "../shared/i18n/locale";
 import type { Route } from "../shared/routing/types";
 import { nav } from "./nav";
-import { beginRoute, commitRoute } from "../shared/api/progress";
+import { commitRoute } from "../shared/api/progress";
 
 export type { Route } from "../shared/routing/types";
 
@@ -29,6 +31,9 @@ export function parse(pathname = location.pathname, search = location.search): R
 }
 
 function parseRoute(pathname: string, search: string): Route {
+  const publicPage = pathname.replace(/\/$/, "");
+  if (["/login", "/register", "/initialize"].includes(publicPage)) return {workspace:`_${publicPage.slice(1)}`,group:"entry",item:publicPage.slice(1),mode:"list"};
+  if (pathname.replace(/\/$/, "") === "/workspaces") return { workspace: "_workspaces", group: "workspace", item: "join", mode: "list" };
   const segments = pathname.replace(/^\/+|\/+$/g, "").split("/");
   if (segments[0] === "platform") {
     return parseRoute('/_platform/' + segments.slice(1).join('/'), search);
@@ -92,6 +97,8 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   const groupKey = r.group === "build" && movedRepositoryItems.has(r.item) ? "repository" : r.group === "build" ? "workflow" : r.group;
   const item = nav.find(group => group.key === groupKey)?.items.find(item => item.key === r.item);
   for (const [key, value] of Object.entries(item?.params ?? {})) if (!query?.[key]) params.set(key, value);
+  if (["_login","_register","_initialize"].includes(r.workspace)) return localizedPath(`/${r.workspace.slice(1)}`, r.locale ?? currentLocale());
+  if (r.workspace === "_workspaces") return localizedPath("/workspaces", r.locale ?? currentLocale());
   if (r.workspace === "_account") return localizedPath("/account", r.locale ?? currentLocale());
   const base = r.workspace === "_platform" ? `/platform/${r.item}` :
     `/workspaces/${encodeURIComponent(r.workspace)}/${resourceName(item?.resource ?? r.item)}`;
@@ -99,27 +106,7 @@ export function href(route: Partial<Route>, query?: Record<string, string>) {
   return `${localizedPath(`${base}${tail}`, r.locale ?? currentLocale())}${search ? `?${search}` : ""}`;
 }
 
-const listeners = new Set<() => void>();
-const announce = () => {
-  beginRoute(snapshot());
-  listeners.forEach((fn) => fn());
-};
-const subscribe = (fn: () => void) => {
-  if (!listeners.size) {
-    window.addEventListener("popstate", announce);
-    window.addEventListener(LOCALE_EVENT, announce);
-  }
-  listeners.add(fn);
-  return () => {
-    listeners.delete(fn);
-    if (!listeners.size) {
-      window.removeEventListener("popstate", announce);
-      window.removeEventListener(LOCALE_EVENT, announce);
-    }
-  };
-};
-const snapshot = () => location.pathname + location.search;
-
+export const isPublicEntryPath = () => ["/login","/register","/initialize"].includes(stripLocalePrefix(location.pathname).replace(/\/$/, ""));
 export const isLoginPath = () => stripLocalePrefix(location.pathname).replace(/\/$/, "") === "/login";
 
 /** Only same-origin relative destinations; never recursively enter login. */
@@ -149,6 +136,7 @@ export function navigate(
   query?: Record<string, string>,
   options?: { replace?: boolean },
 ) {
+  window.dispatchEvent(new Event("ferry:before-navigate"));
   const target = href(route, query);
   if (target === snapshot()) return;
   history[options?.replace ? "replaceState" : "pushState"]({}, "", target);
@@ -159,74 +147,4 @@ export function useRoute(): Route {
   const url = useSyncExternalStore(subscribe, snapshot);
   useEffect(() => { commitRoute(url); }, [url]);
   return parse();
-}
-
-/** `useQueryValue("page", 1)` must give back a `number`, not the literal `1`. */
-type Widen<T> = T extends number ? number : T extends string ? string : T;
-
-/** A filter or pagination value that lives in the URL without adding history. */
-export function useQueryValue<T extends string | number>(
-  key: string,
-  fallback: T,
-): readonly [Widen<T>, (value: Widen<T>) => void] {
-  const read = useCallback((): T => {
-    const raw = new URLSearchParams(location.search).get(key);
-    if (raw === null) return fallback;
-    if (typeof fallback === "number")
-      return (/^\d+$/.test(raw) && Number(raw) > 0 ? Number(raw) : fallback) as T;
-    return raw as T;
-  }, [key, fallback]);
-  const [value, setValue] = useState<Widen<T>>(read as () => Widen<T>);
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (value === fallback) params.delete(key);
-    else params.set(key, String(value));
-    const search = params.toString();
-    const next = `${location.pathname}${search ? `?${search}` : ""}`;
-    if (next !== snapshot()) history.replaceState(history.state, "", next);
-  }, [key, value, fallback]);
-  useSyncExternalStore(subscribe, snapshot);
-  useEffect(() => setValue(read() as Widen<T>), [read]);
-  return [value, setValue] as const;
-}
-
-/**
- * Keeps a scroll container's offset in `?at=` so a shared link lands where the
- * sender was looking. Restoration waits for `ready` — the rows have to exist
- * before the offset means anything.
- *
- * ponytail: pixels, not a row key. Pixels are wrong if the viewer's page size
- * or font differs; switch to the first visible row's id if that shows up.
- */
-export function useScrollSync(ready: boolean) {
-  const ref = useRef<HTMLDivElement>(null);
-  const restored = useRef(false);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node) return;
-    let timer = 0;
-    const onScroll = () => {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const params = new URLSearchParams(location.search);
-        if (node.scrollTop > 8) params.set("at", String(Math.round(node.scrollTop)));
-        else params.delete("at");
-        const search = params.toString();
-        history.replaceState(history.state, "", `${location.pathname}${search ? `?${search}` : ""}`);
-      }, 150);
-    };
-    node.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      clearTimeout(timer);
-      node.removeEventListener("scroll", onScroll);
-    };
-  }, []);
-  useEffect(() => {
-    const node = ref.current;
-    if (!node || !ready || restored.current) return;
-    restored.current = true;
-    const at = Number(new URLSearchParams(location.search).get("at") ?? 0);
-    if (at > 0) node.scrollTo({ top: at });
-  }, [ready]);
-  return ref;
 }

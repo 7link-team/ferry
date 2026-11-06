@@ -16,7 +16,24 @@ pub mod platform_state {
         pub page_scripts: Option<String>,
         pub mail_config: Option<String>,
         pub monitor_config: Option<String>,
+        pub login_security: Option<String>,
         pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod login_guards {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "login_guards")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub count: i64,
+        pub payload: Option<String>,
+        pub expires_at: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

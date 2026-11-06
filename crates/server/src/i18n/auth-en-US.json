@@ -97,5 +97,9 @@
   "mail.testBody": "This is an email configuration test message.",
   "mail.codeSubject": "Registration verification code",
   "mail.codeBody": "Your registration code is {code}. It expires in 10 minutes. Do not share it.",
-  "monitor.nodeChanged": "The responding server differs from the displayed node. Refresh the statistics and retry; no statistics were reset."
+  "monitor.nodeChanged": "The responding server differs from the displayed node. Refresh the statistics and retry; no statistics were reset.",
+  "auth.captchaRequired": "Complete a new security verification before signing in.",
+  "auth.loginRateLimit": "Too many login attempts. Please try again in a minute.",
+  "auth.loginGuardInvalid": "Check the verification method, site key, secret key and site hostname.",
+  "auth.captchaUnavailable": "The verification service is unavailable. Please try again later."
 }

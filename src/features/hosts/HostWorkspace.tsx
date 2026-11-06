@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useTerminalPalette } from "./terminal-palette";
 import { ArrowLeft,Columns2,FolderOpen,Plus,Rows2,SquareTerminal,X } from "lucide-react";
 import { Tabs } from "radix-ui";
@@ -104,7 +105,7 @@ export function HostWorkspace({ navigation, workspace, hostId, permissions, head
         {canClose && <Button variant="ghost" size="icon" className="size-7" aria-label={hostRepositoryText("host.078")} title={hostRepositoryText("host.078")} onClick={() => closePane(node.id)}><X className="size-4" /></Button>}
       </div>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto p-2">
-        {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<p role="status">{hostRepositoryText("host.079")}</p>}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
+        {node.opened.includes("terminal") && <Tabs.Content value="terminal" forceMount className={node.kind === "terminal" ? "h-full min-h-0" : "hidden"}><Suspense fallback={<LoadingSkeleton variant="editor" label={hostRepositoryText("host.079")} />}><HostTerminal workspace={workspace} hostId={hostId} {...(node.directory ? { directory: node.directory } : {})} /></Suspense></Tabs.Content>}
         {node.opened.includes("files") && <Tabs.Content value="files" forceMount className={node.kind === "files" ? "h-full min-h-0" : "hidden"}><HostFiles active={tab.id === activeTab && node.id === tab.activePane && node.kind === "files"} workspace={workspace} hostId={hostId} canTerminal={canTerminal} initialPath={node.directory ?? "/"} onOpenTerminal={directory => split(node.id, "horizontal", "terminal", directory)} /></Tabs.Content>}
       </div>
     </section></Tabs.Root>;

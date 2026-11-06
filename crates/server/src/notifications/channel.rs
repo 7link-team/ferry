@@ -164,6 +164,9 @@ mod tests {
         });
         let notice = super::super::webhook::Notice {
             title: "Push",
+            accent: None,
+            field_links: vec![],
+            field_accents: vec![],
             fields: vec![],
             generic: json!({"event":"push","sha":"fixture"}),
         };

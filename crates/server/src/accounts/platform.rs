@@ -238,6 +238,64 @@ const USER_SPEC: Spec = Spec {
     sortable: &["name", "email", "created_at", "last_login_at"],
     default_sort: "-created_at",
 };
+pub async fn list_activity(
+    State(s): State<AppState>,
+    admin: Admin,
+    Query(mut raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    use crate::entities::activity;
+    const SPEC: Spec = Spec {
+        search: &["actor_name", "resource", "action"],
+        filters: &["workspace_id", "actor_id", "resource", "action"],
+        sortable: &["created_at"],
+        default_sort: "-created_at",
+    };
+    let scope = raw.remove("scope").unwrap_or_default();
+    let mut select = activity::Entity::find();
+    match scope.as_str() {
+        "" => {}
+        "platform" => select = select.filter(activity::Column::WorkspaceId.eq(0_i64)),
+        "workspace" => select = select.filter(activity::Column::WorkspaceId.ne(0_i64)),
+        _ => {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("request.query"),
+            ));
+        }
+    }
+    let query = ListQuery::parse(&SPEC, &raw)?;
+    let (rows, total) = resource::global_list::<activity::Entity, activity::Model>(
+        &s.db, &admin, &SPEC, select, &query,
+    )
+    .await?;
+    let ids: Vec<i64> = rows
+        .iter()
+        .map(|r| r.workspace_id)
+        .filter(|id| *id != 0)
+        .collect();
+    let names: HashMap<i64, String> = if ids.is_empty() {
+        HashMap::new()
+    } else {
+        workspaces::Entity::find()
+            .select_only()
+            .columns([workspaces::Column::Id, workspaces::Column::Name])
+            .filter(workspaces::Column::Id.is_in(ids))
+            .into_tuple::<(i64, String)>()
+            .all(&s.db)
+            .await?
+            .into_iter()
+            .collect()
+    };
+    let items: Vec<Value> = rows.iter().map(|r| json!({
+        "id":Id::from(r.id),"workspace_id":Id::from(r.workspace_id),"workspace_name":names.get(&r.workspace_id),
+        "actor_id":Id::from(r.actor_id),"actor_name":crate::hosts::activity_actor_name(r.actor_id,&r.actor_name),
+        "action":r.action,"resource":r.resource,"resource_id":Id::from(r.resource_id),
+        "details":serde_json::from_str::<Value>(&r.details).unwrap_or(json!({})),"created_at":r.created_at
+    })).collect();
+    Ok(Json(
+        json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}),
+    ))
+}
 #[derive(FromQueryResult)]
 struct PublicUser {
     id: i64,
@@ -680,6 +738,14 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
     view.as_object_mut()
         .unwrap()
         .extend(storage.view().as_object().unwrap().clone());
+    view["storage_local_path"] = json!(std::path::absolute(&s.data_dir)?.display().to_string());
+    view.as_object_mut().unwrap().extend(
+        super::login_guard::Configuration::read(&s, row.login_security.as_deref())?
+            .view()
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
     Ok(Json(view))
 }
 pub async fn server_nodes(
@@ -755,6 +821,8 @@ pub async fn update_settings(
         super::platform_scripts::Configuration::update(row.page_scripts.as_deref(), &body.oauth)?;
     let mail_config =
         super::mail::Configuration::update(&s, row.mail_config.as_deref(), &body.oauth)?;
+    let login_security =
+        super::login_guard::Configuration::update(&s, row.login_security.as_deref(), &body.oauth)?;
     let monitor_limits = crate::platform_monitor::retention::Limits::update(
         row.monitor_config.as_deref(),
         &body.oauth,
@@ -786,6 +854,10 @@ pub async fn update_settings(
     }
     platform_state::Entity::update_many()
         .col_expr(platform_state::Column::FooterHtml, Expr::value(footer_html))
+        .col_expr(
+            platform_state::Column::LoginSecurity,
+            Expr::value(login_security),
+        )
         .col_expr(
             platform_state::Column::PageScripts,
             Expr::value(page_scripts),

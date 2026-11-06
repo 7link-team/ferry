@@ -1,3 +1,5 @@
+import { useQueryValue, useScrollSync } from "../router";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext, FormActions } from "../../shared/forms/auto-form/form-actions";
 import { workflowText, commonText,configText,optionText,useCommonTranslation } from "../../shared/i18n/i18n";
@@ -48,7 +50,7 @@ import { RunnerConnection } from "../pages/RunnerConnection";
 import { href,navigate,useRoute } from "../router";
 
 /** The side-menu group last opened in each grouped form during this session. */
-const openGroups = new Map<string, string>();
+
 
 function useOptions(source: Options | undefined) {
   const [revision, setRevision] = useState(0);
@@ -116,24 +118,22 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const protectedRow = !creating && !!config.readOnly?.(draft);
   const readOnly = route.mode === "view" || protectedRow;
   const [loading, setLoading] = useState(!creating || !!copyId);
+  const scrollRef = useScrollSync<HTMLFormElement>(!loading);
   const [saving, setSaving] = useState(false);
   const editorForm = useRef<HTMLFormElement>(null);
   const [pendingAction, setPendingAction] = useState<RowAction<T>>();
   const [pendingDelete, setPendingDelete] = useState<RowAction<T>>();
   const [pendingActionRow, setPendingActionRow] = useState<T>();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Remembered per form, so a save that remounts the form keeps the open group.
-  const [group, setGroupState] = useState(() => openGroups.get(config.resource) ?? "");
-  const setGroup = (name: string) => {
-    openGroups.set(config.resource, name);
-    setGroupState(name);
-  };
+  const [group, setGroup] = useQueryValue("section", "");
+  const [formTab, setFormTab] = useQueryValue("form_tab", "");
   const [templateDialog, setTemplateDialog] = useState<"import" | "export" | null>(() => new URLSearchParams(location.search).has("template") && pipelineWorkspace ? "import" : null);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
   const [templateError, setTemplateError] = useState("");
-  const [editorMode, setEditorMode] = useState<"visual" | "yaml">("visual");
+  const [editorView, setEditorMode] = useQueryValue("editor", "visual");
+  const editorMode = editorView === "yaml" ? "yaml" : "visual";
   const [unavailableOptions, setUnavailableOptions] = useState<Record<string, boolean>>({});
   const reportOptions = useCallback((key: string, blocked: boolean) => {
     setUnavailableOptions(current => current[key] === blocked ? current : { ...current, [key]: blocked });
@@ -272,12 +272,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     }
   };
 
-  if (loading)
-    return (
-      <p className="text-muted-foreground">
-        <Loader2 className="mr-2 inline size-4 animate-spin" />
-        {commonText("common.loading")}</p>
-    );
+  if (loading) return <div className="min-w-0">{pipelineWorkspace && <div className="flex justify-end border-b px-4 py-2">{headerActions}</div>}<LoadingSkeleton variant={config.editor ? "editor" : "form"} /></div>;
 
   const visibleViewActions = (config.viewActions ?? []).filter(action => (!action.permission || permissions.has(action.permission)) && (!action.when || action.when(draft as T)));
   const renderViewAction = (action: NonNullable<FormConfig<T>["viewActions"]>[number]) => action.to ? <Button key={action.label} variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={configText(action.label, action.labelKey)} title={action.iconOnly ? configText(action.label, action.labelKey) : undefined} asChild><a href={href({...route,...action.to(draft as T)},action.query?.(draft as T))}>{action.iconOnly ? action.icon : configText(action.label, action.labelKey)}</a></Button> : <Button key={action.label} type="button" variant={action.iconOnly ? "ghost" : "outline"} size={action.iconOnly ? "icon" : "default"} aria-label={configText(action.label, action.labelKey)} title={action.iconOnly ? configText(action.label, action.labelKey) : undefined} disabled={saving} onClick={async()=>{
@@ -362,7 +357,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   return (
-    <AutoForm className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
+    <AutoForm ref={scrollRef} className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-6")} onSubmit={submit}>
       {hostConnectionTabs}
       {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
       {error && (
@@ -412,7 +407,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         <div className="min-w-0 flex-1 space-y-6">
           {groupContent ?? <>
           {sections.filter(({ section }) => !section.tab).map(({ section, index }) => renderSection(section, index))}
-          {tabs.length > 0 && <Tabs key={active} defaultValue={tabs[0]!.section.tab}>
+          {tabs.length > 0 && <Tabs key={active} value={tabs.some(({section})=>section.tab===formTab)?formTab:tabs[0]!.section.tab} onValueChange={setFormTab}>
             <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{configText(section.tab, section.tabKey)}</TabsTrigger>)}</TabsList>
             {tabs.map(({ section, index }) => <TabsContent key={section.tab} value={section.tab!} className="pt-2">{renderSection(section, index)}</TabsContent>)}
           </Tabs>}
@@ -470,7 +465,7 @@ function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report,
   return <section aria-label={commonText("form.fromTemplate")} className={cn(compact ? "flex flex-wrap items-center gap-3" : listMode ? "space-y-4" : "space-y-4 rounded-md border p-4")}>
     {!listMode && <h2 className={cn("font-medium", compact && "text-sm")}>{commonText("form.fromTemplateHeading")}</h2>}
     {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label={commonText("form.templateList")}>
-      {optionsLoading && <p className="py-3 text-sm text-muted-foreground">{commonText("form.loadingTemplates")}</p>}
+      {optionsLoading && <LoadingSkeleton variant="inline" label={commonText("form.loadingTemplates")} />}
       {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
       {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{optionText(option)}</button>)}
     </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>{commonText("common.template")}</span>} className="flex min-w-0 flex-col gap-2 text-sm">
@@ -612,7 +607,7 @@ function Field<T>({
     return <SecretField field={field} value={value} stored={stored} creating={creating}
       asText={asText} readOnly={readOnly} draft={draft} permissions={permissions} onChange={onChange} />;
 
-  if (optionsLoading && field.type !== "text") return <Wrapper field={field}><p role="status" className="text-sm text-muted-foreground">{commonText("form.loadingOptions", { name: field.label })}</p></Wrapper>;
+  if (optionsLoading && field.type !== "text") return <Wrapper field={field}><LoadingSkeleton variant="inline" label={commonText("form.loadingOptions", { name: field.label })} /></Wrapper>;
 
   if (field.type === "custom" && field.render) {
     const content = field.render({ workspace, draft, readOnly, onPatch: onChange, onValidityChange: reportManifest });

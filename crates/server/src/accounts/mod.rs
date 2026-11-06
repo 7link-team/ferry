@@ -1,4 +1,5 @@
 pub(crate) mod auth;
+pub(crate) mod login_guard;
 pub(crate) mod mail;
 pub(crate) mod platform;
 pub(crate) mod platform_scripts;

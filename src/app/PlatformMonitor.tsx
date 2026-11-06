@@ -1,3 +1,5 @@
+import { AutoForm } from "../shared/forms/auto-form";
+import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 import { api, errorText } from "../shared/api/api";
@@ -7,7 +9,7 @@ import { AutoTable } from "../shared/tables/auto-table";
 import { Button } from "../shared/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../shared/ui/tabs";
 import { Input } from "../shared/ui/input";
-import { useQueryValue } from "./router";
+import { useQueryValue, useScrollSync } from "./router";
 import { PlatformFileCatalog } from "./PlatformFileCatalog";
 import { DeleteConfirmDialog } from "../shared/ui/DeleteConfirmDialog";
 
@@ -39,14 +41,16 @@ export function PlatformMonitor({ section }: { section: string }) {
   const active = monitorSections.includes(section as typeof monitorSections[number]) ? section : "database";
   const [period, setPeriod] = useQueryValue("period", "month");
   const [refresh, setRefresh] = useState(0);
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useQueryValue("tab", "overview");
   const [pending, setPending] = useState(false);
   const [data, setData] = useState<Snapshot>();
   const [error, setError] = useState("");
   const [resetSql, setResetSql] = useState(false);
   const [samples, setSamples] = useState<Row[]>([]);
-  const [pattern, setPattern] = useState("*");
-  const [cursor, setCursor] = useState("0");
+  const [appliedPattern, setAppliedPattern] = useQueryValue("pattern", "*");
+  const [cursor, setCursor] = useQueryValue("cursor", "0");
+  const [pattern, setPattern] = useState(appliedPattern);
+  useEffect(()=>setPattern(appliedPattern),[appliedPattern]);
   const [table, setTable] = useState("");
   const [tableRows, setTableRows] = useState<{ items: Row[]; columns: string[] }>();
   const sequence = useRef(0);
@@ -54,15 +58,16 @@ export function PlatformMonitor({ section }: { section: string }) {
     const current = ++sequence.current;
     setPending(true);
     try {
-      const query = new URLSearchParams({ period, pattern, cursor });
+      const query = new URLSearchParams({ period, pattern:appliedPattern, cursor });
       const value = await api<Snapshot>(`/platform/monitor/${active}?${query}`);
       if (current !== sequence.current) return;
       setData(value); setError("");
       if (active === "database" || active === "redis") setSamples(rows => [...rows.slice(-29), { label: new Date().toLocaleTimeString(), value: active === "database" ? value.pool?.active ?? 0 : Number(value.info?.used_memory ?? 0) }]);
     } catch (cause) { if (current === sequence.current) setError(errorText(cause)); }
     finally { if (current === sequence.current) setPending(false); }
-  }, [active, period, pattern, cursor]);
-  useEffect(() => { setData(undefined); setSamples([]); setTableRows(undefined); void load(); return () => { sequence.current++; }; }, [load]);
+  }, [active, period, appliedPattern, cursor]);
+  useEffect(() => { setData(undefined); setSamples([]); setTableRows(undefined); }, [active]);
+  useEffect(() => { void load(); return () => { sequence.current++; }; }, [load]);
   const remaining = useAutoRefresh(refresh, load, pending);
   useEffect(() => {
     const controller = new AbortController();
@@ -71,7 +76,8 @@ export function PlatformMonitor({ section }: { section: string }) {
     return () => controller.abort();
   }, [table, active]);
   const daily = (data?.daily ?? []).map((row: Row) => ({ ...row, label: new Date(Number(row.event_day) * 86400000).toISOString().slice(5, 10) }));
-  return <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+  const scrollRef = useScrollSync(!!data);
+  return <div ref={scrollRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
     {resetSql&&<DeleteConfirmDialog action={t("resetCurrentSql")} target={t("sql")} description={t("resetSqlHelp")} onClose={()=>setResetSql(false)} onConfirm={async()=>{sequence.current++;await api('/platform/monitor/database/sql/reset',{method:'POST',body:JSON.stringify({instance_id:data?.instance_id})});await load();}}/>}
     <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -82,7 +88,7 @@ export function PlatformMonitor({ section }: { section: string }) {
         {!!refresh && <span role="timer" className="text-sm tabular-nums">{remaining}s</span>}
       </div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {!data && pending && <p role="status">{commonText("common.loading")}</p>}
+      {!data && pending && <LoadingSkeleton variant="page" />}
       {data && active === "database" && <Tabs value={tab} onValueChange={setTab} className="min-w-0">
         <TabsList aria-label={t(active)} className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto"><TabsTrigger value="overview">{t("overview")}</TabsTrigger><TabsTrigger value="pools">{t("nodePools")}</TabsTrigger><TabsTrigger value="sql">{t("sql")}</TabsTrigger><TabsTrigger value="tables">{t("tables")}</TabsTrigger><TabsTrigger value="inspect">{t("inspect")}</TabsTrigger></TabsList>
         <TabsContent value="overview" className="space-y-5 pt-3">
@@ -117,7 +123,7 @@ export function PlatformMonitor({ section }: { section: string }) {
           </>}
           </TabsContent><TabsContent value="keys" className="space-y-5 pt-3">
             {!data.connected ? <p role="status">{t(data.configured ? "redisUnavailable" : "redisDisabled")}</p> : <>
-            <div className="flex flex-wrap items-center gap-2"><label className="text-sm" htmlFor="redis-pattern">{t("keyPattern")}</label><Input id="redis-pattern" className="w-56" value={pattern} maxLength={200} onChange={event => { setPattern(event.target.value); setCursor("0"); }} /><Button variant="outline" size="sm" disabled={pending || data.cursor === "0"} onClick={() => setCursor(String(data.cursor))}>{t("nextScan")}</Button></div>
+            <AutoForm onSubmit={event=>{event.preventDefault();if(pattern===appliedPattern&&cursor==="0")void load();else {setAppliedPattern(pattern);setCursor("0");}}} className="flex flex-wrap items-center gap-2"><label className="text-sm" htmlFor="redis-pattern">{t("keyPattern")}</label><Input id="redis-pattern" className="w-56" value={pattern} maxLength={200} onChange={event => setPattern(event.target.value)} /><Button type="submit" variant="outline" size="sm" disabled={pending}>{commonText("common.search")}</Button><Button type="button" variant="outline" size="sm" disabled={pending || pattern!==appliedPattern || !data.cursor || String(data.cursor)==="0"} onClick={() => setCursor(String(data.cursor))}>{t("nextScan")}</Button><span role="status" className="text-sm text-muted-foreground">{t(pending?"scanPending":String(data.cursor)==="0"?"scanComplete":"scanMore")}</span></AutoForm>
             <Data title={t("keys")} rows={data.keys ?? []} columns={["key", "type", "ttl"]} />
             <p className="text-sm text-muted-foreground">{t("redisHelp")}</p>
             </>}

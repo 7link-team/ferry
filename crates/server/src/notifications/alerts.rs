@@ -466,6 +466,9 @@ async fn deliver(
             );
             let notice = crate::notifications::webhook::Notice {
                 title: &title,
+                accent: None,
+                field_links: vec![],
+                field_accents: vec![],
                 fields: vec![
                     (i18n::message("alerts.stateLabel"), state),
                     (i18n::message("alerts.kindLabel"), kind),

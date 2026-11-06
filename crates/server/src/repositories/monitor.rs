@@ -970,7 +970,7 @@ pub async fn receive(
             crate::i18n::Message::new("repository.monitor.eventJsonInvalid"),
         )
     })?;
-    let Some(event) = normalize(&connection.provider, &headers, &payload) else {
+    let Some(mut event) = normalize(&connection.provider, &headers, &payload) else {
         return Ok(StatusCode::NO_CONTENT);
     };
     let selected = config.events.contains(&event.event)
@@ -1024,6 +1024,26 @@ pub async fn receive(
     let event_id = record(&s, &tx, &connection, &config, &event, &delivery_key).await?;
     tx.commit().await?;
     if let Some(event_id) = event_id {
+        if event.event == "push" && event.detail.get("line_stats").is_none() {
+            // Enrichment never holds the workspace transaction or fails delivery.
+            let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                if let Ok(access) =
+                    crate::repositories::auth::MonitorAccess::load(&s, &connection).await
+                {
+                    polling::enrich_stats(&access, &mut event).await;
+                }
+            })
+            .await;
+            events::Entity::update_many()
+                .col_expr(
+                    events::Column::Detail,
+                    Expr::value(event.detail.to_string()),
+                )
+                .filter(events::Column::WorkspaceId.eq(connection.workspace_id))
+                .filter(events::Column::Id.eq(event_id))
+                .exec(&s.db)
+                .await?;
+        }
         deliver(&s, &connection, &config, event_id, &event).await?;
     }
     Ok(StatusCode::NO_CONTENT)
@@ -1125,6 +1145,38 @@ async fn deliver(
     Ok(())
 }
 
+fn reference_label(event: &Event) -> &'static str {
+    if event.event.starts_with("tag.")
+        || event.reference.starts_with("refs/tags/")
+        || event.detail["reference_type"] == "tag"
+    {
+        "repository.monitor.tagLabel"
+    } else {
+        "repository.monitor.branchLabel"
+    }
+}
+
+fn notice_accent(event: &str) -> crate::notifications::webhook::Accent {
+    use crate::notifications::webhook::Accent;
+    match event {
+        "branch.deleted" | "tag.deleted" | "repository.deleted" => Accent::Red,
+        "branch.created" | "tag.created" | "repository.created" | "merge" => Accent::Green,
+        "pull_request" => Accent::Purple,
+        _ => Accent::Blue,
+    }
+}
+
+fn notice_action(event: &Event) -> String {
+    // Keep sampling provenance in the event record, not the outbound message.
+    if crate::i18n::decode_stored(&event.action)
+        .is_some_and(|message| message.key.starts_with("repository.monitor.detected"))
+    {
+        detail::label(&event.event)
+    } else {
+        crate::i18n::display_stored(&event.action)
+    }
+}
+
 async fn deliver_notice(
     connection: &connections::Model,
     webhook: &str,
@@ -1143,8 +1195,8 @@ async fn deliver_notice(
                     crate::i18n::Message::new("repository.monitor.notificationClient"),
                 )
             })?;
-        let title = format!("{}：{}", detail::label(&event.event), event.repository);
-        let action = crate::i18n::display_stored(&event.action);
+        let title = detail::label(&event.event);
+        let action = notice_action(event);
         let detail = detail::display(&event.detail);
         let mut fields: Vec<(String, String)> = [
             (
@@ -1157,7 +1209,7 @@ async fn deliver_notice(
             (
                 &crate::i18n::render(
                     crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.referenceLabel"),
+                    &crate::i18n::Message::new(reference_label(event)),
                 ),
                 &event.reference,
             ),
@@ -1192,6 +1244,30 @@ async fn deliver_notice(
         data["detail"] = detail;
         let notice = crate::notifications::webhook::Notice {
             title: &title,
+            accent: Some(notice_accent(&event.event)),
+            field_accents: vec![
+                (
+                    crate::i18n::render(
+                        crate::i18n::current_locale(),
+                        &crate::i18n::Message::new("repository.monitor.addedLinesLabel"),
+                    ),
+                    crate::notifications::webhook::Accent::Green,
+                ),
+                (
+                    crate::i18n::render(
+                        crate::i18n::current_locale(),
+                        &crate::i18n::Message::new("repository.monitor.deletedLinesLabel"),
+                    ),
+                    crate::notifications::webhook::Accent::Red,
+                ),
+            ],
+            field_links: vec![(
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
+                ),
+                detail::field(&event.detail, &["/repository_url", "/repository/url"], 1000),
+            )],
             fields: fields.clone(),
             generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data,"notification":{"title":title,"fields":fields}}),
         };
@@ -1205,6 +1281,83 @@ async fn deliver_notice(
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn notice_reference_and_line_statistics_are_explicit_in_all_locales() {
+        use super::*;
+        for locale in crate::i18n::Locale::ALL {
+            crate::i18n::with_locale(locale, async {
+                for (kind, reference, detail, expected) in [
+                    ("push", "main", json!({}), "repository.monitor.branchLabel"),
+                    (
+                        "tag.created",
+                        "v1",
+                        json!({}),
+                        "repository.monitor.tagLabel",
+                    ),
+                    (
+                        "push",
+                        "refs/tags/v2",
+                        json!({}),
+                        "repository.monitor.tagLabel",
+                    ),
+                    (
+                        "push",
+                        "v3",
+                        json!({"reference_type":"tag"}),
+                        "repository.monitor.tagLabel",
+                    ),
+                ] {
+                    let event = Event {
+                        event: kind.into(),
+                        repository: "team/app".into(),
+                        reference: reference.into(),
+                        actor: String::new(),
+                        action: String::new(),
+                        detail,
+                    };
+                    assert_eq!(reference_label(&event), expected);
+                    assert!(
+                        !crate::i18n::render(
+                            locale,
+                            &crate::i18n::Message::new(reference_label(&event))
+                        )
+                        .contains(" / ")
+                    );
+                    assert!(!detail::label(kind).contains("team/app"));
+                }
+                let unknown = detail::lines(&json!({}));
+                let polled = Event {
+                    event: "push".into(),
+                    repository: "team/app".into(),
+                    reference: "main".into(),
+                    actor: String::new(),
+                    action: crate::i18n::store_message(&crate::i18n::Message::new(
+                        "repository.monitor.detectedPush",
+                    )),
+                    detail: json!({"source":"polling"}),
+                };
+                assert_eq!(notice_action(&polled), detail::label("push"));
+                assert_ne!(
+                    notice_action(&polled),
+                    crate::i18n::display_stored(&polled.action)
+                );
+                let added = crate::i18n::render(
+                    locale,
+                    &crate::i18n::Message::new("repository.monitor.addedLinesLabel"),
+                );
+                assert!(!unknown.iter().any(|(key, _)| key == &added));
+                let known = detail::lines(&json!({"line_stats":{"additions":12,"deletions":0}}));
+                assert!(
+                    known
+                        .iter()
+                        .any(|(key, value)| key == &added && value.contains("12"))
+                );
+                assert_eq!(known.len(), 2);
+            })
+            .await;
+        }
+    }
+
     #[test]
     fn notification_channels_preserve_legacy_and_validate_independent_configuration() {
         use super::*;

@@ -8,11 +8,13 @@ import { commonText,useCommonTranslation } from "../shared/i18n/i18n";
  * creation continue to use this same entry form.
  */
 import { Loader2 } from "lucide-react";
-import { useEffect,useState } from "react";
+import { Dialog } from "radix-ui";
+import { useEffect,useRef,useState } from "react";
 import { api,ApiError,errorText } from "../shared/api/api";
 import { Button } from "../shared/ui/button";
 import { Input } from "../shared/ui/input";
-import { navigate,parse } from "./router";
+import { navigate,useRoute } from "./router";
+import { LoginChallenge, type LoginChallengeData, type LoginProof } from "./LoginChallenge";
 
 type Step = "setup" | "sign-in" | "register" | "workspace";
 
@@ -23,7 +25,13 @@ if (desktopSetupToken) history.replaceState(history.state, "", location.pathname
 
 export function Entry({ onReady, error: outerError, signedIn = false, initialize = false }: { onReady: () => void; error: string; signedIn?: boolean; initialize?: boolean }) {
   useCommonTranslation();
-  const [step, setStep] = useState<Step>(initialize ? "setup" : signedIn ? "workspace" : "sign-in");
+  const route = useRoute();
+  const [step, setStepState] = useState<Step>(initialize || route.workspace === "_initialize" ? "setup" : signedIn ? "workspace" : route.workspace === "_register" ? "register" : "sign-in");
+  const setStep = (value: Step) => {
+    setStepState(value);
+    navigate({workspace:({setup:"_initialize","sign-in":"_login",register:"_register",workspace:"_workspaces"})[value]}, {});
+  };
+  useEffect(()=>{setStepState(initialize || route.workspace === "_initialize" ? "setup" : signedIn ? "workspace" : route.workspace === "_register" ? "register" : "sign-in");},[route.workspace,signedIn,initialize]);
   const [setup, setSetup] = useState<SetupStatus>();
   const [token, setToken] = useState(desktopSetupToken);
   const [attempt, setAttempt] = useState(0);
@@ -33,11 +41,24 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
       if (!live) return;
       setSetup(status);
       if (!status.required) { desktopSetupToken = ""; setToken(""); }
-      if (status.required && (!signedIn || initialize)) setStep("setup");
+      if (status.required && (!signedIn || initialize)) {setStepState("setup");navigate({workspace:"_initialize"}, {}, {replace:true});}
     }).catch(cause => { if (live) setError(errorText(cause)); });
     return () => { live = false; };
   }, [signedIn, initialize, attempt]);
   const [busy, setBusy] = useState(false);
+  const [challenge,setChallenge]=useState<LoginChallengeData>();
+  const [proof,setProof]=useState<LoginProof>({});
+  const [loginEmail,setLoginEmail]=useState("");
+  const [pendingLogin,setPendingLogin]=useState<Record<string,string>>();
+  const [verificationError,setVerificationError]=useState("");
+  const [verified,setVerified]=useState(false);
+  const verificationInFlight=useRef(false);
+  const refreshChallenge=async(email:string)=>{
+    const value=await api<LoginChallengeData>("/sessions/challenge",{method:"POST",body:JSON.stringify({email})});
+    setProof({});setChallenge(value.required?value:undefined);
+    setVerified(false);
+    return value;
+  };
   const [error, setError] = useState(outerError);
   const [codeBusy,setCodeBusy]=useState(false);
   const [codeRetryAt,setCodeRetryAt]=useState(0);
@@ -59,6 +80,39 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
 
   const fields = (form: HTMLFormElement) =>
     Object.fromEntries(new FormData(form).entries()) as Record<string, string>;
+
+  const closeChallenge=()=>{setChallenge(undefined);setPendingLogin(undefined);setProof({});setVerificationError("");setVerified(false);};
+  const signIn=async(body:Record<string,string>,verificationToken?:string)=>{
+    try {
+      await api("/sessions",{method:"POST",body:JSON.stringify({...body,...(verificationToken?{login_verification_token:verificationToken}:{})})});
+      closeChallenge();onReady();
+    }catch(cause){
+      if(cause instanceof ApiError && cause.status===428){
+        const value=await refreshChallenge(body.email??"");
+        if(value.required){setLoginEmail(body.email??"");setPendingLogin(body);setVerificationError(verificationToken?commonText("resource-domain:loginGuard.retryChallenge"):"");return;}
+      }
+      closeChallenge();throw cause;
+    }
+  };
+  const verifyChallenge=(candidate:LoginProof=proof)=>{
+    if(busy||verificationInFlight.current||!pendingLogin)return;
+    verificationInFlight.current=true;
+    void run(async()=>{
+      setVerificationError("");
+      let result:{login_verification_token:string};
+      try{
+        result=await api("/sessions/challenge/verify",{method:"POST",body:JSON.stringify({email:loginEmail,...candidate})});
+      }catch(cause){
+        setVerificationError(errorText(cause));
+        if(cause instanceof ApiError && cause.status===428){
+          try{await refreshChallenge(loginEmail);setVerificationError(commonText("resource-domain:loginGuard.retryChallenge"));}catch(refreshError){setVerificationError(errorText(refreshError));}
+        }
+        return;
+      }
+      setVerified(true);
+      await signIn(pendingLogin,result.login_verification_token);
+    }).finally(()=>{verificationInFlight.current=false;});
+  };
 
   return (
     <div className="grid h-full place-items-center p-6">
@@ -126,6 +180,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
           <AutoForm
             className="space-y-3"
             columns={1}
+            onChange={event=>{const input=event.target;if(input instanceof HTMLInputElement && input.name==="email" && input.value!==loginEmail){setLoginEmail(input.value);setProof({});setChallenge(undefined);}}}
             fields={{
               email: { name: commonText("auth.email"), type: "email", required: true, config: { autoComplete: "username", placeholder: commonText("auth.email") } },
               password: { name: commonText("auth.password"), type: "password", required: true, config: { autoComplete: "current-password", placeholder: commonText("auth.password") } },
@@ -134,8 +189,12 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
               event.preventDefault();
               const body = fields(event.currentTarget);
               void run(async () => {
-                await api("/sessions", { method: "POST", body: JSON.stringify(body) });
-                onReady();
+                const email=body.email??"";
+                setLoginEmail(email);
+                setVerificationError("");
+                const value=await refreshChallenge(email);
+                if(value.required){setPendingLogin(body);return;}
+                await signIn(body);
               });
             }}
           >
@@ -151,6 +210,21 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
             {setup?.required && <Button type="button" variant="link" className="w-full" onClick={() => setStep("setup")}>{commonText("auth.setupTitle")}</Button>}
           </AutoForm>
         )}
+
+        {challenge?.required && pendingLogin && <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)closeChallenge();}}><Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(25rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-md border bg-background p-5 shadow-lg">
+            <Dialog.Title className="text-base font-semibold">{commonText("resource-domain:loginGuard.title")}</Dialog.Title>
+            <Dialog.Description className="text-sm text-muted-foreground">{commonText("resource-domain:loginGuard.dialogHelp")}</Dialog.Description>
+            {verificationError&&<p role="alert" className="text-sm text-destructive">{verificationError}</p>}
+            <LoginChallenge challenge={challenge} onProof={setProof} onVerify={verifyChallenge} busy={busy} onRefresh={()=>void run(async()=>{setVerificationError("");await refreshChallenge(loginEmail);})} />
+            {busy&&<p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />{commonText(verified?"resource-domain:loginGuard.verified":"resource-domain:loginGuard.verifying")}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={busy} onClick={closeChallenge}>{commonText("common.cancel")}</Button>
+              <Button type="button" disabled={busy||(!proof.login_challenge_answer&&!proof.turnstile_token)} onClick={()=>verifyChallenge()}>{commonText("resource-domain:loginGuard.verify")}</Button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal></Dialog.Root>}
 
         {step === "register" && (
           <AutoForm
@@ -252,5 +326,5 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
 
 /** Only rewrites the workspace segment, so a deep link keeps its destination. */
 function enter(workspaceId: string) {
-  navigate({ ...parse(), workspace: workspaceId }, Object.fromEntries(new URLSearchParams(location.search)), { replace: true });
+  navigate({ workspace: workspaceId,group:"host",item:"hosts",mode:"list" }, {}, { replace: true });
 }

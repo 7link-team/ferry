@@ -97,5 +97,9 @@
   "mail.testBody": "这是一封邮箱配置测试邮件。",
   "mail.codeSubject": "注册邮箱验证码",
   "mail.codeBody": "您的注册验证码是：{code}。10 分钟内有效，请勿泄露。",
-  "monitor.nodeChanged": "响应服务器与当前展示节点不同，请刷新统计后重试；未重置任何节点。"
+  "monitor.nodeChanged": "响应服务器与当前展示节点不同，请刷新统计后重试；未重置任何节点。",
+  "auth.captchaRequired": "请完成新的安全验证后再登录。",
+  "auth.loginRateLimit": "登录请求过于频繁，请一分钟后再试。",
+  "auth.loginGuardInvalid": "请检查验证码方式、Site Key、Secret Key 和站点域名。",
+  "auth.captchaUnavailable": "验证服务暂不可用，请稍后重试。"
 }

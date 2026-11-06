@@ -1,7 +1,8 @@
 import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
 import { TypedValueList } from "./pages/TypedValueList";
 import { cn } from "cn";
-import { Loader2,LogOut } from "lucide-react";
+import { LogOut } from "lucide-react";
+import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
 import { useEffect,useMemo,useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dashboard } from "../features/dashboard/Dashboard";
@@ -39,7 +40,7 @@ import { Platform,myRole } from "./Platform";
 import { formConfigs,listConfigs } from "./resources";
 import { ResourceForm } from "./resources/ResourceForm";
 import { ResourceTable } from "./resources/ResourceTable";
-import { href,isLoginPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
+import { href,isLoginPath,isPublicEntryPath,navigate,navigateToLogin,replacePath,safeLoginRedirect,useRoute } from "./router";
 
 export function App() {
   useCommonTranslation();
@@ -55,9 +56,9 @@ export function App() {
   }, [identity?.user.id, route.workspace, route.group, route.item, route.mode, route.id]);
   useEffect(() => {
     if (!identity) return;
-    if (isLoginPath()) {
+    if (isPublicEntryPath() && !(route.workspace === "_initialize" && setupRequired && !deferredSetup)) {
       const target = safeLoginRedirect(new URLSearchParams(location.search).get("redirect"));
-      replacePath(target ?? href({workspace: identity.workspaces[0]?.id ?? "", group: "host", item: "hosts", mode: "list"}, {}));
+      replacePath(target ?? href(identity.workspaces[0] ? {workspace:identity.workspaces[0].id,group:"host",item:"hosts",mode:"list"} : {workspace:identity.user.is_superadmin?"_platform":"_workspaces",group:"platform",item:"workspaces",mode:"list"}, {}));
       return;
     }
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
@@ -70,7 +71,7 @@ export function App() {
     } else if (!stripLocalePrefix(location.pathname).startsWith("/platform/") && !stripLocalePrefix(location.pathname).startsWith(`/workspaces/${current?.id}/`)) {
       navigate({ ...route, workspace: current?.id ?? route.workspace }, query, { replace: true });
     }
-  }, [identity, route]);
+  }, [identity, route, setupRequired, deferredSetup]);
 
   const reload = () => {
     setLoading(true);
@@ -89,7 +90,7 @@ export function App() {
   };
   useEffect(reload, []);
   useEffect(() => {
-    if (!loading && !identity && !error) navigateToLogin();
+    if (!loading && !identity && !error && !isPublicEntryPath()) navigateToLogin();
   }, [loading, identity, error, route]);
   useEffect(() => {
     const query = new URLSearchParams(location.search);
@@ -112,22 +113,24 @@ export function App() {
 
   if (loading || (identity && isLoginPath()))
     return (
-      <div className="grid h-full place-items-center text-muted-foreground">
-        <Loader2 className="size-5 animate-spin" />
+      <div className="h-full overflow-auto">
+        <AppearanceActions floating />
+        <LoadingSkeleton variant={isLoginPath() ? "form" : "page"} className={isLoginPath() ? "mx-auto max-w-md pt-24" : "pt-10"} />
       </div>
     );
 
   const signedOut = () => { setIdentity(undefined); navigateToLogin(false); reload(); };
-  if (!identity?.workspaces) return <><LanguageSwitcher floating /><Entry onReady={reload} error={error} /></>;
+  if (!identity?.workspaces) return <><AppearanceActions floating /><Entry onReady={reload} error={error} /></>;
   if (setupRequired && !deferredSetup)
-    return <><LanguageSwitcher floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
-  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<LanguageSwitcher />} />;
+    return <><AppearanceActions floating /><Entry signedIn initialize onReady={() => { setDeferredSetup(true); reload(); }} error={error} /></>;
+  if (route.workspace === "_workspaces") return <div className="h-full overflow-auto"><AppearanceActions floating />{(identity.workspaces.length > 0 || identity.user.is_superadmin) && <Button className="absolute top-4 left-4" variant="outline" onClick={() => navigate(identity.workspaces.length ? {workspace:identity.workspaces[0]!.id,group:"host",item:"hosts",mode:"list"} : {workspace:"_platform",group:"platform",item:"workspaces",mode:"list"}, {})}>{commonText("shell.backWorkspace")}</Button>}<Entry signedIn onReady={reload} error={error} /></div>;
+  if (route.workspace === "_account") return <Account identity={identity} reload={reload} headerActions={<AppearanceActions />} />;
   if (route.workspace === "_platform" || (identity.user.is_superadmin && !route.workspace))
-    return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({ workspace: "_platform", item: "workspaces", mode: "list" }, {})} onSignedOut={signedOut} />} />;
+    return <Platform identity={identity} reload={reload} onSignedOut={signedOut} headerActions={<WorkspaceHeaderActions identity={identity} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={signedOut} />} />;
   if (route.group === "host" && route.item === "hosts" && route.mode === "workspace" && route.id) {
     const current = identity.workspaces.find(workspace => workspace.id === route.workspace)
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
-    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<><LanguageSwitcher /><ThemeSwitcher /></>} />;
+    if (current) return <HostWorkspace key={`${route.workspace}/${route.id}`} workspace={current.id} hostId={route.id} permissions={new Set(current.permissions)} headerActions={<AppearanceActions />} />;
   }
   return <Workspace identity={identity} reload={reload} onSignedOut={signedOut} />;
 }
@@ -136,11 +139,10 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   useCommonTranslation();
   const { t } = useTranslation();
   const route = useRoute();
-  const [joining, setJoining] = useState(false);
 
   const current =
     identity.workspaces.find((w) => w.id === route.workspace)
-      ?? identity.workspaces.find((w) => w.slug === route.workspace) ?? identity.workspaces[0];
+      ?? identity.workspaces.find((w) => w.slug === route.workspace) ?? (!route.workspace ? identity.workspaces[0] : undefined);
   const workspaceId = current?.id ?? "";
   const needsNodeCatalog = route.item === "workflows" || route.item === "workflow-templates" || route.item === "integration-credentials" || (route.group === "workflow" && route.item === "credentials");
   const [nodeCatalogWorkspace, setNodeCatalogWorkspace] = useState("");
@@ -192,8 +194,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   }, [forms, route.group, route.item]);
 
   // Nothing to show yet: send the user through workspace creation/joining.
-  if (joining) return <div className="h-full"><LanguageSwitcher floating /><Button className="absolute top-4 left-4" variant="outline" onClick={() => setJoining(false)}>{commonText("shell.backWorkspace")}</Button><Entry onReady={() => { setJoining(false); reload(); }} error="" signedIn /></div>;
-  if (!current) return <><LanguageSwitcher floating /><Entry onReady={reload} error="" signedIn /></>;
+  if (!current) return <><AppearanceActions floating />{identity.workspaces.length ? <UnavailablePage onBack={()=>navigate({workspace:identity.workspaces[0]!.id,group:"host",item:"hosts",mode:"list"}, {})} /> : <Entry onReady={reload} error="" signedIn />}</>;
 
   const group = findGroup(route.group)!;
   const item = findItem(route.group, route.item)!;
@@ -223,14 +224,14 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
   const nodeCatalogFeedback = nodeCatalogError
     ? <div className="space-y-3 p-4"><p role="alert">{nodeCatalogError}</p><Button variant="outline" onClick={() => setNodeCatalogRetry(value => value + 1)}>{commonText("common.retry")}</Button></div>
-    : <div role="status" className="p-4"><Loader2 aria-label={commonText("common.loading")} className="size-5 animate-spin" /></div>;
+    : <LoadingSkeleton variant="editor" />;
 
   if ((formConfig?.editor && route.mode !== "list") || (item.resource === "pipelines" && (route.mode === "new" || route.mode === "edit")) ||
       (item.resource === "pipeline-templates" && ["new", "edit", "view"].includes(route.mode)))
     return <div className="h-full min-h-0 min-w-0">
-      {item.permission && !permissions.has(item.permission) ? <p role="alert">{commonText("shell.forbidden")}</p> : nodeCatalogPending ? nodeCatalogFeedback : formConfig ? (
-        <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace headerActions={<LanguageSwitcher />} />
-      ) : <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />}
+      {item.permission && !permissions.has(item.permission) ? <><AppearanceActions floating /><p role="alert">{commonText("shell.forbidden")}</p></> : nodeCatalogPending ? <><AppearanceActions floating />{nodeCatalogFeedback}</> : formConfig ? (
+        <ResourceForm key={`${current.id}/${item.resource}/${route.id ?? "new"}/${route.mode}`} config={formConfig} workspace={current.id} permissions={permissions} pipelineWorkspace headerActions={<AppearanceActions />} />
+      ) : <><AppearanceActions floating /><UnavailablePage onBack={() => navigate({ mode: "list" }, {})} /></>}
     </div>;
 
   return (
@@ -257,7 +258,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
         <span className="flex-1" />
         {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
 
-        <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => setJoining(true)} onSignedOut={onSignedOut} />
+        <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={onSignedOut} />
       </header>
 
       <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
@@ -357,7 +358,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
                 config={{ ...listConfig, defaultPageSize: preferences?.default_page_size ?? 20, ...(item.params ? { fixed: item.params } : {}) }}
                 workspace={current.id}
                 permissions={permissions}
-              /> : <p role="status">{commonText("shell.loadingPreferences")}</p>}
+              /> : <LoadingSkeleton label={commonText("shell.loadingPreferences")} />}
               </div>
             ) : (
               <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
@@ -407,12 +408,15 @@ const UnavailablePage = ({ onBack }: { onBack: () => void }) => (
   <div role="alert"><p>{commonText("shell.unavailable")}</p><Button variant="outline" onClick={onBack}>{commonText("common.backList")}</Button></div>
 );
 
+function AppearanceActions({ floating = false }: { floating?: boolean }) {
+  return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1"}><LanguageSwitcher /><ThemeSwitcher /></div>;
+}
+
 function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
   const route = useRoute();
   return <>
-        <LanguageSwitcher />
-        <ThemeSwitcher />
+        <AppearanceActions />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

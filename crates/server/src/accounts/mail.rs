@@ -15,7 +15,8 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox,
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    message::{Mailbox, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
 };
 use rand::Rng;
@@ -46,6 +47,8 @@ pub struct Configuration {
     code_body: String,
     test_subject: String,
     test_body: String,
+    code_html: String,
+    test_html: String,
 }
 impl Configuration {
     pub fn read(s: &AppState, stored: Option<&str>) -> Result<Self> {
@@ -63,7 +66,7 @@ impl Configuration {
         self.enabled && self.verified_at.is_some()
     }
     pub fn view(&self) -> Value {
-        json!({"mail_enabled":self.enabled,"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body})
+        json!({"mail_enabled":self.enabled,"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body,"mail_code_html":self.code_html,"mail_test_html":self.test_html})
     }
     fn seal(&self, s: &AppState) -> Result<String> {
         s.vault.seal(
@@ -90,6 +93,8 @@ impl Configuration {
             "code_body",
             "test_subject",
             "test_body",
+            "code_html",
+            "test_html",
         ] {
             if let Some(value) = patch.get(&format!("mail_{key}")) {
                 fields[key] = value.clone();
@@ -109,6 +114,8 @@ impl Configuration {
         config.from = config.from.trim().to_owned();
         validate_template(&config.code_subject, &config.code_body, true)?;
         validate_template(&config.test_subject, &config.test_body, false)?;
+        validate_template("", &config.code_html, true)?;
+        validate_template("", &config.test_html, false)?;
         if config.host.len() > 253
             || config
                 .host
@@ -148,7 +155,11 @@ impl Configuration {
             .from(from)
             .to(to)
             .subject(subject)
-            .body(body)
+            .multipart(
+                MultiPart::alternative()
+                    .singlepart(SinglePart::plain(html_text(&body)))
+                    .singlepart(SinglePart::html(body)),
+            )
             .map_err(|_| error("mail.invalid"))?;
         if self.host.is_empty() {
             return Err(error("mail.invalid"));
@@ -231,6 +242,55 @@ fn render_template(template: &str, email: &str, code: &str) -> String {
     out.push_str(rest);
     out
 }
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+fn plain_html(value: &str) -> String {
+    value
+        .lines()
+        .map(|line| format!("<p>{}</p>", escape_html(line)))
+        .collect::<String>()
+}
+fn html_text(value: &str) -> String {
+    let mut text = String::new();
+    let mut inside = false;
+    let mut head = false;
+    let mut tag = String::new();
+    for c in value.chars() {
+        if c == '<' {
+            inside = true;
+            tag.clear();
+        } else if inside && c == '>' {
+            inside = false;
+            if tag.eq_ignore_ascii_case("head") {
+                head = true;
+            }
+            if tag.eq_ignore_ascii_case("/head") {
+                head = false;
+            }
+            if !head && ["/p", "/h1", "/div", "br", "br/", "/tr"].contains(&tag.as_str()) {
+                text.push('\n');
+            }
+        } else if inside {
+            tag.push(c);
+        } else if !head {
+            text.push(c);
+        }
+    }
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .trim()
+        .to_owned()
+}
 impl Configuration {
     fn message(&self, email: &str, code: Option<&str>) -> (String, String) {
         let (subject, body, subject_key, body_key) = if code.is_some() {
@@ -261,7 +321,25 @@ impl Configuration {
         } else {
             render_template(body, email, code.unwrap_or(""))
         };
-        (subject, body)
+        let html = if code.is_some() {
+            &self.code_html
+        } else {
+            &self.test_html
+        };
+        let content = if html.trim().is_empty() {
+            let content = plain_html(&body);
+            if let Some(code) = code.filter(|code| !code.is_empty()) {
+                content.replacen(&escape_html(code), &format!("<strong style=\"font-size:28px;letter-spacing:6px;color:#2563eb\">{}</strong>", escape_html(code)), 1)
+            } else {
+                content
+            }
+        } else {
+            render_template(html, &escape_html(email), &escape_html(code.unwrap_or("")))
+        };
+        let document = include_str!("../../../../src/shared/mail/layout.html")
+            .replacen("{{title}}", &escape_html(&subject), 1)
+            .replacen("{{content}}", &content, 1);
+        (subject, document)
     }
 }
 #[derive(Deserialize)]
@@ -444,6 +522,35 @@ pub async fn consume(
 #[cfg(test)]
 mod template_tests {
     use super::*;
+    #[test]
+    fn html_mail_has_default_design_plain_fallback_and_escaped_variables() {
+        let config = Configuration::default();
+        let (_, html) = config.message("recipient@example.invalid", Some("123456"));
+        assert!(html.contains("max-width:600px"));
+        assert!(html.contains("123456"));
+        assert!(!html.contains("{{content}}"));
+        assert!(html_text(&html).contains("123456"));
+        assert!(!html_text(&html).contains("<table"));
+        let custom = Configuration {
+            test_subject: "<title>".into(),
+            test_html: "<h2>Hello {{email}}</h2>".into(),
+            ..Configuration::default()
+        };
+        let (_, html) = custom.message("<unsafe>@example.invalid", None);
+        assert!(html.contains("&lt;title&gt;"));
+        assert!(html.contains("Hello &lt;unsafe&gt;@example.invalid"));
+        assert!(!html.contains("Hello <unsafe>"));
+        let legacy = Configuration {
+            test_body: "<literal> old plain text".into(),
+            ..Configuration::default()
+        };
+        assert!(
+            legacy
+                .message("a@example.invalid", None)
+                .1
+                .contains("&lt;literal&gt; old plain text")
+        );
+    }
     #[test]
     fn templates_require_code_and_reject_header_injection_or_unknown_variables() {
         assert!(validate_template("Subject", "Your code: {{code}}", true).is_ok());

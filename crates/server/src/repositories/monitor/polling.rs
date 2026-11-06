@@ -1078,6 +1078,12 @@ fn changes(old: &Snapshot, new: &Snapshot, config: &Config) -> Vec<Event> {
         {
             if let Value::Object(map) = &mut detail {
                 map.insert("source".into(), Value::from("polling"));
+                if let Some(snapshot) = new.get(repository).or_else(|| old.get(repository)) {
+                    let url = detail::field(&snapshot.info, &["/url"], 1000);
+                    if !url.is_empty() {
+                        map.insert("repository_url".into(), Value::from(url));
+                    }
+                }
             }
             events.push(Event {
                 event: kind.into(),
@@ -1272,6 +1278,23 @@ async fn enrich(access: &MonitorAccess, events: &mut [Event]) {
                 note(&mut event.detail, message);
             }
         }
+    }
+    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        for event in events.iter_mut().filter(|e| e.event == "push").take(20) {
+            enrich_stats(access, event).await;
+        }
+    })
+    .await;
+}
+
+pub(super) async fn enrich_stats(access: &MonitorAccess, event: &mut Event) {
+    let before = detail::field(&event.detail, &["/before"], 64);
+    let after = detail::field(&event.detail, &["/after"], 64);
+    if let Some((additions, deletions)) = access
+        .change_stats(&event.repository, &before, &after)
+        .await
+    {
+        event.detail["line_stats"] = json!({"additions":additions,"deletions":deletions});
     }
 }
 

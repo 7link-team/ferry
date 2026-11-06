@@ -190,7 +190,7 @@ fn patch_stats(patch: &str) -> (i64, i64) {
     }
     (additions, deletions)
 }
-fn totals(files: &[Value]) -> Result<(i64, i64)> {
+pub(crate) fn totals(files: &[Value]) -> Result<(i64, i64)> {
     ensure_files(files)?;
     let (mut a, mut d) = (0_i64, 0_i64);
     for file in files {

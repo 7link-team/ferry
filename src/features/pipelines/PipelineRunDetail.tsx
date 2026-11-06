@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Badge } from "../../shared/ui/badge";
 import { Tabs } from "radix-ui";
 import { ChevronDown,ChevronRight } from "lucide-react";
@@ -131,7 +132,7 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden pb-3">
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {!run ? <p className="text-muted-foreground">{executionText("run.loading")}</p> : <>
+      {!run ? !error && <LoadingSkeleton variant="page" label={executionText("run.loading")} /> : <>
         <section aria-label={executionText("run.summary")} className="max-h-[35dvh] shrink-0 space-y-3 overflow-auto overscroll-contain rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="font-semibold">{executionText("run.number", { number: run.number })}</h2>

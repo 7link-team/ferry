@@ -34,6 +34,7 @@ mod sync;
 pub(crate) use identity::recover;
 pub use query::insight_report;
 pub use query::report;
+pub(crate) use sync::notification_diff_totals;
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Alias {
     pub name: String,

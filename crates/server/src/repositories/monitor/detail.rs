@@ -350,6 +350,36 @@ pub(super) fn repository(value: &Value) -> Value {
 pub(super) fn webhook(event: &str, payload: &Value) -> Value {
     let mut map = Map::new();
     put(&mut map, "source", "webhook");
+    put(
+        &mut map,
+        "reference_type",
+        field(payload, &["/ref_type"], 16),
+    );
+    if let (Some(added), Some(deleted)) = (
+        payload.pointer("/stats/additions").and_then(Value::as_u64),
+        payload.pointer("/stats/deletions").and_then(Value::as_u64),
+    ) {
+        map.insert(
+            "line_stats".into(),
+            serde_json::json!({"additions":added,"deletions":deleted}),
+        );
+    }
+    put(
+        &mut map,
+        "repository_url",
+        field(
+            payload,
+            &[
+                "/repository/html_url",
+                "/repository/web_url",
+                "/repository/homepage",
+                "/project/web_url",
+                "/repository/webUrl",
+                "/object_attributes/target/web_url",
+            ],
+            1000,
+        ),
+    );
     put(&mut map, "before", field(payload, &["/before"], 64));
     put(
         &mut map,
@@ -566,6 +596,31 @@ pub(super) fn lines(detail: &Value) -> Vec<(String, String)> {
             ),
             field(request, &["/url"], 1000),
         );
+    }
+    if let (Some(added), Some(deleted)) = (
+        detail
+            .pointer("/line_stats/additions")
+            .and_then(Value::as_u64),
+        detail
+            .pointer("/line_stats/deletions")
+            .and_then(Value::as_u64),
+    ) {
+        for (key, count) in [
+            ("repository.monitor.addedLinesLabel", added),
+            ("repository.monitor.deletedLinesLabel", deleted),
+        ] {
+            add(
+                &crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new(key),
+                ),
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.lineCount")
+                        .with("count", count.to_string()),
+                ),
+            );
+        }
     }
     if let Some(total) = detail["total_commits"].as_u64() {
         add(

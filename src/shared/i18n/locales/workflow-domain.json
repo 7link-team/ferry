@@ -515,5 +515,8 @@
 "integration.operation.branches": ["List local and remote branches","列出本地和远程分支","列出本地和远程分支","List local and remote branches","List local and remote branches","List local and remote branches"],
 "integration.operation.tags": ["List tags","列出标签","列出标签","List tags","List tags","List tags"],
 "integration.operation.clone": ["Clone repository","克隆仓库","克隆仓库","Clone repository","Clone repository","Clone repository"],
-"integration.operation.fetch": ["Fetch remote references","拉取远程引用","拉取远程引用","Fetch remote references","Fetch remote references","Fetch remote references"]
+"integration.operation.fetch": ["Fetch remote references","拉取远程引用","拉取远程引用","Fetch remote references","Fetch remote references","Fetch remote references"],
+"entryHelp": ["Manual tests start at a Manual trigger and run its connected tasks. Select which trigger to use if there is more than one.", "测试从“手动触发”节点开始，沿连线执行后续任务；有多个时可在这里选择。", "測試從「手動觸發」開始，沿連線執行後續任務；有多個時可選擇。", "手動トリガーから接続先を実行します。複数ある場合は選択してください。", "수동 트리거에서 연결된 작업을 실행합니다. 여러 개면 선택하세요.", "Ujian bermula pada pencetus manual dan menjalankan tugas bersambung. Pilih jika terdapat beberapa pencetus."],
+"entryMissing": ["This version has no Manual trigger. Add one, connect it to the tasks you want to test, then save. Published versions must be updated and published first.", "当前版本没有“手动触发”节点。请先添加并连接到要测试的任务，保存后再测试；已发布版本需重新发布。", "目前版本沒有「手動觸發」。請新增並連接要測試的任務，儲存後再測試；已發佈版本需重新發佈。", "手動トリガーがありません。追加してタスクに接続し保存してください。公開版は再公開が必要です。", "수동 트리거가 없습니다. 추가 후 작업에 연결하고 저장하세요. 배포 버전은 다시 배포해야 합니다.", "Tiada pencetus manual. Tambah, sambung kepada tugas dan simpan. Versi diterbitkan perlu diterbitkan semula."],
+"entryAdd": ["Add Manual trigger", "添加手动触发节点", "新增手動觸發節點", "手動トリガーを追加", "수동 트리거 추가", "Tambah pencetus manual"]
 }

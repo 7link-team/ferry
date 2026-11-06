@@ -13,12 +13,8 @@ export interface Activity {
   created_at: number;
 }
 
-export function activityLists({}: ResourceConfigContext): Record<
-  string,
-  ListConfig<AnyRow>
-> {
-  return {
-    activity: list({
+export function activityList(): ListConfig<AnyRow> {
+  return list({
       resource: "activity",
       rowKey: (row: Activity) => row.id,
       filters: [
@@ -101,6 +97,9 @@ export function activityLists({}: ResourceConfigContext): Record<
       toolbar: { create: false, import: false },
       empty: "还没有操作记录。",
       emptyKey: "resource-domain:activity.empty",
-    }),
-  };
+    });
+}
+
+export function activityLists({}: ResourceConfigContext): Record<string, ListConfig<AnyRow>> {
+  return { activity: activityList() };
 }
