@@ -97,11 +97,13 @@ try {
   assert.equal(await choice.innerText(), '', 'turning polling off restores the chevron');
   assert.equal(await choice.locator('svg').count(), 1);
   await page.goto(`${origin}/zh-CN/workspaces/2/nodes/17?tab=monitor`);
-  assert.deepEqual(await page.getByLabel('自动刷新间隔', { exact: true }).locator('option').evaluateAll(options => options.map(option => Number(option.value))), [0, 5, 10, 15, 30, 60]);
-  await page.getByLabel('自动刷新间隔', { exact: true }).selectOption('5');
+  await choice.click();
+  await page.getByRole('menu').waitFor();
+  assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['关闭自动刷新', '每 5 秒', '每 10 秒', '每 15 秒', '每 30 秒', '每 60 秒']);
+  await page.getByRole('menuitem', { name: '每 5 秒', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[role=timer]')?.textContent === '5s');
   await page.waitForFunction(() => document.querySelector('[role=timer]')?.textContent === '4s');
-  await page.getByRole('button', { name: '刷新监控', exact: true }).click();
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('[role=timer]')?.textContent === '5s');
   assert.deepEqual(errors, []);
   console.log('PASS countdown, one existing spinner plus 0s during requests, success/failure restart, no overlap, manual reset, shared intervals/off and host-monitor countdown');

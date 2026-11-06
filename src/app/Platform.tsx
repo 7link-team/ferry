@@ -170,7 +170,7 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
       </nav>}
     <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
       {item === "monitor" ? serverNodes ? <PlatformServerNodes /> : route.id === "activity" ? <PlatformActivity /> : <PlatformMonitor key={route.id ?? "database"} section={route.id ?? "database"} /> : route.mode === "list" && item !== "settings" ? <ResourceTable key={item} config={lists[item]!} workspace="_platform" permissions={permissions} />
-        : <div className="min-h-0 space-y-8 overflow-auto"><ResourceForm key={`${item}/${route.id}/${route.mode}`} config={form} workspace="_platform" permissions={permissions}
+        : <div className="min-h-0 space-y-8 overflow-auto"><ResourceForm key={`${item}/${route.id}/${route.mode}`} config={form} workspace="_platform" permissions={permissions} editInPlace={item === "settings"}
           onSaved={() => { if (item === "settings") {toast.success(commonText("resource-domain:platform.saved")); window.dispatchEvent(new Event(FOOTER_UPDATED));} reload(); }} /></div>}
     </main>
     </div>

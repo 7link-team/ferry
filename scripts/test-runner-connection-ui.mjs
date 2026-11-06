@@ -74,11 +74,12 @@ try {
   await page.getByRole('tab', { name: '监控', exact: true }).click();
   await page.getByText('12.5%').waitFor();
   if (process.env.FERRY_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.FERRY_SCREENSHOT_DIR, 'host-detail-monitor.png'), fullPage: true });
-  await page.getByRole('combobox', { name: '自动刷新间隔' }).selectOption('15');
-  assert.equal(await page.getByRole('combobox', { name: '自动刷新间隔' }).inputValue(), '15');
-  await page.getByRole('button', { name: '刷新监控' }).click();
+  await exactButton('定时刷新').click();
+  await page.getByRole('menuitem', { name: '每 15 秒', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[role=timer]')?.textContent === '15s');
+  await exactButton('刷新').click();
   await page.getByRole('tab', { name: '基本信息' }).click();
-  assert.equal(await page.getByRole('combobox', { name: '自动刷新间隔' }).count(), 0);
+  assert.equal(await page.locator('[data-slot=refresh-control]').count(), 0);
   await page.getByRole('tab', { name: 'Windows', exact: true }).click();
   assert.match(await current.inputValue(), /powershell.exe/);
   await page.getByRole('tab', { name: 'Linux', exact: true }).click();
