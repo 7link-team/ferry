@@ -17,7 +17,7 @@ use axum::{
 use sea_orm::sea_query::{Expr, ExprTrait};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
-    QueryFilter, QuerySelect, Set, TransactionTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -755,6 +755,7 @@ pub async fn server_nodes(
 ) -> Result<Json<Value>> {
     let now = db::now();
     let rows = crate::entities::worker_ids::Entity::find()
+        .order_by_asc(crate::entities::worker_ids::Column::WorkerId)
         .all(&s.db)
         .await?;
     let items=rows.into_iter().map(|r| {

@@ -376,7 +376,7 @@ const HOST_SPEC: Spec = Spec {
     search: &["name", "address", "username"],
     filters: &["group_id", "connection", "state"],
     sortable: &["name", "address", "state", "seen_at", "created_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 
 pub const CONNECTIONS: [&str; 2] = ["runner", "ssh"];

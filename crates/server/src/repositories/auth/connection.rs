@@ -287,7 +287,7 @@ const CONNECTION_SPEC: crate::resources::resource::Spec = crate::resources::reso
     search: &["name", "account"],
     filters: &["provider", "state"],
     sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 
 fn connection_json(row: &connections::Model) -> Value {

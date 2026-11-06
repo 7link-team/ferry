@@ -410,7 +410,7 @@ const MEMBER_SPEC: Spec = Spec {
     search: &[],
     filters: &["role_id", "state"],
     sortable: &["created_at"],
-    default_sort: "created_at",
+    default_sort: "-created_at",
 };
 pub async fn members(
     State(s): State<AppState>,

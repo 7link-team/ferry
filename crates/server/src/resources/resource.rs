@@ -192,9 +192,15 @@ async fn page<E: EntityTrait, M: FromQueryResult + Send + Sync>(
     } else {
         sea_orm::Order::Asc
     };
+    let select = select.order_by(column::<E>(&query.sort), direction.clone());
+    // Match the primary direction so newer IDs win ties in newest-first lists.
+    // Skip a duplicate ORDER BY id when the caller already sorts by ID.
+    let select = if query.sort == "id" {
+        select
+    } else {
+        select.order_by(column::<E>("id"), direction)
+    };
     let rows = select
-        .order_by(column::<E>(&query.sort), direction)
-        .order_by_asc(column::<E>("id"))
         .limit(query.page_size)
         .offset((query.page - 1) * query.page_size)
         .into_model::<M>()
@@ -227,6 +233,67 @@ mod tests {
         assert_eq!((q.page, q.page_size), (1, DEFAULT_PAGE_SIZE));
         assert_eq!(q.sort, "created_at");
         assert!(q.descending);
+    }
+
+    #[tokio::test]
+    async fn newest_first_ties_pagination_and_explicit_sort_are_workspace_scoped() {
+        use crate::entities::credentials;
+        use sea_orm::{Database, DbBackend, IntoActiveModel, Schema};
+
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        let schema = Schema::new(DbBackend::Sqlite);
+        db.execute(&schema.create_table_from_entity(credentials::Entity))
+            .await
+            .unwrap();
+        for (id, workspace_id, name, created_at) in [
+            (1, 11, "Zulu", 200),
+            (2, 11, "Echo", 100),
+            (3, 11, "Bravo", 200),
+            (4, 11, "Alpha", 300),
+            (5, 12, "Other workspace", 400),
+        ] {
+            credentials::Entity::insert(
+                credentials::Model {
+                    id,
+                    workspace_id,
+                    name: name.into(),
+                    scope: "host".into(),
+                    kind: "password".into(),
+                    username: String::new(),
+                    description: String::new(),
+                    secret: String::new(),
+                    created_at,
+                    updated_at: created_at,
+                    version: 1,
+                }
+                .into_active_model(),
+            )
+            .exec(&db)
+            .await
+            .unwrap();
+        }
+        let spec = Spec {
+            search: &[],
+            filters: &[],
+            sortable: &["created_at", "name", "id"],
+            default_sort: "-created_at",
+        };
+        for (params, expected) in [
+            (vec![], vec![4, 3, 1, 2]),
+            (vec![("page_size", "2")], vec![4, 3]),
+            (vec![("page_size", "2"), ("page", "2")], vec![1, 2]),
+            (vec![("sort", "created_at")], vec![2, 1, 3, 4]),
+            (vec![("sort", "name")], vec![4, 3, 2, 1]),
+            (vec![("sort", "-id")], vec![4, 3, 2, 1]),
+        ] {
+            let query = ListQuery::parse(&spec, &raw(&params)).unwrap();
+            let (rows, total): (Vec<credentials::Model>, _) =
+                list(&db, &spec, credentials::Entity::find(), &11.into(), &query)
+                    .await
+                    .unwrap();
+            assert_eq!(total, 4);
+            assert_eq!(rows.iter().map(|row| row.id).collect::<Vec<_>>(), expected);
+        }
     }
 
     #[test]

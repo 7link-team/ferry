@@ -25,7 +25,7 @@ const RULES: Spec = Spec {
     search: &["name"],
     filters: &["target_kind", "target_ref", "metric"],
     sortable: &["name", "created_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 const EVENTS: Spec = Spec {
     search: &["rule_name"],

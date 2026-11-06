@@ -28,7 +28,7 @@ const SPEC: Spec = Spec {
     search: &["name", "description"],
     filters: &["scope"],
     sortable: &["name", "next_run_at", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 const RUN_SPEC: Spec = Spec {
     search: &["job_name"],

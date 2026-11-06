@@ -31,7 +31,7 @@ const SPEC: Spec = Spec {
     search: &["name", "username"],
     filters: &["kind", "scope"],
     sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 
 pub const KINDS: [&str; 3] = ["password", "ssh-key", "token"];

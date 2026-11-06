@@ -25,7 +25,7 @@ const SPEC: Spec = Spec {
     search: &["name", "description"],
     filters: &[],
     sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 #[derive(Deserialize)]
 pub struct Body {

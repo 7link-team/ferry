@@ -87,7 +87,8 @@ const SPEC: Spec = Spec {
     search: &[],
     filters: &["pipeline_id", "state", "environment_id"],
     sortable: &["number", "created_at", "state"],
-    default_sort: "-number",
+    // Run numbers are local to each pipeline, not chronological across pipelines.
+    default_sort: "-created_at",
 };
 const RUN_NAMES: [crate::resources::names::Ref; 3] = [
     crate::resources::names::of(

@@ -31,7 +31,7 @@ const SPEC: Spec = Spec {
     search: &["name"],
     filters: &["repository_id", "target_kind", "group_id", "application_id"],
     sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-updated_at",
 };
 
 fn to_json(row: &pipelines::Model) -> Value {

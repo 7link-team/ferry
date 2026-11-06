@@ -33,13 +33,14 @@ const SPEC: Spec = Spec {
     search: &["name"],
     filters: &["state", "category"],
     sortable: &["name", "created_at", "updated_at"],
-    default_sort: "name",
+    default_sort: "-created_at",
 };
 const REV_SPEC: Spec = Spec {
     search: &[],
     filters: &["deployment_id", "state"],
     sortable: &["number", "created_at"],
-    default_sort: "-number",
+    // Revision numbers are local to each deployment.
+    default_sort: "-created_at",
 };
 fn app_json(r: &apps::Model) -> Value {
     json!({"id":Id::from(r.id),"name":r.name,"category":r.category,"manifest":r.manifest,"mode":r.mode,"target_kind":r.target_kind,

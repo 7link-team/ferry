@@ -234,7 +234,7 @@ const SPEC: Spec = Spec {
     search: &[],
     filters: &["user_id", "role"],
     sortable: &["user_id", "role", "created_at"],
-    default_sort: "created_at",
+    default_sort: "-created_at",
 };
 fn json(row: grants::Model) -> Value {
     json!({"id":Id::from(row.id), "subject_kind":row.subject_kind,
