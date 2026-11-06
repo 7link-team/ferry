@@ -19,7 +19,7 @@ export async function verifyMail({browser,admin,regular,page,origin,api,patchSet
  });
  await new Promise(resolve=>smtp.listen(0,'127.0.0.1',resolve));const port=smtp.address().port;
  const sql=(query,args=[])=>execFileSync('python',['-c','import sqlite3,sys,json; c=sqlite3.connect(sys.argv[1]); rows=c.execute(sys.argv[2],json.loads(sys.argv[3])).fetchall();c.commit();print(json.dumps(rows))',join(work,'ferry.sqlite'),query,JSON.stringify(args)],{encoding:'utf8',windowsHide:true}).trim();
- const body=message=>{let text=message.split('\r\n\r\n').slice(1).join('\r\n\r\n');if(/Content-Transfer-Encoding: base64/i.test(message))text=Buffer.from(text.replace(/\s/g,''),'base64').toString();else text=text.replace(/=\r\n/g,'').replace(/=([A-Fa-f0-9]{2})/g,(_,n)=>String.fromCharCode(parseInt(n,16)));return text;};
+ const body=message=>JSON.parse(execFileSync('python',['-c','import email,email.policy,json,sys; m=email.message_from_string(sys.stdin.read(),policy=email.policy.default); print(json.dumps([p.get_content() for p in m.walk() if p.get_content_type() in ("text/plain","text/html") and not p.is_multipart()]))'],{input:message,encoding:'utf8',windowsHide:true})).join('\n');
  const code=()=>body(messages.at(-1)).match(/\b\d{6}\b/)?.[0];
  const register=(email,verification_code,expected=400)=>api(regular,'/users',{email,password:'temporary-registration-password',name:'Verified member',verification_code},'POST',expected);
  try {
@@ -65,7 +65,7 @@ export async function verifyMail({browser,admin,regular,page,origin,api,patchSet
   await registration.getByLabel('姓名',{exact:true}).fill('UI member');await registration.getByLabel('邮箱',{exact:true}).fill('ui-verified@example.invalid');await registration.getByLabel('密码',{exact:true}).fill('temporary-registration-password');
   await registration.getByRole('button',{name:'发送验证码',exact:true}).click();await registration.getByRole('status').getByText('验证码已发送，请查收邮箱。',{exact:true}).waitFor();
   await registration.getByLabel('邮箱验证码',{exact:true}).fill(code());await registration.screenshot({path:join(work,'mail-registration.png')});
-  await registration.getByRole('button',{name:'注册',exact:true}).click();await registration.getByText('创建工作空间',{exact:true}).first().waitFor();await context.close();
+  await registration.getByRole('button',{name:'注册',exact:true}).click();await registration.waitForURL(origin+'/zh-CN/workspaces');await registration.getByText('创建工作空间',{exact:true}).first().waitFor();await context.close();
   await api(regular,'/registration-code',{email:'pending@example.invalid'});const pendingCode=code();
   const bucket=Math.floor(Date.now()/3600000);sql('update email_codes set count=20 where id=?',['rate:ip:127.0.0.1:'+bucket]);
   await api(regular,'/registration-code',{email:'limited@example.invalid'},'POST',429);sql('update email_codes set count=0 where id=?',['rate:ip:127.0.0.1:'+bucket]);

@@ -243,6 +243,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
                 catch(e) { void api<SetupStatus>("/setup",{cache:"no-store"}).then(setSetup).catch(()=>{});throw e; }
                 // Registration signs you in, but you have no workspace yet.
                 setStep("workspace");
+                onReady();
               });
             }}
           >
