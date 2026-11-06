@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { CheckCircle2,Copy,HelpCircle,Loader2,RotateCcw,Terminal,X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect,useId,useRef,useState } from "react";
@@ -414,7 +415,7 @@ export function RunnerUpdateStatus({ workspace, hostId, canUpdate = false }: { w
   const labels: Record<string, string> = { draining: commonText("resource-domain:runner.draining"), updating: commonText("resource-domain:runner.updating"), unknown: commonText("resource-domain:runner.verifyReconnect"), succeeded: commonText("resource-domain:runner.updated"), rolled_back: commonText("resource-domain:runner.rolledBack"), failed: commonText("resource-domain:runner.updateFailed"), retrying: commonText("resource-domain:runner.retrying"), cancelled: commonText("common-domain:dashboard.cancelled") };
   return <section aria-label={commonText("resource-domain:runner.updateStatus")} className="space-y-2 rounded-xl border bg-card p-5 text-sm">
     <h2 className="font-semibold">{commonText("resource-domain:runner.updateTitle")}</h2>
-    {error ? <p role="alert" className="text-destructive">{commonText("resource-domain:runner.refreshFailed")}{error}</p> : !status ? <p role="status">{commonText("resource-domain:runner.loadingUpdate")}</p> : null}
+    {error ? <p role="alert" className="text-destructive">{commonText("resource-domain:runner.refreshFailed")}{error}</p> : !status ? <LoadingSkeleton variant="inline" label={commonText("resource-domain:runner.loadingUpdate")} /> : null}
     {status && <>
       <HostAgentVersion workspace={workspace} hostId={hostId} version={status.agent_version} available={status.available && status.supported} updateState={status.update?.state} online={status.ready} canUpdate={canUpdate} />
       <p className="text-xs text-muted-foreground">{commonText("resource-domain:runner.versions", { current: status.agent_version || "—", server: status.target_version })}</p>

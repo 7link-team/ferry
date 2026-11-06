@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useId,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { named } from "../../shared/api/resource";
@@ -67,7 +68,7 @@ function CheckoutRepository({navigation,workspace,draft,jobId,stepIndex,readOnly
     <ConnectionRepositoryFields navigation={navigation} workspace={workspace} data={data} connectionId={current?.connection_id??''} repositoryUrl={current?.repository_url??''} repositoryLabel={hostRepositoryText("repository.010")} onChange={selected=>change({connection_id:selected.connection_id,repository_url:selected.url,ref:selected.default_branch})}/>
     {current?.repository_url&&<>
       <AutoField label={<span className="text-sm">{hostRepositoryText("repository.005")}</span>} className="block space-y-2">{connection&&connection.provider!=='git'?<SelectRefresh label={hostRepositoryText("repository.014")} loading={loadingBranches} onRefresh={()=>setBranchRequest({source:branchSource,page:branchData?.error?branchData.page+1:1,revision:branchRequest.revision+1})}>{branchInput}</SelectRefresh>:branchInput}<datalist id={branchList}>{branchData?.items.map(name=><option key={name} value={name}>{name}</option>)}</datalist></AutoField>
-      {loadingBranches&&<p role="status" className="text-xs text-muted-foreground">{hostRepositoryText("repository.012")}</p>}
+      {loadingBranches&&!branchData?.items.length&&<LoadingSkeleton variant="inline" label={hostRepositoryText("repository.012")} />}
       {branchData?.hasMore&&!branchData.error&&<Button type="button" variant="outline" disabled={loadingBranches} onClick={()=>setBranchRequest({source:branchSource,page:branchData.page+1,revision:branchRequest.revision})}>{hostRepositoryText("repository.013")}</Button>}
       {branchData?.error&&<p role="alert" className="text-sm text-destructive">{branchData.error}</p>}
       <AutoField label={<span className="text-sm">{hostRepositoryText("repository.007")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.007")} value={current.path} placeholder={hostRepositoryText("repository.015")} onChange={event=>change({path:event.target.value})}/></AutoField>

@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Activity,HardDrive,MemoryStick,Network } from "lucide-react";
 import { useCallback,useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
@@ -135,7 +136,7 @@ export function HostMonitor({ workspace, hostId }: { workspace: string; hostId: 
     </div>
     <p className="text-xs leading-5 tabular-nums text-muted-foreground">{new Date(chart.start).toLocaleTimeString(currentLocale(), { hour12: false })} — {new Date(chart.end).toLocaleTimeString(currentLocale(), { hour12: false })} · {hostRepositoryText("host.053", {collection: collectionSeconds, step: interval || 30, refresh: interval ? hostRepositoryText("host.052", {value1: interval}) : hostRepositoryText("host.030"), count: samples.length})}</p>
     {error && <p role="alert" className="border-l-2 border-destructive bg-destructive/5 px-3 py-2 text-sm text-destructive">{hostRepositoryText("host.031")}{" "}{error}</p>}
-    {!monitor && !error && <p role="status" className="py-8 text-sm text-muted-foreground">{collecting ? hostRepositoryText("host.032") : hostRepositoryText("host.033")}</p>}
+    {!monitor && !error && (collecting ? <p role="status" className="py-8 text-sm text-muted-foreground">{hostRepositoryText("host.032")}</p> : <div className="grid gap-8 md:grid-cols-2">{[0, 1].map(index => <LoadingSkeleton key={index} variant="editor" label={hostRepositoryText("host.033")} />)}</div>)}
     {monitor && <>
       <div className="grid gap-8 border-b pb-7 md:grid-cols-2">
         <div className="space-y-3"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Activity className="size-4" />{hostRepositoryText("host.034")}</div><div className="text-3xl font-semibold tabular-nums">{monitor.cpu_percent.toFixed(1)}<span className="ml-1 text-base font-normal text-muted-foreground">%</span></div><MonitorTimeChart {...chart} label={hostRepositoryText("host.035")} series={[{ name: "CPU", points: points(value => value.cpu_percent) }]} ceiling={100} format={percentage} /><p className="text-xs tabular-nums text-muted-foreground">{hostRepositoryText("host.036")}{" "}{monitor.load1.toFixed(2)}</p></div>

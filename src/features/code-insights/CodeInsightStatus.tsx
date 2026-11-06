@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
@@ -90,7 +91,7 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
   };
   return <section aria-label={insightText("分析任务状态")} className="space-y-4 rounded-xl border bg-card p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(row?.name ?? insightText("代码洞察"))}</h2><p role="status" className="mt-1 flex items-center gap-2 text-sm"><Icon className={`size-4 shrink-0 ${running ? "animate-spin" : ""}`} />{insightText(status)}{row && <span className="text-muted-foreground">· {Number(row.repository_count ?? sources.length)} {insightText("仓库")}</span>}</p></div>
+      <div className="min-w-0"><h2 className="truncate text-lg font-semibold">{String(row?.name ?? insightText("代码洞察"))}</h2>{!row ? error ? null : <LoadingSkeleton variant="inline" className="mt-1" label={insightText("正在加载分析状态")} /> : <p role="status" className="mt-1 flex items-center gap-2 text-sm"><Icon className={`size-4 shrink-0 ${running ? "animate-spin" : ""}`} />{insightText(status)}{row && <span className="text-muted-foreground">· {Number(row.repository_count ?? sources.length)} {insightText("仓库")}</span>}</p>}</div>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" aria-pressed={autoRefresh} onClick={() => setAutoRefresh(value => !value)}>{commonText("table.autoRefresh")} · {autoRefresh ? insightText("已启用") : insightText("已停用")}</Button>
         {autoRefresh && <span className="text-xs tabular-nums text-muted-foreground">{refreshing ? insightText("正在更新数据…") : insightText("{{seconds}} 秒后刷新", { seconds: remaining })}</span>}
@@ -99,11 +100,11 @@ export function CodeInsightStatus({ workspace, insightId, permissions, onConfigu
     </div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {row?.last_error ? <p role="alert" className="text-sm text-destructive">{String(row.last_error)}</p> : null}
-    <dl className="grid gap-3 text-sm sm:grid-cols-3">
+    {row && <dl className="grid gap-3 text-sm sm:grid-cols-3">
       <div><dt className="text-xs text-muted-foreground">{insightText("最近成功分析")}</dt><dd className="mt-1 tabular-nums">{successes.length ? time(Math.max(...successes)) : insightText("尚未成功")}</dd></div>
       <div><dt className="text-xs text-muted-foreground">{insightText("下次计划更新")}</dt><dd className="mt-1 tabular-nums">{!row ? "—" : row.enabled === false ? insightText("分析已暂停") : row.update_mode === "event" ? insightText("仓库事件触发") : time(row.next_run_at)}</dd></div>
       <div><dt className="text-xs text-muted-foreground">{insightText("状态检查时间")}</dt><dd className="mt-1 tabular-nums">{time(checkedAt)}</dd></div>
-    </dl>
+    </dl>}
     {(active.length > 0 || blocked.length > 0) && <p className="text-xs text-muted-foreground">{insightText(blocked.length ? "采集暂未完成，请查看仓库错误详情并重试同步。" : "任务状态每 15 秒更新；下次计划时间表示触发采集，不是完成时间。当前无法准确预估完成时间。")}</p>}
     {sources.length > 0 && <details className="border-t pt-3"><summary className="cursor-pointer text-sm font-medium">{insightText("各仓库覆盖与任务状态")}</summary><ul className="mt-3 divide-y">{sources.map((source, index) => {
       const job = source.job as Row | undefined;

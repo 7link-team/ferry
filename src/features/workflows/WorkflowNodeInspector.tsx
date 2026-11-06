@@ -579,11 +579,7 @@ export function WorkflowNodeInspector({
                     <WorkflowDataView
                       items={inputItems}
                       {...(!readOnly ? { reference: referenceField } : {})}
-                      empty={
-                        loading
-                          ? commonText("common.loading")
-                          : t("inspector.noInput")
-                      }
+                      loading={loading} empty={t("inspector.noInput")}
                     />
                   </>
                 )}
@@ -850,11 +846,7 @@ export function WorkflowNodeInspector({
                     )}
                     <WorkflowDataView
                       items={(preview ?? []).map((json) => ({ json }))}
-                      empty={
-                        previewBusy
-                          ? commonText("common.loading")
-                          : t("inspector.noPreview")
-                      }
+                      loading={previewBusy} empty={t("inspector.noPreview")}
                     />
                   </>
                 ) : (
@@ -881,11 +873,7 @@ export function WorkflowNodeInspector({
                     {!data?.output && (
                       <WorkflowDataView
                         items={[]}
-                        empty={
-                          loading
-                            ? commonText("common.loading")
-                            : t("inspector.noOutput")
-                        }
+                        loading={loading} empty={t("inspector.noOutput")}
                       />
                     )}
                     {data && (

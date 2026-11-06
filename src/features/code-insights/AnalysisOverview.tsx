@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect, useMemo, useState } from "react";
 import { errorText } from "../../shared/api/api";
 import { listResource, type Envelope } from "../../shared/api/resource";
@@ -23,7 +24,7 @@ const metrics = ["commits", "additions", "deletions", "effectives"] as const;
 const metricLabels = ["提交数", "新增行", "删除行", "有效变更"] as const;
 
 function Bars({ state, metric, authors }: { state: ReturnType<typeof useReport>; metric: string; authors: boolean }) {
-  if (state.loading && !state.data) return <div role="status" className="h-28 animate-pulse rounded-md bg-muted/50" aria-label={insightText("正在加载分析数据")} />;
+  if (state.loading && !state.data) return <LoadingSkeleton variant="inline" className="[&_[data-slot=skeleton]]:h-28 [&_[data-slot=skeleton]]:max-w-none" label={insightText("正在加载分析数据")} />;
   if (state.error && !state.data) return <p role="alert" className="py-6 text-sm text-destructive">{state.error}</p>;
   const rows = [...(state.data?.items ?? [])].sort((a, b) => Number(b[metric] ?? 0) - Number(a[metric] ?? 0)).slice(0, 10);
   if (!rows.length) return <p className="flex h-28 items-center justify-center text-sm text-muted-foreground">{insightText("暂无已采集数据")}</p>;

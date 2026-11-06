@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
@@ -108,6 +109,7 @@ export function Dashboard({ workspace }: { workspace: string }) {
           {error}
         </p>
       )}
+      {!data && busy && !error && <LoadingSkeleton variant="page" />}
       {data && (
         <>
           {!Object.keys(data.counts).length && (

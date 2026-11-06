@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { useState } from "react";
 import { Copy, ChevronLeft, ChevronRight } from "lucide-react";
@@ -97,10 +98,12 @@ export function WorkflowDataView({
   items,
   reference,
   empty,
+  loading = false,
 }: {
   items: WorkflowItem[];
   reference?: (expression: string) => void;
   empty?: string;
+  loading?: boolean;
 }) {
   const [mode, setMode] = useState("schema");
   const [page, setPage] = useState(0);
@@ -139,7 +142,7 @@ export function WorkflowDataView({
           {items.length} {t("inspector.items")}
         </span>
       </div>
-      {!items.length ? (
+      {loading && !items.length ? <LoadingSkeleton variant="editor" /> : !items.length ? (
         <p className="py-10 text-center text-sm leading-6 text-muted-foreground">
           {empty ?? t("inspector.noData")}
         </p>

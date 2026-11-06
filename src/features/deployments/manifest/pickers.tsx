@@ -1,3 +1,4 @@
+import { LoadingSkeleton } from "../../../shared/ui/loading-skeleton";
 import { useCallback, useEffect, useState } from "react";
 import { listResource, named } from "../../../shared/api/resource";
 import { AutoField, FieldControl } from "../../../shared/forms/auto-form";
@@ -57,14 +58,14 @@ export function ReferencePicker({
   ];
   return (
     <AutoField label={label} required={required} help={hint}>
-      <FieldControl
+      {!choices ? <LoadingSkeleton variant="inline" label={hostRepositoryText("manifest.006")} /> : <FieldControl
         name={label}
         field={{ name: label, type: "select", config: { options } }}
         value={selected}
         required={required}
         disabled={readOnly || !choices}
         onChange={(next) => onChange(String(next))}
-      />
+      />}
     </AutoField>
   );
 }
