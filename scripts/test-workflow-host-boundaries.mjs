@@ -186,7 +186,7 @@ try {
   assert.equal((await terminal(cancelled.id)).state, 'cancelled');
   await wait(() => sockets.size === 0);
   await page.getByRole('button', { name: '取消中…', exact: true }).waitFor({ state: 'hidden' });
-  await page.locator('h3').filter({ hasText: /cancelled/ }).waitFor();
+  await page.locator('h3').filter({ hasText: /已取消/ }).waitFor();
   const attempts = (await admin(runs + cancelled.id + '/node-runs')).items;
   assert.equal(attempts.find(n => n.node_id === 'start').state, 'succeeded');
   assert.equal(attempts.find(n => n.node_id === 'remote').state, 'cancelled');

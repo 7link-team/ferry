@@ -346,6 +346,7 @@ jobs:
           python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-activity-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-theme-entry-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-alpha2-ux-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-workflow-execution-view.mjs
       - name: Workspace management browser acceptance
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-workspace-admin-ui.mjs

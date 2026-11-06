@@ -1,0 +1,88 @@
+/** Real Agent, recorded Git stderr, execution graph, cancellation and restart. */
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {mkdtemp,mkdir,open,readFile,writeFile} from 'node:fs/promises';
+import {createServer} from 'node:net';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {chromium} from 'playwright';
+
+const work=await mkdtemp(join(tmpdir(),'workflow-execution-view-'));
+const catalog=JSON.parse(await readFile('src/shared/i18n/locales/workflow-domain.json','utf8'));
+const t=key=>catalog[key][1];
+const wait=async(fn,seconds=35)=>{const end=Date.now()+seconds*1000;while(Date.now()<end){const result=await fn();if(result)return result;await new Promise(r=>setTimeout(r,150));}throw Error('Acceptance condition timed out');};
+const free=createServer();await new Promise(r=>free.listen(0,'127.0.0.1',r));const port=free.address().port;await new Promise(r=>free.close(r));
+const origin=`http://127.0.0.1:${port}`,report={work,checks:[]};
+const env={...process.env,FERRY_DATA_DIR:work,FERRY_BIND:`127.0.0.1:${port}`,FERRY_SANDBOX_PATH:resolve(`target/debug/ferry-sandbox${process.platform==='win32'?'.exe':''}`)};
+for(const key of ['FERRY_DATABASE_URL','FERRY_NATS_URL','FERRY_CLUSTER_NAMESPACE','FERRY_REDIS_URL'])delete env[key];
+const log=await open(join(work,'server.log'),'w');
+let server,runner,browser,page;
+const sockets=new Set();
+const stalled=createServer(socket=>{sockets.add(socket);socket.on('error',()=>{});socket.on('close',()=>sockets.delete(socket));socket.write('SSH-2.0-ExecutionAcceptance\r\n');});
+const startServer=()=>spawn(resolve(process.env.FERRY_BINARY||`target/debug/ferry-server${process.platform==='win32'?'.exe':''}`),[],{env,windowsHide:true,stdio:['ignore',log.fd,log.fd]});
+const ready=()=>wait(async()=>{assert.equal(server.exitCode,null);try{return (await fetch(origin+'/api/status')).ok;}catch{return false;}});
+const stop=async process=>{if(process?.exitCode===null && process.signalCode===null){const ended=once(process,'exit');process.kill();await ended;}};
+try{
+  server=startServer();await ready();
+  browser=await chromium.launch({headless:true,...(process.platform==='win32'?{channel:'chrome'}:{})});
+  const context=await browser.newContext({locale:'zh-CN',viewport:{width:1440,height:1000}});
+  const api=async(path,data,method=data?'POST':'GET',expected)=>{const response=await context.request.fetch(origin+'/api'+path,{method,headers:{'X-Ferry-Request':'1'},...(data?{data}:{})});assert(expected?response.status()===expected:response.ok(),`${method} ${path} ${response.status()} ${await response.text()}`);return response.status()===204?null:response.json();};
+  await api('/setup',{name:'Execution acceptance',email:'owner@example.invalid',password:'temporary-execution-acceptance',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
+  const workspace=await api('/workspaces',{name:'Execution acceptance',slug:'execution-acceptance'}),root=`/workspaces/${workspace.id}`;
+  const host=await api(root+'/nodes',{name:'Local Agent',connection:'runner'}),token=await api(root+'/runner-tokens',{host_id:host.id});
+  runner=spawn(resolve(`target/debug/ferry-runner${process.platform==='win32'?'.exe':''}`),['--server',origin,'--token',token.token,'--state-dir',join(work,'agent')],{windowsHide:true,stdio:['ignore',log.fd,log.fd]});
+  await wait(async()=>{assert.equal(runner.exitCode,null);return (await api(root+'/nodes/'+host.id)).state==='online';});
+  const node=(id,type,params,index)=>({id,name:id,type,type_version:1,params,settings:{},position:[index*360,0]});
+  const link=(from,to)=>({from:{node:from,port:'main',index:0},to:{node:to,port:'main',index:0}});
+  const make=async(name,type,params)=>api(root+'/workflows',{name,definition:JSON.stringify({engine:'ferry-graph',schema:1,nodes:[node('start','core.trigger.manual',{input_schema:{type:'object'}},0),node('remote',type,params,1),node('finish','data.set',{fields:[{path:'complete',value:true}],keep_other_fields:true},2)],connections:[link('start','remote'),link('remote','finish')],settings:{execution:{runtime:'host',target_kind:'host',target_ref:host.id}}})});
+  const begin=flow=>api(root+'/workflows/'+flow.id+'/executions',{mode:'manual',revision:'draft',version:flow.version,entry_node_id:'start',inputs:{}});
+  const terminal=id=>wait(async()=>{const run=await api(root+'/workflow-executions/'+id);return ['succeeded','failed','cancelled'].includes(run.state)&&run;});
+  page=await context.newPage();const pageErrors=[];page.on('pageerror',error=>pageErrors.push(error.message));
+  await new Promise(r=>stalled.listen(0,'127.0.0.1',r));
+  const blocked=await make('Running graph','integration.git.repository.remote_refs',{url:`ssh://127.0.0.1:${stalled.address().port}/repository`});
+  await page.goto(`${origin}/zh-CN${root}/workflows/${blocked.id}/edit`);
+  await page.getByRole('button',{name:t('saveAndRun'),exact:true}).click();
+  const submitted=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/executions'));
+  await page.getByRole('dialog',{name:t('run'),exact:true}).getByRole('button',{name:t('confirm'),exact:true}).click();
+  const response=await submitted;assert.equal(response.status(),201);const running=await response.json();
+  const results=page.getByRole('dialog',{name:t('results'),exact:true}),view=results.locator('[data-workflow-execution-view]');await view.waitFor();
+  await wait(()=>sockets.size>0);
+  await view.locator('.react-flow__node[data-id="remote"]').getByText(t('execution.state.running'),{exact:true}).waitFor();
+  await view.locator('.react-flow__edge.animated').first().waitFor();
+  assert(await view.locator('.react-flow__edge.animated').count()>0,'Running edges animate');
+  assert(await view.locator('.react-flow__edge').first().locator('path[marker-end]').count()>0,'Edges show arrow direction');
+  assert.equal(await results.getByRole('textbox').count(),0);
+  await page.screenshot({path:join(work,'running.png')});
+  await results.getByRole('button',{name:t('execution.cancel'),exact:true}).click();assert.equal((await terminal(running.id)).state,'cancelled');
+  await view.locator('.react-flow__node[data-id="remote"]').getByText(t('execution.state.cancelled'),{exact:true}).waitFor();
+  await wait(async()=>await view.locator('.react-flow__edge.animated').count()===0);
+  report.checks.push('Actual Agent running node, directed animated edges, per-node status, cancellation and stopped animation; no parameter editing');
+
+  const failure=await make('Failure logs','integration.git.repository.status',{directory:join(work,'missing-repository').replaceAll('\\','/')});
+  const failed=await begin(failure);assert.equal((await terminal(failed.id)).state,'failed');
+  const attempts=(await api(root+'/workflow-executions/'+failed.id+'/node-runs')).items,failedNode=attempts.find(row=>row.node_id==='remote');
+  const dataPath=root+'/workflow-executions/'+failed.id+'/node-runs/'+failedNode.id+'/data';
+  const recorded=await api(dataPath);assert.match(recorded.logs,/\[stderr\].*(fatal|cannot change|No such file)/s);assert.equal(recorded.output,null);
+  await page.goto(`${origin}/zh-CN${root}/workflows/${failure.id}?view=executions`);
+  await page.getByRole('button',{name:t('results'),exact:true}).click();
+  const failedView=page.locator('[data-workflow-execution-view]');await failedView.locator('[data-node-execution-logs]').waitFor();
+  assert.match(await failedView.locator('[data-node-execution-logs]').innerText(),/fatal/);
+  await failedView.getByRole('tab',{name:t('execution.output'),exact:true}).click();await failedView.getByText(t('inspector.noOutput'),{exact:true}).waitFor();
+  await failedView.getByRole('combobox',{name:t('execution.nodeDetails'),exact:true}).selectOption('start');
+  await failedView.getByText(t('emptyObject'),{exact:false}).waitFor();assert.equal(await failedView.getByText('main 1',{exact:true}).count(),0);
+  await page.screenshot({path:join(work,'failed-output.png')});
+  await failedView.getByRole('tab',{name:t('execution.process'),exact:true}).click();await failedView.getByRole('combobox',{name:t('execution.nodeDetails'),exact:true}).selectOption('remote');await failedView.locator('[data-node-execution-logs]').waitFor();
+  await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:join(work,'failed-mobile.png'),fullPage:true});
+  const foreign=await api('/workspaces',{name:'Foreign',slug:'foreign'});await api(`/workspaces/${foreign.id}/workflow-executions/${failed.id}/node-runs/${failedNode.id}/data`,undefined,'GET',404);
+  assert.deepEqual(pageErrors,[]);
+  report.checks.push('Failed Agent Git persists actual stderr and has no fake output; successful trigger shows explicit empty object; node details, input/output/process tabs, 390px and cross-workspace rejection');
+
+  const repository=join(work,'repository');await mkdir(repository);const init=spawn('git',['init',repository],{windowsHide:true,stdio:'ignore'});assert.equal((await once(init,'exit'))[0],0);
+  const successFlow=await make('Success logs','integration.git.repository.status',{directory:repository.replaceAll('\\','/')});const success=await begin(successFlow);assert.equal((await terminal(success.id)).state,'succeeded');
+  const successNode=(await api(root+'/workflow-executions/'+success.id+'/node-runs')).items.find(row=>row.node_id==='remote');
+  const successData=await api(root+'/workflow-executions/'+success.id+'/node-runs/'+successNode.id+'/data');assert.match(successData.logs,/\[stdout\]/);assert(successData.output.ports[0].items.length);
+  await stop(runner);await stop(server);server=startServer();await ready();assert.equal((await api(dataPath)).logs,recorded.logs);
+  report.checks.push('Successful Agent stdout and output recorded; failed stderr survives server restart');report.result='PASS';
+}catch(error){report.result='FAIL';report.error=String(error);if(page){await page.screenshot({path:join(work,'failure.png'),fullPage:true});await writeFile(join(work,'failure.html'),await page.content());}throw error;}
+finally{await writeFile(join(work,'acceptance.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));await browser?.close();await stop(runner);await stop(server);for(const socket of sockets)socket.destroy();if(stalled.listening)await new Promise(r=>stalled.close(r));await log.close();}

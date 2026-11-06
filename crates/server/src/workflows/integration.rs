@@ -274,7 +274,7 @@ async fn host_request(
     let script = format!(
         "#!/bin/sh\nset -eu\ncurl --config - --write-out '\\n%{{http_code}}' <<'{delimiter}'\n{config}{delimiter}\n"
     );
-    let output = super::host::execute(s, run, node, &script).await?;
+    let output = super::host::execute(s, run, node, &script, false).await?;
     let (body, status) = output["stdout"]
         .as_str()
         .ok_or_else(unknown)?
@@ -434,7 +434,7 @@ pub(super) async fn execute(
         }
         let result = if let Some(operation) = git {
             let script = super::host::git_script(operation, params)?;
-            super::host::execute(s, run, node, &script)
+            super::host::execute(s, run, node, &script, true)
                 .await
                 .map(|mut value| {
                     value["operation"] = json!(operation);

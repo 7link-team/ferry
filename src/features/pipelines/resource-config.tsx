@@ -27,7 +27,7 @@ import { Badge } from "../../shared/ui/badge";
 import { TARGETS } from "../hosts/resource-config";
 import { tagOptions } from "../tags/resource-config";
 import { templateGenerator } from "../templates/resource-config";
-import { DEFAULT_ACTIONS, dispatchInputs } from "./actions-workflow";
+import { dispatchInputs } from "./actions-workflow";
 import { duration, stateBadge, type PipelineRun } from "./pipeline";
 
 export interface Pipeline {
@@ -610,7 +610,7 @@ export function pipelinesForms({
         executor_bindings: [],
         checkout_bindings: [],
         graph_layout: {},
-        definition: DEFAULT_ACTIONS,
+        definition: "on: workflow_dispatch\njobs: {}\n",
       },
       sections: [
         {

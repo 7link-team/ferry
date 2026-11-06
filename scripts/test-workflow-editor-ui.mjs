@@ -87,7 +87,7 @@ try {
   assert.equal(JSON.parse((await api(endpoint)).definition).nodes.find(node => node.id === 'check').params.rules[0].right, 101);
   await parameters.getByRole('button', { name: '关闭', exact: true }).click();
   passed('condition form edits and persists without visible JSON inputs');
-  await page.getByRole('button', { name: '测试运行', exact: true }).click();
+  await page.getByRole('button', { name: '保存并运行', exact: true }).click();
   await dialog.getByRole('spinbutton', { name: 'quantity', exact: true }).fill('2');
   await dialog.getByRole('spinbutton', { name: 'price', exact: true }).fill('75');
   assert.equal(await dialog.locator('textarea:visible').count(), 0, 'test runs use declared input fields');
@@ -161,7 +161,7 @@ try {
 
   const structured = await api(`${root}/workflows`, { name: 'Structured inputs', definition: JSON.stringify({ engine: 'ferry-graph', schema: 1, nodes: [node('start', 'core.trigger.manual', { input_schema: { type: 'object', properties: { profile: { type: 'object', required: ['age'], properties: { age: { type: 'integer' }, names: { type: 'array', items: { type: 'string' } } } } }, required: ['profile'] } }, [0, 0])], connections: [] }) }, 'POST', 201);
   await page.goto(`${origin}/zh-CN${root}/workflows/${structured.id}/edit`);
-  await page.getByRole('button', { name: '测试运行', exact: true }).click();
+  await page.getByRole('button', { name: '保存并运行', exact: true }).click();
   await dialog.getByRole('spinbutton', { name: 'profile.age', exact: true }).fill('28');
   await dialog.getByRole('button', { name: '添加 profile.names', exact: true }).click();
   await dialog.getByRole('textbox', { name: 'profile.names.0', exact: true }).fill('Ada');

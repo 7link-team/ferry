@@ -281,7 +281,7 @@ it("exports the current Actions workflow and executor bindings as a pipeline tem
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Build template"); name.dispatchEvent(new Event("input", { bubbles: true })); });
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === "保存模板")!.click());
   const payload = JSON.parse(requests.find(row => row.url.endsWith("/pipeline-templates") && row.method === "POST")!.body!);
-  expect(JSON.parse(payload.content)).toMatchObject({ engine: "github-actions", workflow: DEFAULT_ACTIONS, executor_bindings: [] });
+  expect(JSON.parse(payload.content)).toMatchObject({ engine: "github-actions", workflow: "on: workflow_dispatch\njobs: {}\n", executor_bindings: [] });
 });
 it("imports an Actions template into the visual editor with task bindings", async () => {
   const permissions = new Set(["pipeline-templates.read"]);
@@ -305,7 +305,7 @@ it("saves and runs a pipeline from the full-page action bar", async () => {
     return { ok: true, status: init.method === "POST" ? 201 : 200, json: async () => result };
   }));
   const config = formConfigs("ops", permissions).pipelines!;
-  config.blank = { ...config.blank, executor_bindings: [{ job_id: "build", target_kind: "host", target_ref: "1", image: "host" }] };
+  config.blank = { ...config.blank, definition: DEFAULT_ACTIONS, executor_bindings: [{ job_id: "build", target_kind: "host", target_ref: "1", image: "host" }] };
   await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={permissions} pipelineWorkspace />));
   const name = host.querySelector('input[aria-label="流水线名称"]')! as HTMLInputElement;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Build"); name.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -327,7 +327,7 @@ it("asks for a bound environment after saving before starting a pipeline", async
     return { ok: true, status: init.method === "POST" ? 201 : 200, json: async () => result };
   }));
   const config = formConfigs("ops", permissions).pipelines!;
-  config.blank = { ...config.blank, executor_bindings: [{ job_id: "build", target_kind: "host", target_ref: "1", image: "host" }] };
+  config.blank = { ...config.blank, definition: DEFAULT_ACTIONS, executor_bindings: [{ job_id: "build", target_kind: "host", target_ref: "1", image: "host" }] };
   await act(async () => root.render(<ResourceForm config={config} workspace="ops" permissions={permissions} pipelineWorkspace />));
   const name = host.querySelector('input[aria-label="流水线名称"]')! as HTMLInputElement;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(name, "Build"); name.dispatchEvent(new Event("input", { bubbles: true })); });

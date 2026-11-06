@@ -1,4 +1,5 @@
 import { AutoField } from "../../shared/forms/auto-form";
+import { EditorFormActionsContext } from "../../shared/forms/auto-form/form-actions";
 import { useQueryValue } from "../../shared/routing/url-state";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import {
@@ -22,6 +23,7 @@ import {
   Play,
   Plus,
   Redo2,
+  Save,
   Trash2,
   Undo2,
   Workflow,
@@ -30,6 +32,7 @@ import {
 } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -65,6 +68,7 @@ import {
 import { nodeTitle, WorkflowNodePicker } from "./WorkflowNodePicker";
 import { WorkflowNodeInspector } from "./WorkflowNodeInspector";
 import { WorkflowExecutionTarget } from "./WorkflowExecutionTarget";
+import { WorkflowExecutionView, executionStateText } from "./WorkflowExecutionView";
 import { integrationManifest } from "./integrations";
 import { nodeModes } from "./workflow-data";
 import { WorkflowAssetContext, WorkflowOutputPreview } from "./WorkflowAssets";
@@ -113,7 +117,7 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
       : Workflow;
   return (
     <div
-      className={`relative w-56 rounded-xl border-2 bg-card p-4 shadow-sm ${selected ? "border-primary ring-4 ring-primary/10" : "border-border"}`}
+      className={`relative w-56 rounded-xl border-2 bg-card p-4 shadow-sm ${data.state === "failed" ? "border-destructive" : data.state === "running" ? "border-primary ring-4 ring-primary/10" : data.state === "succeeded" ? "border-green-600" : selected ? "border-primary ring-4 ring-primary/10" : "border-border"}`}
       style={{
         minHeight: Math.max(
           104,
@@ -135,8 +139,8 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
         </div>
       </div>
       {data.state && (
-        <span className="mt-3 block text-xs text-muted-foreground">
-          {data.state}
+        <span className={`mt-3 block text-xs ${data.state === "failed" ? "text-destructive" : data.state === "running" ? "text-primary" : "text-muted-foreground"}`}>
+          {executionStateText(data.state)}
         </span>
       )}
       {data.node.settings?.mode && data.node.settings.mode !== "active" ? <span className="mt-2 block text-xs text-muted-foreground">{t(`inspector.mode.${String(data.node.settings.mode)}` as Parameters<typeof t>[0])}</span> : null}
@@ -230,10 +234,12 @@ function Modal({
   title,
   children,
   close,
+  wide = false,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
+  wide?: boolean;
 }) {
   return (
     <Dialog.Root
@@ -244,7 +250,7 @@ function Modal({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-6 shadow-xl">
+        <Dialog.Content className={`fixed left-1/2 top-1/2 z-50 max-h-[90dvh] ${wide ? "w-[min(90rem,calc(100vw-2rem))]" : "w-[min(48rem,calc(100vw-2rem))]"} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl`}>
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold">
               {title}
@@ -301,9 +307,10 @@ export function WorkflowEditor({
     }
   }, [draft.definition]);
   const graph = parsed.graph;
+  const formActions = useContext(EditorFormActionsContext);
   const [selected, setSelected] = useQueryValue("node", "");
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const returnToInspector = useRef(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [selectedLink, setSelectedLink] = useState<number>();
   const [dragging, setDragging] = useState<{
     id: string;
@@ -600,7 +607,9 @@ export function WorkflowEditor({
     setBusy(true);
     setError("");
     try {
-      const row = await saved(dialog !== "run" || runRevision === "draft");
+      const saveBeforeRun = dialog === "run" && runRevision === "draft" && !readOnly && formActions?.saveAndWait;
+      const row = saveBeforeRun ? await saveBeforeRun() as WorkflowRow | undefined : await saved(dialog !== "run" || runRevision === "draft");
+      if (!row) throw new Error(t("saveBlocked"));
       if (dialog === "run") {
         const inputs = input;
         if (!inputs || Array.isArray(inputs) || typeof inputs !== "object")
@@ -619,10 +628,8 @@ export function WorkflowEditor({
           },
         );
         setExecution(run);
-        if (returnToInspector.current || !rowReadOnly) {
-          if (!selected) setSelected(entry || graph?.nodes[0]?.id || "");
-          setTab("canvas");setInspectorOpen(true);returnToInspector.current=false;
-        } else setTab("executions");
+        setInspectorOpen(false);
+        setResultsOpen(true);
       } else if (dialog === "publish") {
         await api(`${endpoint}/publications`, {
           method: "POST",
@@ -759,11 +766,10 @@ export function WorkflowEditor({
               label: t("viewOutput"),
               action: async (row) => {
                 try {
-                  setOutputPreview(
-                    await api(
+                  const output = await api<Parameters<typeof WorkflowOutputPreview>[0]["output"]>(
                       `/workspaces/${workspace}/workflow-executions/${execution.id}/node-runs/${row.id}/output`,
-                    ),
                   );
+                  setOutputPreview({...output, state:String(row.state), ...(row.end_reason ? {end_reason:String(row.end_reason)} : {})});
                 } catch (error) {
                   setError(errorText(error));
                 }
@@ -773,6 +779,33 @@ export function WorkflowEditor({
         }
       : undefined;
 
+  const executionResults = execution && resultConfig && (
+              <section className="rounded-xl border p-4">
+                <h3 role="status" className={`mb-4 text-sm font-semibold ${execution.state === "failed" ? "text-destructive" : ""}`}>
+                  {t("results")} #{String(execution.number)} ·{" "}
+                  {executionStateText(execution.state)}
+                </h3>
+                {permissions.has("workflows.run") && ["queued", "running", "waiting", "cancelling"].includes(String(execution.state)) && (
+                  <div className="mb-4 flex justify-end">
+                    <Button type="button" variant="outline" disabled={busy || execution.state === "cancelling"} onClick={async () => {
+                      setBusy(true); setError("");
+                      try {
+                        const run = await api<Record<string, unknown>>(`/workspaces/${workspace}/workflow-executions/${execution.id}/cancellations`, { method: "POST" });
+                        setExecution(run); setRefresh(value => value + 1);
+                      } catch (error) { setError(errorText(error)); }
+                      finally { setBusy(false); }
+                    }}>{t(execution.state === "cancelling" ? "execution.cancelling" : "execution.cancel")}</Button>
+                  </div>
+                )}
+                {execution.end_reason ? (
+                  <p className="mb-3 text-sm text-destructive">
+                    {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : String(execution.end_reason)}
+                  </p>
+                ) : null}
+                <WorkflowExecutionView workspace={workspace} execution={execution} graph={executionGraph} attempts={attempts} nodeTypes={nodeTypes} />
+                <details className="mt-4"><summary className="cursor-pointer text-sm">{t("execution.records")}</summary>{renderTable?.(resultConfig, refresh)}</details>
+              </section>
+            );
   return (
     <WorkflowAssetContext.Provider
       value={{ workspace, workflow: draft.id ?? "" }}
@@ -885,10 +918,12 @@ export function WorkflowEditor({
                 </Button>
               </>
             )}
+            {execution && <Button type="button" variant="outline" onClick={() => setResultsOpen(true)}>{t("results")} #{String(execution.number)}</Button>}
+            {!readOnly && formActions && <Button type="button" variant="outline" disabled={busy || invalid || formActions.saving || formActions.blocked} onClick={formActions.save}><Save />{commonText("common.save")}</Button>}
             {!templateMode && <Button
               type="button"
-              variant="outline"
-              disabled={!runnable || invalid}
+              variant={readOnly ? "outline" : "default"}
+              disabled={!runnable || invalid || busy || formActions?.saving || (!readOnly && formActions?.blocked)}
               onClick={() => {
                 setRunRevision("draft");
                 setEntry(
@@ -900,11 +935,13 @@ export function WorkflowEditor({
               }}
             >
               <Play />
-              {t("run")}
+              {t(!readOnly && formActions?.saveAndWait ? "saveAndRun" : "run")}
             </Button>}
             {!readOnly && runnable && (
               <Button
                 type="button"
+                variant="outline"
+                className="ml-2"
                 disabled={invalid}
                 onClick={() => {
                   setVersionName("");
@@ -1145,32 +1182,7 @@ export function WorkflowEditor({
         {tab === "executions" && draft.id && (
           <div className="space-y-5">
             {renderTable?.(executionsConfig, refresh)}
-            {execution && resultConfig && (
-              <section className="rounded-xl border p-4">
-                <h3 className="mb-4 text-sm font-semibold">
-                  {t("results")} #{String(execution.number)} ·{" "}
-                  {String(execution.state)}
-                </h3>
-                {permissions.has("workflows.run") && ["queued", "running", "waiting", "cancelling"].includes(String(execution.state)) && (
-                  <div className="mb-4 flex justify-end">
-                    <Button type="button" variant="outline" disabled={busy || execution.state === "cancelling"} onClick={async () => {
-                      setBusy(true); setError("");
-                      try {
-                        const run = await api<Record<string, unknown>>(`/workspaces/${workspace}/workflow-executions/${execution.id}/cancellations`, { method: "POST" });
-                        setExecution(run); setRefresh(value => value + 1);
-                      } catch (error) { setError(errorText(error)); }
-                      finally { setBusy(false); }
-                    }}>{t(execution.state === "cancelling" ? "execution.cancelling" : "execution.cancel")}</Button>
-                  </div>
-                )}
-                {execution.end_reason ? (
-                  <p className="mb-3 text-sm text-destructive">
-                    {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : String(execution.end_reason)}
-                  </p>
-                ) : null}
-                {renderTable?.(resultConfig, refresh)}
-              </section>
-            )}
+            {executionResults}
           </div>
         )}
         {pickerOpen && !readOnly && (
@@ -1239,7 +1251,7 @@ export function WorkflowEditor({
           inputFields={inputFields} update={updateNode} invalid={(key,value)=>invalidField(`${node.id}.${key}`,value)}
           changeGraph={change} close={()=>setInspectorOpen(false)} select={setSelected} duplicate={duplicateNode}
           remove={()=>{setInspectorOpen(false);setDialog("delete");}}
-          run={()=>{returnToInspector.current=true;setInspectorOpen(false);setRunRevision("draft");setInput({});setDialog("run");}}
+          run={()=>{setInspectorOpen(false);setRunRevision("draft");setInput({});setDialog("run");}}
         />}
         {outputPreview && (
           <Modal
@@ -1249,6 +1261,7 @@ export function WorkflowEditor({
             <WorkflowOutputPreview output={outputPreview} />
           </Modal>
         )}
+        {resultsOpen && execution && <Modal wide title={t("results")} close={() => setResultsOpen(false)}>{executionResults}</Modal>}
         {executionSettingsOpen && graph && <Modal title={t("execution.defaults")} close={() => setExecutionSettingsOpen(false)}>
           <WorkflowExecutionTarget workspace={workspace} value={((graph.settings as Record<string,unknown> | undefined)?.execution as Record<string,unknown>) ?? {}} readOnly={readOnly}
             change={execution => change({...graph, settings:{...(graph.settings as Record<string,unknown> ?? {}), execution}})} />

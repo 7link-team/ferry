@@ -357,7 +357,7 @@ export function WorkflowNodeInspector({
               onClick={run}
             >
               <Play />
-              {t("inspector.runWorkflow")}
+              {t(!readOnly && formActions?.saveAndWait ? "saveAndRun" : "inspector.runWorkflow")}
             </Button>
             {!readOnly && formActions && (
               <Button
@@ -571,7 +571,7 @@ export function WorkflowNodeInspector({
                         {data.input.sources
                           .map(
                             (item) =>
-                              `${graph.nodes.find((n) => n.id === item.node)?.name ?? item.node} · ${item.port} ${item.index + 1}`,
+                              `${graph.nodes.find((n) => n.id === item.node)?.name ?? item.node} · ${item.port === "main" ? t("mainPort") : item.port}${item.index > 0 ? ` #${item.index + 1}` : ""}`,
                           )
                           .join(" / ")}
                       </p>
@@ -859,7 +859,8 @@ export function WorkflowNodeInspector({
                   </>
                 ) : (
                   <>
-                    {data && !data.output && (
+                    {runs.find(item => item.id === execution)?.state === "failed" && <p role="status" className="text-sm text-destructive">{t("workflowRunFailed")}</p>}
+                    {data && (data.state === "failed" || !data.output) && (
                       <p className="text-sm text-destructive">
                         {t("inspector.executionFailed")} · {data.end_reason}
                       </p>
@@ -870,9 +871,10 @@ export function WorkflowNodeInspector({
                         className="space-y-3"
                       >
                         <h4 className="text-sm font-medium">
-                          {port.name} {port.index + 1}
+                          {port.name === "main" ? t("mainPort") : port.name}{(data?.output?.ports.length ?? 0) > 1 ? ` · ${t("outputPort")} #${port.index + 1}` : ""}
                           {port.skipped ? ` · ${t("inspector.skipped")}` : ""}
                         </h4>
+                        {port.name === "main" && <p className="text-xs text-muted-foreground">{t("defaultOutputHelp")}</p>}
                         <WorkflowDataView items={port.items} />
                       </section>
                     ))}

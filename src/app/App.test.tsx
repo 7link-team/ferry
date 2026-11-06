@@ -390,17 +390,20 @@ it("gives pipeline creation a full-page editor with its own action bar", async (
   expect(host.querySelector('[aria-label="流水线画布"]')).not.toBeNull();
   const settings = [...host.querySelectorAll("button")].find(button => button.textContent === "流水线设置")!;
   expect(settings.parentElement?.querySelector('[role="tablist"]')).not.toBeNull();
+  expect(host.querySelectorAll('.react-flow__node')).toHaveLength(0);
+  expect((host.querySelector('input[aria-label="流水线名称"]') as HTMLInputElement).value).toMatch(/^工作流-\d{8}-\d{6}-[a-f0-9]{6}$/);
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "添加第一个任务")!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[title="在此任务后添加串行任务"]')!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[title="添加并行任务"]')!.click());
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[data-id="build"] button')].find(button => button.textContent?.trim() === "添加步骤")!.click());
-  await act(async () => host.querySelector<HTMLButtonElement>('[data-id="job_2"] button[title="删除任务"]')!.click());
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[data-id="job_1"] button')].find(button => button.textContent?.trim() === "添加步骤")!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-id="job_3"] button[title="删除任务"]')!.click());
   expect(document.body.textContent).toContain('确认删除任务“新任务”？');
   await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '确认删除任务')!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[role="tab"][aria-selected="false"]')!.click());
   const jobs = parseActions(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="GitHub Actions YAML"]')!.value).jobs;
-  expect(jobs.find(job => job.id === "job_1")?.needs).toEqual(["build"]);
-  expect(jobs.find(job => job.id === "job_2")).toBeUndefined();
-  expect(jobs.find(job => job.id === "build")?.steps).toHaveLength(2);
+  expect(jobs.find(job => job.id === "job_2")?.needs).toEqual(["job_1"]);
+  expect(jobs.find(job => job.id === "job_3")).toBeUndefined();
+  expect(jobs.find(job => job.id === "job_1")?.steps).toHaveLength(2);
 });
 it("moves pipeline group filtering into a left directory", async () => {
   required = false;

@@ -2,7 +2,7 @@ import { createContext, type ComponentProps } from "react";
 import { cn } from "cn";
 
 /** Portaled editor panels save through the owning form and its existing validation. */
-export const EditorFormActionsContext = createContext<{save:()=>void;saving:boolean;blocked:boolean}|null>(null);
+export const EditorFormActionsContext = createContext<{save:()=>void;saveAndWait?:()=>Promise<Record<string,unknown>|undefined>;saving:boolean;blocked:boolean}|null>(null);
 
 /** Reference CrudEditButton's sticky toolbar, shared by detail and edit modes. */
 export function FormActions({ className, placement = "footer", ...props }: ComponentProps<"div"> & { placement?: "footer" | "toolbar" }) {

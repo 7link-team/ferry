@@ -171,6 +171,8 @@ export function WorkflowAssetUpload({
 }
 
 interface Output {
+  state?: string;
+  end_reason?: string;
   ports: {
     name: string;
     index: number;
@@ -183,14 +185,17 @@ interface Output {
 export function WorkflowOutputPreview({ output }: { output: Output }) {
   return (
     <div className="space-y-4">
+      {output.state && <p role="status" className={output.state === "failed" ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>{t("state")}: {output.state}{output.end_reason ? ` · ${output.end_reason}` : ""}</p>}
       {output.ports.map((port) => (
         <section key={`${port.name}:${port.index}`} className="space-y-3">
           <h3 className="font-medium">
-            {port.name} · {port.items.length} {t("itemsOut")}
+            {port.name === "main" ? t("mainPort") : port.name} · {port.items.length} {t("inspector.items")}
           </h3>
+          {port.name === "main" && <p className="text-xs text-muted-foreground">{t("defaultOutputHelp")}</p>}
           {port.items.slice(0, 20).map((item, index) => (
             <div key={index} className="space-y-3 rounded-lg border p-3">
               <dl className="space-y-2">
+                {!Object.keys(item.json).length && <p className="text-xs text-muted-foreground"><code>{"{}"}</code> · {t("emptyObject")}</p>}
                 {Object.entries(item.json).map(([key, value]) => (
                   <div key={key} className="grid min-w-0 gap-1">
                     <dt className="text-xs text-muted-foreground">{key}</dt>

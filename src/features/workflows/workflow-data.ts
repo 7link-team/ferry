@@ -15,6 +15,9 @@ export interface WorkflowPacket {
   }[];
 }
 export interface NodeExecutionData {
+    logs?: string | null;
+    logs_truncated?: boolean;
+    logs_updated_at?: number;
   input: {
     items: WorkflowItem[];
     sources: {

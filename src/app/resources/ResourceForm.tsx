@@ -108,9 +108,18 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const route = createInPlace ? { ...pageRoute, mode: "new" as const } : editInPlace ? { ...pageRoute, mode: "edit" as const } : pageRoute;
   const creating = route.mode === "new";
   const copyId = creating && !createInPlace ? new URLSearchParams(location.search).get("copy") : null;
-  const blankDraft = creating && !createInPlace && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
+  const baseBlankDraft = creating && !createInPlace && config.resource === "alert-rules" && new URLSearchParams(location.search).get("target_kind") === "host"
     ? { ...config.blank, target_kind: "host", target_ref: new URLSearchParams(location.search).get("target_ref") ?? "" } as Partial<T>
     : config.blank;
+  const [defaultWorkflowName] = useState(() => {
+    if (!["workflows", "pipelines"].includes(config.resource)) return "";
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    const suffix = Array.from(crypto.getRandomValues(new Uint8Array(3)), value => value.toString(16).padStart(2,"0")).join("");
+    return `${workflowText("newWorkflow")}-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${suffix}`;
+  });
+  const blankDraft = creating && ["workflows", "pipelines"].includes(config.resource)
+    ? { ...baseBlankDraft, name: defaultWorkflowName } as Partial<T> : baseBlankDraft;
   const [draft, setDraft] = useState<Partial<T>>(blankDraft);
   const [draftAssets] = useState(createWorkflowDraftAssets);
   const [pendingWorkflow, setPendingWorkflow] = useState<T | null>(null);
@@ -199,10 +208,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
     />
   );
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (groupContent || readOnly || !canEdit || loading || optionsBlocked) return;
-    const runAfterSave = workspaceEditor && (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "save-run";
+  const saveForm = async (runAfterSave = false, throwOnError = false) => {
+    if (groupContent || readOnly || !canEdit || loading || optionsBlocked || saving) return;
     setSaving(true);
     setError("");
     let savedId: string | undefined;
@@ -234,10 +241,11 @@ export function ResourceForm<T extends Record<string, unknown>>({
       }
       onSaved?.();
       if (config.editor && savedId) {
-        setDraft(await getResource<T>(workspace, config.resource, savedId, config.endpoint));
+        const row = await getResource<T>(workspace, config.resource, savedId, config.endpoint);
+        setDraft(row);
         if (creating) navigate({ ...route, id: savedId, mode: "edit" }, {});
         toast.success(commonText("common.save"));
-        return;
+        return row;
       }
       if (createInPlace) return;
       if (editInPlace) {
@@ -267,9 +275,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
         toast.error(commonText("form.savedRunFailed", { error: errorText(cause) }));
         navigate({ ...route, id: savedId, mode: "edit" }, {});
       } else setError(errorText(cause));
+      if (throwOnError) throw cause;
     } finally {
       setSaving(false);
     }
+  };
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await saveForm(workspaceEditor && (event.nativeEvent as SubmitEvent).submitter?.getAttribute("value") === "save-run");
   };
 
   if (loading) return <div className="min-w-0">{pipelineWorkspace && <div className="flex justify-end border-b px-4 py-2">{headerActions}</div>}<LoadingSkeleton variant={config.editor ? "editor" : "form"} /></div>;
@@ -301,7 +314,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       if (creating && pendingActionRow && "id" in pendingActionRow)
         navigate({ ...route, id: String(pendingActionRow.id), mode: "edit" }, {});
     };
-    return <EditorFormActionsContext.Provider value={{save:()=>editorForm.current?.requestSubmit(),saving,blocked:readOnly || !canEdit || optionsBlocked}}><WorkflowDraftAssetsContext.Provider value={draftAssets}><AutoForm ref={editorForm} className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
+    return <EditorFormActionsContext.Provider value={{save:()=>editorForm.current?.requestSubmit(),saveAndWait:async()=>editorForm.current?.reportValidity() ? saveForm(false,true) : undefined,saving,blocked:readOnly || !canEdit || optionsBlocked}}><WorkflowDraftAssetsContext.Provider value={draftAssets}><AutoForm ref={editorForm} className="flex h-full min-h-0 min-w-0 flex-col" onSubmit={submit}>
       <header className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-2 sm:min-h-14 sm:px-4">
         <Button type="button" variant="ghost" size="icon" aria-label={commonText(templateWorkspace || config.editor ? "common.backList" : "form.backPipeline")} title={commonText(templateWorkspace || config.editor ? "common.backList" : "form.backPipeline")} onClick={() => navigate({ ...route, mode: "list" }, {})}><ArrowLeft /></Button>
         <AutoField label={config.editor?.nameLabel ?? commonText(templateWorkspace ? "form.templateName" : "form.pipelineName")} name="name" hideLabel className="shrink-0"><Input aria-label={config.editor?.nameLabel ?? commonText(templateWorkspace ? "form.templateName" : "form.pipelineName")} placeholder={config.editor?.nameLabel ?? commonText(templateWorkspace ? "form.templateName" : "form.pipelineName")} readOnly={readOnly} required maxLength={60} className="h-9 w-48 max-w-[calc(100vw-6rem)] shrink-0 border-0 bg-transparent px-2 text-base font-semibold shadow-none focus-visible:ring-0 sm:w-56" value={String(draft.name ?? "")} onChange={event => setDraft(current => ({ ...current, name: event.target.value } as Partial<T>))} /></AutoField>
@@ -314,7 +327,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         {!templateWorkspace && permissions.has("pipeline-templates.create") && <Button type="button" variant="ghost" size="sm" onClick={() => { setTemplateError(""); setTemplateDialog("export"); }}><Upload />{commonText("form.saveAsTemplate")}</Button>}
         <div className="ml-auto flex gap-2">
       <FormActions placement="toolbar">
-        {readOnly ? canEdit && <Button asChild className="w-full"><a href={href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button> : <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />{commonText(templateWorkspace && creating ? "common.create" : "common.save")}</Button>}
+        {readOnly ? canEdit && <Button asChild className="w-full"><a href={href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button> : config.resource !== "workflows" && <Button type="submit" variant="outline" disabled={saving || !canEdit || optionsBlocked}>{saving && <Loader2 className="animate-spin" />}<Save />{commonText(templateWorkspace && creating ? "common.create" : "common.save")}</Button>}
         {!config.editor && !templateWorkspace && permissions.has("pipelines.run") && <Button type="submit" value="save-run" disabled={saving || !canEdit || optionsBlocked}><Play />{commonText("form.saveAndRun")}</Button>}
       </FormActions>
           {headerActions}

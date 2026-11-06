@@ -4,6 +4,16 @@ import { artifactNames, outputSources } from "./action-references";
 import { actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
 
+it("starts from an empty draft and adds the first usable job without relaxing execution validation", () => {
+ const empty = "on: workflow_dispatch\njobs: {}\n";
+ expect(parseActions(empty, true).jobs).toHaveLength(0);
+ expect(() => parseActions(empty)).toThrow();
+ const added = addActionJob(empty);
+ expect(parseActions(added.source).jobs).toHaveLength(1);
+ expect(parseActions(added.source).jobs[0]?.id).toBe(added.id);
+ expect(parseActions(added.source).jobs[0]?.steps[0]?.run).toContain("CI_");
+});
+
 it("suggests reachable artifacts and known step outputs without guessing producer expressions", () => {
  const { jobs } = parseActions(`jobs:
   build:

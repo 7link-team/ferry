@@ -674,7 +674,8 @@ pub async fn node_data(
     Ok(Json(
         json!({"input":{"items":items,"sources":upstream},"output":output,
         "resolved_params":snapshot.params,"frozen_at":snapshot.frozen_at_ms,
-        "revision_id":Id::from(run.revision_id),"state":node.state,"end_reason":run.end_reason}),
+        "revision_id":Id::from(run.revision_id),"state":node.state,"end_reason":run.end_reason,
+        "logs":node.logs,"logs_truncated":node.logs_truncated,"logs_updated_at":node.logs_updated_at}),
     ))
 }
 
@@ -692,7 +693,7 @@ pub async fn node_runs(
         .order_by_asc(nodes::Column::Id)
         .all(&tx)
         .await?;
-    let items:Vec<_>=rows.iter().map(|n|json!({"id":Id::from(n.id),"node_id":n.node_id,"iteration":n.iteration_path,"attempt":n.attempt,"state":n.state,"items_in":n.items_in,"items_out":n.items_out,"version":n.version,"started_at":n.started_at,"finished_at":n.finished_at})).collect();
+    let items:Vec<_>=rows.iter().map(|n|json!({"id":Id::from(n.id),"node_id":n.node_id,"iteration":n.iteration_path,"attempt":n.attempt,"state":n.state,"items_in":n.items_in,"items_out":n.items_out,"version":n.version,"started_at":n.started_at,"finished_at":n.finished_at,"logs_updated_at":n.logs_updated_at,"logs_truncated":n.logs_truncated})).collect();
     tx.commit().await?;
     Ok(Json(
         json!({"items":items,"total":items.len(),"page":1,"page_size":items.len()}),

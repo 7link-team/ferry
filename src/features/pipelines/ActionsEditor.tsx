@@ -85,10 +85,10 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
     if (!next) return;
     (forward ? undo.current : redo.current).push(snapshot()); onChange(next); setError("");
   }
-  const parsed = useMemo(() => { try { return { ...parseActions(source), error: "" }; } catch (cause) { return { document: undefined, jobs: [] as ActionJob[], error: cause instanceof Error ? cause.message : String(cause) }; } }, [source, i18n.language]);
+  const parsed = useMemo(() => { try { return { ...parseActions(source, true), error: "" }; } catch (cause) { return { document: undefined, jobs: [] as ActionJob[], error: cause instanceof Error ? cause.message : String(cause) }; } }, [source, i18n.language]);
   const bindings = (draft.executor_bindings ?? []) as Binding[];
   const missingHosts = requireExecutorBinding ? parsed.jobs.filter(job => job.raw["ferry-approval"] !== true && !bindings.some(binding => binding.job_id === job.id && (binding.target_kind === "pool" || (binding.target_ref && binding.target_ref !== "0")))) : [];
-  useEffect(() => { onValidityChange(!!parsed.error || missingHosts.length > 0); return () => onValidityChange(false); }, [parsed.error, missingHosts.length, onValidityChange]);
+  useEffect(() => { onValidityChange(!!parsed.error || !parsed.jobs.length || missingHosts.length > 0); return () => onValidityChange(false); }, [parsed.error, parsed.jobs.length, missingHosts.length, onValidityChange]);
   useEffect(() => { panel.current?.querySelector<HTMLInputElement>("input")?.focus(); }, [selection?.job, selection?.step, workflowSettings]);
   const layout = (draft.graph_layout ?? {}) as Record<string, { x: number; y: number }>;
   // checkout_bindings use { job_id, step_id, ...repository fields }; step_id is the stable YAML step.id assigned by the checkout form.
@@ -142,7 +142,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
     try {
       if (readOnly) return;
       const definition = transform();
-      const nextJobs = parseActions(definition).jobs;
+      const nextJobs = parseActions(definition, true).jobs;
       const ids = new Set(nextJobs.map(job => job.id));
       commit({ definition, checkout_bindings: checkoutBindings.filter(binding => nextJobs.some(job => job.id === binding.job_id && job.steps.some(step => step.id === binding.step_id && /^actions\/checkout@/.test(String(step.uses ?? ""))))), executor_bindings: bindings.filter(binding => ids.has(binding.job_id) && nextJobs.find(job => job.id === binding.job_id)?.raw["ferry-approval"] !== true), graph_layout: Object.fromEntries(Object.entries(layout).filter(([id]) => ids.has(id))), ...extra }); setError("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -237,6 +237,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
         setSelectedEdge(undefined);
       } });
     }}><Unlink2 className="size-4" /></Button></div>}
+        {!readOnly && !parsed.error && !parsed.jobs.length && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><Button type="button" variant="outline" className="pointer-events-auto" onClick={() => { const added=addActionJob(source); change(() => added.source); select({job:added.id}); }}><Plus />{workflowText("addBuildJob")}</Button></div>}
         {!parsed.error && <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesFocusable={!readOnly} deleteKeyCode={null} onConnect={onConnect} onEdgeClick={(_, edge) => setSelectedEdge({ source: edge.source, target: edge.target })} onPaneClick={() => setSelectedEdge(undefined)} onNodesChange={changes => {
           const dimensions = changes.flatMap(change => change.type === "dimensions" && change.dimensions ? [[change.id, change.dimensions] as const] : []);
           if (dimensions.length) setMeasurements(current => ({ ...current, ...Object.fromEntries(dimensions) }));
@@ -302,6 +303,6 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
         {!step && <ActionFragmentYaml key={job.id} source={source} job={job.id} original={originalSource.current} readOnly={readOnly} onChange={definition => change(() => definition)} />}
       </aside>}
     </div>}
-    {(parsed.error || error) && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{parsed.error || error}</p>}
+    {(parsed.error || error || !parsed.jobs.length) && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{parsed.error || error || executionText("workflow.jobsRequired")}</p>}
   </div></FieldHelpContext.Provider>;
 }

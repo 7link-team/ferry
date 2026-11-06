@@ -89,6 +89,20 @@ async function click(name: string) {
   expect(item, name).toBeDefined();
   await act(async () => item.click());
 }
+
+it("distinguishes a failed workflow from a successful node's main output", async () => {
+  const implementation = calls.getMockImplementation()!;
+  calls.mockImplementation(async (...args) => {
+    const result = await implementation(...args);
+    return args[0].includes("/executions?") ? {items:[{id:"91",number:1,state:"failed",revision_id:"15"}]} : result;
+  });
+  await act(async () => root.render(<Harness />));
+  expect(dialog().textContent).toContain(t("workflowRunFailed"));
+  expect(dialog().textContent).toContain(t("mainPort"));
+  expect(dialog().textContent).toContain(t("defaultOutputHelp"));
+  expect(dialog().textContent).not.toContain("main 1");
+  expect(dialog().textContent).toContain("before");
+});
 function Harness({
   readOnly = false,
   save = () => {},

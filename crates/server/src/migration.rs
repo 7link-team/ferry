@@ -5,6 +5,7 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod login_guard;
+mod workflow_node_logs;
 mod platform_monitor;
 mod platform_storage;
 
@@ -138,6 +139,7 @@ impl MigratorTrait for Migrator {
             Box::new(platform_monitor::Migration),
             Box::new(platform_monitor::LimitsMigration),
             Box::new(login_guard::Migration),
+            Box::new(workflow_node_logs::Migration),
         ]
     }
 }

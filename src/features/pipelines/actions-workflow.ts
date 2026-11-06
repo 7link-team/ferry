@@ -41,11 +41,11 @@ export function dispatchInputs(source: string): DispatchInput[] {
   }
 }
 
-export function parseActions(source: string): { document: Document; jobs: ActionJob[] } {
+export function parseActions(source: string, allowEmpty = false): { document: Document; jobs: ActionJob[] } {
   const document = parseDocument(source, { uniqueKeys: true });
   if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));
   const value = document.toJS({ maxAliasCount: 50 });
-  if (!object(value) || !object(value.jobs) || !Object.keys(value.jobs).length) throw new Error(executionText("workflow.jobsRequired"));
+  if (!object(value) || !object(value.jobs) || (!allowEmpty && !Object.keys(value.jobs).length)) throw new Error(executionText("workflow.jobsRequired"));
   const jobs = Object.entries(value.jobs).map(([id, raw]) => {
     if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(id) || !object(raw)) throw new Error(executionText("workflow.invalidJobId", { id }));
     if (raw.steps !== undefined && (!Array.isArray(raw.steps) || raw.steps.some(step => !object(step)))) throw new Error(executionText("workflow.stepsArray", { id }));
@@ -86,7 +86,7 @@ function patch(document: Document, path: (string | number)[], values: Record<str
   }
 }
 export function editActionWorkflow(source: string, values: Record<string, unknown>): string {
-  const { document } = parseActions(source);
+  const { document } = parseActions(source, true);
   patch(document, [], values); return serialize(document);
 }
 export function editActionJob(source: string, job: string, values: Record<string, unknown>): string {
@@ -143,7 +143,7 @@ export function removeActionJob(source: string, id: string): string {
   return serialize(document);
 }
 export function addActionJob(source: string, checkout = false, placement?: { job: string; mode: "serial" | "parallel" }): { source: string; id: string } {
-  const { document, jobs } = parseActions(source);
+  const { document, jobs } = parseActions(source, true);
   let suffix = 1; while (jobs.some(job => job.id === `job_${suffix}`)) suffix++;
   const id = `job_${suffix}`;
   const anchor = placement && jobs.find(job => job.id === placement.job);

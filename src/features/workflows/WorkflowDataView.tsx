@@ -25,6 +25,7 @@ function Fields({
       </span>
     );
   const entries = Object.entries(value).slice(0, 100);
+  if (!entries.length) return <p className="text-xs text-muted-foreground"><code>{Array.isArray(value) ? "[]" : "{}"}</code> · {t("emptyObject")}</p>;
   return (
     <div className="space-y-2">
       {entries.map(([key, item]) => {

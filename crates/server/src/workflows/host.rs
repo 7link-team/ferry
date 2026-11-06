@@ -10,9 +10,43 @@ use crate::{
 };
 use axum::http::StatusCode;
 use bytes::Bytes;
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr};
 use serde_json::{Value, json};
 use std::time::Duration;
+
+const NODE_LOG_LIMIT: usize = 256 * 1024;
+#[derive(Default)]
+struct NodeLog {
+    text: String,
+    truncated: bool,
+    dirty: bool,
+}
+impl NodeLog {
+    fn push(&mut self, stream: &str, bytes: &[u8]) {
+        if bytes.is_empty() || self.truncated { return; }
+        let entry = format!("[{}] [{}] {}\n", chrono::Utc::now().to_rfc3339(), stream, String::from_utf8_lossy(&bytes[..bytes.len().min(NODE_LOG_LIMIT)]));
+        let mut end = entry.len().min(NODE_LOG_LIMIT.saturating_sub(self.text.len()));
+        while !entry.is_char_boundary(end) { end -= 1; }
+        self.text.push_str(&entry[..end]);
+        self.truncated = end < entry.len() || bytes.len() > NODE_LOG_LIMIT;
+        self.dirty = true;
+    }
+    async fn flush(&mut self, s: &AppState, node: Option<i64>) -> Result<()> {
+        if !self.dirty { return Ok(()); }
+        if let Some(id) = node {
+            use crate::entities::workflow_node_runs as nodes;
+            nodes::Entity::update_many()
+                .col_expr(nodes::Column::Logs, Expr::value(self.text.clone()))
+                .col_expr(nodes::Column::LogsTruncated, Expr::value(self.truncated))
+                .col_expr(nodes::Column::LogsUpdatedAt, Expr::value(crate::db::now()))
+                .filter(nodes::Column::Id.eq(id))
+                .filter(nodes::Column::State.eq("running"))
+                .exec(&s.db).await?;
+        }
+        self.dirty = false;
+        Ok(())
+    }
+}
 
 pub(super) fn invalid() -> ApiError {
     ApiError::localized(
@@ -94,7 +128,15 @@ pub(super) async fn execute(
     run: &workflow_executions::Model,
     node: &Value,
     script: &str,
+    log_output: bool,
 ) -> Result<Value> {
+    let log_node = if log_output {
+        use crate::entities::workflow_node_runs as nodes;
+        nodes::Entity::find().filter(nodes::Column::ExecutionId.eq(run.id))
+            .filter(nodes::Column::NodeId.eq(node["id"].as_str().unwrap_or("")))
+            .filter(nodes::Column::State.eq("running"))
+            .order_by_desc(nodes::Column::Id).one(&s.db).await?.map(|row|row.id)
+    } else { None };
     let target = node
         .pointer("/settings/target_ref")
         .and_then(Value::as_str)
@@ -188,6 +230,8 @@ pub(super) async fn execute(
                 let task = ch.exec_stream(&command, Duration::from_secs(120), sender, receiver);
                 tokio::pin!(task);
                 let mut stdout = Vec::new();
+                let mut node_log = NodeLog::default();
+                let mut log_tick = tokio::time::interval(Duration::from_millis(250));
                 let mut stderr_len = 0usize;
                 let mut failure = None;
                 let mut output_open = true;
@@ -197,20 +241,24 @@ pub(super) async fn execute(
                     tokio::select! {
                         result = &mut task => break result?,
                         chunk = output.recv(), if output_open => if let Some((kind, bytes)) = chunk {
+                            if log_node.is_some() { node_log.push(&kind, &bytes); }
                             if kind == "stdout" {
                                 if stdout.len() + bytes.len() > 1024*1024 { failure.get_or_insert_with(invalid); let _ = cancel.send(true); }
                                 else { stdout.extend_from_slice(&bytes); }
                             } else { stderr_len += bytes.len(); if stderr_len > 1024*1024 { failure.get_or_insert_with(invalid); let _=cancel.send(true); } }
                         } else { output_open = false; },
+                        _ = log_tick.tick(), if log_node.is_some() && node_log.dirty => if let Err(error) = node_log.flush(s, log_node).await { failure.get_or_insert(error); let _ = cancel.send(true); },
                         _ = check.tick() => if let Err(error) = active(s, run).await { failure.get_or_insert(error); let _ = cancel.send(true); },
                         _ = renewal.tick() => if !lease.renew(&s.db).await.unwrap_or(false) { failure.get_or_insert_with(crate::executions::ownership_lost); let _=cancel.send(true); },
                     }
                 };
                 // Drain chunks queued immediately before process completion.
                 while let Ok((kind, bytes)) = output.try_recv() {
+                    if log_node.is_some() { node_log.push(&kind, &bytes); }
                     if kind == "stdout" { if stdout.len()+bytes.len()>1024*1024 {code=-1;} else {stdout.extend_from_slice(&bytes);} }
                     else { stderr_len += bytes.len(); if stderr_len > 1024*1024 { code = -1; } }
                 }
+                node_log.flush(s, log_node).await?;
                 if let Some(error) = failure { return Err(error); }
                 active(s, run).await?;
                 if code != 0 { return Err(invalid()); }
@@ -279,6 +327,32 @@ pub(super) fn git_script(operation: &str, params: &Value) -> Result<String> {
 mod tests {
     use super::*;
     use sea_orm::{ColumnTrait, ConnectionTrait, IntoActiveModel, QueryFilter};
+
+    #[test]
+    fn node_logs_bound_unicode_and_stop_growing_after_truncation() {
+        let mut log = NodeLog::default();
+        log.push("stderr", "failure 中文".repeat(NODE_LOG_LIMIT).as_bytes());
+        assert!(log.truncated);
+        assert!(log.text.len() <= NODE_LOG_LIMIT);
+        assert!(log.text.contains("[stderr] failure 中文"));
+        let frozen = log.text.clone();
+        log.dirty = false;
+        log.push("stdout", b"must not keep writing");
+        assert_eq!(log.text, frozen);
+        assert!(!log.dirty);
+    }
+
+    #[test]
+    fn node_logs_keep_both_streams_and_ignore_empty_chunks() {
+        let mut log = NodeLog::default();
+        log.push("stdout", b"");
+        assert!(!log.dirty);
+        log.push("stdout", b"first");
+        log.push("stderr", b"second");
+        assert!(log.text.contains("[stdout] first"));
+        assert!(log.text.contains("[stderr] second"));
+        assert!(!log.truncated);
+    }
 
     async fn waiting_fixture() -> (
         tempfile::TempDir,
@@ -357,7 +431,7 @@ mod tests {
         let state = s.clone();
         let node =
             json!({"id":"git","settings":{"target_ref":host.to_string(),"target_kind":"host"}});
-        let task = tokio::spawn(async move { execute(&state, &run, &node, "exit 0").await });
+        let task = tokio::spawn(async move { execute(&state, &run, &node, "exit 0", false).await });
         for _ in 0..100 {
             if slot(s, host).await.is_some() {
                 return task;
