@@ -135,11 +135,12 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
   useTranslation("resource-domain");
   const route = useRoute();
   const legacyServerNodes = route.item === "settings" && new URLSearchParams(location.search).get("section") === "server-nodes";
-  const serverNodes = route.item === "monitor" && route.id === "server-nodes";
+  const serverNodes = route.item === "monitor" && (!route.id || route.id === "server-nodes");
   const item = route.workspace === "_platform" ? route.item : "workspaces";
   useEffect(() => {
     if (route.workspace !== "_platform") navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {}, { replace: true });
     else if (item === "server-nodes" || legacyServerNodes) navigate({ workspace: "_platform", item: "monitor", id: "server-nodes", mode: "view" }, {}, { replace: true });
+    else if (item === "monitor" && !route.id) navigate({ ...route, id: "server-nodes", mode: "view" }, {}, { replace: true });
     else if (item === "settings" && !route.id) navigate({ ...route, id: "1", mode: "edit" }, {}, { replace: true });
   }, [route.workspace, route.id, item, legacyServerNodes]);
   if (!identity.user.is_superadmin) return <div className="p-6 space-y-4"><div className="flex justify-end">{headerActions}</div><p>{commonText("resource-domain:platform.forbidden")}</p><Button onClick={() => navigate({ workspace: identity.workspaces[0]?.id ?? "", mode: "list" }, {})}>{commonText("common-domain:shell.backWorkspace")}</Button></div>;
@@ -149,9 +150,9 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     <header className="flex flex-wrap items-center gap-4 border-b px-5 py-3">
       <h1 className="font-semibold">{commonText("resource-domain:platform.management")}</h1>
       <nav aria-label={commonText("resource-domain:platform.management")} className="flex flex-wrap gap-2">
-        {Object.entries(labels).map(([key, label]) => <a key={key} href={href({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : "list", ...(key === "settings" ? { id: "1" } : {}) }, {})}
+        {Object.entries(labels).map(([key, label]) => <a key={key} href={href({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {})}
           aria-current={key === item ? "page" : undefined} className={`rounded px-3 py-2 text-sm ${key === item ? "bg-accent" : "text-muted-foreground"}`}
-          onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : "list", ...(key === "settings" ? { id: "1" } : {}) }, {}); }}>{commonText(label)}</a>)}
+          onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate({ workspace: "_platform", item: key, mode: key === "settings" ? "edit" : key === "monitor" ? "view" : "list", ...(key === "settings" ? { id: "1" } : key === "monitor" ? { id: "server-nodes" } : {}) }, {}); }}>{commonText(label)}</a>)}
       </nav>
       <span className="flex-1" />
       {headerActions}
@@ -159,14 +160,14 @@ export function Platform({ identity, reload, headerActions }: { identity: Identi
     <div className="flex shrink-0 items-center justify-between gap-3 border-b px-5 py-3">
       <nav aria-label={commonText("common-domain:shell.breadcrumbs")}><ol className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         <li>{commonText("resource-domain:platform.management")}</li><li aria-hidden="true">/</li>
-        <li><a className="hover:text-foreground" aria-current={!route.id?"page":undefined} href={href({workspace:"_platform",item,mode:item==="settings"?"edit":"list",...(item==="settings"?{id:"1"}:{})},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item,mode:item==="settings"?"edit":"list",...(item==="settings"?{id:"1"}:{})},{});}}>{commonText(labels[item]!)}</a></li>
+        <li><a className="hover:text-foreground" aria-current={!route.id?"page":undefined} href={href({workspace:"_platform",item,mode:item==="settings"?"edit":item==="monitor"?"view":"list",...(item==="settings"?{id:"1"}:item==="monitor"?{id:"server-nodes"}:{})},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item,mode:item==="settings"?"edit":item==="monitor"?"view":"list",...(item==="settings"?{id:"1"}:item==="monitor"?{id:"server-nodes"}:{})},{});}}>{commonText(labels[item]!)}</a></li>
         {(item==="monitor"||serverNodes||(route.id&&item!=="settings"))&&<><li aria-hidden="true">/</li><li aria-current="page" className="text-foreground">{serverNodes?commonText("resource-domain:platform.serverNodes"):item==="monitor"?commonText(`resource-domain:monitor.${route.id??"database"}`):commonText(`common-domain:common.${route.mode==="edit"?"edit":"details"}`)}</li></>}
       </ol></nav>
       {item === "workspaces" && route.id && <Button asChild variant="outline"><a href={href(workspaceEntry(route.id), {})} onClick={event => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate(workspaceEntry(route.id!), {}); }}><LogIn className="size-4" />{commonText("resource-domain:platform.enter")}</a></Button>}
     </div>
     <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
       {item === "monitor" && <nav aria-label={commonText("resource-domain:monitor.title")} className="flex shrink-0 gap-1 overflow-auto border-b p-3 sm:w-48 sm:flex-col sm:border-r sm:border-b-0">
-        {["server-nodes", ...monitorSections, "activity"].map(section => <a key={section} className={`rounded px-3 py-2 text-sm ${(route.id ?? "database") === section ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`} aria-current={(route.id ?? "database") === section ? "page" : undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section === "server-nodes" ? "resource-domain:platform.serverNodes" : `resource-domain:monitor.${section}`)}</a>)}
+        {["server-nodes", ...monitorSections, "activity"].map(section => <a key={section} className={`rounded px-3 py-2 text-sm ${(route.id ?? "server-nodes") === section ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`} aria-current={(route.id ?? "server-nodes") === section ? "page" : undefined} href={href({workspace:"_platform",item:"monitor",id:section,mode:"view"},{})} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate({workspace:"_platform",item:"monitor",id:section,mode:"view"},{});}}>{commonText(section === "server-nodes" ? "resource-domain:platform.serverNodes" : `resource-domain:monitor.${section}`)}</a>)}
       </nav>}
     <main className="flex min-h-0 min-w-0 flex-1 flex-col p-5">
       {item === "monitor" ? serverNodes ? <PlatformServerNodes /> : route.id === "activity" ? <PlatformActivity /> : <PlatformMonitor key={route.id ?? "database"} section={route.id ?? "database"} /> : route.mode === "list" && item !== "settings" ? <ResourceTable key={item} config={lists[item]!} workspace="_platform" permissions={permissions} />
