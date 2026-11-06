@@ -154,10 +154,11 @@ it("requests the selected time range and refresh step, and keeps real history af
     select.value = value; select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await change("监控时段", "300");
-  await change("自动刷新间隔", "5");
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="定时刷新"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes("5 秒"))!.click());
   expect(fetch).toHaveBeenLastCalledWith("/api/workspaces/ops/nodes/h1/metrics?window_seconds=300&step_seconds=5", expect.anything());
   fetch.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: "query failed" }) });
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="刷新监控"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="刷新"]')!.click());
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("query failed");
   expect(host.textContent).toContain("20.0%");
   expect(host.querySelectorAll('[data-sample-point]').length).toBeGreaterThan(0);

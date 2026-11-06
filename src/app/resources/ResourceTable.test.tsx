@@ -41,6 +41,20 @@ it("renders report metadata from the fetched envelope and hides stale charts aft
   expect(element.textContent).toContain("Report unavailable");
   expect(element.textContent).not.toContain("Report Full series");
 });
+it("opens configured read-only details from the row or an explicit labeled action", async () => {
+  const open = vi.fn();
+  const config: ListConfig<{id:string;name:string}> = {
+    resource:"executions", rowKey:row=>row.id, onRowClick:open,
+    columns:[{key:"name",label:"名称"}], toolbar:{create:false},
+    actions:[{label:"查看详情",showLabel:true,icon:<span data-eye />,action:async row=>{open(row);}}],
+  };
+  await act(async()=>root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+  const details=element.querySelector<HTMLButtonElement>('button[aria-label="查看详情"]')!;
+  expect(details.textContent).toBe("查看详情");expect(details.querySelector('[data-eye]')).not.toBeNull();
+  await act(async()=>details.click());expect(open).toHaveBeenCalledTimes(1);
+  await act(async()=>[...element.querySelectorAll('td')].find(cell=>cell.textContent==="Beta")!.click());
+  expect(open).toHaveBeenLastCalledWith({id:"2",name:"Beta"});
+});
 it("keeps the 15-second default selectable, spins only the refresh icon and resets after failure", async () => {
   vi.useFakeTimers();
   const visibility = vi.spyOn(document, "hidden", "get").mockReturnValue(false);

@@ -1,3 +1,4 @@
+import { RefreshControl } from "../../shared/ui/refresh-control";
 import { commonText,configText,optionText,useCommonTranslation } from "../../shared/i18n/i18n";
 /**
  * The one list implementation. A resource page is a `ListConfig`, never a
@@ -24,7 +25,6 @@ import {
 ArrowUp,
 Cable,
 Columns3,
-ChevronDown,
 ChevronRight,
 Copy,
 Download,
@@ -68,7 +68,6 @@ import {
 DropdownMenu,
 DropdownMenuCheckboxItem,
 DropdownMenuContent,
-DropdownMenuItem,
 DropdownMenuTrigger,
 } from "../../shared/ui/dropdown-menu";
 import { Input } from "../../shared/ui/input";
@@ -366,49 +365,10 @@ export function ResourceTable<T>({
         )}
 
         {!hideToolbar && <div className="ml-auto flex flex-wrap items-center gap-2">
-          {/* 刷新 is a split control: the left half acts, the right half picks
-              the interval. */}
-          <div data-slot="refresh-control" className="inline-flex items-center overflow-hidden rounded-full border bg-background shadow-xs">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="rounded-none! border-0! shadow-none! ring-inset"
-              onClick={reload}
-              disabled={loading}
-            >
-              <RefreshCw className={cn(loading && "animate-spin")} />
-              {commonText("common.refresh")}</Button>
-            <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="min-w-10 rounded-none! border-0! px-2 shadow-none! ring-inset tabular-nums"
-                  aria-label={commonText("table.autoRefresh")}
-                >
-                  {refresh ? <span role="timer" aria-live="off" aria-busy={loading}>{loading ? "0s" : `${remaining}s`}</span> : <ChevronDown aria-hidden="true" className="size-3.5" />}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {REFRESH_INTERVALS.map((seconds) => (
-                  <DropdownMenuItem
-                    key={seconds}
-                    onClick={() => {
-                      setRefresh(seconds);
-                      try {
-                        localStorage.setItem(REFRESH_KEY(config.resource), String(seconds));
-                      } catch {
-                        /* a private window refuses to store the preference */
-                      }
-                    }}
-                  >
-                    {seconds === 0 ? commonText("table.disableRefresh") : commonText("table.refreshEvery", { seconds })}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <RefreshControl loading={loading} interval={refresh} remaining={remaining} onRefresh={reload} onIntervalChange={seconds => {
+            setRefresh(seconds);
+            try { localStorage.setItem(REFRESH_KEY(config.resource), String(seconds)); } catch { /* private storage */ }
+          }} />
 
           <span className="flex-1" />
 
@@ -463,15 +423,16 @@ export function ResourceTable<T>({
         pageSizeOptions={[...PAGE_SIZES]} onSortChange={key => { setSort(sort === key ? `-${key}` : sort === `-${key}` ? "" : key); setPage(1); }}
         onRetry={reload} onSelectAll={toggleAll}
         onToggleSelect={row => setSelected(current => { const next = new Set(current); const key = config.rowKey(row); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
-        rowClickable={row => visibleActions.some(action => (action.label === "查看" || action.label === "编辑") && !!action.to && (!action.when || action.when(row)))}
-        onRowClick={row => { const action = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row))); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); else navigate({ ...route, id: config.rowKey(row), mode: "view" }, {}); }}
-        actionWidth={Math.max(80, visibleActions.length * 36 + 24)}
+        rowClickable={row => !!config.onRowClick || visibleActions.some(action => (action.label === "查看" || action.label === "编辑") && !!action.to && (!action.when || action.when(row)))}
+        onRowClick={row => { if (config.onRowClick) { config.onRowClick(row); return; } const action = visibleActions.find(action => action.label === "查看" && action.to && (!action.when || action.when(row))); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); else navigate({ ...route, id: config.rowKey(row), mode: "view" }, {}); }}
+        actionWidth={Math.max(80, visibleActions.reduce((width, action) => width + (action.showLabel ? 120 : 36), 24))}
         actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <>                          {visibleActions
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
                               <RowActionButton
                                 key={configText(action.label, action.labelKey)}
                                 label={configText(action.label, action.labelKey)}
+                                showLabel={action.showLabel}
                                 icon={busyActions.has(JSON.stringify([config.resource, key, action.label])) ? <Loader2 className="size-4 animate-spin" /> : action.icon ?? actionIcon(action.label)}
                                 newTab={action.newTab}
                                 disabled={busy || busyActions.has(JSON.stringify([config.resource, key, action.label])) || action.disabled?.(row)}
@@ -553,6 +514,7 @@ export function ResourceTable<T>({
 function RowActionButton({
   label,
   icon,
+  showLabel,
   newTab,
   destructive,
   to,
@@ -564,6 +526,7 @@ function RowActionButton({
 }: {
   label: string;
   icon?: ReactNode;
+  showLabel?: boolean | undefined;
   newTab?: boolean | undefined;
   disabled?: boolean | undefined;
   disabledReason?: string | undefined;
@@ -585,7 +548,7 @@ function RowActionButton({
         title={label}
         className={cn(
           "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
-          icon && "inline-flex size-7 items-center justify-center align-middle",
+          icon && (showLabel ? "inline-flex min-h-7 items-center gap-1 align-middle" : "inline-flex size-7 items-center justify-center align-middle"),
           destructive ? "text-destructive" : "text-primary",
         )}
         onClick={(event) => {
@@ -595,7 +558,7 @@ function RowActionButton({
           onNavigate?.();
         }}
       >
-        {icon ?? label}
+        {showLabel ? <>{icon}{label}</> : icon ?? label}
       </a>
     );
   return (
@@ -603,7 +566,7 @@ function RowActionButton({
       type="button"
       className={cn(
         "mr-2 text-sm underline-offset-4 last:mr-0 hover:underline disabled:cursor-not-allowed disabled:opacity-50",
-        icon && "inline-flex size-7 items-center justify-center align-middle",
+        icon && (showLabel ? "inline-flex min-h-7 items-center gap-1 align-middle" : "inline-flex size-7 items-center justify-center align-middle"),
         destructive ? "text-destructive" : "text-primary",
       )}
       disabled={disabled}
@@ -612,7 +575,7 @@ function RowActionButton({
       title={disabled && disabledReason ? `${label}：${disabledReason}` : label}
       onClick={() => void onRun?.()}
     >
-      {icon ?? label}
+      {showLabel ? <>{icon}{label}</> : icon ?? label}
     </button>
   );
 }

@@ -1,5 +1,6 @@
 import { AutoField } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext } from "../../shared/forms/auto-form/form-actions";
+import { EmptyWorkflowCanvas } from "../../shared/editor/EmptyWorkflowCanvas";
 import { useQueryValue } from "../../shared/routing/url-state";
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import {
@@ -17,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { ContextMenu, Dialog } from "radix-ui";
 import {
   GitBranch,
+  Eye,
   History,
   LayoutGrid,
   Maximize2,
@@ -311,6 +313,7 @@ export function WorkflowEditor({
   const [selected, setSelected] = useQueryValue("node", "");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [resultsOpen, setResultsOpen] = useState(false);
+  const [executionId, setExecutionId] = useQueryValue("execution", "");
   const [selectedLink, setSelectedLink] = useState<number>();
   const [dragging, setDragging] = useState<{
     id: string;
@@ -346,6 +349,18 @@ export function WorkflowEditor({
   const [refresh, setRefresh] = useState(0);
   const [execution, setExecution] = useState<Record<string, unknown>>();
   const [executionGraph, setExecutionGraph] = useState<Graph>();
+  const openExecution = (row: Record<string, unknown>) => {
+    if (execution?.id !== row.id) { setExecution(row); setAttempts([]); setExecutionGraph(undefined); }
+    setExecutionId(String(row.id)); setResultsOpen(true);
+  };
+  useEffect(() => {
+    if (!executionId) return;
+    const controller = new AbortController();
+    void api<Record<string, unknown>>(`/workspaces/${workspace}/workflow-executions/${executionId}`, {signal:controller.signal})
+      .then(row => { if (!controller.signal.aborted) { setExecution(row); setResultsOpen(true); } })
+      .catch(cause => { if (!controller.signal.aborted) setError(errorText(cause)); });
+    return () => controller.abort();
+  }, [workspace, executionId]);
   const [attempts, setAttempts] = useState<Record<string, unknown>[]>([]);
   const [outputPreview, setOutputPreview] =
     useState<Parameters<typeof WorkflowOutputPreview>[0]["output"]>();
@@ -628,6 +643,7 @@ export function WorkflowEditor({
           },
         );
         setExecution(run);
+        setExecutionId(String(run.id));
         setInspectorOpen(false);
         setResultsOpen(true);
       } else if (dialog === "publish") {
@@ -707,8 +723,18 @@ export function WorkflowEditor({
     rowKey: (row) => String(row.id),
     toolbar: { create: false },
     columns: [
-      { key: "number", label: t("history") },
+      { key: "number", label: t("history.version"), render: row => `v${row.number}` },
+      { key: "node_count", label: t("history.nodeCount") },
+      { key: "status", label: t("state"), render: row => [row.is_draft ? t("draft") : "", row.is_published ? t("published") : ""].filter(Boolean).join(" · ") || "—" },
       { key: "message", label: commonText("common.description") },
+      { key: "latest_execution", label: t("history.lastRun"), render: row => {
+        const run = row.latest_execution as Record<string, unknown> | null;
+        return run ? <Button type="button" variant="link" className={run.state === "failed" ? "text-destructive" : ""} onClick={() => openExecution(run)}>#{String(run.number)} · {executionStateText(run.state)}</Button> : t("noRuns");
+      } },
+      { key: "last_run_at", label: t("history.lastRunAt"), render: row => {
+        const run = row.latest_execution as Record<string, unknown> | null;
+        return run ? new Date(Number(run.created_at)).toLocaleString() : "—";
+      } },
       {
         key: "created_at",
         label: t("createdAt"),
@@ -724,17 +750,25 @@ export function WorkflowEditor({
     rowKey: (row) => String(row.id),
     toolbar: { create: false },
     empty: t("noRuns"),
+    onRowClick: openExecution,
+    filters: [{key:"state", label:t("state"), type:"select", options:["queued","running","waiting","succeeded","failed","cancelled"].map(value=>({value,label:executionStateText(value)}))}],
     columns: [
-      { key: "number", label: "#" },
-      { key: "state", label: t("state") },
-      { key: "revision_id", label: t("history") },
+      { key: "number", label: "#", sortable:true },
+      { key: "state", label: t("state"), render: row => <span className={row.state === "failed" ? "text-destructive" : ""}>{executionStateText(row.state)}</span> },
+      { key: "revision_number", label: t("history.version"), render: row => row.revision_number ? `v${row.revision_number}` : "—" },
+      { key: "trigger_kind", label: t("history.trigger"), render: row => row.trigger_kind === "manual" ? t("manual") : String(row.trigger_kind || "—") },
+      { key: "triggered_by_name", label: t("history.actor") },
+      { key: "created_at", label: t("createdAt"), sortable:true, render: row => new Date(Number(row.created_at)).toLocaleString() },
+      { key: "started_at", label: t("execution.startedAt"), sortable:true, render: row => Number(row.started_at)>0 ? new Date(Number(row.started_at)).toLocaleString() : "—" },
+      { key: "finished_at", label: t("execution.finishedAt"), sortable:true, render: row => Number(row.finished_at)>0 ? new Date(Number(row.finished_at)).toLocaleString() : "—" },
+      { key: "duration", label: t("execution.duration"), render: row => Number(row.started_at)>0 ? `${Math.max(0,(Number(row.finished_at)||Date.now())-Number(row.started_at))} ms` : "—" },
+      { key: "end_reason", label: t("history.endReason") },
     ],
     actions: [
       {
-        label: t("results"),
+        label: t("history.details"), icon:<Eye className="size-4" />, showLabel:true,
         action: async (row) => {
-          setExecution(row);
-          setAttempts([]);
+          openExecution(row);
         },
       },
     ],
@@ -1079,29 +1113,7 @@ export function WorkflowEditor({
                   {t("removeLink")}
                 </Button>
               )}
-              {!nodes.length && (
-                <div className="pointer-events-none absolute inset-0 grid place-items-center px-6">
-                  <div className="text-center">
-                    <Zap className="mx-auto mb-4 size-10 text-primary" />
-                    <h3 className="font-medium">{t("empty")}</h3>
-                    <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">
-                      {t("emptyHelp")}
-                    </p>
-                    <Button
-                      type="button"
-                      className="pointer-events-auto mt-5"
-                      disabled={readOnly}
-                      onClick={() => {
-                        setInsertAt(undefined);
-                        setPickerOpen(true);
-                      }}
-                    >
-                      <Plus />
-                      {t("startWorkflow")}
-                    </Button>
-                  </div>
-                </div>
-              )}
+              {!nodes.length && <EmptyWorkflowCanvas title={t("empty")} description={t("emptyHelp")} action={t("startWorkflow")} disabled={readOnly} onAdd={() => {setInsertAt(undefined);setPickerOpen(true);}} />}
             </div>
             </ContextMenu.Trigger>
             {node && !readOnly && <ContextMenu.Portal><ContextMenu.Content className="z-50 min-w-48 rounded-md border bg-popover p-1 text-popover-foreground shadow-md" collisionPadding={8}>
@@ -1182,7 +1194,6 @@ export function WorkflowEditor({
         {tab === "executions" && draft.id && (
           <div className="space-y-5">
             {renderTable?.(executionsConfig, refresh)}
-            {executionResults}
           </div>
         )}
         {pickerOpen && !readOnly && (
@@ -1261,7 +1272,7 @@ export function WorkflowEditor({
             <WorkflowOutputPreview output={outputPreview} />
           </Modal>
         )}
-        {resultsOpen && execution && <Modal wide title={t("results")} close={() => setResultsOpen(false)}>{executionResults}</Modal>}
+        {resultsOpen && execution && <Modal wide title={t("results")} close={() => {setResultsOpen(false);setExecutionId("");}}>{executionResults}</Modal>}
         {executionSettingsOpen && graph && <Modal title={t("execution.defaults")} close={() => setExecutionSettingsOpen(false)}>
           <WorkflowExecutionTarget workspace={workspace} value={((graph.settings as Record<string,unknown> | undefined)?.execution as Record<string,unknown>) ?? {}} readOnly={readOnly}
             change={execution => change({...graph, settings:{...(graph.settings as Record<string,unknown> ?? {}), execution}})} />

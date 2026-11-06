@@ -56,6 +56,7 @@ export interface RowAction<T> {
   /** Explicit message key; raw labels remain stable action/configuration identities. */
   labelKey?: string | undefined;
   icon?: ReactNode;
+  showLabel?: boolean;
   newTab?: boolean;
   permission?: string;
   /** Navigating action: becomes a real link. */
@@ -102,6 +103,8 @@ export interface ListConfig<T> {
   pagination?: "next";
   defaultRefresh?: number;
   rowKey: (row: T) => string;
+  /** Open a read-only detail view without navigating to a resource form. */
+  onRowClick?: (row: T) => void;
   /** Optional namespace directory browser. An empty key places a row at the root. */
   grouping?: { label: string; labelKey?: string | undefined; key: (row: T) => string };
   filters?: Filter[];

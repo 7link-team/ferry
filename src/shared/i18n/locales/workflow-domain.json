@@ -552,5 +552,15 @@
 "execution.state.pinned": ["Pinned", "使用固定数据", "使用固定資料", "固定データ", "고정 데이터", "Data dipinkan"],
 "execution.state.reused": ["Reused", "已复用", "已重用", "再利用", "재사용됨", "Diguna semula"],
 "execution.state.bypassed": ["Bypassed", "已绕过", "已略過處理", "バイパス", "우회됨", "Dipintas"],
-"execution.logsTruncated": ["Log limit reached (256 KiB). Further output was not recorded.", "日志已达到256 KiB上限，后续输出未继续记录。", "日誌已達256 KiB上限，後續輸出未繼續記錄。", "ログは256 KiBの上限に達しました。それ以降は記録されません。", "로그가256 KiB한도에 도달했습니다. 이후 출력은 기록되지 않았습니다.", "Had log256 KiB telah dicapai. Output seterusnya tidak direkodkan."]
+"execution.logsTruncated": ["Log limit reached (256 KiB). Further output was not recorded.", "日志已达到256 KiB上限，后续输出未继续记录。", "日誌已達256 KiB上限，後續輸出未繼續記錄。", "ログは256 KiBの上限に達しました。それ以降は記録されません。", "로그가256 KiB한도에 도달했습니다. 이후 출력은 기록되지 않았습니다.", "Had log256 KiB telah dicapai. Output seterusnya tidak direkodkan."],
+"history.version": ["Version", "版本", "版本", "バージョン", "버전", "Versi"],
+"history.nodeCount": ["Nodes", "节点数", "節點數", "ノード数", "노드 수", "Bilangan nod"],
+"history.lastRun": ["Latest execution", "最近一次执行", "最近一次執行", "最新の実行", "최근 실행", "Pelaksanaan terkini"],
+"history.lastRunAt": ["Last executed", "最近执行时间", "最近執行時間", "最終実行日時", "최근 실행 시간", "Masa pelaksanaan terkini"],
+"history.details": ["View details", "查看详情", "查看詳情", "詳細を表示", "상세 보기", "Lihat butiran"],
+"history.trigger": ["Trigger", "触发方式", "觸發方式", "トリガー", "트리거", "Pencetus"],
+"history.actor": ["Triggered by", "触发人", "觸發人", "実行者", "실행자", "Dicetuskan oleh"],
+"history.endReason": ["End reason", "结束原因", "結束原因", "終了理由", "종료 사유", "Sebab tamat"],
+"actions.emptyTitle": ["Start with your first job", "从第一个任务开始", "從第一個任務開始", "最初のジョブから開始", "첫 작업으로 시작", "Mulakan dengan tugas pertama"],
+"actions.emptyHelp": ["Add a job, configure its host and steps, then connect dependent jobs.", "添加任务，配置执行主机和步骤，再连接有依赖关系的任务。", "新增任務，設定執行主機與步驟，再連接有相依關係的任務。", "ジョブを追加し、ホストとステップを設定して依存ジョブを接続します。", "작업을 추가하고 호스트와 단계를 설정한 후 종속 작업을 연결하세요.", "Tambah tugas, tetapkan hos dan langkah, kemudian sambungkan tugas bergantung."]
 }

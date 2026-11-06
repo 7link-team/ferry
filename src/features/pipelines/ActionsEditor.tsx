@@ -1,4 +1,5 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { EmptyWorkflowCanvas } from "../../shared/editor/EmptyWorkflowCanvas";
 import { ActionFragmentYaml, WorkflowFragmentEditor } from "./WorkflowFragmentEditor";
 import { ActionsJobSettings, ActionsRunnerFields, ActionsWorkflowSettings } from "./ActionsSettings";
 import { ActionsConditionField, ActionsPhase } from "./ActionsExecutionFields";
@@ -237,7 +238,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
         setSelectedEdge(undefined);
       } });
     }}><Unlink2 className="size-4" /></Button></div>}
-        {!readOnly && !parsed.error && !parsed.jobs.length && <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center"><Button type="button" variant="outline" className="pointer-events-auto" onClick={() => { const added=addActionJob(source); change(() => added.source); select({job:added.id}); }}><Plus />{workflowText("addBuildJob")}</Button></div>}
+        {!parsed.error && !parsed.jobs.length && <EmptyWorkflowCanvas title={workflowText("actions.emptyTitle")} description={workflowText("actions.emptyHelp")} action={workflowText("addBuildJob")} disabled={readOnly} onAdd={() => { const added=addActionJob(source); change(() => added.source); select({job:added.id}); }} />}
         {!parsed.error && <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesFocusable={!readOnly} deleteKeyCode={null} onConnect={onConnect} onEdgeClick={(_, edge) => setSelectedEdge({ source: edge.source, target: edge.target })} onPaneClick={() => setSelectedEdge(undefined)} onNodesChange={changes => {
           const dimensions = changes.flatMap(change => change.type === "dimensions" && change.dimensions ? [[change.id, change.dimensions] as const] : []);
           if (dimensions.length) setMeasurements(current => ({ ...current, ...Object.fromEntries(dimensions) }));
