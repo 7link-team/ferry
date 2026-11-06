@@ -97,6 +97,8 @@ try {
       const select = languageTrigger(page);
       await select.waitFor({ state: 'visible' });
       const box = await select.boundingBox();
+      console.log('GEOMETRY', JSON.stringify(await select.evaluate(el => ({viewport:innerWidth,body:document.body.scrollWidth,header:el.closest('header').outerHTML,items:[...el.closest('header').children].map(c=>({tag:c.tagName,text:c.textContent,box:c.getBoundingClientRect().toJSON()}))}))));
+      if (!(box && box.x >= 0 && box.x + box.width <= width + 1)) console.error('::error::GEOMETRY '+JSON.stringify(await select.evaluate(el=>({viewport:innerWidth,body:document.body.scrollWidth,items:[...el.closest('header').children].map(c=>({tag:c.tagName,text:c.textContent,box:c.getBoundingClientRect().toJSON()}))}))));
       assert(box && box.x >= 0 && box.x + box.width <= width + 1, `${width}px selector outside viewport: ${path}`);
       const overlap = await select.evaluate(element => {
         const own = element.getBoundingClientRect();

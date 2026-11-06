@@ -1,0 +1,19 @@
+name: Alpha2 locale geometry diagnostics
+on:
+  push:
+    branches: [feat/release-030-alpha2-locale-geometry]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - run: python3 .github/scripts/annotate-failures.py --run node scripts/test-locale-ui.mjs
