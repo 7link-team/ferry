@@ -104,6 +104,7 @@ with tempfile.TemporaryDirectory(prefix='runner-upgrade-') as temp:
         # Compile a throwaway source copy against the fixture's signed TLS catalog.
         shutil.copytree(repo/'crates/server', source/'crates/server')
         shutil.copytree(repo/'src/shared/workflow-contracts', source/'src/shared/workflow-contracts')
+        shutil.copytree(repo/'src/shared/mail', source/'src/shared/mail')
         fixture = Path('examples/workflow-extensions/public-repository.json')
         (source/fixture).parent.mkdir(parents=True)
         shutil.copy2(repo/fixture, source/fixture)
