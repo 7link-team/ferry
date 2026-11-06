@@ -1,8 +1,31 @@
 import { beforeEach,describe,expect,it } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
 import { artifactNames, outputSources } from "./action-references";
-import { actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
+import { actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,formatActionYaml,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
+
+it("expands compact and JSON-shaped YAML without changing scripts, expressions, aliases or comments", () => {
+ const compact = '# retained\non: workflow_dispatch\njobs: { build: { runs-on: self-hosted, env: &vars { FLAG: "false" }, steps: [ { run: "echo \\\"{\\\\\\\"ok\\\\\\\":true}\\\"\\necho done" }, { env: *vars, run: "${{ github.job }}" } ] } }\n';
+ const original = parseActions(compact).document.toJS();
+ const pretty = formatActionYaml(compact);
+ expect(pretty).toContain('# retained');
+ expect(pretty).toContain('jobs:\n  build:\n');
+ expect(pretty).toContain('run: |-');
+ expect(pretty).toContain('*vars');
+ expect(parseActions(pretty).document.toJS()).toEqual(original);
+ const json = JSON.stringify({ on: 'workflow_dispatch', jobs: { build: { steps: [{run:'echo "{\\"ok\\":true}"\r\necho done'}] } } });
+ expect(parseActions(formatActionYaml(json)).document.toJS()).toEqual(JSON.parse(json));
+ expect(formatActionYaml(pretty)).toBe(pretty);
+ expect(() => formatActionYaml('jobs: [')).toThrow();
+ expect(() => formatActionYaml('jobs: {}\njobs: {}')).toThrow();
+});
+
+it("keeps form-generated jobs in indented block YAML when starting from jobs: {}", () => {
+ const added = addActionJob('on: workflow_dispatch\njobs: {}\n');
+ expect(added.source).toContain('jobs:\n');
+ expect(added.source).not.toContain('jobs: {');
+ expect(actionFragment(added.source, added.id)).toContain('steps:\n');
+});
 
 it("starts from an empty draft and adds the first usable job without relaxing execution validation", () => {
  const empty = "on: workflow_dispatch\njobs: {}\n";

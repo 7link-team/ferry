@@ -64,7 +64,20 @@ export function parseActions(source: string, allowEmpty = false): { document: Do
   jobs.forEach(job => visit(job.id));
   return { document, jobs };
 }
-function serialize(document: Document) { const source = document.toString({ lineWidth: 0 }); parseActions(source); return source; }
+/** Expand YAML flow collections without interpreting commands or expression strings. */
+function blockYaml(document: Document): string {
+  visit(document, (_key, node) => {
+    if (isCollection(node)) node.flow = false;
+    if (isScalar(node) && typeof node.value === "string" && node.value.includes("\n") && !node.value.includes("\r")) node.type = "BLOCK_LITERAL";
+  });
+  return document.toString({ indent: 2, lineWidth: 0, verifyAliasOrder: false });
+}
+export function formatActionYaml(source: string): string {
+  const document = parseDocument(source, { uniqueKeys: true });
+  if (document.errors.length) throw new Error(document.errors.map(error => error.message).join("\n"));
+  return blockYaml(document);
+}
+function serialize(document: Document) { const source = blockYaml(document); parseActions(source); return source; }
 function patch(document: Document, path: (string | number)[], values: Record<string, unknown>, deleteNull = true) {
   for (const [key, value] of Object.entries(values)) {
     const target = [...path, key];
@@ -116,7 +129,7 @@ export function actionFragment(source: string, job: string, index?: number): str
   if (!isMap(node)) throw new Error(executionText("workflow.stepMissing"));
   // Aliases can legitimately refer to workflow-level anchors outside this fragment.
   // The complete workflow is validated again before applying the fragment.
-  return new Document(node.clone()).toString({ lineWidth: 0, verifyAliasOrder: false });
+  return blockYaml(new Document(node.clone()));
 }
 
 export function editActionFragment(source: string, job: string, index: number | undefined, fragment: string): string {

@@ -437,6 +437,8 @@ jobs:
           python3 .github/scripts/annotate-failures.py --run node scripts/test-marketplace-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-repository-auth-ui.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-actions-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-actions-yaml-pretty.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-list-default-sort.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-actions-canvas.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-manual-approval.mjs
           python3 .github/scripts/annotate-failures.py --run node scripts/test-named-connection-ui.mjs

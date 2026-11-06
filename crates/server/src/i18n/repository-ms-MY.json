@@ -164,7 +164,7 @@
   "repository.monitor.moreCommits": "{count} lagi; lihat butiran peristiwa",
   "repository.monitor.truncatedCommits": "Hanya {count} komit terkini ditunjukkan",
   "repository.monitor.repositoryLabel": "Repositori",
-  "repository.monitor.tagLabel": "Tag",
+  "repository.monitor.tagLabel": "Penanda",
   "repository.monitor.addedLinesLabel": "Ditambah",
   "repository.monitor.deletedLinesLabel": "Dipadam",
   "repository.monitor.lineCount": "{count} baris",
