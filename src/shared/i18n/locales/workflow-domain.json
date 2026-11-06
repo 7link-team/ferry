@@ -416,6 +416,7 @@
 "draft": ["Draft","草稿","草稿","下書き","초안","Draf"],
 "published": ["Published","已发布","已發佈","公開済み","게시됨","Diterbitkan"],
 "archived": ["Archived","已归档","已封存","アーカイブ済み","보관됨","Diarkibkan"],
+"archive": ["Archive","归档","封存","アーカイブ","보관","Arkibkan"],
 "changes": ["Unpublished changes","有未发布改动","有未發佈變更","未公開の変更","게시되지 않은 변경","Perubahan belum diterbitkan"],
 "run": ["Test run","测试运行","測試執行","テスト実行","테스트 실행","Uji jalan"],
 "publish": ["Publish","发布","發佈","公開","게시","Terbitkan"],

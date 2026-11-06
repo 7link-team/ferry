@@ -1,4 +1,5 @@
 import { api } from '../../shared/api/api';
+import { Archive } from 'lucide-react';
 import { deleteResource } from '../../shared/api/resource';
 import { commonText, workflowText as t } from '../../shared/i18n/i18n';
 import { ago, form, list, namedOptions, type ResourceConfigContext } from '../../shared/resources/config';
@@ -26,7 +27,7 @@ export function workflowsLists({ workspace }: ResourceConfigContext) {
         { label: commonText('common.view'), to: row => ({ id: row.id, mode: 'view' }) },
         { label: commonText('common.edit'), permission: 'workflows.update', when: row => row.lifecycle === 'active', to: row => ({ id: row.id, mode: 'edit' }) },
         { label: commonText('common.copy'), permission: 'workflows.create', to: () => ({ mode: 'new' }), query: row => ({ copy: row.id }) },
-        { label: t('archived'), permission: 'workflows.update', when: row => row.lifecycle === 'active', destructive: true, action: async row => { await api(`/workspaces/${workspace}/workflows/${row.id}`, { method: 'PATCH', body: JSON.stringify({ version: row.version, lifecycle: 'archived' }) }); } },
+        { label: t('archive'), icon: <Archive className="size-4" />, permission: 'workflows.update', when: row => row.lifecycle === 'active', destructive: true, action: async row => { await api(`/workspaces/${workspace}/workflows/${row.id}`, { method: 'PATCH', body: JSON.stringify({ version: row.version, lifecycle: 'archived' }) }); } },
         { label: commonText('common.delete'), permission: 'workflows.delete', when: row => row.lifecycle === 'archived', destructive: true, action: row => deleteResource(workspace, 'workflows', row.id) },
       ],
     }),
