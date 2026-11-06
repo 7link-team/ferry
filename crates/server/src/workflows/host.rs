@@ -23,16 +23,29 @@ struct NodeLog {
 }
 impl NodeLog {
     fn push(&mut self, stream: &str, bytes: &[u8]) {
-        if bytes.is_empty() || self.truncated { return; }
-        let entry = format!("[{}] [{}] {}\n", chrono::Utc::now().to_rfc3339(), stream, String::from_utf8_lossy(&bytes[..bytes.len().min(NODE_LOG_LIMIT)]));
-        let mut end = entry.len().min(NODE_LOG_LIMIT.saturating_sub(self.text.len()));
-        while !entry.is_char_boundary(end) { end -= 1; }
+        if bytes.is_empty() || self.truncated {
+            return;
+        }
+        let entry = format!(
+            "[{}] [{}] {}\n",
+            chrono::Utc::now().to_rfc3339(),
+            stream,
+            String::from_utf8_lossy(&bytes[..bytes.len().min(NODE_LOG_LIMIT)])
+        );
+        let mut end = entry
+            .len()
+            .min(NODE_LOG_LIMIT.saturating_sub(self.text.len()));
+        while !entry.is_char_boundary(end) {
+            end -= 1;
+        }
         self.text.push_str(&entry[..end]);
         self.truncated = end < entry.len() || bytes.len() > NODE_LOG_LIMIT;
         self.dirty = true;
     }
     async fn flush(&mut self, s: &AppState, node: Option<i64>) -> Result<()> {
-        if !self.dirty { return Ok(()); }
+        if !self.dirty {
+            return Ok(());
+        }
         if let Some(id) = node {
             use crate::entities::workflow_node_runs as nodes;
             nodes::Entity::update_many()
@@ -41,7 +54,8 @@ impl NodeLog {
                 .col_expr(nodes::Column::LogsUpdatedAt, Expr::value(crate::db::now()))
                 .filter(nodes::Column::Id.eq(id))
                 .filter(nodes::Column::State.eq("running"))
-                .exec(&s.db).await?;
+                .exec(&s.db)
+                .await?;
         }
         self.dirty = false;
         Ok(())
@@ -132,11 +146,17 @@ pub(super) async fn execute(
 ) -> Result<Value> {
     let log_node = if log_output {
         use crate::entities::workflow_node_runs as nodes;
-        nodes::Entity::find().filter(nodes::Column::ExecutionId.eq(run.id))
+        nodes::Entity::find()
+            .filter(nodes::Column::ExecutionId.eq(run.id))
             .filter(nodes::Column::NodeId.eq(node["id"].as_str().unwrap_or("")))
             .filter(nodes::Column::State.eq("running"))
-            .order_by_desc(nodes::Column::Id).one(&s.db).await?.map(|row|row.id)
-    } else { None };
+            .order_by_desc(nodes::Column::Id)
+            .one(&s.db)
+            .await?
+            .map(|row| row.id)
+    } else {
+        None
+    };
     let target = node
         .pointer("/settings/target_ref")
         .and_then(Value::as_str)

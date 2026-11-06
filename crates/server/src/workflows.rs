@@ -27,8 +27,8 @@ use crate::{
 };
 use axum::{extract::State, http::StatusCode};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    ExprTrait, QuerySelect, QueryTrait, sea_query::Expr,
+    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter, QuerySelect, QueryTrait, sea_query::Expr,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -602,28 +602,44 @@ pub async fn revisions(
     access::require(&tx, &scope, &row, Operation::View).await?;
     let mut result = definitions::list(&tx, scope.workspace_id, "workflow", id, raw).await?;
     if let Some(items) = result.0["items"].as_array_mut() {
-        let ids: Vec<i64> = items.iter().filter_map(|item| item["id"].as_str()?.parse().ok()).collect();
+        let ids: Vec<i64> = items
+            .iter()
+            .filter_map(|item| item["id"].as_str()?.parse().ok())
+            .collect();
         if !ids.is_empty() {
             let latest = workflow_executions::Entity::find()
                 .filter(workflow_executions::Column::WorkspaceId.eq(scope.workspace_id))
                 .filter(workflow_executions::Column::WorkflowId.eq(id))
-                .filter(workflow_executions::Column::Id.in_subquery(
-                    workflow_executions::Entity::find().select_only()
-                        .column_as(Expr::col(workflow_executions::Column::Id).max(), "latest_id")
-                        .filter(workflow_executions::Column::WorkspaceId.eq(scope.workspace_id))
-                        .filter(workflow_executions::Column::WorkflowId.eq(id))
-                        .filter(workflow_executions::Column::RevisionId.is_in(ids))
-                        .group_by(workflow_executions::Column::RevisionId).into_query()
-                )).all(&tx).await?;
+                .filter(
+                    workflow_executions::Column::Id.in_subquery(
+                        workflow_executions::Entity::find()
+                            .select_only()
+                            .column_as(
+                                Expr::col(workflow_executions::Column::Id).max(),
+                                "latest_id",
+                            )
+                            .filter(workflow_executions::Column::WorkspaceId.eq(scope.workspace_id))
+                            .filter(workflow_executions::Column::WorkflowId.eq(id))
+                            .filter(workflow_executions::Column::RevisionId.is_in(ids))
+                            .group_by(workflow_executions::Column::RevisionId)
+                            .into_query(),
+                    ),
+                )
+                .all(&tx)
+                .await?;
             let latest: HashMap<_, _> = latest.iter().map(|run| (run.revision_id, run)).collect();
             for item in items {
-                let revision_id = item["id"].as_str().and_then(|value| value.parse::<i64>().ok());
-                item["node_count"] = item["definition"].as_str()
+                let revision_id = item["id"]
+                    .as_str()
+                    .and_then(|value| value.parse::<i64>().ok());
+                item["node_count"] = item["definition"]
+                    .as_str()
                     .and_then(|value| serde_json::from_str::<Value>(value).ok())
                     .and_then(|value| value["nodes"].as_array().map(|nodes| json!(nodes.len())))
                     .unwrap_or(Value::Null);
                 item["is_draft"] = json!(revision_id == Some(row.draft_revision_id));
-                item["is_published"] = json!(revision_id.is_some() && revision_id == row.published_revision_id);
+                item["is_published"] =
+                    json!(revision_id.is_some() && revision_id == row.published_revision_id);
                 item["latest_execution"] = revision_id.and_then(|id| latest.get(&id))
                     .map(|run| json!({"id":Id::from(run.id),"number":run.number,"state":run.state,"created_at":run.created_at}))
                     .unwrap_or(Value::Null);

@@ -27,7 +27,7 @@ use axum::{extract::State, http::StatusCode};
 use ferry_protocol::sandbox::{InputData, Item, NodeOutput, Paired};
 use sea_orm::{
     ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder,
-    TransactionTrait, QuerySelect, sea_query::Expr,
+    QuerySelect, TransactionTrait, sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -521,30 +521,46 @@ pub async fn list(
         &query,
     )
     .await?;
-    let revision_ids: Vec<_> = rows.iter().map(|row: &runs::Model| row.revision_id).collect();
-    let revisions: BTreeMap<i64, i64> = definition_revisions::Entity::find().select_only()
-        .column(definition_revisions::Column::Id).column(definition_revisions::Column::Number)
+    let revision_ids: Vec<_> = rows
+        .iter()
+        .map(|row: &runs::Model| row.revision_id)
+        .collect();
+    let revisions: BTreeMap<i64, i64> = definition_revisions::Entity::find()
+        .select_only()
+        .column(definition_revisions::Column::Id)
+        .column(definition_revisions::Column::Number)
         .filter(definition_revisions::Column::WorkspaceId.eq(scope.workspace_id))
         .filter(definition_revisions::Column::SubjectKind.eq("workflow"))
         .filter(definition_revisions::Column::SubjectId.eq(id))
         .filter(definition_revisions::Column::Id.is_in(revision_ids))
-        .into_tuple().all(&tx).await?.into_iter().collect();
+        .into_tuple()
+        .all(&tx)
+        .await?
+        .into_iter()
+        .collect();
     use crate::entities::users;
-    let actors: BTreeMap<i64, String> = users::Entity::find().select_only()
-        .column(users::Column::Id).column(users::Column::Name)
+    let actors: BTreeMap<i64, String> = users::Entity::find()
+        .select_only()
+        .column(users::Column::Id)
+        .column(users::Column::Name)
         .filter(users::Column::Id.is_in(rows.iter().map(|row| row.triggered_by)))
-        .into_tuple().all(&tx).await?.into_iter().collect();
-    let items: Vec<_> = rows.iter().map(|row| {
-        let mut value = summary(row);
-        value["revision_number"] = json!(revisions.get(&row.revision_id));
-        value["triggered_by_name"] = json!(actors.get(&row.triggered_by));
-        value
-    }).collect();
+        .into_tuple()
+        .all(&tx)
+        .await?
+        .into_iter()
+        .collect();
+    let items: Vec<_> = rows
+        .iter()
+        .map(|row| {
+            let mut value = summary(row);
+            value["revision_number"] = json!(revisions.get(&row.revision_id));
+            value["triggered_by_name"] = json!(actors.get(&row.triggered_by));
+            value
+        })
+        .collect();
     tx.commit().await?;
-    Ok(Json(
-        json!({"items":items,
-        "total":total,"page":query.page,"page_size":query.page_size}),
-    ))
+    Ok(Json(json!({"items":items,
+        "total":total,"page":query.page,"page_size":query.page_size})))
 }
 
 pub async fn node_output(

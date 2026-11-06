@@ -5,9 +5,9 @@
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
 mod login_guard;
-mod workflow_node_logs;
 mod platform_monitor;
 mod platform_storage;
+mod workflow_node_logs;
 
 // Keep names alongside builders for existence checks; no SQL parsing is needed.
 enum SchemaStatement {
