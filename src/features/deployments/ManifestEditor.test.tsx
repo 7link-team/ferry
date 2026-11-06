@@ -6,6 +6,8 @@ import { named } from "../../shared/api/resource";
 import { hostRepositoryText,i18n } from "../../shared/i18n/i18n";
 import { ManifestEditor,readManifest } from "./ManifestEditor";
 
+vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value, label, readOnly, onChange }: { value: string; label: string; readOnly: boolean; onChange: (value: string) => void }) => <textarea aria-label={label} value={value} readOnly={readOnly} onChange={event => onChange(event.target.value)} /> }));
+
 const fixture = `# original application
 apiVersion: ferry/v1
 kind: Application

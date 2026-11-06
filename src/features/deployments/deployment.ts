@@ -2,11 +2,13 @@ import { commonText } from "../../shared/i18n/i18n";
 export interface Deployment {
   id: string; name: string; category?: string; manifest: string; mode: string; target_kind: string;
   target_ref: string; workdir: string; description: string; state: string;
+  target_name?: string; revision_number?: number; created_at?: number; updated_at?: number;
   version: number; current_revision: string; latest_revision?: Revision;
   current_targets?: { host_id: string; current_revision: string }[];
 }
 export interface Revision {
   id: string; deployment_id: string; number: number; action: string; state: string;
+  deployment_name?: string; triggered_by?: string; triggered_by_name?: string; created_at?: number;
   rendered: string; artifact: string; output: string; started_at: number; finished_at: number;
   targets?: { id: string; host_id: string; state: string; output: string; artifact: string }[];
 }

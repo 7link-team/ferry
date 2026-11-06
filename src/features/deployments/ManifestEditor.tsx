@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { parseDocument } from "yaml";
 import { AutoField } from "../../shared/forms/auto-form";
 import {
+  commonText,
   hostRepositoryText,
   useCommonTranslation,
 } from "../../shared/i18n/i18n";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
-import { area, grid, manifestFields } from "./manifest/fields";
+import { grid, manifestFields } from "./manifest/fields";
 import { JsonField } from "./manifest/JsonField";
 import {
   appendManifest,
@@ -21,6 +23,8 @@ import {
 import { pipelineChoices } from "./manifest/pickers";
 import { ServiceEditor } from "./manifest/ServiceEditor";
 export { readManifest } from "./manifest/model";
+
+const ManifestCodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
 export function ManifestEditor({
   value,
@@ -39,6 +43,7 @@ export function ManifestEditor({
   workspace?: string;
 }) {
   const { i18n } = useCommonTranslation();
+  const editorId = useId();
   const loadPipelines = useCallback(
     () => (workspace ? pipelineChoices(workspace) : Promise.resolve([])),
     [workspace],
@@ -155,20 +160,16 @@ export function ManifestEditor({
           </Button>
         </div>
       </div>
+      {["native", "docker", "compose", "stack"].includes(mode) && <p className="rounded-md border bg-muted/30 px-4 py-3 text-sm leading-6 text-muted-foreground">{commonText(`resource-domain:deployment.capability.${mode}`)}</p>}
       {sourceMode || !parsed.data ? (
         <>
           <AutoField
             label={hostRepositoryText("manifest.020")}
             className="flex flex-col gap-2 text-sm"
           >
-            <textarea
-              className={`${area} min-h-80`}
-              value={value}
-              readOnly={readOnly}
-              spellCheck={false}
-              onChange={(e) => onChange(e.target.value)}
-              aria-invalid={syntaxError}
-            />
+            <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border" aria-invalid={syntaxError}>
+              <Suspense fallback={<LoadingSkeleton variant="editor" />}><ManifestCodeEditor value={value} language="yaml" path={`application-${editorId}.yaml`} label={hostRepositoryText("manifest.020")} readOnly={readOnly} onChange={onChange} /></Suspense>
+            </div>
           </AutoField>
           {parsed.error && (
             <p

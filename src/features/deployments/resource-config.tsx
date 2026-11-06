@@ -24,6 +24,7 @@ export function deploymentsLists({
       resource: "deployments",
       rowKey: (r: Deployment) => r.id,
       filters: [
+        { key: "state", label: "状态", labelKey: "resource-domain:status.title", type: "select", options: ["idle", "queued", "running", "succeeded", "failed", "needs-review"].map(value => ({ value, label: deploymentState(value) })) },
         { key: "category", label: "分类", labelKey: "typed-domain:category", type: "select", options: dictionaries?.["app-category"] ?? dictionaryOptions(workspace, "app-category") },
         {
           key: "q",
@@ -53,6 +54,9 @@ export function deploymentsLists({
           render: (r) =>
             `${label(TARGETS, r.target_kind)} · ${named((r as AnyRow).target_name as string, r.target_ref)}`,
         },
+        { key: "mode", label: "部署模式", labelKey: "resource-domain:deployment.mode", render: r => ({ native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" })[r.mode as string] ?? r.mode },
+        { key: "revision_number", label: "版本", labelKey: "common-domain:common.version", render: r => r.revision_number ? `v${r.revision_number}` : "—" },
+        { key: "updated_at", label: "更新时间", labelKey: "resource-domain:platform.workspaceUpdated", sortable: true, render: r => r.updated_at ? new Date(r.updated_at).toLocaleString(currentLocale()) : "—" },
         {
           key: "description",
           label: "备注",
@@ -66,6 +70,7 @@ export function deploymentsLists({
           permission: "deployments.read",
           to: (r) => ({ id: r.id, mode: "view" }),
         },
+        { label: "部署历史", labelKey: "common-domain:nav.deploymentHistory", permission: "deployments.read", to: () => ({ item: "revisions", mode: "list" }), query: r => ({ deployment_id: r.id }) },
         {
           label: "编辑",
           labelKey: "common-domain:common.edit",
@@ -85,6 +90,7 @@ export function deploymentsLists({
       resource: "deployment-revisions",
       rowKey: (r: Revision) => r.id,
       filters: [
+        { key: "state", label: "状态", labelKey: "resource-domain:status.title", type: "select", options: ["queued", "running", "succeeded", "failed", "needs-review"].map(value => ({ value, label: deploymentState(value) })) },
         {
           key: "deployment_id",
           label: "应用",
@@ -94,7 +100,7 @@ export function deploymentsLists({
         },
       ],
       columns: [
-        { key: "number", label: "Revision", sortable: true },
+        { key: "number", label: "版本", labelKey: "common-domain:common.version", sortable: true, render: r => `v${r.number}` },
         {
           key: "deployment_name",
           label: "应用",
@@ -126,6 +132,9 @@ export function deploymentsLists({
               ? new Date(r.started_at).toLocaleString(currentLocale())
               : "—",
         },
+        { key: "triggered_by_name", label: "触发人", labelKey: "resource-domain:execution.triggeredBy", render: r => named(r.triggered_by_name, r.triggered_by) },
+        { key: "finished_at", label: "结束时间", labelKey: "resource-domain:deployment.finishedAt", render: r => r.finished_at ? new Date(r.finished_at).toLocaleString(currentLocale()) : "—" },
+        { key: "created_at", label: "创建时间", labelKey: "resource-domain:platform.workspaceCreated", sortable: true, render: r => r.created_at ? new Date(r.created_at).toLocaleString(currentLocale()) : "—" },
       ],
       actions: [
         {
@@ -156,6 +165,8 @@ export function deploymentsForms({
           }
         : {}),
       resource: "deployments",
+      width: "full",
+      presentation: "sections",
       heading: (r: Deployment) => r.name,
       blank: {
         name: "",
@@ -170,6 +181,7 @@ export function deploymentsForms({
       },
       sections: [
         {
+          title: "基本信息", titleKey: "resource-domain:deployment.basics",
           fields: [
             {
               key: "name",
@@ -179,6 +191,11 @@ export function deploymentsForms({
               required: true,
             },
             { key: "category", label: "分类", labelKey: "typed-domain:category", type: "select", options: dictionaryOptions(workspace, "app-category") },
+          ],
+        },
+        {
+          title: "部署目标", titleKey: "resource-domain:deployment.targetSection",
+          fields: [
             {
               key: "mode",
               label: "部署模式",
@@ -194,6 +211,7 @@ export function deploymentsForms({
             },
             {
               key: "target_kind",
+              resetOnChange: ["target_ref"],
               label: "目标类型",
               labelKey: "resource-domain:resource.targetType",
               type: "select",
@@ -243,6 +261,12 @@ export function deploymentsForms({
               help: "目标 Linux 主机上的可写绝对路径；自动按工作空间和应用隔离子目录。容器模式需要 Docker，Compose 另需 Compose v2+；Native 需要 systemd 及管理服务的权限。所有模式需要 flock、sha256sum。",
               helpKey: "resource-domain:deployment.workdirHelp",
             },
+          ],
+        },
+        {
+          title: "服务配置", titleKey: "resource-domain:deployment.servicesSection",
+          fullWidth: true,
+          fields: [
             {
               key: "manifest",
               label: "应用配置",
@@ -251,6 +275,10 @@ export function deploymentsForms({
               required: true,
               span: 2,
             },
+          ],
+        },
+        {
+          fields: [
             {
               key: "description",
               label: "备注",

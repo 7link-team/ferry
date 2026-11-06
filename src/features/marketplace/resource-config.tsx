@@ -117,6 +117,7 @@ export function marketplaceLists({
           key: "last_error",
           label: "同步错误",
           labelKey: "resource-domain:market.syncError",
+          render: r => r.last_error ? <span className="text-destructive">{r.last_error}</span> : "—",
         },
       ],
       actions: [
@@ -135,6 +136,8 @@ export function marketplaceLists({
           label: "立即同步",
           labelKey: "resource-domain:market.syncNow",
           permission: "marketplace-sources.sync",
+          disabled: r => r.state === "syncing",
+          disabledReason: () => commonText("resource-domain:market.syncing"),
           action: async (r) => {
             await runItemAction(
               workspace,

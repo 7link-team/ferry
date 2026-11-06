@@ -1,17 +1,22 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
-import { useEffect,useRef,useState } from "react";
+import { lazy,Suspense,useEffect,useId,useRef,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
-import { base,operationResource } from "../../shared/api/resource";
+import { base,named,operationResource } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
-import { executionText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText,executionText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { currentLocale } from "../../shared/i18n/locale";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
-import { artifactDiff,deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
+import { Badge } from "../../shared/ui/badge";
+import { deploymentActive,deploymentState,type Deployment,type Preview,type Revision } from "./deployment";
+
+const CodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
 
 export function DeploymentDetail({ navigation, workspace, deploymentId, revisionId, permissions }: { navigation: Navigation;
   workspace: string; deploymentId?: string; revisionId?: string; permissions: Set<string>;
 }) {
   useCommonTranslation();
+  const editorId = useId();
   const stateLabel = deploymentState;
   const [app, setApp] = useState<Deployment>();
   const [revision, setRevision] = useState<Revision>();
@@ -36,7 +41,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
         const next = await api<Deployment>(`${root}/${encodeURIComponent(id ?? "")}`, { signal: controller.signal });
         if (!live || controller.signal.aborted) return;
         setApp(next); setRevision(selected ?? next.latest_revision); setError("");
-        finished = !deploymentActive(next.state);
+        finished = !deploymentActive(selected?.state ?? next.state);
         if (appRef.current && appRef.current.version !== next.version) setPreview(undefined);
       } catch (e) { if (live && !controller.signal.aborted) setError(errorText(e)); }
       finally { request = undefined; if (live && !finished && !document.hidden) timer = setTimeout(load, 1200); }
@@ -73,11 +78,19 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
   return <div className="min-h-0 overflow-auto space-y-5 pb-6">
     <header className="flex flex-wrap items-center gap-3 border-b pb-4">
-      <h2 className="text-lg font-semibold">{app.name}</h2>{deploymentState(app.state)}
-      <span className="text-sm text-muted-foreground">{executionText("deployment.composeTarget", { id: app.target_ref })}</span>
+      <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
+      <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {named(app.target_name, app.target_ref)}</span>
     </header>
+    <dl className="grid min-w-0 gap-4 rounded-md border p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      {[
+        [commonText("resource-domain:deployment.mode"), ({ native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack" })[app.mode] ?? app.mode],
+        [commonText("resource-domain:deployment.workdir"), app.workdir],
+        [commonText("common.version"), revision ? `v${revision.number}` : "—"],
+        [commonText("resource-domain:platform.workspaceUpdated"), app.updated_at ? new Date(app.updated_at).toLocaleString(currentLocale()) : "—"],
+      ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-medium">{value || "—"}</dd></div>)}
+    </dl>
     <div className="flex flex-wrap gap-2" aria-busy={busy}>
-      <Button variant="outline" disabled={busy} onClick={() => void action("render")}>{executionText("deployment.viewRendered")}</Button>
+      <Button variant="outline" disabled={busy} onClick={() => revisionId ? setRendered(revision?.rendered ?? "") : void action("render")}>{executionText("deployment.viewRendered")}</Button>
       <Button variant="outline" disabled={blocked} onClick={() => void action("preview", revisionId ? { revision_id: revisionId } : {})}>{executionText("deployment.previewDiff")}</Button>
       {permissions.has("deployments.apply") && !revisionId && <Button disabled={blocked || !preview || preview.version !== app.version} onClick={() => execute(false)}>{executionText("deployment.apply")}</Button>}
       {revisionId && permissions.has("deployments.rollback") && revision?.state === "succeeded" && <Button variant="outline" disabled={blocked || !preview || preview.version !== app.version} onClick={() => execute(true)}>{executionText("deployment.rollbackNumber", { number: revision.number })}</Button>}
@@ -101,12 +114,19 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
         </li>)}</ul>
         <p className="text-xs text-muted-foreground">{executionText("deployment.variableHistoryHelp")}</p>
       </section>}
-      <pre className="max-h-96 overflow-auto rounded border bg-muted/30 p-4 text-xs">{artifactDiff(preview.current, revisionId && revision?.artifact ? revision.artifact : preview.desired)}</pre>
+      {preview.current === (revisionId && revision?.artifact ? revision.artifact : preview.desired)
+        ? <p className="rounded-md border p-4 text-sm text-muted-foreground">{commonText("artifact.identical")}</p>
+        : <div className="h-96 min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor originalValue={preview.current} value={revisionId && revision?.artifact ? revision.artifact : preview.desired} language="yaml" path={`deployment-${editorId}-diff.yaml`} label={executionText("deployment.artifactDiff")} readOnly onChange={() => {}} /></Suspense></div>}
       <details><summary className="cursor-pointer text-sm">{executionText("deployment.fullDesired")}</summary><pre className="overflow-auto p-4 text-xs">{revisionId && revision?.artifact ? revision.artifact : preview.desired}</pre></details>
     </section>}
-    {rendered !== undefined && <section><h3 className="mb-2 font-semibold">{executionText("deployment.currentRendered")}</h3><pre className="max-h-96 overflow-auto rounded border p-4 text-xs">{rendered}</pre></section>}
+    {rendered !== undefined && <section><h3 className="mb-2 font-semibold">{executionText(revisionId ? "deployment.historicalRevision" : "deployment.currentRendered")}</h3><div className="h-96 min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={rendered} language="yaml" path={`deployment-${editorId}-rendered.yaml`} label={executionText("deployment.viewRendered")} readOnly onChange={() => {}} /></Suspense></div></section>}
     {!!app.current_targets?.length && <details><summary className="cursor-pointer text-sm">{executionText("deployment.hostRevisions")}</summary><ul className="mt-2 space-y-1 text-sm">{app.current_targets.map((target) => <li key={target.host_id}>{executionText("deployment.hostRevision", { id: target.host_id, revision: target.current_revision })}</li>)}</ul></details>}
     {revision && <section className="space-y-3"><h3 className="font-semibold">{executionText("deployment.revisionTitle", { number: revision.number, action: revision.action === "rollback" ? executionText("shared.resource.deployment.rollback") : executionText("shared.resource.variable.deploy"), state: stateLabel(revision.state) })}</h3>
+      <dl className="grid gap-3 text-sm sm:grid-cols-3">{[
+        [commonText("resource-domain:execution.triggeredBy"), named(revision.triggered_by_name, revision.triggered_by)],
+        [commonText("resource-domain:execution.startedAt"), revision.started_at ? new Date(revision.started_at).toLocaleString(currentLocale()) : "—"],
+        [commonText("resource-domain:deployment.finishedAt"), revision.finished_at ? new Date(revision.finished_at).toLocaleString(currentLocale()) : "—"],
+      ].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all">{value}</dd></div>)}</dl>
       <pre aria-label={executionText("shared.resource.cron.output")} className="max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/30 p-4 text-xs">{revision.output || executionText("deployment.resultPending")}</pre>
       {!!revision.targets?.length && <section aria-label={executionText("deployment.perHostResults")} className="space-y-2"><h4 className="text-sm font-medium">{executionText("deployment.sequentialHosts")}</h4><ol className="space-y-2">{revision.targets.map((target) => <li key={target.id} className="rounded border p-3"><details><summary className="cursor-pointer text-sm">{executionText("deployment.hostNumber", { id: target.host_id })} · {deploymentState(target.state)}</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-xs">{target.output || executionText("deployment.waiting")}</pre></details></li>)}</ol></section>}
       <details><summary className="cursor-pointer text-sm">{executionText("deployment.savedArtifact")}</summary><pre className="overflow-auto p-4 text-xs">{revision.artifact || executionText("deployment.artifactPending")}</pre></details>

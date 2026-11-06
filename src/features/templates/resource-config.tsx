@@ -1,3 +1,7 @@
+import { lazy, Suspense } from "react";
+import { stringify } from "yaml";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { TemplateParametersEditor, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
 import { deleteResource } from "../../shared/api/resource";
 import { commonText, workflowText } from "../../shared/i18n/i18n";
@@ -15,6 +19,8 @@ import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { DEFAULT_ACTIONS, parseActions } from "../pipelines/actions-workflow";
 import { pipelineExecutorOptions } from "../pipelines/executor-options";
 
+const TemplateCodeEditor = lazy(() => import("../../shared/editor/CodeEditor").then(module => ({ default: module.CodeEditor })));
+
 export interface Template {
   id: string;
   name: string;
@@ -24,18 +30,7 @@ export interface Template {
   version: number;
 }
 
-export interface TemplateParameter {
-  name: string;
-  label?: string;
-  type: "string" | "integer" | "boolean";
-  default?: unknown;
-  enum?: string[];
-  min?: number;
-  max?: number;
-  min_length?: number;
-  max_length?: number;
-  secret?: boolean;
-}
+export type { TemplateParameter } from "./TemplateParametersEditor";
 
 export const templateList = (
   workspace: string,
@@ -122,15 +117,13 @@ export const templateForm = (resource: string, application: boolean, workspace =
         resource === "config-templates"
           ? "port={{ .Values.port }}\n"
           : application
-            ? JSON.stringify(
+            ? stringify(
                 {
                   apiVersion: "ferry/v1",
                   kind: "Application",
                   metadata: { name: "web" },
                   services: [{ name: "web", image: "{{ .Values.image }}" }],
                 },
-                null,
-                2,
               )
             : JSON.stringify(
                 {
@@ -201,13 +194,12 @@ export const templateForm = (resource: string, application: boolean, workspace =
           {
             key: "parameters",
             when: () => resource !== "pipeline-templates",
-            label: "参数定义（JSON 数组）",
-            labelKey: "resource-domain:template.parametersJson",
-            type: "code",
+            label: "模板参数",
+            labelKey: "resource-domain:template.parameters",
+            type: "custom",
+            render: ({ draft, readOnly, onPatch, onValidityChange }) => <TemplateParametersEditor value={String(draft.parameters ?? "[]")} readOnly={readOnly} onChange={parameters => onPatch({ parameters })} onValidityChange={onValidityChange} />,
             span: 2,
             required: true,
-            help: "每项包含 name、type（string/integer/boolean），可选 label、default、enum（字符串）、min/max（整数）、min_length/max_length。无 default 时必填。",
-            helpKey: "resource-domain:template.parameterHelp",
           },
           {
             key: "content",
@@ -223,7 +215,8 @@ export const templateForm = (resource: string, application: boolean, workspace =
                 : application
                   ? "resource-domain:template.appContent"
                   : "resource-domain:template.pipelineContent",
-            type: resource === "pipeline-templates" ? "actions-template-editor" : "code",
+            type: resource === "pipeline-templates" ? "actions-template-editor" : "custom",
+            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch }: { draft: Partial<Template>; readOnly: boolean; onPatch: (patch: Partial<Template>) => void; }) => <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
             ...(resource === "pipeline-templates" ? { options: pipelineExecutorOptions(workspace, permissions) } : {}),
             span: 2,
             required: true,

@@ -216,6 +216,15 @@ pub async fn get(
         .one(&s.db)
         .await?;
     let mut out = app_json(&r);
+    let mut named = vec![out];
+    crate::resources::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut named,
+        &[crate::resources::names::target("target_ref", "target_name", "target_kind")],
+    )
+    .await?;
+    out = named.remove(0);
     out["latest_revision"] = latest.as_ref().map(revision_json).unwrap_or(Value::Null);
     if let Some(latest) = &latest {
         out["latest_revision"]["targets"] =
@@ -237,6 +246,18 @@ pub async fn revision_get(
         .await?
         .ok_or_else(ApiError::missing)?;
     let mut out = revision_json(&r);
+    let mut named = vec![out];
+    crate::resources::names::attach(
+        &s.db,
+        scope.workspace_id,
+        &mut named,
+        &[
+            crate::resources::names::of("deployment_id", "deployment_name", crate::resources::names::Kind::Deployment),
+            crate::resources::names::of("triggered_by", "triggered_by_name", crate::resources::names::Kind::User),
+        ],
+    )
+    .await?;
+    out = named.remove(0);
     out["targets"] = groups::details(&s.db, scope.workspace_id, r.id).await?;
     Ok(Json(out))
 }

@@ -4,6 +4,7 @@ import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { DeploymentDetail } from "../../app/pages/DeploymentDetail";
 import { i18n } from "../../shared/i18n/i18n";
 import { artifactDiff } from "./deployment";
+vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value }: { value: string }) => <pre data-editor-value>{value}</pre> }));
 let root: Root, host: HTMLDivElement, state: string, calls: string[];
 const mount = async () => { await act(async () => root.render(<DeploymentDetail workspace="ops" deploymentId="1" permissions={new Set(["deployments.apply"])} />)); };
 const tick = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); };
@@ -35,4 +36,24 @@ it("execution requires preview and is blocked while uncertain", async () => {
 it("diff retains reordered lines as a change and exact equality as unchanged", () => {
   expect(artifactDiff("a\nb\n", "b\na\n")).toContain("- a\n- b\n+ b\n+ a");
   expect(artifactDiff("a\n", "a\n")).toBe("产物内容一致。");
+});
+
+it("historical rendering uses the selected snapshot and stops polling a completed revision", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    calls.push(url);
+    const row = url.includes("deployment-revisions")
+      ? { id: "10", deployment_id: "1", number: 2, state: "succeeded", rendered: "historical-content", action: "apply" }
+      : { id: "1", name: "web", state: "running", mode: "native", target_ref: "2", target_name: "Linux host", version: 3 };
+    return { ok: true, json: async () => row };
+  }));
+  await act(async () => root.render(<DeploymentDetail workspace="ops" revisionId="10" permissions={new Set()} />));
+  const count = calls.length;
+  await tick(6000);
+  expect(calls).toHaveLength(count);
+  const render = [...host.querySelectorAll("button")].find(button => button.textContent === "查看渲染产物")!;
+  expect(render).toBeDefined();
+  await act(async () => render.click());
+  expect(host.querySelector("[data-editor-value]")?.textContent).toBe("historical-content");
+  expect(calls).toHaveLength(count);
+  expect(host.textContent).toContain("Linux host");
 });
