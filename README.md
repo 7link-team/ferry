@@ -1,217 +1,142 @@
-# Ferry · 运维平台
+# Ferry
 
-一个工作空间制的运维工具：主机、工作流、仓库与代码洞察、部署、维护和平台监控，两种部署形态
-（Docker 纯 Web / Tauri 桌面内嵌），两种主机接入方式（runner 代理 / SSH 直连），
-两者都支持远程终端与双向文件传输。
+**自托管的运维与工作流平台。** 在同一个工作空间中管理主机、仓库、构建、节点工作流和应用部署。
 
-**方案与设计见 [`docs/ferry-运维平台产品与技术方案.md`](docs/ferry-运维平台产品与技术方案.md)。**
+[![Build](https://github.com/7link-team/ferry/actions/workflows/build.yml/badge.svg)](https://github.com/7link-team/ferry/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/7link-team/ferry?include_prereleases)](https://github.com/7link-team/ferry/releases)
 
-当前为 **v0.3.0-alpha.1 预发布，尚非正式版**。支持超管初始化与平台管理、工作空间成员与角色、仪表盘、主机分组与标签、Runner／SSH 终端和文件传输、外部仓库授权、构建流水线与不可变产物、节点工作流、应用／工作流／配置文件模板、定时任务、报警监控、字典与配置项，以及 CSV／XLSX 导入导出。
+支持 Docker Web 服务与 Windows / macOS / Linux 桌面应用，使用 Rust、React、TypeScript 和 Tauri 构建。
 
-构建流水线提供可视化表单与高级 YAML 编辑；节点工作流提供画布、节点参数、表达式与执行记录。文件存储可选择本地（单机）或 S3（单机／集群）。平台提供数据库、Redis、文件和访问统计，以及服务器节点的心跳与资源信息；Redis 监控需要配置实际连接。
+[快速开始](#快速开始) · [主要功能](#主要功能) · [部署配置](#部署配置) · [本地开发](#本地开发) · [文档](#文档)
 
-节点扩展能力、运行平台与执行器有明确边界，并非兼容全部 n8n 节点或 ComfyUI 插件。表达式沙箱随服务打包，当前支持 Windows 与 Linux；Linux 非 root 部署需要允许非特权用户命名空间，容器或内核禁止隔离能力时会拒绝执行。macOS 尚不支持沙箱执行，相关表达式会明确拒绝执行。
+> 当前处于 **Alpha 预发布阶段**。升级前请备份数据库、数据目录和加密主密钥；功能范围与兼容边界以发布说明和文档为准。
 
-## 界面预览
+## 主要功能
 
-订单路由示例：
+| 模块 | 能力 |
+| --- | --- |
+| 主机 | Runner Agent / SSH 接入，分组与标签，远程终端、文件传输和资源监控 |
+| 构建流水线 | GitHub Actions 格式，可视化表单与高级 YAML 编辑，任务依赖、执行日志和构建产物 |
+| 节点工作流 | 可视化画布，应用与集成节点、表达式、AI / 文件处理，独立执行视图与版本记录 |
+| 仓库与代码洞察 | 外部代码平台授权、仓库事件与通知，提交统计、作者昵称映射和提交热力图 |
+| 应用部署 | Compose、Docker、systemd、Swarm，主机与主机组部署，差异预览、历史版本和回滚 |
+| 系统维护 | 定时任务、报警监控，字典与配置项，按类型编辑、模板和 CSV / XLSX 导入导出 |
+| 平台与协作 | 工作空间隔离、成员与角色、凭据，平台账号、邮件模板、登录防护与系统监控 |
 
-![节点工作流订单路由示例](docs/screenshots/workflow-order-routing.png)
+提供简体中文、繁体中文、英语、日语、韩语和马来语，以及多套主题、明暗模式和跟随系统设置。
 
-按类型编辑配置：
+## 快速开始
 
-![富文本配置编辑](docs/screenshots/typed-richtext-editor.png)
+### Docker 一键部署
 
-应用可通过 Compose、Docker、native（systemd）或 Swarm 部署到单主机／主机组。主机组按主机 ID 逐台执行，首个失败即停，已成功主机保留当前版本，由用户决定回滚。**K8s／Helm 本轮暂缓**。各模式按实际能力校验，不支持的配置在保存时明确拒绝。
-
-变量引用使用 `valueFrom: variable/变量名`，按全局→模块→对象覆盖；部署入队固定加密快照，回滚恢复历史变量与配置文件。旧密钥可能已经失效。历史默认保留，只有管理员配置保留天数后才清理，并保护各主机当前版本及其构建产物。删除应用记录不停止目标上运行的服务。
-
-GitHub／GitLab／Gitee 提供网页授权入口（需部署者配置 OAuth 应用），Codeup 使用 API 令牌；不提供内部 Git 托管。外部私有平台的实际账号兼容性仍需用户测试，当前验收使用隔离接口夹具。参见 [仓库连接说明](docs/repository-connections.md)、[部署与数据导入说明](docs/deployments-and-transfers.md)及 [本轮实现与验收记录](docs/tasks/T12-product-completion.md)。
-
-应用/流水线模板支持创建、复制、编辑、删除；“使用模板”或新建页面的模板选择器提供参数输入与配置生成，再由用户确认创建。支持字符串、整数、布尔、默认值和范围/枚举校验，使用 `{{ .Values.image.tag }}` 语法；模板变化需重新载入。创建后保留完整配置，修改/删除模板不影响已有对象。应用和流水线的 `secret` 参数填写已有变量名，仅用于环境项 `valueFrom`。流水线在触发时固定加密变量快照，排队后修改变量不改变此次执行；值通过私有脚本传入并在日志保存前脱敏。执行详情显示变量的来源层级和版本。应用配置文件位于“应用部署”内，用于生成 nginx.conf、application.yml 等运行时文件。
-
-“维护 → 配置项”可设置默认分页、Runner心跳超时、执行历史保留天数和仓库事件保留天数（0为永久）。历史清理保留当前部署版本、运行中及待核实记录；清理部署历史时一并删除该历史的加密变量快照。字典支持自定义枚举管理；主机、流水线等固定流程状态由程序定义，不作为可编辑字典。
-
-正在按完整产品方案补齐剩余能力，**导航覆盖数不代表六种部署模式等全部产品能力已完成**；阶段进度与验收见 [T12](docs/tasks/T12-product-completion.md)。
-
-## 结构
-
-| 位置 | 内容 |
-|---|---|
-| `src/app` | 启动、身份与路由、页面组合、资源界面与配置注册 |
-| `src/features` | 洞察、仓库、流水线、主机、部署、系统维护等业务组件与配置 |
-| `src/shared` | 公共 UI、表单和表格、API、类型契约、语言、主题与编辑器运行时 |
-| `crates/server` | 业务服务：HTTP API、内嵌 Web 界面、数据库与迁移 |
-| `crates/runner` | 主机代理：注册、连接与任务运行；平台服务和进程监督各自独立 |
-| `crates/protocol` | server 与 runner 共用的线上协议 |
-| `crates/sandbox` | 工作流表达式的独立隔离执行进程 |
-| `crates/desktop-updater` | 桌面升级事务与进程间通信 |
-| `desktop` | Tauri 2 外壳：托盘、连接设置，服务作为 sidecar |
-| `docs` | 产品与技术方案 |
-
-前端依赖方向为 `app → features → shared`。页面组合负责路由和资源界面装配，业务模块
-通过明确的参数与回调接入；共享层提供公共能力及纯类型契约。测试与对应实现放在一起，
-应用组合和架构检查放在 `app`。
-
-资源界面继续复用 `src/app/resources/ResourceTable.tsx`（列表）和
-`ResourceForm.tsx`（表单，详情是它的只读模式）。业务配置由各 feature 维护，
-`src/app/resources.tsx` 汇总注册，纯配置契约位于 `src/shared/resources/types.ts`。
-通用表单与表格分别位于 `shared/forms/auto-form`、`shared/tables/auto-table`。
-服务端资源分页、筛选、排序和列名白名单复用 `crates/server/src/resources/resource.rs`。
-
-服务端按 `accounts`、`hosts`、`pipelines`、`repositories`、`deployments`、
-`maintenance`、`notifications`、`resources` 组织业务。数据库、迁移、凭据加密、集群等
-基础模块保留在 crate 根目录。主机 Runner 的注册、传输与升级位于 `hosts/runner`；
-流水线执行编排位于 `pipelines/actions_run`；仓库授权位于 `repositories/auth`。
-Cargo crate 边界保持独立，入口负责启动和组装。
-
-主题使用 shadcn/ui + Tailwind v4 语义令牌，提供现代简约、商务渐变、护眼、粉色可爱、
-新粗野主义和自定义配色，支持明暗模式及跟随系统。主题状态和校验位于
-`src/shared/theme`，配色令牌集中在 `themes.css`；组件复用统一语义令牌。
-
-## 开发
-
-```sh
-cargo build -p ferry-sandbox       # 工作流表达式需要相邻的沙箱程序
-cargo run -p ferry-server          # 127.0.0.1:4290
-npm install && npm run dev         # 5173，/api 代理到 4290
-npm run build                      # 产物进 dist/，被服务内嵌
-
-cargo fmt --all -- --check && cargo check --workspace && cargo test --workspace
-npm run typecheck && npm test
-
-# 三种数据库跑同一套功能测试（不带 URL 则只测 SQLite）
-cargo build -p ferry-server
-FERRY_TEST_MYSQL='mysql://root:pw@127.0.0.1:3306/ferry' \
-FERRY_TEST_POSTGRES='postgres://postgres:pw@127.0.0.1:5432/ferry' \
-  ./scripts/test-backends.sh
-```
-
-## 首次初始化与平台管理
-
-没有默认管理员账号或密码。首次打开需由部署者设置平台超级管理员，完成后直接进入平台管理页。
-桌面使用内置服务时自动传递初始化凭据，只需填写账号、密码和确认密码；连接远程服务时按服务器部署流程初始化。
-服务器部署需读取 `FERRY_DATA_DIR/setup-token`，在初始化页面填写该凭据。该文件仅用于首次初始化，成功后删除；重启不会重新开放初始化。
-
-升级已有安装不会自动提升旧账号权限。可使用初始化凭据及旧账号的原邮箱、原密码认领超管身份；原姓名和密码保留，当前初始化会话自动登录，其他旧会话需要重新登录。
-平台超级管理员可在 `/_platform` 管理用户的启用状态和超管资格、创建或改名工作空间、进入全部工作空间，以及开启/关闭公开注册。
-必须保留至少一位启用的超管；账号停用或权限变化会使该账号的会话失效。普通工作空间拥有者没有平台管理权限。
-初始化后默认允许注册，超管可在「注册设置」关闭；关闭不会阻止已有账号登录。
-
-## 凭据加密
-
-SSH 密码/私钥、Git 令牌等由服务端加密后落库,任何接口都不会把明文返回。
-
-主密钥优先取 `FERRY_MASTER_KEY`(64 位十六进制,`openssl rand -hex 32` 生成);
-未设置时在数据目录生成 `master.key`(权限 0600)并一直复用。
-
-两种方式都可用,区别在备份边界:生成的密钥和密文在同一个目录里,
-备份该目录等于同时备份了两者;要把密钥和数据分开保管,就用环境变量。
-**无论哪种方式,丢了密钥等于丢了所有已存凭据** —— 数据库里只有密文。
-
-## 数据库
-
-SQLite、MySQL、PostgreSQL 都支持,用 `FERRY_DATABASE_URL` 选择:
-
-| 不填 | SQLite,数据在 `FERRY_DATA_DIR/ferry.sqlite`(桌面形态与小型部署的默认) |
-|---|---|
-| `mysql://…` | MySQL 8+ |
-| `postgres://…` | PostgreSQL |
-
-三者的差异只在 `crates/server/src/db.rs`:业务代码一律写 SQLite 风味、
-`?` 占位符的 SQL。新增查询请保持可移植,不要在方言层加按查询的特例。
-
-Docker 部署：
-
-```sh
-docker compose up -d                       # 拉 ghcr.io/7link-team/ferry-server
-docker compose up -d --build               # 或本地构建
-```
-
-> GHCR 的包默认是私有的（即使仓库公开）。首次发布后需要在
-> GitHub → Packages → ferry-server → Package settings 里把可见性改成 Public，
-> 匿名 `docker pull` 才能用。
-
-桌面部署：`desktop/` 需要先把 `ferry-server` 可执行文件按目标三元组放进
-`desktop/binaries/`，然后 `npm run desktop:dev`。
-
-**只构建桌面端（Windows / macOS / Linux），不构建移动应用。** `tauri.conf.json`
-的 `targets: "all"` 指的是当前桌面平台的全部安装包格式；Android/iOS 需要另外执行
-`tauri android init` / `tauri ios init`，本项目不执行，也不保留移动端图标与配置。
-
-## 全套 Compose 快速启动
-
-无需克隆仓库：
+需要 Docker 与 Compose v2.20+，在 Linux、macOS 或 Windows WSL / Git Bash 中执行：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh
 ```
 
-启动最新发布版本的 Ferry + PostgreSQL + NATS JetStream + Redis；传入参数用 `sh -s --`，例如 `… | sh -s -- --database mysql` 改用 MySQL。自动生成并复用随机密钥，等待健康检查后提供初始化令牌。已有部署用 `… | sh -s -- --upgrade` 一键升级到最新版本：先备份数据库和配置，拒绝降级，失败时还原文件。`… | sh -s -- --domain ops.example.com`（可重复）通过 Caddy 开启 HTTPS，自动申请并续期证书；从哪个域名访问，安装命令就显示哪个域名。
+脚本创建 `ferry/` 部署目录，启动 **Ferry + PostgreSQL + NATS JetStream + Redis**，固定最新发布版本并生成随机密钥。健康检查通过后会输出初始化令牌。
 
-部署地址、HTTPS、备份、升级、Redis 当前用途及单机/高可用边界见 [Compose 快速部署](docs/compose-quickstart.md)。
+打开 **http://localhost:4290**，使用令牌创建第一个平台超级管理员。**没有默认账号或密码。**
 
-## Runner 安装方式
+域名、HTTPS、MySQL、备份与升级方法见 [Compose 部署指南](docs/compose-quickstart.md)。
 
-在节点的“连接主机”中选择安装方式，复制生成的命令到目标主机执行：
+### 轻量单机部署
 
-| 方式 | 运行身份 | 权限 | 运行时间 |
-|---|---|---|---|
-| 系统服务（默认） | Windows LocalSystem / root | 需要管理员或 sudo | 开机启动 |
-| 当前用户 | 执行命令的账号，使用该账号的用户目录、PATH 和已登录的工具（如 npm 全局安装的 CLI） | 无需管理员或 sudo | Windows 为登录时启动的计划任务；Linux 为 `systemd --user`，注销后停止，除非执行 `loginctl enable-linger`；macOS 为 LaunchAgent |
-
-终端、命令和流水线都以 Runner 的运行身份执行。两种方式都会在异常退出后自动恢复，并支持签名自动升级。Windows 当前用户方式的状态保存在 `%LOCALAPPDATA%\runner-agent`，仅该账号和 SYSTEM 可访问，运行时不显示任何窗口；该账号注销后节点显示离线，下次登录时自动重连。需要 Runner 0.1.0-alpha.25 或更新版本，旧版本会被安装脚本拒绝，不会安装。
-
-GitHub Actions 格式的流水线也可以在 Windows 主机上执行（`runs-on: self-hosted`，直接在主机上运行）：
-- 需要 Git for Windows 和 Runner 0.1.0-alpha.32 或更新版本，旧版本 Runner 会提示升级；
-- `run` 步骤默认使用 PowerShell（有 PowerShell 7 时用 `pwsh`，否则用系统自带的 Windows PowerShell），也可以写 `shell: cmd`，或在装有 Git Bash 时写 `shell: bash`；
-- 执行时不显示任何窗口；
-- 容器镜像任务只能在 Linux 主机上执行；
-- Windows 上取消任务会强制结束进程，任务的收尾步骤可能来不及执行。
-
-更换安装方式时，先在主机上用原安装目录中的 `runner-service service uninstall` 移除原注册（当前用户方式需加 `--user`，系统服务需管理员权限），再在 Ferry 中“重置连接”，然后用新方式运行连接命令。
-
-## 多实例节点通信
-
-设置 `FERRY_NATS_URL` 启用 NATS JetStream 集群通信；不设置时保持单实例运行。
-所有服务副本必须连接同一业务数据库，使用相同的 `FERRY_MASTER_KEY` 和
-`FERRY_CLUSTER_NAMESPACE`（默认 `ferry`），每个副本使用独立数据目录和实例身份。
-生产环境使用共享 PostgreSQL / MySQL；不要跨机器共享 SQLite 文件。
+只想运行一个服务，可以使用仓库中的 Compose 配置，默认采用 SQLite 和本地文件存储：
 
 ```sh
-FERRY_DATABASE_URL='postgres://…' \
-FERRY_MASTER_KEY='<相同的64位十六进制主密钥>' \
-FERRY_NATS_URL='nats://user:password@nats:4222' \
-FERRY_CLUSTER_NAMESPACE=ferry \
-FERRY_NATS_REPLICAS=3 \
-ferry-server --data-dir /var/lib/ferry/replica-a
+git clone https://github.com/7link-team/ferry.git
+cd ferry
+docker compose up -d
+docker compose exec ferry cat /data/setup-token
 ```
 
-NATS 必须开启 JetStream，并为配置的副本数提供足够的节点。
-`FERRY_NATS_REPLICAS` 支持 `1`（默认）、`3`、`5`；已有 KV 桶的配置必须匹配。
-NATS 使用私网访问控制、认证和部署所需的 TLS；具备该命名空间发布权限的服务属于可信边界。
-负载均衡器需要支持 WebSocket，无需将浏览器或 Runner 固定到某个服务副本。
-节点连接归属使用 30 秒租约，每 5 秒续约；SQL 状态写入同时校验归属令牌。
-终端、命令、文件会话可跨副本转发，凭据重置和升级排他锁也在副本间生效。
-连接所属服务或消息服务故障会关闭现有会话，Runner 重连后可重新打开；不会重放命令或键盘输入。
+访问 **http://localhost:4290** 完成初始化。数据保存在 `ferry-data` 卷中；单机基础功能不依赖 Redis 或 NATS。
 
-监控由当前所属服务每 5 秒采集，查询读取缓存；仅权限和资源存在性检查访问业务数据库。
-最近一小时的真实采样暂存所属服务内存，支持 5 分钟 / 15 分钟 / 1 小时查询，
-重启或归属切换后重新积累，不补造历史数据。跨副本读取会转发到采集所属服务。
-本轮不提供 Redis / TSDB 长期历史持久化。
+### 桌面应用
 
-## Compose 部署与桌面更新
+从 [Releases](https://github.com/7link-team/ferry/releases) 下载对应平台的安装包。桌面应用可启动内置服务，也可连接远程 Ferry 服务。
 
-在“部署 → 应用”创建应用，选择单台主机并填写绝对工作目录与 Application manifest。
-目标需安装 Docker Compose v2+、`flock`、`sha256sum`，并允许主机接入账号管理 Docker。
-先预览目标差异，再执行：预览固定镜像摘要，执行使用同一份产物。
-“部署历史”可以回滚到成功 revision，直接复用保存的产物；卷数据不会回滚。
-失败不会自动回滚；服务中断后的“需核实”状态需填写核实说明后才能再次部署。
-删除应用仅删除平台记录与历史，保留远端容器和卷。支持普通/密钥变量引用；仍拒绝服务配置文件模板及非镜像来源。
+### 接入第一台主机
 
-Windows 安装程序支持“仅为我安装”和“所有用户”；后者需管理员权限。
-桌面连接设置窗口提供“检查更新”和“下载并安装更新”，安装前要求用户确认，下载后验证签名与版本。
-alpha 通道包含预发布版本。`alpha.1` 没有更新入口，需手动安装 `alpha.3`，之后才能使用应用内更新。
-服务数据库与数据目录升级时继续复用，发布只追加迁移。
+创建工作空间，在主机页面选择 **Runner Agent** 或 **SSH**。Runner 安装命令由界面生成，可选系统服务或当前用户方式；终端与任务以接入账号的身份执行。
 
-平台账号列表显示最近一次成功登录的 IP 和时间；旧账号在首次重新登录前显示空值，失败登录不更新记录。直连默认使用 TCP 对端 IP。经反向代理部署时，设置 `FERRY_TRUSTED_PROXIES` 为实际代理的 CIDR（逗号分隔，例如 `127.0.0.1/32,::1/128`），并让代理传递 `X-Forwarded-For`（或 `X-Real-IP`）。只信任列出的代理，从右向左取第一个非可信地址；未配置时不采信客户端转发头。不要将所有公网地址设为可信代理。
+## 部署配置
+
+| 配置 | 默认 / 用途 |
+| --- | --- |
+| `FERRY_DATA_DIR` | 数据目录；容器内为 `/data` |
+| `FERRY_DATABASE_URL` | 留空使用 SQLite；也支持 MySQL 8+、PostgreSQL |
+| `FERRY_MASTER_KEY` | 64 位十六进制加密主密钥；未指定时在数据目录生成并复用 `master.key` |
+| `FERRY_ALLOWED_HOSTS` | 允许访问的域名或主机地址 |
+| `FERRY_TRUSTED_PROXIES` | 可信代理 CIDR，控制登录 IP 等记录是否采信转发头 |
+| `FERRY_REDIS_URL` | 可选 Redis 连接，系统监控读取该实例 |
+| `FERRY_NATS_URL` | 可选 NATS JetStream 连接，启用多实例节点通信 |
+
+文件存储可在平台设置中选择 **本地文件（单机）** 或 **S3（单机 / 集群）**。多实例部署使用共享 PostgreSQL / MySQL、相同主密钥与集群命名空间、独立数据目录，并配置 NATS JetStream 和共享文件存储；不要跨机器共享 SQLite 文件。反向代理需要支持 WebSocket。
+
+凭据在服务端加密保存。**丢失主密钥后，数据库中的已存凭据将无法解密**；备份与迁移时请一并保管。OAuth 应用、邮箱、登录验证和存储等可在平台界面配置。
+
+## 兼容范围
+
+- **构建与节点工作流**：借鉴 Actions、n8n 等工具的使用方式，不保证兼容全部第三方 Action、n8n 节点或 ComfyUI 插件。扩展方式见 [工作流扩展示例](examples/workflow-extensions/README.md)。
+- **表达式沙箱**：支持 Windows 与 Linux；Linux 需要可用的隔离能力，禁止非特权用户命名空间的环境会拒绝执行。macOS 暂不支持沙箱表达式执行。
+- **主机执行**：Windows 支持主机模式 Actions 任务，容器镜像任务需要 Linux；所需工具与权限以目标主机实际安装情况为准。
+- **部署**：目前提供 Compose、Docker、systemd、Swarm；Kubernetes / Helm 暂未提供。回滚恢复平台保存的配置与产物，不回滚业务卷数据；删除应用记录不会停止远端服务。
+
+## 本地开发
+
+需要 Rust stable、Node.js 24 和 npm。先构建 Web 资源，再启动内嵌服务：
+
+```sh
+npm ci
+npm run build
+cargo build -p ferry-sandbox
+cargo run -p ferry-server
+```
+
+服务默认监听 `127.0.0.1:4290`。另开终端运行前端开发服务：
+
+```sh
+npm run dev
+```
+
+打开 **http://localhost:5173**，`/api` 请求会代理至 `4290`。运行检查：
+
+```sh
+cargo fmt --all -- --check
+cargo check --workspace
+cargo test --workspace
+npm run typecheck
+npm test
+```
+
+| 目录 | 内容 |
+| --- | --- |
+| `src/app` | 页面组合、路由与资源注册 |
+| `src/features` | 主机、工作流、仓库、部署等业务模块 |
+| `src/shared` | 公共 UI、表单、表格、API、主题与语言 |
+| `crates/server` | HTTP 服务、数据库、迁移与内嵌 Web 资源 |
+| `crates/runner` | 主机代理与任务执行 |
+| `crates/protocol` | 服务与 Runner 的共享协议 |
+| `crates/sandbox` | 表达式隔离执行进程 |
+| `desktop` | Tauri 桌面应用 |
+
+前端依赖方向为 `app → features → shared`。桌面打包、Runner 生命周期与多数据库验收参见下方文档。
+
+## 文档
+
+- [产品与技术方案](docs/ferry-运维平台产品与技术方案.md)
+- [Compose 部署、HTTPS、备份与升级](docs/compose-quickstart.md)
+- [仓库连接与授权](docs/repository-connections.md)
+- [部署与数据导入导出](docs/deployments-and-transfers.md)
+- [工作流能力清单](docs/ferry-工作流能力清单.md) · [工作流总体设计](docs/ferry-工作流平台v3总体设计.md)
+- [工作流扩展示例](examples/workflow-extensions/README.md)
+- [Runner 安装、运行与升级](docs/tasks/T16-runner-lifecycle.md)
+- [桌面应用更新](docs/tasks/T17-desktop-unattended-updates.md)
+- [阶段实现与验收记录](docs/tasks/T12-product-completion.md)
+
+## 反馈与参与
+
+欢迎通过 [Issues](https://github.com/7link-team/ferry/issues) 报告问题或提出建议。反馈时请附上版本、操作系统、部署方式、复现步骤和脱敏日志；提交代码前请运行相关检查。
