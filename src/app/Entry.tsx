@@ -324,7 +324,7 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
   );
 }
 
-/** Only rewrites the workspace segment, so a deep link keeps its destination. */
+/** Creating or joining a workspace starts at that workspace's overview. */
 function enter(workspaceId: string) {
-  navigate({ workspace: workspaceId,group:"host",item:"hosts",mode:"list" }, {}, { replace: true });
+  navigate({ workspace: workspaceId,group:"dashboard",item:"overview",mode:"list" }, {}, { replace: true });
 }

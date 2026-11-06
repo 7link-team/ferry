@@ -70,7 +70,7 @@ try {
   await g.getByRole('menuitem',{name:'创建/加入工作空间',exact:true}).click();
   await g.getByPlaceholder('邀请码',{exact:true}).fill(code);
   await g.getByRole('button',{name:'加入',exact:true}).click();
-  await g.waitForURL(`**/workspaces/${workspace_tenant}/**`);
+  await g.waitForURL(`${origin}/zh-CN/workspaces/${workspace_tenant}/dashboard`);
   await g.getByRole('heading',{name:'最近活动',exact:true}).waitFor();
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/roles`);
   const builtin = p.getByRole('row').filter({hasText:'只读'});
