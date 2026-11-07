@@ -518,6 +518,12 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 check(kind+' Swarm readiness failure cannot report success',row['state']=='failed')
                 start(id,first);row=done(id)
                 check(kind+' Swarm explicit rollback recovers: '+row['latest_revision']['output'],row['state']=='succeeded')
+                check(kind+' Swarm explicit rollback restores historical HTTP',eventually(lambda:response(web_port)=='stack-v1'))
+                spec=json.loads(engine(['service','inspect',project+'_web']))[0]['Spec']
+                check(kind+' Swarm explicit rollback preserves start-first updates',spec['UpdateConfig']['Order']=='start-first')
+                if swarm_ha:
+                    check(kind+' Swarm rollback retains placement limits',spec['TaskTemplate']['Placement']['Constraints']==['node.labels.ferry-test == eligible'] and spec['TaskTemplate']['Placement']['MaxReplicas']==1)
+                    check(kind+' Swarm rollback leaves exactly two healthy tasks',len(eventually(healthy_tasks,120))==2)
                 stage_left=command(['docker','exec',name,'find',deployment_workdir,'-name','stack-*']).decode()
                 check(kind+' Swarm private runtime files cleaned',not stage_left.strip())
                 engine(['stack','rm',project])

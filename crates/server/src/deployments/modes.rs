@@ -1005,6 +1005,37 @@ pub(crate) async fn stack_execute(
                 command.push_str(&format!("if docker secret inspect {name} >/dev/null 2>&1; then [ \"$(docker secret inspect --format '{{{{index .Spec.Labels \"workspace.deployment\"}}}}' {name})\" = {owner} ] || exit 75; else docker secret create --label {label} {name} {path} >/dev/null; fi; ",name=quote(name),owner=quote(&prefix),label=quote(&format!("workspace.deployment={prefix}")),path=quote(&path)));
             }
         }
+        let m=manifest::parse_for(&rev.manifest,"stack")?;
+        let timeout=m.strategy.as_ref().map(|s|s.health_timeout).unwrap_or(120);
+        if rev.action=="rollback" {
+            command.push_str(&format!("deadline=$(( $(date +%s) + {timeout} )); "));
+            // A Ferry timeout does not stop Swarm's asynchronous rolling update.
+            // Starting another start-first update can retain overlapping old tasks
+            // and exhaust max_replicas_per_node placement capacity. Only an explicit
+            // rollback unwinds that engine update before applying the selected snapshot.
+            for name in artifact["services"].as_object().unwrap().keys() {
+                let name=quote(&format!("{prefix}_{name}"));
+                command.push_str(&format!(r#"if docker service inspect {name} >/dev/null 2>&1; then
+update=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}' {name});
+case "$update" in updating|paused)
+previous_update=$(docker service inspect --format '{{{{json .UpdateStatus}}}}' {name});
+docker service update --rollback --detach=true {name} >/dev/null;
+while :; do
+snapshot=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}|{{{{json .UpdateStatus}}}}' {name});
+update=${{snapshot%%|*}}; status=${{snapshot#*|}};
+case "$update" in rollback_completed|completed) if [ "$status" != "$previous_update" ]; then break; fi;; paused|rollback_paused) if [ "$status" != "$previous_update" ]; then echo 'Swarm更新失败或被暂停' >&2; exit 74; fi;; esac;
+[ $(date +%s) -lt "$deadline" ] || {{ echo 'Swarm副本未全部就绪，已超时' >&2; exit 74; }};
+sleep 1;
+done;; esac;
+fi; "#));
+            }
+        }
+        // Swarm may briefly retain the preceding update's terminal status after
+        // accepting the new spec. Associate failures with a changed status snapshot.
+        for (index,name) in artifact["services"].as_object().unwrap().keys().enumerate() {
+            let name=quote(&format!("{prefix}_{name}"));
+            command.push_str(&format!("previous_update_{index}=$(docker service inspect --format '{{{{json .UpdateStatus}}}}' {name} 2>/dev/null || printf null); "));
+        }
         if rev.action=="restart" {
             for name in artifact["services"].as_object().unwrap().keys() {
                 command.push_str(&format!("docker service update --force --container-label-add {} --detach=true {} >/dev/null; ",quote(&format!("workspace.revision={}",rev.id)),quote(&format!("{prefix}_{name}"))));
@@ -1012,13 +1043,13 @@ pub(crate) async fn stack_execute(
         } else {
             command.push_str(&format!("docker stack deploy --prune --resolve-image never -c {} {}; ",quote(&format!("{stage}/stack.json")),quote(&prefix)));
         }
-        let m=manifest::parse_for(&rev.manifest,"stack")?;
-        let timeout=m.strategy.as_ref().map(|s|s.health_timeout).unwrap_or(120);
-        command.push_str(&format!("deadline=$(( $(date +%s) + {timeout} )); "));
-        for (name,service) in artifact["services"].as_object().unwrap() {
+        if rev.action!="rollback" {
+            command.push_str(&format!("deadline=$(( $(date +%s) + {timeout} )); "));
+        }
+        for (index,(name,service)) in artifact["services"].as_object().unwrap().iter().enumerate() {
             let name=quote(&format!("{prefix}_{name}"));
             let count=service["deploy"]["replicas"].as_u64().unwrap_or(1);
-            command.push_str(&format!("while :; do update=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}' {name}); case \"$update\" in paused|rollback_paused|rollback_completed) echo 'Swarm更新失败或被暂停' >&2; exit 74;; esac; tasks=$(docker service ps -q --filter desired-state=running {name}); running=0; ready=true; for task in $tasks; do state=$(docker inspect --type task --format '{{{{.Status.State}}}}:{{{{index .Spec.ContainerSpec.Labels \"workspace.revision\"}}}}' \"$task\"); case \"$state\" in running:{revision}) running=$((running+1));; *) ready=false;; esac; done; if [ \"$ready\" = true ] && [ \"$running\" -eq {count} ] && [ \"$update\" != updating ]; then break; fi; [ $(date +%s) -lt \"$deadline\" ] || {{ echo 'Swarm副本未全部就绪，已超时' >&2; exit 74; }}; sleep 1; done; ",revision=rev.id));
+            command.push_str(&format!("while :; do snapshot=$(docker service inspect --format '{{{{if .UpdateStatus}}}}{{{{.UpdateStatus.State}}}}{{{{end}}}}|{{{{json .UpdateStatus}}}}' {name}); update=${{snapshot%%|*}}; status=${{snapshot#*|}}; case \"$update\" in paused|rollback_paused|rollback_completed) if [ \"$status\" != \"$previous_update_{index}\" ]; then echo 'Swarm更新失败或被暂停' >&2; exit 74; fi;; esac; tasks=$(docker service ps -q --filter desired-state=running {name}); running=0; ready=true; for task in $tasks; do state=$(docker inspect --type task --format '{{{{.Status.State}}}}:{{{{index .Spec.ContainerSpec.Labels \"workspace.revision\"}}}}' \"$task\"); case \"$state\" in running:{revision}) running=$((running+1));; *) ready=false;; esac; done; settled=false; case \"$update\" in ''|completed) settled=true;; esac; if [ \"$ready\" = true ] && [ \"$running\" -eq {count} ] && [ \"$settled\" = true ]; then break; fi; [ $(date +%s) -lt \"$deadline\" ] || {{ echo 'Swarm副本未全部就绪，已超时' >&2; exit 74; }}; sleep 1; done; ",revision=rev.id));
         }
         command.push_str(&format!("cp -- {} {}",quote(&format!("{stage}/artifact.json")),quote(&format!("{dir}/compose.json"))));
         let result=ch.exec(&format!("flock -n {} sh -c {}",quote(&format!("{dir}/execution.lock")),quote(&command)),Duration::from_secs(u64::from(timeout)+180)).await?;
