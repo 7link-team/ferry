@@ -94,8 +94,10 @@ def main():
             for project in projects:
                 result=subprocess.run(['docker','exec',name+'-manager','/usr/bin/docker','service','ps','--no-trunc',project+'_web'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
                 (work/(project+'-tasks.log')).write_bytes(result.stdout)
+                print(result.stdout.decode(errors='replace'), flush=True)
                 result=subprocess.run(['docker','exec',name+'-manager','/usr/bin/docker','service','inspect','--format','{{json .UpdateStatus}}',project+'_web'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
                 (work/(project+'-update.log')).write_bytes(result.stdout)
+                print('Swarm update status: '+result.stdout.decode(errors='replace'), flush=True)
         if not condition and mode=='native':
             debug=subprocess.run(['docker','exec',name,'journalctl','--no-pager','-n','120'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             (work/'native-journal.log').write_bytes(debug.stdout)
@@ -514,7 +516,8 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 source['services'][0]['health']['readiness']['httpGet']['path']='/not-ready'
                 update(id,source);start(id);row=done(id)
                 check(kind+' Swarm readiness failure cannot report success',row['state']=='failed')
-                start(id,first);check(kind+' Swarm explicit rollback recovers',done(id)['state']=='succeeded')
+                start(id,first);row=done(id)
+                check(kind+' Swarm explicit rollback recovers: '+row['latest_revision']['output'],row['state']=='succeeded')
                 stage_left=command(['docker','exec',name,'find',deployment_workdir,'-name','stack-*']).decode()
                 check(kind+' Swarm private runtime files cleaned',not stage_left.strip())
                 engine(['stack','rm',project])
