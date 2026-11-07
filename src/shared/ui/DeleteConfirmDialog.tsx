@@ -17,11 +17,13 @@ export function DeleteConfirmDialog({ action = commonText("common.delete"), targ
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose(); }}>
     <Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
-        <Dialog.Title className="break-all text-base font-semibold">{commonText("common.confirm")}{action}“{target}”？</Dialog.Title>
+      <Dialog.Content className="dialog-shell fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
+        <Dialog.Title className="line-clamp-2 break-all text-base font-semibold">{commonText("common.confirm")}{action}“{target}”？</Dialog.Title>
+        <div className="dialog-body mt-2"><p className="break-all text-sm">{target}</p>
         <Dialog.Description className="mt-2 text-sm text-muted-foreground">{description}</Dialog.Description>
         {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
+        </div>
+        <div className="dialog-footer mt-5">
           <Button variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button>
           <Button variant="destructive" disabled={busy} onClick={async () => {
             setBusy(true); setError("");

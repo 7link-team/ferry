@@ -14,7 +14,7 @@ it("retains unknown saved subscription events when opening the edit form",async(
   const host=document.createElement('div'),root=createRoot(host);
   try{
     await act(async()=>root.render(<RepositoryMonitor workspace="ops" connectionId="c1" permissions={new Set()}/>));
-    const initial=capture.config!.viewActions![0]!.initialValues!;
+    const initial=capture.config!.editValues!;
     expect(initial({provider:'git',events:['push','future.event','merge']})).toMatchObject({events:['push','future.event']});
     expect(initial({provider:'codeup',events:['push','repository.future','repository.created']})).toMatchObject({events:['push','repository.future']});
   }finally{await act(async()=>root.unmount());}
@@ -24,16 +24,16 @@ it("migrates legacy webhook URLs and languages into editable channels without lo
   const host=document.createElement('div'),root=createRoot(host);
   try{
     await act(async()=>root.render(<RepositoryMonitor workspace="ops" connectionId="c1" permissions={new Set()}/>));
-    const action=capture.config!.viewActions![0]!;
+    const config=capture.config!;
     for(const provider of ['git','codeup']){
       const row={provider,webhook:'https://notify.example.invalid/token',notification_language:'ja-JP'};
-      expect(action.initialValues!(row)).toMatchObject({webhook:row.webhook,notification_language:'ja-JP'});
-      const fields=action.parameters!(row);
-      expect(action.initialValues!(row).notification_channels).toEqual([{name:'Webhook',webhook:row.webhook,language:'ja-JP',enabled:true}]);
+      expect(config.editValues!(row)).toMatchObject({webhook:row.webhook,notification_language:'ja-JP'});
+      const fields=config.sections.flatMap(section=>section.fields);
+      expect(config.editValues!(row).notification_channels).toEqual([{name:'Webhook',webhook:row.webhook,language:'ja-JP',enabled:true}]);
       expect(fields.find(field=>field.key==='notification_channels')!.type).toBe('custom');
       expect(fields.some(field=>field.key==='webhook')).toBe(false);
     }
-    expect(action.initialValues!({provider:'codeup'}).notification_language).toBe('en-US');
+    expect(config.editValues!({provider:'codeup'}).notification_language).toBe('en-US');
   }finally{await act(async()=>root.unmount());}
 });
 it("updates subscription labels and event options immediately in all six languages",async()=>{
@@ -59,4 +59,20 @@ it("renders absent event dates as empty and preserves valid zero counts", () => 
   const columns=repositoryEventList('ops').columns;
   expect(columns.find(column=>column.key==='created_at')!.render!({created_at:0})).toBe('—');
   expect(columns.find(column=>column.key==='event')!.render!({event:'future.event'})).toBe(selectDisplay('future.event',{options:[]}));
+});
+
+it("shows every subscription event with its selected or unselected read-only checkbox", async () => {
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
+  const host=document.createElement('div'),root=createRoot(host);
+  try {
+    await act(async()=>root.render(<RepositoryMonitor workspace="ops" connectionId="c1" permissions={new Set()} />));
+    const field=capture.config!.sections.flatMap(section=>section.fields).find(field=>field.key==='events')!;
+    const render=(provider: string, events: string[]) => field.render!({workspace:"ops",draft:{provider,events},readOnly:true,onPatch:vi.fn(),onValidityChange:vi.fn()});
+    await act(async()=>root.render(<>{render('github',['push','tag.created'])}</>));
+    let boxes=[...host.querySelectorAll<HTMLButtonElement>('[role="checkbox"]')];
+    expect(boxes).toHaveLength(9);expect(boxes.filter(box=>box.getAttribute('aria-checked')==='true')).toHaveLength(2);expect(boxes.every(box=>box.disabled)).toBe(true);
+    await act(async()=>root.render(<>{render('git',[])}</>));
+    boxes=[...host.querySelectorAll<HTMLButtonElement>('[role="checkbox"]')];
+    expect(boxes).toHaveLength(6);expect(boxes.every(box=>box.getAttribute('aria-checked')==='false')).toBe(true);
+  } finally {await act(async()=>root.unmount());}
 });

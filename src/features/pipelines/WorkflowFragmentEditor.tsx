@@ -77,11 +77,11 @@ export function ActionFragmentYaml({ source, job, index, original, readOnly, onC
     </details>
     <Dialog.Root open={open} onOpenChange={setOpen}><Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-      <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-50 flex h-[85dvh] w-[min(80rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-lg border bg-background p-4 shadow-lg">
-        <Dialog.Title className="text-lg font-semibold">{title}</Dialog.Title>
+      <Dialog.Content aria-describedby={undefined} className="fixed left-1/2 top-1/2 z-50 flex h-[85dvh] w-[min(80rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-3 overflow-hidden rounded-lg border bg-background p-4 shadow-lg">
+        <Dialog.Title className="shrink-0 text-lg font-semibold">{title}</Dialog.Title>
         <Suspense fallback={<LoadingSkeleton variant="editor" label={executionText("editor.loadingYaml")} />}><YamlEditor value={draft} originalValue={originalFragment} path={`file:///fragment-${encodeURIComponent(job)}-${index ?? "job"}.yaml`} label={title} fillHeight readOnly={readOnly} onChange={setDraft} /></Suspense>
         {error && <p role="alert" className="max-h-24 overflow-auto whitespace-pre-wrap text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setOpen(false)}>{executionText("editor.closeFragment")}</Button>{!readOnly && <Button type="button" disabled={!!error} onClick={() => { onChange(next); setOpen(false); }}>{executionText("editor.applyFragment")}</Button>}</div>
+        <div className="dialog-footer"><Button type="button" variant="outline" onClick={() => setOpen(false)}>{executionText("editor.closeFragment")}</Button>{!readOnly && <Button type="button" disabled={!!error} onClick={() => { onChange(next); setOpen(false); }}>{executionText("editor.applyFragment")}</Button>}</div>
       </Dialog.Content>
     </Dialog.Portal></Dialog.Root>
   </>;

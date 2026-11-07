@@ -65,7 +65,7 @@ export function App() {
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (!current && route.workspace !== "_platform") return;
     const query = Object.fromEntries(new URLSearchParams(location.search));
-    if (route.item === "host-groups" || route.item === "pipeline-groups") {
+    if ((route.item === "host-groups" || route.item === "pipeline-groups") && (route.mode === "list" || route.mode === "view")) {
       if (route.id) query.group_id = route.id;
       navigate({ ...route, workspace: current?.id ?? route.workspace, item: route.item === "host-groups" ? "hosts" : "pipelines", mode: "list" }, query, { replace: true });
     } else if (!stripLocalePrefix(location.pathname).startsWith("/platform/") && !stripLocalePrefix(location.pathname).startsWith(`/workspaces/${current?.id}/`)) {
@@ -363,9 +363,9 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             ) : (
               <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
             )
-          ) : route.mode === "view" && item.resource === "code-insights" && route.id ? (
+          ) : (route.mode === "view" || route.mode === "edit") && item.resource === "code-insights" && route.id ? (
             <CodeInsightDetail key={`${current.id}/${route.id}`} workspace={current.id} insightId={route.id} permissions={permissions} />
-          ) : route.mode === "view" && item.resource === "code-connections" && route.id && formConfig ? (
+          ) : (route.mode === "view" || (route.mode === "edit" && new URLSearchParams(location.search).get("tab") === "monitoring")) && item.resource === "code-connections" && route.id && formConfig ? (
             <RepositoryConnectionDetail key={`${current.id}/${route.id}`} workspace={current.id} connectionId={route.id} permissions={permissions} form={formConfig} />
           ) : route.mode === "view" && (item.resource === "deployments" || item.resource === "deployment-revisions") && route.id ? (
             <DeploymentDetail key={`${current.id}/${item.resource}/${route.id}`} workspace={current.id} {...(item.resource === "deployments" ? { deploymentId: route.id } : { revisionId: route.id })} permissions={permissions} />

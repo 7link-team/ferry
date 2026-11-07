@@ -1,7 +1,6 @@
 import { cn } from "cn";
-import { Activity,Bell,FolderOpen,Info,Pencil,Plus,SquareTerminal,X } from "lucide-react";
-import { Dialog } from "radix-ui";
-import { useEffect,useMemo,useState } from "react";
+import { Activity,Bell,FolderOpen,Info,Pencil,Plus,SquareTerminal } from "lucide-react";
+import { useEffect,useState } from "react";
 import { HostMonitor } from "../../features/hosts/HostMonitor";
 import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
@@ -34,14 +33,6 @@ export function HostDetail({
   // terminal if that is what the sender was looking at.
   const [tab, setTab] = useQueryValue("tab", "info");
   const [alertView, setAlertView] = useState<"rules" | "events">("rules");
-  const [creatingAlert, setCreatingAlert] = useState(false);
-  const [alertRevision, setAlertRevision] = useState(0);
-  const nodeAlertForm = useMemo(() => alertForm ? {
-    ...alertForm,
-    blank: { ...alertForm.blank, target_kind: "host", target_ref: hostId },
-    sections: alertForm.sections.map(section => ({ ...section, fields: section.fields.filter(field => field.key !== "target_kind" && field.key !== "target_ref") })),
-  } : undefined, [alertForm, hostId]);
-  useEffect(() => setCreatingAlert(false), [workspace, hostId]);
   useEffect(() => {
     if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
   }, [tab, workspace, hostId]);
@@ -61,14 +52,7 @@ export function HostDetail({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-    <Dialog.Root open={creatingAlert} onOpenChange={setCreatingAlert}><Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-xl border bg-background p-6 shadow-lg">
-        <div className="mb-1 flex items-center justify-between gap-3"><Dialog.Title className="text-lg font-semibold">{commonText("shell.newAlert")}</Dialog.Title><Dialog.Close asChild><Button type="button" size="icon" variant="ghost" aria-label={commonText("common.close")} title={commonText("common.close")}><X className="size-4" /></Button></Dialog.Close></div>
-        <Dialog.Description className="mb-5 text-sm text-muted-foreground">{commonText("shell.newAlertHelp")}</Dialog.Description>
-        {nodeAlertForm && <ResourceForm config={nodeAlertForm} workspace={workspace} permissions={permissions} createInPlace onCancel={() => setCreatingAlert(false)} onSaved={() => { setCreatingAlert(false); setAlertRevision(value => value + 1); }} />}
-      </Dialog.Content>
-    </Dialog.Portal></Dialog.Root>
+
     <div className="flex flex-wrap items-center justify-between gap-2 border-b">
       <div role="tablist" aria-label={commonText("shell.hostDetail")} className="flex gap-1">
         <Button type="button" role="tab" title={commonText("common.basic")} aria-selected={tab === "info"} variant="ghost" size="sm" className={cn("rounded-none border-b-2", tab === "info" ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab("info")}><Info className="size-4" />{commonText("common.basic")}</Button>
@@ -89,9 +73,9 @@ export function HostDetail({
               <Button type="button" role="tab" aria-selected={alertView === "events"} size="sm" variant={alertView === "events" ? "secondary" : "ghost"} onClick={() => setAlertView("events")}>{commonText("nav.alertEvents")}</Button>
             </div>
             <span className="flex-1" />
-            {alertView === "rules" && alertForm && permissions.has("alerts.create") && <Button type="button" size="sm" onClick={() => setCreatingAlert(true)}><Plus className="size-4" />{commonText("shell.newAlert")}</Button>}
+            {alertView === "rules" && alertForm && permissions.has("alerts.create") && <Button asChild size="sm"><a href={href({workspace,group:"deploy",item:"alerts",mode:"new"},{target_kind:"host",target_ref:hostId,return_to:location.pathname+location.search+location.hash})}><Plus className="size-4" />{commonText("shell.newAlert")}</a></Button>}
           </div>
-          {alertView === "rules" ? <ResourceTable key={`${hostId}/rules/${alertRevision}`} config={{ ...alerts, fixed: { target_kind: "host", target_ref: hostId }, filters: (alerts.filters ?? []).filter(filter => filter.key !== "target_kind"), toolbar: { ...alerts.toolbar, create: false }, actions: alerts.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alerts", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
+          {alertView === "rules" ? <ResourceTable key={`${hostId}/rules`} config={{ ...alerts, fixed: { target_kind: "host", target_ref: hostId }, filters: (alerts.filters ?? []).filter(filter => filter.key !== "target_kind"), toolbar: { ...alerts.toolbar, create: false }, actions: alerts.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alerts", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
             : <ResourceTable key={`${hostId}/events`} config={{ ...alertEvents, fixed: { target_kind: "host", target_ref: hostId }, filters: (alertEvents.filters ?? []).filter(filter => filter.key !== "rule_id"), actions: alertEvents.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "deploy", item: "alert-events", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />}
         </div> : <>
         {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">{commonText("shell.agentUnknown")}{connectionError}</p>}

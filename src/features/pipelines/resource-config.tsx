@@ -539,12 +539,6 @@ export function pipelinesForms({
               required: true,
             },
             {
-              key: "description",
-              label: "说明",
-              labelKey: "common-domain:common.description",
-              type: "textarea",
-            },
-            {
               key: "target_kind",
               label: "默认执行器类型",
               labelKey: "resource-domain:pipeline.defaultExecutor",
@@ -577,6 +571,12 @@ export function pipelinesForms({
               type: "switch",
               help: "Actions 任务声明 environment 为此环境名称时，开始执行前需要有执行权限的成员批准（相当于 GitHub 环境的必需审阅者）。",
               helpKey: "resource-domain:pipeline.approvalHelp",
+            },
+            {
+              key: "description",
+              label: "说明",
+              labelKey: "common-domain:common.description",
+              type: "textarea",
             },
           ],
         },

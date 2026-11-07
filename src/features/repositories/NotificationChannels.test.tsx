@@ -88,7 +88,7 @@ it("previews without credentials and sends current unsaved channel only on expli
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement("div"), root = createRoot(host);
   const channel = { name: "Unsaved", webhook: "http://127.0.0.1:1234/receiver", language: "en-US", enabled: false, bearer_token: "secret" };
-  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Test notification", fields: [{ name: "Message", value: "<sample>", accent: "blue" }], payload: {test:true} }), {headers:{"Content-Type":"application/json"}})).mockResolvedValueOnce(new Response(JSON.stringify({ok:false,message:"Rejected by receiver"}), {headers:{"Content-Type":"application/json"}}));
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Test notification", provider: "Webhook", payload: {test:true,message:"<sample>"} }), {headers:{"Content-Type":"application/json"}})).mockResolvedValueOnce(new Response(JSON.stringify({ok:false,message:"Rejected by receiver"}), {headers:{"Content-Type":"application/json"}}));
   vi.stubGlobal("fetch", fetcher);
   const render = (readOnly = false) => root.render(<NotificationChannels endpoint="/workspaces/2/code-connection-monitors/42" channels={[channel]} readOnly={readOnly} onChange={vi.fn()} onValidityChange={vi.fn()} />);
   try {

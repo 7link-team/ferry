@@ -235,11 +235,13 @@ const nodeTypes = { workflow: NodeCard };
 function Modal({
   title,
   children,
+  footer,
   close,
   wide = false,
 }: {
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
   close: () => void;
   wide?: boolean;
 }) {
@@ -252,7 +254,7 @@ function Modal({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className={`fixed left-1/2 top-1/2 z-50 max-h-[90dvh] ${wide ? "w-[min(90rem,calc(100vw-2rem))]" : "w-[min(48rem,calc(100vw-2rem))]"} -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-4 sm:p-6 shadow-xl`}>
+        <Dialog.Content className={`fixed left-1/2 top-1/2 z-50 max-h-[90dvh] ${wide ? "w-[min(90rem,calc(100vw-2rem))]" : "w-[min(48rem,calc(100vw-2rem))]"} -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-xl border bg-background p-4 sm:p-6 shadow-xl`}>
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold">
               {title}
@@ -269,7 +271,8 @@ function Modal({
             </Dialog.Close>
           </div>
           <Dialog.Description className="sr-only">{title}</Dialog.Description>
-          {children}
+          <div className="dialog-body">{children}</div>
+          {footer && <footer className="dialog-footer mt-4">{footer}</footer>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -1273,24 +1276,14 @@ export function WorkflowEditor({
           </Modal>
         )}
         {resultsOpen && execution && <Modal wide title={t("results")} close={() => {setResultsOpen(false);setExecutionId("");}}>{executionResults}</Modal>}
-        {executionSettingsOpen && graph && <Modal title={t("execution.defaults")} close={() => setExecutionSettingsOpen(false)}>
+        {executionSettingsOpen && graph && <Modal title={t("execution.defaults")} footer={<Button type="button" onClick={()=>setExecutionSettingsOpen(false)}>{t("close")}</Button>} close={() => setExecutionSettingsOpen(false)}>
           <WorkflowExecutionTarget workspace={workspace} value={((graph.settings as Record<string,unknown> | undefined)?.execution as Record<string,unknown>) ?? {}} readOnly={readOnly}
             change={execution => change({...graph, settings:{...(graph.settings as Record<string,unknown> ?? {}), execution}})} />
-          <div className="mt-5 flex justify-end"><Button type="button" onClick={()=>setExecutionSettingsOpen(false)}>{t("close")}</Button></div>
+
         </Modal>}
         {dialog && (
           <Modal
-            title={t(dialog === "delete" ? "delete" : dialog)}
-            close={() => {
-              if (!busy) setDialog(null);
-            }}
-          >
-            {dialog === "delete" ? (
-              <>
-                <p className="mb-5 text-sm">
-                  {node?.name} · {t("deleteHelp")}
-                </p>
-                <div className="flex justify-end gap-2">
+            footer={dialog === "delete" ? (<div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setDialog(null)}>{t("cancel")}</Button>
                 <Button
                   type="button"
@@ -1314,7 +1307,41 @@ export function WorkflowEditor({
                 >
                   {t("confirm")}
                 </Button>
-                </div>
+                </div>) : (<div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => setDialog(null)}
+                  >
+                    {t("cancel")}
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={
+                      busy ||
+                      (dialog === "run" &&
+                        (!entry ||
+                          inputInvalid ||
+                          !validRunInputs(inputSchema, input))) ||
+                      (dialog === "publish" && !versionName.trim())
+                    }
+                    onClick={() => void perform()}
+                  >
+                    {t("confirm")}
+                  </Button>
+                </div>)}
+            title={t(dialog === "delete" ? "delete" : dialog)}
+            close={() => {
+              if (!busy) setDialog(null);
+            }}
+          >
+            {dialog === "delete" ? (
+              <>
+                <p className="mb-5 text-sm">
+                  {node?.name} · {t("deleteHelp")}
+                </p>
+
               </>
             ) : (
               <div className="space-y-4">
@@ -1390,30 +1417,7 @@ export function WorkflowEditor({
                     {error}
                   </p>
                 )}
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => setDialog(null)}
-                  >
-                    {t("cancel")}
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={
-                      busy ||
-                      (dialog === "run" &&
-                        (!entry ||
-                          inputInvalid ||
-                          !validRunInputs(inputSchema, input))) ||
-                      (dialog === "publish" && !versionName.trim())
-                    }
-                    onClick={() => void perform()}
-                  >
-                    {t("confirm")}
-                  </Button>
-                </div>
+
               </div>
             )}
           </Modal>

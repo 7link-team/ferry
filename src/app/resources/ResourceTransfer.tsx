@@ -59,10 +59,11 @@ export function ResourceTransfer({ workspace, resource, params, columns, canImpo
       <Dialog.Trigger asChild><Button size="sm" variant="outline"><Upload /> {commonText("transfer.import")}</Button></Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90dvh] w-[min(64rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-lg border bg-background p-6 shadow-lg">
+        <Dialog.Content className="dialog-shell fixed left-1/2 top-1/2 z-50 w-[min(64rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-lg border bg-background p-6 shadow-lg">
           <Dialog.Title className="text-lg font-semibold">{commonText("transfer.importTitle")}</Dialog.Title>
           <Dialog.Description className="text-sm text-muted-foreground">{commonText("transfer.importHelp")}</Dialog.Description>
           <Dialog.Close asChild><Button size="icon" variant="ghost" disabled={busy} className="absolute right-3 top-3" aria-label={commonText("transfer.close")}><X /></Button></Dialog.Close>
+          <div className="dialog-body space-y-4">
           <div className="flex flex-wrap gap-2">
             {(["xlsx", "csv"] as const).map(format => <Button key={format} variant="outline" size="sm" disabled={busy} onClick={() => void run(() => download(`${endpoint}/import-template?format=${format}`, `${resource}-template.${format}`))}>{commonText("transfer.downloadTemplate", { format: format.toUpperCase() })}</Button>)}
           </div>
@@ -82,7 +83,8 @@ export function ResourceTransfer({ workspace, resource, params, columns, canImpo
               state={{ rows: preview.rows, total: preview.rows.length, query: { page: 1, pageSize: Math.max(1, preview.rows.length) } }}
               columns={[{ field: "row", name: commonText("transfer.row"), width: "88px" }, { field: "error", name: commonText("transfer.validation"), width: "200px", render: (_value, row) => <span className={row.error ? "text-destructive" : ""}>{row.error ?? commonText("transfer.passed")}</span> }, ...previewColumns.map(key => ({ field: key, name: columns?.find(column => column.key === key)?.label ?? key, width: "220px", render: (_value: unknown, row: Preview["rows"][number]) => <span className="whitespace-pre-wrap break-words">{typeof row.values[key] === "string" ? String(row.values[key]) : JSON.stringify(row.values[key])}</span> }))]} />
           </>}
-          <div className="flex flex-wrap justify-end gap-2">
+          </div>
+          <div className="dialog-footer">
             <Button variant="outline" disabled={busy} onClick={close}>{commonText("common.cancel")}</Button>
             {preview ? <Button variant="outline" disabled={busy} onClick={() => void run(discard)}>{commonText("transfer.chooseAgain")}</Button> : <Button disabled={busy || !file} onClick={() => void run(async () => {
               if (!file) return;

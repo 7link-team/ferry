@@ -1,15 +1,13 @@
+import { navigate } from "../router";
 import { cn } from "cn";
 import { ChevronDown,ChevronUp,EllipsisVertical,FolderTree,Pencil,Plus,Trash2 } from "lucide-react";
-import { Dialog } from "radix-ui";
 import { useEffect,useState } from "react";
 import { api,errorText } from "../../shared/api/api";
-import { base,createResource,deleteResource,listResource,patchResource } from "../../shared/api/resource";
-import { AutoField,AutoForm,FieldControl } from "../../shared/forms/auto-form";
+import { base,deleteResource,listResource } from "../../shared/api/resource";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { currentLocale } from "../../shared/i18n/locale";
 import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
-import { Input } from "../../shared/ui/input";
 import { DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuTrigger } from "../../shared/ui/dropdown-menu";
 
 export type GroupNode = { id: string; name: string; description: string; parent_id?: string; position?: number; version: number; count?: number };
@@ -20,10 +18,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
   const [groups, setGroups] = useState<GroupNode[]>([]);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState<{ group?: GroupNode; parentId: string }>();
   const [deleting, setDeleting] = useState<GroupNode>();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const canCreate = suppliedGroups === undefined && permissions.has(`${resource}.create`);
   const canUpdate = suppliedGroups === undefined && permissions.has(`${resource}.update`);
@@ -43,7 +38,10 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     void load().catch(cause => { if (live) setError(errorText(cause)); });
     return () => { live = false; };
   }, [workspace, resource, revision, suppliedGroups]);
-  const open = (group?: GroupNode, parentId = "") => { setEditing({ ...(group ? { group } : {}), parentId }); setName(group?.name ?? ""); setDescription(group?.description ?? ""); setError(""); };
+  const open = (group?: GroupNode, parentId = "") => navigate(
+    { workspace, group: resource === "host-groups" ? "host" : "workflow", item: resource, mode: group ? "edit" : "new", ...(group ? { id: group.id } : {}) },
+    { return_to: location.pathname + location.search + location.hash, ...(parentId && !group ? { parent_id: parentId } : {}) },
+  );
   const siblings = (parentId: string) => groups.filter(group => (group.parent_id || "0") === (parentId || "0"))
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, currentLocale()) || a.id.localeCompare(b.id));
   const moveGroup = async (group: GroupNode, direction: -1 | 1) => {
@@ -89,27 +87,7 @@ export function GroupSidebar({ workspace, permissions, resource, noun, active, o
     <button type="button" aria-current={active === "" ? "page" : undefined} className={cn("flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm", active === "" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("")}>{commonText("group.all")}{total !== undefined && <span className="tabular-nums opacity-70">{total}</span>}</button>
     {suppliedGroups === undefined && <button type="button" aria-current={active === "0" ? "page" : undefined} className={cn("rounded px-2 py-1.5 text-left text-sm", active === "0" ? "bg-primary font-medium text-primary-foreground" : "hover:bg-accent hover:text-accent-foreground")} onClick={() => onSelect("0")}>{commonText("group.ungrouped")}</button>}
     {(resource === "host-groups" ? groups.filter(group => !group.parent_id || group.parent_id === "0" || !groups.some(parent => parent.id === group.parent_id)) : groups).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.name.localeCompare(b.name, currentLocale())).map(group => renderGroup(group, 0))}
-    {error && !editing && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
-    <Dialog.Root open={!!editing} onOpenChange={value => { if (!value && !busy) setEditing(undefined); }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-6 shadow-lg">
-      <Dialog.Title className="text-lg font-semibold">{editing?.group ? commonText("group.edit") : commonText("group.create")}</Dialog.Title>
-      <Dialog.Description className="sr-only">{commonText("group.help")}</Dialog.Description>
-      <AutoForm className="mt-4 space-y-4" onSubmit={async event => {
-        event.preventDefault(); if (!editing || !name.trim()) return;
-        setBusy(true); setError("");
-        try {
-          const values = { name: name.trim(), description, ...(resource === "host-groups" ? { parent_id: editing.parentId } : {}) };
-          if (editing.group) await patchResource(workspace, resource, editing.group.id, { ...values, version: editing.group.version });
-          else await createResource(workspace, resource, values);
-          setEditing(undefined); setRevision(value => value + 1);
-        } catch (cause) { setError(errorText(cause)); }
-        finally { setBusy(false); }
-      }}>
-        <AutoField label={commonText("common.name")} className="block space-y-2 text-sm"><Input value={name} maxLength={60} required onChange={event => setName(event.target.value)} /></AutoField>
-        {resource === "host-groups" && <AutoField label={commonText("repository.parent")} className="block space-y-2 text-sm"><FieldControl name="parent_id" field={{ name: commonText("repository.parent"), type: "select", config: { emptyValues: [0, "0"], emptyLabel: commonText("group.topLevel"), options: groups.filter(group => group.id !== editing?.group?.id).map(group => ({ value: group.id, label: group.name })) } }} value={editing?.parentId ?? ""} onChange={value => setEditing(current => current ? { ...current, parentId: String(value) } : current)} /></AutoField>}
-        <AutoField label={commonText("common.description")} className="block space-y-2 text-sm"><Input value={description} onChange={event => setDescription(event.target.value)} /></AutoField>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setEditing(undefined)}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy || !name.trim()}>{busy ? commonText("common.saving") : commonText("common.save")}</Button></div>
-      </AutoForm>
-    </Dialog.Content></Dialog.Portal></Dialog.Root>
+    {error && <p role="alert" className="px-2 text-xs text-destructive">{error}</p>}
+
   </aside>;
 }

@@ -6,5 +6,5 @@ export const EditorFormActionsContext = createContext<{save:()=>void;saveAndWait
 
 /** Reference CrudEditButton's sticky toolbar, shared by detail and edit modes. */
 export function FormActions({ className, placement = "footer", ...props }: ComponentProps<"div"> & { placement?: "footer" | "toolbar" }) {
-  return <div data-form-actions className={cn("flex flex-wrap items-center gap-2", placement === "footer" && "sticky bottom-0 z-30 mt-6 border-t bg-background/90 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75", className)} {...props} />;
+  return <div data-form-actions className={cn("flex flex-wrap items-center gap-2", placement === "footer" && "sticky bottom-0 z-30 mt-4 justify-end border-t bg-background/90 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75", className)} {...props} />;
 }

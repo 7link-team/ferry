@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createServer as createPortServer } from 'node:net';
-import { createServer } from 'vite';
+import { preview } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 let server = null;
@@ -14,9 +14,8 @@ if(!process.env.CRUD_LAYOUT_UI_URL) {
   await new Promise(resolve=>listener.listen(0,'127.0.0.1',resolve));
   const port=listener.address().port;
   await new Promise(resolve=>listener.close(resolve));
-  server=await createServer({server:{host:'127.0.0.1',port,strictPort:true,open:false}});
+  server=await preview({preview:{host:'127.0.0.1',port,strictPort:true}});
 }
-if (server) await server.listen();
 const origin = process.env.CRUD_LAYOUT_UI_URL || `http://127.0.0.1:${server.httpServer.address().port}`;
 const output = resolve('data/maintenance/crud-layout-ui');
 await mkdir(output, { recursive: true });
@@ -78,13 +77,16 @@ try {
     geometry.push({mode,width,...result});
     return result;
   };
-  const primaryFillsFooter = async (primary,label) => {
+  const compactFooterActions = async (primary,label) => {
     const result=await footer.evaluate(element=>{
       const style=getComputedStyle(element),buttons=[...element.querySelectorAll(':scope > button,:scope > a')].map(button=>button.getBoundingClientRect().width);
       return{available:element.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),buttons,gap:parseFloat(style.columnGap)||0};
     });
-    assert(Math.abs(result.buttons.reduce((sum,width)=>sum+width,0)+result.gap*(result.buttons.length-1)-result.available)<3,`${label}: actions occupy the footer without an orphan narrow primary button: ${JSON.stringify(result)}`);
-    assert((await primary.boundingBox()).width>=Math.max(...result.buttons)-1,`${label}: primary action is the expanding action`);
+    assert(result.buttons.every(width=>width>0&&width<Math.min(280,result.available)),`${label}: actions retain compact intrinsic widths`);
+    const primaryBox=await primary.boundingBox();
+    const footerBox=await footer.boundingBox();
+    assert(primaryBox.x>=footerBox.x&&primaryBox.x+primaryBox.width<=footerBox.x+footerBox.width+1,`${label}: primary stays inside footer`);
+    assert.equal(await footer.locator('button,a').last().textContent(),await primary.textContent(),`${label}: primary action is last`);
   };
   const visibleInsideViewport = async (locator, label) => {
     const box = await locator.boundingBox();
@@ -108,7 +110,7 @@ try {
     await page.getByLabel('选项 40 显示名称', { exact: true }).waitFor();
     const detailFrame=await formFrame('detail',width);
     const edit = footer.getByRole('link', { name: '编辑', exact: true });
-    await primaryFillsFooter(edit,`${width}px detail Edit`);
+    await compactFooterActions(edit,`${width}px detail Edit`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`detail-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(edit, `${width}px detail Edit at ${fraction}`); }
@@ -119,7 +121,7 @@ try {
     await save.waitFor();
     const editFrame=await formFrame('edit',width);
     assert(Math.abs(editFrame.form.width-detailFrame.form.width)<2&&Math.abs(editFrame.form.x-detailFrame.form.x)<2,`${width}px detail and edit share the same frame`);
-    await primaryFillsFooter(save,`${width}px edit Save`);
+    await compactFooterActions(save,`${width}px edit Save`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`edit-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(save, `${width}px edit Save at ${fraction}`); }
@@ -135,7 +137,7 @@ try {
     const create = footer.getByRole('button', { name: '创建', exact: true });
     const createFrame=await formFrame('create',width);
     assert(Math.abs(createFrame.form.width-detailFrame.form.width)<2&&Math.abs(createFrame.form.x-detailFrame.form.x)<2,`${width}px detail, edit and create share the same frame`);
-    await primaryFillsFooter(create,`${width}px new Create`);
+    await compactFooterActions(create,`${width}px new Create`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`create-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(create, `${width}px new Create at ${fraction}`); }

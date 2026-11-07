@@ -7,10 +7,15 @@ from pathlib import Path
 import socket
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
 import urllib.request
+
+def command(script):
+    args=[sys.executable, '-c', script]
+    return subprocess.list2cmdline(args) if os.name == 'nt' else shlex.join(args)
 
 checks = 0
 def check(condition, label):
@@ -46,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
     def launch():
         proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
         for _ in range(150):
-            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
+            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text(encoding='utf8',errors='replace'))
             try:
                 if request(anonymous, '/status')['ok']: return proc
             except OSError: pass
@@ -68,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         group=request(owner,root+'/node-groups',{'name':'Cron group'},expected=201)['id']
         host=request(owner,root+'/nodes',{'name':'Cron runner','connection':'runner','group_id':group},expected=201)['id']
         token=request(owner,root+'/runner-tokens',{'host_id':host},expected=201)['token']
-        runner=subprocess.Popen(['target/debug/ferry-runner','--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
+        runner=subprocess.Popen([os.environ.get('RUNNER_BINARY','target/debug/ferry-runner'),'--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
         def eventually(fn,timeout=30):
             until=time.monotonic()+timeout
             while time.monotonic()<until:
@@ -85,7 +90,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         def run(id):return request(owner,root+'/cron-runs/'+id)
         def done(id):return eventually(lambda: (r if r['state'] not in ('queued','running') else None) if (r:=run(id)) else None)
         def update(id,**values):return request(owner,root+'/cron-jobs/'+id,dict(job(id),**values),'PATCH')
-        body={'name':'Runner command','scope':'host','schedule':'* * * * *','timezone':'Asia/Shanghai','enabled':False,'action':'command','target_kind':'host','target_ref':host,'command':'printf CRON_OK','timeout_seconds':10,'max_retries':0,'retry_delay_seconds':1}
+        body={'name':'Runner command','scope':'host','schedule':'* * * * *','timezone':'Asia/Shanghai','enabled':False,'action':'command','target_kind':'host','target_ref':host,'command':command("print('CRON_OK')"),'timeout_seconds':10,'max_retries':0,'retry_delay_seconds':1}
         cid=create(body)
         check(job(cid)['next_run_at']==0 and job(cid)['run_as_name']=='Owner','disabled job and execution identity persisted')
         request(guest,root+'/cron-jobs',body,expected=403)
@@ -101,17 +106,17 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         first=execute(cid);finished=done(first)
         check(finished['state']=='succeeded' and 'CRON_OK' in finished['output'],'real runner command succeeds and records output')
         request(outsider,f'/workspaces/{workspace_other}/cron-runs/'+first,expected=404)
-        check('printf CRON_OK' in finished['config'],'run records immutable configuration snapshot')
-        update(cid,command='printf UPDATED')
-        check('printf CRON_OK' in run(first)['config'],'editing job does not alter old snapshot')
+        check(json.loads(finished['config'])['command']==body['command'],'run records immutable configuration snapshot')
+        update(cid,command=command("print('UPDATED')"))
+        check(json.loads(run(first)['config'])['command']==body['command'],'editing job does not alter old snapshot')
         grouped=create(dict(body,name='Group command',target_kind='host-group',target_ref=group))
         request(owner,root+'/node-groups/'+group,method='DELETE',expected=409)
         check(done(execute(grouped))['state']=='succeeded','real group command uses member HostChannel')
-        counter=shlex.quote(str(data/'attempts'))
-        retry=create(dict(body,name='Retry',command=f'n=$(cat {counter} 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > {counter}; [ "$n" -ge 3 ]',max_retries=2))
+        counter=repr(str(data/'attempts'))
+        retry=create(dict(body,name='Retry',command=command(f'from pathlib import Path; import sys; p=Path({counter}); n=int(p.read_text())+1 if p.exists() else 1; p.write_text(str(n)); sys.exit(0 if n>=3 else 1)'),max_retries=2))
         result=done(execute(retry))
         check(result['state']=='succeeded' and result['attempt']==3 and (data/'attempts').read_text().strip()=='3','configured retry succeeds on third real attempt')
-        uncertain=create(dict(body,name='Timeout',command='sleep 3; echo LATE',timeout_seconds=1,max_retries=2))
+        uncertain=create(dict(body,name='Timeout',command=command("import time; time.sleep(3); print('LATE')"),timeout_seconds=1,max_retries=2))
         pending=execute(uncertain)
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=409)
         result=done(pending)
@@ -122,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/cron-runs/'+pending+'/acknowledgements',{'version':result['version'],'note':'Remote command has finished.'})
         check(run(pending)['state']=='failed','operator acknowledgement resolves uncertain execution')
         request(owner,root+'/cron-jobs/'+uncertain,method='DELETE',expected=204)
-        overlap=create(dict(body,name='Overlap',schedule='* * * * * *',enabled=True,command='sleep 2; echo SCHEDULED'))
+        overlap=create(dict(body,name='Overlap',schedule='* * * * * *',enabled=True,command=command("import time; time.sleep(2); print('SCHEDULED')")))
         eventually(lambda:any(r['state']=='running' for r in runs(overlap)))
         request(owner,root+'/cron-jobs/'+overlap+'/runs',{},expected=409)
         eventually(lambda:any(r['state']=='skipped' for r in runs(overlap)))
@@ -143,13 +148,13 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         request(owner,root+'/members/'+member['id'],{'version':member['version'],'role_id':role},'PATCH')
         instant=datetime.now(timezone.utc)+timedelta(seconds=5)
         denied_marker=data/'must-not-run'
-        revoked=create(dict(body,name='Revoked identity',enabled=True,schedule=f'{instant.second} {instant.minute} {instant.hour} * * *',timezone='UTC',command=f'touch {shlex.quote(str(denied_marker))}'),guest)
+        revoked=create(dict(body,name='Revoked identity',enabled=True,schedule=f'{instant.second} {instant.minute} {instant.hour} * * *',timezone='UTC',command=command(f'from pathlib import Path; Path({str(denied_marker)!r}).touch()')),guest)
         viewer=next(r for r in request(owner,root+'/roles')['items'] if r['name']=='只读')
         request(owner,root+'/members/'+member['id'],{'version':member['version']+1,'role_id':viewer['id']},'PATCH')
         eventually(lambda:any(r['state']=='failed' for r in runs(revoked)))
         check(not denied_marker.exists(),'automatic trigger rechecks revoked actor permissions before executing')
         # Persist a frequent enabled schedule, stop the service while no command is active, and restart.
-        missed=create(dict(body,name='Missed',schedule='* * * * * *',enabled=True,command='true'))
+        missed=create(dict(body,name='Missed',schedule='* * * * * *',enabled=True,command=command('pass')))
         proc.stdin.close();proc.wait(timeout=30)
         time.sleep(2)
         proc=launch()
@@ -160,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         eventually(lambda:(result[0]==200 and result[1].get('ok')) if (result:=request(owner,root+'/nodes/'+host+'/connection-tests',{},expected=None)) else False)
         # Desktop-owned drain must wait for the active command and preserve its final result.
         marker=data/'drain-started';release=data/'drain-release'
-        draining=create(dict(body,name='Drain',command=f'touch {shlex.quote(str(marker))}; while [ ! -f {shlex.quote(str(release))} ]; do sleep .1; done; echo DRAIN_DONE'))
+        draining=create(dict(body,name='Drain',command=command(f'from pathlib import Path; import time; Path({str(marker)!r}).touch(); release=Path({str(release)!r}); exec("while not release.exists():\\n time.sleep(.1)"); print("DRAIN_DONE")')))
         active=execute(draining);eventually(marker.exists)
         proc.stdin.close();time.sleep(.4)
         check(proc.poll() is None,'desktop drain waits for active scheduled command')
@@ -174,9 +179,11 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(request(owner,root+'/cron-jobs')['total']==0,'inactive jobs and histories can be deleted')
         print(f'{checks} checks passed',flush=True)
     except Exception:
-        log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
+        log.flush();print((data/'server.log').read_text(encoding='utf8',errors='replace')[-5000:],flush=True)
         raise
     finally:
         if runner: runner.terminate();runner.wait(timeout=15)
-        if proc.poll() is None:proc.terminate();proc.wait(timeout=30)
+        if proc.poll() is None:
+            if proc.stdin and not proc.stdin.closed: proc.stdin.close()
+            proc.wait(timeout=30)
         log.close()

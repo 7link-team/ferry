@@ -12,17 +12,17 @@ const nodeText=(key:string,values?:Record<string,unknown>)=>t(`resource-domain:p
 function Partitions({node}:{node:ServerNode}) {
   const disks=node.info.resources?.disks;
   if (!disks) return null;
-  return <Dialog.Root><Dialog.Trigger asChild><Button variant="link" size="sm" className="h-auto px-0">{nodeText("partitionsCount",{count:disks.length})}</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40"/><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(64rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border bg-background p-6 shadow-lg">
+  return <Dialog.Root><Dialog.Trigger asChild><Button variant="link" size="sm" className="h-auto px-0">{nodeText("partitionsCount",{count:disks.length})}</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40"/><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(64rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-lg border bg-background p-6 shadow-lg">
     <Dialog.Title className="text-lg font-semibold">{nodeText("partitions")} · {node.info.hostname || node.instance_id}</Dialog.Title>
     <Dialog.Description className="mb-4 mt-2 text-sm text-muted-foreground">{nodeText("samplingHelp")}</Dialog.Description>
-    <AutoTable data={disks} rowKey={disk=>disk.mount} pageSize={10} columns={[
+    <div className="dialog-body"><AutoTable data={disks} rowKey={disk=>disk.mount} pageSize={10} columns={[
       {field:"mount",name:nodeText("mount"),render:(_value,disk:Partition)=><div>{disk.mount}{disk.data_disk&&<p className="text-xs text-muted-foreground">{nodeText("dataPartition")}</p>}</div>},
       {field:"name",name:nodeText("volume")},{field:"filesystem",name:nodeText("filesystem")},
       {field:"kind",name:nodeText("diskKind"),render:value=>nodeText(value==="ssd"?"diskSsd":value==="hdd"?"diskHdd":"diskUnknown")},
       ...(["total","used","available"] as const).map(field=>({field,name:nodeText(field),render:(value:unknown)=>capacity(value as number)})),
       {field:"usage_percent",name:nodeText("usage"),render:value=>value==null?"—":`${Number(value).toFixed(1)}%`},
-    ]}/>
-    <div className="mt-4 flex justify-end"><Dialog.Close asChild><Button variant="outline">{t("common.close")}</Button></Dialog.Close></div>
+    ]}/></div>
+    <div className="dialog-footer mt-4"><Dialog.Close asChild><Button variant="outline">{t("common.close")}</Button></Dialog.Close></div>
   </Dialog.Content></Dialog.Portal></Dialog.Root>;
 }
 const permissions=new Set<string>();

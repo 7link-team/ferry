@@ -367,7 +367,7 @@ export function WorkflowIntegrationParameters({
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border bg-background p-6 shadow-xl">
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-xl border bg-background p-6 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <Dialog.Title className="text-lg font-semibold">
                 {spec.ui.application_name} · {t("integration.createCredential")}
@@ -388,7 +388,7 @@ export function WorkflowIntegrationParameters({
               {t("integration.credentialHelp")}
             </Dialog.Description>
             <AutoForm
-              className="space-y-4"
+              className="dialog-form"
               onSubmit={async (event) => {
                 event.preventDefault();
                 setBusy(true);
@@ -427,6 +427,7 @@ export function WorkflowIntegrationParameters({
                 }
               }}
             >
+              <div className="dialog-body space-y-4">
               <label className="block space-y-2 text-sm">
                 <span><FieldCaption label={<>{t("integration.name")}</>} /></span>
                 <Input
@@ -456,7 +457,8 @@ export function WorkflowIntegrationParameters({
                   {error}
                 </p>
               )}
-              <div className="flex justify-end gap-2 border-t pt-4">
+              </div>
+              <div className="dialog-footer mt-4">
                 <Button
                   type="button"
                   variant="outline"

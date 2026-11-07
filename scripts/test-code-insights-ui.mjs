@@ -286,6 +286,8 @@ try {
     },
   ];
   await page.goto(origin + "/zh-CN/workspaces/2/code-insights/31?tab=authors");
+  assert.equal(await page.locator("input,textarea,select").count(),0);
+  await page.getByRole("link", {name: "\u7f16\u8f91", exact:true}).click();
   await page.getByLabel("统一昵称 1", { exact: true }).fill("Alice combined");
   assert.equal(await page.locator("textarea").count(), 0);
   const save = page.getByRole("button", { name: "保存", exact: true });
@@ -299,6 +301,7 @@ try {
   assert(page.url().endsWith("?tab=authors"), "Save stays on mapping tab");
   assert.equal(writes.at(-1).data.aliases[0].contributor_id, "123");
   assert.equal(writes.at(-1).data.aliases[0].nickname, "Alice combined");
+  await page.getByRole("link", {name:"\u7f16\u8f91",exact:true}).click();
   await page.getByRole("button", { name: "在第 1 行下方添加映射", exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('button[type="submit"]')?.disabled === false,

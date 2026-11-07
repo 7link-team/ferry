@@ -374,13 +374,13 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
     {pendingDelete && <DeleteConfirmDialog target={join(path, pendingDelete.name)} onClose={() => setPendingDelete(undefined)} onConfirm={() => remove(pendingDelete)} />}
     <Dialog.Root open={!!creating} onOpenChange={open => { if (!open && !busy) { setCreating(undefined); setError(""); } }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
+        <Dialog.Content className="dialog-shell fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-lg">
           <Dialog.Title className="text-base font-semibold">{hostRepositoryText(creating === "directory" ? "host-files.043" : "host-files.044")}</Dialog.Title>
           <Dialog.Description className="mt-1 truncate text-sm text-muted-foreground" title={path}>{hostRepositoryText("host-files.022")}{" "}{path}</Dialog.Description>
-          <AutoForm className="mt-4 space-y-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
-            <AutoField label={hostRepositoryText("host-files.023")} required><Input autoFocus name="name" required aria-label={hostRepositoryText("host-files.023")} value={newName} onChange={event => setNewName(event.target.value)} /></AutoField>
+          <AutoForm className="dialog-form mt-4" onSubmit={event => { event.preventDefault(); void createEntry(); }}>
+            <div className="dialog-body space-y-4"><AutoField label={hostRepositoryText("host-files.023")} required><Input autoFocus name="name" required aria-label={hostRepositoryText("host-files.023")} value={newName} onChange={event => setNewName(event.target.value)} /></AutoField>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!busy} onClick={() => setCreating(undefined)}>{hostRepositoryText("host-files.024")}</Button><Button type="submit" disabled={!!busy || !newName.trim()}>{busy ? hostRepositoryText("host-files.025") : hostRepositoryText("host-files.026")}</Button></div>
+            </div><div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={!!busy} onClick={() => setCreating(undefined)}>{hostRepositoryText("host-files.024")}</Button><Button type="submit" disabled={!!busy || !newName.trim()}>{busy ? hostRepositoryText("host-files.025") : hostRepositoryText("host-files.026")}</Button></div>
           </AutoForm>
         </Dialog.Content>
       </Dialog.Portal>
@@ -519,7 +519,7 @@ export function HostFiles({ workspace, hostId, canTerminal = false, initialPath:
     </aside>}
     <Dialog.Root open={!!preview} onOpenChange={open => { if (!open) closePreview(); }}>
       <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content className="fixed inset-4 z-50 flex flex-col border bg-background shadow-xl sm:inset-8">
+        <Dialog.Content className="fixed inset-4 z-50 flex min-h-0 flex-col overflow-hidden border bg-background shadow-xl sm:inset-8">
           <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
             <Dialog.Title className="min-w-0 flex-1 truncate text-sm font-semibold" title={preview?.path}>{preview?.name}</Dialog.Title>
             <Dialog.Description className="sr-only">{hostRepositoryText("host-files.060")}</Dialog.Description>

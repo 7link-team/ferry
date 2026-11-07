@@ -34,9 +34,11 @@ try {
  // Create classification resources through the same shared forms users use.
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines`);
  await page.getByRole('button',{name:'新建分组'}).click();
- const groupDialog=page.getByRole('dialog');await groupDialog.getByLabel('名称',{exact:true}).fill('Browser group');
- await groupDialog.getByRole('button',{name:'保存',exact:true}).click();
- await groupDialog.waitFor({state:'hidden'});
+ await page.waitForURL('**/pipeline-groups/new');
+ assert.equal(await page.getByRole('dialog').count(),0);
+ await page.getByLabel('名称',{exact:true}).fill('Browser group');
+ await page.getByRole('button',{name:'创建',exact:true}).click();
+ await page.waitForURL('**/pipelines');
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/new`);
  await page.getByLabel('流水线名称',{exact:true}).fill('Canvas pipeline');
  await page.getByRole('button',{name:'流水线设置'}).click();

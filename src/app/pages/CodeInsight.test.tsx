@@ -68,6 +68,39 @@ const closeRepositories = async () => act(async () => {
   document.querySelector('[role="menu"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 });
 
+it.each(["settings", "authors"])("keeps the %s detail read-only even for editors and links to a dedicated edit route", async tab => {
+  const origin = `/zh-CN/workspaces/ws/code-insights/31?tab=${tab}&at=30`;
+  history.replaceState({}, "", origin);
+  await act(async () => root.render(<CodeInsightDetail workspace="ws" insightId="31" permissions={new Set(["code-insights.read", "code-insights.update"])} />));
+  expect(host.querySelector('input,textarea,select,[role="combobox"]')).toBeNull();
+  expect(host.querySelector('button[type="submit"]')).toBeNull();
+  const edit = [...host.querySelectorAll<HTMLAnchorElement>('a')].find(link => link.textContent === "编辑")!;
+  expect(edit).toBeDefined();
+  const target = new URL(edit.href);
+  expect(target.pathname).toBe("/zh-CN/workspaces/ws/code-insights/31/edit");
+  expect(target.searchParams.get("tab")).toBe(tab);
+  expect(target.searchParams.get("return_to")).toBe(origin);
+  if (tab === "settings") expect(host.textContent).toContain(settings.schedule);
+  expect(requests.some(request => request.method !== "GET")).toBe(false);
+});
+
+it.each(["settings", "authors"])("does not offer readers an edit action on %s", async tab => {
+  history.replaceState({}, "", `/zh-CN/workspaces/ws/code-insights/31?tab=${tab}`);
+  await act(async () => root.render(<CodeInsightDetail workspace="ws" insightId="31" permissions={new Set(["code-insights.read"])} />));
+  expect(host.querySelector('input,textarea,select,button[type="submit"]')).toBeNull();
+  expect([...host.querySelectorAll('a')].some(link => link.textContent === "编辑")).toBe(false);
+});
+
+it.each(["settings", "authors"])("renders the %s standalone editor and preserves the safe cancel target", async tab => {
+  const origin = `/zh-CN/workspaces/ws/code-insights/31?tab=${tab}&at=30`;
+  history.replaceState({}, "", `/zh-CN/workspaces/ws/code-insights/31/edit?tab=${tab}&return_to=${encodeURIComponent(origin)}`);
+  await act(async () => root.render(<CodeInsightDetail workspace="ws" insightId="31" permissions={new Set(["code-insights.read", "code-insights.update"])} />));
+  expect(host.querySelector('input')).not.toBeNull();
+  expect(host.querySelector('button[type="submit"]')).not.toBeNull();
+  expect(host.querySelector('[role="tablist"]')).toBeNull();
+  expect([...host.querySelectorAll<HTMLAnchorElement>('a')].find(link => link.textContent === "取消")?.getAttribute("href")).toBe(origin);
+});
+
 it("scopes all reports and six period rankings to an insight without the legacy connection query", async () => {
   for (const [kind] of analysisReports) {
     const config = analysisReport("ws", "31", kind, "insight");

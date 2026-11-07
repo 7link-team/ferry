@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real HTTP and runner scheduled-task acceptance; optional empty FERRY_TEST_DATABASE_URL."""
 import http.cookiejar
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -62,7 +63,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
     def launch():
         proc = subprocess.Popen([binary,"--desktop-control"], env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
         for _ in range(150):
-            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text())
+            if proc.poll() is not None: raise AssertionError((data / 'server.log').read_text(encoding='utf8',errors='replace'))
             try:
                 if request(anonymous, '/status')['ok']: return proc
             except OSError: pass
@@ -108,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         check(rule(rid)['has_webhook'] and 'fixture-private-token' not in json.dumps(rule(rid)),'webhook address never returned')
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             import sqlite3
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 stored=conn.execute('SELECT webhook FROM alert_rules WHERE id=?',(rid,)).fetchone()[0]
                 check(stored.startswith('v1.') and 'fixture-private-token' not in stored,'webhook stored as authenticated ciphertext')
         event=eventually(lambda:next((e for e in events(rid) if 'HTTP 204' in e['trigger_delivery']),None))
@@ -116,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(outsider,f'/workspaces/{workspace_other}/alert-events/'+event['id'],expected=404)
         time.sleep(4.5)
         check(len(events(rid))==1 and len(notifications)==1,'continuous abnormality produces one event and one notification')
-        runner=subprocess.Popen(['target/debug/ferry-runner','--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
+        runner=subprocess.Popen([os.environ.get('RUNNER_BINARY','target/debug/ferry-runner'),'--server',base[:-4],'--token',token,'--state-dir',str(data/'runner')],stdout=log,stderr=log)
         event=eventually(lambda:next((e for e in events(rid) if e['state']=='recovered' and 'HTTP 204' in e['recovery_delivery']),None))
         check(event['recovered_at']>=event['triggered_at'] and len(notifications)==2,'real runner connection recovers event and sends one recovery notification')
         check([n[1]['event'] for n in notifications]==['triggered','recovered'],'webhook payload distinguishes trigger and recovery')
@@ -138,7 +139,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         eventually(lambda:any(e['state']=='firing' for e in events(execution)))
         check(True,'real scheduled command failure triggers execution alert')
         old=request(owner,root+'/cron-jobs/'+job)
-        request(owner,root+'/cron-jobs/'+job,dict(old,command='true'),'PATCH')
+        request(owner,root+'/cron-jobs/'+job,dict(old,command='exit 0'),'PATCH')
         request(owner,root+'/cron-jobs/'+job+'/runs',{},expected=202)
         eventually(lambda:any(e['state']=='recovered' for e in events(execution)))
         check(True,'subsequent actual success recovers execution alert')
@@ -169,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         request(owner,root+'/alert-rules/'+revoked,method='DELETE',expected=204)
         if not os.environ.get('FERRY_TEST_DATABASE_URL'):
             proc.stdin.close();proc.wait(timeout=30)
-            with sqlite3.connect(data/'ferry.sqlite') as conn:
+            with closing(sqlite3.connect(data/'ferry.sqlite')) as conn, conn:
                 old=int(time.time()*1000)-3*86400000
                 conn.execute('UPDATE alert_events SET recovered_at=?',(old,))
                 retained=conn.execute('SELECT id FROM alert_events ORDER BY id LIMIT 1').fetchone()[0]
@@ -194,11 +195,13 @@ with tempfile.TemporaryDirectory(prefix='alert-test-') as directory:
         check(len(events(drain_rule))==1,'graceful webhook completion persists without duplicate event after restart')
         print(f'{checks} checks passed',flush=True)
     except Exception:
-        log.flush();print((data/'server.log').read_text()[-5000:],flush=True)
+        log.flush();print((data/'server.log').read_text(encoding='utf8',errors='replace')[-5000:],flush=True)
         raise
     finally:
         if runner:runner.terminate();runner.wait(timeout=15)
-        if proc.poll() is None:proc.terminate();proc.wait(timeout=30)
+        if proc.poll() is None:
+            if proc.stdin and not proc.stdin.closed: proc.stdin.close()
+            proc.wait(timeout=30)
         log.close()
         slow_release.set()
         receiver.shutdown();receiver.server_close()

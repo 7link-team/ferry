@@ -6,18 +6,20 @@ import { api,errorText } from "../../shared/api/api";
 import { base } from "../../shared/api/resource";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
+import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { ConnectionInsights } from "../pages/CodeInsight";
 import { RepositoryEventHistory,RepositoryMonitor } from "../pages/RepositoryMonitor";
 import { formConfigs } from "../resources";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
-import { useQueryValue } from "../router";
+import { useQueryValue,useRoute } from "../router";
 
 export function RepositoryConnectionDetail({ workspace, connectionId, permissions, form }: {
   workspace: string; connectionId: string; permissions: Set<string>;
   form: ReturnType<typeof formConfigs>[string];
 }) {
   useCommonTranslation();
+  const route = useRoute();
   const [tab, setTab] = useQueryValue("tab", "info");
   const [connection, setConnection] = useState<{ provider?: string }>({});
   const [connectionError, setConnectionError] = useState("");
@@ -46,6 +48,7 @@ export function RepositoryConnectionDetail({ workspace, connectionId, permission
   }), [workspace, connectionId]);
   const activeTab = tab === "repositories" || tab === "monitoring" || tab === "events" || tab === "insights" ? tab : tab === "analysis" ? "insights" : "info";
   if (connectionError) return <p role="alert" className="text-destructive">{connectionError}</p>;
+  if (route.mode === "edit") return connection.provider ? <RepositoryMonitor workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /> : <LoadingSkeleton />;
   return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
     <Tabs.List aria-label={commonText("shell.repositoryDetail")} className="flex flex-wrap gap-1 border-b">
       {([["info", commonText("common.basic"), Info], ["repositories", commonText("shell.repositoryList"), FolderTree], ["monitoring", commonText("shell.monitorNotifications"), Bell], ["events", commonText("shell.eventRecords"), History], ["insights", commonText("nav.insights"), FolderTree]] as const).map(([value, label, Icon]) =>

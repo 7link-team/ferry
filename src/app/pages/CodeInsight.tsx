@@ -9,7 +9,7 @@ import { insightText } from "../../shared/i18n/i18n";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
-import { href, useQueryValue } from "../router";
+import { href, useQueryValue, useRoute } from "../router";
 import { RepositoryAnalysis } from "./RepositoryAnalysis";
 export * from "../../features/code-insights/config";
 
@@ -23,6 +23,7 @@ export function CodeInsightDetail({
   permissions: Set<string>;
 }) {
   useTranslation("insight-domain");
+  const route = useRoute();
   const [tab, setTab] = useQueryValue("tab", "dashboard");
   const form = useMemo(() => codeInsightForm(workspace), [workspace]);
   const [published, setPublished] = useState(0);
@@ -51,11 +52,13 @@ export function CodeInsightDetail({
     }),
     [form, permissions],
   );
+  const editHref = href({ ...route, mode: "edit" }, { tab, return_to: location.pathname + location.search });
+  if (route.mode === "edit") return <div className="crud-config-page flex min-h-0 min-w-0 flex-1 flex-col"><ResourceForm config={tab === "authors" ? aliases : form} workspace={workspace} permissions={permissions} /></div>;
   return (
     <Tabs
       value={tab === "settings" || tab === "authors" ? tab : "dashboard"}
       onValueChange={setTab}
-      className="flex min-h-0 min-w-0 flex-1 flex-col gap-4"
+      className="crud-config-page flex min-h-0 min-w-0 flex-1 flex-col gap-4"
     >
       <div className="min-w-0 overflow-x-auto border-b pb-2">
         <TabsList aria-label={insightText("代码洞察详情")}>
@@ -84,6 +87,7 @@ export function CodeInsightDetail({
       <TabsContent value="settings" className="min-h-0 flex-1 overflow-auto">
         <ResourceForm
           config={form}
+          editHref={editHref}
           workspace={workspace}
           permissions={permissions}
         />
@@ -93,9 +97,7 @@ export function CodeInsightDetail({
           config={aliases}
           workspace={workspace}
           permissions={permissions}
-          editInPlace
-          showViewNavigation={false}
-          onCancel={() => setTab("dashboard")}
+          editHref={editHref}
         />
       </TabsContent>
     </Tabs>

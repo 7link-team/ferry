@@ -67,7 +67,7 @@ export function YamlEditor({ value, originalValue, readOnly, fillHeight, onChang
     {!expanded && <>{toolbar}{formatError && <p role="alert" className="text-sm text-destructive">{formatError}</p>}{editor}</>}
     <Dialog.Root open={expanded} onOpenChange={open => { if (!open) close(); }}><Dialog.Portal>
       <Dialog.Overlay className="fixed inset-0 z-[100] bg-background" />
-      <Dialog.Content aria-describedby={undefined} className="fixed inset-0 z-[101] flex h-dvh w-screen flex-col gap-3 bg-background p-3 sm:p-4">
+      <Dialog.Content aria-describedby={undefined} className="fixed inset-0 z-[101] flex h-dvh w-screen flex-col gap-3 overflow-hidden bg-background p-3 sm:p-4">
         <Dialog.Title className="sr-only">{executionText("editor.fullscreen")}</Dialog.Title>
         {toolbar}{formatError && <p role="alert" className="text-sm text-destructive">{formatError}</p>}{editor}
       </Dialog.Content>

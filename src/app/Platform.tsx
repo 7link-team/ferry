@@ -82,14 +82,14 @@ const forms: Record<string, FormConfig<Row>> = {
     { key: "slug", label: "标识", labelKey: "common-domain:auth.slug", type: "text", required: true, immutable: true, help: "2–40 位小写字母、数字、中划线；创建后不可修改。", helpKey: "resource-domain:platform.slugHelp" },
   ] }, {title:"空间信息",titleKey:"resource-domain:platform.workspaceInfo",fields:[{key:"workspace_overview",label:"空间信息",labelKey:"resource-domain:platform.workspaceInfo",type:"custom",span:2,when:d=>!!d.id,render:({draft})=><WorkspaceOverview draft={draft}/>}]}] },
   settings: { resource: "settings", endpoint: "/platform/settings", heading: () => commonText("resource-domain:platform.settings"), blank: {}, sections: [{title:"邮箱配置",titleKey:"resource-domain:platform.mailSettings",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"connection",tabKey:"resource-domain:platform.mailConnection",fields:[
-    {key:"mail_enabled",label:"启用邮箱",labelKey:"resource-domain:platform.mailEnabled",type:"switch",span:2,helpKey:"resource-domain:platform.mailHelp"},
+    {key:"mail_enabled",label:"启用邮箱",labelKey:"resource-domain:platform.mailEnabled",type:"switch",helpKey:"resource-domain:platform.mailHelp"},
+    {key:"mail_security",label:"传输加密",labelKey:"resource-domain:platform.mailSecurity",type:"select",options:[{value:"starttls",label:"STARTTLS (587)"},{value:"tls",label:"TLS (465)"},{value:"none",label:"不加密",labelKey:"resource-domain:platform.mailPlain"}]},
     {key:"mail_host",label:"SMTP 服务器",labelKey:"resource-domain:platform.mailHost",type:"text",placeholder:"smtp.example.com"},
     {key:"mail_port",label:"SMTP 端口",labelKey:"resource-domain:platform.mailPort",type:"number",min:1,max:65535},
-    {key:"mail_security",label:"传输加密",labelKey:"resource-domain:platform.mailSecurity",type:"select",options:[{value:"starttls",label:"STARTTLS (587)"},{value:"tls",label:"TLS (465)"},{value:"none",label:"不加密",labelKey:"resource-domain:platform.mailPlain"}]},
-    {key:"mail_from",label:"发件人邮箱",labelKey:"resource-domain:platform.mailFrom",type:"text",placeholder:"noreply@example.com"},
     {key:"mail_username",label:"SMTP 用户名",labelKey:"resource-domain:platform.mailUsername",type:"text"},
     {key:"mail_password",label:"SMTP 密码 / 授权码",labelKey:"resource-domain:platform.mailPassword",type:"secret",stored:"mail_has_password",replaceOnEdit:true,hideSecretStatus:true},
-    {key:"mail_verified_at",label:"发送验证时间",labelKey:"resource-domain:platform.mailVerified",type:"custom",span:2,render:({draft})=><AutoField label={commonText("resource-domain:platform.mailVerified")}><p role="status" className="text-sm text-muted-foreground">{draft.mail_verified_at?new Date(Number(draft.mail_verified_at)).toLocaleString():commonText("resource-domain:platform.mailUnverified")}</p></AutoField>},
+    {key:"mail_from",label:"发件人邮箱",labelKey:"resource-domain:platform.mailFrom",type:"text",placeholder:"noreply@example.com"},
+    {key:"mail_verified_at",label:"发送验证时间",labelKey:"resource-domain:platform.mailVerified",type:"custom",render:({draft})=><AutoField label={commonText("resource-domain:platform.mailVerified")}><p role="status" className="text-sm text-muted-foreground">{draft.mail_verified_at?new Date(Number(draft.mail_verified_at)).toLocaleString():commonText("resource-domain:platform.mailUnverified")}</p></AutoField>},
     {key:"mail_test",label:"发送验证",labelKey:"resource-domain:platform.mailTest",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTest draft={draft} readOnly={readOnly} onVerified={onPatch}/>},
   ]}, {title:"邮件模板",titleKey:"resource-domain:platform.mailTemplates",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"templates",tabKey:"resource-domain:platform.mailTemplates",fields:[
     {key:"mail_templates",label:"邮件模板",labelKey:"resource-domain:platform.mailTemplates",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTemplates draft={draft} readOnly={readOnly} onPatch={onPatch}/>},
@@ -99,8 +99,8 @@ const forms: Record<string, FormConfig<Row>> = {
   ]}, {title:"页脚设置",titleKey:"resource-domain:platform.footerSettings",group:"页脚设置",groupKey:"resource-domain:platform.footerSettings",fields:[
     {key:"footer_html",label:"页脚内容",labelKey:"resource-domain:platform.footerContent",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformFooterEditor value={String(draft.footer_html??"")} readOnly={readOnly} onChange={value=>onPatch({footer_html:value})}/>},
   ]}, {title:"页面脚本",titleKey:"resource-domain:platform.scripts",group:"页面脚本",groupKey:"resource-domain:platform.scripts",fields:[
-    {key:"analytics_enabled",label:"启用页面脚本",labelKey:"resource-domain:platform.scriptsEnabled",type:"switch",span:2,helpKey:"resource-domain:platform.scriptsHelp"},
-    {key:"analytics_ga_id",label:"Google Analytics 测量 ID（可选）",labelKey:"resource-domain:platform.gaId",type:"text",placeholder:"G-XXXXXXXXXX",span:2,helpKey:"resource-domain:platform.gaHelp"},
+    {key:"analytics_enabled",label:"启用页面脚本",labelKey:"resource-domain:platform.scriptsEnabled",type:"switch",helpKey:"resource-domain:platform.scriptsHelp"},
+    {key:"analytics_ga_id",label:"Google Analytics 测量 ID（可选）",labelKey:"resource-domain:platform.gaId",type:"text",placeholder:"G-XXXXXXXXXX",helpKey:"resource-domain:platform.gaHelp"},
     {key:"analytics_js",label:"自定义 JavaScript",labelKey:"resource-domain:platform.customJs",type:"textarea",span:2,helpKey:"resource-domain:platform.jsHelp"},
     {key:"analytics_origins",label:"允许访问的域名",labelKey:"resource-domain:platform.scriptOrigins",type:"textarea",span:2,placeholder:"https://analytics.example.com",helpKey:"resource-domain:platform.originsHelp"},
   ]}, { title: "HostAgent", titleKey: "resource-domain:runner.settings", group: "HostAgent", groupKey: "resource-domain:runner.settings", fields: [

@@ -135,7 +135,7 @@ pub fn preview(provider: &str, notice: &Notice<'_>) -> Result<Value, Message> {
                     Some(Robot::Feishu) => accent.feishu(),
                     Some(Robot::WeCom) => match accent {
                         Accent::Green => "green",
-                        Accent::Red => "orange",
+                        Accent::Blue | Accent::Red => "orange",
                         _ => "gray",
                     },
                     _ => "inherit",
@@ -274,8 +274,8 @@ fn styled_field(robot: Robot, notice: &Notice<'_>, name: &str, value: &str) -> S
             "<font color=\"{}\">{text}</font>",
             match accent {
                 Accent::Green => "info",
-                Accent::Red => "warning",
-                // WeCom only supports info/comment/warning, not arbitrary blue.
+                Accent::Blue | Accent::Red => "warning",
+                // Use native orange for emphasis: comment gray is too faint.
                 _ => "comment",
             }
         ),
@@ -558,7 +558,7 @@ mod tests {
         );
         assert_eq!(
             preview("WeCom", &notice).unwrap()["fields"][0]["accent"],
-            "gray"
+            "orange"
         );
     }
 
@@ -596,7 +596,7 @@ mod tests {
         assert!(!elements.contains("fix: <unsafe>"));
         let wecom = body(Robot::WeCom, &url, &notice).unwrap();
         let content = wecom["markdown"]["content"].as_str().unwrap();
-        assert!(content.contains("<font color=\"comment\">Commit message：fix:"));
+        assert!(content.contains("<font color=\"warning\">Commit message：fix:"));
         assert!(content.contains("<font color=\"info\">Added：12 lines</font>"));
         assert!(content.contains("<font color=\"warning\">Deleted：3 lines</font>"));
 

@@ -192,7 +192,7 @@ it("keeps connection details in basic information and paged repository tabs", as
   expect(host.textContent).toContain("Team Codeup");
 });
 
-it("opens monitoring settings with saved values and saves without navigating away", async () => {
+it("opens monitoring settings in a dedicated edit route and returns after saving", async () => {
   required = false;
   permissions = ["repositories.read", "repositories.update"];
   const original = vi.mocked(fetch).getMockImplementation()!;
@@ -205,12 +205,15 @@ it("opens monitoring settings with saved values and saves without navigating awa
   await act(async () => root.render(<App />));
   expect(host.querySelector('[aria-label="仓库事件记录"]')).toBeNull();
   expect(host.textContent).toContain("已设置");
-  await act(async () => host.querySelector<HTMLButtonElement>('section[aria-label="订阅配置"] button[aria-label="修改订阅配置"]')!.click());
-  const dialog = document.querySelector('[role="dialog"]')!;
+  const edit = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(link => link.pathname.endsWith("/42/edit"))!;
+  expect(edit).toBeDefined();
+  await act(async () => { history.pushState({}, "", edit.href); window.dispatchEvent(new PopStateEvent("popstate")); });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  const dialog = host.querySelector("form")!;
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("org/repo");
   expect(dialog.textContent).not.toContain("新增仓库");
   expect(dialog.textContent).not.toContain("删除仓库");
-  await act(async () => dialog.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   const request = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/workspaces/2/code-connection-monitors/42" && init?.method === "PATCH");
   expect(JSON.parse(request?.[1]?.body as string)).toMatchObject({ enabled: true, all_repositories: false, repositories: "org/repo", events: ["push"], version: 3 });
   expect(location.pathname).toBe("/zh-CN/workspaces/2/code-connections/42");
@@ -234,8 +237,9 @@ it("edits Git monitoring through a named Runner selector and polling-only events
   expect(host.textContent).toContain("Build Runner");
   expect(host.textContent).toContain("等待检查");
   expect(host.textContent).not.toContain("SHA256");
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="修改订阅配置"]')!.click());
-  const dialog = document.querySelector('[role="dialog"]')!;
+  await act(async () => navigate({ mode: "edit" }, { tab: "monitoring", return_to: location.pathname + location.search }));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  const dialog = host.querySelector("form")!;
   expect(dialog.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("https://git.example.invalid/org/repo.git");
   expect(dialog.querySelector('[role="combobox"]')?.textContent).toContain("Build Runner");
   expect(dialog.textContent).not.toContain("SSH host");
@@ -247,7 +251,7 @@ it("edits Git monitoring through a named Runner selector and polling-only events
   expect(dialog.textContent).toContain("更新标签");
   expect(dialog.querySelectorAll('[role="checkbox"]')).toHaveLength(7); // Six events and the enable switch.
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/nodes?")).map(([url]) => new URL(String(url), location.origin).searchParams.get("page"))).toEqual(["1", "2"]);
-  await act(async () => dialog.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   const request = vi.mocked(fetch).mock.calls.find(([url, init]) => url === "/api/workspaces/2/code-connection-monitors/42" && init?.method === "PATCH");
   expect(JSON.parse(request?.[1]?.body as string)).toMatchObject({ runner_id: "7", mode: "poll", all_repositories: false, poll_interval_minutes: 1, events: ["push", "tag.updated"], version: 4 });
 });
@@ -261,7 +265,7 @@ it.each([["hosts.read"], ["hosts.terminal"]])("keeps Git monitoring read-only wi
   await act(async () => root.render(<RepositoryMonitor workspace="2" connectionId="42" provider="git" permissions={new Set(["repositories.read", "repositories.update", permission])} />));
   expect(host.textContent).toContain("Build Runner");
   expect(host.textContent).toContain("需要主机读取及终端执行权限");
-  expect(host.querySelector('button[aria-label="修改订阅配置"]')).toBeNull();
+  expect(host.querySelector('a[href*="/42/edit"]')).toBeNull();
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/nodes?"))).toBe(false);
 });
 
@@ -282,11 +286,12 @@ it.each([false, true])("blocks Git monitoring without a selected Runner when opt
     return original(url, options);
   }));
   await act(async () => root.render(<RepositoryMonitor workspace="2" connectionId="42" provider="git" permissions={new Set(["repositories.read", "repositories.update", "hosts.read", "hosts.terminal"])} />));
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="修改订阅配置"]')!.click());
-  const dialog = document.querySelector('[role="dialog"]')!;
+  await act(async () => navigate({ mode: "edit" }, { tab: "monitoring", return_to: location.pathname + location.search }));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  const dialog = host.querySelector("form")!;
   expect(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
   if (failed) expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("Runner access denied");
-  await act(async () => dialog.querySelector<HTMLFormElement>("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(false);
 });
 
@@ -421,8 +426,9 @@ it("moves pipeline group filtering into a left directory", async () => {
   expect(location.search).not.toContain("at=");
   expect(host.querySelector('aside[aria-label="流水线分组"] [aria-current="page"]')?.textContent).toBe("未分组");
   await act(async () => (directory.querySelector<HTMLButtonElement>('button[aria-label="新建分组"]')!).click());
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("新建分组");
-  expect(location.pathname).toBe("/zh-CN/workspaces/2/pipelines");
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/pipeline-groups/new");
+  expect(host.querySelector("form")).not.toBeNull();
 });
 it("reorders pipeline groups from the directory", async () => {
   required = false;
@@ -454,13 +460,14 @@ it("shows host groups inside the host list without a separate menu page", async 
   expect(directory.textContent).toContain("全部");
   expect(directory.textContent).toContain("未分组");
   await act(async () => (directory.querySelector<HTMLButtonElement>('button[aria-label="新建分组"]')!).click());
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("新建分组");
-  expect(location.pathname).toBe("/zh-CN/workspaces/2/nodes");
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(location.pathname).toBe("/zh-CN/workspaces/2/node-groups/new");
+  expect(host.querySelector("form")).not.toBeNull();
 });
 it("redirects old group pages to the corresponding directory", async () => {
   required = false;
   permissions = ["hosts.read", "host-groups.read"];
-  history.replaceState({}, "", "/zh-CN/workspaces/2/node-groups/42/edit");
+  history.replaceState({}, "", "/zh-CN/workspaces/2/node-groups/42");
   await act(async () => root.render(<App />));
   expect(location.pathname).toBe("/zh-CN/workspaces/2/nodes");
   expect(location.search).toContain("group_id=42");

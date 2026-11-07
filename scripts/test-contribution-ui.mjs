@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { createServer } from 'vite';
+import { preview } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 async function chooseNative(control, value) {
@@ -27,8 +27,7 @@ async function chooseOption(page, label, option) {
 
 const output = resolve('data/maintenance/contribution-ui');
 await mkdir(output, { recursive: true });
-const server = process.env.CONTRIBUTION_UI_URL ? null : await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, open: false } });
-if (server) await server.listen();
+const server = process.env.CONTRIBUTION_UI_URL ? null : await preview({ preview: { host: '127.0.0.1', port: 0 } });
 const origin = process.env.CONTRIBUTION_UI_URL || `http://127.0.0.1:${server.httpServer.address().port}`;
 let browser;
 const errors = [], consoleErrors = [], unexpected = [], requests = [], checks = [];
@@ -199,16 +198,18 @@ try {
   await page.getByLabel('初始化最近天数',{exact:true}).fill('120');
   await page.getByLabel('分支头核对间隔（分钟）',{exact:true}).fill('60');
   await page.getByRole('button',{name:'保存',exact:true}).click();
-  await page.waitForURL(url=>url.pathname==='/zh-CN/workspaces/2/code-insights');
+  await page.waitForURL(url=>url.pathname==='/zh-CN/workspaces/2/code-insights/31' && url.searchParams.get('tab')==='settings');
   assert.equal(config.initial_days,120);assert.equal(config.reconcile_minutes,60);
   assert.equal(config.update_mode,'event');
   assert.equal(config.repositories.length,2);assert.equal(config.repositories[1].pipeline_id,'');
   assert.equal(config.aliases[0].nickname,'Alice');assert.equal(config.aliases[0].contributor_id,'100');
   await page.goto(insightPath+'?tab=authors');
+  await page.getByRole('link',{name:'编辑',exact:true}).click();
   await page.getByLabel('统一昵称 1', { exact: true }).fill('');
   assert(await page.getByRole('button', { name: '保存', exact: true }).isEnabled());
   await Promise.all([page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/code-insights/31')), page.getByRole('button', { name: '保存', exact: true }).click()]);
   assert.equal(config.aliases[0].nickname,'');assert.equal(config.aliases[0].contributor_id,'100');
+  await page.getByRole('link',{name:'编辑',exact:true}).click();
   await page.getByLabel('统一昵称 1', { exact: true }).fill('小艾');
   await Promise.all([page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/code-insights/31')), page.getByRole('button', { name: '保存', exact: true }).click()]);
   assert.equal(config.aliases[0].nickname,'小艾');assert.equal(config.aliases[0].contributor_id,'100');
@@ -238,6 +239,7 @@ try {
   assert.equal(created.update_mode,'scheduled');assert.equal(created.schedule,'0 */6 * * *');assert.equal(created.timezone,'Asia/Singapore');
   assert.deepEqual(created.aliases,[]);
   await page.goto(origin+'/zh-CN/workspaces/2/code-insights/32?tab=authors');
+  await page.getByRole('link',{name:'编辑',exact:true}).click();
   await page.getByRole('button',{name:'添加作者映射',exact:true}).click();
   await page.getByLabel('提交邮箱 1',{exact:true}).fill('alice@example.invalid');
   await page.getByLabel('统一昵称 1',{exact:true}).fill('Separate Alice');

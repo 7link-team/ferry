@@ -10,10 +10,10 @@ type FileRow={id:string;workspace_id:string;workspace:string;name:string;sha256:
 const text=(key:string)=>t(`resource-domain:monitor.${key}`);
 function FileActions({row}:{row:FileRow}) {
   return <div className="flex flex-wrap gap-3">
-    {row.kind==="asset"&&row.workflow_id&&<Dialog.Root><Dialog.Trigger asChild><Button variant="link" size="sm" className="h-auto px-0">{text("previewDownload")}</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40"/><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-lg border bg-background p-6 shadow-lg">
+    {row.kind==="asset"&&row.workflow_id&&<Dialog.Root><Dialog.Trigger asChild><Button variant="link" size="sm" className="h-auto px-0">{text("previewDownload")}</Button></Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-black/40"/><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[85dvh] w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-lg border bg-background p-6 shadow-lg">
       <Dialog.Title className="font-semibold">{text("previewDownload")}</Dialog.Title><Dialog.Description className="my-3 text-sm text-muted-foreground">{text("catalogHelp")}</Dialog.Description>
-      <WorkflowAssetContext.Provider value={{workspace:row.workspace_id,workflow:row.workflow_id}}><WorkflowAssetPreview file={{asset:`sha256:${row.sha256}`,name:row.name,mime:row.mime,size:row.size}}/></WorkflowAssetContext.Provider>
-      <Dialog.Close asChild><Button className="mt-4" variant="outline">{t("common.close")}</Button></Dialog.Close>
+      <div className="dialog-body"><WorkflowAssetContext.Provider value={{workspace:row.workspace_id,workflow:row.workflow_id}}><WorkflowAssetPreview file={{asset:`sha256:${row.sha256}`,name:row.name,mime:row.mime,size:row.size}}/></WorkflowAssetContext.Provider></div>
+      <div className="dialog-footer mt-4"><Dialog.Close asChild><Button variant="outline">{t("common.close")}</Button></Dialog.Close></div>
     </Dialog.Content></Dialog.Portal></Dialog.Root>}
     {row.kind==="artifact"&&<a className="text-sm text-primary underline" href={`/api/workspaces/${row.workspace_id}/pipeline-artifacts/${row.id}/content`}>{t("workflow-domain:downloadFile")}</a>}
     {(row.workflow_id||row.run_id)&&<a className="text-sm text-primary underline" href={href({workspace:row.workspace_id,group:"workflow",item:row.kind==="artifact"?"pipeline-runs":row.workflow_id?"workflows":"workflow-executions",id:row.kind==="artifact"?row.run_id!:row.workflow_id??row.run_id!,mode:"view"},{})}>{text("openSource")}</a>}

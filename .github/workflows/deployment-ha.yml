@@ -1,13 +1,15 @@
-name: Multi-node deployment acceptance
+name: Container deployment acceptance
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, 'ci/e2e-remediation-*']
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
       - scripts/test-deployments.sh
+      - scripts/test-deployments-ui.mjs
+      - src/**
       - crates/server/src/deployments/**
       - crates/runner/**
       - crates/protocol/**
@@ -16,6 +18,8 @@ on:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
       - scripts/test-deployments.sh
+      - scripts/test-deployments-ui.mjs
+      - src/**
       - crates/server/src/deployments/**
       - crates/runner/**
       - crates/protocol/**
@@ -28,13 +32,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  swarm-failure-recovery:
+  deployment-acceptance:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: compose
+            swarm_ha: "0"
+            label: Compose deployment and browser acceptance
+          - mode: stack
+            swarm_ha: "1"
+            label: Three-node Swarm failure recovery
     env:
       FERRY_REQUIRE_ALL: "1"
-      FERRY_TEST_DEPLOY_MODE: stack
-      FERRY_TEST_SWARM_HA: "1"
+      FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
+      FERRY_TEST_SWARM_HA: ${{ matrix.swarm_ha }}
       FERRY_TEST_OUTPUT_DIR: ${{ github.workspace }}/harness-logs/fixtures
     steps:
       - uses: actions/checkout@v4
@@ -54,41 +69,47 @@ jobs:
           docker info
           mkdir -p "$FERRY_TEST_OUTPUT_DIR"
       - run: npm ci
+      - name: Install the deployment browser
+        if: matrix.mode == 'compose'
+        run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: cargo fmt --all -- --check
       - name: Build server and HostAgent
         run: cargo build --locked -p ferry-server -p ferry-runner
-      - name: Three-node Swarm deployment and fault recovery through SSH and HostAgent
+      - name: Deployment acceptance through SSH and HostAgent
         shell: bash
         run: |
           set -euo pipefail
-          # The harness owns three nested Docker daemons. It never initializes
-          # Swarm on the runner's host daemon and never targets user machines.
-          bash scripts/test-deployments.sh 2>&1 | tee harness-logs/acceptance.log
+          # The harness owns every fixture. Stack mode owns three nested Docker
+          # daemons; it never initializes Swarm on the host or targets user machines.
+          if bash scripts/test-deployments.sh 2>&1 | tee harness-logs/acceptance.log; then
+            exit 0
+          else
+            python3 .github/scripts/annotate-failures.py harness-logs/acceptance.log
+            exit 1
+          fi
       - name: Record the tested boundary
         if: always()
         run: |
           {
-            echo '### Three-node Swarm acceptance'
+            echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
-            echo 'One manager and two workers, each with an isolated Docker daemon.'
-            echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
-            echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
+            if [ "$FERRY_TEST_DEPLOY_MODE" = compose ]; then
+              echo 'Real Compose deployment through SSH and HostAgent, including browser acceptance.'
+            else
+              echo 'One manager and two workers, each with an isolated Docker daemon.'
+              echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
+              echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
+            fi
             echo 'See acceptance.json and daemon logs for actual results.'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: swarm-ha-${{ github.run_id }}-${{ github.run_attempt }}
+          name: deployment-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           if-no-files-found: warn
           path: |
             harness-logs/acceptance.log
             harness-logs/fixtures/**/acceptance.json
-            harness-logs/fixtures/**/manager-daemon.log
-            harness-logs/fixtures/**/worker-daemon.log
-            harness-logs/fixtures/**/worker2-daemon.log
-            harness-logs/fixtures/**/swarm-services.log
-            harness-logs/fixtures/**/swarm-cli-errors.log
-            harness-logs/fixtures/**/*-tasks.log
-            harness-logs/fixtures/**/*-update.log
+            harness-logs/fixtures/**/*.log

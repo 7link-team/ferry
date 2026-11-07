@@ -60,10 +60,10 @@ try {
     const name=`UI ${resource}`;
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${resource}`);
     await p.getByRole('button',{name:'创建',exact:true}).click();
-    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name);
+    await p.locator('[data-auto-field="name"] input').fill(name);
     if (app) {
-      await p.getByLabel('参数定义（JSON 数组）',{exact:true}).fill(JSON.stringify([{name:'image',label:'镜像',type:'string',default:'nginx:alpine'},{name:'token',label:'令牌',type:'string',secret:true}]));
-      await p.getByLabel('应用模板（YAML / JSON）',{exact:true}).fill(JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
+      await p.getByRole('button',{name:'高级 JSON',exact:true}).click(); await writeEditor(p,p.getByRole('textbox',{name:'高级 JSON',exact:true}),JSON.stringify([{name:'image',label:'镜像',type:'string',default:'nginx:alpine'},{name:'token',label:'令牌',type:'string',secret:true}]));
+      await writeEditor(p,p.getByRole('textbox',{name:'应用配置',exact:true}),JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
     }
     if (!app) {
       assert.equal(await p.getByLabel('参数定义（JSON 数组）',{exact:true}).count(),0,'new pipeline templates no longer expose dynamic parameters');
@@ -78,10 +78,10 @@ try {
     if (app) await p.getByRole('button',{name:'创建',exact:true}).click();
     let row=p.getByRole('row').filter({hasText:name});
     await row.getByRole('link',{name:'复制',exact:true}).click();
-    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name+' copy');
+    await p.locator('[data-auto-field="name"] input').fill(name+' copy');
     await p.getByRole('button',{name:'创建',exact:true}).click();
     await p.getByRole('row').filter({hasText:name+' copy'}).getByRole('link',{name:'编辑',exact:true}).click();
-    await p.getByRole('textbox',{name:/(?:模板)?名称$/}).fill(name+' edited');
+    await p.locator('[data-auto-field="name"] input').fill(name+' edited');
     await p.getByRole('button',{name:'保存',exact:true}).click();
     await p.getByRole('row').filter({hasText:name+' edited'}).getByRole('button',{name:'删除模板',exact:true}).click();
     await p.getByRole('dialog').getByRole('button',{name:'确认删除模板',exact:true}).click();
@@ -114,7 +114,7 @@ try {
       assert.equal(step.env.TIMEOUT,30);
       assert.equal(generated.jobs.build.defaults.run['working-directory'],'/tmp/build/${{ github.run_number }}');
       assert(!JSON.stringify(generated).includes('secret-not-in-template'));
-      await p.getByRole('textbox',{name:'流水线名称',exact:true}).fill('Generated '+resource);
+      await p.locator('[data-auto-field="name"] input').fill('Generated '+resource);
       await p.getByRole('alert').getByRole('button',{name:'build',exact:true}).click();
       await p.getByLabel('任务执行器',{exact:true}).selectOption(host.id);
       await p.getByRole('button',{name:'保存',exact:true}).click();
@@ -142,7 +142,7 @@ try {
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
     if(app) await p.getByRole('button',{name:'源码编辑',exact:true}).click();
-    const generated=JSON.parse(await p.getByLabel(label,{exact:true}).inputValue());
+    const generated=parseDocument(await readEditor(p,p.getByRole('textbox',{name:label,exact:true}))).toJS();
     if(app) assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
     else {
       const step=parseDocument(generated.workflow).toJS().jobs.build.steps.find(step=>step.name==='test');
@@ -172,7 +172,7 @@ try {
     await p.getByRole('button',{name:'生成配置',exact:true}).click();
     await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
     if(app) await p.getByRole('button',{name:'表单编辑',exact:true}).click();
-    await p.getByRole('textbox',{name:/^名称/}).fill('Generated '+resource);
+    await p.locator('[data-auto-field="name"] input').fill('Generated '+resource);
     await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
     await p.getByRole('option',{name:'Template host',exact:true}).click();
     await create.click();
@@ -190,10 +190,10 @@ try {
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('名称',{exact:true}).fill('Runtime file');
-  await p.getByLabel('应用配置文件内容',{exact:true}).fill('port={{ .Values.port }}\n');
+  await writeEditor(p,p.getByRole('textbox',{name:'应用配置',exact:true}),'port={{ .Values.port }}\n');
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByRole('row').filter({hasText:'Runtime file'}).getByRole('link',{name:'编辑',exact:true}).click();
-  await p.getByLabel('应用配置文件内容',{exact:true}).fill('listen={{ .Values.port }}\n');
+  await writeEditor(p,p.getByRole('textbox',{name:'应用配置',exact:true}),'listen={{ .Values.port }}\n');
   await p.getByRole('button',{name:'保存',exact:true}).click();
   const configs=await get(root+'/config-templates');
   assert.equal(configs.items[0].content,'listen={{ .Values.port }}\n');
@@ -209,3 +209,7 @@ try {
   await log.close();
   await rm(work, { recursive: true, force: true });
 }
+
+async function focusEditor(locator){await locator.locator('xpath=ancestor::div[contains(@class,"monaco-editor")][1]').locator('.view-lines').click();}
+async function readEditor(page,locator){await focusEditor(locator);await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('ControlOrMeta+C');return page.evaluate(()=>navigator.clipboard.readText());}
+async function writeEditor(page,locator,value){await focusEditor(locator);await page.keyboard.press('ControlOrMeta+A');await page.evaluate(value=>navigator.clipboard.writeText(value),value);await page.keyboard.press('ControlOrMeta+V');}

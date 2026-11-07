@@ -181,7 +181,8 @@ export function AutoFields({
   return (
     <div
       className={cn(
-        "min-w-0 gap-x-6 gap-y-5",
+        "min-w-0 gap-x-6",
+        readonly && className?.split(/\s+/).includes("detail-fields") ? "gap-y-0" : "gap-y-4",
         flow ? "flex flex-wrap items-start" : "grid",
         !flow && columns === 2 && "sm:grid-cols-2",
         className,

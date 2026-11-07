@@ -56,8 +56,8 @@ try {
   await page.getByRole('cell', { name: 'root-repo', exact: true }).waitFor();
   await page.getByRole('button', { name: '列表', exact: true }).click();
   await page.getByRole('tab', { name: '监控通知', exact: true }).click();
-  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await page.getByRole('link', { name: '编辑', exact: true }).click();
+  const dialog = page.locator('form');
   assert.equal(await dialog.locator('textarea').inputValue(), 'org/team/repo');
   const webhookInput = dialog.getByRole('textbox', { name: 'Webhook 地址 1', exact: true });
   assert.equal(await webhookInput.inputValue(), monitor.webhook, 'edit pre-fills the configured webhook');
@@ -65,23 +65,23 @@ try {
   await dialog.getByRole('combobox', { name: '通知语言 1', exact: true }).selectOption('ja-JP');
   assert.equal(await dialog.getByText('新增仓库', { exact: true }).count(), 0);
   await dialog.locator('button[type=submit]').click();
-  await dialog.waitFor({ state: 'hidden' });
+  await page.locator('form.resource-detail').waitFor();
   assert.equal(saved.version, 2);
   assert.deepEqual(saved.events, ['push']);
   assert.equal(saved.repositories, 'org/team/repo');
   assert.equal(saved.notification_channels[0].webhook, monitor.webhook, 'saving unrelated settings retains the configured URL');
   assert.equal(saved.notification_channels[0].language, 'ja-JP');
   assert.match(page.url(), /\/code-connections\/42\?/);
-  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  await page.getByRole('link', { name: '编辑', exact: true }).click();
   await webhookInput.fill('https://notify.example.invalid/hooks/replacement-token');
   await dialog.locator('button[type=submit]').click();
-  await dialog.waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  await page.locator('form.resource-detail').waitFor();
+  await page.getByRole('link', { name: '编辑', exact: true }).click();
   assert.equal(await webhookInput.inputValue(), 'https://notify.example.invalid/hooks/replacement-token', 'replacement survives reopening');
   await dialog.getByRole('button', { name: '删除 1', exact: true }).click();
   await dialog.locator('button[type=submit]').click();
-  await dialog.waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: '修改订阅配置', exact: true }).click();
+  await page.locator('form.resource-detail').waitFor();
+  await page.getByRole('link', { name: '编辑', exact: true }).click();
   assert.deepEqual(saved.notification_channels, [], 'explicit removal persists an empty channel list');
   assert.equal(await webhookInput.count(), 0, 'removed channel stays absent when reopening');
   await dialog.getByRole('combobox', { name: '监控类型', exact: true }).click();
@@ -97,7 +97,7 @@ try {
   assert.equal(await dialog.locator('button[type=submit]').isDisabled(), true);
   await interval.fill('2');
   await dialog.locator('button[type=submit]').click();
-  await dialog.waitFor({ state: 'hidden' });
+  await page.locator('form.resource-detail').waitFor();
   assert.equal(saved.mode, 'poll');
   assert.equal(saved.poll_interval_minutes, 2);
   assert.deepEqual(saved.events, ['push']);
@@ -110,11 +110,12 @@ try {
     const box = await card.boundingBox();
     const formBox = await card.locator('..').boundingBox();
     assert(Math.abs(box.width - formBox.width) < 2, `subscription card fills form at ${width}`);
-    const edit = card.getByRole('button', { name: '修改订阅配置', exact: true });
+    const edit = page.locator('[data-form-actions]').getByRole('link', { name: '编辑', exact: true });
+    await edit.scrollIntoViewIfNeeded();
     const editBox = await edit.boundingBox();
-    assert(editBox.x > box.x + box.width - 90, 'edit icon stays at right edge');
-    assert.equal(await edit.getAttribute('title'), '修改订阅配置');
-    assert.equal(await edit.innerText(), '', 'edit is icon-only');
+    assert(editBox.x >= 0 && editBox.x + editBox.width <= width, 'shared Edit action stays within viewport');
+    assert.equal(await edit.innerText(), '编辑');
+    assert(new URL(await edit.getAttribute('href'), origin).pathname.endsWith('/42/edit'));
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `page overflow at ${width}`);
   }
   assert.equal(await page.getByRole('region', { name: '仓库事件记录' }).count(), 0);
@@ -124,5 +125,5 @@ try {
   await page.reload();
   await page.getByRole('region', { name: '仓库事件记录' }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: Chromium paginated namespace directory navigation/parent/breadcrumb/reload/list switch, monitoring modal saved values/provider capabilities/save in place, responsive widths 1440/768/390');
+  console.log('PASS: Chromium paginated namespace directory navigation/parent/breadcrumb/reload/list switch, monitoring CRUD edit route/saved values/provider capabilities/return to detail, responsive widths 1440/768/390');
 } finally { await browser?.close(); await new Promise(resolve => server.httpServer.close(resolve)); }

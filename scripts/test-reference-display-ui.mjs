@@ -1,8 +1,10 @@
 /** Production browser regression for optional references, valid zero values and stale IDs. */
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { preview } from 'vite';
 import { existsSync } from 'node:fs';
-const origin = process.env.REFERENCE_UI_URL || 'http://127.0.0.1:5194';
+const server = process.env.REFERENCE_UI_URL ? null : await preview({preview:{host:'127.0.0.1',port:0}});
+const origin = process.env.REFERENCE_UI_URL || server.resolvedUrls.local[0].replace(/\/$/,'');
 const chrome = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const browser = await chromium.launch({ headless: true, ...(process.platform === 'win32' && existsSync(chrome) ? { executablePath: chrome } : {}) });
 try {
@@ -56,7 +58,8 @@ try {
     await page.goto(groupDetail);
     await page.getByRole('button', { name: '操作 · Production group', exact: true }).click();
     await page.getByRole('menuitem', { name: '编辑分组', exact: true }).click();
-    return page.getByRole('dialog').getByRole('combobox', { name: '上级分组', exact: true });
+    await page.waitForURL(url => url.pathname.endsWith('/node-groups/2/edit'));
+    return page.getByRole('combobox', { name: '上级主机组', exact: true });
   };
   for (const parent of [0, '0', '', null]) {
     group.parent_id = parent;
@@ -71,4 +74,4 @@ try {
   assert.equal(writes.length, 0);
   assert.deepEqual(errors, []);
   console.log('PASS: host detail/edit and group parent zero/null/empty references, names, unavailable references and explicit clearing; presentation causes no writes');
-} finally { await browser.close(); }
+} finally { await browser.close(); if(server) await new Promise(resolve=>server.httpServer.close(resolve)); }

@@ -51,23 +51,22 @@ try {
   assert.equal((await eventsResponse.json()).total,0);
   await p.getByRole('tab',{name:'告警规则'}).click();
   const nodeAlertUrl=p.url();
-  await p.getByRole('button',{name:'新增告警规则'}).click();
-  let nodeAlertDialog=p.getByRole('dialog',{name:'新增告警规则'});
-  await nodeAlertDialog.waitFor();
-  assert.equal(p.url(),nodeAlertUrl,'opening a node alert must preserve its route');
-  await nodeAlertDialog.getByRole('button',{name:'取消',exact:true}).click();
-  await nodeAlertDialog.waitFor({state:'hidden'});
+  await p.getByRole('link',{name:'新增告警规则'}).click();
+  await p.waitForURL('**/alert-rules/new?**');
+  assert.equal(await p.getByRole('dialog').count(),0,'resource creation uses its shared CRUD page');
+  await p.getByRole('link',{name:'取消',exact:true}).click();
+  await p.waitForURL(nodeAlertUrl);
   assert.equal(p.url(),nodeAlertUrl,'cancelling must stay on node monitoring');
-  await p.getByRole('button',{name:'新增告警规则'}).click();
-  nodeAlertDialog=p.getByRole('dialog',{name:'新增告警规则'});
-  await nodeAlertDialog.getByRole('textbox',{name:/^名称/}).fill('Node scoped rule');
+  await p.getByRole('link',{name:'新增告警规则'}).click();
+  await p.waitForURL('**/alert-rules/new?**');
+  await p.getByRole('textbox',{name:/^名称/}).fill('Node scoped rule');
   const [nodeRuleResponse]=await Promise.all([
     p.waitForResponse(response=>new URL(response.url()).pathname===`/api${root}/alert-rules` && response.request().method()==='POST'),
-    nodeAlertDialog.getByRole('button',{name:'创建',exact:true}).click(),
+    p.getByRole('button',{name:'创建',exact:true}).click(),
   ]);
   assert(nodeRuleResponse.ok());
   assert.deepEqual(JSON.parse(nodeRuleResponse.request().postData()).target_ref,host.id);
-  await nodeAlertDialog.waitFor({state:'hidden'});
+  await p.waitForURL(nodeAlertUrl);
   await p.getByRole('row').filter({hasText:'Node scoped rule'}).waitFor();
   assert.equal(p.url(),nodeAlertUrl,'saved node alert must refresh in place');
   assert.equal(await p.getByRole('tab',{name:'告警',exact:true}).getAttribute('aria-selected'),'true');

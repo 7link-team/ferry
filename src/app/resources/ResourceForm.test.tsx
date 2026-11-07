@@ -12,6 +12,24 @@ vi.mock("../../features/pipelines/YamlEditor", () => ({
 let root: Root, host: HTMLDivElement, requests: { url: string; method: string | undefined; body: string | undefined }[];
 let stored: Record<string, unknown>;
 const perms = new Set(["variables.read", "variables.update", "variables.reveal"]);
+
+it.each([
+  { events: [], interval: 1, blocked: true },
+  { events: ["push"], interval: 0, blocked: true },
+  { events: ["push"], interval: 61, blocked: true },
+  { events: ["push"], interval: 2, blocked: false },
+])("preserves required collection and numeric limits on the CRUD page: %j", async ({events, interval, blocked}) => {
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/variables/10/edit");
+  stored = { id: "10", events, interval, version: 3 };
+  const config = { resource: "variables", heading: () => "Monitor", blank: {}, sections: [{ fields: [
+    {key:"events",label:"Events",type:"multiselect" as const,required:true,options:[{value:"push",label:"Push"}]},
+    {key:"interval",label:"Interval",type:"number" as const,required:true,min:1,max:60},
+  ] }] };
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  expect(host.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(blocked);
+  await act(async()=>host.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+  expect(requests.some(request=>request.method==='PATCH')).toBe(!blocked);
+});
 const mount = async (permissions = perms) => {
   await act(async () => root.render(<ResourceForm config={formConfigs("ops").variables!} workspace="ops" permissions={permissions} />));
 };
@@ -396,4 +414,43 @@ it("creates a classification tag in place and selects it without losing the pipe
  expect(host.textContent).toContain('Release');
  expect(host.querySelector('[role="checkbox"][data-state="checked"]')).not.toBeNull();
  expect(name.value).toBe('Draft kept');
+});
+
+it("keeps the ordinary form footer compact with cancel before the primary action", async () => {
+  history.replaceState({}, "", "/ops/deploy/variables/10/edit");
+  await mount();
+  const footer=host.querySelector('[data-form-actions]')!;
+  expect(footer.className).toContain('justify-end');
+  const actions=[...footer.querySelectorAll<HTMLElement>('button,a')];
+  expect(actions.at(-1)?.getAttribute('type')).toBe('submit');
+  expect(actions.at(-1)?.className).not.toContain('flex-1');
+  expect(actions.at(-2)?.textContent).toBe('取消');
+});
+
+it("places grouped form actions with their fields instead of below a taller category sidebar", async () => {
+  history.replaceState({}, "", "/ops/deploy/variables/10/edit");
+  const base=formConfigs('ops').variables!;
+  const config={...base,sections:[{...base.sections[0]!,group:'Settings'}]};
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["variables.update"])} />));
+  expect(host.querySelector('[data-form-content] [data-form-actions]')).not.toBeNull();
+  expect(host.querySelectorAll('[data-form-actions]')).toHaveLength(1);
+});
+
+it("keeps the parent and returns to the originating directory after shared group creation", async () => {
+  const origin="/zh-CN/workspaces/ops/nodes?group_id=20&at=120";
+  history.replaceState({}, "", "/zh-CN/workspaces/ops/node-groups/new?parent_id=20&return_to="+encodeURIComponent(origin));
+  const config={resource:"host-groups",heading:()=>"Group",blank:{name:"Child",parent_id:""},sections:[{fields:[{key:"name",label:"Name",type:"text" as const},{key:"parent_id",label:"Parent",type:"text" as const}]}]};
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["host-groups.create"])} />));
+  expect((host.querySelector('input[name="parent_id"]') as HTMLInputElement).value).toBe("20");
+  expect(host.querySelector('a')?.getAttribute('href')).toBe(origin);
+  await act(async()=>host.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+  expect(JSON.parse(requests.find(row=>row.method==="POST")!.body!)).toMatchObject({name:"Child",parent_id:"20"});
+  expect(location.pathname+location.search).toBe(origin);
+});
+
+it.each(["https://example.invalid/", "//example.invalid/", "/zh-CN/workspaces/foreign/nodes", "/zh-CN/workspaces/ops/node-groups/new"])("rejects an unsafe or unrelated resource return target: %s", async target=>{
+  history.replaceState({},"","/zh-CN/workspaces/ops/node-groups/new?return_to="+encodeURIComponent(target));
+  const config={resource:"host-groups",heading:()=>"Group",blank:{name:"Child"},sections:[{fields:[{key:"name",label:"Name",type:"text" as const}]}]};
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={new Set(["host-groups.create"])} />));
+  expect(host.querySelector('a')?.getAttribute('href')).toBe("/zh-CN/workspaces/ops/node-groups");
 });

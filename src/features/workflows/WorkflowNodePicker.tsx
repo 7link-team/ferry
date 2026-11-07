@@ -152,8 +152,8 @@ export function WorkflowNodePicker({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
-        <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l bg-background shadow-xl">
-          <div className="border-b p-5">
+        <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex min-h-0 w-full max-w-md flex-col overflow-hidden border-l bg-background shadow-xl">
+          <div className="shrink-0 border-b p-5">
             <div className="flex items-center justify-between gap-3">
               <Dialog.Title className="flex items-center gap-2 text-lg font-semibold">
                 <Workflow className="size-5" />

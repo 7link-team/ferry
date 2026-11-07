@@ -364,7 +364,10 @@ jobs:
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-pipeline-template-editor-ui.mjs
       - name: Node workflow editing, inline insertion, publication and execution in Chromium
         if: matrix.harness == 'build-ui'
-        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-workflow-editor-ui.mjs
+        run: |
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-workflow-editor-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-dialog-layout-ui.mjs
+          python3 .github/scripts/annotate-failures.py --run node scripts/test-crud-detail-ui.mjs
       - name: Deployment form browser acceptance (three consecutive runs)
         if: matrix.harness == 'build-ui'
         run: |

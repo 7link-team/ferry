@@ -213,13 +213,15 @@ export function Entry({ onReady, error: outerError, signedIn = false, initialize
 
         {challenge?.required && pendingLogin && <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)closeChallenge();}}><Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(25rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-4 overflow-y-auto rounded-md border bg-background p-5 shadow-lg">
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(25rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 space-y-4 dialog-shell rounded-md border bg-background p-5 shadow-lg">
             <Dialog.Title className="text-base font-semibold">{commonText("resource-domain:loginGuard.title")}</Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground">{commonText("resource-domain:loginGuard.dialogHelp")}</Dialog.Description>
+            <div className="dialog-body space-y-4">
             {verificationError&&<p role="alert" className="text-sm text-destructive">{verificationError}</p>}
             <LoginChallenge challenge={challenge} onProof={setProof} onVerify={verifyChallenge} busy={busy} onRefresh={()=>void run(async()=>{setVerificationError("");await refreshChallenge(loginEmail);})} />
             {busy&&<p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="size-4 animate-spin" />{commonText(verified?"resource-domain:loginGuard.verified":"resource-domain:loginGuard.verifying")}</p>}
-            <div className="flex justify-end gap-2">
+            </div>
+            <div className="dialog-footer">
               <Button type="button" variant="outline" disabled={busy} onClick={closeChallenge}>{commonText("common.cancel")}</Button>
               <Button type="button" disabled={busy||(!proof.login_challenge_answer&&!proof.turnstile_token)} onClick={()=>verifyChallenge()}>{commonText("resource-domain:loginGuard.verify")}</Button>
             </div>

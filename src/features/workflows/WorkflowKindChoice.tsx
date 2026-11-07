@@ -88,14 +88,14 @@ export function WorkflowKindChoice({
       >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-xl">
+          <Dialog.Content className="dialog-shell fixed left-1/2 top-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-xl border bg-background p-6 shadow-xl">
             <Dialog.Title className="text-base font-semibold">
               {t("switchKind")}
             </Dialog.Title>
-            <Dialog.Description className="mt-3 text-sm leading-6 text-muted-foreground">
+            <div className="dialog-body"><Dialog.Description className="mt-3 text-sm leading-6 text-muted-foreground">
               {t("switchKindHelp")}
-            </Dialog.Description>
-            <div className="mt-5 flex justify-end gap-2">
+            </Dialog.Description></div>
+            <div className="dialog-footer mt-5">
               <Dialog.Close asChild>
                 <Button type="button" variant="outline">
                   {t("cancel")}

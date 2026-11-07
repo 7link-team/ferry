@@ -44,8 +44,8 @@ export function workflowsForms({ workspace, permissions, renderTable }: Resource
       readOnly: row => row.lifecycle === 'archived',
       sections: [{ fields: [
         { key: 'name', label: t('name'), type: 'text', required: true },
-        { key: 'description', label: commonText('common.description'), type: 'textarea' },
         { key: 'group_id', label: commonText('table.groups'), type: 'select', options: namedOptions(workspace, 'workflow-groups'), emptyValues: ['0'] },
+        { key: 'description', label: commonText('common.description'), type: 'textarea' },
         { key: 'definition', label: t('canvas'), type: 'custom', span: 2, render: props => <WorkflowEditor {...props} permissions={permissions ?? new Set()} {...(renderTable ? { renderTable } : {})} /> },
       ] }],
     }),

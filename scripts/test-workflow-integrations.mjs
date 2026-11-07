@@ -375,7 +375,7 @@ try {
     await page.getByRole("button", {name:t("add"), exact:true}).click();
     const picker = page.getByRole("dialog");
     await picker.getByLabel(t("search"), {exact:true}).fill("extension");
-    await picker.getByRole("button", {name:"Public repository extension v1", exact:true}).click();
+    await picker.getByRole("button", {name:"Public repository extension v1 · Repository · Read", exact:true}).waitFor();
     await picker.getByRole("button", {name:"Public repository extension v1 · Repository · Read", exact:true}).waitFor();
     await picker.getByRole("button", {name:t("close"), exact:true}).click();
     await run(extensionRow, "succeeded");
@@ -403,13 +403,8 @@ try {
   await page.getByRole("button", { name: t("add"), exact: true }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel(t("search"), { exact: true }).fill("git");
-  assert(
-    await dialog.getByRole("button", { name: "GitHub", exact: true }).count(),
-  );
-  assert(
-    await dialog.getByRole("button", { name: "GitLab", exact: true }).count(),
-  );
-  await dialog.getByRole("button", { name: "GitHub", exact: true }).click();
+  assert(await dialog.getByRole("button",{name:/^GitHub · /}).count(),"GitHub operations match git search");
+  assert(await dialog.getByRole("button",{name:/^GitLab · /}).count(),"GitLab operations match git search");
   for (const spec of catalog.nodes.filter(
     (node) => node.ui.application === "github",
   )) {

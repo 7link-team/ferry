@@ -228,6 +228,8 @@ export interface FormConfig<T> {
   blank: Partial<T>;
   readOnly?: (row: Partial<T>) => boolean;
   copy?: (row: T) => Partial<T>;
+  /** Normalize persisted values for the edit form, retaining the row version. */
+  editValues?: (row: T) => Partial<T>;
   viewActions?: (RowAction<T> & { section?: string; iconOnly?: boolean })[];
   pollMs?: (row: Partial<T>) => number;
   generator?: {

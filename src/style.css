@@ -37,13 +37,30 @@
 
 /* Resource details share the form schema, with a dedicated reading layout. */
 @layer components {
+  /* Dialog chrome stays outside the only scrollable content region. */
+  .dialog-shell {
+    @apply flex min-h-0 max-h-[90dvh] flex-col overflow-hidden;
+  }
+  .dialog-shell > :not(.dialog-body):not(.dialog-form) {
+    flex-shrink: 0;
+  }
+  .dialog-body {
+    @apply min-h-0 min-w-0 flex-auto overflow-y-auto overscroll-contain;
+    scrollbar-gutter: stable;
+  }
+  .dialog-form {
+    @apply flex min-h-0 flex-auto flex-col overflow-hidden;
+  }
+  .dialog-footer {
+    @apply flex shrink-0 flex-wrap items-center justify-end gap-2 border-t pt-4;
+  }
   .auto-field [aria-invalid="true"] {
     @apply border-destructive ring-destructive/20;
   }
   .resource-detail {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    @apply items-start gap-6;
+    @apply items-start gap-4;
   }
   .resource-detail > :not(.detail-section) {
     grid-column: 1 / -1;
@@ -52,17 +69,17 @@
     @apply min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground;
   }
   .detail-section-title {
-    @apply flex items-center gap-2.5 border-b bg-muted/25 px-5 py-3.5 text-sm font-semibold;
+    @apply flex items-center gap-2.5 border-b bg-muted/25 px-4 py-3 text-sm font-semibold;
   }
   .detail-section-title::before {
     content: "";
     @apply h-3.5 w-0.5 rounded-full bg-primary;
   }
   .detail-fields {
-    @apply min-w-0 px-5;
+    @apply min-w-0 px-4;
   }
   .detail-fields > * {
-    @apply min-w-0 border-b border-border/60 py-4;
+    @apply min-w-0 border-b border-border/60 py-3;
   }
   .detail-fields .resource-field {
     @apply gap-2;
@@ -81,7 +98,7 @@
   }
   @media (min-width: 640px) {
     .detail-fields {
-      @apply gap-x-8;
+      @apply gap-x-6;
     }
     .detail-fields > :nth-last-child(2):nth-child(odd):not(.sm\:col-span-2) {
       @apply border-b-0;
@@ -183,4 +200,21 @@
 
 @layer components {
   [data-theme="custom"] :is([data-slot="button"], [data-slot="input"], [data-slot="tabs-list"]) { border-width: var(--border-width); }
+}
+/* Configuration detail/edit pages: reachable touch controls and safe footer. */
+@media (max-width: 1199px) {
+  .crud-config-page [data-slot="button"],
+  .crud-config-page input:not([type="hidden"]):not([type="checkbox"]),
+  .crud-config-page select,
+  .crud-config-page [role="combobox"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .crud-config-page label:has([role="checkbox"]:not(:disabled)),
+  .crud-config-page [role="tab"] {
+    min-height: 44px;
+  }
+}
+.crud-config-page [data-form-actions] {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
