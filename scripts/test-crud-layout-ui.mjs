@@ -32,7 +32,7 @@ try {
     if(!path.startsWith('/api/')) return route.continue();
     const json = value => route.fulfill({ contentType: 'application/json', body: JSON.stringify(value) });
     if (path === '/api/setup') return json({ required: false, has_users: true, registration_enabled: false });
-    if (path === '/api/me') return json({ user: { id: '1', name: 'Layout reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Layout workspace', slug: 'layout', role_name: 'Reviewer', permissions: ['dictionaries.read', ...(canEdit ? ['dictionaries.create', 'dictionaries.update', 'dictionaries.delete'] : [])] }] });
+    if (path === '/api/me') return json({ user: { id: '1', name: 'Layout reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Layout workspace', slug: 'layout', role_name: 'Reviewer', permissions: ['dictionaries.read', 'deployments.read', 'deployments.create', ...(canEdit ? ['dictionaries.create', 'dictionaries.update', 'dictionaries.delete'] : [])] }] });
     if (path.endsWith('/preferences')) return json({ default_page_size: 20, dictionaries: {} });
     const match = /^\/api\/workspaces\/2\/dictionaries(?:\/([^/]+))?$/.exec(path);
     if (match) {
@@ -165,6 +165,26 @@ try {
     await visibleInsideViewport(rightHeader, `${width}px action header`);
     await page.screenshot({ path: resolve(output, `table-${width}.png`) });
     checks.push(`${width}px two-axis table header/right actions/pagination`);
+  }
+  // Hidden absolute legends in a long manifest must stay in the content
+  // scroll region, never create blank scrollable space below the whole app.
+  for (const width of [1440, 768, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    await page.goto(`${origin}/zh-CN/workspaces/2/deployments/new?at=300`);
+    await footer.waitFor();
+    for (const fraction of [0, 0.5, 1]) {
+      await scrollForm(fraction);
+      const extent = await page.evaluate(() => ({ height: document.documentElement.scrollHeight, width: document.documentElement.scrollWidth, viewportHeight: innerHeight, viewportWidth: innerWidth }));
+      assert(extent.height <= extent.viewportHeight + 1, `${width}px deployment at ${fraction}: no blank document overflow: ${JSON.stringify(extent)}`);
+      assert(extent.width <= extent.viewportWidth + 1, `${width}px deployment: no horizontal document overflow`);
+      const shellExtent = await page.locator('[data-platform-content]').evaluate(element => element.scrollHeight - element.clientHeight);
+      assert(shellExtent <= 1, `${width}px deployment: no blank outer content scroll (${shellExtent}px)`);
+      await visibleInsideViewport(footer.getByRole('link', { name: '取消', exact: true }), `${width}px deployment Cancel at ${fraction}`);
+      const createBox = await footer.getByRole('button', { name: '创建', exact: true }).boundingBox();
+      assert(createBox && createBox.y >= 0 && createBox.y + createBox.height <= 960, `${width}px deployment Create stays visible (disabled without fixture hosts)`);
+    }
+    await page.screenshot({ path: resolve(output, `deployment-bottom-${width}.png`) });
+    checks.push(`${width}px long deployment hidden legends stay contained; Create reachable at top/middle/bottom`);
   }
   canEdit = false;
   await page.goto(`${base}/1`);

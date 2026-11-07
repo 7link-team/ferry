@@ -34,11 +34,11 @@ try {
  // Create classification resources through the same shared forms users use.
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines`);
  await page.getByRole('button',{name:'新建分组'}).click();
- await page.waitForURL('**/pipeline-groups/new');
+ await page.waitForURL(url=>url.pathname.endsWith('/pipeline-groups/new'));
  assert.equal(await page.getByRole('dialog').count(),0);
  await page.getByLabel('名称',{exact:true}).fill('Browser group');
  await page.getByRole('button',{name:'创建',exact:true}).click();
- await page.waitForURL('**/pipelines');
+ await page.waitForURL(url=>url.pathname.endsWith('/pipelines'));
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/new`);
  await page.getByLabel('流水线名称',{exact:true}).fill('Canvas pipeline');
  await page.getByRole('button',{name:'流水线设置'}).click();
@@ -135,7 +135,7 @@ jobs:
  await eventually(async()=>await page.getByRole('button',{name:'保存',exact:true}).isEnabled());
 
  await page.getByRole('button',{name:'保存',exact:true}).click();
- await page.waitForURL(`**/workspaces/${workspace_actions}/pipelines`);
+ await page.waitForURL(url=>url.pathname===`/zh-CN/workspaces/${workspace_actions}/pipelines`);
  const list=await(await context.request.get(origin+'/api'+root+'/pipelines')).json();const pipeline=list.items.find(row=>row.name==='Canvas pipeline');assert(pipeline);assert(pipeline.graph_layout.build && pipeline.graph_layout.build.x!==24, "dragged layout was not saved");assert(Math.abs(pipeline.graph_layout.build.x-keyboardX)<0.001,"keyboard layout was not saved (CSS serializes coordinates to three decimals)");
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await page.getByRole('button',{name:'Compile edited',exact:true}).waitFor();
@@ -193,7 +193,7 @@ jobs:
  await editor.goto(origin+`/workspaces/${workspace_actions}/pipelines/`+pipeline.id+'/edit');
  await editor.getByLabel('流水线名称').fill('Restricted edit saved');
  await editor.getByRole('button',{name:'保存',exact:true}).click();
- await editor.waitForURL(`**/workspaces/${workspace_actions}/pipelines`);
+ await editor.waitForURL(url=>url.pathname===`/zh-CN/workspaces/${workspace_actions}/pipelines`);
  const edited=await(await context.request.get(origin+'/api'+root+'/pipelines/'+pipeline.id)).json();
  assert.equal(edited.name,'Restricted edit saved');assert.deepEqual(edited.environment_ids,pipeline.environment_ids);assert.equal(edited.group_id,pipeline.group_id);assert.deepEqual(edited.tag_ids,pipeline.tag_ids);
  await restricted.close();

@@ -524,7 +524,8 @@ export function AutoForm({
     <Errors.Provider value={renderedErrors}>
       <form
         {...props}
-        className={className}
+        // Keep absolute hidden labels inside the form's scroll ancestor.
+        className={cn("relative", className)}
         data-auto-form
         noValidate
         onChange={(event) => {

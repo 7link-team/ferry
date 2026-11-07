@@ -26,7 +26,7 @@ try {
     await new Promise(r => setTimeout(r, 100));
   }
   browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}) });
-  const context = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({permissions:['clipboard-read','clipboard-write'], locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' }, viewport: { width: 1280, height: 800 } });
   const errors = [];
 
   const headers = { 'X-Ferry-Request': '1', 'Accept-Language': 'zh-CN' };
@@ -35,7 +35,7 @@ try {
     assert(response.ok(), `${path}: ${await response.text()}`); return response.json();
   };
   await post(context, '/setup', {email:'admin@example.invalid',name:'Admin',password:'temporary-admin-password',token:(await readFile(join(work,'setup-token'),'utf8')).trim()});
-  const owner = await browser.newContext({ locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
+  const owner = await browser.newContext({permissions:['clipboard-read','clipboard-write'], locale: 'zh-CN', extraHTTPHeaders: { 'Accept-Language': 'zh-CN' } });
   await post(owner, '/users', {email:'owner@example.invalid',name:'Owner',password:'temporary-owner-password'});
   const workspace_tenant = (await post(owner, '/workspaces', {name:'Tenant',slug:'tenant'})).id;
   const p = await owner.newPage();
@@ -79,26 +79,26 @@ try {
   await service(2).getByLabel('服务名称',{exact:true}).fill('redis');
   await editor.getByRole('button',{name:'源码编辑',exact:true}).click();
   const source = editor.getByRole('textbox',{name:'应用配置源码（YAML / JSON）',exact:true});
-  let manifest = parse(await source.inputValue());
+  let manifest = parse(await readEditor(p,source));
   assert.deepEqual(manifest.services.map(s=>s.name),['web','redis']);
   assert.deepEqual(manifest.services[0].dependsOn,['redis']);
   assert.equal(manifest.services[0].env[0].valueFrom,'variable/token');
   assert.equal(manifest.services[0].health.readiness.httpGet.port,80);
   assert.equal(manifest.services[0].resources.limits.cpu,'500m');
   assert.equal(manifest.services[0].ports[0].published,8090);
-  const beforeInvalid = await source.inputValue();
-  await source.fill('services: [');
-  assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
+  const beforeInvalid = await readEditor(p,source);
+  await writeEditor(p,source,'services: [');
+  for(let attempt=0;attempt<50&&!(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());attempt++)await new Promise(r=>setTimeout(r,50)); assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
   await editor.getByRole('button',{name:'表单编辑',exact:true}).click();
-  assert.equal(await source.inputValue(),'services: [');
-  await source.fill(beforeInvalid);
+  assert.equal(await readEditor(p,source),'services: [');
+  await writeEditor(p,source,beforeInvalid);
   await service(1).getByRole('button',{name:'删除服务 web',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除服务',exact:true}).click();
   await editor.getByRole('button',{name:'源码编辑',exact:true}).click();
   // Restore the explicitly deleted service, then import advanced fields.
   manifest.metadata.labels = { release:'01' };
   manifest.overrides = {compose:{services:{web:{restart:'unless-stopped'}}}};
-  await source.fill('# preserve this comment\n'+JSON.stringify(manifest,null,2));
+  await writeEditor(p,source,'# preserve this comment\n'+JSON.stringify(manifest,null,2));
   await editor.getByRole('button',{name:'表单编辑',exact:true}).click();
   await service(1).getByLabel('镜像',{exact:true}).fill('nginx:alpine');
   const save = p.waitForResponse(r=>r.url().endsWith('/deployments')&&r.request().method()==='POST');
@@ -183,3 +183,7 @@ try {
   await log.close();
   await rm(work, { recursive: true, force: true });
 }
+
+async function focusEditor(locator){await locator.locator('xpath=ancestor::div[contains(@class,"monaco-editor")][1]').locator('.view-lines').click();}
+async function readEditor(page,locator){await focusEditor(locator);await page.keyboard.press('ControlOrMeta+A');await page.keyboard.press('ControlOrMeta+C');return page.evaluate(()=>navigator.clipboard.readText());}
+async function writeEditor(page,locator,value){await focusEditor(locator);await page.keyboard.press('ControlOrMeta+A');await page.evaluate(value=>navigator.clipboard.writeText(value),value);await page.keyboard.press('ControlOrMeta+V');}

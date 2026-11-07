@@ -181,7 +181,7 @@ try {
   const pageErrors = []; page.on('pageerror', e => pageErrors.push(e.message));
   await page.goto(origin + '/zh-CN' + root + '/workflows/' + flow.id);
   await page.getByRole('tab', { name: '执行记录', exact: true }).click();
-  await page.getByRole('button', { name: '节点执行结果', exact: true }).first().click();
+  await page.getByRole('button', { name: '查看详情', exact: true }).first().click();
   await page.getByRole('button', { name: '取消执行', exact: true }).click();
   assert.equal((await terminal(cancelled.id)).state, 'cancelled');
   await wait(() => sockets.size === 0);
