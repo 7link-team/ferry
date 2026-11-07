@@ -1,0 +1,32 @@
+name: Dispatch v0.3.0-alpha.3 verified build
+on:
+  push:
+    branches: [feat/release-030-alpha3-build]
+    paths: [.github/workflows/release-dispatch.yml]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const sha='b2c2fba3ba4761a73104d205a27f04965f5487c8';
+            const repo=context.repo;
+            const main=(await github.rest.repos.getCommit({...repo,ref:'main'})).data;
+            if(main.sha!==sha)throw Error('Main changed; inspect before dispatch');
+            const all=(await github.rest.actions.listWorkflowRunsForRepo({...repo,head_sha:sha,per_page:100})).data.workflow_runs;
+            const builds=all.filter(r=>r.path==='.github/workflows/build.yml' && r.event==='workflow_dispatch');
+            if(builds.length>1)throw Error('Multiple release build dispatches');
+            if(builds.length){core.notice(`Existing release build ${builds[0].id}`);return;}
+            // The full dispatch includes storage and release-asset collection;
+            // do not duplicate the ordinary push build at this exact same SHA.
+            for(const run of all.filter(r=>r.path==='.github/workflows/build.yml' && r.event==='push' && r.head_branch==='main' && r.status!=='completed')){
+              await github.rest.actions.cancelWorkflowRun({...repo,run_id:run.id});
+              core.info(`Cancelled redundant push build ${run.id} at ${sha}`);
+            }
+            await github.rest.actions.createWorkflowDispatch({...repo,workflow_id:'build.yml',ref:'main'});
+            core.notice(`Dispatched full release build for ${sha}; no publication requested`);
