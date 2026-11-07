@@ -93,7 +93,7 @@ fn supported_events(provider: &str, mode: Mode) -> Vec<&'static str> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct NotificationChannel {
+pub struct NotificationChannel {
     name: String,
     #[serde(default)]
     webhook: String,
@@ -1196,94 +1196,208 @@ async fn deliver_notice(
                 )
             })?;
         let title = detail::label(&event.event);
-        let action = notice_action(event);
-        let detail = detail::display(&event.detail);
-        let mut fields: Vec<(String, String)> = [
-            (
-                &crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
-                ),
-                &event.repository,
-            ),
-            (
-                &crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new(reference_label(event)),
-                ),
-                &event.reference,
-            ),
-            (
-                &crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.actorLabel"),
-                ),
-                &event.actor,
-            ),
-            (
-                &crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.actionLabel"),
-                ),
-                &action,
-            ),
-            (
-                &crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.providerLabel"),
-                ),
-                &connection.provider,
-            ),
-        ]
-        .into_iter()
-        .map(|(name, value)| (name.to_owned(), value.clone()))
-        .collect();
-        fields.extend(detail::lines(&detail));
-        let mut data = json!(event);
-        data["action"] = json!(action);
-        data["detail"] = detail;
-        let notice = crate::notifications::webhook::Notice {
-            title: &title,
-            accent: Some(notice_accent(&event.event)),
-            field_accents: vec![
-                (
-                    crate::i18n::render(
-                        crate::i18n::current_locale(),
-                        &crate::i18n::Message::new("repository.monitor.commitMessageLabel"),
-                    ),
-                    crate::notifications::webhook::Accent::Blue,
-                ),
-                (
-                    crate::i18n::render(
-                        crate::i18n::current_locale(),
-                        &crate::i18n::Message::new("repository.monitor.addedLinesLabel"),
-                    ),
-                    crate::notifications::webhook::Accent::Green,
-                ),
-                (
-                    crate::i18n::render(
-                        crate::i18n::current_locale(),
-                        &crate::i18n::Message::new("repository.monitor.deletedLinesLabel"),
-                    ),
-                    crate::notifications::webhook::Accent::Red,
-                ),
-            ],
-            field_links: vec![(
-                crate::i18n::render(
-                    crate::i18n::current_locale(),
-                    &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
-                ),
-                detail::field(&event.detail, &["/repository_url", "/repository/url"], 1000),
-            )],
-            fields: fields.clone(),
-            generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data,"notification":{"title":title,"fields":fields}}),
-        };
+        let notice = build_notice(connection, event_id, event, &title);
         let delivery =
             crate::notifications::webhook::deliver_configured(&client, webhook, options, &notice)
                 .await;
         return Ok(delivery);
     }
     Ok(String::new())
+}
+
+fn build_notice<'a>(
+    connection: &connections::Model,
+    event_id: Id,
+    event: &Event,
+    title: &'a str,
+) -> crate::notifications::webhook::Notice<'a> {
+    let action = notice_action(event);
+    let detail = detail::display(&event.detail);
+    let mut fields: Vec<(String, String)> = [
+        (
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
+            ),
+            &event.repository,
+        ),
+        (
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new(reference_label(event)),
+            ),
+            &event.reference,
+        ),
+        (
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.actorLabel"),
+            ),
+            &event.actor,
+        ),
+        (
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.actionLabel"),
+            ),
+            &action,
+        ),
+        (
+            &crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.providerLabel"),
+            ),
+            &connection.provider,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| (name.to_owned(), value.clone()))
+    .collect();
+    fields.extend(detail::lines(&detail));
+    let mut data = json!(event);
+    data["action"] = json!(action);
+    data["detail"] = detail;
+    crate::notifications::webhook::Notice {
+        title,
+        accent: Some(notice_accent(&event.event)),
+        field_accents: vec![
+            (
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.commitMessageLabel"),
+                ),
+                crate::notifications::webhook::Accent::Blue,
+            ),
+            (
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.addedLinesLabel"),
+                ),
+                crate::notifications::webhook::Accent::Green,
+            ),
+            (
+                crate::i18n::render(
+                    crate::i18n::current_locale(),
+                    &crate::i18n::Message::new("repository.monitor.deletedLinesLabel"),
+                ),
+                crate::notifications::webhook::Accent::Red,
+            ),
+        ],
+        field_links: vec![(
+            crate::i18n::render(
+                crate::i18n::current_locale(),
+                &crate::i18n::Message::new("repository.monitor.repositoryLabel"),
+            ),
+            detail::field(&event.detail, &["/repository_url", "/repository/url"], 1000),
+        )],
+        fields: fields.clone(),
+        generic: json!({"id":event_id,"workspace_id":Id::from(connection.workspace_id),"connection_id":Id::from(connection.id),"provider":connection.provider,"event":event.event,"data":data,"notification":{"title":title,"fields":fields}}),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PreviewRequest {
+    provider: String,
+    language: String,
+}
+
+fn notification_locale(language: &str) -> Result<crate::i18n::Locale> {
+    crate::i18n::Locale::from_tag(language).ok_or_else(|| {
+        ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.monitor.languageInvalid"),
+        )
+    })
+}
+fn sample_event() -> Event {
+    Event {
+        event: "push".into(),
+        repository: "example/app".into(),
+        reference: "main".into(),
+        actor: "Example".into(),
+        action: String::new(),
+        detail: json!({"repository_url":"https://example.invalid/example/app", "total_commits":1, "line_stats":{"additions":12,"deletions":3}, "commits":[{"short_id":"a1b2c3d", "author":"Example", "message":crate::i18n::render(crate::i18n::current_locale(), &crate::i18n::Message::new("repository.monitor.testMessage"))}]}),
+    }
+}
+fn sample_title() -> String {
+    crate::i18n::render(
+        crate::i18n::current_locale(),
+        &crate::i18n::Message::new("repository.monitor.testTitle"),
+    )
+}
+
+pub async fn notification_preview(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_workspace, id)): Path<(Id, Id)>,
+    Json(body): Json<PreviewRequest>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.read")?;
+    let connection = owned_connection(&s.db, &scope, id).await?;
+    let locale = notification_locale(&body.language)?;
+    crate::i18n::with_locale(locale, async {
+        let title = sample_title();
+        let event = sample_event();
+        let mut notice = build_notice(&connection, Id::from(0), &event, &title);
+        notice.generic["test"] = json!(true);
+        crate::notifications::webhook::preview(&body.provider, &notice)
+            .map(Json)
+            .map_err(|message| ApiError::localized(StatusCode::BAD_REQUEST, message))
+    })
+    .await
+}
+
+pub async fn notification_test(
+    State(s): State<AppState>,
+    scope: Scope,
+    Path((_workspace, id)): Path<(Id, Id)>,
+    Json(body): Json<NotificationChannel>,
+) -> Result<Json<Value>> {
+    scope.require("repositories.update")?;
+    let connection = owned_connection(&s.db, &scope, id).await?;
+    validate_channels(std::slice::from_ref(&body))?;
+    let locale = notification_locale(&body.language)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| {
+            ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.monitor.notificationClient"),
+            )
+        })?;
+    let (ok, message) = crate::i18n::with_locale(locale, async {
+        let title = sample_title();
+        let event = sample_event();
+        let mut notice = build_notice(&connection, Id::from(0), &event, &title);
+        notice.generic["test"] = json!(true);
+        let delivery = crate::notifications::webhook::deliver_configured(
+            &client,
+            &body.webhook,
+            &body.options,
+            &notice,
+        )
+        .await;
+        let ok = crate::i18n::decode_stored(&delivery).is_some_and(|m| {
+            matches!(
+                m.key.as_str(),
+                "webhook.delivered" | "webhook.deliveredHttp"
+            )
+        });
+        (ok, crate::i18n::display_stored(&delivery))
+    })
+    .await;
+    crate::hosts::activity(
+        &s,
+        &scope,
+        "notification.test",
+        "repositories",
+        &id,
+        json!({"success":ok}),
+    )
+    .await?;
+    Ok(Json(json!({"ok":ok,"message":message})))
 }
 
 #[cfg(test)]

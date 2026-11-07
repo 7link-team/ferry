@@ -799,5 +799,7 @@
   "maintenance.dictionary.insight-state.unsupported": "平台不支援",
   "maintenance.dictionary.insight-state.blocked": "採集暫不可用",
   "maintenance.dictionary.insight-state.retry_wait": "等待重試",
-  "maintenance.dictionary.insight-state.unavailable": "等待發現或恢復存取"
+  "maintenance.dictionary.insight-state.unavailable": "等待發現或恢復存取",
+  "repository.monitor.testTitle": "[測試通知] 程式碼推送",
+  "repository.monitor.testMessage": "這是一則測試提交訊息，用於驗證通知管道。"
 }

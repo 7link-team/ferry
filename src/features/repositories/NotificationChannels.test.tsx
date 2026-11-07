@@ -83,3 +83,45 @@ it("supports provider fields, legacy Telegram URLs, secret redaction and platfor
     expect(host.innerHTML).not.toContain("secret-key");
   } finally { await act(async () => root.unmount()); }
 });
+
+it("previews without credentials and sends current unsaved channel only on explicit click", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement("div"), root = createRoot(host);
+  const channel = { name: "Unsaved", webhook: "http://127.0.0.1:1234/receiver", language: "en-US", enabled: false, bearer_token: "secret" };
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ title: "Test notification", fields: [{ name: "Message", value: "<sample>", accent: "blue" }], payload: {test:true} }), {headers:{"Content-Type":"application/json"}})).mockResolvedValueOnce(new Response(JSON.stringify({ok:false,message:"Rejected by receiver"}), {headers:{"Content-Type":"application/json"}}));
+  vi.stubGlobal("fetch", fetcher);
+  const render = (readOnly = false) => root.render(<NotificationChannels endpoint="/workspaces/2/code-connection-monitors/42" channels={[channel]} readOnly={readOnly} onChange={vi.fn()} onValidityChange={vi.fn()} />);
+  try {
+    await act(async () => render());
+    const buttons = () => [...host.querySelectorAll<HTMLButtonElement>('button')];
+    await act(async () => buttons().find(button => button.textContent?.includes("Preview"))!.click());
+    expect(JSON.parse(fetcher.mock.calls[0]![1].body)).toEqual({provider:"Webhook",language:"en-US"});
+    expect(fetcher.mock.calls[0]![0]).toBe("/api/workspaces/2/code-connection-monitors/42/notification-previews");
+    expect(host.textContent).toContain("<sample>");
+    expect(host.querySelector("sample")).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await act(async () => buttons().find(button => button.textContent?.includes("Send test"))!.click());
+    expect(JSON.parse(fetcher.mock.calls[1]![1].body)).toEqual(channel);
+    expect(host.textContent).toContain("Rejected by receiver");
+    await act(async () => render(true));
+    expect(buttons().some(button => button.textContent?.includes("Send test"))).toBe(false);
+  } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
+});
+
+it("prevents duplicate sends and discards results for a channel edited during delivery", async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host=document.createElement("div"),root=createRoot(host);
+  let finish!: (response: Response) => void;
+  const fetcher=vi.fn(() => new Promise<Response>(resolve => { finish=resolve; })); vi.stubGlobal("fetch",fetcher);
+  let channel={name:"Test",webhook:"http://127.0.0.1:1234/test",language:"en-US",enabled:true};
+  const render=() => root.render(<NotificationChannels endpoint="/workspaces/2/code-connection-monitors/42" channels={[channel]} readOnly={false} onChange={vi.fn()} onValidityChange={vi.fn()} />);
+  try {
+    await act(async () => render());
+    const button=[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.includes("Send test"))!;
+    await act(async () => { button.click(); button.click(); });
+    expect(fetcher).toHaveBeenCalledTimes(1);expect(button.disabled).toBe(true);
+    channel={...channel,webhook:"http://127.0.0.1:1234/other"};await act(async()=>render());
+    await act(async()=>finish(new Response(JSON.stringify({ok:true,message:"Old delivery"}),{headers:{"Content-Type":"application/json"}})));
+    expect(host.textContent).not.toContain("Old delivery");expect(button.disabled).toBe(false);
+  } finally {await act(async()=>root.unmount());vi.unstubAllGlobals();}
+});

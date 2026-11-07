@@ -107,6 +107,47 @@ impl Accent {
     }
 }
 
+/// Uses the delivery payload builder without credentials or IO.
+pub fn preview(provider: &str, notice: &Notice<'_>) -> Result<Value, Message> {
+    let kind = match provider {
+        "WeCom" => Some(Robot::WeCom),
+        "DingTalk" => Some(Robot::DingTalk),
+        "Feishu" | "Lark" => Some(Robot::Feishu),
+        "Telegram" => Some(Robot::Telegram),
+        "Slack" => Some(Robot::Slack),
+        "Discord" => Some(Robot::Discord),
+        "Google Chat" => Some(Robot::GoogleChat),
+        "Webhook" => None,
+        _ => return Err(Message::new("webhook.channelInvalid")),
+    };
+    let url = reqwest::Url::parse("https://example.invalid/?chat_id=preview").unwrap();
+    let payload = match kind {
+        Some(kind) => body(kind, &url, notice)?,
+        None => notice.generic.clone(),
+    };
+    let fields: Vec<Value> = lines(notice)
+        .map(|(name, value)| {
+            let accent = notice
+                .field_accents
+                .iter()
+                .find(|(label, _)| label == name)
+                .map(|(_, accent)| match kind {
+                    Some(Robot::Feishu) => accent.feishu(),
+                    Some(Robot::WeCom) => match accent {
+                        Accent::Green => "green",
+                        Accent::Red => "orange",
+                        _ => "gray",
+                    },
+                    _ => "inherit",
+                })
+                .unwrap_or("inherit");
+            let url = field_url(notice, name, &value);
+            json!({"name":name,"value":value,"accent":accent,"url":url})
+        })
+        .collect();
+    Ok(json!({"title":notice.title,"provider":provider,"fields":fields,"payload":payload}))
+}
+
 fn clean(value: &str, limit: usize) -> String {
     value
         .chars()
@@ -481,6 +522,46 @@ pub async fn deliver_configured(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn previews_share_native_delivery_payloads_and_reject_unknown_providers() {
+        let notice = Notice {
+            title: "Test",
+            accent: Some(Accent::Blue),
+            fields: vec![("Message".into(), "<sample>".into())],
+            field_links: vec![],
+            field_accents: vec![("Message".into(), Accent::Blue)],
+            generic: json!({"test":true}),
+        };
+        let url = reqwest::Url::parse("https://example.invalid/?chat_id=preview").unwrap();
+        for (provider, kind) in [
+            ("WeCom", Robot::WeCom),
+            ("DingTalk", Robot::DingTalk),
+            ("Feishu", Robot::Feishu),
+            ("Lark", Robot::Feishu),
+            ("Telegram", Robot::Telegram),
+            ("Slack", Robot::Slack),
+            ("Discord", Robot::Discord),
+            ("Google Chat", Robot::GoogleChat),
+        ] {
+            let preview = preview(provider, &notice).unwrap();
+            assert_eq!(preview["payload"], body(kind, &url, &notice).unwrap());
+            assert_eq!(preview["fields"][0]["value"], "<sample>");
+        }
+        assert_eq!(
+            preview("Webhook", &notice).unwrap()["payload"],
+            notice.generic
+        );
+        assert!(preview("unknown", &notice).is_err());
+        assert_eq!(
+            preview("Feishu", &notice).unwrap()["fields"][0]["accent"],
+            "blue"
+        );
+        assert_eq!(
+            preview("WeCom", &notice).unwrap()["fields"][0]["accent"],
+            "gray"
+        );
+    }
+
     #[test]
     fn repository_cards_color_titles_stats_and_link_the_repository_name() {
         let notice = Notice {

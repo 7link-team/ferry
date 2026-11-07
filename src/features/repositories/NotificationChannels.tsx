@@ -1,5 +1,6 @@
-import { Plus, Trash2 } from "lucide-react";
-import { useEffect } from "react";
+import { Eye, Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { api } from "../../shared/api/api";
 import { AutoField } from "../../shared/forms/auto-form";
 import { commonText, hostRepositoryText } from "../../shared/i18n/i18n";
 import { localeNames, supportedLocales } from "../../shared/i18n/locale";
@@ -63,8 +64,8 @@ export function notificationProvider(value: string): string {
   return "Webhook";
 }
 
-export function NotificationChannels({ channels, readOnly, onChange, onValidityChange }: {
-  channels: NotificationChannel[]; readOnly: boolean;
+export function NotificationChannels({ channels, readOnly, onChange, onValidityChange, endpoint }: {
+  channels: NotificationChannel[]; readOnly: boolean; endpoint?: string;
   onChange: (channels: NotificationChannel[]) => void;
   onValidityChange: (blocked: boolean) => void;
 }) {
@@ -127,9 +128,57 @@ export function NotificationChannels({ channels, readOnly, onChange, onValidityC
       {instructions[provider] && <a className="inline-block text-sm text-primary underline underline-offset-4" href={instructions[provider]} target="_blank" rel="noreferrer">{hostRepositoryText("notification.instructions")}</a>}
       {!readOnly && !validChannel(channel) && <p className="text-sm text-destructive" role="status">{hostRepositoryText("notification.invalid")}</p>}
       <AutoField label={hostRepositoryText("repository-monitor.notificationLanguage")}><select aria-label={`${hostRepositoryText("repository-monitor.notificationLanguage")} ${index + 1}`} className="h-9 w-full min-w-0 max-w-64 rounded-md border bg-background px-3 text-sm" disabled={readOnly} value={channel.language} onChange={event => patch(index, { language: event.target.value })}>{supportedLocales.map(locale => <option key={locale} value={locale}>{localeNames[locale]}</option>)}</select></AutoField>
+      {endpoint && <ChannelActions channel={channel} readOnly={readOnly} endpoint={endpoint} />}
     </div>; })}
   </section>;
 }
 function validUrl(value: string) {
   try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password && !url.hash; } catch { return false; }
+}
+
+type NoticePreview = { title: string; provider: string; fields: { name: string; value: string; accent: string; url?: string }[]; payload: unknown };
+function ChannelActions({ channel, readOnly, endpoint }: { channel: NotificationChannel; readOnly: boolean; endpoint: string }) {
+  const [busy, setBusy] = useState<"preview" | "test" | null>(null);
+  const [preview, setPreview] = useState<NoticePreview | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const identity = JSON.stringify([endpoint, channel]);
+  const current = useRef(identity); current.current = identity;
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { setPreview(null); setResult(null); }, [identity]);
+  async function request(kind: "preview" | "test") {
+    if (lock.current) return;
+    lock.current = true; setBusy(kind); setResult(null);
+    const started = identity;
+    try {
+      const response = await api<NoticePreview | { ok: boolean; message: string }>(`${endpoint}/notification-${kind === "preview" ? "previews" : "tests"}`, {
+        method: "POST", body: JSON.stringify(kind === "preview" ? { provider: providerOf(channel), language: channel.language } : channel),
+      });
+      if (mounted.current && current.current === started) {
+        if (kind === "preview") setPreview(response as NoticePreview);
+        else setResult(response as { ok: boolean; message: string });
+      }
+    } catch (error) {
+      if (mounted.current && current.current === started) setResult({ ok: false, message: error instanceof Error ? error.message : String(error) });
+    } finally { lock.current = false; if (mounted.current) setBusy(null); }
+  }
+  const colors: Record<string, string> = { blue: "text-blue-600 dark:text-blue-400", green: "text-green-700 dark:text-green-400", red: "text-red-700 dark:text-red-400", orange: "text-orange-600 dark:text-orange-400", gray: "text-muted-foreground" };
+  return <div className="space-y-3 border-t pt-3">
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => preview ? setPreview(null) : void request("preview")}>
+        {busy === "preview" ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}{hostRepositoryText("notification.preview")}
+      </Button>
+      {!readOnly && <Button type="button" variant="outline" size="sm" disabled={busy !== null || !validChannel(channel) || !channel.name.trim()} onClick={() => void request("test")}>
+        {busy === "test" ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}{hostRepositoryText("notification.sendTest")}
+      </Button>}
+    </div>
+    {result && <p role="status" className={`break-words text-sm ${result.ok ? "text-green-700 dark:text-green-400" : "text-destructive"}`}>{result.message}</p>}
+    {preview && <section aria-label={hostRepositoryText("notification.preview")} className="min-w-0 space-y-3 rounded-md border bg-background p-3">
+      <p className="text-xs text-muted-foreground">{hostRepositoryText("notification.previewHelp")}</p>
+      <h5 className="break-words font-medium text-blue-600 dark:text-blue-400">{preview.title}</h5>
+      <dl className="space-y-2 text-sm">{preview.fields.map((field, index) => <div key={index} className="min-w-0"><dt className="text-muted-foreground">{field.name}</dt><dd className={`whitespace-pre-wrap break-words ${colors[field.accent] ?? ""}`}>{field.url ? <a href={field.url} target="_blank" rel="noreferrer" className="text-primary underline">{field.value}</a> : field.value}</dd></div>)}</dl>
+      <details><summary className="cursor-pointer text-sm text-muted-foreground">{hostRepositoryText("notification.payload")}</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(preview.payload, null, 2)}</pre></details>
+    </section>}
+  </div>;
 }

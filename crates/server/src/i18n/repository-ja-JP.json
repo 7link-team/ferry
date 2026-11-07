@@ -799,5 +799,7 @@
   "maintenance.dictionary.insight-state.unsupported": "プラットフォーム非対応",
   "maintenance.dictionary.insight-state.blocked": "収集は一時的に利用できません",
   "maintenance.dictionary.insight-state.retry_wait": "再試行待ち",
-  "maintenance.dictionary.insight-state.unavailable": "検出またはアクセス回復待ち"
+  "maintenance.dictionary.insight-state.unavailable": "検出またはアクセス回復待ち",
+  "repository.monitor.testTitle": "[テスト通知] コードのプッシュ",
+  "repository.monitor.testMessage": "通知先を確認するためのサンプルコミットです。"
 }

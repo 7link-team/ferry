@@ -799,5 +799,7 @@
   "maintenance.dictionary.insight-state.unsupported": "Tidak disokong oleh platform",
   "maintenance.dictionary.insight-state.blocked": "Pengumpulan tidak tersedia buat sementara",
   "maintenance.dictionary.insight-state.retry_wait": "Menunggu percubaan semula",
-  "maintenance.dictionary.insight-state.unavailable": "Menunggu penemuan atau pemulihan akses"
+  "maintenance.dictionary.insight-state.unavailable": "Menunggu penemuan atau pemulihan akses",
+  "repository.monitor.testTitle": "[Pemberitahuan ujian] Tolakan kod",
+  "repository.monitor.testMessage": "Komit contoh ini mengesahkan saluran pemberitahuan anda."
 }

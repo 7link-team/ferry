@@ -24,7 +24,7 @@ export function RepositoryMonitor({ workspace, connectionId, permissions, provid
   }, [workspace, canSelectRunner]);
   const channelField = {
     key: "notification_channels", label: hostRepositoryText("repository-monitor.channels"), type: "custom" as const, span: 2 as const,
-    render: ({ draft, readOnly, onPatch, onValidityChange }: { draft: Record<string, unknown>; readOnly: boolean; onPatch: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void }) => <NotificationChannels channels={Array.isArray(draft.notification_channels) ? draft.notification_channels as NotificationChannel[] : []} readOnly={readOnly} onChange={notification_channels => onPatch({ notification_channels })} onValidityChange={onValidityChange} />,
+    render: ({ draft, readOnly, onPatch, onValidityChange }: { draft: Record<string, unknown>; readOnly: boolean; onPatch: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void }) => <NotificationChannels endpoint={`/workspaces/${workspace}/code-connection-monitors/${connectionId}`} channels={Array.isArray(draft.notification_channels) ? draft.notification_channels as NotificationChannel[] : []} readOnly={readOnly} onChange={notification_channels => onPatch({ notification_channels })} onValidityChange={onValidityChange} />,
   };
   const form = useMemo<FormConfig<Record<string, unknown>>>(() => ({
     resource: "code-connection-monitors", permissionResource: "repositories", width: "full", blank: {}, heading: () => hostRepositoryText("repository-monitor.055"), readOnly: () => true,

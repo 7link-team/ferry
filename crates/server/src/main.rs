@@ -359,6 +359,14 @@ async fn main() -> anyhow::Result<()> {
             get(repositories::monitor::get).patch(repositories::monitor::update),
         )
         .route(
+            "/{workspace}/code-connection-monitors/{id}/notification-previews",
+            post(repositories::monitor::notification_preview),
+        )
+        .route(
+            "/{workspace}/code-connection-monitors/{id}/notification-tests",
+            post(repositories::monitor::notification_test),
+        )
+        .route(
             "/{workspace}/code-connections/{id}/events",
             get(repositories::monitor::history),
         )

@@ -799,5 +799,7 @@
   "maintenance.dictionary.insight-state.unsupported": "Unsupported by platform",
   "maintenance.dictionary.insight-state.blocked": "Collection temporarily unavailable",
   "maintenance.dictionary.insight-state.retry_wait": "Waiting to retry",
-  "maintenance.dictionary.insight-state.unavailable": "Awaiting discovery or restored access"
+  "maintenance.dictionary.insight-state.unavailable": "Awaiting discovery or restored access",
+  "repository.monitor.testTitle": "[Test notification] Code push",
+  "repository.monitor.testMessage": "This sample commit verifies your notification channel."
 }

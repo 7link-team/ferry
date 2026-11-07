@@ -451,7 +451,11 @@
     "notification.thread_id": "话题 / 线程 ID（可选）",
     "notification.bearer_token": "Bearer 令牌（可选）",
     "notification.instructions": "平台配置指南",
-    "notification.invalid": "请填写必填项，并检查地址是否属于所选通知平台。"
+    "notification.invalid": "请填写必填项，并检查地址是否属于所选通知平台。",
+    "notification.preview": "预览",
+    "notification.sendTest": "发送测试通知",
+    "notification.previewHelp": "示例预览，实际布局以接收平台为准；发送测试使用当前配置，无需先保存。",
+    "notification.payload": "查看消息数据"
   },
   "en-US": {
     "notification.webhookUrl": "Webhook URL",
@@ -905,7 +909,11 @@
     "notification.thread_id": "Thread / topic ID (optional)",
     "notification.bearer_token": "Bearer token (optional)",
     "notification.instructions": "Provider setup guide",
-    "notification.invalid": "Complete the required fields and check that the URL matches the selected provider."
+    "notification.invalid": "Complete the required fields and check that the URL matches the selected provider.",
+    "notification.preview": "Preview",
+    "notification.sendTest": "Send test notification",
+    "notification.previewHelp": "Sample preview. Layout depends on the receiving platform. Tests use current settings without saving.",
+    "notification.payload": "View message payload"
   },
   "zh-TW": {
     "notification.webhookUrl": "Webhook 位址",
@@ -1359,7 +1367,11 @@
     "notification.thread_id": "話題 / 討論串 ID（選填）",
     "notification.bearer_token": "Bearer 權杖（選填）",
     "notification.instructions": "平台設定指南",
-    "notification.invalid": "請填寫必填欄位，並檢查網址是否屬於所選通知平台。"
+    "notification.invalid": "請填寫必填欄位，並檢查網址是否屬於所選通知平台。",
+    "notification.preview": "預覽",
+    "notification.sendTest": "發送測試通知",
+    "notification.previewHelp": "範例預覽，實際版面以接收平台為準；測試使用目前設定，無須先儲存。",
+    "notification.payload": "檢視訊息資料"
   },
   "ja-JP": {
     "notification.webhookUrl": "Webhook URL",
@@ -1813,7 +1825,11 @@
     "notification.thread_id": "スレッド / トピックID（任意）",
     "notification.bearer_token": "Bearerトークン（任意）",
     "notification.instructions": "プロバイダー設定ガイド",
-    "notification.invalid": "必須項目を入力し、URLが選択したプロバイダーに一致するか確認してください。"
+    "notification.invalid": "必須項目を入力し、URLが選択したプロバイダーに一致するか確認してください。",
+    "notification.preview": "プレビュー",
+    "notification.sendTest": "テスト通知を送信",
+    "notification.previewHelp": "サンプル表示です。実際の表示は受信先によって異なります。保存前の設定でテストできます。",
+    "notification.payload": "メッセージデータ"
   },
   "ko-KR": {
     "notification.webhookUrl": "Webhook URL",
@@ -2267,7 +2283,11 @@
     "notification.thread_id": "스레드 / 주제 ID (선택)",
     "notification.bearer_token": "Bearer 토큰 (선택)",
     "notification.instructions": "플랫폼 설정 가이드",
-    "notification.invalid": "필수 항목을 입력하고 URL이 선택한 플랫폼과 일치하는지 확인하세요."
+    "notification.invalid": "필수 항목을 입력하고 URL이 선택한 플랫폼과 일치하는지 확인하세요.",
+    "notification.preview": "미리 보기",
+    "notification.sendTest": "테스트 알림 보내기",
+    "notification.previewHelp": "예시입니다. 실제 표시는 수신 플랫폼에 따라 다릅니다. 저장 전 현재 설정으로 테스트합니다.",
+    "notification.payload": "메시지 데이터 보기"
   },
   "ms-MY": {
     "notification.webhookUrl": "URL Webhook",
@@ -2721,6 +2741,10 @@
     "notification.thread_id": "ID urutan / topik (pilihan)",
     "notification.bearer_token": "Token Bearer (pilihan)",
     "notification.instructions": "Panduan persediaan penyedia",
-    "notification.invalid": "Lengkapkan medan wajib dan semak URL sepadan dengan penyedia yang dipilih."
+    "notification.invalid": "Lengkapkan medan wajib dan semak URL sepadan dengan penyedia yang dipilih.",
+    "notification.preview": "Pratonton",
+    "notification.sendTest": "Hantar pemberitahuan ujian",
+    "notification.previewHelp": "Contoh pratonton. Reka letak bergantung pada platform penerima. Ujian menggunakan tetapan semasa tanpa menyimpan.",
+    "notification.payload": "Lihat data mesej"
   }
 }
