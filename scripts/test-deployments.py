@@ -194,7 +194,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         (build_dir/'docker-wrapper').write_text('#!/bin/sh\nwhile [ -f /tmp/deployment-pause ]; do sleep 0.1; done\nfor arg in "$@"; do if [ "$arg" = up ]; then while [ -f /tmp/deployment-up-pause ]; do sleep 0.1; done; fi; if [ "$arg" = up ] && [ -f /tmp/deployment-fail ]; then echo fixture-command-failed >&2; if [ -f /tmp/deployment-leak ]; then find /tmp/deployments -name \".variables-*.env\" -exec cat {} \\; >&2; fi; exit 42; fi; done\nexec /usr/bin/docker "$@"\n')
         command(['curl','-fL','--max-time','120','-o',str(build_dir/'docker-compose'),f'https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-{compose_arch}'])
         if mode=='stack':
-            (build_dir/'nested-daemon').write_text('#!/bin/sh\nset -eu\nif [ -f /sys/fs/cgroup/cgroup.controllers ]; then\n mkdir -p /sys/fs/cgroup/init\n for pid in $(cat /sys/fs/cgroup/cgroup.procs); do echo "$pid" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :; done\n sed -e "s/ / +/g" -e "s/^/+/" /sys/fs/cgroup/cgroup.controllers > /sys/fs/cgroup/cgroup.subtree_control\nfi\n# PID 1 is reused when this owned daemon container restarts.\n# A forced stop can leave the old dockerd pidfile behind.\nrm -f /var/run/docker.pid\nexec dockerd "$@"\n')
+            (build_dir/'nested-daemon').write_text('#!/bin/sh\nset -eu\nif [ -f /sys/fs/cgroup/cgroup.controllers ]; then\n mkdir -p /sys/fs/cgroup/init\n for pid in $(cat /sys/fs/cgroup/cgroup.procs); do echo "$pid" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :; done\n sed -e "s/ / +/g" -e "s/^/+/" /sys/fs/cgroup/cgroup.controllers > /sys/fs/cgroup/cgroup.subtree_control\nfi\nexec dockerd "$@"\n')
             with (build_dir/'Dockerfile').open('ab') as docker_file:
                 docker_file.write(b'\nCOPY nested-daemon /usr/local/bin/nested-daemon\nRUN chmod +x /usr/local/bin/nested-daemon\n')
             (build_dir/'docker-wrapper').write_text('#!/bin/sh\nerr=$(mktemp); /usr/bin/docker --host unix:///docker-socket/docker.sock "$@" 2>"$err"; result=$?; cat "$err" >&2; cat "$err" >> /tmp/stack-cli-errors; rm -f "$err"; exit $result\n')
@@ -207,7 +207,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             command(['docker','network','create',name+'-swarm'])
             command(['docker','volume','create',name+'-socket'])
             for node in swarm_nodes:
-                args=['docker','run','-d','--privileged','--cgroupns=private','--name',name+'-'+node,'--network',name+'-swarm','-e','DOCKER_TLS_CERTDIR=']
+                # A node reboot clears runtime sockets/PIDs but preserves /var/lib/docker.
+                # Reusing /run from the container layer can mistake a reused PID for containerd.
+                args=['docker','run','-d','--privileged','--cgroupns=private','--tmpfs','/run','--name',name+'-'+node,'--network',name+'-swarm','-e','DOCKER_TLS_CERTDIR=']
                 if node=='manager': args+=['-v',name+'-socket:/docker-socket','-p',f'127.0.0.1:{native_port}:18081']
                 args+=['deployment-live-test-'+mode,'nested-daemon','--host=unix:///var/run/docker.sock',*(['--host=unix:///docker-socket/docker.sock'] if node=='manager' else []),'--storage-driver=vfs']
                 command(args)
