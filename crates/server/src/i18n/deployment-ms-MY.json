@@ -109,7 +109,7 @@
   "deployment.manifest.006": "resources hanya menyokong cpu dan memory.",
   "deployment.manifest.007": "requests sumber tidak boleh melebihi limits.",
   "deployment.manifest.008": "Manifes tidak boleh melebihi 64 KB atau mengandungi aksara nol.",
-  "deployment.manifest.009": "Manifes memerlukan apiVersion: ferry/v1 dan kind: Application.",
+  "deployment.manifest.009": "Manifes memerlukan apiVersion: ferry/v1 atau ferry/v2 dan kind: Application.",
   "deployment.manifest.010": "Nama aplikasi mestilah pengecam huruf kecil; services mesti mengandungi 1–50 perkhidmatan.",
   "deployment.manifest.011": "Compose tidak menyokong kemas kini bergilir; strategy.type hanya menyokong recreate.",
   "deployment.manifest.012": "maxUnavailable hanya untuk Swarm dan mestilah 0–100.",
@@ -215,5 +215,8 @@
   "deployment.output.failed": "Pelaksanaan gagal",
   "deployment.output.uncertainPrefix": "Hasil pelaksanaan tidak dapat dipastikan: ",
   "deployment.output.verifyRemote": " Sahkan proses jauh dan bekas.\n",
-  "deployment.categoryInvalid": "Pilih kategori aplikasi daripada kamus ruang kerja."
+  "deployment.categoryInvalid": "Pilih kategori aplikasi daripada kamus ruang kerja.",
+  "deployment.portable.sourceRequired": "Setiap perkhidmatan memerlukan imej atau artifak natif. ferry/v2 membenarkan kedua-duanya; enjin memilih sumber.",
+  "deployment.portable.placementMode": "Penempatan memerlukan ferry/v2 dan Docker Swarm / Stack; enjin lain tidak menjadualkan merentas hos.",
+  "deployment.portable.placementInvalid": "Penempatan tidak sah: maksimum 32 kekangan label nod/enjin (== atau !=); replika maksimum setiap nod ialah 1–100."
 }

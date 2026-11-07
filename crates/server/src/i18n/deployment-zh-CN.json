@@ -109,7 +109,7 @@
   "deployment.manifest.006": "resources 仅支持 cpu 和 memory。",
   "deployment.manifest.007": "资源 requests 不能大于 limits。",
   "deployment.manifest.008": "manifest 不能超过64KB或包含空字符。",
-  "deployment.manifest.009": "manifest 必须使用 apiVersion: ferry/v1 和 kind: Application。",
+  "deployment.manifest.009": "manifest 必须使用 apiVersion: ferry/v1 或 ferry/v2 和 kind: Application。",
   "deployment.manifest.010": "应用名必须是小写标识符，services 必须包含1到50个服务。",
   "deployment.manifest.011": "Compose 不支持滚动更新；strategy.type 仅支持 recreate。",
   "deployment.manifest.012": "maxUnavailable仅用于Swarm，范围0到100。",
@@ -215,5 +215,8 @@
   "deployment.output.failed": "部署失败",
   "deployment.output.uncertainPrefix": "执行结果无法确认：",
   "deployment.output.verifyRemote": " 请核实远端进程及容器。\n",
-  "deployment.categoryInvalid": "请选择工作空间字典中的应用分类。"
+  "deployment.categoryInvalid": "请选择工作空间字典中的应用分类。",
+  "deployment.portable.sourceRequired": "每个服务至少提供镜像或原生产物；ferry/v2 可同时提供，由部署引擎选择。",
+  "deployment.portable.placementMode": "放置约束需要 ferry/v2 和 Docker Swarm / Stack；其他引擎不能跨主机调度。",
+  "deployment.portable.placementInvalid": "放置配置无效：最多32条节点/引擎标签约束（== 或 !=）；每节点副本上限为1–100。"
 }

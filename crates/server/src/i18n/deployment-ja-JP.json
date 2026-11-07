@@ -109,7 +109,7 @@
   "deployment.manifest.006": "resources は cpu と memory のみに対応します。",
   "deployment.manifest.007": "リソースの requests は limits 以下にしてください。",
   "deployment.manifest.008": "マニフェストは 64 KB 以下で、ヌル文字を含めることはできません。",
-  "deployment.manifest.009": "マニフェストには apiVersion: ferry/v1 と kind: Application が必要です。",
+  "deployment.manifest.009": "マニフェストには apiVersion: ferry/v1 または ferry/v2 と kind: Application が必要です。",
   "deployment.manifest.010": "アプリケーション名は小文字の識別子とし、services には 1～50 件のサービスを指定してください。",
   "deployment.manifest.011": "Compose はローリング更新に対応していません。strategy.type は recreate のみ使用できます。",
   "deployment.manifest.012": "maxUnavailable は Swarm 専用で、範囲は 0～100 です。",
@@ -215,5 +215,8 @@
   "deployment.output.failed": "デプロイ失敗",
   "deployment.output.uncertainPrefix": "実行結果を確認できません：",
   "deployment.output.verifyRemote": " リモートプロセスとコンテナーを確認してください。\n",
-  "deployment.categoryInvalid": "ワークスペース辞書のアプリケーション分類を選択してください。"
+  "deployment.categoryInvalid": "ワークスペース辞書のアプリケーション分類を選択してください。",
+  "deployment.portable.sourceRequired": "各サービスにイメージまたはネイティブ成果物が必要です。ferry/v2 では両方を定義でき、実行方式で選択します。",
+  "deployment.portable.placementMode": "配置制約には ferry/v2 と Docker Swarm / Stack が必要です。他の方式はホスト間で配置できません。",
+  "deployment.portable.placementInvalid": "配置設定が無効です。ノード/エンジンラベル制約（== または !=）は32件まで、ノードあたりの最大レプリカ数は1～100です。"
 }

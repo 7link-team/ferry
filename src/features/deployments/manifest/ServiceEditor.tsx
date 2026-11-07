@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { AutoField } from "../../../shared/forms/auto-form";
-import { hostRepositoryText } from "../../../shared/i18n/i18n";
+import { commonText, hostRepositoryText } from "../../../shared/i18n/i18n";
 import { Button } from "../../../shared/ui/button";
 import { Checkbox } from "../../../shared/ui/checkbox";
 import { Input } from "../../../shared/ui/input";
@@ -14,6 +14,7 @@ export function ServiceEditor({
   index,
   services,
   mode,
+  portable,
   workspace,
   readOnly,
   invalidJson,
@@ -36,6 +37,7 @@ export function ServiceEditor({
   index: number;
   services: Row[];
   mode: string;
+  portable: boolean;
   workspace: string | undefined;
   readOnly: boolean;
   invalidJson: boolean;
@@ -54,6 +56,8 @@ export function ServiceEditor({
   const p = (...keys: Path) => [...path, ...keys];
   const dependencies = (service.dependsOn ?? []) as string[];
   const artifact = object(service.artifact);
+  const dualSource = portable && artifact && typeof service.image === "string";
+  const placement = object(service.placement) ? service.placement : undefined;
   return (
     <section
       key={index}
@@ -153,7 +157,7 @@ export function ServiceEditor({
           <select
             aria-label={hostRepositoryText("manifest.033")}
             className="h-9 rounded-md border border-input bg-background px-2"
-            value={artifact ? "artifact" : "image"}
+            value={dualSource ? "both" : artifact ? "artifact" : "image"}
             disabled={readOnly}
             onChange={(e) => {
               // Switching is an ordinary draft edit: it takes effect
@@ -161,31 +165,32 @@ export function ServiceEditor({
               change([
                 {
                   path: p("image"),
-                  value: e.target.value === "image" ? "" : undefined,
+                  value: e.target.value !== "artifact" ? (service.image ?? "") : undefined,
                 },
                 {
                   path: p("artifact"),
                   value:
-                    e.target.value === "artifact"
-                      ? { source: "pipeline", pipeline: "", path: "" }
+                    e.target.value !== "image"
+                      ? (service.artifact ?? { source: "pipeline", pipeline: "", path: "" })
                       : undefined,
                 },
               ]);
             }}
           >
+            {portable && <option value="both">{commonText("resource-domain:deployment.dualSource")}</option>}
             <option value="image">{hostRepositoryText("manifest.034")}</option>
             <option value="artifact">
               {hostRepositoryText("manifest.035")}
             </option>
           </select>
         </AutoField>
-        {!artifact &&
+        {(!artifact || dualSource) &&
           text(hostRepositoryText("manifest.036"), p("image"), {
             required: true,
             hint: hostRepositoryText("manifest.037"),
           })}
       </div>
-      {(mode === "native") !== artifact && (
+      {(mode === "native" ? !artifact : !service.image || (!portable && artifact)) && (
         <p role="status" className="text-sm text-destructive">
           {mode === "native"
             ? hostRepositoryText("manifest.038")
@@ -237,6 +242,21 @@ export function ServiceEditor({
           )}
         </div>
       )}
+      {(portable && (mode === "stack" || placement)) && <details className="space-y-3" open={!!placement}>
+        <summary className="cursor-pointer text-sm font-medium">{commonText("resource-domain:deployment.placement")}</summary>
+        <p className="text-sm text-muted-foreground">{commonText("resource-domain:deployment.placementHelp")}</p>
+        {mode !== "stack" && <p role="status" className="text-sm text-destructive">{commonText("resource-domain:deployment.placementUnsupported")}</p>}
+        <AutoField label={commonText("resource-domain:deployment.placementConstraints")} help={commonText("resource-domain:deployment.placementConstraintsHelp")}>
+          <textarea className="min-h-24 w-full rounded-md border bg-background p-3 font-mono text-sm" disabled={readOnly}
+            value={Array.isArray(placement?.constraints) ? placement.constraints.join("\n") : ""} onChange={event => {
+              const constraints = event.target.value.split("\n");
+              const max = placement?.maxReplicasPerNode;
+              set(p("placement"), !event.target.value && max == null ? undefined : { ...placement, constraints: event.target.value ? constraints : [] });
+            }} />
+        </AutoField>
+        {text(commonText("resource-domain:deployment.maxReplicasPerNode"), p("placement", "maxReplicasPerNode"), { number: true, min: 1, max: 100, hint: commonText("resource-domain:deployment.maxReplicasHelp") })}
+        {!!placement && !readOnly && <Button type="button" variant="outline" onClick={() => set(p("placement"), undefined)}>{commonText("resource-domain:deployment.clearPlacement")}</Button>}
+      </details>}
       {rows(
         hostRepositoryText("manifest.046"),
         p("ports"),

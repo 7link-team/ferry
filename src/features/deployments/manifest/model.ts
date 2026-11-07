@@ -51,8 +51,11 @@ export function readManifest(source: string) {
       )
         throw new Error(hostRepositoryText("manifest.005", { value1: name }));
     }
-    for (const name of ["artifact", "resources", "health"])
+    for (const name of ["artifact", "resources", "health", "placement"])
       optionalObject(service, name);
+    if (object(service.placement) && service.placement.constraints !== undefined
+      && (!Array.isArray(service.placement.constraints) || !service.placement.constraints.every(value => typeof value === "string")))
+      throw new Error(hostRepositoryText("manifest.005", { value1: "placement.constraints" }));
     if (object(service.resources))
       for (const key of ["requests", "limits"])
         optionalObject(service.resources, key);

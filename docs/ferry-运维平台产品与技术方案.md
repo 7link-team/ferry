@@ -1172,3 +1172,43 @@ TTL 取心跳间隔的若干倍(例如心跳 10 秒、TTL 60 秒),留足网络�
 - 可移植配置：同一应用定义在每个支持引擎生成确定性产物；不支持能力在执行前拒绝；历史v1升级不改变原执行语义。
 - 集群模板：每种服务分别真实部署、故障停机、网络隔离、滚动升级、重建和备份恢复；有证据后才标记该模板可用于生产。
 - 自动调度：真实多节点、主机断联、资源不足、反亲和、持久卷不可迁移等场景通过；验证重启恢复、并发操作及权限隔离。此阶段尚未实现。
+
+### 第二阶段：可移植定义与 Swarm 放置（2026-11-07）
+
+`ferry/v2 Application` 复用 v1 的服务字段与四引擎执行链路，允许同一服务同时指定 `image` 和 `artifact`。Native 只渲染原生产物，Docker / Compose / Stack 只渲染镜像；保存保留两种定义，且二者均须通过校验，产物流水线仍在当前工作空间解析、授权并保存为ID。v1 的 image/artifact 互斥及原渲染结果保持不变，不自动升级存量定义。表单提供定义版本选择，双来源或放置字段存在时阻止无损性不成立的v1降级。
+
+```yaml
+apiVersion: ferry/v2
+kind: Application
+metadata:
+  name: portable-web
+services:
+  - name: web
+    image: registry.example.invalid/web:1.0.0
+    artifact:
+      source: pipeline
+      pipeline: build-web # 替换为当前空间真实流水线名称或ID
+      path: bin/web
+    replicas: 1
+    ports:
+      - container: 8080
+        published: 8080
+```
+
+上例提供两种运行实现，不把镜像转换为可执行文件。原生产物启动方式与容器入口仍需由应用提供兼容实现；服务参数、端口和依赖必须符合目标能力。需用现有 `overrides.native.units` 等引擎覆盖表达差异时仍按原有校验执行。四引擎继续共用部署预览、快照哈希、审计和回滚保护。
+
+Swarm 额外支持 v2 服务级 `placement`：
+
+```yaml
+placement:
+  constraints:
+    - node.role == worker
+    - node.labels.zone != zone-a
+  maxReplicasPerNode: 1
+```
+
+约束最多32条，每条最多256字节，允许Docker的节点ID、主机名、角色、平台及节点/引擎标签键，运算符为 `==` / `!=`；每节点上限为1–100。渲染为 `deploy.placement.constraints` / `max_replicas_per_node`；Stack高级覆盖也须同样校验，非Stack拒绝，不能静默丢弃。Swarm目标沿用现有HostChannel，在管理员选择的管理节点提交Stack，执行前验证Swarm控制权限；它不是另一个Ferry调度器。节点不足时由Swarm保持待调度。约束不提供卷迁移能力，也不替代有状态服务自身的仲裁/复制配置。
+
+新增工作空间级 `POST /deployment-capabilities`，请求 `{manifest: string}`，复用 `deployments.read`，返回四引擎 `{mode,supported,reason?}`。纯渲染检查不访问主机、凭据或其他空间，不修改业务数据或增加提交审计；前端显式触发、变更配置/语言后清除旧结果，取消过期请求。结果只能证明配置兼容，实际环境、引用资源和权限仍由保存与部署预览校验。禁止将“可渲染”显示为“集群可用”。
+
+PXC/Redis/NATS/TiDB 的高可用拓扑模板、协议健康检查、Nomad接入及真实多机故障恢复尚未在此阶段实现；以独立真实验收作为后续门禁。

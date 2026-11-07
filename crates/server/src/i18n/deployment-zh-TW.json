@@ -109,7 +109,7 @@
   "deployment.manifest.006": "resources 僅支援 cpu 和 memory。",
   "deployment.manifest.007": "資源 requests 不能大於 limits。",
   "deployment.manifest.008": "manifest 不能超過 64 KB 或包含空字元。",
-  "deployment.manifest.009": "manifest 必須使用 apiVersion: ferry/v1 和 kind: Application。",
+  "deployment.manifest.009": "manifest 必須使用 apiVersion: ferry/v1 或 ferry/v2 和 kind: Application。",
   "deployment.manifest.010": "應用程式名稱必須是小寫識別碼，services 必須包含 1 到 50 個服務。",
   "deployment.manifest.011": "Compose 不支援輪流更新；strategy.type 僅支援 recreate。",
   "deployment.manifest.012": "maxUnavailable 僅用於 Swarm，範圍為 0 到 100。",
@@ -215,5 +215,8 @@
   "deployment.output.failed": "部署失敗",
   "deployment.output.uncertainPrefix": "執行結果無法確認：",
   "deployment.output.verifyRemote": " 請確認遠端程序及容器。\n",
-  "deployment.categoryInvalid": "請選擇工作空間字典中的應用分類。"
+  "deployment.categoryInvalid": "請選擇工作空間字典中的應用分類。",
+  "deployment.portable.sourceRequired": "每個服務至少提供映像或原生成品；ferry/v2 可同時提供，由部署引擎選擇。",
+  "deployment.portable.placementMode": "放置限制需要 ferry/v2 和 Docker Swarm / Stack；其他引擎無法跨主機排程。",
+  "deployment.portable.placementInvalid": "放置設定無效：最多32條節點/引擎標籤限制（== 或 !=）；每節點副本上限為1–100。"
 }

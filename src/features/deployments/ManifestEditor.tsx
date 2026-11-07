@@ -1,5 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { parseDocument } from "yaml";
+import { api, errorText } from "../../shared/api/api";
+import { base } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import {
   commonText,
@@ -44,6 +46,28 @@ export function ManifestEditor({
 }) {
   const { i18n } = useCommonTranslation();
   const editorId = useId();
+  const capabilityRequest = useRef<AbortController | undefined>(undefined);
+  const [checking, setChecking] = useState(false);
+  const [capabilities, setCapabilities] = useState<{mode: string; supported: boolean; reason?: string}[]>();
+  const [capabilityError, setCapabilityError] = useState("");
+  useEffect(() => {
+    capabilityRequest.current?.abort();
+    setCapabilities(undefined); setCapabilityError(""); setChecking(false);
+    return () => capabilityRequest.current?.abort();
+  }, [value, workspace, i18n.resolvedLanguage]);
+  const checkCapabilities = async () => {
+    if (!workspace) return;
+    capabilityRequest.current?.abort();
+    const controller = new AbortController(); capabilityRequest.current = controller;
+    setChecking(true); setCapabilityError("");
+    try {
+      const result = await api<{checks: {mode: string; supported: boolean; reason?: string}[]}>(base(workspace, "deployment-capabilities"), {
+        method: "POST", body: JSON.stringify({ manifest: value }), signal: controller.signal,
+      });
+      if (!controller.signal.aborted) setCapabilities(result.checks);
+    } catch (error) { if (!controller.signal.aborted) setCapabilityError(errorText(error)); }
+    finally { if (!controller.signal.aborted) setChecking(false); }
+  };
   const loadPipelines = useCallback(
     () => (workspace ? pipelineChoices(workspace) : Promise.resolve([])),
     [workspace],
@@ -161,6 +185,22 @@ export function ManifestEditor({
         </div>
       </div>
       {["native", "docker", "compose", "stack"].includes(mode) && <p className="rounded-md border bg-muted/30 px-4 py-3 text-sm leading-6 text-muted-foreground">{commonText(`resource-domain:deployment.capability.${mode}`)}</p>}
+      {workspace && <section className="space-y-3" aria-label={commonText("resource-domain:deployment.checkCompatibility")}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant="outline" disabled={checking || syntaxError || invalidJson} onClick={() => void checkCapabilities()}>
+            {commonText(`resource-domain:deployment.${checking ? "checkingCompatibility" : "checkCompatibility"}`)}
+          </Button>
+          <p className="text-xs text-muted-foreground">{commonText("resource-domain:deployment.compatibilityHelp")}</p>
+        </div>
+        <div aria-live="polite" className="grid min-w-0 gap-3 sm:grid-cols-2">
+          {capabilities?.map(result => <div key={result.mode} className="min-w-0 rounded-md border p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{({native: "Native (systemd)", docker: "Docker", compose: "Docker Compose", stack: "Docker Swarm / Stack"} as Record<string, string>)[result.mode] ?? result.mode}</span>
+              <span className={result.supported ? "text-muted-foreground" : "text-destructive"}>{commonText(`resource-domain:deployment.${result.supported ? "compatible" : "incompatible"}`)}</span></div>
+            {result.reason && <p className="mt-2 break-words text-destructive">{result.reason}</p>}
+          </div>)}
+        </div>
+        {capabilityError && <p role="alert" className="text-sm text-destructive">{capabilityError}</p>}
+      </section>}
       {sourceMode || !parsed.data ? (
         <>
           <AutoField
@@ -186,6 +226,19 @@ export function ManifestEditor({
       ) : (
         <>
           <div className={grid}>
+            <AutoField label={commonText("resource-domain:deployment.definitionVersion")} help={commonText("resource-domain:deployment.portableHelp")}>
+              <select className="h-9 w-full rounded-md border bg-background px-3 text-sm" disabled={readOnly} value={String(get(["apiVersion"]) ?? "ferry/v1")} onChange={event => {
+                if (event.target.value === "ferry/v1" && services.some(service => (service.image && service.artifact) || service.placement)) {
+                  setNotice(commonText("resource-domain:deployment.downgradeBlocked"));
+                  return;
+                }
+                set(["apiVersion"], event.target.value);
+              }}>
+                <option value="ferry/v1">{commonText("resource-domain:deployment.definitionV1")}</option>
+                <option value="ferry/v2">{commonText("resource-domain:deployment.definitionV2")}</option>
+                {!["ferry/v1", "ferry/v2"].includes(String(get(["apiVersion"]))) && <option value={String(get(["apiVersion"]))}>{String(get(["apiVersion"]))}</option>}
+              </select>
+            </AutoField>
             {text(hostRepositoryText("manifest.022"), ["metadata", "name"], {
               required: true,
               hint: hostRepositoryText("manifest.023"),
@@ -201,6 +254,7 @@ export function ManifestEditor({
               index={index}
               services={services}
               mode={mode}
+              portable={get(["apiVersion"]) === "ferry/v2"}
               workspace={workspace}
               readOnly={readOnly}
               invalidJson={invalidJson}

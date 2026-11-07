@@ -485,6 +485,7 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/deployment-revisions/{id}",
             get(deployments::revision_get),
         )
+        .route("/{workspace}/deployment-capabilities", post(deployments::capabilities))
         .route(
             "/{workspace}/deployments",
             get(deployments::list).post(deployments::create),

@@ -29,6 +29,23 @@ use std::{
     time::Duration,
 };
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CapabilityBody {
+    manifest: String,
+}
+/// Pure capability checks: no host commands, credentials, or cross-tenant lookups.
+pub async fn capabilities(scope: Scope, Json(body): Json<CapabilityBody>) -> Result<Json<Value>> {
+    scope.require("deployments.read")?;
+    let checks: Vec<Value> = ["native", "docker", "compose", "stack"].into_iter().map(|mode| {
+        match manifest::parse_for(&body.manifest, mode) {
+            Ok(_) => json!({"mode":mode, "supported":true}),
+            Err(error) => json!({"mode":mode, "supported":false, "reason":error.render(crate::i18n::current_locale())}),
+        }
+    }).collect();
+    Ok(Json(json!({"checks":checks})))
+}
+
 const SPEC: Spec = Spec {
     search: &["name"],
     filters: &["state", "category"],

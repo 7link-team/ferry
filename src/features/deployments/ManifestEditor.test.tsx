@@ -56,7 +56,7 @@ it("shows a successful artifact build without a completion timestamp as unavaila
 });
 let root: Root, host: HTMLDivElement, latest: string, blocked: boolean;
 const reference=(label:string)=>[...host.querySelectorAll('[data-auto-field]')].find(field=>field.firstElementChild?.textContent?.trim().startsWith(label))!.querySelector('[role="combobox"]')!;
-function Harness({ source = fixture, readOnly = false, mode = "compose" }) {
+function Harness({ source = fixture, readOnly = false, mode = "compose", workspace }: { source?: string; readOnly?: boolean; mode?: string; workspace?: string }) {
   const [value, setValue] = useState(source);
   latest = value;
   const validity = useCallback((value: boolean) => {
@@ -65,6 +65,7 @@ function Harness({ source = fixture, readOnly = false, mode = "compose" }) {
   return (
     <ManifestEditor
       value={value}
+      {...(workspace ? { workspace } : {})}
       mode={mode}
       readOnly={readOnly}
       onChange={setValue}
@@ -241,4 +242,47 @@ it("refuses duplicate keys, aliases and malformed collections without discarding
   expect(() =>
     readManifest("metadata: {name: test}\nservices: [wrong]"),
   ).toThrow("services");
+});
+
+it("v2 preserves both sources when the target engine or editor mode changes and blocks destructive downgrade", async () => {
+  await act(async () => root.render(<Harness />));
+  await fill(input("应用定义版本"), "ferry/v2");
+  await fill(input(hostRepositoryText("manifest.033")), "both");
+  await fill(input(hostRepositoryText("manifest.042")), "build");
+  await fill(input(hostRepositoryText("manifest.043")), "bin/web");
+  const expected = parse(latest);
+  expect(expected.services[0]).toMatchObject({ image: "nginx:alpine", artifact: { source: "pipeline", pipeline: "build", path: "bin/web" } });
+  await act(async () => root.render(<Harness mode="native" />));
+  expect(parse(latest)).toEqual(expected);
+  expect(input("镜像").value).toBe("nginx:alpine");
+  expect(input(hostRepositoryText("manifest.043")).value).toBe("bin/web");
+  await click("源码编辑"); await click("表单编辑");
+  expect(parse(latest)).toEqual(expected);
+  await fill(input("应用定义版本"), "ferry/v1");
+  expect(parse(latest)).toEqual(expected);
+  expect(host.textContent).toContain("请先移除双运行来源或放置约束");
+  expect(latest).toContain("# original application");
+});
+it("edits typed Swarm placement and preserves unsupported constraints when changing engines", async () => {
+  await act(async () => root.render(<Harness source={fixture.replace("ferry/v1", "ferry/v2")} mode="stack" />));
+  await fill(input("节点约束"), "node.role == worker\nnode.labels.zone != zone-a");
+  await fill(input("每节点副本上限"), "1");
+  expect(parse(latest).services[0].placement).toEqual({ constraints: ["node.role == worker", "node.labels.zone != zone-a"], maxReplicasPerNode: 1 });
+  const expected = latest;
+  await act(async () => root.render(<Harness mode="compose" />));
+  expect(latest).toBe(expected);
+  expect(host.textContent).toContain("当前部署方式不支持放置约束");
+  await click("清除放置配置");
+  expect(parse(latest).services[0].placement).toBeUndefined();
+});
+it("capability checks use current unsaved YAML and clear obsolete results after editing", async () => {
+  const fetch = vi.fn(async (_url: string, _options?: RequestInit) => ({ ok: true, status: 200, json: async () => ({ checks: [{ mode: "compose", supported: true }, { mode: "native", supported: false, reason: "Native requires artifact" }] }) }));
+  vi.stubGlobal("fetch", fetch);
+  await act(async () => root.render(<Harness workspace="ops" />));
+  await click("检查部署兼容性");
+  expect(fetch.mock.calls[0]?.[0]).toBe("/api/workspaces/ops/deployment-capabilities");
+  expect(host.textContent).toContain("配置可渲染");
+  expect(host.textContent).toContain("Native requires artifact");
+  await fill(input("镜像"), "nginx:stable");
+  expect(host.textContent).not.toContain("Native requires artifact");
 });

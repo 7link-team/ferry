@@ -49,7 +49,40 @@ pub struct Service {
     pub volumes: Vec<Volume>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
 }
+/// Swarm placement is explicit and never silently applied to single-host engines.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct Placement {
+    #[serde(default)]
+    pub constraints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_replicas_per_node: Option<u32>,
+}
+fn validate_placement(constraints: &[String], max: Option<u32>) -> Result<()> {
+    if constraints.len() > 32 || max.is_some_and(|n| !(1..=100).contains(&n)) {
+        return Err(bad("deployment.portable.placementInvalid"));
+    }
+    for constraint in constraints {
+        let Some((key, value)) = constraint.split_once("==").or_else(|| constraint.split_once("!=")) else {
+            return Err(bad("deployment.portable.placementInvalid"));
+        };
+        let (key, value) = (key.trim(), value.trim());
+        let label = key.strip_prefix("node.labels.").or_else(|| key.strip_prefix("engine.labels."));
+        let known = ["node.id", "node.hostname", "node.role", "node.platform.os", "node.platform.arch"].contains(&key);
+        if constraint.len() > 256 || constraint.chars().any(char::is_control) || (!known && !label.is_some_and(|label| !label.is_empty()
+            && label.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-/".contains(&c))))
+            || value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-/:".contains(&c))
+            || (key == "node.role" && !["manager", "worker"].contains(&value))
+        {
+            return Err(bad("deployment.portable.placementInvalid"));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BuildArtifact {
@@ -320,6 +353,10 @@ fn identifier(v: &str) -> bool {
         && v.bytes()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
 }
+fn valid_image(image: &str) -> bool {
+    !image.is_empty() && !image.starts_with('-')
+        && !image.chars().any(|c| c.is_whitespace() || c.is_control() || c == '$')
+}
 fn environment_name(v: &str) -> bool {
     let mut chars = v.bytes();
     chars
@@ -342,7 +379,7 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
         )
     })?;
     let mode = effective_mode(&m, mode);
-    if m.api_version != "ferry/v1" || m.kind != "Application" {
+    if !["ferry/v1", "ferry/v2"].contains(&m.api_version.as_str()) || m.kind != "Application" {
         return Err(bad("deployment.manifest.009"));
     }
     if !identifier(&m.metadata.name) || m.services.is_empty() || m.services.len() > 50 {
@@ -369,8 +406,20 @@ pub fn parse_for(input: &str, mode: &str) -> Result<Manifest> {
         if let Some(resources) = &s.resources {
             validate_resources(resources)?;
         }
-        if s.image.is_empty() == s.artifact.is_none() {
+        if m.api_version == "ferry/v1" && s.image.is_empty() == s.artifact.is_none() {
             return Err(bad("deployment.manifest.015"));
+        }
+        if s.image.is_empty() && s.artifact.is_none() {
+            return Err(bad("deployment.portable.sourceRequired"));
+        }
+        if let Some(placement) = &s.placement {
+            if m.api_version != "ferry/v2" || mode != "stack" {
+                return Err(bad("deployment.portable.placementMode"));
+            }
+            validate_placement(&placement.constraints, placement.max_replicas_per_node)?;
+        }
+        if m.api_version == "ferry/v2" && !s.image.is_empty() && !valid_image(&s.image) {
+            return Err(bad("deployment.manifest.059"));
         }
         if let Some(artifact) = &s.artifact {
             if artifact.source != "pipeline" || artifact.pipeline.trim().is_empty() {
@@ -473,9 +522,9 @@ fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
     if mode != "auto" {
         return mode;
     }
-    if m.services.iter().any(|s| s.artifact.is_some()) {
+    if m.services.iter().any(|s| s.artifact.is_some()) && m.services.iter().all(|s| s.image.is_empty()) {
         "native"
-    } else if !m.overrides.stack.is_empty()
+    } else if m.services.iter().any(|s| s.placement.is_some()) || !m.overrides.stack.is_empty()
         || m.strategy
             .as_ref()
             .is_some_and(|s| s.kind == "rolling" || s.max_unavailable.is_some())
@@ -487,10 +536,14 @@ fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
 }
 pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
     let mode = effective_mode(m, mode);
+    // Also guard direct rendering callers, independently of parse_for.
+    if m.services.iter().any(|s| s.placement.is_some()) && (mode != "stack" || m.api_version != "ferry/v2") {
+        return Err(bad("deployment.portable.placementMode"));
+    }
     if mode == "native" {
         return render_native(m);
     }
-    if m.services.iter().any(|s| s.artifact.is_some()) {
+    if m.services.iter().any(|s| s.image.is_empty() || (m.api_version == "ferry/v1" && s.artifact.is_some())) {
         return Err(bad("deployment.manifest.026"));
     }
     if !["compose", "docker", "stack"].contains(&mode) {
@@ -516,6 +569,12 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
             return Err(bad("deployment.manifest.030"));
         }
         let mut v = json!({"image":s.image,"deploy":{"replicas":s.replicas}});
+        if let Some(placement) = &s.placement {
+            validate_placement(&placement.constraints, placement.max_replicas_per_node)?;
+            let mut value = json!({"constraints": placement.constraints});
+            if let Some(max) = placement.max_replicas_per_node { value["max_replicas_per_node"] = json!(max); }
+            v["deploy"]["placement"] = value;
+        }
         if mode == "stack" {
             let rolling = m.strategy.as_ref().is_some_and(|s| s.kind == "rolling");
             let unavailable = m
@@ -624,7 +683,7 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
             &m.overrides.compose
         }),
     );
-    validate_compose(&document, mode)?;
+    validate_compose(&document, mode, m.api_version == "ferry/v2")?;
     for config in document["services"].as_object_mut().unwrap().values_mut() {
         if let Some(resources) = config["deploy"]
             .get_mut("resources")
@@ -703,7 +762,7 @@ fn render_native(m: &Manifest) -> Result<String> {
     let mut services = BTreeMap::new();
     let mut volumes = BTreeMap::new();
     for service in &m.services {
-        if service.artifact.is_none() || !service.image.is_empty() || service.replicas != 1 {
+        if service.artifact.is_none() || (m.api_version == "ferry/v1" && !service.image.is_empty()) || service.replicas != 1 {
             return Err(bad("deployment.manifest.035"));
         }
         if service
@@ -824,7 +883,7 @@ pub fn readiness(m: &Manifest) -> Result<Vec<(String, String, u32)>> {
         .map(|(s, p)| Ok((s.name.clone(), probe_command(s, p)?, p.period_seconds)))
         .collect()
 }
-fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
+fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
     let root = doc
         .as_object()
         .ok_or_else(|| bad("deployment.manifest.045"))?;
@@ -933,12 +992,7 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
             return Err(bad("deployment.manifest.058"));
         }
         let image = config["image"].as_str().unwrap_or("");
-        if image.is_empty()
-            || image.starts_with('-')
-            || image
-                .chars()
-                .any(|c| c.is_whitespace() || c.is_control() || c == '$')
-        {
+        if !valid_image(image) {
             return Err(bad("deployment.manifest.059"));
         }
         let replicas = if let Some(deploy) = service.get("deploy") {
@@ -946,9 +1000,20 @@ fn validate_compose(doc: &Value, mode: &str) -> Result<()> {
                 .as_object()
                 .ok_or_else(|| bad("deployment.manifest.060"))?;
             if d.keys().any(|k| {
-                k != "replicas" && k != "resources" && !(mode == "stack" && k == "update_config")
+                k != "replicas" && k != "resources" && !(mode == "stack" && (k == "update_config" || (portable && k == "placement")))
             }) {
                 return Err(bad("deployment.manifest.061"));
+            }
+            if let Some(placement) = d.get("placement") {
+                let placement = placement.as_object().ok_or_else(|| bad("deployment.portable.placementInvalid"))?;
+                if placement.keys().any(|k| !["constraints", "max_replicas_per_node"].contains(&k.as_str())) {
+                    return Err(bad("deployment.portable.placementInvalid"));
+                }
+                let constraints: Vec<String> = serde_json::from_value(placement.get("constraints").cloned().unwrap_or(json!([])))
+                    .map_err(|_| bad("deployment.portable.placementInvalid"))?;
+                let max = placement.get("max_replicas_per_node").map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| bad("deployment.portable.placementInvalid"))).transpose()?;
+                validate_placement(&constraints, max)?;
             }
             if let Some(update) = d.get("update_config") {
                 let update = update
@@ -1155,6 +1220,94 @@ mod tests {
     use super::*;
     fn sample() -> Value {
         json!({"apiVersion":"ferry/v1","kind":"Application","metadata":{"name":"demo"},"services":[{"name":"web","image":"nginx:alpine","ports":[{"container":80,"published":8080}]}]})
+    }
+    fn portable_sample() -> Value {
+        let mut value = sample();
+        value["apiVersion"] = json!("ferry/v2");
+        // Use no port mapping so the exact same definition is valid on systemd.
+        value["services"][0]["ports"] = json!([]);
+        value["services"][0]["artifact"] = json!({"source":"pipeline", "pipeline":"build", "path":"bin/web"});
+        value
+    }
+    #[test]
+    fn portable_sources_select_runtime_without_changing_v1_artifacts() {
+        let portable = portable_sample();
+        for mode in ["native", "docker", "compose", "stack"] {
+            let m = parse_for(&portable.to_string(), mode).unwrap();
+            let rendered = render_for(&m, mode).unwrap();
+            let doc: Value = serde_json::from_str(&rendered).unwrap();
+            assert_eq!(doc["services"]["web"].get("artifact").is_some(), mode == "native");
+            assert_eq!(doc["services"]["web"].get("image").is_some(), mode != "native");
+            // Existing v1 and v2 use exactly the same renderer and runtime artifact.
+            let mut legacy = portable.clone();
+            legacy["apiVersion"] = json!("ferry/v1");
+            legacy["services"][0].as_object_mut().unwrap().remove(if mode == "native" {"image"} else {"artifact"});
+            assert_eq!(rendered, render_for(&parse_for(&legacy.to_string(), mode).unwrap(), mode).unwrap());
+            assert_eq!(rendered, render_for(&m, mode).unwrap());
+        }
+        let mut legacy = portable.clone();
+        legacy["apiVersion"] = json!("ferry/v1");
+        assert!(parse_for(&legacy.to_string(), "native").is_err());
+        assert!(parse_for(&legacy.to_string(), "compose").is_err());
+        // Auto/template parsing defaults to containers when both implementations exist.
+        assert!(parse(&portable.to_string()).is_ok());
+    }
+    #[test]
+    fn portable_inactive_sources_are_validated_and_missing_active_sources_fail() {
+        let mut value = portable_sample();
+        value["services"][0]["artifact"]["path"] = json!("../escape");
+        assert!(parse_for(&value.to_string(), "compose").is_err());
+        value = portable_sample();
+        value["services"][0]["image"] = json!("bad image");
+        assert!(parse_for(&value.to_string(), "native").is_err());
+        value = portable_sample();
+        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        assert!(parse_for(&value.to_string(), "native").is_err());
+        value["services"][0].as_object_mut().unwrap().remove("image");
+        assert!(parse_for(&value.to_string(), "compose").is_err());
+        value = portable_sample();
+        value["services"][0].as_object_mut().unwrap().remove("image");
+        assert!(parse_for(&value.to_string(), "docker").is_err());
+    }
+    #[test]
+    fn swarm_placement_is_versioned_bounded_and_not_silently_dropped() {
+        let mut value = portable_sample();
+        value["services"][0]["placement"] = json!({"constraints":["node.role == worker", "node.labels.zone != zone-a"], "maxReplicasPerNode":1});
+        let manifest = parse_for(&value.to_string(), "stack").unwrap();
+        let doc: Value = serde_json::from_str(&render_for(&manifest, "stack").unwrap()).unwrap();
+        assert_eq!(doc["services"]["web"]["deploy"]["placement"], json!({"constraints":["node.role == worker", "node.labels.zone != zone-a"], "max_replicas_per_node":1}));
+        for mode in ["native", "docker", "compose"] {
+            assert!(parse_for(&value.to_string(), mode).is_err());
+            assert!(render_for(&manifest, mode).is_err());
+        }
+        for constraint in ["node.role = worker", "node.role == admin", "node.labels. == x", "unknown == value", "node.hostname == x;touch /tmp/x", "node.hostname == "] {
+            value["services"][0]["placement"]["constraints"] = json!([constraint]);
+            assert!(parse_for(&value.to_string(), "stack").is_err(), "{constraint}");
+        }
+        value["services"][0]["placement"]["constraints"] = json!(vec!["node.platform.os == linux"; 33]);
+        assert!(parse_for(&value.to_string(), "stack").is_err());
+        value["services"][0]["placement"]["constraints"] = json!([]);
+        for max in [0, 101] {
+            value["services"][0]["placement"]["maxReplicasPerNode"] = json!(max);
+            assert!(parse_for(&value.to_string(), "stack").is_err());
+        }
+        value["apiVersion"] = json!("ferry/v1");
+        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        assert!(parse_for(&value.to_string(), "stack").is_err());
+    }
+    #[test]
+    fn swarm_placement_overrides_cannot_bypass_validation_or_engine_capabilities() {
+        let mut value = portable_sample();
+        for mode in ["native", "docker", "compose", "stack"] {
+            value["overrides"] = json!({mode:{"services":{"web":{"deploy":{"placement":{"max_replicas_per_node":0}}}}}});
+            // Native rejects unsupported override root entries too.
+            assert!(parse_for(&value.to_string(), mode).is_err(), "{mode}");
+        }
+        value["overrides"] = json!({"stack":{"services":{"web":{"deploy":{"placement":{"constraints":["node.role == worker"], "max_replicas_per_node":1}}}}}});
+        assert!(parse_for(&value.to_string(), "stack").is_ok());
+        value["apiVersion"] = json!("ferry/v1");
+        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        assert!(parse_for(&value.to_string(), "stack").is_err());
     }
     fn fails(v: &Value, part: &str) {
         let e = parse(&v.to_string()).unwrap_err();

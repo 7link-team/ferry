@@ -109,7 +109,7 @@
   "deployment.manifest.006": "Resources only supports cpu and memory.",
   "deployment.manifest.007": "Resource requests cannot exceed limits.",
   "deployment.manifest.008": "The manifest cannot exceed 64 KB or contain null characters.",
-  "deployment.manifest.009": "The manifest requires apiVersion: ferry/v1 and kind: Application.",
+  "deployment.manifest.009": "The manifest requires apiVersion: ferry/v1 or ferry/v2 and kind: Application.",
   "deployment.manifest.010": "Application name must be a lowercase identifier; services must contain 1–50 services.",
   "deployment.manifest.011": "Compose does not support rolling updates; strategy.type only supports recreate.",
   "deployment.manifest.012": "maxUnavailable is only for Swarm and must be 0–100.",
@@ -215,5 +215,8 @@
   "deployment.output.failed": "Deployment failed",
   "deployment.output.uncertainPrefix": "Execution outcome is uncertain: ",
   "deployment.output.verifyRemote": " Verify remote processes and containers.\n",
-  "deployment.categoryInvalid": "Choose an application category from the workspace dictionary."
+  "deployment.categoryInvalid": "Choose an application category from the workspace dictionary.",
+  "deployment.portable.sourceRequired": "Each service needs an image or a native artifact. ferry/v2 allows both; the deployment engine selects the source.",
+  "deployment.portable.placementMode": "Placement requires ferry/v2 and Docker Swarm / Stack; other engines cannot schedule across hosts.",
+  "deployment.portable.placementInvalid": "Invalid placement: use up to 32 node/engine label constraints (== or !=); max replicas per node must be 1–100."
 }
