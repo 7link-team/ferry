@@ -66,7 +66,7 @@ def artifact_workflow(workdir, command, path='app'):
 
 
 def main():
-    work = Path(tempfile.mkdtemp(prefix='compose-acceptance-'))
+    work = Path(tempfile.mkdtemp(prefix='compose-acceptance-', dir=os.environ.get('FERRY_TEST_OUTPUT_DIR')))
     name = 'compose-check-' + uuid.uuid4().hex[:10]
     server_port, ssh_port, native_port = port(), port(), port()
     origin = f'http://127.0.0.1:{server_port}'
@@ -75,10 +75,17 @@ def main():
     checks = 0
     mode = os.environ.get("FERRY_TEST_DEPLOY_MODE", "compose")
     assert mode in ("compose", "docker", "native", "stack")
+    swarm_ha = os.environ.get('FERRY_TEST_SWARM_HA') == '1'
+    assert not swarm_ha or mode == 'stack', 'Swarm HA acceptance requires stack mode'
+    swarm_nodes = ('manager', 'worker', 'worker2') if swarm_ha else ('manager', 'worker')
+    report = {'mode': mode, 'swarm_nodes': list(swarm_nodes) if mode == 'stack' else [],
+              'boundary': 'isolated Docker daemons on one host; not physical-host or manager-quorum HA',
+              'checks': [], 'snapshots': [], 'result': 'RUNNING'}
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
     def check(label, condition):
         nonlocal checks
+        report['checks'].append({'name': label, 'passed': bool(condition)})
         if not condition and mode=='stack':
             result=subprocess.run(['docker','exec',name+'-manager','/usr/bin/docker','service','ls'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             (work/'swarm-services.log').write_bytes(result.stdout)
@@ -199,7 +206,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             # This CLI reaches an owned nested daemon. Never initialize Swarm on the developer daemon.
             command(['docker','network','create',name+'-swarm'])
             command(['docker','volume','create',name+'-socket'])
-            for node in ('manager','worker'):
+            for node in swarm_nodes:
                 args=['docker','run','-d','--privileged','--cgroupns=private','--name',name+'-'+node,'--network',name+'-swarm','-e','DOCKER_TLS_CERTDIR=']
                 if node=='manager': args+=['-v',name+'-socket:/docker-socket','-p',f'127.0.0.1:{native_port}:18081']
                 args+=['deployment-live-test-'+mode,'nested-daemon','--host=unix:///var/run/docker.sock',*(['--host=unix:///docker-socket/docker.sock'] if node=='manager' else []),'--storage-driver=vfs']
@@ -210,12 +217,20 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 state=json.loads(command(['docker','inspect',name+'-'+node]))[0]['State']
                 assert state['Running'], command(['docker','logs',name+'-'+node]).decode()
                 return subprocess.run(['docker','exec',name+'-'+node,'/usr/bin/docker','info'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
-            for node in ('manager','worker'): eventually(lambda node=node:daemon_ready(node),120)
+            for node in swarm_nodes: eventually(lambda node=node:daemon_ready(node),120)
             manager_ip=json.loads(command(['docker','inspect',name+'-manager']))[0]['NetworkSettings']['Networks'][name+'-swarm']['IPAddress']
             engine(['swarm','init','--advertise-addr',manager_ip])
             join=engine(['swarm','join-token','-q','worker']).decode().strip()
-            engine(['swarm','join','--token',join,manager_ip+':2377'],'worker')
-            for node in ('manager','worker'): engine(['pull',os.environ.get('FERRY_TEST_IMAGE','busybox:1.36')],node)
+            for node in swarm_nodes[1:]:
+                engine(['swarm','join','--token',join,manager_ip+':2377'],node)
+            for node in swarm_nodes: engine(['pull',os.environ.get('FERRY_TEST_IMAGE','busybox:1.36')],node)
+            swarm_ids = {node: engine(['info','--format','{{.Swarm.NodeID}}'],node).decode().strip() for node in swarm_nodes}
+            if swarm_ha:
+                for node_id in swarm_ids.values():
+                    engine(['node','update','--label-add','ferry-test=eligible',node_id])
+                eventually(lambda: all(row['Status']['State'] == 'ready' for row in json.loads(engine(['node','inspect',*swarm_ids.values()]))))
+                check('three isolated Swarm nodes registered and ready', len(set(swarm_ids.values())) == 3)
+
         volume=name+'-files'
         command(['docker','volume','create',volume])
         deployment_workdir=json.loads(command(['docker','volume','inspect',volume]))[0]['Mountpoint']
@@ -385,6 +400,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             with sqlite3.connect(work/'data'/'ferry.sqlite') as db:
                 check('group deletion releases target records and references',db.execute('SELECT count(*) FROM deployment_revision_targets').fetchone()[0]==0 and db.execute('SELECT count(*) FROM deployment_target_states').fetchone()[0]==0 and db.execute('SELECT count(*) FROM deployment_artifact_refs').fetchone()[0]==0)
             check('group check floor',checks>=30)
+            report['result']='PASS'
             print(f'{checks} passed, 0 failed, 0 skipped',flush=True)
             return
         for kind,host in [('runner',runner_id),('ssh',ssh_id)]:
@@ -394,6 +410,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 web_port=native_port
                 source=manifest('stack-v1',18081)
                 source['services'][0]['replicas']=2
+                if swarm_ha:
+                    source['apiVersion']='ferry/v2'
+                    source['services'][0]['placement']={'constraints':['node.labels.ferry-test == eligible'], 'maxReplicasPerNode':1}
+
                 source['strategy']={'type':'rolling','maxUnavailable':0,'healthTimeout':90}
                 secret='stack secret \\slash \"quote\" $dollar\nsecond'
                 key='stack-token-'+kind
@@ -407,14 +427,63 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 check(kind+' Swarm replicas converge: '+row['latest_revision']['output'],row['state']=='succeeded')
                 check(kind+' Swarm ingress actual HTTP',eventually(lambda:response(web_port)=='stack-v1'))
                 def task_containers(node): return engine(['ps','-q','--filter','label=com.docker.swarm.service.name='+project+'_web'],node).decode().split()
-                check(kind+' Swarm schedules on manager and worker',bool(task_containers('manager')) and bool(task_containers('worker')))
-                for node in ('manager','worker'):
-                    container=task_containers(node)[0]
+                if swarm_ha:
+                    distribution={node:task_containers(node) for node in swarm_nodes}
+                    check(kind+' Swarm distributes two replicas on distinct nodes',sum(map(len,distribution.values())) == 2 and sum(bool(tasks) for tasks in distribution.values()) == 2)
+                    spec=json.loads(engine(['service','inspect',project+'_web']))[0]['Spec']
+                    check(kind+' v2 placement reaches the actual scheduler',spec['TaskTemplate']['Placement']['Constraints'] == ['node.labels.ferry-test == eligible'] and spec['TaskTemplate']['Placement']['MaxReplicas'] == 1)
+                else:
+                    check(kind+' Swarm schedules on manager and worker',bool(task_containers('manager')) and bool(task_containers('worker')))
+                for node in swarm_nodes:
+                    containers=task_containers(node)
+                    if swarm_ha and not containers: continue
+                    container=containers[0]
                     check(kind+' '+node+' receives config through Swarm secret',engine(['exec',container,'cat','/etc/runtime.conf'],node).decode()=='token='+secret)
                     check(kind+' '+node+' multiline environment preserved',engine(['exec',container,'printenv','TOKEN'],node).decode()==secret+'\n')
                     check(kind+' '+node+' literal environment preserved',engine(['exec',container,'printenv','LITERAL'],node).decode().strip()=='${NOT_INTERPOLATED}')
                 saved=json.loads(row['latest_revision']['artifact'])
                 check(kind+' Swarm history contains no secret or manager bind',secret not in json.dumps(row) and all(v['type']!='bind' for v in saved['services']['web'].get('volumes',[])))
+                if swarm_ha:
+                    service_name=project+'_web'
+                    by_id={node_id: node for node,node_id in swarm_ids.items()}
+                    def healthy_tasks():
+                        ids=engine(['service','ps','-q','--filter','desired-state=running',service_name]).decode().split()
+                        if len(ids) != 2: return None
+                        tasks=json.loads(engine(['inspect',*ids]))
+                        if any(task['Status']['State'] != 'running' for task in tasks): return None
+                        result=[]
+                        for task in tasks:
+                            node=by_id[task['NodeID']]
+                            container_id=task['Status']['ContainerStatus']['ContainerID']
+                            inspected=subprocess.run(['docker','exec',name+'-'+node,'/usr/bin/docker','inspect',container_id],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                            if inspected.returncode: return None
+                            container=json.loads(inspected.stdout)[0]
+                            if container['State'].get('Health',{}).get('Status') != 'healthy': return None
+                            result.append({'task_id':task['ID'], 'node':node, 'container_id':container_id, 'state':task['Status']['State']})
+                        return result if len({task['node'] for task in result}) == 2 else None
+                    def capture(stage, tasks):
+                        report['snapshots'].append({'transport':kind, 'stage':stage, 'tasks':tasks})
+                    before=eventually(healthy_tasks,120);capture('before-task-exit',before)
+                    victim=before[0]
+                    engine(['kill',victim['container_id']],victim['node'])
+                    def replaced():
+                        tasks=healthy_tasks()
+                        return tasks if tasks and victim['task_id'] not in {task['task_id'] for task in tasks} else None
+                    after=eventually(replaced,120);capture('after-task-exit',after)
+                    check(kind+' Swarm replaces an exited task and restores healthy replicas',eventually(lambda:response(web_port)=='stack-v1'))
+                    victim_node=next(task['node'] for task in after if task['node'] != 'manager')
+                    command(['docker','stop','-t','5',name+'-'+victim_node])
+                    eventually(lambda: json.loads(engine(['node','inspect',swarm_ids[victim_node]]))[0]['Status']['State'] == 'down',120)
+                    def rescheduled():
+                        tasks=healthy_tasks()
+                        return tasks if tasks and all(task['node'] != victim_node for task in tasks) else None
+                    recovered=eventually(rescheduled,150);capture('after-worker-down',recovered)
+                    check(kind+' Swarm reschedules from an offline worker onto remaining nodes',eventually(lambda:response(web_port)=='stack-v1'))
+                    command(['docker','start',name+'-'+victim_node])
+                    eventually(lambda:daemon_ready(victim_node),120)
+                    eventually(lambda:json.loads(engine(['node','inspect',swarm_ids[victim_node]]))[0]['Status']['State'] == 'ready',120)
+                    capture('after-worker-return',eventually(healthy_tasks,120))
+                    check(kind+' returning worker rejoins without a Ferry redeploy',eventually(lambda:response(web_port)=='stack-v1') and app(id)['latest_revision']['id']==first)
                 source['services'][0]['command'][2]=source['services'][0]['command'][2].replace('stack-v1','stack-v2')
                 update(id,source);start(id);row=done(id)
                 check(kind+' Swarm rolling update completes',row['state']=='succeeded' and eventually(lambda:response(web_port)=='stack-v2'))
@@ -423,11 +492,20 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 api(f'/workspaces/{workspace_ops}/variables/'+variable,{'name':key,'version':1,'value':'rotated'},method='PATCH')
                 start(id,first);row=done(id)
                 check(kind+' Swarm rollback restores historical image and config',row['state']=='succeeded' and eventually(lambda:response(web_port)=='stack-v1'))
-                for node in ('manager','worker'):
+                for node in swarm_nodes:
                     for container in task_containers(node):
                         check(kind+' Swarm rollback restores historical variable',engine(['exec',container,'printenv','TOKEN'],node).decode()==secret+'\n')
                 restarted=scheduled_restart(id,'swarm-restart-'+kind)
-                check(kind+' Swarm scheduled restart converges and preserves historical variables',restarted['state']=='succeeded' and eventually(lambda:response(web_port)=='stack-v1') and all(engine(['exec',container,'printenv','TOKEN'],node).decode()==secret+'\n' for node in ('manager','worker') for container in task_containers(node)))
+                check(kind+' Swarm scheduled restart converges and preserves historical variables',restarted['state']=='succeeded' and eventually(lambda:response(web_port)=='stack-v1') and all(engine(['exec',container,'printenv','TOKEN'],node).decode()==secret+'\n' for node in swarm_nodes for container in task_containers(node)))
+                if swarm_ha:
+                    unavailable=json.loads(json.dumps(source))
+                    unavailable['strategy']['healthTimeout']=5
+                    unavailable['services'][0]['placement']['constraints']=['node.labels.ferry-test == unavailable']
+                    update(id,unavailable);start(id);unavailable_row=done(id)
+                    check(kind+' insufficient eligible nodes cannot report deployment success',unavailable_row['state']=='failed')
+                    spec=json.loads(engine(['service','inspect',project+'_web']))[0]['Spec']
+                    check(kind+' scheduler does not silently remove unmet placement constraints',spec['TaskTemplate']['Placement']['Constraints'] == ['node.labels.ferry-test == unavailable'])
+                    start(id,first);check(kind+' rollback restores schedulable placement',done(id)['state']=='succeeded')
                 source['strategy']['healthTimeout']=5
                 source['services'][0]['health']['readiness']['httpGet']['path']='/not-ready'
                 update(id,source);start(id);row=done(id)
@@ -438,7 +516,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 engine(['stack','rm',project])
                 eventually(lambda:not engine(['service','ls','-q','--filter','label=com.docker.stack.namespace='+project]).strip())
                 # Wait for ingress port release before the next transport scenario.
-                eventually(lambda:not task_containers('manager') and not task_containers('worker'))
+                eventually(lambda:all(not task_containers(node) for node in swarm_nodes))
                 continue
             if mode=='native':
                 import shlex
@@ -765,9 +843,15 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             # Delete metadata only: the existing v2 HTTP service keeps running.
             api(f'/workspaces/{workspace_ops}/deployments/'+id,method='DELETE',status=204)
             check(kind+' deletion keeps containers running',response(web_port)=='v2')
+        if swarm_ha:
+            expected={(transport,stage) for transport in ('runner','ssh') for stage in ('before-task-exit','after-task-exit','after-worker-down','after-worker-return')}
+            check('fault recovery snapshots cover both deployment transports', {(row['transport'],row['stage']) for row in report['snapshots']} == expected)
         check('check floor',checks>=(35 if mode=='compose' else 30))
+        report['result']='PASS'
         print(f'{checks} passed, 0 failed, 0 skipped',flush=True)
     finally:
+        if report['result'] == 'RUNNING': report['result']='FAIL'
+        (work/'acceptance.json').write_text(json.dumps(report,indent=2),encoding='utf8')
         for project in projects:
             ids=command(['docker','ps','-aq','--filter',('label=com.docker.compose.project=' if mode=='compose' else 'label=workspace.deployment=')+project]).decode().split()
             if ids: subprocess.run(['docker','rm','-f',*ids],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -779,7 +863,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         subprocess.run(['docker','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         subprocess.run(['docker','volume','rm',name+'-files'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         if mode=='stack':
-            for node in ('manager','worker'):
+            for node in swarm_nodes:
                 result=subprocess.run(['docker','logs',name+'-'+node],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
                 (work/(node+'-daemon.log')).write_bytes(result.stdout)
                 subprocess.run(['docker','rm','-fv',name+'-'+node],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

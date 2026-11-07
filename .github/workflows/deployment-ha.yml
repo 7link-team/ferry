@@ -1,0 +1,92 @@
+name: Multi-node deployment acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deployment-ha.yml
+      - scripts/test-deployments.py
+      - scripts/test-deployments.sh
+      - crates/server/src/deployments/**
+      - crates/runner/**
+      - crates/protocol/**
+  pull_request:
+    paths:
+      - .github/workflows/deployment-ha.yml
+      - scripts/test-deployments.py
+      - scripts/test-deployments.sh
+      - crates/server/src/deployments/**
+      - crates/runner/**
+      - crates/protocol/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-ha-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swarm-failure-recovery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FERRY_REQUIRE_ALL: "1"
+      FERRY_TEST_DEPLOY_MODE: stack
+      FERRY_TEST_SWARM_HA: "1"
+      FERRY_TEST_OUTPUT_DIR: ${{ github.workspace }}/harness-logs/fixtures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+          save-if: false
+      - name: Verify the isolated Docker test environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-client python3 git curl
+          docker info
+          mkdir -p "$FERRY_TEST_OUTPUT_DIR"
+      - run: npm ci
+      - run: npm run build
+      - run: cargo fmt --all -- --check
+      - name: Build server and HostAgent
+        run: cargo build --locked -p ferry-server -p ferry-runner
+      - name: Three-node Swarm deployment and fault recovery through SSH and HostAgent
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The harness owns three nested Docker daemons. It never initializes
+          # Swarm on the runner's host daemon and never targets user machines.
+          bash scripts/test-deployments.sh 2>&1 | tee harness-logs/acceptance.log
+      - name: Record the tested boundary
+        if: always()
+        run: |
+          {
+            echo '### Three-node Swarm acceptance'
+            echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
+            echo 'One manager and two workers, each with an isolated Docker daemon.'
+            echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
+            echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
+            echo 'See acceptance.json and daemon logs for actual results.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swarm-ha-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            harness-logs/acceptance.log
+            harness-logs/fixtures/**/acceptance.json
+            harness-logs/fixtures/**/manager-daemon.log
+            harness-logs/fixtures/**/worker-daemon.log
+            harness-logs/fixtures/**/worker2-daemon.log
+            harness-logs/fixtures/**/swarm-services.log
+            harness-logs/fixtures/**/swarm-cli-errors.log

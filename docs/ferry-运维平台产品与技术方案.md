@@ -1212,3 +1212,16 @@ placement:
 新增工作空间级 `POST /deployment-capabilities`，请求 `{manifest: string}`，复用 `deployments.read`，返回四引擎 `{mode,supported,reason?}`。纯渲染检查不访问主机、凭据或其他空间，不修改业务数据或增加提交审计；前端显式触发、变更配置/语言后清除旧结果，取消过期请求。结果只能证明配置兼容，实际环境、引用资源和权限仍由保存与部署预览校验。禁止将“可渲染”显示为“集群可用”。
 
 PXC/Redis/NATS/TiDB 的高可用拓扑模板、协议健康检查、Nomad接入及真实多机故障恢复尚未在此阶段实现；以独立真实验收作为后续门禁。
+
+
+### GitHub Actions 多节点部署验收（2026-11-07）
+
+工作流 `Multi-node deployment acceptance`（`.github/workflows/deployment-ha.yml`）可在 Actions 页面手动触发；相关部署、Runner、协议及测试文件的 main 推送和 PR 也会触发。复用 `scripts/test-deployments.py` 的真实 Ferry API、SSH 和 Host Agent 部署链路，不使用用户主机或已有工作空间。
+
+启用 `FERRY_TEST_DEPLOY_MODE=stack` 和 `FERRY_TEST_SWARM_HA=1` 后，在 CI 自有 Docker 网络创建一个 manager 和两个 worker，各自运行隔离的 Docker daemon。默认测试仍保留原有两节点路径。HA 用例采用 v2 定义、两个副本、标签约束和 `maxReplicasPerNode: 1`；三个可用节点为 start-first 滚动更新及故障替换保留一个位置，不能将两个副本简单改为三个而不调整更新策略或增加节点。
+
+SSH 和 Host Agent 分别验证：约束实际进入 Swarm 服务规格、两个健康副本分散在不同节点；杀死任务容器后补齐副本；停止承载任务的 worker daemon 后在其余节点重调度并恢复 HTTP；worker 回归后保持健康，且 Ferry 没有额外创建部署修订。随后继续验证滚动更新、历史变量/配置回滚、定时重启、无法满足的放置约束失败及恢复、就绪检查失败及恢复。不能满足约束时不得静默删除约束或报告部署成功。
+
+每次执行保留 `swarm-ha-<run_id>-<attempt>` artifact，包含断言结果 `acceptance.json`、两条链路四个故障阶段的任务/节点快照、验收输出及 daemon/失败诊断日志，保留14天。只上传明确列出的诊断文件，不上传临时数据库、主密钥或整个测试目录。本地具备 Docker/Linux 测试环境时也可设置上述两个变量运行 `bash scripts/test-deployments.sh`；可选 `FERRY_TEST_OUTPUT_DIR` 必须指向已创建的证据父目录。
+
+三个节点共享 Actions runner 的宿主内核：覆盖独立 daemon 退出与调度恢复，不等同于跨物理主机网络隔离、三 manager 仲裁、持久卷跨机迁移，或 PXC/Redis/NATS/TiDB 的协议级高可用验收。后者仍需对应拓扑和独立场景。工作流配置与语法检查通过不代表上述运行测试已通过；实际结论以对应提交的 Actions 执行结果和证据为准。

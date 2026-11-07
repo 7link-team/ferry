@@ -66,15 +66,37 @@ fn validate_placement(constraints: &[String], max: Option<u32>) -> Result<()> {
         return Err(bad("deployment.portable.placementInvalid"));
     }
     for constraint in constraints {
-        let Some((key, value)) = constraint.split_once("==").or_else(|| constraint.split_once("!=")) else {
+        let Some((key, value)) = constraint
+            .split_once("==")
+            .or_else(|| constraint.split_once("!="))
+        else {
             return Err(bad("deployment.portable.placementInvalid"));
         };
         let (key, value) = (key.trim(), value.trim());
-        let label = key.strip_prefix("node.labels.").or_else(|| key.strip_prefix("engine.labels."));
-        let known = ["node.id", "node.hostname", "node.role", "node.platform.os", "node.platform.arch"].contains(&key);
-        if constraint.len() > 256 || constraint.chars().any(char::is_control) || (!known && !label.is_some_and(|label| !label.is_empty()
-            && label.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-/".contains(&c))))
-            || value.is_empty() || !value.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-/:".contains(&c))
+        let label = key
+            .strip_prefix("node.labels.")
+            .or_else(|| key.strip_prefix("engine.labels."));
+        let known = [
+            "node.id",
+            "node.hostname",
+            "node.role",
+            "node.platform.os",
+            "node.platform.arch",
+        ]
+        .contains(&key);
+        if constraint.len() > 256
+            || constraint.chars().any(char::is_control)
+            || (!known
+                && !label.is_some_and(|label| {
+                    !label.is_empty()
+                        && label
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"._-/".contains(&c))
+                }))
+            || value.is_empty()
+            || !value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._-/:".contains(&c))
             || (key == "node.role" && !["manager", "worker"].contains(&value))
         {
             return Err(bad("deployment.portable.placementInvalid"));
@@ -354,8 +376,11 @@ fn identifier(v: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' || c == b'_')
 }
 fn valid_image(image: &str) -> bool {
-    !image.is_empty() && !image.starts_with('-')
-        && !image.chars().any(|c| c.is_whitespace() || c.is_control() || c == '$')
+    !image.is_empty()
+        && !image.starts_with('-')
+        && !image
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '$')
 }
 fn environment_name(v: &str) -> bool {
     let mut chars = v.bytes();
@@ -522,9 +547,12 @@ fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
     if mode != "auto" {
         return mode;
     }
-    if m.services.iter().any(|s| s.artifact.is_some()) && m.services.iter().all(|s| s.image.is_empty()) {
+    if m.services.iter().any(|s| s.artifact.is_some())
+        && m.services.iter().all(|s| s.image.is_empty())
+    {
         "native"
-    } else if m.services.iter().any(|s| s.placement.is_some()) || !m.overrides.stack.is_empty()
+    } else if m.services.iter().any(|s| s.placement.is_some())
+        || !m.overrides.stack.is_empty()
         || m.strategy
             .as_ref()
             .is_some_and(|s| s.kind == "rolling" || s.max_unavailable.is_some())
@@ -537,13 +565,18 @@ fn effective_mode<'a>(m: &Manifest, mode: &'a str) -> &'a str {
 pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
     let mode = effective_mode(m, mode);
     // Also guard direct rendering callers, independently of parse_for.
-    if m.services.iter().any(|s| s.placement.is_some()) && (mode != "stack" || m.api_version != "ferry/v2") {
+    if m.services.iter().any(|s| s.placement.is_some())
+        && (mode != "stack" || m.api_version != "ferry/v2")
+    {
         return Err(bad("deployment.portable.placementMode"));
     }
     if mode == "native" {
         return render_native(m);
     }
-    if m.services.iter().any(|s| s.image.is_empty() || (m.api_version == "ferry/v1" && s.artifact.is_some())) {
+    if m.services
+        .iter()
+        .any(|s| s.image.is_empty() || (m.api_version == "ferry/v1" && s.artifact.is_some()))
+    {
         return Err(bad("deployment.manifest.026"));
     }
     if !["compose", "docker", "stack"].contains(&mode) {
@@ -572,7 +605,9 @@ pub fn render_for(m: &Manifest, mode: &str) -> Result<String> {
         if let Some(placement) = &s.placement {
             validate_placement(&placement.constraints, placement.max_replicas_per_node)?;
             let mut value = json!({"constraints": placement.constraints});
-            if let Some(max) = placement.max_replicas_per_node { value["max_replicas_per_node"] = json!(max); }
+            if let Some(max) = placement.max_replicas_per_node {
+                value["max_replicas_per_node"] = json!(max);
+            }
             v["deploy"]["placement"] = value;
         }
         if mode == "stack" {
@@ -762,7 +797,10 @@ fn render_native(m: &Manifest) -> Result<String> {
     let mut services = BTreeMap::new();
     let mut volumes = BTreeMap::new();
     for service in &m.services {
-        if service.artifact.is_none() || (m.api_version == "ferry/v1" && !service.image.is_empty()) || service.replicas != 1 {
+        if service.artifact.is_none()
+            || (m.api_version == "ferry/v1" && !service.image.is_empty())
+            || service.replicas != 1
+        {
             return Err(bad("deployment.manifest.035"));
         }
         if service
@@ -1000,19 +1038,35 @@ fn validate_compose(doc: &Value, mode: &str, portable: bool) -> Result<()> {
                 .as_object()
                 .ok_or_else(|| bad("deployment.manifest.060"))?;
             if d.keys().any(|k| {
-                k != "replicas" && k != "resources" && !(mode == "stack" && (k == "update_config" || (portable && k == "placement")))
+                k != "replicas"
+                    && k != "resources"
+                    && !(mode == "stack"
+                        && (k == "update_config" || (portable && k == "placement")))
             }) {
                 return Err(bad("deployment.manifest.061"));
             }
             if let Some(placement) = d.get("placement") {
-                let placement = placement.as_object().ok_or_else(|| bad("deployment.portable.placementInvalid"))?;
-                if placement.keys().any(|k| !["constraints", "max_replicas_per_node"].contains(&k.as_str())) {
+                let placement = placement
+                    .as_object()
+                    .ok_or_else(|| bad("deployment.portable.placementInvalid"))?;
+                if placement
+                    .keys()
+                    .any(|k| !["constraints", "max_replicas_per_node"].contains(&k.as_str()))
+                {
                     return Err(bad("deployment.portable.placementInvalid"));
                 }
-                let constraints: Vec<String> = serde_json::from_value(placement.get("constraints").cloned().unwrap_or(json!([])))
-                    .map_err(|_| bad("deployment.portable.placementInvalid"))?;
-                let max = placement.get("max_replicas_per_node").map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok())
-                    .ok_or_else(|| bad("deployment.portable.placementInvalid"))).transpose()?;
+                let constraints: Vec<String> = serde_json::from_value(
+                    placement.get("constraints").cloned().unwrap_or(json!([])),
+                )
+                .map_err(|_| bad("deployment.portable.placementInvalid"))?;
+                let max = placement
+                    .get("max_replicas_per_node")
+                    .map(|v| {
+                        v.as_u64()
+                            .and_then(|n| u32::try_from(n).ok())
+                            .ok_or_else(|| bad("deployment.portable.placementInvalid"))
+                    })
+                    .transpose()?;
                 validate_placement(&constraints, max)?;
             }
             if let Some(update) = d.get("update_config") {
@@ -1226,7 +1280,8 @@ mod tests {
         value["apiVersion"] = json!("ferry/v2");
         // Use no port mapping so the exact same definition is valid on systemd.
         value["services"][0]["ports"] = json!([]);
-        value["services"][0]["artifact"] = json!({"source":"pipeline", "pipeline":"build", "path":"bin/web"});
+        value["services"][0]["artifact"] =
+            json!({"source":"pipeline", "pipeline":"build", "path":"bin/web"});
         value
     }
     #[test]
@@ -1236,13 +1291,29 @@ mod tests {
             let m = parse_for(&portable.to_string(), mode).unwrap();
             let rendered = render_for(&m, mode).unwrap();
             let doc: Value = serde_json::from_str(&rendered).unwrap();
-            assert_eq!(doc["services"]["web"].get("artifact").is_some(), mode == "native");
-            assert_eq!(doc["services"]["web"].get("image").is_some(), mode != "native");
+            assert_eq!(
+                doc["services"]["web"].get("artifact").is_some(),
+                mode == "native"
+            );
+            assert_eq!(
+                doc["services"]["web"].get("image").is_some(),
+                mode != "native"
+            );
             // Existing v1 and v2 use exactly the same renderer and runtime artifact.
             let mut legacy = portable.clone();
             legacy["apiVersion"] = json!("ferry/v1");
-            legacy["services"][0].as_object_mut().unwrap().remove(if mode == "native" {"image"} else {"artifact"});
-            assert_eq!(rendered, render_for(&parse_for(&legacy.to_string(), mode).unwrap(), mode).unwrap());
+            legacy["services"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove(if mode == "native" {
+                    "image"
+                } else {
+                    "artifact"
+                });
+            assert_eq!(
+                rendered,
+                render_for(&parse_for(&legacy.to_string(), mode).unwrap(), mode).unwrap()
+            );
             assert_eq!(rendered, render_for(&m, mode).unwrap());
         }
         let mut legacy = portable.clone();
@@ -1261,12 +1332,21 @@ mod tests {
         value["services"][0]["image"] = json!("bad image");
         assert!(parse_for(&value.to_string(), "native").is_err());
         value = portable_sample();
-        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        value["services"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("artifact");
         assert!(parse_for(&value.to_string(), "native").is_err());
-        value["services"][0].as_object_mut().unwrap().remove("image");
+        value["services"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("image");
         assert!(parse_for(&value.to_string(), "compose").is_err());
         value = portable_sample();
-        value["services"][0].as_object_mut().unwrap().remove("image");
+        value["services"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("image");
         assert!(parse_for(&value.to_string(), "docker").is_err());
     }
     #[test]
@@ -1275,16 +1355,30 @@ mod tests {
         value["services"][0]["placement"] = json!({"constraints":["node.role == worker", "node.labels.zone != zone-a"], "maxReplicasPerNode":1});
         let manifest = parse_for(&value.to_string(), "stack").unwrap();
         let doc: Value = serde_json::from_str(&render_for(&manifest, "stack").unwrap()).unwrap();
-        assert_eq!(doc["services"]["web"]["deploy"]["placement"], json!({"constraints":["node.role == worker", "node.labels.zone != zone-a"], "max_replicas_per_node":1}));
+        assert_eq!(
+            doc["services"]["web"]["deploy"]["placement"],
+            json!({"constraints":["node.role == worker", "node.labels.zone != zone-a"], "max_replicas_per_node":1})
+        );
         for mode in ["native", "docker", "compose"] {
             assert!(parse_for(&value.to_string(), mode).is_err());
             assert!(render_for(&manifest, mode).is_err());
         }
-        for constraint in ["node.role = worker", "node.role == admin", "node.labels. == x", "unknown == value", "node.hostname == x;touch /tmp/x", "node.hostname == "] {
+        for constraint in [
+            "node.role = worker",
+            "node.role == admin",
+            "node.labels. == x",
+            "unknown == value",
+            "node.hostname == x;touch /tmp/x",
+            "node.hostname == ",
+        ] {
             value["services"][0]["placement"]["constraints"] = json!([constraint]);
-            assert!(parse_for(&value.to_string(), "stack").is_err(), "{constraint}");
+            assert!(
+                parse_for(&value.to_string(), "stack").is_err(),
+                "{constraint}"
+            );
         }
-        value["services"][0]["placement"]["constraints"] = json!(vec!["node.platform.os == linux"; 33]);
+        value["services"][0]["placement"]["constraints"] =
+            json!(vec!["node.platform.os == linux"; 33]);
         assert!(parse_for(&value.to_string(), "stack").is_err());
         value["services"][0]["placement"]["constraints"] = json!([]);
         for max in [0, 101] {
@@ -1292,7 +1386,10 @@ mod tests {
             assert!(parse_for(&value.to_string(), "stack").is_err());
         }
         value["apiVersion"] = json!("ferry/v1");
-        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        value["services"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("artifact");
         assert!(parse_for(&value.to_string(), "stack").is_err());
     }
     #[test]
@@ -1306,7 +1403,10 @@ mod tests {
         value["overrides"] = json!({"stack":{"services":{"web":{"deploy":{"placement":{"constraints":["node.role == worker"], "max_replicas_per_node":1}}}}}});
         assert!(parse_for(&value.to_string(), "stack").is_ok());
         value["apiVersion"] = json!("ferry/v1");
-        value["services"][0].as_object_mut().unwrap().remove("artifact");
+        value["services"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("artifact");
         assert!(parse_for(&value.to_string(), "stack").is_err());
     }
     fn fails(v: &Value, part: &str) {

@@ -238,7 +238,11 @@ pub async fn get(
         &s.db,
         scope.workspace_id,
         &mut named,
-        &[crate::resources::names::target("target_ref", "target_name", "target_kind")],
+        &[crate::resources::names::target(
+            "target_ref",
+            "target_name",
+            "target_kind",
+        )],
     )
     .await?;
     out = named.remove(0);
@@ -269,8 +273,16 @@ pub async fn revision_get(
         scope.workspace_id,
         &mut named,
         &[
-            crate::resources::names::of("deployment_id", "deployment_name", crate::resources::names::Kind::Deployment),
-            crate::resources::names::of("triggered_by", "triggered_by_name", crate::resources::names::Kind::User),
+            crate::resources::names::of(
+                "deployment_id",
+                "deployment_name",
+                crate::resources::names::Kind::Deployment,
+            ),
+            crate::resources::names::of(
+                "triggered_by",
+                "triggered_by_name",
+                crate::resources::names::Kind::User,
+            ),
         ],
     )
     .await?;
