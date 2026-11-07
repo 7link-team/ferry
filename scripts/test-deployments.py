@@ -94,6 +94,8 @@ def main():
             for project in projects:
                 result=subprocess.run(['docker','exec',name+'-manager','/usr/bin/docker','service','ps','--no-trunc',project+'_web'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
                 (work/(project+'-tasks.log')).write_bytes(result.stdout)
+                result=subprocess.run(['docker','exec',name+'-manager','/usr/bin/docker','service','inspect','--format','{{json .UpdateStatus}}',project+'_web'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+                (work/(project+'-update.log')).write_bytes(result.stdout)
         if not condition and mode=='native':
             debug=subprocess.run(['docker','exec',name,'journalctl','--no-pager','-n','120'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             (work/'native-journal.log').write_bytes(debug.stdout)

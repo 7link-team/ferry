@@ -90,3 +90,5 @@ jobs:
             harness-logs/fixtures/**/worker2-daemon.log
             harness-logs/fixtures/**/swarm-services.log
             harness-logs/fixtures/**/swarm-cli-errors.log
+            harness-logs/fixtures/**/*-tasks.log
+            harness-logs/fixtures/**/*-update.log
