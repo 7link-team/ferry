@@ -231,10 +231,11 @@ fn styled_field(robot: Robot, notice: &Notice<'_>, name: &str, value: &str) -> S
         (Robot::Feishu, Some(accent)) => format!("<font color='{}'>{text}</font>", accent.feishu()),
         (Robot::WeCom, Some(accent)) => format!(
             "<font color=\"{}\">{text}</font>",
-            if matches!(accent, Accent::Green) {
-                "info"
-            } else {
-                "warning"
+            match accent {
+                Accent::Green => "info",
+                Accent::Red => "warning",
+                // WeCom only supports info/comment/warning, not arbitrary blue.
+                _ => "comment",
             }
         ),
         _ => text,
@@ -487,6 +488,7 @@ mod tests {
             accent: Some(Accent::Blue),
             fields: vec![
                 ("Repository".into(), "team/app".into()),
+                ("Commit message".into(), "fix: <unsafe> & [message]".into()),
                 ("Added".into(), "12 lines".into()),
                 ("Deleted".into(), "3 lines".into()),
             ],
@@ -495,6 +497,7 @@ mod tests {
                 "https://example.invalid/team/app".into(),
             )],
             field_accents: vec![
+                ("Commit message".into(), Accent::Blue),
                 ("Added".into(), Accent::Green),
                 ("Deleted".into(), Accent::Red),
             ],
@@ -508,6 +511,14 @@ mod tests {
         assert!(elements.contains("[team/app](https://example.invalid/team/app)"));
         assert!(elements.contains("<font color='green'>Added：12 lines</font>"));
         assert!(elements.contains("<font color='red'>Deleted：3 lines</font>"));
+        assert!(elements.contains("<font color='blue'>Commit message：fix:"));
+        assert!(!elements.contains("fix: <unsafe>"));
+        let wecom = body(Robot::WeCom, &url, &notice).unwrap();
+        let content = wecom["markdown"]["content"].as_str().unwrap();
+        assert!(content.contains("<font color=\"comment\">Commit message：fix:"));
+        assert!(content.contains("<font color=\"info\">Added：12 lines</font>"));
+        assert!(content.contains("<font color=\"warning\">Deleted：3 lines</font>"));
+
         assert_eq!(
             body(Robot::Slack, &url, &notice).unwrap()["attachments"][0]["color"],
             "#2563eb"

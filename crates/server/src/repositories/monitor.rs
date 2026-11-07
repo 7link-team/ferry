@@ -1249,6 +1249,13 @@ async fn deliver_notice(
                 (
                     crate::i18n::render(
                         crate::i18n::current_locale(),
+                        &crate::i18n::Message::new("repository.monitor.commitMessageLabel"),
+                    ),
+                    crate::notifications::webhook::Accent::Blue,
+                ),
+                (
+                    crate::i18n::render(
+                        crate::i18n::current_locale(),
                         &crate::i18n::Message::new("repository.monitor.addedLinesLabel"),
                     ),
                     crate::notifications::webhook::Accent::Green,
