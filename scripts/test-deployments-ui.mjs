@@ -10,6 +10,30 @@ try {
   const workspaceId = identity.workspaces.find(workspace => workspace.slug === 'ops').id;
   const page = await context.newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
+  async function executeAndWait(outputText) {
+    const request = page.waitForResponse(response => response.request().method() === 'POST'
+      && response.url().endsWith(`/deployments/${id}/executions`));
+    await page.getByRole('button', { name: '执行部署', exact: true }).click();
+    const response = await request;
+    assert.equal(response.status(), 202);
+    const execution = await response.json();
+    const deadline = Date.now() + 120000;
+    let current;
+    do {
+      const response = await context.request.get(`${origin}/api/workspaces/${workspaceId}/deployments/${id}`);
+      assert.equal(response.status(), 200);
+      current = await response.json();
+      if (current.latest_revision?.id === execution.id && !['queued', 'running'].includes(current.state)) break;
+      await page.waitForTimeout(250);
+    } while (Date.now() < deadline);
+    assert.equal(current.latest_revision?.id, execution.id);
+    assert.equal(current.state, 'succeeded');
+    await page.waitForFunction(text => document.querySelector('[aria-label="执行输出"]')?.textContent?.includes(text), outputText);
+    // The live detail must also observe completion before opening the history.
+    await page.getByRole('button', { name: '预览目标差异', exact: true }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent === '预览目标差异' && !button.disabled));
+  }
+
   if (process.argv[5] === 'groups') {
     await page.goto(`${origin}/zh-CN/workspaces/${workspaceId}/deployments/${id}`);
     const targets=page.getByRole('region',{name:'逐台执行结果'});
@@ -40,8 +64,7 @@ try {
     assert((await bindings.textContent()).includes('BOUND_SECRET'));
     assert(!(await page.locator('body').textContent()).includes('fixture-secret-v1'));
     page.on('dialog', dialog => dialog.accept());
-    await page.getByRole('button', { name: '执行部署', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('[aria-label="执行输出"]')?.textContent?.includes('部署成功'));
+    await executeAndWait('部署成功');
     await page.goto(`${origin}/zh-CN/workspaces/${workspaceId}/deployment-revisions/${revision}`);
     await page.getByRole('button', { name: '预览目标差异', exact: true }).click();
     await page.getByText('变量引用 · 历史版本', {exact:true}).waitFor();
@@ -60,8 +83,7 @@ try {
   await page.getByRole('heading', { name: '产物差异', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '执行部署', exact: true }).isEnabled(), true);
   page.on('dialog', dialog => dialog.accept());
-  await page.getByRole('button', { name: '执行部署', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('[aria-label="执行输出"]')?.textContent?.includes('退出码：0'));
+  await executeAndWait('退出码：0');
   await page.goto(`${origin}/zh-CN/workspaces/${workspaceId}/deployment-revisions/${revision}`);
   await page.getByRole('button', { name: /^回滚到 #/ }).waitFor();
   await page.getByRole('button', { name: '预览目标差异', exact: true }).click();

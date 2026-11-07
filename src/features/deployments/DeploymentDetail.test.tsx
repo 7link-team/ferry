@@ -38,15 +38,23 @@ it("diff retains reordered lines as a change and exact equality as unchanged", (
   expect(artifactDiff("a\n", "a\n")).toBe("产物内容一致。");
 });
 
-it("historical rendering uses the selected snapshot and stops polling a completed revision", async () => {
+it("historical rendering stays fixed while live application polling restores actions", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     calls.push(url);
     const row = url.includes("deployment-revisions")
       ? { id: "10", deployment_id: "1", number: 2, state: "succeeded", rendered: "historical-content", action: "apply" }
-      : { id: "1", name: "web", state: "running", mode: "native", target_ref: "2", target_name: "Linux host", version: 3 };
+      : { id: "1", name: "web", state, mode: "native", target_ref: "2", target_name: "Linux host", version: 3 };
     return { ok: true, json: async () => row };
   }));
   await act(async () => root.render(<DeploymentDetail workspace="ops" revisionId="10" permissions={new Set()} />));
+  const preview = () => [...host.querySelectorAll("button")].find(button => button.textContent === "预览目标差异")!;
+  expect(preview().disabled).toBe(true);
+  const before = calls.length;
+  await tick(1200);
+  expect(calls.length).toBeGreaterThan(before);
+  state = "succeeded";
+  await tick(1200);
+  expect(preview().disabled).toBe(false);
   const count = calls.length;
   await tick(6000);
   expect(calls).toHaveLength(count);

@@ -41,7 +41,8 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
         const next = await api<Deployment>(`${root}/${encodeURIComponent(id ?? "")}`, { signal: controller.signal });
         if (!live || controller.signal.aborted) return;
         setApp(next); setRevision(selected ?? next.latest_revision); setError("");
-        finished = !deploymentActive(selected?.state ?? next.state);
+        // Historical content is fixed, but action availability follows the live application.
+        finished = !deploymentActive(next.state) && !deploymentActive(selected?.state ?? next.state);
         if (appRef.current && appRef.current.version !== next.version) setPreview(undefined);
       } catch (e) { if (live && !controller.signal.aborted) setError(errorText(e)); }
       finally { request = undefined; if (live && !finished && !document.hidden) timer = setTimeout(load, 1200); }
