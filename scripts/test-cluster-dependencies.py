@@ -186,7 +186,16 @@ def main():
                         (destination / file.name).write_text(redact(file.read_text(errors='replace')), encoding='utf8')
         (work / 'acceptance.json').write_text(json.dumps(report, indent=2), encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            annotation = json.dumps(report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            # Check annotations truncate at 4096 bytes. Keep the complete report
+            # in the artifact and an independently parseable failure summary.
+            summary = dict(report, full_report='acceptance.json')
+            if summary.get('error'):
+                summary['error'] = summary['error'][-600:]
+            for key in ('binaries', 'images', 'error'):
+                if len(json.dumps(summary, separators=(',', ':')).encode()) <= 3900:
+                    break
+                summary.pop(key, None)
+            annotation = json.dumps(summary, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
             print('::notice title=Ferry dependency evidence::' + annotation, flush=True)
         print(report['result'], engine, len(report['checks']), 'checks;', work, flush=True)
     return result_code

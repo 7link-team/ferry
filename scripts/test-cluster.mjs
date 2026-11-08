@@ -238,8 +238,31 @@ try {
   }
   // Start a fresh live terminal if an earlier dependency fault closed it, so
   // the full-broker-outage assertion cannot pass on a stale closed flag.
-  await page.evaluate(path=>{window.terminal.onclose=null;window.terminal.close();window.terminalClosed=false;window.terminal=new WebSocket(path);window.terminal.onclose=()=>{window.terminalClosed=true;};},B.replace('http:','ws:')+'/api'+root+'/terminal-sessions');
-  await until(()=>page.evaluate(()=>window.terminal.readyState===WebSocket.OPEN),'live terminal before full broker outage');
+  // Database recovery is eventual across pools, ownership and ID leases. Retry
+  // a failed terminal handshake, then require actual shell output from the same
+  // connection that will be tested during the full broker outage below.
+  const recoveryCommand=process.platform==='win32'?`powershell -NoProfile -Command "Write-Output ('RECOVERED_' + (2+3))"\r`:'printf "RECOVERED_%s\\n" $((2+3))\r';
+  await page.evaluate(({path,command})=>{
+    window.terminal.onclose=null;window.terminal.close();window.terminalClosed=false;
+    window.recoveryFrames='';window.recoveryAttempt=0;
+    window.openRecoveryTerminal=()=>{
+      window.recoveryAttempt++;window.recoveryFrames='';
+      const socket=new WebSocket(path);window.terminal=socket;socket.binaryType='arraybuffer';
+      socket.onopen=()=>socket.send(new TextEncoder().encode(command));
+      socket.onmessage=event=>{
+        const text=typeof event.data==='string'?event.data:new TextDecoder().decode(event.data);
+        window.recoveryFrames+=text;
+        if(text.includes('\x1b[6n'))socket.send(new TextEncoder().encode('\x1b[1;1R'));
+      };
+      socket.onclose=()=>{window.terminalClosed=true;};
+    };window.openRecoveryTerminal();
+  },{path:B.replace('http:','ws:')+'/api'+root+'/terminal-sessions',command:recoveryCommand});
+  await until(()=>page.evaluate(()=>{
+    if(window.terminal.readyState===WebSocket.OPEN&&window.recoveryFrames.includes('RECOVERED_5'))return true;
+    if(window.terminal.readyState===WebSocket.CLOSED)window.openRecoveryTerminal();
+    return false;
+  }),'actual terminal shell recovers before full broker outage',90);
+  console.log('PASS fresh terminal executes real shell after dependency recovery; attempts',await page.evaluate(()=>window.recoveryAttempt));
   await page.evaluate(()=>{window.terminalClosed=false;});
   for(const broker of brokers)await stop(broker);
   await until(()=>page.evaluate(()=>window.terminalClosed),'terminal closes on broker failure',35);
