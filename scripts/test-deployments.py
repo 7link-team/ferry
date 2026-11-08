@@ -469,7 +469,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 nats_config = next(t for t in api(f'/workspaces/{workspace_ops}/config-templates')['items'] if t['name']=='example-nats-config')
                 report['nats_scenario_templates']={'application':nats_template,'configuration':nats_config}
                 token_key='nats-token-'+kind
-                token=uuid.uuid4().hex+uuid.uuid4().hex
+                # NATS parses environment values as configuration literals. A
+                # letter prefix keeps random hex from being parsed as a number.
+                token='nats-'+uuid.uuid4().hex+uuid.uuid4().hex
                 create('variables',{'name':token_key,'scope':'deploy','kind':'secret','value':token})
                 published_ports = [18082,18083,18084] if mode=='stack' else nats_host_ports
                 values={'token':token_key}

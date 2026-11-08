@@ -813,7 +813,7 @@
   "templates.examples.nativeDescription": "先執行配套的 Native HTTP 建置流水線，再填寫其名稱或 ID，選擇 Native 模式、自己的 Linux 主機和未使用連接埠。部署主機需要 Python 3、systemd 及部署權限。使用 app 歸檔，提供 /health 檢查；回應內容透過環境變數傳入。僅初始化範本，不自動部署；不包含多機高可用或正式環境入口。",
   "templates.examples.nativePipeline": "建置流水線名稱或 ID",
   "templates.examples.natsName": "範例：NATS JetStream 三成員",
-  "templates.examples.natsDescription": "Compose 單機三程序或 Stack 三成員範本；Stack 須先為三個不同節點設定標籤 ferry-nats=a/b/c，資料卷固定在各節點，不跨機遷移。先建立 deploy 範圍的密鑰變數，再綁定客戶端驗證變數、三個發布連接埠與客戶端可達的通告端點。使用 example-nats-config。串流與消費者副本由客戶端設定；HTTP 健康不代表仲裁健康。僅初始化範本，不自動部署；未設定正式環境 TLS 或路由驗證。",
+  "templates.examples.natsDescription": "Compose 單機三程序或 Stack 三成員範本；Stack 須先為三個不同節點設定標籤 ferry-nats=a/b/c，資料卷固定在各節點，不跨機遷移。先建立 deploy 範圍的密鑰變數，再綁定客戶端驗證變數、三個發布連接埠與客戶端可達的通告端點。使用 example-nats-config。串流與消費者副本由客戶端設定；HTTP 健康不代表仲裁健康。僅初始化範本，不自動部署；未設定正式環境 TLS 或路由驗證。 驗證密鑰須以字母開頭，僅含字母、數字、連字號與底線（例如 nats- 加隨機十六進位字串）。",
   "templates.examples.natsConfigDescription": "NATS 成員共用設定；從環境變數讀取成員名稱、客戶端通告端點與驗證 token，路由限制在應用網路。修改影響後續部署，不更改歷史快照。",
   "templates.examples.natsToken": "客戶端驗證密鑰變數",
   "templates.examples.natsConfig": "設定範本名稱或 ID",
