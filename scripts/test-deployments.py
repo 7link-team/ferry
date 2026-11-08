@@ -908,7 +908,13 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             summary['source_commit'] = os.environ.get('GITHUB_SHA','')
             summary['template_sha256'] = hashlib.sha256(Path('crates/server/src/templates/examples/http-service.json').read_bytes()).hexdigest()
             summary['checks'] = [{'name':row['name'][:180],'passed':row['passed']} for row in report['checks']]
+            summary['check_count'] = len(report['checks'])
             summary['scenario_initialized'] = 'scenario_template' in report
+            summary['full_report'] = 'acceptance.json'
+            # GitHub truncates annotations at 4096 bytes. Keep a valid summary
+            # with the final checks; the artifact contains the complete report.
+            while len(json.dumps(summary,separators=(',',':')).encode()) > 3800:
+                summary['checks'].pop(0)
             notice = json.dumps(summary,separators=(',',':')).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
             print('::notice title=Application scenario evidence::'+notice,flush=True)
         for project in projects:
