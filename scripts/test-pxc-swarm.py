@@ -27,12 +27,16 @@ def main():
     output = Path(os.environ.get('FERRY_PXC_OUTPUT', 'pxc-evidence')).resolve()
     output.mkdir(parents=True, exist_ok=True)
     prefix = 'fpxc-' + uuid.uuid4().hex[:10]
+    # Reconnecting a partitioned manager at its advertised IP requires an
+    # explicitly configured IPAM subnet, rather than Docker's automatic pool.
+    underlay_subnet = f'10.241.{secrets.randbelow(256)}.0/24'
     password, sst_password = secrets.token_hex(24), secrets.token_hex(24)
     if os.environ.get('GITHUB_ACTIONS') == 'true':
         print('::add-mask::' + password, flush=True)
         print('::add-mask::' + sst_password, flush=True)
     report = {'result': 'RUNNING', 'source': os.environ.get('GITHUB_SHA', 'local'),
               'prefix': prefix, 'image': IMAGE, 'variant': IMAGE_VARIANT,
+              'underlay_subnet': underlay_subnet,
               'ci_mysql_apparmor_complain': os.environ.get('FERRY_PXC_RESTORE_MYSQL_APPARMOR') == '1',
               'engine': ENGINE, 'checks': [], 'snapshots': [],
               'boundary': 'Three nested daemons on one shared kernel; direct Swarm experiment, not Ferry API or physical-host certification',
@@ -97,6 +101,16 @@ def main():
         return dict(line.split('\t', 1) for line in raw.splitlines() if '\t' in line) if raw else {}
 
     def ready(node, size):
+        container = task(node)
+        if not container:
+            return False
+        # The image starts a temporary bootstrap mysqld (port 0) to initialize
+        # users. Its SQL/WSREP status can look ready before entrypoint stops it.
+        # Only the final exec'ed server may donate state to the next member.
+        process = engine(node, 'exec', container, 'cat', '/proc/1/comm',
+                         check=False, timeout=15)
+        if process.returncode != 0 or process.stdout.strip() != 'mysqld':
+            return False
         state = status(node)
         return (state.get('wsrep_cluster_size') == str(size) and state.get('wsrep_cluster_status') == 'Primary'
                 and state.get('wsrep_connected') == 'ON' and state.get('wsrep_ready') == 'ON'
@@ -104,6 +118,25 @@ def main():
 
     def cluster(size=3, nodes=NODES):
         return all(ready(node, size) for node in nodes)
+
+    startup_states = set()
+
+    def joining(size, nodes):
+        # Swarm retains only a few stopped tasks. Preserve the first failure
+        # while it still exists, before retries replace its diagnostic state.
+        for node in nodes:
+            ids = engine(node, 'ps', '-aq', '--filter',
+                         'label=com.docker.swarm.service.name=' + prefix + '-db-' + node,
+                         check=False, timeout=15).stdout.split()
+            if ids:
+                result = engine(node, 'inspect', '--format', '{{.Id}} {{json .State}}', *ids,
+                                check=False, timeout=20)
+                for line in result.stdout.splitlines():
+                    if line not in startup_states:
+                        startup_states.add(line)
+                        with (output / f'runtime-startup-{node}.log').open('a', encoding='utf8') as log:
+                            log.write(redact(line) + '\n')
+        return cluster(size, nodes)
 
     def snapshot(stage):
         states = {}
@@ -137,7 +170,7 @@ def main():
                 '--env', 'MYSQL_ROOT_PASSWORD=' + password, '--env', 'MYSQL_ROOT_HOST=localhost',
                 '--env', 'XTRABACKUP_PASSWORD=' + sst_password, '--env', 'CLUSTER_NAME=' + prefix,
                 '--env', 'PERCONA_TELEMETRY_DISABLE=1',
-                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
+                '--health-cmd', 'test "$(cat /proc/1/comm)" = mysqld && MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
                 '--health-interval', '10s', '--health-timeout', '5s', '--health-retries', '6',
                 '--health-start-period', '180s', '--restart-delay', '10s', '--stop-grace-period', '60s',
                 '--limit-memory', '2G']
@@ -179,12 +212,21 @@ def main():
                 result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
                                 '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
                                 IMAGE, '-c',
+                                'head -n 160 /evidence/lab-error.log 2>/dev/null; '
                                 'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" '
                                 '/evidence/lab-error.log 2>/dev/null | head -n 18; '
                                 'tail -n 40 /evidence/lab-error.log /evidence/*.err 2>/dev/null; '
                                 'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" /evidence/lab-error.log 2>/dev/null | tail -n 20',
                                 check=False, timeout=30)
                 (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
+                result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
+                                '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
+                                IMAGE, '-c',
+                                'find /evidence -maxdepth 3 -type f '
+                                '\\( -iname "*backup*.log" -o -iname "*sst*.log" \\) '
+                                '-exec sh -c \'echo "LOG: $1"; tail -n 100 "$1"\' sh {} \\;',
+                                check=False, timeout=30)
+                (output / f'backup-{node}.log').write_text(redact(result.stdout + result.stderr))
             containers = engine(node, 'ps', '-aq', '--filter',
                                 'label=com.docker.swarm.service.name=' + prefix + '-db-' + node,
                                 check=False, timeout=15).stdout.split()
@@ -193,13 +235,13 @@ def main():
                                 check=False, timeout=20)
                 (output / f'runtime-state-{node}.log').write_text(redact(result.stdout + result.stderr))
         result = docker('exec', prefix + '-a', 'sh', '-c',
-                        'dmesg 2>/dev/null | grep -E "DENIED.*(mysqld|bash|sh)" | tail -n 12',
+                        'dmesg 2>/dev/null | grep -E "DENIED.*(mysqld|bash|sh)|Out of memory|Killed process|oom-kill" | tail -n 20',
                         check=False, timeout=15)
         (output / 'runtime-kernel.log').write_text(redact(result.stdout + result.stderr))
 
     try:
         check('Linux Docker laboratory', os.name == 'posix' and docker('info').returncode == 0)
-        docker('network', 'create', prefix + '-underlay')
+        docker('network', 'create', '--subnet', underlay_subnet, prefix + '-underlay')
         for node in NODES:
             docker('volume', 'create', prefix + '-engine-' + node)
             docker('run', '-d', '--privileged', '--tmpfs', '/run', '--name', prefix + '-' + node,
@@ -226,9 +268,9 @@ def main():
         service('a', '')
         eventually(lambda: ready('a', 1), 'first bootstrap', timeout=300)
         service('b', prefix + '-db-a')
-        eventually(lambda: cluster(2, ('a', 'b')), 'second member SST', timeout=300)
+        eventually(lambda: joining(2, ('a', 'b')), 'second member SST', timeout=300)
         service('c', prefix + '-db-a,' + prefix + '-db-b')
-        eventually(cluster, 'third member SST', timeout=300)
+        eventually(lambda: joining(3, NODES), 'third member SST', timeout=300)
         bootstrap_task = task('a')
         manager('service', 'update', '--detach=true', '--env-add',
                 'CLUSTER_JOIN=' + prefix + '-db-b,' + prefix + '-db-c', prefix + '-db-a')
@@ -356,7 +398,7 @@ def main():
                 print(f'::notice title=PXC laboratory evidence chunk {index:03d}::' + chunk, flush=True)
             if report['result'] == 'FAIL':
                 for path in sorted(output.glob('*.log')):
-                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-', 'runtime-')):
+                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-', 'runtime-', 'backup-')):
                         contents = path.read_text(errors='replace')
                         diagnostic = (contents[:2000] + '\n[... bounded diagnostic ...]\n' + contents[-1400:]
                                       if len(contents) > 3500 else contents)
