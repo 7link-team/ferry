@@ -77,6 +77,11 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']
+        builds=request(owner,root+'/pipeline-templates?workflow_kind=actions')['items']
+        build=next(row for row in builds if 'Native HTTP artifact build' in row['content'])
+        generated=json.loads(request(owner,root+'/pipeline-templates/'+build['id']+'/renderings',{'version':1,'values':{}})['definition'])
+        saved=request(owner,root+'/pipelines',{'name':'Native sample build','target_kind':'host','target_ref':host,'definition_format':'github-actions','definition':generated['workflow']},expected=201)
+        check(request(owner,root+'/pipelines/'+saved['id'])['definition']==generated['workflow'],'initialized Native build creates a real Actions pipeline from YAML')
         request(owner,root+'/variables',{'name':'token','scope':'deploy','kind':'secret','value':'never-copy-this-secret'},expected=201)
         for resource, field in [('app-templates','manifest'),('pipeline-templates','definition')]:
             app=field=='manifest'

@@ -597,7 +597,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     generated = api(f'/workspaces/{workspace_ops}/pipeline-templates/'+native_build_template['id']+'/renderings',
                                     {'version':native_build_template['version'],'values':{}})['definition']
                     sample_pipeline = create('pipelines',{'name':'sample-native-'+kind,'target_kind':'host','target_ref':host,
-                        'repository_id':repo,'definition_format':'github-actions','definition':generated})
+                        'repository_id':repo,'definition_format':'github-actions','definition':json.loads(generated)['workflow']})
                     sample_run = build(sample_pipeline)
                     message = "Native example 'quote' $HOME %\nsecond line 你好"
                     generated = api(f'/workspaces/{workspace_ops}/app-templates/'+native_template['id']+'/renderings',
