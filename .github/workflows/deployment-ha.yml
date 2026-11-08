@@ -103,7 +103,11 @@ jobs:
       - run: npm ci
       - name: Install the NATS protocol acceptance client
         if: matrix.mode == 'compose' || matrix.mode == 'stack'
-        run: python3 -m pip install nats-py==2.9.0
+        run: |
+          python3 -m venv "$RUNNER_TEMP/nats-client-env"
+          "$RUNNER_TEMP/nats-client-env/bin/python" -m pip install nats-py==2.9.0
+          "$RUNNER_TEMP/nats-client-env/bin/python" -I -c 'import nats'
+          echo "$RUNNER_TEMP/nats-client-env/bin" >> "$GITHUB_PATH"
       - name: Install the deployment browser
         if: matrix.mode == 'compose'
         run: npx playwright install --with-deps chromium
