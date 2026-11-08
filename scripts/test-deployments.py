@@ -460,7 +460,11 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             if test_nats:
                 assert os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1', 'NATS acceptance requires initialized scenario templates'
                 import asyncio
-                from nats_application_acceptance import verify as verify_nats
+                import importlib.util
+                protocol_spec=importlib.util.spec_from_file_location('nats_application_acceptance',Path(__file__).with_name('nats_application_acceptance.py'))
+                protocol_module=importlib.util.module_from_spec(protocol_spec)
+                protocol_spec.loader.exec_module(protocol_module)
+                verify_nats=protocol_module.verify
                 nats_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-nats')
                 nats_config = next(t for t in api(f'/workspaces/{workspace_ops}/config-templates')['items'] if t['name']=='example-nats-config')
                 report['nats_scenario_templates']={'application':nats_template,'configuration':nats_config}
