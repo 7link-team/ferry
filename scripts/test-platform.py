@@ -97,7 +97,11 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         check(request(admin, '/platform/monitor/database/tables?q=nonexistent_catalog_fixture')['total']==0, 'database catalog empty state')
         for query in ['sort=password_hash','kind=secret','workspace_id=1','page=0']:
             request(admin, '/platform/monitor/database/tables?'+query, expected=400)
-        diagnostics = request(admin, '/platform/monitor/database')['waits']
+        overview = request(admin, '/platform/monitor/database')
+        check(bool(overview['instance'].get('version')), 'database overview reports actual engine version')
+        if overview['backend'] != 'SQLite':
+            check(bool(overview['instance'].get('database')), 'database overview reports the current database')
+        diagnostics = overview['waits']
         check(diagnostics['status'] in ('available','unsupported'), 'database waits have explicit engine availability')
         check(not any(key in json.dumps(diagnostics) for key in ['password','query_text','client_addr']), 'wait diagnostics exclude SQL text and connection addresses')
         request(outsider, f'/workspaces/{workspace_tenant}/nodes', expected=404)

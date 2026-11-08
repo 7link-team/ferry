@@ -209,7 +209,7 @@ pub async fn overview(State(s): State<AppState>, _: Admin) -> Result<Json<Value>
         ),
         DbBackend::MySql => (
             "MySQL",
-            "SELECT VERSION() AS version, DATABASE() AS database, @@hostname AS host, @@port AS port",
+            "SELECT VERSION() AS version, DATABASE() AS `database`, @@hostname AS host, @@port AS port",
             "SELECT TABLE_NAME AS name, TABLE_TYPE AS kind, TABLE_ROWS AS estimated_rows, DATA_LENGTH + INDEX_LENGTH AS bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME",
         ),
         _ => return Err(bad_query()),
