@@ -82,6 +82,24 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         outsider_id = request(outsider, '/users', {'name':'Outsider','email':'outsider@example.invalid','password':password})['id']
         ws = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})
         workspace_tenant = ws['id']
+        for c, code in [(anonymous,401),(owner,403)]:
+            request(c, '/platform/monitor/database/tables', expected=code)
+        catalog = request(admin, '/platform/monitor/database/tables?page_size=200')
+        check(catalog['total'] > 0 and len(catalog['items']) > 0, 'database catalog uses shared list envelope')
+        users_table = next(row for row in catalog['items'] if row['name']=='users')
+        check(users_table['size_status']=='available' and users_table['bytes']>0, 'database catalog reports actual allocated user-table bytes')
+        check(users_table['bytes']==users_table['data_bytes']+users_table['index_bytes'], 'database size splits data and indexes')
+        filtered = request(admin, '/platform/monitor/database/tables?q=users&kind=table&page_size=1')
+        check(len(filtered['items'])==1 and 'users' in filtered['items'][0]['name'], 'database catalog filters and paginates')
+        ordered = request(admin, '/platform/monitor/database/tables?sort=-bytes&page_size=200')['items']
+        amounts = [row['bytes'] for row in ordered if row.get('bytes') is not None]
+        check(amounts==sorted(amounts,reverse=True), 'database capacity sorts numerically')
+        check(request(admin, '/platform/monitor/database/tables?q=nonexistent_catalog_fixture')['total']==0, 'database catalog empty state')
+        for query in ['sort=password_hash','kind=secret','workspace_id=1','page=0']:
+            request(admin, '/platform/monitor/database/tables?'+query, expected=400)
+        diagnostics = request(admin, '/platform/monitor/database')['waits']
+        check(diagnostics['status'] in ('available','unsupported'), 'database waits have explicit engine availability')
+        check(not any(key in json.dumps(diagnostics) for key in ['password','query_text','client_addr']), 'wait diagnostics exclude SQL text and connection addresses')
         request(outsider, f'/workspaces/{workspace_tenant}/nodes', expected=404)
         for path in ['/platform/users', '/platform/workspaces', '/platform/settings/1']:
             request(owner, path, expected=403)

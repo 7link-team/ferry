@@ -62,6 +62,138 @@ pub fn pool(db: &DatabaseConnection) -> Value {
         _ => Value::Null,
     }
 }
+
+async fn table_metadata(db: &DatabaseConnection) -> Result<Vec<Value>> {
+    let sql = match db.get_database_backend() {
+        DbBackend::Postgres => {
+            "SELECT c.relname AS name, CASE WHEN c.relkind = 'v' THEN 'view' ELSE 'table' END AS kind, CASE WHEN c.reltuples >= 0 AND c.relkind <> 'v' THEN c.reltuples::bigint END AS estimated_rows, CASE WHEN c.relkind <> 'v' THEN pg_total_relation_size(c.oid)::bigint END AS bytes, CASE WHEN c.relkind <> 'v' THEN pg_table_size(c.oid)::bigint END AS data_bytes, CASE WHEN c.relkind <> 'v' THEN pg_indexes_size(c.oid)::bigint END AS index_bytes FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = current_schema() AND c.relkind IN ('r','p','v','m') ORDER BY c.relname"
+        }
+        DbBackend::MySql => {
+            "SELECT TABLE_NAME AS name, CASE WHEN TABLE_TYPE = 'VIEW' THEN 'view' ELSE 'table' END AS kind, TABLE_ROWS AS estimated_rows, DATA_LENGTH + INDEX_LENGTH AS bytes, DATA_LENGTH AS data_bytes, INDEX_LENGTH AS index_bytes FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME"
+        }
+        DbBackend::Sqlite => {
+            "SELECT m.name AS name, m.type AS kind, NULL AS estimated_rows, SUM(d.pgsize) AS bytes, SUM(CASE WHEN d.name = m.name THEN d.pgsize ELSE 0 END) AS data_bytes, SUM(CASE WHEN d.name <> m.name THEN d.pgsize ELSE 0 END) AS index_bytes FROM sqlite_schema m LEFT JOIN sqlite_schema owned ON owned.tbl_name = m.name AND owned.type IN ('table','index') LEFT JOIN dbstat d ON d.name = owned.name WHERE m.type IN ('table','view') AND m.name NOT LIKE 'sqlite_%' GROUP BY m.name, m.type ORDER BY m.name"
+        }
+        _ => return Err(bad_query()),
+    };
+    let mut rows = match query(db, sql, vec![]).await {
+        Ok(rows) => rows,
+        // dbstat is an optional SQLite build feature. Keep the catalog usable
+        // when unavailable; no table scans or invented zero-byte values.
+        Err(_) if db.get_database_backend() == DbBackend::Sqlite => query(db, "SELECT name, type AS kind FROM sqlite_schema WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name", vec![]).await?,
+        Err(error) => return Err(error),
+    };
+    for row in &mut rows {
+        if row["kind"] == "view" {
+            for key in ["bytes", "data_bytes", "index_bytes", "estimated_rows"] {
+                row[key] = Value::Null;
+            }
+            row["size_status"] = json!("not_applicable");
+        } else {
+            row["size_status"] = json!(if row["bytes"].is_number() {
+                "available"
+            } else {
+                "unavailable"
+            });
+        }
+    }
+    Ok(rows)
+}
+
+fn table_page(mut rows: Vec<Value>, raw: &HashMap<String, String>) -> Result<Value> {
+    use crate::resources::resource::{ListQuery, Spec};
+    let query = ListQuery::parse(
+        &Spec {
+            search: &["name"],
+            filters: &["kind"],
+            sortable: &[
+                "name",
+                "kind",
+                "estimated_rows",
+                "bytes",
+                "data_bytes",
+                "index_bytes",
+            ],
+            default_sort: "name",
+        },
+        raw,
+    )?;
+    if query
+        .search
+        .as_ref()
+        .is_some_and(|q| q.chars().count() > 200)
+        || query.filters.iter().any(|(_, kinds)| {
+            kinds
+                .iter()
+                .any(|kind| !matches!(kind.as_str(), "table" | "view"))
+        })
+    {
+        return Err(bad_query());
+    }
+    let needle = query.search.as_ref().map(|q| q.to_lowercase());
+    rows.retain(|row| {
+        needle.as_ref().is_none_or(|q| {
+            row["name"]
+                .as_str()
+                .unwrap_or("")
+                .to_lowercase()
+                .contains(q)
+        }) && query
+            .filters
+            .iter()
+            .all(|(_, kinds)| kinds.iter().any(|kind| row["kind"].as_str() == Some(kind)))
+    });
+    rows.sort_by(|a, b| {
+        let left = &a[&query.sort];
+        let right = &b[&query.sort];
+        let order = match (left.is_null(), right.is_null()) {
+            (true, false) => return std::cmp::Ordering::Greater,
+            (false, true) => return std::cmp::Ordering::Less,
+            _ => match (left.as_u64(), right.as_u64()) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                _ => left.as_str().cmp(&right.as_str()),
+            },
+        };
+        (if query.descending {
+            order.reverse()
+        } else {
+            order
+        })
+        .then_with(|| a["name"].as_str().cmp(&b["name"].as_str()))
+    });
+    let total = rows.len();
+    let offset = query
+        .page
+        .saturating_sub(1)
+        .saturating_mul(query.page_size)
+        .min(total as u64) as usize;
+    let items = rows
+        .into_iter()
+        .skip(offset)
+        .take(query.page_size as usize)
+        .collect::<Vec<_>>();
+    Ok(json!({"items":items,"total":total,"page":query.page,"page_size":query.page_size}))
+}
+
+pub async fn tables(
+    State(s): State<AppState>,
+    _: Admin,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Result<Json<Value>> {
+    // Validate before querying system catalogs, including on empty databases.
+    table_page(vec![], &raw)?;
+    Ok(Json(table_page(table_metadata(&s.db).await?, &raw)?))
+}
+
+async fn waits(db: &DatabaseConnection) -> Value {
+    if db.get_database_backend() != DbBackend::Postgres {
+        return json!({"status":"unsupported"});
+    }
+    match query(db, "SELECT COALESCE(state, 'unknown') AS state, COALESCE(wait_event_type, '') AS wait_type, COALESCE(wait_event, '') AS wait_event, COUNT(*)::bigint AS sessions, COUNT(*) FILTER (WHERE cardinality(pg_blocking_pids(pid)) > 0)::bigint AS blocked, COALESCE(MAX(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - xact_start))),0)::double precision AS oldest_transaction_seconds FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() GROUP BY state, wait_event_type, wait_event ORDER BY COUNT(*) DESC", vec![]).await {
+        Ok(items) => json!({"status":"available","items":items}),
+        Err(_) => json!({"status":"unavailable"}),
+    }
+}
 pub async fn overview(State(s): State<AppState>, _: Admin) -> Result<Json<Value>> {
     let backend = s.db.get_database_backend();
     let (kind, instance_sql, tables_sql) = match backend {
@@ -84,6 +216,7 @@ pub async fn overview(State(s): State<AppState>, _: Admin) -> Result<Json<Value>
     };
     let instance = query(&s.db, instance_sql, vec![]).await?;
     let tables = query(&s.db, tables_sql, vec![]).await?;
+    let waits = waits(&s.db).await;
     let mut size = Value::Null;
     if backend == DbBackend::Sqlite {
         let pages = query(&s.db, "PRAGMA page_count", vec![]).await?;
@@ -106,7 +239,7 @@ pub async fn overview(State(s): State<AppState>, _: Admin) -> Result<Json<Value>
     let mut sql=snapshot.iter().map(|(template,stat)|json!({"template":template,"count":stat.count,"errors":stat.failed,"slow":stat.slow,"total_ms":stat.total_ms,"max_ms":stat.max_ms})).collect::<Vec<_>>();
     sql.sort_by_key(|v| std::cmp::Reverse(v["max_ms"].as_u64().unwrap_or(0)));
     Ok(Json(
-        json!({"instance_id":s.instance_id,"backend":kind,"instance":instance.first(),"sqlite_bytes":size,"pool":pool(&s.db),"tables":tables,"sql":sql,"nodes":nodes,"sql_template_limit":200,"sql_skipped":s.monitor.sql_skipped.load(Ordering::Relaxed),"sql_reset_at":s.monitor.sql_reset_at.load(Ordering::Relaxed),"slow_threshold_ms":1000,"sampled_at":db::now()}),
+        json!({"instance_id":s.instance_id,"backend":kind,"instance":instance.first(),"sqlite_bytes":size,"pool":pool(&s.db),"tables":tables,"waits":waits,"sql":sql,"nodes":nodes,"sql_template_limit":200,"sql_skipped":s.monitor.sql_skipped.load(Ordering::Relaxed),"sql_reset_at":s.monitor.sql_reset_at.load(Ordering::Relaxed),"slow_threshold_ms":1000,"sampled_at":db::now()}),
     ))
 }
 #[derive(Deserialize)]
@@ -229,6 +362,83 @@ pub async fn table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn sqlite_table_storage_includes_indexes_without_counting_rows() {
+        let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
+        for sql in [
+            "CREATE TABLE sample(id INTEGER PRIMARY KEY, payload TEXT)",
+            "CREATE INDEX sample_payload ON sample(payload)",
+            "INSERT INTO sample(payload) VALUES ('hello')",
+            "CREATE VIEW sample_view AS SELECT id FROM sample",
+        ] {
+            db.execute_unprepared(sql).await.unwrap();
+        }
+        let rows = table_metadata(&db).await.unwrap();
+        let table = rows.iter().find(|row| row["name"] == "sample").unwrap();
+        assert_eq!(
+            table["size_status"], "available",
+            "bundled SQLite must expose dbstat sizes"
+        );
+        assert!(table["data_bytes"].as_u64().unwrap() > 0);
+        assert!(table["index_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(
+            table["bytes"].as_u64().unwrap(),
+            table["data_bytes"].as_u64().unwrap() + table["index_bytes"].as_u64().unwrap()
+        );
+        assert!(table["estimated_rows"].is_null());
+        let view = rows
+            .iter()
+            .find(|row| row["name"] == "sample_view")
+            .unwrap();
+        assert_eq!(view["size_status"], "not_applicable");
+        assert!(view["bytes"].is_null());
+        assert_eq!(waits(&db).await["status"], "unsupported");
+    }
+
+    #[test]
+    fn catalog_pages_sort_numbers_filter_and_reject_unknown_fields() {
+        let rows = vec![
+            json!({"name":"large","kind":"table","bytes":100}),
+            json!({"name":"small","kind":"table","bytes":9}),
+            json!({"name":"view","kind":"view","bytes":null}),
+        ];
+        let raw = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<HashMap<_, _>>()
+        };
+        let page = table_page(rows.clone(), &raw(&[("sort", "bytes")])).unwrap();
+        assert_eq!(page["items"][0]["name"], "small");
+        let page = table_page(
+            rows.clone(),
+            &raw(&[
+                ("sort", "-bytes"),
+                ("page_size", "1"),
+                ("page", "2"),
+                ("kind", "table"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(page["total"], 2);
+        assert_eq!(page["items"][0]["name"], "small");
+        let page = table_page(rows.clone(), &raw(&[("q", "LARGE")])).unwrap();
+        assert_eq!(page["total"], 1);
+        assert_eq!(page["items"][0]["name"], "large");
+        for params in [
+            raw(&[("sort", "password")]),
+            raw(&[("kind", "secret")]),
+            raw(&[("page", "0")]),
+            raw(&[("workspace_id", "1")]),
+            raw(&[("q", &"x".repeat(201))]),
+        ] {
+            assert!(table_page(rows.clone(), &params).is_err());
+        }
+        assert_eq!(
+            table_page(rows, &raw(&[("page", "18446744073709551615")])).unwrap()["items"],
+            json!([])
+        );
+    }
     #[test]
     fn sql_templates_never_keep_literals_comments_or_parameters() {
         let value = fingerprint(

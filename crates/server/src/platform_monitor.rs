@@ -353,6 +353,8 @@ pub async fn query(
             for name in row.column_names() {
                 let v = if let Ok(v) = row.try_get::<i64>("", &name) {
                     json!(v)
+                } else if let Ok(v) = row.try_get::<u64>("", &name) {
+                    json!(v)
                 } else if let Ok(v) = row.try_get::<f64>("", &name) {
                     json!(v)
                 } else if let Ok(v) = row.try_get::<String>("", &name) {

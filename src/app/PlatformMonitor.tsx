@@ -12,6 +12,8 @@ import { Input } from "../shared/ui/input";
 import { useQueryValue, useScrollSync } from "./router";
 import { PlatformFileCatalog } from "./PlatformFileCatalog";
 import { DeleteConfirmDialog } from "../shared/ui/DeleteConfirmDialog";
+import { ResourceTable } from "./resources/ResourceTable";
+import type { ListConfig } from "../shared/resources/types";
 
 type Row = Record<string, unknown>;
 type Snapshot = Record<string, any>;
@@ -24,6 +26,24 @@ const bytes = (value: unknown) => {
   return `${number.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${["B", "KiB", "MiB", "GiB", "TiB"][unit]}`;
 };
 const text = (value: unknown): string => value == null ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
+const databaseTables: ListConfig<Row> = {
+  resource:"database-tables", endpoint:"/platform/monitor/database/tables", queryPrefix:"db_tables",
+  rowKey:row=>String(row.name), toolbar:{create:false,import:false,export:false},
+  filters:[
+    {key:"q",label:"Table name",labelKey:"resource-domain:monitor.name",type:"text"},
+    {key:"kind",label:"Type",labelKey:"resource-domain:monitor.kind",type:"select",options:[
+      {value:"table",label:"Table",labelKey:"resource-domain:monitor.tableKind"},
+      {value:"view",label:"View",labelKey:"resource-domain:monitor.viewKind"},
+    ]},
+  ],
+  columns:[
+    {key:"name",label:"Name",labelKey:"resource-domain:monitor.name",sortable:true,render:row=><span className="block max-w-80 whitespace-normal break-all">{String(row.name)}</span>},
+    {key:"kind",label:"Type",labelKey:"resource-domain:monitor.kind",sortable:true,render:row=>t(row.kind==="view"?"viewKind":"tableKind")},
+    {key:"estimated_rows",label:"Estimated rows",labelKey:"resource-domain:monitor.estimated_rows",sortable:true,align:"right",render:row=>row.estimated_rows==null?t("notCollected"):Number(row.estimated_rows).toLocaleString()},
+    ...["bytes","data_bytes","index_bytes"].map(key=>({key,label:key,labelKey:`resource-domain:monitor.${key}`,sortable:true,align:"right" as const,
+      render:(row:Row)=>row[key]==null?t(row.size_status==="not_applicable"?"sizeNotApplicable":"sizeUnavailable"):bytes(row[key])})),
+  ],
+};
 function Metric({ label, value }: { label: string; value: ReactNode }) {
   return <div className="min-w-0 rounded-lg border bg-card p-4"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 break-words text-2xl font-semibold tabular-nums">{value}</p></div>;
 }
@@ -68,7 +88,7 @@ export function PlatformMonitor({ section }: { section: string }) {
   }, [active, period, appliedPattern, cursor]);
   useEffect(() => { setData(undefined); setSamples([]); setTableRows(undefined); }, [active]);
   useEffect(() => { void load(); return () => { sequence.current++; }; }, [load]);
-  const remaining = useAutoRefresh(refresh, load, pending);
+  const remaining = useAutoRefresh(active==="database"&&tab==="tables"?0:refresh, load, pending);
   useEffect(() => {
     const controller = new AbortController();
     setTableRows(undefined);
@@ -83,9 +103,9 @@ export function PlatformMonitor({ section }: { section: string }) {
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="mr-auto font-semibold">{t(active)}</h3>
         {["files", "usage"].includes(active) && <select className="h-9 rounded-md border bg-background px-3 text-sm" aria-label={t("period")} value={period} onChange={event => setPeriod(event.target.value)}>{["day", "week", "month", "quarter", "year"].map(key => <option key={key} value={key}>{t(key)}</option>)}</select>}
-        <Button variant="outline" size="sm" disabled={pending} onClick={() => void load()}><RefreshCw className={`size-4 ${pending ? "animate-spin" : ""}`} />{commonText("common.refresh")}</Button>
+        {!(active==="database"&&tab==="tables")&&<><Button variant="outline" size="sm" disabled={pending} onClick={() => void load()}><RefreshCw className={`size-4 ${pending ? "animate-spin" : ""}`} />{commonText("common.refresh")}</Button>
         <select className="h-9 rounded-md border bg-background px-3 text-sm" aria-label={commonText("table.autoRefresh")} value={refresh} onChange={event => setRefresh(Number(event.target.value))}>{[0, 5, 10, 15, 30, 60].map(seconds => <option key={seconds} value={seconds}>{seconds ? `${seconds}s` : commonText("table.off")}</option>)}</select>
-        {!!refresh && <span role="timer" className="text-sm tabular-nums">{remaining}s</span>}
+        {!!refresh && <span role="timer" className="text-sm tabular-nums">{remaining}s</span>}</>}
       </div>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {!data && pending && <LoadingSkeleton variant="page" />}
@@ -101,9 +121,13 @@ export function PlatformMonitor({ section }: { section: string }) {
         <div className="flex flex-wrap items-center justify-between gap-3"><p className="break-all text-sm text-muted-foreground">{t("currentNodeSql")} · {data.instance_id}{data.sql_reset_at>0&&` · ${t("lastReset")} ${new Date(data.sql_reset_at).toLocaleString()}`}</p><Button variant="outline" size="sm" disabled={pending} onClick={()=>setResetSql(true)}>{t("resetCurrentSql")}</Button></div>
         <Data sql title={t("sql")} rows={(data.sql ?? []).map((row: Snapshot) => ({ ...row, avg_ms: row.count ? row.total_ms / row.count : 0 }))} columns={["template", "count", "errors", "slow", "total_ms", "avg_ms", "max_ms"]} />
         <p className="text-sm text-muted-foreground">{t("sqlHelp")}</p>
+        <p className="text-sm text-muted-foreground">{t("sqlTimingHelp")}</p>
         <p className="text-sm text-muted-foreground">{t("sqlSkipped")}: {data.sql_skipped??0}</p>
-        </TabsContent><TabsContent value="tables" className="pt-3">
-        <Data title={t("tables")} rows={data.tables ?? []} columns={["name", "kind", "estimated_rows", "bytes"]} />
+        <p className="text-sm text-muted-foreground">{t("waitsHelp")}</p>
+        {data.waits?.status==="available"?<Data title={t("waitsTitle")} rows={data.waits.items??[]} columns={["state","wait_type","wait_event","sessions","blocked","oldest_transaction_seconds"]}/>:<p role="status" className="text-sm text-muted-foreground">{t(data.waits?.status==="unsupported"?"waitsUnsupported":"waitsUnavailable")}</p>}
+        </TabsContent><TabsContent value="tables" className="flex h-[65dvh] min-h-96 flex-col gap-3 pt-3">
+        <p className="shrink-0 text-sm text-muted-foreground">{t("tableStatsHelp")}</p>
+        <ResourceTable config={databaseTables} workspace="_platform" permissions={new Set()}/>
         </TabsContent><TabsContent value="inspect" className="space-y-5 pt-3">
         <label className="flex flex-wrap items-center gap-3 text-sm">{t("inspect")}<select className="h-9 max-w-full rounded-md border bg-background px-3" value={table} onChange={event => setTable(event.target.value)}><option value="">{commonText("common.select")}</option>{["worker_ids", "workspaces", "pipeline_runs", "workflow_executions", "repository_analysis_jobs", "platform_observations"].map(name => <option key={name}>{name}</option>)}</select></label>
         {tableRows && <Data title={`${table} · ${t("readonly")}`} rows={tableRows.items} columns={tableRows.columns} />}

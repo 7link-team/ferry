@@ -945,6 +945,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/platform/monitor/database",get(platform_monitor::database::overview))
         .route("/api/platform/monitor/database/sql/reset",post(platform_monitor::database::reset_sql))
         .route("/api/platform/monitor/database/table",get(platform_monitor::database::table))
+        .route("/api/platform/monitor/database/tables",get(platform_monitor::database::tables))
         .route("/api/platform/monitor/redis",get(platform_monitor::cache::overview))
         .route("/api/platform/monitor/usage",get(platform_monitor::usage))
         .route("/api/platform/monitor/files",get(platform_monitor::files))
