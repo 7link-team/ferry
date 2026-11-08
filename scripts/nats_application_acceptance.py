@@ -33,13 +33,17 @@ async def verify(urls, token, check, stop_member, restore_member):
     else:
         await unauthorized.close()
     check('NATS application rejects an unauthenticated client', rejected)
-    client = await retry(lambda: nats.connect(servers=urls, token=token, connect_timeout=2,
+    client = await retry(lambda: nats.connect(servers=urls[:1], token=token, connect_timeout=2,
         reconnect_time_wait=.2, max_reconnect_attempts=100, error_cb=quiet_error), 'authenticated NATS client')
     stopped = set()
     try:
         expected = {(urlparse(url).hostname, urlparse(url).port) for url in urls}
-        check('NATS client discovery returns only configured reachable endpoints', bool(client.discovered_servers)
-              and all((server.hostname, server.port) in expected for server in client.discovered_servers))
+        async def discovered():
+            peers = {(server.hostname, server.port) for server in client.discovered_servers}
+            assert peers <= expected, 'NATS advertised an unreachable or unconfigured endpoint: '+str(peers-expected)
+            return peers if len(peers) >= 2 else None
+        peers = await retry(discovered, 'discover two peers from a single configured endpoint')
+        check('NATS client discovery returns only configured reachable endpoints', len(peers) >= 2 and peers <= expected)
         js = client.jetstream(timeout=3)
         await retry(lambda: js.add_stream(config=StreamConfig(name='PROOF', subjects=['proof'],
                     storage=StorageType.FILE, num_replicas=3)), 'replicated stream')

@@ -16,7 +16,7 @@
       ],
       "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
       "volumes": [{ "name": "nats-a-data", "path": "/data" }],
-      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "health": { "readiness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 } },
       "resources": { "limits": { "memory": "512Mi" } }
     },
     {
@@ -31,7 +31,7 @@
       ],
       "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
       "volumes": [{ "name": "nats-b-data", "path": "/data" }],
-      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "health": { "readiness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 } },
       "resources": { "limits": { "memory": "512Mi" } }
     },
     {
@@ -46,7 +46,7 @@
       ],
       "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
       "volumes": [{ "name": "nats-c-data", "path": "/data" }],
-      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "health": { "readiness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz?js-enabled-only=true", "port": 8222 }, "periodSeconds": 2 } },
       "resources": { "limits": { "memory": "512Mi" } }
     }
   ],

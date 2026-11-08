@@ -1177,6 +1177,14 @@ mod tests {
             assert_eq!(service["env"][2]["valueFrom"], "variable/nats-client-token");
             assert_eq!(service["volumes"][0]["name"], format!("nats-{suffix}-data"));
             assert_eq!(service["files"][0]["fromTemplate"], "example-nats-config");
+            assert_eq!(
+                service["health"]["readiness"]["httpGet"]["path"],
+                "/healthz?js-enabled-only=true"
+            );
+            assert_eq!(
+                service["health"]["liveness"]["httpGet"]["path"],
+                "/healthz?js-enabled-only=true"
+            );
         }
         for mode in ["compose", "stack"] {
             let manifest = crate::deployments::manifest::parse_for(&nats_text, mode).unwrap();
