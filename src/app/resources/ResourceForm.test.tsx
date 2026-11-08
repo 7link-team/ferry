@@ -416,14 +416,13 @@ it("creates a classification tag in place and selects it without losing the pipe
  expect(name.value).toBe('Draft kept');
 });
 
-it("keeps the ordinary form footer compact with cancel before the primary action", async () => {
+it("uses the shared full-width footer with cancel before the primary action", async () => {
   history.replaceState({}, "", "/ops/deploy/variables/10/edit");
   await mount();
   const footer=host.querySelector('[data-form-actions]')!;
-  expect(footer.className).toContain('justify-end');
+  expect(footer.getAttribute('data-form-actions-placement')).toBe('footer');
   const actions=[...footer.querySelectorAll<HTMLElement>('button,a')];
   expect(actions.at(-1)?.getAttribute('type')).toBe('submit');
-  expect(actions.at(-1)?.className).not.toContain('flex-1');
   expect(actions.at(-2)?.textContent).toBe('取消');
 });
 

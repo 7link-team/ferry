@@ -57,6 +57,16 @@ export function ServiceEditor({
   const dependencies = (service.dependsOn ?? []) as string[];
   const artifact = object(service.artifact);
   const dualSource = portable && artifact && typeof service.image === "string";
+  const source = dualSource ? "both" : artifact ? "artifact" : "image";
+  const sourceOptions = [
+    ...(portable ? ["both"] : []),
+    ...(mode !== "native" ? ["image"] : []),
+    ...(!["docker", "compose", "stack"].includes(mode) ? ["artifact"] : []),
+  ];
+  const sourceCompatible = sourceOptions.includes(source);
+  const sourceLabel = (value: string) => value === "both"
+    ? commonText("resource-domain:deployment.dualSource")
+    : hostRepositoryText(value === "image" ? "manifest.034" : "manifest.035");
   const placement = object(service.placement) ? service.placement : undefined;
   return (
     <section
@@ -157,9 +167,12 @@ export function ServiceEditor({
           <select
             aria-label={hostRepositoryText("manifest.033")}
             className="h-9 rounded-md border border-input bg-background px-2"
-            value={dualSource ? "both" : artifact ? "artifact" : "image"}
+            value={sourceCompatible || readOnly ? source : ""}
+            required
+            aria-invalid={!sourceCompatible || undefined}
             disabled={readOnly}
             onChange={(e) => {
+              if (!sourceOptions.includes(e.target.value)) return;
               // Switching is an ordinary draft edit: it takes effect
               // only when saved and can be undone by switching back.
               change([
@@ -177,11 +190,9 @@ export function ServiceEditor({
               ]);
             }}
           >
-            {portable && <option value="both">{commonText("resource-domain:deployment.dualSource")}</option>}
-            <option value="image">{hostRepositoryText("manifest.034")}</option>
-            <option value="artifact">
-              {hostRepositoryText("manifest.035")}
-            </option>
+            <option value="" disabled>{commonText("common.select")}</option>
+            {readOnly && !sourceCompatible && <option value={source} disabled>{sourceLabel(source)}</option>}
+            {sourceOptions.map(value => <option key={value} value={value}>{sourceLabel(value)}</option>)}
           </select>
         </AutoField>
         {(!artifact || dualSource) &&

@@ -229,6 +229,46 @@ it("switches a service's run source immediately without a browser confirmation",
   expect(host.querySelector('select[aria-label="运行来源"]')!.closest("[data-auto-field]")?.parentElement?.textContent).not.toContain("Native 模式需要选择流水线构建产物。");
   expect(input("流水线 ID")).toBeDefined();
 });
+it.each(["docker", "compose", "stack"])("limits %s sources to images while preserving incompatible draft YAML", async mode => {
+  const source=fixture.replace('    image: nginx:alpine # keep image comment','    artifact: {source: pipeline, pipeline: build, path: bin/web}');
+  await act(async () => root.render(<Harness mode={mode} source={source} />));
+  const picker=host.querySelector<HTMLSelectElement>('select[aria-label="运行来源"]')!;
+  expect([...picker.options].filter(option=>!option.disabled).map(option=>option.value)).toEqual(["image"]);
+  expect(picker.value).toBe("");
+  expect(picker.validity.valueMissing).toBe(true);
+  expect(latest).toBe(source);
+  await fill(picker,"image");
+  expect(parse(latest).services[0].artifact).toBeUndefined();
+  expect(parse(latest).services[0].image).toBe("");
+  expect(input("镜像").required).toBe(true);
+});
+it("limits Native to artifacts and preserves dual-source v2 definitions across engines", async () => {
+  await act(async () => root.render(<Harness mode="native" />));
+  let picker=host.querySelector<HTMLSelectElement>('select[aria-label="运行来源"]')!;
+  expect([...picker.options].filter(option=>!option.disabled).map(option=>option.value)).toEqual(["artifact"]);
+  expect(picker.value).toBe("");
+  expect(latest).toBe(fixture);
+  await fill(picker,"artifact");
+  await fill(input("应用定义版本"),"ferry/v2");
+  await fill(picker,"both");
+  const expected=latest;
+  for(const mode of ["docker","compose","stack","native"]) {
+    await act(async()=>root.render(<Harness mode={mode} />));
+    picker=host.querySelector<HTMLSelectElement>('select[aria-label="运行来源"]')!;
+    expect(picker.value).toBe("both");
+    expect([...picker.options].filter(option=>!option.disabled).map(option=>option.value)).toEqual(["both",mode==="native"?"artifact":"image"]);
+    expect(latest).toBe(expected);
+  }
+});
+it("shows an incompatible source accurately in read-only mode without rewriting it", async () => {
+  const source=fixture.replace('    image: nginx:alpine # keep image comment','    artifact: {source: pipeline, pipeline: build, path: bin/web}');
+  await act(async()=>root.render(<Harness mode="compose" source={source} readOnly />));
+  const picker=host.querySelector<HTMLSelectElement>('select[aria-label="运行来源"]')!;
+  expect(picker.disabled).toBe(true);
+  expect(picker.value).toBe("artifact");
+  expect(picker.selectedOptions[0]!.textContent).toBe(hostRepositoryText("manifest.035"));
+  expect(latest).toBe(source);
+});
 it("refuses duplicate keys, aliases and malformed collections without discarding original source", () => {
   expect(() => readManifest(fixture + "\nservices: []")).toThrow();
   expect(() =>

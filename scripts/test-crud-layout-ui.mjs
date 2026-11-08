@@ -77,12 +77,14 @@ try {
     geometry.push({mode,width,...result});
     return result;
   };
-  const compactFooterActions = async (primary,label) => {
+  const fullWidthFooterActions = async (primary,label) => {
     const result=await footer.evaluate(element=>{
-      const style=getComputedStyle(element),buttons=[...element.querySelectorAll(':scope > button,:scope > a')].map(button=>button.getBoundingClientRect().width);
+      const style=getComputedStyle(element),buttons=[...element.querySelectorAll(':scope > button,:scope > a')].map(button=>{const box=button.getBoundingClientRect();return{width:box.width,height:box.height,y:box.y};});
       return{available:element.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),buttons,gap:parseFloat(style.columnGap)||0};
     });
-    assert(result.buttons.every(width=>width>0&&width<Math.min(280,result.available)),`${label}: actions retain compact intrinsic widths`);
+    const expected=(result.available-result.gap*(result.buttons.length-1))/result.buttons.length;
+    assert(result.gap>=8,`${label}: actions have a visible touch gap`);
+    assert(result.buttons.every(button=>Math.abs(button.width-expected)<2&&button.height>=44&&Math.abs(button.y-result.buttons[0].y)<2),`${label}: actions equally fill one row with 44px minimum touch height: ${JSON.stringify(result)}`);
     const primaryBox=await primary.boundingBox();
     const footerBox=await footer.boundingBox();
     assert(primaryBox.x>=footerBox.x&&primaryBox.x+primaryBox.width<=footerBox.x+footerBox.width+1,`${label}: primary stays inside footer`);
@@ -103,14 +105,14 @@ try {
     await page.waitForTimeout(80);
     await scroll.dispose();
   };
-  for (const width of [1280, 390, 320]) {
+  for (const width of [1280, 900, 390, 320]) {
     console.log(`Checking CRUD layout at ${width}px`);
     await page.setViewportSize({ width, height: width === 1280 ? 800 : 844 });
     await page.goto(`${base}/1`);
     await page.getByLabel('选项 40 显示名称', { exact: true }).waitFor();
     const detailFrame=await formFrame('detail',width);
     const edit = footer.getByRole('link', { name: '编辑', exact: true });
-    await compactFooterActions(edit,`${width}px detail Edit`);
+    await fullWidthFooterActions(edit,`${width}px detail Edit`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`detail-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(edit, `${width}px detail Edit at ${fraction}`); }
@@ -121,7 +123,7 @@ try {
     await save.waitFor();
     const editFrame=await formFrame('edit',width);
     assert(Math.abs(editFrame.form.width-detailFrame.form.width)<2&&Math.abs(editFrame.form.x-detailFrame.form.x)<2,`${width}px detail and edit share the same frame`);
-    await compactFooterActions(save,`${width}px edit Save`);
+    await fullWidthFooterActions(save,`${width}px edit Save`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`edit-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(save, `${width}px edit Save at ${fraction}`); }
@@ -137,7 +139,7 @@ try {
     const create = footer.getByRole('button', { name: '创建', exact: true });
     const createFrame=await formFrame('create',width);
     assert(Math.abs(createFrame.form.width-detailFrame.form.width)<2&&Math.abs(createFrame.form.x-detailFrame.form.x)<2,`${width}px detail, edit and create share the same frame`);
-    await compactFooterActions(create,`${width}px new Create`);
+    await fullWidthFooterActions(create,`${width}px new Create`);
     await scrollForm(0);
     await page.screenshot({path:resolve(output,`create-top-${width}.png`)});
     for(const fraction of [0, 0.5, 1]) { await scrollForm(fraction); await visibleInsideViewport(create, `${width}px new Create at ${fraction}`); }

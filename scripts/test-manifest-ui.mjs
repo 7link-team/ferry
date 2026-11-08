@@ -147,6 +147,9 @@ try {
     await p.getByRole('textbox',{name:/^名称/}).fill(`Form ${mode}`);
     await p.getByRole('combobox',{name:/^部署模式/}).click();
     await p.getByRole('option',{name:label,exact:true}).click();
+    const sourceOptions=await service(1).getByLabel('运行来源',{exact:true}).locator('option:not([disabled])').evaluateAll(options=>options.map(option=>option.value));
+    assert(sourceOptions.includes(mode==='native'?'artifact':'image'),'target-compatible run source is offered');
+    assert(!sourceOptions.includes(mode==='native'?'image':'artifact'),'incompatible run source cannot be selected');
     await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
     await p.getByRole('option',{name:'Manifest host',exact:true}).click();
     if(mode==='native') {

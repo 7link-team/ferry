@@ -215,6 +215,14 @@
     min-height: 44px;
   }
 }
-.crud-config-page [data-form-actions] {
+[data-form-actions-placement="footer"] {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+[data-form-actions-placement="footer"] > [data-slot="button"] {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
