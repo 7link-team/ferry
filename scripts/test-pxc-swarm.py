@@ -153,6 +153,13 @@ def main():
             (output / f'pxc-{node}.log').write_text(redact(result.stdout + result.stderr))
             result = manager('service', 'ps', '--no-trunc', prefix + '-db-' + node, check=False, timeout=15)
             (output / f'tasks-{node}.log').write_text(redact(result.stdout + result.stderr))
+            container = task(node)
+            if container:
+                result = engine(node, 'exec', container, 'sh', '-c',
+                                'id; echo "$PATH"; ls -l /bin/sh /usr/bin/sh /etc/my.cnf; '
+                                'cat /proc/1/attr/current; tr "\\0" "\\n" < /proc/1/environ | sed -n "/^PATH=/p"',
+                                check=False, timeout=15)
+                (output / f'runtime-{node}.log').write_text(redact(result.stdout + result.stderr))
             # Server startup errors are written inside the data volume, not always
             # to service stdout. Read only this laboratory's existing volume.
             volume = prefix + '-data-' + node
@@ -162,6 +169,10 @@ def main():
                                 IMAGE, '-c', 'tail -n 100 /evidence/lab-error.log /evidence/*.err 2>/dev/null',
                                 check=False, timeout=30)
                 (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
+        result = docker('exec', prefix + '-a', 'sh', '-c',
+                        'dmesg 2>/dev/null | grep -E "DENIED.*(mysqld|bash|sh)" | tail -n 12',
+                        check=False, timeout=15)
+        (output / 'runtime-kernel.log').write_text(redact(result.stdout + result.stderr))
 
     try:
         check('Linux Docker laboratory', os.name == 'posix' and docker('info').returncode == 0)
@@ -321,7 +332,7 @@ def main():
                 print(f'::notice title=PXC laboratory evidence chunk {index:03d}::' + chunk, flush=True)
             if report['result'] == 'FAIL':
                 for path in sorted(output.glob('*.log')):
-                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-')):
+                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-', 'runtime-')):
                         diagnostic = path.read_text(errors='replace')[-3500:]
                         diagnostic = diagnostic.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                         print('::notice title=PXC diagnostic ' + path.name + '::' + diagnostic, flush=True)
