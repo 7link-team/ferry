@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Protocol-specific HA experiments; no production deployments or user fixtures."""
 import asyncio
+import hashlib
+import http.cookiejar
 import json
 import os
 from pathlib import Path
@@ -8,12 +10,15 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.parse
 import uuid
 
 IMAGES = {
     'redis': 'redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952',
     'nats': 'nats@sha256:d69eb29526c1d98afdfb2e2434763bef77b5f3c83e2e24769c13a4d104be475e',
     'nginx': 'nginx@sha256:4ff102c5d78d254a6f0da062b3cf39eaf07f01eec0927fd21e219d0af8bc0591',
+    'mysql': 'mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b',
+    'xxl-admin': 'xuxueli/xxl-job-admin@sha256:6ef0f2cf57ccd332b045549cf91ac945d4cf0139d7b98b8f126d2effe9364bec',
 }
 
 
@@ -25,16 +30,22 @@ class Lab:
         self.output = Path(os.environ.get('FERRY_HA_OUTPUT', 'ha-evidence')).resolve()
         self.output.mkdir(parents=True, exist_ok=True)
         self.containers, self.volumes = [], []
+        self.redactions = []
         self.report = {'result': 'RUNNING', 'kind': kind, 'prefix': self.prefix,
                        'source': os.environ.get('GITHUB_SHA', 'local'), 'checks': [], 'observations': {},
                        'boundary': 'Direct Docker protocol experiment, one host; not Ferry deployment-driver or production HA certification',
                        'uncovered': ['physical-host faults', 'production TLS/auth', 'NAT/remote client discovery',
                                      'Ferry API/SSH/Agent integration', 'backup restore', 'cross-host volume migration']}
 
-    def command(self, *args, check=True, timeout=90):
-        result = subprocess.run(['docker', *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+    def redact(self, text):
+        for value in self.redactions:
+            text = text.replace(value, '[REDACTED]')
+        return text
+
+    def command(self, *args, check=True, timeout=90, input_text=None):
+        result = subprocess.run(['docker', *args], input=input_text, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
         if check and result.returncode:
-            raise RuntimeError(result.stderr[-4000:])
+            raise RuntimeError(self.redact(result.stderr[-4000:]))
         return result
 
     def check(self, name, condition, detail=None):
@@ -84,16 +95,16 @@ class Lab:
     def finish(self, error=None):
         self.report['result'] = 'FAIL' if error else 'PASS'
         if error:
-            self.report['error'] = str(error)
+            self.report['error'] = self.redact(str(error))
         for name in self.containers:
             result = self.command('logs', '--tail', '150', name, check=False, timeout=20)
-            (self.output / (name + '.log')).write_text(result.stdout + result.stderr, encoding='utf8')
+            (self.output / (name + '.log')).write_text(self.redact(result.stdout + result.stderr), encoding='utf8')
         (self.output / 'acceptance.json').write_text(json.dumps(self.report, indent=2), encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
             message = json.dumps(self.report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
             print('::notice title=HA topology evidence::' + message, flush=True)
             if error:
-                print('::error title=HA topology failure::' + str(error).replace('%', '%25').replace('\n', '%0A'), flush=True)
+                print('::error title=HA topology failure::' + self.redact(str(error)).replace('%', '%25').replace('\n', '%0A'), flush=True)
         for name in reversed(self.containers):
             self.command('rm', '-f', name, check=False)
         for volume in self.volumes:
@@ -254,9 +265,152 @@ def nginx_stateless(lab):
                                    'entrypoint_ha': 'NOT_VERIFIED; a shared external LB/VIP is not provided by two Nginx replicas'}
 
 
+def xxl_job(lab):
+    """Real upstream admins/executor; only the owned laboratory database is queried."""
+    upstream = '92577cc33e3974a2f46d9223ed9a405a03c8ee1d'
+    schema_hash = 'f495e8a258111af4f79befad3c70256d656952cf56e64bd5db69494bf1fdcf36'
+    jar = Path(os.environ['FERRY_XXL_EXECUTOR_JAR']).resolve(strict=True)
+    password, token = uuid.uuid4().hex, uuid.uuid4().hex
+    lab.redactions.extend([password, token])
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        for value in lab.redactions:
+            print('::add-mask::' + value, flush=True)
+    lab.report['observations'] = {'upstream_commit': upstream, 'schema_sha256': schema_hash,
+                                   'executor_jar_sha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
+                                   'images': {key: IMAGES[key] for key in ('mysql', 'xxl-admin')},
+                                   'scope': 'admin scheduling HA with a real upstream Java executor; database HA and executor HA not certified'}
+    with urllib.request.urlopen('https://raw.githubusercontent.com/xuxueli/xxl-job/' + upstream + '/doc/db/tables_xxl_job.sql', timeout=30) as response:
+        schema = response.read()
+    lab.check('XXL-01 pinned upstream database schema verified', hashlib.sha256(schema).hexdigest() == schema_hash)
+    lab.start('db', 'mysql', ['--max-connections=80', '--innodb-buffer-pool-size=128M'],
+              env={'MYSQL_ROOT_PASSWORD': password, 'MYSQL_ROOT_HOST': '%'})
+
+    def sql(query, database=True):
+        result = lab.command('exec', '-i', '-e', 'MYSQL_PWD=' + password, lab.name('db'),
+                             'mysql', '--protocol=tcp', '-h127.0.0.1', '-uroot', '--batch', '--raw',
+                             '--skip-column-names', *(['xxl_job'] if database else []),
+                             input_text=query, check=False, timeout=15)
+        if result.returncode:
+            raise RuntimeError(lab.redact(result.stderr[-1500:]))
+        return result.stdout.strip()
+
+    lab.eventually(lambda: sql('SELECT 1', False) == '1', 'final MySQL TCP service', timeout=180)
+    sql(schema.decode(), False)
+    for node in ('a0', 'a1'):
+        params = ('--spring.datasource.url=jdbc:mysql://' + lab.name('db') + ':3306/xxl_job?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC '
+                  '--spring.datasource.username=root --spring.datasource.password=' + password +
+                  ' --xxl.job.accessToken=' + token + ' --xxl.job.i18n=en')
+        lab.start(node, 'xxl-admin', [], port=8080, env={'PARAMS': params, 'JAVA_OPTS': '-Xms128m -Xmx384m', 'TZ': 'UTC'})
+    urls = {node: 'http://127.0.0.1:' + str(lab.port(node, 8080)) + '/xxl-job-admin' for node in ('a0', 'a1')}
+    clients = {node: urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())) for node in urls}
+
+    def api(node, path, fields):
+        data = urllib.parse.urlencode(fields).encode()
+        with clients[node].open(urllib.request.Request(urls[node] + path, data=data), timeout=10) as response:
+            result = json.load(response)
+        if result.get('code') != 200:
+            raise RuntimeError(path + ': ' + str(result))
+        return result
+
+    for node in urls:
+        lab.eventually(lambda node=node: api(node, '/login', {'userName': 'admin', 'password': '123456'}),
+                       'admin login ' + node, timeout=180)
+    lab.check('XXL-02 two real admin instances use one initialized database',
+              all(api(node, '/login', {'userName': 'admin', 'password': '123456'})['code'] == 200 for node in urls)
+              and sql('SELECT COUNT(*) FROM xxl_job_lock') == '1')
+    network = json.loads(lab.command('network', 'inspect', lab.prefix).stdout)[0]
+    gateway = network['IPAM']['Config'][0]['Gateway']
+    import socket
+    with socket.socket() as listener:
+        listener.bind(('0.0.0.0', 0))
+        executor_port = listener.getsockname()[1]
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        web_port = listener.getsockname()[1]
+    executor_address = f'http://{gateway}:{executor_port}'
+    api('a0', '/jobgroup/save', {'appname': lab.prefix, 'title': 'HA acceptance executor',
+                               'addressType': 1, 'addressList': executor_address})
+    group = int(sql("SELECT id FROM xxl_job_group WHERE appname='" + lab.prefix + "'"))
+    log_dir = lab.output / 'executor-jobs'
+    executor_log = (lab.output / 'executor.log').open('w', encoding='utf8')
+    executor = subprocess.Popen(['java', '-jar', str(jar), '--server.port=' + str(web_port),
+                                 '--xxl.job.admin.addresses=' + ','.join(urls.values()),
+                                 '--xxl.job.accessToken=' + token, '--xxl.job.executor.appname=' + lab.prefix,
+                                 '--xxl.job.executor.address=' + executor_address,
+                                 '--xxl.job.executor.ip=0.0.0.0', '--xxl.job.executor.port=' + str(executor_port),
+                                 '--xxl.job.executor.logpath=' + str(log_dir)],
+                                stdout=executor_log, stderr=subprocess.STDOUT)
+    try:
+        def executor_ready():
+            assert executor.poll() is None, 'upstream executor exited before registration'
+            with urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{executor_port}/beat',
+                                         data=b'{}', headers={'XXL-JOB-ACCESS-TOKEN': token}), timeout=5) as response:
+                return json.load(response).get('code') == 200
+        lab.eventually(executor_ready, 'real Java executor protocol ready', timeout=120)
+        job = int(api('a0', '/jobinfo/add', {
+            'jobGroup': group, 'jobDesc': 'Real HA scheduled shell', 'author': 'HA laboratory',
+            'scheduleType': 'CRON', 'scheduleConf': '0/3 * * * * ?', 'misfireStrategy': 'DO_NOTHING',
+            'executorRouteStrategy': 'FIRST', 'executorBlockStrategy': 'SERIAL_EXECUTION',
+            'executorTimeout': 10, 'executorFailRetryCount': 0, 'glueType': 'GLUE_SHELL',
+            'glueSource': '#!/bin/sh\necho FERRY_XXL_HA_MARKER\n', 'glueRemark': 'owned HA laboratory',
+        })['content'])
+
+        def rows():
+            return json.loads(sql("SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('id',id,'time',UNIX_TIMESTAMP(trigger_time),"
+                                  "'trigger',trigger_code,'handle',handle_code,'message',trigger_msg)),JSON_ARRAY()) "
+                                  f'FROM xxl_job_log WHERE job_id={job}'))
+
+        api('a0', '/jobinfo/start', {'id': job})
+        lab.eventually(lambda: len([r for r in rows() if r['handle'] == 200]) >= 3,
+                       'three scheduled real shell executions with callbacks', timeout=90)
+        baseline = rows()
+        lab.check('XXL-03 real scheduled shell jobs complete and callbacks reach admins',
+                  all(r['trigger'] == 200 and r['handle'] == 200 for r in baseline))
+        last = max(baseline, key=lambda row: row['id'])
+        active = next(node for node in urls if lab.ip(node) in last['message'])
+        survivor = 'a1' if active == 'a0' else 'a0'
+        lab.command('stop', '-t', '15', lab.name(active))
+        boundary = max(row['id'] for row in rows())
+        lab.eventually(lambda: len([r for r in rows() if r['id'] > boundary and r['handle'] == 200
+                                   and lab.ip(survivor) in r['message']]) >= 3,
+                       'surviving admin schedules new jobs and receives execution callbacks', timeout=90)
+        lab.check('XXL-04 surviving admin takes over after the last scheduling admin exits',
+                  len([r for r in rows() if r['id'] > boundary and r['handle'] == 200]) >= 3)
+        lab.command('start', lab.name(active))
+        lab.eventually(lambda: api(active, '/login', {'userName': 'admin', 'password': '123456'}),
+                       'returning admin ready', timeout=120)
+        returning_boundary = max(r['id'] for r in rows())
+        lab.eventually(lambda: len([r for r in rows() if r['id'] > returning_boundary and r['handle'] == 200]) >= 3,
+                       'scheduling continues after admin returns', timeout=90)
+        api(survivor, '/jobinfo/stop', {'id': job})
+        lab.eventually(lambda: all(r['trigger'] == 200 and r['handle'] == 200 for r in rows()),
+                       'all observed jobs completed without retry', timeout=30)
+        final = rows()
+        lab.check('XXL-05 no duplicate scheduled seconds or failed callbacks in the observed window',
+                  len(final) == len({r['time'] for r in final}) and all(r['handle'] == 200 for r in final))
+        markers = sum(path.read_text(errors='replace').count('FERRY_XXL_HA_MARKER') for path in log_dir.rglob('*.log'))
+        lab.check('XXL-06 each successful callback corresponds to one real shell execution log', markers == len(final))
+        lab.report['observations'].update({'job': job, 'last_scheduling_admin_stopped': active,
+                                           'survivor': survivor, 'completed_executions': len(final),
+                                           'distinct_scheduled_seconds': len({r['time'] for r in final}),
+                                           'shell_log_markers': markers,
+                                           'global_exactly_once': 'NOT CERTIFIED; finite observation, no business retry/idempotency certification'})
+        (lab.output / 'xxl-executions.json').write_text(json.dumps(final, indent=2), encoding='utf8')
+    finally:
+        executor.terminate()
+        try:
+            executor.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            executor.kill()
+            executor.wait(timeout=10)
+        executor_log.close()
+        for path in lab.output.rglob('*.log'):
+            path.write_text(lab.redact(path.read_text(errors='replace')), encoding='utf8')
+
+
 def main():
     kind = sys.argv[1]
-    assert kind in ('redis-sentinel', 'nats-jetstream', 'nginx')
+    assert kind in ('redis-sentinel', 'nats-jetstream', 'nginx', 'xxl-job')
     lab = Lab(kind)
     error = None
     try:
@@ -265,6 +419,8 @@ def main():
             redis_sentinel(lab)
         elif kind == 'nats-jetstream':
             asyncio.run(nats_jetstream(lab))
+        elif kind == 'xxl-job':
+            xxl_job(lab)
         else:
             nginx_stateless(lab)
     except Exception as caught:
