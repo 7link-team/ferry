@@ -2,6 +2,7 @@
 """Real Compose + runner/SSH acceptance. Owns all fixtures; no silent skips."""
 import concurrent.futures
 import http.cookiejar
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -206,7 +207,18 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             dockerfile=dockerfile.replace(b'CMD ["/usr/sbin/sshd","-D","-e"]',b'RUN systemctl enable ssh && systemctl disable docker.service docker.socket containerd.service\nCMD ["/sbin/init"]')
         (build_dir/'Dockerfile').write_bytes(dockerfile.replace(b'BASE_IMAGE',base_image.encode()))
         (build_dir/'docker-wrapper').write_text('#!/bin/sh\nwhile [ -f /tmp/deployment-pause ]; do sleep 0.1; done\nfor arg in "$@"; do if [ "$arg" = up ]; then while [ -f /tmp/deployment-up-pause ]; do sleep 0.1; done; fi; if [ "$arg" = up ] && [ -f /tmp/deployment-fail ]; then echo fixture-command-failed >&2; if [ -f /tmp/deployment-leak ]; then find /tmp/deployments -name \".variables-*.env\" -exec cat {} \\; >&2; fi; exit 42; fi; done\nexec /usr/bin/docker "$@"\n')
-        command(['curl','-fL','--max-time','120','-o',str(build_dir/'docker-compose'),f'https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-{compose_arch}'])
+        compose_binary = os.environ.get('FERRY_TEST_COMPOSE_BINARY')
+        if compose_binary:
+            compose_source = Path(compose_binary).resolve(strict=True)
+            assert compose_source.is_file(), 'provided Compose plugin must be a file'
+            compose_version = command([str(compose_source),'version','--short']).decode().strip()
+            assert compose_version.lstrip('v').startswith('2.'), 'acceptance requires Compose v2'
+            shutil.copyfile(compose_source,build_dir/'docker-compose')
+        else:
+            command(['curl','-fL','--retry','3','--retry-delay','2','--retry-max-time','180','--max-time','120','-o',str(build_dir/'docker-compose'),f'https://github.com/docker/compose/releases/download/v2.40.3/docker-compose-linux-{compose_arch}'])
+            compose_version = '2.40.3'
+        report['compose'] = {'version':compose_version,'source':'provided' if compose_binary else 'release',
+                             'sha256':hashlib.sha256((build_dir/'docker-compose').read_bytes()).hexdigest()}
         if mode=='stack':
             (build_dir/'nested-daemon').write_text('#!/bin/sh\nset -eu\nif [ -f /sys/fs/cgroup/cgroup.controllers ]; then\n mkdir -p /sys/fs/cgroup/init\n for pid in $(cat /sys/fs/cgroup/cgroup.procs); do echo "$pid" > /sys/fs/cgroup/init/cgroup.procs 2>/dev/null || :; done\n sed -e "s/ / +/g" -e "s/^/+/" /sys/fs/cgroup/cgroup.controllers > /sys/fs/cgroup/cgroup.subtree_control\nfi\nexec dockerd "$@"\n')
             with (build_dir/'Dockerfile').open('ab') as docker_file:
@@ -885,8 +897,8 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         if report['result'] == 'RUNNING': report['result']='FAIL'
         (work/'acceptance.json').write_text(json.dumps(report,indent=2),encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1':
-            import hashlib
             summary = {key:report[key] for key in ('mode','boundary','result')}
+            if 'compose' in report: summary['compose'] = report['compose']
             summary['source_commit'] = os.environ.get('GITHUB_SHA','')
             summary['template_sha256'] = hashlib.sha256(Path('crates/server/src/templates/examples/http-service.json').read_bytes()).hexdigest()
             summary['checks'] = [{'name':row['name'][:180],'passed':row['passed']} for row in report['checks']]

@@ -77,6 +77,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openssh-client python3 git curl
           docker info
+          # Reuse the runner's Compose v2 plugin explicitly. Copy this exact
+          # binary into the owned SSH/Agent fixture; record version and SHA256.
+          compose_path=$(docker info --format '{{json .ClientInfo.Plugins}}' | python3 -c 'import json,sys; print(next(p["Path"] for p in json.load(sys.stdin) if p["Name"] == "compose"))')
+          test -x "$compose_path"
+          echo "FERRY_TEST_COMPOSE_BINARY=$compose_path" >> "$GITHUB_ENV"
+          "$compose_path" version --short
           mkdir -p "$FERRY_TEST_OUTPUT_DIR"
       - run: npm ci
       - name: Install the deployment browser
