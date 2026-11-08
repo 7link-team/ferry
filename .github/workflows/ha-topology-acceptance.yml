@@ -1,0 +1,43 @@
+name: Protocol-specific HA topology experiments
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ci/ha-topologies-*']
+    paths:
+      - .github/workflows/ha-topology-acceptance.yml
+      - scripts/test-ha-topologies.py
+permissions:
+  contents: read
+concurrency:
+  group: ha-topology-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [redis-sentinel, nats-jetstream, nginx]
+    env:
+      FERRY_HA_LAB: '1'
+      FERRY_HA_OUTPUT: ${{ github.workspace }}/ha-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install experiment client
+        if: matrix.topology == 'nats-jetstream'
+        run: python -m pip install nats-py==2.9.0
+      - name: Real service-specific failure and recovery
+        run: python scripts/test-ha-topologies.py '${{ matrix.topology }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ha-${{ matrix.topology }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            ha-evidence/acceptance.json
+            ha-evidence/*.log
