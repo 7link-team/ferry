@@ -491,7 +491,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     for suffix,node in zip(['a','b','c'],swarm_nodes):
                         tasks=json.loads(engine(['service','ps','--no-trunc','--filter','desired-state=running','--format','{{json .}}',sample_project+'_nats-'+suffix]).decode().splitlines()[0])
                         check(kind+' NATS member '+suffix+' placed on assigned node',tasks['Node']==engine(['info','--format','{{.Name}}'],node).decode().strip())
-                    def stop_member(member): engine(['service','scale','--detach',sample_project+'_'+member+'=0'])
+                    def stop_member(member):
+                        service=sample_project+'_'+member
+                        engine(['service','scale','--detach',service+'=0'])
+                        eventually(lambda:all(not engine(['ps','-q','--filter','label=com.docker.swarm.service.name='+service],node).decode().strip() for node in swarm_nodes))
                     def restore_member(member): engine(['service','scale','--detach',sample_project+'_'+member+'=1'])
                 else:
                     members={member:command(['docker','ps','-q','--filter','label=com.docker.compose.project='+sample_project,'--filter','label=com.docker.compose.service='+member]).decode().strip() for member in ['nats-a','nats-b','nats-c']}
