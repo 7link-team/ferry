@@ -1546,7 +1546,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferry-desktop-updater"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-protocol"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-runner"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-sandbox"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "ferry-server"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",

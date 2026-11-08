@@ -196,7 +196,7 @@ pub(super) async fn run(
     #[cfg(unix)]
     {
         use std::os::fd::AsRawFd;
-        let descriptor = _lock.as_raw_fd();
+        let descriptor = _lock.0.as_raw_fd();
         // Let the native process retain the lock if its Runner is killed.
         unsafe {
             command.pre_exec(move || {
