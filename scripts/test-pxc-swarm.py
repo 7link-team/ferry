@@ -179,10 +179,19 @@ def main():
                 result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
                                 '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
                                 IMAGE, '-c',
+                                'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" '
+                                '/evidence/lab-error.log 2>/dev/null | head -n 18; '
                                 'tail -n 40 /evidence/lab-error.log /evidence/*.err 2>/dev/null; '
                                 'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" /evidence/lab-error.log 2>/dev/null | tail -n 20',
                                 check=False, timeout=30)
                 (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
+            containers = engine(node, 'ps', '-aq', '--filter',
+                                'label=com.docker.swarm.service.name=' + prefix + '-db-' + node,
+                                check=False, timeout=15).stdout.split()
+            if containers:
+                result = engine(node, 'inspect', '--format', '{{json .State}}', *containers,
+                                check=False, timeout=20)
+                (output / f'runtime-state-{node}.log').write_text(redact(result.stdout + result.stderr))
         result = docker('exec', prefix + '-a', 'sh', '-c',
                         'dmesg 2>/dev/null | grep -E "DENIED.*(mysqld|bash|sh)" | tail -n 12',
                         check=False, timeout=15)
@@ -348,7 +357,9 @@ def main():
             if report['result'] == 'FAIL':
                 for path in sorted(output.glob('*.log')):
                     if path.name.startswith(('mysql-', 'pxc-', 'tasks-', 'runtime-')):
-                        diagnostic = path.read_text(errors='replace')[-3500:]
+                        contents = path.read_text(errors='replace')
+                        diagnostic = (contents[:2000] + '\n[... bounded diagnostic ...]\n' + contents[-1400:]
+                                      if len(contents) > 3500 else contents)
                         diagnostic = diagnostic.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                         print('::notice title=PXC diagnostic ' + path.name + '::' + diagnostic, flush=True)
         (output / 'summary.md').write_text('\n'.join([
