@@ -301,7 +301,9 @@ try {
   await p.goto(connectionPath);
   const detailTabs=p.getByRole('tablist',{name:'仓库连接详情',exact:true});
   await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).waitFor();
-  await p.getByText('Codeup private checkout',{exact:true}).waitFor();
+  await p.getByRole('heading',{level:2,name:'Codeup private checkout',exact:true}).waitFor();
+  const connectionBasics=p.getByRole('region',{name:'基本信息',exact:true});
+  await connectionBasics.getByText('Codeup private checkout',{exact:true}).waitFor();
   await detailTabs.getByRole('tab',{name:'仓库列表',exact:true}).click();
   await p.getByRole('cell',{name:'test-org/team/test-repo',exact:true}).waitFor();
   assert.equal(new URL(p.url()).pathname,new URL(connectionPath).pathname);
@@ -316,7 +318,7 @@ try {
   await p.getByRole('button',{name:'上一页',exact:true}).click();await p.getByRole('cell',{name:'test-org/team/test-repo',exact:true}).waitFor();
   await p.setViewportSize({width:390,height:844});
   assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'connection repository table fits mobile viewport');
-  await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).click();await p.getByText('Codeup private checkout',{exact:true}).waitFor();
+  await detailTabs.getByRole('tab',{name:'基本信息',exact:true}).click();await connectionBasics.getByText('Codeup private checkout',{exact:true}).waitFor();
   console.log('PASS: connection detail tabs, Codeup repository pagination, reload deep link, permission failure/retry and mobile layout');
 
   const passwordCredential=await post(owner,root+'/credentials',{name:'Reusable Git password',kind:'password',username:'git-user',secret:'generic-private-password',description:''});
