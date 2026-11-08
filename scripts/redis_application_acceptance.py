@@ -1,5 +1,6 @@
 """Sentinel protocol checks for a template deployed through Ferry's real API."""
 import json
+import subprocess
 import time
 import uuid
 
@@ -97,7 +98,11 @@ def exercise(api, create, start, done, check, command, mode, workspace, host, tr
             label = ('com.docker.stack.namespace=' if mode == 'stack' else 'com.docker.compose.project=') + project
             for container in command(prefix + ['ps', '-aq', '--filter', 'label=' + label]).decode().split():
                 result.append(command(prefix + ['inspect', '--format', '{{.Name}} {{json .State}}', container]).decode())
-                result.append(command(prefix + ['logs', '--tail', '60', container]).decode())
+                # Docker sends container stderr to the CLI's stderr even when
+                # logs exits successfully. Keep startup failures in evidence.
+                output = subprocess.run(prefix + ['logs', '--tail', '100', container],
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+                result.append(output.stdout.decode())
         text = '\n'.join(result).replace(password, '[REDACTED]').replace(json.dumps(password)[1:-1], '[REDACTED]')
         (work / ('redis-' + transport + '-diagnostics.log')).write_text(text, encoding='utf8')
         print(text[-7000:], flush=True)
