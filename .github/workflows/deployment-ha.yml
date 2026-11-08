@@ -111,7 +111,7 @@ jobs:
         if: matrix.mode == 'native'
         run: |
           mkdir -p harness-logs
-          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server -- --nocapture > harness-logs/server-tests.log 2>&1
+          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server -- --nocapture 2>&1 | tee harness-logs/server-tests.log
       - name: Deployment acceptance through SSH and HostAgent
         shell: bash
         run: |
@@ -157,6 +157,7 @@ jobs:
           if-no-files-found: warn
           path: |
             harness-logs/acceptance.log
+            harness-logs/server-tests.log
             harness-logs/fixtures/**/acceptance.json
             harness-logs/fixtures/**/*.log
             harness-logs/template-ui/*.png
