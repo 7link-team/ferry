@@ -17,7 +17,7 @@ async function chooseNative(control, value) {
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, open } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -101,13 +101,39 @@ try {
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
     assert.equal(templates.total,2);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
     assert.equal(templates.items.filter(row=>JSON.parse(row.content).metadata?.name==='example-http').length,1);
+    const example=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-http');
+    for(const width of [1440,900,390,320]){
+      await p.setViewportSize({width,height:900});
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${example.id}`);
+      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      await generator.getByRole('spinbutton',{name:'发布端口',exact:true}).fill('23180');
+      const message=`HTTP scenario ${width}: 'quotes' $HOME $(false)`;
+      await generator.getByRole('textbox',{name:'响应内容',exact:true}).fill(message);
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${example.id}/renderings`)&&response.request().method()==='POST');
+      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      const response=await rendered;assert(response.ok(),await response.text());
+      const manifest=JSON.parse((await response.json()).manifest);
+      assert.equal(manifest.services[0].ports[0].published,23180);
+      assert.equal(manifest.services[0].env[0].value,message);
+      assert(!manifest.services[0].command.join(' ').includes(message));
+      await generator.getByRole('status').filter({hasText:'配置已填入'}).waitFor();
+      assert(await generator.getByRole('button',{name:'生成配置',exact:true}).isEnabled());
+      assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`page overflow at ${width}`);
+      if(process.env.FERRY_SCENARIO_UI_OUTPUT){
+        await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`http-template-${width}.png`)});
+      }
+    }
+    const deployments=await(await owner.request.get(`${origin}/api${root}/deployments`)).json();
+    assert.equal(deployments.total,0,'Selecting and rendering an example must not deploy or save an application');
+    await p.setViewportSize({width:1280,height:800});
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources`);
     await p.getByRole('row').filter({has:p.getByRole('cell',{name:'Browser source',exact:true})}).getByRole('button',{name:'删除',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});
     assert(authorizedSyncs>0,'marketplace sync used the selected connection credential');
     assert.deepEqual(errors,[]);
-    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import and source deletion');
+    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, HTTP scenario parameters at four widths without deployment and source deletion');
   } finally {fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}
 } finally {
   if (browser) await browser.close();

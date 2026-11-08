@@ -100,6 +100,11 @@ jobs:
             python3 .github/scripts/annotate-failures.py harness-logs/acceptance.log
             exit 1
           fi
+      - name: Application template selection and marketplace compatibility
+        if: matrix.mode == 'compose'
+        env:
+          FERRY_SCENARIO_UI_OUTPUT: ${{ github.workspace }}/harness-logs/template-ui
+        run: node scripts/test-marketplace-ui.mjs
       - name: Record the tested boundary
         if: always()
         run: |
@@ -127,3 +132,4 @@ jobs:
             harness-logs/acceptance.log
             harness-logs/fixtures/**/acceptance.json
             harness-logs/fixtures/**/*.log
+            harness-logs/template-ui/*.png
