@@ -34,6 +34,7 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
   const [platformError, setPlatformError] = useState("");
   const [authorizationError, setAuthorizationError] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const [preset, setPreset] = useState("");
   const popup = useRef<Window | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const authorizationRequest = useRef(0);
@@ -45,6 +46,10 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
     authorizationRequest.current++;
     popup.current?.close(); popup.current = null;
     channel.current?.close(); channel.current = null;
+  }
+  function changeProvider(value: string) {
+    closeAuthorization(); setWaiting(false); setMethod("token"); setPreset("");
+    onChange({ provider: value, credential_id: "0", base_url: "", api_url: "", organization: "", url: "" });
   }
   useEffect(() => {
     if (readOnly) return;
@@ -128,9 +133,19 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
   </dl>;
 
   return <div className="space-y-4">
+    {!draft.id && <fieldset className="min-w-0 space-y-2">
+      <legend className="text-sm font-medium">{hostRepositoryText("repository.presets.title")}</legend>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {(["github", "codeup", "git"] as const).map(value => <Button key={value} type="button" variant={preset === value ? "secondary" : "outline"}
+          className="h-auto min-h-11 min-w-0 whitespace-normal px-3 py-2" aria-pressed={preset === value} disabled={waiting}
+          onClick={() => { changeProvider(value); setPreset(value); }}>
+          {hostRepositoryText(`repository.presets.${value}`)}
+        </Button>)}
+      </div>
+      <p role="status" className="text-xs leading-relaxed text-muted-foreground">{hostRepositoryText(preset ? `repository.presets.${preset}Help` : "repository.presets.help")}</p>
+    </fieldset>}
     <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.037")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.037")} className={selectClass} value={provider} disabled={waiting || existingOAuth} onChange={event => {
-      setMethod("token");
-      onChange({ provider: event.target.value, credential_id: "0", base_url: "", api_url: "", organization: "", url: "" });
+      changeProvider(event.target.value);
     }}><option value="">{hostRepositoryText("repository.044")}</option>{provider && !platforms.some(([key]) => key === provider) && <option value={provider}>{repositoryProviderLabel(provider)}</option>}{platforms.map(([key]) => <option key={key} value={key}>{repositoryProviderLabel(key)}</option>)}</select></AutoField>
     {provider && provider !== "git" && <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.045")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.045")} className={selectClass} value={method} disabled={waiting || !!draft.id} onChange={event => { closeAuthorization(); setWaiting(false); setMethod(event.target.value); setAuthorizationError(""); }}><option value="token">{hostRepositoryText("repository.046")}</option>{provider !== "codeup" && <option value="web" disabled={!platform?.web_available && !existingOAuth}>{hostRepositoryText("repository.039")}</option>}</select></AutoField>}
     {provider && (provider === "git" || method === "token") && <>

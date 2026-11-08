@@ -43,8 +43,12 @@ it("rerenders repository controls in all six languages and preserves the selecte
  for(const locale of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY']){
    await act(async()=>{await i18n.changeLanguage(locale);});
    expect(host.textContent).toContain(hostRepositoryText('repository.037'));
-   expect(host.querySelector<HTMLSelectElement>('select')?.value).toBe('git');
+   expect(host.querySelector<HTMLSelectElement>('[aria-label="'+hostRepositoryText('repository.037')+'"]')?.value).toBe('git');
    expect(host.textContent).toContain(hostRepositoryText('repository.001'));
+   for(const key of ['title','help','github','codeup','git']) {
+     expect(hostRepositoryText(`repository.presets.${key}`)).not.toBe(`repository.presets.${key}`);
+     expect(host.textContent).toContain(hostRepositoryText(`repository.presets.${key}`));
+   }
  }
  expect(patch).not.toHaveBeenCalled();
 });
@@ -120,4 +124,20 @@ it("can reuse a credential beyond the first page",async()=>{
  vi.stubGlobal("fetch",vi.fn(async(url:string)=>{requests.push(url);const second=url.includes('page=2');return {ok:true,status:200,json:async()=>url.includes('/credentials')?{items:second?[{id:'late',name:'Second page PAT',kind:'token'}]:credentials,total:4,page_size:3}:{items:[]}};}));
  await mount();await select('凭据','late');expect(patch).toHaveBeenLastCalledWith({credential_id:'late'});
  expect(requests.some(url=>url.includes('page=2'))).toBe(true);
+});
+it("applies scenario presets without submitting, retaining names and clearing former authorization fields",async()=>{
+ await mount({name:'Keep name',description:'Keep notes',provider:'gitea',credential_id:'11',base_url:'https://old.invalid',api_url:'https://old.invalid/api',organization:'old-org',url:'old-url'});
+ for(const provider of ['github','codeup','git']) {
+   await act(async()=>[...host.querySelectorAll('button')].find(button=>button.textContent===hostRepositoryText(`repository.presets.${provider}`))!.click());
+   expect(patch).toHaveBeenLastCalledWith({provider,credential_id:'0',base_url:'',api_url:'',organization:'',url:''});
+   expect(host.querySelector('[aria-pressed="true"]')?.textContent).toBe(hostRepositoryText(`repository.presets.${provider}`));
+   expect(host.textContent).toContain(hostRepositoryText(`repository.presets.${provider}Help`));
+   expect(validity).toHaveBeenLastCalledWith(provider!=='git');
+ }
+ expect(requests.every(url=>!url.includes('/authorizations'))).toBe(true);
+ await select('代码平台','gitlab');expect(host.querySelector('[aria-pressed="true"]')).toBeNull();
+});
+it("keeps presets out of saved connections and read-only views",async()=>{
+ await mount({id:'saved',provider:'git',credential_id:'0'});
+ expect(host.querySelector('fieldset')).toBeNull();expect(patch).not.toHaveBeenCalled();
 });

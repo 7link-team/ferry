@@ -57,6 +57,31 @@ try {
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
+  const presetOutput = resolve(process.env.FERRY_SCENARIO_UI_OUTPUT || join(work, 'template-ui'));
+  await mkdir(presetOutput, { recursive: true });
+  for (const width of [1440,900,390,320]) {
+    await p.setViewportSize({width,height:900});
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
+    await p.getByRole('textbox',{name:/^连接名称/}).fill('Preset Git '+width);
+    for (const [label,provider] of [['GitHub 团队构建','github'],['Codeup 企业仓库','codeup'],['纯 Git 拉取','git']]) {
+      await p.getByRole('button',{name:label,exact:true}).click();
+      assert.equal(await p.getByRole('combobox',{name:'代码平台',exact:true}).inputValue(),provider);
+      assert.equal(await p.getByRole('combobox',{name:'凭据',exact:true}).inputValue(),'0');
+      assert.equal(await p.getByRole('textbox',{name:/^连接名称/}).inputValue(),'Preset Git '+width);
+    }
+    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Repository preset page overflows');
+    await p.screenshot({path:join(presetOutput,`repository-preset-${width}.png`),fullPage:true});
+    await p.getByRole('button',{name:'创建',exact:true}).click();
+    await p.waitForURL(url=>!url.pathname.endsWith('/new'));
+    const connections=await(await owner.request.get(`${origin}/api${root}/code-connections`)).json();
+    const saved=connections.items.find(row=>row.name==='Preset Git '+width);
+    assert(saved,'Preset connection must persist'); assert.equal(saved.provider,'git');assert.equal(String(saved.credential_id),'0');
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${saved.id}/edit`);
+    await p.getByRole('combobox',{name:'代码平台',exact:true}).waitFor();
+    assert.equal(await p.getByRole('button',{name:'纯 Git 拉取',exact:true}).count(),0);
+    const deleted=await owner.request.delete(`${origin}/api${root}/code-connections/${saved.id}`,{headers});assert.equal(deleted.status(),204);
+  }
+  await p.setViewportSize({width:1280,height:800});
   let authorizedSyncs=0;
   const fixture=createHttpServer((request,response)=>{
     const path=new URL(request.url,'http://localhost').pathname;
