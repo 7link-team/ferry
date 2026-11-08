@@ -106,6 +106,10 @@ CI 资源仅证明共享宿主内的独立 daemon、集群协议和故障行为�
 | 273783f / 42433468191 | 同8.4.11 | FAIL，补采数据卷错误日志；MySQL实际加载provider none、socket /var/lib/mysql/mysql.sock，与入口生成的node.cnf不一致 |
 | c7cc1e5 / 42434199721 | 同8.4.11 | 显式 `--defaults-file=/etc/mysql/node.cnf` 和socket后首次bootstrap通过；FAIL于第二成员SST，posix_spawnp返回13 Permission denied并出现SIGSEGV；未到达三成员及后续故障用例 |
 | c1d441f / 42434837307 | 同8.4.11，只读镜像预检 | 诊断任务成功不等于数据库验收成功：SST脚本755可执行，预期路径/usr/bin/xtrabackup不存在；脚本执行能进入，但SST失败完整根因未确认 |
-| c2a9329 / 42435051693 | 独立8.0固定摘要 | 运行中，仍使用PXC-01～07相同断言；结果待收取 |
+| c2a9329 / 42435051693 | 独立8.0.46固定摘要 | FAIL，同样在第二成员SST遇到posix_spawnp=13；说明不能只归因于8.4镜像 |
+| 34e6cdf / 42435706378 | 同8.0.46 | FAIL并取得根因证据：MySQL实际附着宿主 `/usr/sbin/mysqld (enforce)`；内核AppArmor审计明确拒绝容器 `/usr/bin/bash` 执行及Percona配置读取 |
+| 9c79761 / 42436260309 | 独立8.0/8.4双矩阵 | 修正一次性CI主机的宿主策略后，同PXC-01～07断言重跑；结果待收取 |
 
 每次失败保留原始CI与脱敏日志。JSON报告按3000字符拆分为check annotations，避开4096字符截断；完整报告及日志另存artifact。已读取JSON或公开job HTML中的诊断，不将尚未下载校验的附件称为本地完整归档。8.4.11当前不在“实验通过”名单，不能由8.0候选测试覆盖其失败。
+
+本轮定位出的环境问题是嵌套Docker未附着外层容器策略，宿主MySQL路径策略自动约束了容器内同路径程序。CI仅临时将这条宿主profile切为complain，并以always步骤恢复；不关闭整个AppArmor服务，不修改用户本机或生产主机。报告记录该环境修正；即使后续实验通过，也不构成生产AppArmor策略验收。镜像预检发现的XtraBackup路径差异不是已证明的SST失败根因，不能据此认定镜像缺陷。

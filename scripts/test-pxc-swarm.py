@@ -143,7 +143,13 @@ def main():
                 '--limit-memory', '2G']
         if join:
             args += ['--env', 'CLUSTER_JOIN=' + join]
-        manager(*args, IMAGE, 'mysqld', '--defaults-file=/etc/mysql/node.cnf',
+        # SST helpers read the option file rather than mysqld's command line.
+        # Keep the already-declared unencrypted private laboratory consistent.
+        wrapper = ('sed -i "/^\\[mysqld\\]/a pxc-encrypt-cluster-traffic=OFF" /etc/mysql/node.cnf; '
+                   'sed -i "/^\\[sst\\]/a encrypt=0" /etc/mysql/node.cnf; '
+                   'exec /entrypoint.sh "$@"')
+        manager(*args, '--entrypoint', 'sh', IMAGE, '-c', wrapper, 'ferry-pxc-lab',
+                'mysqld', '--defaults-file=/etc/mysql/node.cnf',
                 '--pxc-encrypt-cluster-traffic=OFF',
                 '--innodb-buffer-pool-size=128M', '--max-connections=40',
                 '--log-error=/var/lib/mysql/lab-error.log', timeout=120)
@@ -172,7 +178,9 @@ def main():
             if engine(node, 'volume', 'inspect', volume, check=False).returncode == 0:
                 result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
                                 '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
-                                IMAGE, '-c', 'tail -n 100 /evidence/lab-error.log /evidence/*.err 2>/dev/null',
+                                IMAGE, '-c',
+                                'tail -n 40 /evidence/lab-error.log /evidence/*.err 2>/dev/null; '
+                                'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" /evidence/lab-error.log 2>/dev/null | tail -n 20',
                                 check=False, timeout=30)
                 (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
         result = docker('exec', prefix + '-a', 'sh', '-c',
