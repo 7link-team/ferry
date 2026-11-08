@@ -31,6 +31,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
 }) {
   const id = useId();
   const [advanced, setAdvanced] = useState(false);
+  const [preview, setPreview] = useState(false);
   const parsed = useMemo(() => {
     try {
       const rows: unknown = JSON.parse(value);
@@ -53,18 +54,29 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
   return <section className="min-w-0 space-y-4" aria-label={t("parameters")}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-muted-foreground">{t("visualParametersHelp")}</p>
-      <Button type="button" size="sm" variant="outline" aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>
-        {advanced ? t("visualParameters") : t("advancedJson")}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="outline" aria-expanded={preview} onClick={() => setPreview(current => !current)}>{t("formPreview")}</Button>
+        <Button type="button" size="sm" variant="outline" aria-pressed={advanced} onClick={() => setAdvanced(!advanced)}>
+          {advanced ? t("visualParameters") : t("advancedJson")}
+        </Button>
+      </div>
     </div>
+    {preview && <div className="rounded-md border border-primary/30 bg-background p-3"><TemplateParameterPreview key={value} value={value} /></div>}
     {advanced || !parsed ? <div className="h-80 min-w-0 overflow-hidden rounded-md border">
       <Suspense fallback={<LoadingSkeleton variant="editor" />}><CodeEditor value={value} language="json" path={`template-parameters-${id}.json`}
         label={t("advancedJson")} readOnly={readOnly} onChange={onChange} /></Suspense>
     </div> : <>
       {!parsed.length && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">{t("noParameters")}</p>}
-      {parsed.map((row, index) => <fieldset key={index} className="min-w-0 space-y-4 rounded-md border p-4">
-        <legend className="px-1 text-sm font-medium">{row.label || row.name || `${t("parameter")} ${index + 1}`}</legend>
-        <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {parsed.map((row, index) => <fieldset key={index} data-template-parameter className="min-w-0 overflow-hidden rounded-lg border border-border border-l-4 border-l-primary/60 bg-muted/30">
+        <legend className="sr-only">{row.label || row.name || `${t("parameter")} ${index + 1}`}</legend>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border bg-primary/10 px-3 py-2">
+          <span aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded bg-primary text-xs font-semibold text-primary-foreground">{index + 1}</span>
+          <h3 className="min-w-0 flex-1 break-words text-sm font-semibold [overflow-wrap:anywhere]">{row.label || row.name || t("parameter")}</h3>
+          {!readOnly && <Button type="button" size="sm" variant="ghost" aria-label={`${commonText("common.delete")} ${row.label || row.name || index + 1}`} onClick={() => onChange(JSON.stringify(parsed.filter((_, i) => i !== index), null, 2))}><Trash2 className="size-4" />{commonText("common.delete")}</Button>}
+        </div>
+        <div className="min-w-0 space-y-3 p-3">
+        {readOnly ? <ParameterDefinition row={row} /> : <>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <AutoField label={t("parameterName")} required help={t("parameterNameHelp")}><Input value={row.name} required maxLength={100} disabled={readOnly} onChange={event => update(index, { name: event.target.value })} /></AutoField>
           <AutoField label={t("parameterLabel")}><Input value={row.label ?? ""} maxLength={100} disabled={readOnly} onChange={event => update(index, { label: event.target.value })} /></AutoField>
           <AutoField label={t("parameterType")}><select className="h-9 w-full rounded-md border bg-background px-3 text-sm" value={row.type} disabled={readOnly}
@@ -72,7 +84,7 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
             <option value="string">{t("typeString")}</option><option value="integer">{t("typeInteger")}</option><option value="boolean">{t("typeBoolean")}</option>
           </select></AutoField>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-3">
             <label className="flex items-center gap-2 text-sm"><Checkbox checked={row.default !== undefined} disabled={readOnly} onCheckedChange={checked => update(index, { default: checked ? row.type === "boolean" ? false : row.type === "integer" ? 0 : "" : undefined })} />{t("useDefault")}</label>
             {row.default !== undefined && <AutoField label={t("defaultValue")} help={row.secret ? t("secretDefaultHelp") : undefined}>
@@ -89,9 +101,8 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
             {row.type === "string" && <AutoField label={t("enumChoices")} help={t("enumChoicesHelp")} className="sm:col-span-2"><textarea className="min-h-24 w-full rounded-md border bg-background p-3 text-sm" value={row.enum?.join("\n") ?? ""} disabled={readOnly} onChange={event => update(index, { enum: event.target.value === "" ? undefined : event.target.value.split("\n") })} /></AutoField>}
           </div>
         </details>}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-          <code className="min-w-0 break-all text-xs text-muted-foreground">{`{{ .Values.${row.name} }}`}</code>
-          {!readOnly && <Button type="button" size="sm" variant="ghost" aria-label={`${commonText("common.delete")} ${row.label || row.name || index + 1}`} onClick={() => onChange(JSON.stringify(parsed.filter((_, i) => i !== index), null, 2))}><Trash2 className="size-4" />{commonText("common.delete")}</Button>}
+        </>}
+        <code className="block min-w-0 break-all border-t border-border/70 pt-2 text-xs text-muted-foreground">{`{{ .Values.${row.name} }}`}</code>
         </div>
       </fieldset>)}
       {!readOnly && <Button type="button" variant="outline" disabled={parsed.length >= 64} onClick={() => {
@@ -102,6 +113,18 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
     </>}
     {invalid && <p role="alert" className="text-sm text-destructive">{t("parameterNamesInvalid")}</p>}
   </section>;
+}
+
+function ParameterDefinition({ row }: { row: TemplateParameter }) {
+  const fields: [string, string][] = [
+    [t("parameterName"), row.name],
+    [t("parameterType"), t(row.type === "integer" ? "typeInteger" : row.type === "boolean" ? "typeBoolean" : "typeString")],
+    [t("defaultValue"), row.default === undefined ? commonText("common.notSet") : row.type === "boolean" ? commonText(row.default ? "common.yes" : "common.no") : String(row.default)],
+    ...(row.secret ? [[t("secretReference"), commonText("common.yes")] as [string, string]] : []),
+    ...(["min", "max", "min_length", "max_length"] as const).filter(key => row[key] !== undefined).map(key => [t(key), String(row[key])] as [string, string]),
+    ...(row.enum ? [[t("enumChoices"), row.enum.join(" · ")] as [string, string]] : []),
+  ];
+  return <dl className="grid min-w-0 grid-cols-2 gap-x-4 gap-y-2 text-sm">{fields.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 break-words [overflow-wrap:anywhere]">{value}</dd></div>)}</dl>;
 }
 
 export function templateParameterFields(parameters: TemplateParameter[]): FormField<Record<string, unknown>>[] {

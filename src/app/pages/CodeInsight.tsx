@@ -7,6 +7,7 @@ import {
 } from "../../features/code-insights/config";
 import { insightText } from "../../shared/i18n/i18n";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../shared/ui/tabs";
+import { RemoteResourceHeading } from "../../shared/ui/resource-heading";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
 import { href, useQueryValue, useRoute } from "../router";
@@ -60,6 +61,7 @@ export function CodeInsightDetail({
       onValueChange={setTab}
       className="crud-config-page flex min-h-0 min-w-0 flex-1 flex-col gap-4"
     >
+      <RemoteResourceHeading endpoint={`/workspaces/${encodeURIComponent(workspace)}/code-insights/${encodeURIComponent(insightId)}`} fallback={insightId} />
       <div className="min-w-0 overflow-x-auto border-b pb-2">
         <TabsList aria-label={insightText("代码洞察详情")}>
           <TabsTrigger value="dashboard">{insightText("分析看板")}</TabsTrigger>
@@ -86,6 +88,7 @@ export function CodeInsightDetail({
       </TabsContent>
       <TabsContent value="settings" className="min-h-0 flex-1 overflow-auto">
         <ResourceForm
+          showHeading={false}
           config={form}
           editHref={editHref}
           workspace={workspace}
@@ -94,6 +97,7 @@ export function CodeInsightDetail({
       </TabsContent>
       <TabsContent value="authors" className="min-h-0 flex-1 overflow-auto">
         <ResourceForm
+          showHeading={false}
           config={aliases}
           workspace={workspace}
           permissions={permissions}

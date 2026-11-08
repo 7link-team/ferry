@@ -7,6 +7,7 @@ import { base } from "../../shared/api/resource";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { ResourceHeading } from "../../shared/ui/resource-heading";
 import { ConnectionInsights } from "../pages/CodeInsight";
 import { RepositoryEventHistory,RepositoryMonitor } from "../pages/RepositoryMonitor";
 import { formConfigs } from "../resources";
@@ -21,13 +22,13 @@ export function RepositoryConnectionDetail({ workspace, connectionId, permission
   useCommonTranslation();
   const route = useRoute();
   const [tab, setTab] = useQueryValue("tab", "info");
-  const [connection, setConnection] = useState<{ provider?: string }>({});
+  const [connection, setConnection] = useState<{ provider?: string; name?: string }>({});
   const [connectionError, setConnectionError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
     setConnection({});
     setConnectionError("");
-    void api<{ provider: string }>(`${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}`, { signal: controller.signal })
+    void api<{ provider: string; name: string }>(`${base(workspace, "code-connections")}/${encodeURIComponent(connectionId)}`, { signal: controller.signal })
       .then(row => { if (!controller.signal.aborted) setConnection(row); })
       .catch(cause => { if (!controller.signal.aborted) setConnectionError(errorText(cause)); });
     return () => controller.abort();
@@ -48,13 +49,14 @@ export function RepositoryConnectionDetail({ workspace, connectionId, permission
   }), [workspace, connectionId]);
   const activeTab = tab === "repositories" || tab === "monitoring" || tab === "events" || tab === "insights" ? tab : tab === "analysis" ? "insights" : "info";
   if (connectionError) return <p role="alert" className="text-destructive">{connectionError}</p>;
-  if (route.mode === "edit") return connection.provider ? <RepositoryMonitor workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /> : <LoadingSkeleton />;
+  if (route.mode === "edit") return connection.provider ? <div className="flex min-h-0 flex-1 flex-col gap-3"><ResourceHeading name={connection.name || connectionId} /><RepositoryMonitor workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /></div> : <LoadingSkeleton />;
   return <Tabs.Root value={activeTab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-4">
+    {connection.provider ? <ResourceHeading name={connection.name || connectionId} /> : <LoadingSkeleton variant="inline" />}
     <Tabs.List aria-label={commonText("shell.repositoryDetail")} className="flex flex-wrap gap-1 border-b">
       {([["info", commonText("common.basic"), Info], ["repositories", commonText("shell.repositoryList"), FolderTree], ["monitoring", commonText("shell.monitorNotifications"), Bell], ["events", commonText("shell.eventRecords"), History], ["insights", commonText("nav.insights"), FolderTree]] as const).map(([value, label, Icon]) =>
         <Tabs.Trigger key={value} value={value} asChild><Button variant="ghost" size="sm" className={cn("rounded-none border-b-2", activeTab === value ? "border-primary text-primary" : "border-transparent")}><Icon className="size-4" />{label}</Button></Tabs.Trigger>)}
     </Tabs.List>
-    <Tabs.Content value="info" className="min-h-0 flex-1 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></Tabs.Content>
+    <Tabs.Content value="info" className="min-h-0 flex-1 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} showHeading={false} /></Tabs.Content>
     <Tabs.Content value="repositories" className="flex min-h-0 flex-1 flex-col overflow-auto"><ResourceTable config={repositories} workspace={workspace} permissions={permissions} /></Tabs.Content>
     <Tabs.Content value="monitoring" className="flex min-h-0 flex-1 flex-col overflow-auto"><RepositoryMonitor workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /></Tabs.Content>
     <Tabs.Content value="events" className="flex min-h-0 flex-1 flex-col overflow-auto"><RepositoryEventHistory workspace={workspace} connectionId={connectionId} provider={connection.provider} permissions={permissions} /></Tabs.Content>

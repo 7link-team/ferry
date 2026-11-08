@@ -207,6 +207,8 @@ export interface FormField<T> {
 }
 
 export interface FormConfig<T> {
+  /** Render grouped sections together with a scroll-linked table of contents. */
+  sectionNavigation?: "scroll";
   /** A resource-specific editor inside the shared full-height form workspace. */
   editor?: { field: string; nameLabel: string };
   width?: "full";

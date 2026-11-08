@@ -78,7 +78,7 @@ export function DeploymentDetail({ navigation, workspace, deploymentId, revision
   if (!app) return <div role={error ? "alert" : "status"}>{error || executionText("deployment.loading")}{error && <Button onClick={() => setReload((n) => n + 1)}>{executionText("shared.common.common.retry")}</Button>}</div>;
   const blocked = busy || deploymentActive(app.state) || app.state === "needs-review";
   return <div className="min-h-0 overflow-auto space-y-5 pb-6">
-    <header className="flex flex-wrap items-center gap-3 border-b pb-4">
+    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-3 border-b bg-background py-3">
       <h2 className="text-lg font-semibold">{app.name}</h2><Badge variant={["failed", "needs-review"].includes(app.state) ? "destructive" : "secondary"}>{deploymentState(app.state)}</Badge>
       <span className="text-sm text-muted-foreground">{commonText("resource-domain:resource.target")} · {named(app.target_name, app.target_ref)}</span>
     </header>

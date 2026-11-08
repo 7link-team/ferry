@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { stringify } from "yaml";
 import { ManifestEditor } from "../deployments/ManifestEditor";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
-import { TemplateParametersEditor, TemplateParameterPreview, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
+import { TemplateParametersEditor, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
 import { deleteResource } from "../../shared/api/resource";
 import { commonText, workflowText } from "../../shared/i18n/i18n";
@@ -110,6 +110,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
   form<Template>({
     resource,
     width: "full",
+    ...(application ? { sectionNavigation: "scroll" as const } : {}),
     heading: (r) => r.name,
     blank: {
       name: "",
@@ -242,9 +243,8 @@ export const templateForm = (resource: string, application: boolean, workspace =
 function templateSections(application: boolean, sections: FormConfig<Template>["sections"]): FormConfig<Template>["sections"] {
   return sections.flatMap(section => application ? [
       { group: "basics", groupKey: "common-domain:common.basic", title: "basics", titleKey: "common-domain:common.basic", fields: section.fields.filter(field => ["name", "description"].includes(field.key)) },
-      { group: "parameters", groupKey: "resource-domain:template.parameters", title: "parameters", titleKey: "resource-domain:template.parameters", fields: section.fields.filter(field => field.key === "parameters") },
       { group: "definition", groupKey: "resource-domain:template.definition", title: "definition", titleKey: "resource-domain:template.definition", fields: section.fields.filter(field => field.key === "content") },
-      { group: "preview", groupKey: "resource-domain:template.formPreview", title: "preview", titleKey: "resource-domain:template.formPreview", fields: [{ key: "$preview", label: "preview", labelKey: "resource-domain:template.formPreview", type: "custom" as const, span: 2 as const, render: ({ draft }: { draft: Partial<Template> }) => <TemplateParameterPreview key={String(draft.parameters)} value={String(draft.parameters ?? "[]")} /> }] },
+      { group: "parameters", groupKey: "resource-domain:template.parameters", title: "parameters", titleKey: "resource-domain:template.parameters", fields: section.fields.filter(field => field.key === "parameters") },
     ] : [section]);
 }
 

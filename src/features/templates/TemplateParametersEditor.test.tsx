@@ -64,9 +64,26 @@ it("keeps the complete definition when switching between form and source", async
 
 it("shows typed values in read-only mode without mutation controls", async () => {
   await act(async () => root.render(<Harness source='[{"name":"enabled","type":"boolean","default":false}]' readOnly />));
-  expect([...host.querySelectorAll("select")].every(select => select.disabled)).toBe(true);
+  expect(host.querySelector("input, select, textarea, [role=checkbox]")).toBeNull();
+  expect(host.querySelector("dl")?.textContent).toContain("否");
   expect(button("添加参数")).toBeUndefined();
   expect(latest).toContain('"default":false');
+});
+
+it("keeps the usage preview closed by default and discards its inputs without changing the definition", async () => {
+  const source = '[{"name":"replicas","type":"integer","default":3}]';
+  await act(async () => root.render(<Harness source={source} />));
+  const toggle = button("使用表单预览");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(host.querySelector('section[aria-label="使用表单预览"]')).toBeNull();
+  await act(async () => toggle.click());
+  const preview = host.querySelector('section[aria-label="使用表单预览"]')!;
+  await fill(preview.querySelector<HTMLInputElement>('input[type="number"]')!, "7");
+  expect(latest).toBe(source);
+  await act(async () => toggle.click());
+  await act(async () => toggle.click());
+  expect(host.querySelector<HTMLInputElement>('section[aria-label="使用表单预览"] input')!.value).toBe("3");
+  expect(latest).toBe(source);
 });
 
 it("previews the same typed fields used by template generation without changing definitions", async () => {
