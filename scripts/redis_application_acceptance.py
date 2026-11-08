@@ -285,9 +285,16 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
         for name in list(stopped):
             restore_member(name)
             stopped.remove(name)
-        current = retry(agreed, 'master discovery after voter restoration')
         retry(lambda: all(quorum_ready(v) for v in voters.values()), 'Sentinel quorum restored')
-        retry(lambda: write(current, 'proof:recovered', 'recovered', 2), 'write after quorum restoration')
+
+        def recovered_write():
+            # Restoring voters may complete an election that began while the
+            # former master was down. Retry discovery as well as the write;
+            # retrying a cached address would keep targeting a demoted member.
+            endpoint = agreed()
+            return endpoint if endpoint and write(endpoint, 'proof:recovered', 'recovered', 2) else None
+
+        current = retry(recovered_write, 'write after quorum restoration')
         check('quorum restoration retains baseline and post-failover data',
               all(c.get('proof:baseline') == 'before' and c.get('proof:after') == 'after' for c in members.values()))
         return {'initial_master': original, 'promoted_master': promoted, 'current_master': current,
