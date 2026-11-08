@@ -68,7 +68,8 @@ async def verify(urls, token, check, stop_member, restore_member):
             return info if info.cluster and info.cluster.leader and info.cluster.leader != leader else None
         promoted = await retry(changed, 'leader election after member loss')
         await retry(lambda: js.publish('proof', b'after'), 'publish after election')
-        check('NATS committed data survives leader loss', (await js.get_msg('PROOF', seq=1)).data == b'before')
+        original = await retry(lambda: js.get_msg('PROOF', seq=1), 'read committed baseline after leader election')
+        check('NATS committed data survives leader loss', original.data == b'before')
         await consumer.unsubscribe()
         consumer = await retry(lambda: js.pull_subscribe('proof', durable='proof-consumer', stream='PROOF'), 'durable consumer recovery')
         received = {}
@@ -102,7 +103,8 @@ async def verify(urls, token, check, stop_member, restore_member):
             stopped.remove(member)
         await retry(current, 'quorum restoration')
         await retry(lambda: js.publish('proof', b'recovered'), 'publish after quorum restoration')
-        check('NATS quorum restoration preserves committed baseline', (await js.get_msg('PROOF', seq=1)).data == b'before')
+        original = await retry(lambda: js.get_msg('PROOF', seq=1), 'read committed baseline after quorum restoration')
+        check('NATS quorum restoration preserves committed baseline', original.data == b'before')
         return {'original_leader': leader, 'promoted_leader': promoted.cluster.leader,
                 'stream_replicas': 3, 'consumer_pending_sequence': 2, 'quorum_recovered': True}
     finally:
