@@ -1308,6 +1308,13 @@ mod tests {
             assert_eq!(output["volumes"].as_object().unwrap().len(), 6);
             for service in doc["services"].as_array().unwrap() {
                 let name = service["name"].as_str().unwrap();
+                let digest = service["image"]
+                    .as_str()
+                    .unwrap()
+                    .strip_prefix("redis@sha256:")
+                    .unwrap();
+                assert_eq!(digest.len(), 64);
+                assert!(digest.bytes().all(|c| c.is_ascii_hexdigit()));
                 assert_eq!(service["env"][6]["valueFrom"], "variable/redis-password");
                 assert_eq!(
                     service["ports"][0]["container"],

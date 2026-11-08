@@ -11,7 +11,7 @@
   "services": [
     {
       "name": "redis-a",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
@@ -72,7 +72,7 @@
     },
     {
       "name": "sentinel-a",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
@@ -133,7 +133,7 @@
     },
     {
       "name": "redis-b",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
@@ -194,7 +194,7 @@
     },
     {
       "name": "sentinel-b",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
@@ -255,7 +255,7 @@
     },
     {
       "name": "redis-c",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
@@ -316,7 +316,7 @@
     },
     {
       "name": "sentinel-c",
-      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952",
       "command": [
         "sh",
         "/etc/example-redis-start.sh"
