@@ -107,6 +107,11 @@ jobs:
         run: |
           cargo build --locked -p ferry-server -p ferry-runner
           cargo test --locked -p ferry-server templates::tests:: -- --nocapture
+      - name: Full server regression on Linux
+        if: matrix.mode == 'native'
+        run: |
+          mkdir -p harness-logs
+          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server -- --nocapture > harness-logs/server-tests.log 2>&1
       - name: Deployment acceptance through SSH and HostAgent
         shell: bash
         run: |
