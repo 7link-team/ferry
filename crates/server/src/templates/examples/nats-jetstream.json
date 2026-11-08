@@ -1,0 +1,62 @@
+{
+  "apiVersion": "ferry/v2",
+  "kind": "Application",
+  "metadata": { "name": "example-nats" },
+  "strategy": { "type": "recreate", "healthTimeout": 120 },
+  "services": [
+    {
+      "name": "nats-a",
+      "image": "nats@sha256:d69eb29526c1d98afdfb2e2434763bef77b5f3c83e2e24769c13a4d104be475e",
+      "command": ["--config", "/etc/example-nats.conf"],
+      "ports": [{ "container": 4222, "published": "{{ .Values.port_a }}" }],
+      "env": [
+        { "name": "NATS_SERVER_NAME", "value": "nats-a" },
+        { "name": "NATS_CLIENT_ADVERTISE", "value": "{{ .Values.advertise_a }}" },
+        { "name": "NATS_AUTH_TOKEN", "valueFrom": "{{ .Values.token }}" }
+      ],
+      "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
+      "volumes": [{ "name": "nats-a-data", "path": "/data" }],
+      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "resources": { "limits": { "memory": "512Mi" } }
+    },
+    {
+      "name": "nats-b",
+      "image": "nats@sha256:d69eb29526c1d98afdfb2e2434763bef77b5f3c83e2e24769c13a4d104be475e",
+      "command": ["--config", "/etc/example-nats.conf"],
+      "ports": [{ "container": 4222, "published": "{{ .Values.port_b }}" }],
+      "env": [
+        { "name": "NATS_SERVER_NAME", "value": "nats-b" },
+        { "name": "NATS_CLIENT_ADVERTISE", "value": "{{ .Values.advertise_b }}" },
+        { "name": "NATS_AUTH_TOKEN", "valueFrom": "{{ .Values.token }}" }
+      ],
+      "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
+      "volumes": [{ "name": "nats-b-data", "path": "/data" }],
+      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "resources": { "limits": { "memory": "512Mi" } }
+    },
+    {
+      "name": "nats-c",
+      "image": "nats@sha256:d69eb29526c1d98afdfb2e2434763bef77b5f3c83e2e24769c13a4d104be475e",
+      "command": ["--config", "/etc/example-nats.conf"],
+      "ports": [{ "container": 4222, "published": "{{ .Values.port_c }}" }],
+      "env": [
+        { "name": "NATS_SERVER_NAME", "value": "nats-c" },
+        { "name": "NATS_CLIENT_ADVERTISE", "value": "{{ .Values.advertise_c }}" },
+        { "name": "NATS_AUTH_TOKEN", "valueFrom": "{{ .Values.token }}" }
+      ],
+      "files": [{ "path": "/etc/example-nats.conf", "fromTemplate": "{{ .Values.config }}" }],
+      "volumes": [{ "name": "nats-c-data", "path": "/data" }],
+      "health": { "readiness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 }, "liveness": { "httpGet": { "path": "/healthz", "port": 8222 }, "periodSeconds": 2 } },
+      "resources": { "limits": { "memory": "512Mi" } }
+    }
+  ],
+  "overrides": {
+    "stack": {
+      "services": {
+        "nats-a": { "deploy": { "placement": { "constraints": ["node.labels.ferry-nats == a"] } } },
+        "nats-b": { "deploy": { "placement": { "constraints": ["node.labels.ferry-nats == b"] } } },
+        "nats-c": { "deploy": { "placement": { "constraints": ["node.labels.ferry-nats == c"] } } }
+      }
+    }
+  }
+}

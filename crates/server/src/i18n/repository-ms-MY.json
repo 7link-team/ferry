@@ -811,5 +811,12 @@
   "templates.examples.nativeBuildDescription": "Bina fail boleh laku app secara manual untuk contoh HTTP Native yang sepadan. Pilih hos Linux sendiri dengan Bash dan Python 3; tiada pakej pihak ketiga digunakan. Selepas binaan berjaya, masukkan nama atau ID saluran paip ini dalam contoh aplikasi Native. Pemulaan tidak mencipta atau menjalankan saluran paip.",
   "templates.examples.nativeName": "Contoh: Tempatkan artifak HTTP Native",
   "templates.examples.nativeDescription": "Jalankan saluran paip binaan HTTP Native yang sepadan dahulu, kemudian masukkan nama atau IDnya dan pilih mod Native, hos Linux sendiri serta port yang belum digunakan. Hos penempatan memerlukan Python 3, systemd dan kebenaran penempatan. Menggunakan arkib app dengan pemeriksaan /health; kandungan respons dihantar melalui pemboleh ubah persekitaran. Pemulaan hanya mencipta templat tanpa penempatan. HA berbilang hos dan gerbang masuk pengeluaran tidak disertakan.",
-  "templates.examples.nativePipeline": "Nama atau ID saluran paip binaan"
+  "templates.examples.nativePipeline": "Nama atau ID saluran paip binaan",
+  "templates.examples.natsName": "Contoh: NATS JetStream tiga ahli",
+  "templates.examples.natsDescription": "Tiga proses dengan Compose atau tiga ahli dengan Stack. Untuk Stack, labelkan tiga nod berbeza ferry-nats=a/b/c dahulu; setiap volum kekal pada nodnya tanpa pemindahan. Cipta pemboleh ubah rahsia skop deploy, kemudian tetapkan pengesahan klien, tiga port diterbitkan dan alamat pengumuman yang boleh dicapai klien. Menggunakan example-nats-config. Klien menetapkan replika aliran dan pengguna; kesihatan HTTP tidak membuktikan kuorum. Pemulaan hanya mencipta templat. TLS pengeluaran dan pengesahan laluan tidak dikonfigurasi.",
+  "templates.examples.natsConfigDescription": "Konfigurasi bersama ahli NATS. Membaca identiti ahli, alamat pengumuman klien dan token pengesahan daripada persekitaran; laluan kekal dalam rangkaian aplikasi. Suntingan digunakan untuk penempatan seterusnya tanpa mengubah petikan sejarah.",
+  "templates.examples.natsToken": "Pemboleh ubah rahsia pengesahan klien",
+  "templates.examples.natsConfig": "Nama atau ID templat konfigurasi",
+  "templates.examples.natsPort": "Port klien diterbitkan",
+  "templates.examples.natsAdvertise": "Alamat pengumuman klien (hos:port)"
 }

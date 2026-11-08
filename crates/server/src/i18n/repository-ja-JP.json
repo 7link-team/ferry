@@ -811,5 +811,12 @@
   "templates.examples.nativeBuildDescription": "対応する Native HTTP の実行ファイル app を手動でビルドします。Bash と Python 3 がある Linux ホストを選択してください。外部パッケージは不要です。成功後、Native アプリの例にこのパイプライン名または ID を入力します。初期化ではパイプラインの作成や実行を行いません。",
   "templates.examples.nativeName": "例：Native HTTP 成果物のデプロイ",
   "templates.examples.nativeDescription": "対応する Native HTTP ビルドを先に実行し、その名前または ID、Native モード、Linux ホスト、未使用ポートを指定してください。デプロイ先には Python 3、systemd、デプロイ権限が必要です。app アーカイブと /health チェックを使用し、応答内容は環境変数で渡します。初期化ではテンプレートだけを作成し、デプロイしません。複数ホストの HA と本番環境の入口は含みません。",
-  "templates.examples.nativePipeline": "ビルドパイプライン名または ID"
+  "templates.examples.nativePipeline": "ビルドパイプライン名または ID",
+  "templates.examples.natsName": "例：3メンバーの NATS JetStream",
+  "templates.examples.natsDescription": "Compose の3プロセス、または Stack の3メンバー用テンプレート。Stack では異なる3ノードに ferry-nats=a/b/c を事前設定し、各データボリュームを固定します。deploy 範囲の秘密変数を作成し、クライアント認証、3つの公開ポート、クライアントから到達できる通知先を指定してください。example-nats-config を使用します。ストリームとコンシューマーの複製はクライアントが設定します。HTTP 正常性はクォーラムを保証しません。初期化ではテンプレートだけを作成し、本番 TLS とルート認証は設定しません。",
+  "templates.examples.natsConfigDescription": "NATS メンバー共通設定。環境変数からメンバー名、クライアント通知先、認証トークンを読み込み、ルートはアプリ内ネットワークに限定します。変更は以降のデプロイに適用され、履歴は変更しません。",
+  "templates.examples.natsToken": "クライアント認証の秘密変数",
+  "templates.examples.natsConfig": "設定テンプレート名または ID",
+  "templates.examples.natsPort": "クライアント公開ポート",
+  "templates.examples.natsAdvertise": "クライアント通知先（ホスト:ポート）"
 }

@@ -77,6 +77,23 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']
+        nats_template=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-nats')
+        nats_path=root+'/app-templates/'+nats_template['id']
+        nats_values={'token':'nats-secret','advertise_a':'a.example.invalid:4222','advertise_b':'b.example.invalid:4223','advertise_c':'c.example.invalid:4224'}
+        request(owner,nats_path+'/renderings',{'version':1,'values':{}},expected=400)
+        nats_doc=json.loads(request(owner,nats_path+'/renderings',{'version':1,'values':nats_values})['manifest'])
+        check(len(nats_doc['services'])==3 and len({s['volumes'][0]['name'] for s in nats_doc['services']})==3,'NATS template has three distinct persistent members')
+        check(all(s['env'][2]['valueFrom']=='variable/nats-secret' for s in nats_doc['services']),'NATS authentication is a secret reference, never a template token')
+        nats_body={'name':'NATS example','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/nats-example','manifest':json.dumps(nats_doc)}
+        request(owner,root+'/deployments',nats_body,expected=400)
+        check(True,'NATS deployment rejects missing secret bindings')
+        request(owner,root+'/variables',{'name':'nats-secret','scope':'deploy','kind':'secret','value':'fixture-client-token'},expected=201)
+        nats_app=request(owner,root+'/deployments',nats_body,expected=201)['id']
+        config=next(row for row in request(owner,root+'/config-templates')['items'] if row['name']=='example-nats-config')
+        request(outsider,f'/workspaces/{workspace_other}/config-templates/'+config['id'],expected=404)
+        request(owner,root+'/config-templates/'+config['id'],method='DELETE',expected=409)
+        check(True,'NATS configuration is workspace isolated and protected while referenced')
+        request(owner,root+'/deployments/'+nats_app,method='DELETE',expected=204)
         builds=request(owner,root+'/pipeline-templates?workflow_kind=actions')['items']
         build=next(row for row in builds if 'Native HTTP artifact build' in row['content'])
         generated=json.loads(request(owner,root+'/pipeline-templates/'+build['id']+'/renderings',{'version':1,'values':{}})['definition'])

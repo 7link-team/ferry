@@ -115,6 +115,49 @@ pub(crate) async fn seed_examples(
     })
     .exec(conn)
     .await?;
+    let content = include_str!("templates/examples/nats-config.conf");
+    validate_template(content, "[]", Kind::Config)?;
+    crate::entities::config_templates::Entity::insert(
+        crate::entities::config_templates::ActiveModel {
+            id: Set(s.next_id()?.into()),
+            workspace_id: Set(workspace.into()),
+            name: Set("example-nats-config".into()),
+            description: Set(crate::i18n::message(
+                "templates.examples.natsConfigDescription",
+            )),
+            content: Set(content.into()),
+            parameters: Set("[]".into()),
+            version: Set(1),
+            created_at: Set(now),
+            updated_at: Set(now),
+        },
+    )
+    .exec(conn)
+    .await?;
+    let content = include_str!("templates/examples/nats-jetstream.json");
+    let mut definitions = vec![
+        json!({"name":"token","label":crate::i18n::message("templates.examples.natsToken"),"type":"string","secret":true}),
+        json!({"name":"config","label":crate::i18n::message("templates.examples.natsConfig"),"type":"string","min_length":1,"max_length":60,"default":"example-nats-config"}),
+    ];
+    for (suffix, port) in [("a", 4222), ("b", 4223), ("c", 4224)] {
+        definitions.push(json!({"name":format!("port_{suffix}"),"label":format!("{} {}",crate::i18n::message("templates.examples.natsPort"),suffix.to_uppercase()),"type":"integer","min":1,"max":65535,"default":port}));
+        definitions.push(json!({"name":format!("advertise_{suffix}"),"label":format!("{} {}",crate::i18n::message("templates.examples.natsAdvertise"),suffix.to_uppercase()),"type":"string","min_length":1,"max_length":255}));
+    }
+    let parameters = serde_json::to_string(&definitions).map_err(|_| ApiError::missing())?;
+    validate_template(content, &parameters, Kind::App)?;
+    crate::entities::app_templates::Entity::insert(crate::entities::app_templates::ActiveModel {
+        id: Set(s.next_id()?.into()),
+        workspace_id: Set(workspace.into()),
+        name: Set(crate::i18n::message("templates.examples.natsName")),
+        description: Set(crate::i18n::message("templates.examples.natsDescription")),
+        content: Set(content.into()),
+        parameters: Set(parameters),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(conn)
+    .await?;
     Ok(())
 }
 
@@ -946,6 +989,14 @@ mod tests {
             if slug == "examples-rollback" {
                 tx.rollback().await.unwrap();
                 assert!(
+                    crate::entities::config_templates::Entity::find()
+                        .filter(crate::entities::config_templates::Column::WorkspaceId.eq(id))
+                        .all(&s.db)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
+                assert!(
                     rows::Entity::find()
                         .filter(rows::Column::WorkspaceId.eq(id))
                         .all(&s.db)
@@ -1070,8 +1121,8 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(apps_a["total"], 2);
-        assert_eq!(apps_b["total"], 2);
+        assert_eq!(apps_a["total"], 3);
+        assert_eq!(apps_b["total"], 3);
         assert_ne!(apps_a["items"][0]["id"], apps_b["items"][0]["id"]);
         let app = apps_a["items"].as_array().unwrap().iter().find(|item| {
             serde_json::from_str::<Value>(item["content"].as_str().unwrap()).unwrap()["metadata"]["name"] == "example-http"
@@ -1103,6 +1154,72 @@ mod tests {
             "build-native"
         );
         crate::deployments::manifest::parse_for(&native_render, "native").unwrap();
+        let nats = apps_a["items"].as_array().unwrap().iter().find(|item| {
+            serde_json::from_str::<Value>(item["content"].as_str().unwrap()).unwrap()["metadata"]["name"] == "example-nats"
+        }).unwrap();
+        let nats_values = BTreeMap::from([
+            ("token".into(), json!("nats-client-token")),
+            ("advertise_a".into(), json!("a.example.invalid:4222")),
+            ("advertise_b".into(), json!("b.example.invalid:4223")),
+            ("advertise_c".into(), json!("c.example.invalid:4224")),
+        ]);
+        let nats_text = render_content(
+            nats["content"].as_str().unwrap(),
+            nats["parameters"].as_str().unwrap(),
+            &nats_values,
+            Kind::App,
+        )
+        .unwrap();
+        let nats_doc: Value = serde_json::from_str(&nats_text).unwrap();
+        assert_eq!(nats_doc["services"].as_array().unwrap().len(), 3);
+        for (index, suffix) in ["a", "b", "c"].iter().enumerate() {
+            let service = &nats_doc["services"][index];
+            assert_eq!(service["env"][2]["valueFrom"], "variable/nats-client-token");
+            assert_eq!(service["volumes"][0]["name"], format!("nats-{suffix}-data"));
+            assert_eq!(service["files"][0]["fromTemplate"], "example-nats-config");
+        }
+        for mode in ["compose", "stack"] {
+            let manifest = crate::deployments::manifest::parse_for(&nats_text, mode).unwrap();
+            let rendered = crate::deployments::manifest::render_for(&manifest, mode).unwrap();
+            let rendered: Value = serde_json::from_str(&rendered).unwrap();
+            assert_eq!(rendered["volumes"].as_object().unwrap().len(), 3);
+            for suffix in ["a", "b", "c"] {
+                let service = &rendered["services"][format!("nats-{suffix}")];
+                if mode == "stack" {
+                    assert_eq!(
+                        service["deploy"]["placement"]["constraints"],
+                        json!([format!("node.labels.ferry-nats == {suffix}")])
+                    );
+                } else {
+                    assert!(service["deploy"].get("placement").is_none());
+                }
+            }
+        }
+        assert!(
+            render_content(
+                nats["content"].as_str().unwrap(),
+                nats["parameters"].as_str().unwrap(),
+                &BTreeMap::new(),
+                Kind::App
+            )
+            .is_err()
+        );
+        let configs = configs::list(
+            State(s.clone()),
+            Scope {
+                permissions: ["config-templates.read".into()].into_iter().collect(),
+                ..scope(workspaces[0])
+            },
+            Query(HashMap::new()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(configs["total"], 1);
+        assert_eq!(
+            configs["items"][0]["content"],
+            include_str!("templates/examples/nats-config.conf")
+        );
         for invalid in [
             BTreeMap::new(),
             BTreeMap::from([("pipeline".into(), json!(""))]),
@@ -1188,7 +1305,7 @@ mod tests {
             .await
             .unwrap()
             .0["total"],
-            1
+            2
         );
         assert_eq!(
             apps::list(
@@ -1199,7 +1316,7 @@ mod tests {
             .await
             .unwrap()
             .0["total"],
-            2
+            3
         );
         // Include a canonical graph discriminator to check SQL filtering, count
         // and pagination alongside the seeded Actions template.

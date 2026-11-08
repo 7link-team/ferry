@@ -99,7 +99,7 @@ try {
     await p.getByRole('button',{name:'导入应用模板',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/app-templates/*`);
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
-    assert.equal(templates.total,3);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
+    assert.equal(templates.total,4);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
     assert.equal(templates.items.filter(row=>JSON.parse(row.content).metadata?.name==='example-http').length,1);
     const example=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-http');
     const nativeExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-native-http');
@@ -139,6 +139,30 @@ try {
         await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`${native?'native':'http'}-template-${width}.png`)});
       }
     }
+    const natsExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-nats');
+    assert(natsExample);
+    for(const width of [1440,900,390,320]){
+      await p.setViewportSize({width,height:900});
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${natsExample.id}`);
+      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      for(const parameter of JSON.parse(natsExample.parameters)){
+        const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+        if(parameter.name==='token') await generator.getByRole('textbox',{name:label}).fill('nats-client-secret');
+        if(parameter.name.startsWith('advertise_')) await generator.getByRole('textbox',{name:label}).fill('client.example.invalid:'+({a:4222,b:4223,c:4224}[parameter.name.at(-1)]));
+      }
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${natsExample.id}/renderings`)&&response.request().method()==='POST');
+      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      const response=await rendered;assert(response.ok(),await response.text());
+      const manifest=JSON.parse((await response.json()).manifest);
+      assert.equal(manifest.services.length,3);
+      assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,3);
+      assert(manifest.services.every(service=>service.env[2].valueFrom==='variable/nats-client-secret'));
+      assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`NATS page overflow at ${width}`);
+      if(process.env.FERRY_SCENARIO_UI_OUTPUT){
+        await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`nats-template-${width}.png`)});
+      }
+    }
     const deployments=await(await owner.request.get(`${origin}/api${root}/deployments`)).json();
     assert.equal(deployments.total,0,'Selecting and rendering an example must not deploy or save an application');
     await p.setViewportSize({width:1280,height:800});
@@ -148,7 +172,7 @@ try {
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});
     assert(authorizedSyncs>0,'marketplace sync used the selected connection credential');
     assert.deepEqual(errors,[]);
-    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, container and Native scenario parameters at four widths without deployment and source deletion');
+    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, container, Native and NATS scenario parameters at four widths without deployment and source deletion');
   } finally {fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}
 } finally {
   if (browser) await browser.close();

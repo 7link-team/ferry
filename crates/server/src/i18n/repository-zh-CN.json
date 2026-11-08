@@ -811,5 +811,12 @@
   "templates.examples.nativeBuildDescription": "手动构建配套 Native HTTP 示例的可执行产物 app。选择自己的 Linux 主机；需要 Bash 和 Python 3，无第三方软件包。构建成功后，在 Native 应用示例中填写此流水线的名称或 ID。初始化不创建或运行流水线。",
   "templates.examples.nativeName": "示例：Native HTTP 产物部署",
   "templates.examples.nativeDescription": "先运行配套的 Native HTTP 构建流水线，再填写其名称或 ID，选择 Native 模式、自己的 Linux 主机和空闲端口。部署主机需要 Python 3、systemd 及部署权限。使用 app 归档，提供 /health 检查；响应内容作为环境变量传入。仅初始化模板，不自动部署；不包含多机高可用或生产流量入口。",
-  "templates.examples.nativePipeline": "构建流水线名称或 ID"
+  "templates.examples.nativePipeline": "构建流水线名称或 ID",
+  "templates.examples.natsName": "示例：NATS JetStream 三成员",
+  "templates.examples.natsDescription": "Compose 单机三进程或 Stack 三成员模板；Stack 需预先为三个不同节点分别设置标签 ferry-nats=a/b/c，数据卷固定在对应节点，不跨机迁移。先创建 deploy 作用域密钥变量，再绑定客户端认证变量、三个发布端口和客户端可达的通告端点。配套配置模板为 example-nats-config。流与消费者副本由客户端配置；HTTP 健康不等于仲裁健康。仅初始化模板，不自动部署；未配置生产 TLS 或路由认证。",
+  "templates.examples.natsConfigDescription": "NATS 三成员共用配置；通过环境变量读取成员名称、客户端通告端点和认证 token，路由限应用内部网络。修改影响后续部署，历史快照不改。",
+  "templates.examples.natsToken": "客户端认证密钥变量",
+  "templates.examples.natsConfig": "配置模板名称或 ID",
+  "templates.examples.natsPort": "客户端发布端口",
+  "templates.examples.natsAdvertise": "客户端通告端点（主机:端口）"
 }

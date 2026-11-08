@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
+      - scripts/nats_application_acceptance.py
       - scripts/test-deployments.sh
       - scripts/test-deployments-ui.mjs
       - src/**
@@ -20,6 +21,7 @@ on:
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
+      - scripts/nats_application_acceptance.py
       - scripts/test-deployments.sh
       - scripts/test-deployments-ui.mjs
       - src/**
@@ -63,6 +65,7 @@ jobs:
       FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
       FERRY_TEST_SWARM_HA: ${{ matrix.swarm_ha }}
       FERRY_TEST_SCENARIO_TEMPLATES: "1"
+      FERRY_TEST_NATS_TEMPLATES: "1"
       FERRY_TEST_OUTPUT_DIR: ${{ github.workspace }}/harness-logs/fixtures
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +101,9 @@ jobs:
           "$compose_path" version --short
           mkdir -p "$FERRY_TEST_OUTPUT_DIR"
       - run: npm ci
+      - name: Install the NATS protocol acceptance client
+        if: matrix.mode == 'compose' || matrix.mode == 'stack'
+        run: python3 -m pip install nats-py==2.9.0
       - name: Install the deployment browser
         if: matrix.mode == 'compose'
         run: npx playwright install --with-deps chromium
@@ -146,6 +152,10 @@ jobs:
               echo 'One manager and two workers, each with an isolated Docker daemon.'
               echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
               echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
+            fi
+            if [ "$FERRY_TEST_DEPLOY_MODE" = compose ] || [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; then
+              echo 'Initialized NATS application through SSH and HostAgent: three persistent members, token authentication, client discovery, leader loss, durable consumer recovery and quorum refusal/restoration.'
+              echo 'Stack members use distinct assigned daemons and local volumes; no physical three-host, TLS, route authentication or volume migration certification.'
             fi
             echo 'See acceptance.json and daemon logs for actual results.'
           } >> "$GITHUB_STEP_SUMMARY"

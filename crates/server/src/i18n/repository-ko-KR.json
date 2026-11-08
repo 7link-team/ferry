@@ -811,5 +811,12 @@
   "templates.examples.nativeBuildDescription": "대응하는 Native HTTP 예제의 실행 파일 app을 수동으로 빌드합니다. Bash와 Python 3이 있는 Linux 호스트를 선택하세요. 외부 패키지는 필요하지 않습니다. 빌드 성공 후 Native 앱 예제에 이 파이프라인의 이름 또는 ID를 입력합니다. 초기화는 파이프라인을 만들거나 실행하지 않습니다.",
   "templates.examples.nativeName": "예제: Native HTTP 아티팩트 배포",
   "templates.examples.nativeDescription": "대응하는 Native HTTP 빌드를 먼저 실행한 뒤 이름 또는 ID, Native 모드, Linux 호스트, 사용하지 않는 포트를 선택하세요. 배포 호스트에는 Python 3, systemd와 배포 권한이 필요합니다. app 아카이브와 /health 검사를 사용하며 응답 내용은 환경 변수로 전달합니다. 초기화는 템플릿만 만들고 배포하지 않습니다. 다중 호스트 HA와 운영 환경 인그레스는 포함하지 않습니다.",
-  "templates.examples.nativePipeline": "빌드 파이프라인 이름 또는 ID"
+  "templates.examples.nativePipeline": "빌드 파이프라인 이름 또는 ID",
+  "templates.examples.natsName": "예제: NATS JetStream 3개 멤버",
+  "templates.examples.natsDescription": "Compose의 3개 프로세스 또는 Stack의 3개 멤버 템플릿입니다. Stack은 서로 다른 노드에 ferry-nats=a/b/c 레이블을 미리 설정하며 각 데이터 볼륨을 해당 노드에 고정합니다. deploy 범위의 비밀 변수를 만든 후 클라이언트 인증, 공개 포트 3개와 클라이언트가 접근할 수 있는 알림 주소를 지정하세요. example-nats-config를 사용합니다. 스트림과 소비자 복제는 클라이언트가 설정합니다. HTTP 정상 상태는 쿼럼을 보장하지 않습니다. 초기화는 템플릿만 만들며 운영 TLS와 경로 인증은 설정하지 않습니다.",
+  "templates.examples.natsConfigDescription": "NATS 멤버 공통 설정입니다. 환경 변수에서 멤버 이름, 클라이언트 알림 주소와 인증 토큰을 읽고 경로를 앱 네트워크로 제한합니다. 변경은 이후 배포에 적용되며 과거 스냅샷은 바뀌지 않습니다.",
+  "templates.examples.natsToken": "클라이언트 인증 비밀 변수",
+  "templates.examples.natsConfig": "설정 템플릿 이름 또는 ID",
+  "templates.examples.natsPort": "클라이언트 공개 포트",
+  "templates.examples.natsAdvertise": "클라이언트 알림 주소 (호스트:포트)"
 }
