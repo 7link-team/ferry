@@ -352,7 +352,10 @@ def xxl_job(lab):
         '<encoder><pattern>%d %-5level %logger - %msg%n</pattern></encoder></appender>'
         '<root level="INFO"><appender-ref ref="STDOUT"/></root></configuration>', encoding='utf8')
     executor_log = (lab.output / 'executor.log').open('w', encoding='utf8')
-    executor = subprocess.Popen(['java', '-jar', str(jar), '--server.port=' + str(web_port),
+    # Logback auto-initializes before Spring reads --logging.config; both must
+    # point at the lab config to avoid retaining errors from the bundled one.
+    executor = subprocess.Popen(['java', '-Dlogback.configurationFile=' + str(logging_config.resolve()),
+                                 '-jar', str(jar), '--server.port=' + str(web_port),
                                  '--logging.config=' + str(logging_config.resolve()),
                                  '--xxl.job.admin.addresses=' + ','.join(urls.values()),
                                  '--xxl.job.accessToken=' + token, '--xxl.job.executor.appname=' + lab.prefix,
@@ -362,7 +365,10 @@ def xxl_job(lab):
                                 stdout=executor_log, stderr=subprocess.STDOUT)
     try:
         def executor_ready():
-            assert executor.poll() is None, 'upstream executor exited before registration'
+            if executor.poll() is not None:
+                executor_log.flush()
+                tail = (lab.output / 'executor.log').read_text(errors='replace')[-4500:]
+                raise AssertionError('upstream executor exited before registration: ' + lab.redact(tail))
             with urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:{executor_port}/beat',
                                          data=b'{}', headers={'XXL-JOB-ACCESS-TOKEN': token}), timeout=5) as response:
                 return json.load(response).get('code') == 200
