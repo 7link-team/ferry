@@ -521,7 +521,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     eventually(lambda:json.loads(engine(['node','inspect',swarm_ids[victim_node]]))[0]['Status']['State'] == 'ready',120)
                     capture('after-worker-return',eventually(healthy_tasks,120))
                     check(kind+' returning worker rejoins without a Ferry redeploy',eventually(lambda:response(web_port)=='stack-v1') and app(id)['latest_revision']['id']==first)
-                source['services'][0]['command'][2]=source['services'][0]['command'][2].replace('stack-v1','stack-v2')
+                if http_template is not None:
+                    next(item for item in source['services'][0]['env'] if item['name']=='WELCOME_MESSAGE')['value']='stack-v2'
+                else:
+                    source['services'][0]['command'][2]=source['services'][0]['command'][2].replace('stack-v1','stack-v2')
                 update(id,source);start(id);row=done(id)
                 check(kind+' Swarm rolling update completes',row['state']=='succeeded' and eventually(lambda:response(web_port)=='stack-v2'))
                 spec=json.loads(engine(['service','inspect',project+'_web']))[0]['Spec']
@@ -671,7 +674,10 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 inspected=json.loads(command(['docker','inspect',container]))[0]
                 check(kind+' Docker limits and actual health applied',inspected['HostConfig']['Memory']==67108864 and inspected['HostConfig']['NanoCpus']==500000000 and inspected['State']['Health']['Status']=='healthy')
                 check(kind+' Docker secret absent from public history',secret not in json.dumps(row))
-                source['services'][0]['command'][2]=source['services'][0]['command'][2].replace('docker-v1','docker-v2')
+                if http_template is not None:
+                    next(item for item in source['services'][0]['env'] if item['name']=='WELCOME_MESSAGE')['value']='docker-v2'
+                else:
+                    source['services'][0]['command'][2]=source['services'][0]['command'][2].replace('docker-v1','docker-v2')
                 update(id,source);start(id);row=done(id)
                 check(kind+' Docker update changes running service',row['state']=='succeeded' and eventually(lambda:response(web_port)=='docker-v2'))
                 api(f'/workspaces/{workspace_ops}/variables/'+variable,{'name':key,'version':1,'value':'rotated'},method='PATCH')
