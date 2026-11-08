@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, open, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, writeFile, access, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -56,9 +56,12 @@ try {
   },60);}
   page=await actor.newPage();const browserErrors=[];page.on('pageerror',e=>browserErrors.push(e.message));
   await page.goto(`${origin}/en-US${root}/conversations/new`);
+  await page.getByRole('combobox',{name:'Conversation type',exact:true}).click();
+  await page.getByRole('option',{name:'Direct conversation',exact:true}).click();
   await page.getByLabel('Conversation title',{exact:true}).fill('Private native conversation');
   await page.getByRole('combobox',{name:'AI Agent',exact:true}).click();await page.getByRole('option',{name:agentBody.name,exact:true}).click();
-  await page.getByLabel('Working directory',{exact:true}).fill(cwd);
+  assert.equal(await page.getByLabel('Working directory',{exact:true}).count(),0);
+  assert.equal(await page.getByLabel('Tool permissions',{exact:true}).count(),0);
   await page.getByRole('button',{name:'Create',exact:true}).click();await page.waitForURL(new RegExp('/conversations/[0-9]+$'));
   const conversation=(await user(root+'/conversations')).items.find(r=>r.title==='Private native conversation');assert(conversation);
   const path=root+'/conversations/'+conversation.id;
@@ -106,7 +109,7 @@ try {
   await page.getByLabel('Search conversations',{exact:true}).fill('');
   assert.equal(await page.getByRole('table').count(),0);
   assert.equal(await page.getByRole('navigation',{name:'Breadcrumbs',exact:true}).count(),0);
-  assert((await user(root+'/conversations/'+another.id)).config.cwd===cwd);
+  assert.equal(await realpath((await user(root+'/conversations/'+another.id)).config.cwd),await realpath(cwd));
   pass('left sidebar selects conversations, search works, unsent drafts survive switching and right pane has no resource table');
   await page.screenshot({path:join(output,'conversation-desktop.png'),fullPage:true});
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -120,10 +123,12 @@ try {
   for(const [index,locale] of ['en-US','zh-CN','zh-TW','ja-JP','ko-KR','ms-MY'].entries()){
     await page.goto(`${origin}/${locale}${path}`);
     await page.getByLabel(translations.prompt[index],{exact:true}).waitFor();
-    assert(await page.getByText(translations.direct[index],{exact:true}).isVisible());
+    await page.getByRole('button',{name:translations.conversationInfo[index],exact:true}).click();
+    await page.getByRole('dialog').getByRole('heading',{name:translations.conversationInfo[index],exact:true}).waitFor();
+    await page.getByRole('dialog').getByRole('button',{name:translations.close[index],exact:true}).click();
   }
   await page.goto(`${origin}/en-US${path}`);
-  pass('conversation details, message composer and direct-conversation label render in six locales');
+  pass('conversation details, message composer and functioning information dialog render in six locales');
   const cursor=await user(path+'/events?after=0');assert.deepEqual((await user(path+'/events?after='+cursor.next)).items,[]);
   const before=await user(path);await stop(server);await startServer();
   await runnerReady();
