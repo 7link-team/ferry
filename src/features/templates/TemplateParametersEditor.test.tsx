@@ -2,7 +2,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
-import { TemplateParametersEditor } from "./TemplateParametersEditor";
+import { TemplateParametersEditor, TemplateParameterPreview, templateParameterFields } from "./TemplateParametersEditor";
 
 vi.mock("../../shared/editor/CodeEditor", () => ({ CodeEditor: ({ value, label, onChange }: { value: string; label: string; onChange: (value: string) => void }) => <textarea aria-label={label} value={value} onChange={event => onChange(event.target.value)} /> }));
 let root: Root, host: HTMLDivElement, latest: string;
@@ -67,4 +67,18 @@ it("shows typed values in read-only mode without mutation controls", async () =>
   expect([...host.querySelectorAll("select")].every(select => select.disabled)).toBe(true);
   expect(button("添加参数")).toBeUndefined();
   expect(latest).toContain('"default":false');
+});
+
+it("previews the same typed fields used by template generation without changing definitions", async () => {
+  const rows = [{ name: "image", label: "容器镜像", type: "string" as const, default: "nginx:alpine", enum: ["nginx:alpine", "nginx:stable"] }, { name: "replicas", type: "integer" as const, default: 3, min: 1, max: 10 }, { name: "enabled", type: "boolean" as const, default: false }, { name: "token", type: "string" as const, secret: true }];
+  const fields = templateParameterFields(rows);
+  expect(fields.map(field => field.type)).toEqual(["select", "number", "select", "text"]);
+  expect(fields[3]!.label).toContain("变量");
+  await act(async () => root.render(<TemplateParameterPreview value={JSON.stringify(rows)} />));
+  expect(host.textContent).toContain("容器镜像");
+  expect(host.querySelector<HTMLInputElement>('input[type="number"]')!.value).toBe("3");
+  expect(host.querySelector<HTMLInputElement>('input[type="number"]')!.min).toBe("1");
+  await fill(host.querySelector<HTMLInputElement>('input[type="number"]')!, "4");
+  expect(rows[1]!.default).toBe(3);
+  expect(host.textContent).toContain("预览输入不保存");
 });

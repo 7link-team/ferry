@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { AutoField } from "../../shared/forms/auto-form";
+import { AutoField, FieldControl } from "../../shared/forms/auto-form";
 import { commonText } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Checkbox } from "../../shared/ui/checkbox";
 import { Input } from "../../shared/ui/input";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import type { FormField } from "../../shared/resources/types";
+
 export interface TemplateParameter {
   name: string;
   label?: string;
@@ -99,5 +101,58 @@ export function TemplateParametersEditor({ value, readOnly, onChange, onValidity
       }}><Plus className="size-4" />{t("addParameter")}</Button>}
     </>}
     {invalid && <p role="alert" className="text-sm text-destructive">{t("parameterNamesInvalid")}</p>}
+  </section>;
+}
+
+export function templateParameterFields(parameters: TemplateParameter[]): FormField<Record<string, unknown>>[] {
+  return parameters.map((p) => ({
+        key: p.name,
+        get label() {
+          return `${p.label || p.name}${p.secret ? commonText("resource-domain:template.secretNameSuffix") : ""}`;
+        },
+        type:
+          p.enum || p.type === "boolean"
+            ? ("select" as const)
+            : p.type === "integer"
+              ? ("number" as const)
+              : ("text" as const),
+        required: p.default === undefined,
+        ...(p.enum
+          ? { options: p.enum.map((value) => ({ value, label: value })) }
+          : p.type === "boolean"
+            ? {
+                options: [
+                  {
+                    value: "true",
+                    label: "是",
+                    labelKey: "common-domain:common.yes",
+                  },
+                  {
+                    value: "false",
+                    label: "否",
+                    labelKey: "common-domain:common.no",
+                  },
+                ],
+              }
+            : {}),
+        get help() {
+          return p.secret
+            ? commonText("resource-domain:template.secretHelp")
+            : `${p.name}${p.min !== undefined ? commonText("resource-domain:parameter.minimum", { value: p.min }) : ""}${p.max !== undefined ? commonText("resource-domain:parameter.maximum", { value: p.max }) : ""}${p.min_length !== undefined ? commonText("resource-domain:parameter.minLength", { value: p.min_length }) : ""}${p.max_length !== undefined ? commonText("resource-domain:parameter.maxLength", { value: p.max_length }) : ""}`;
+        },
+      }));
+}
+
+export function TemplateParameterPreview({ value }: { value: string }) {
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  let parameters: TemplateParameter[];
+  try { parameters = JSON.parse(value); if (!Array.isArray(parameters) || parameters.some(row => !row || typeof row.name !== "string" || !["string", "integer", "boolean"].includes(row.type))) throw new Error(); }
+  catch { return <p role="alert" className="text-sm text-destructive">{t("parameterNamesInvalid")}</p>; }
+  return <section className="space-y-4" aria-label={t("formPreview")}>
+    <p className="text-sm text-muted-foreground">{t("formPreviewHelp")}</p>
+    {!parameters.length && <p className="text-sm text-muted-foreground">{t("noParameters")}</p>}
+    <div className="grid min-w-0 gap-4 sm:grid-cols-2">{templateParameterFields(parameters).map((field, index) => <AutoField key={field.key} label={field.label} help={field.help}>
+      <FieldControl name={field.key} field={{ name: field.label, type: field.type === "select" ? "select" : field.type === "number" ? "number" : "text", config: { ...(Array.isArray(field.options) ? { options: field.options } : {}), ...(parameters[index]?.min === undefined ? {} : { min: parameters[index]!.min! }), ...(parameters[index]?.max === undefined ? {} : { max: parameters[index]!.max! }) } }} value={values[field.key] ?? parameters[index]?.default ?? ""} onChange={value => setValues(current => ({ ...current, [field.key]: value }))} />
+    </AutoField>)}</div>
   </section>;
 }

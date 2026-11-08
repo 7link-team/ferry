@@ -35,6 +35,7 @@ export function ManifestEditor({
   onChange,
   onValidityChange,
   workspace,
+  templateParameters,
 }: {
   value: string;
   mode: string;
@@ -43,6 +44,8 @@ export function ManifestEditor({
   onValidityChange: (blocked: boolean) => void;
   /** When known, artifact sources choose the pipeline and build run by name. */
   workspace?: string;
+  /** Template authoring uses the same manifest fields; unresolved values cannot be capability-checked. */
+  templateParameters?: { name: string; label?: string; type: string; secret?: boolean }[];
 }) {
   const { i18n } = useCommonTranslation();
   const editorId = useId();
@@ -143,6 +146,7 @@ export function ManifestEditor({
     readOnly,
     invalidJson,
     setPendingRemoval,
+    ...(templateParameters ? { templateParameters } : {}),
   });
   return (
     <section
@@ -185,7 +189,7 @@ export function ManifestEditor({
         </div>
       </div>
       {["native", "docker", "compose", "stack"].includes(mode) && <p className="rounded-md border bg-muted/30 px-4 py-3 text-sm leading-6 text-muted-foreground">{commonText(`resource-domain:deployment.capability.${mode}`)}</p>}
-      {workspace && <section className="space-y-3" aria-label={commonText("resource-domain:deployment.checkCompatibility")}>
+      {workspace && !templateParameters && <section className="space-y-3" aria-label={commonText("resource-domain:deployment.checkCompatibility")}>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" variant="outline" disabled={checking || syntaxError || invalidJson} onClick={() => void checkCapabilities()}>
             {commonText(`resource-domain:deployment.${checking ? "checkingCompatibility" : "checkCompatibility"}`)}

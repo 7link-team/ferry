@@ -56,7 +56,7 @@ it("shows a successful artifact build without a completion timestamp as unavaila
 });
 let root: Root, host: HTMLDivElement, latest: string, blocked: boolean;
 const reference=(label:string)=>[...host.querySelectorAll('[data-auto-field]')].find(field=>field.firstElementChild?.textContent?.trim().startsWith(label))!.querySelector('[role="combobox"]')!;
-function Harness({ source = fixture, readOnly = false, mode = "compose", workspace }: { source?: string; readOnly?: boolean; mode?: string; workspace?: string }) {
+function Harness({ source = fixture, readOnly = false, mode = "compose", workspace, templateParameters }: { source?: string; readOnly?: boolean; mode?: string; workspace?: string; templateParameters?: { name: string; label?: string; type: string; secret?: boolean }[] }) {
   const [value, setValue] = useState(source);
   latest = value;
   const validity = useCallback((value: boolean) => {
@@ -65,6 +65,7 @@ function Harness({ source = fixture, readOnly = false, mode = "compose", workspa
   return (
     <ManifestEditor
       value={value}
+      {...(templateParameters ? { templateParameters } : {})}
       {...(workspace ? { workspace } : {})}
       mode={mode}
       readOnly={readOnly}
@@ -325,4 +326,34 @@ it("capability checks use current unsaved YAML and clear obsolete results after 
   expect(host.textContent).toContain("Native requires artifact");
   await fill(input("镜像"), "nginx:stable");
   expect(host.textContent).not.toContain("Native requires artifact");
+});
+
+it("binds typed template parameters, isolates secret references and preserves source extensions", async () => {
+  const parameters = [{ name: "image", label: "Image", type: "string" }, { name: "replicas", type: "integer" }, { name: "token", type: "string", secret: true }];
+  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  await act(async () => root.render(<Harness mode="" workspace="ops" templateParameters={parameters} />));
+  expect(host.textContent).not.toContain("检查兼容性");
+  const bind = async (label: string, choice: string, forbidden: string[]) => {
+    const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label='为“${label}”选择模板参数']`)!;
+    expect(trigger).not.toBeNull();
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.length).toBeGreaterThan(0);
+    for (const name of forbidden) expect(items.some(item => item.textContent?.includes(name))).toBe(false);
+    await act(async () => items.find(item => item.textContent?.includes(choice))!.click());
+  };
+  await bind("镜像", "Image", ["replicas", "token"]);
+  await bind("副本数", "replicas", ["Image", "token"]);
+  await bind("变量引用", "token", ["Image", "replicas"]);
+  expect(parse(latest).services[0]).toMatchObject({ image: "{{ .Values.image }}", replicas: "{{ .Values.replicas }}" });
+  expect((input("副本数") as HTMLInputElement).type).toBe("text");
+  expect(latest).toContain("# keep image comment");
+  expect(parse(latest).metadata.labels.release).toBe("01");
+  await click("源码编辑"); const source = latest;
+  await click("表单编辑"); expect(latest).toBe(source);
+  expect(blocked).toBe(false);
+  await fill(input("副本数"), "4");
+  expect(parse(latest).services[0].replicas).toBe(4);
+  expect(parse(latest).services[0].env[0].valueFrom).toBe("{{ .Values.token }}");
+  expect(fetch).not.toHaveBeenCalled();
 });

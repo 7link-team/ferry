@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
 import { stringify } from "yaml";
+import { ManifestEditor } from "../deployments/ManifestEditor";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
-import { TemplateParametersEditor, type TemplateParameter } from "./TemplateParametersEditor";
+import { TemplateParametersEditor, TemplateParameterPreview, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
 import { deleteResource } from "../../shared/api/resource";
 import { commonText, workflowText } from "../../shared/i18n/i18n";
@@ -175,7 +176,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
       content: r.content,
       parameters: r.parameters,
     }),
-    sections: [
+    sections: templateSections(application, [
       {
         fields: [
           {
@@ -216,7 +217,7 @@ export const templateForm = (resource: string, application: boolean, workspace =
                   ? "resource-domain:template.appContent"
                   : "resource-domain:template.pipelineContent",
             type: resource === "pipeline-templates" ? "actions-template-editor" : "custom",
-            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch }: { draft: Partial<Template>; readOnly: boolean; onPatch: (patch: Partial<Template>) => void; }) => <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
+            ...(resource === "pipeline-templates" ? {} : { render: ({ draft, readOnly, onPatch, onValidityChange }) => application ? <ManifestEditor value={String(draft.content ?? "")} mode="" workspace={workspace} templateParameters={readTemplateParameters(String(draft.parameters ?? "[]"))} readOnly={readOnly} onChange={content => onPatch({ content })} onValidityChange={onValidityChange} /> : <div className="h-[28rem] min-w-0 overflow-hidden rounded-md border"><Suspense fallback={<LoadingSkeleton variant="editor" />}><TemplateCodeEditor value={String(draft.content ?? "")} language={application ? "yaml" : "plaintext"} path={`${workspace}/${resource}/${draft.id ?? "new"}/content.${application ? "yaml" : "txt"}`} label={commonText("resource-domain:deployment.config")} readOnly={readOnly} onChange={content => onPatch({ content })} /></Suspense></div> }),
             ...(resource === "pipeline-templates" ? { options: pipelineExecutorOptions(workspace, permissions) } : {}),
             span: 2,
             required: true,
@@ -235,8 +236,22 @@ export const templateForm = (resource: string, application: boolean, workspace =
           },
         ],
       },
-    ],
+    ]),
   });
+
+function templateSections(application: boolean, sections: FormConfig<Template>["sections"]): FormConfig<Template>["sections"] {
+  return sections.flatMap(section => application ? [
+      { group: "basics", groupKey: "common-domain:common.basic", title: "basics", titleKey: "common-domain:common.basic", fields: section.fields.filter(field => ["name", "description"].includes(field.key)) },
+      { group: "parameters", groupKey: "resource-domain:template.parameters", title: "parameters", titleKey: "resource-domain:template.parameters", fields: section.fields.filter(field => field.key === "parameters") },
+      { group: "definition", groupKey: "resource-domain:template.definition", title: "definition", titleKey: "resource-domain:template.definition", fields: section.fields.filter(field => field.key === "content") },
+      { group: "preview", groupKey: "resource-domain:template.formPreview", title: "preview", titleKey: "resource-domain:template.formPreview", fields: [{ key: "$preview", label: "preview", labelKey: "resource-domain:template.formPreview", type: "custom" as const, span: 2 as const, render: ({ draft }: { draft: Partial<Template> }) => <TemplateParameterPreview key={String(draft.parameters)} value={String(draft.parameters ?? "[]")} /> }] },
+    ] : [section]);
+}
+
+function readTemplateParameters(value: string): TemplateParameter[] {
+  try { const rows: unknown = JSON.parse(value); return Array.isArray(rows) ? rows.filter(row => row && typeof row.name === "string" && typeof row.type === "string") : []; }
+  catch { return []; }
+}
 
 export const templateGenerator = (
   workspace: string,
@@ -261,42 +276,7 @@ export const templateGenerator = (
             p.type === "boolean" ? String(p.default) : p.default,
           ]),
       ),
-      fields: parameters.map((p) => ({
-        key: p.name,
-        get label() {
-          return `${p.label || p.name}${p.secret ? commonText("resource-domain:template.secretNameSuffix") : ""}`;
-        },
-        type:
-          p.enum || p.type === "boolean"
-            ? ("select" as const)
-            : p.type === "integer"
-              ? ("number" as const)
-              : ("text" as const),
-        required: p.default === undefined,
-        ...(p.enum
-          ? { options: p.enum.map((value) => ({ value, label: value })) }
-          : p.type === "boolean"
-            ? {
-                options: [
-                  {
-                    value: "true",
-                    label: "是",
-                    labelKey: "common-domain:common.yes",
-                  },
-                  {
-                    value: "false",
-                    label: "否",
-                    labelKey: "common-domain:common.no",
-                  },
-                ],
-              }
-            : {}),
-        get help() {
-          return p.secret
-            ? commonText("resource-domain:template.secretHelp")
-            : `${p.name}${p.min !== undefined ? commonText("resource-domain:parameter.minimum", { value: p.min }) : ""}${p.max !== undefined ? commonText("resource-domain:parameter.maximum", { value: p.max }) : ""}${p.min_length !== undefined ? commonText("resource-domain:parameter.minLength", { value: p.min_length }) : ""}${p.max_length !== undefined ? commonText("resource-domain:parameter.maxLength", { value: p.max_length }) : ""}`;
-        },
-      })),
+      fields: templateParameterFields(parameters),
     };
   },
   generate: async (id, version, values) => {

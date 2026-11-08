@@ -1,11 +1,12 @@
-import { Trash2 } from "lucide-react";
+import { Braces, Trash2 } from "lucide-react";
 import {
   AutoField,
   FieldControl,
   selectDisplay,
 } from "../../../shared/forms/auto-form";
-import { hostRepositoryText } from "../../../shared/i18n/i18n";
+import { commonText, hostRepositoryText } from "../../../shared/i18n/i18n";
 import { Button } from "../../../shared/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../../shared/ui/dropdown-menu";
 import type { Path, Row } from "./model";
 
 export const area =
@@ -25,6 +26,7 @@ export function manifestFields({
   readOnly,
   invalidJson,
   setPendingRemoval,
+  templateParameters,
 }: {
   get: (path: Path) => unknown;
   plain: (path: Path) => unknown;
@@ -33,6 +35,7 @@ export function manifestFields({
   readOnly: boolean;
   invalidJson: boolean;
   setPendingRemoval: (removal: Removal) => void;
+  templateParameters?: { name: string; label?: string; type: string; secret?: boolean }[];
 }) {
   const text = (
     label: string,
@@ -48,15 +51,21 @@ export function manifestFields({
     } = {},
   ) => {
     const current = get(path);
+    const reference = typeof current === "string" && /\{\{\s*\.Values\./.test(current);
+    const parameters = templateParameters?.filter(parameter =>
+      path.at(-1) === "valueFrom" ? parameter.secret : !parameter.secret &&
+        (options.number ? parameter.type === "integer" : parameter.type === "string"));
     return (
       <AutoField label={label} required={options.required} help={options.hint}>
+        <div className="flex min-w-0 items-start gap-2">
+        <div className="min-w-0 flex-1">
         <FieldControl
           name={label}
           field={{
             name: label,
             type: options.multiline
               ? "textarea"
-              : options.number
+              : options.number && !reference
                 ? "number"
                 : "text",
             config: {
@@ -67,10 +76,23 @@ export function manifestFields({
           value={String(current ?? options.fallback ?? "")}
           required={options.required}
           disabled={readOnly}
-          onChange={(value) =>
-            set(path, value === "" && !options.required ? undefined : value)
-          }
+          onChange={(value) => {
+            const literal = options.number && typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
+            set(path, literal === "" && !options.required ? undefined : literal);
+          }}
         />
+        </div>
+        {!readOnly && parameters && parameters.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button type="button" variant="outline" className="size-11" aria-label={commonText("resource-domain:template.bindField", { field: label })} title={commonText("resource-domain:template.bindParameter")}><Braces className="size-4" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-w-[min(24rem,calc(100vw-2rem))]">
+              {parameters.map(parameter => <DropdownMenuItem key={parameter.name} className="min-h-11" onSelect={() => set(path, `{{ .Values.${parameter.name} }}`)}>
+                <span className="min-w-0 break-words">{parameter.label || parameter.name}<span className="ml-2 text-xs text-muted-foreground">{parameter.name}</span></span>
+              </DropdownMenuItem>)}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        </div>
       </AutoField>
     );
   };
