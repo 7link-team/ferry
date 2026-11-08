@@ -9,7 +9,9 @@ import subprocess
 import time
 import uuid
 
-IMAGE = 'percona/percona-xtradb-cluster@sha256:a002b7654a22cb29b2af3e1010b2ad5e5ffdef1dc2eece8bfdf974d09746df44'
+# Each pinned image is qualified independently. The previous 8.4.11 candidate
+# failed SST; its failed runs remain evidence, not support for this candidate.
+IMAGE = 'percona/percona-xtradb-cluster@sha256:ca15bf7f3b53464a546b57a2a2a3e4cd67cedc6ad25c079e1461128465b649ff'
 ENGINE = 'docker:27.5.1-dind'
 NODES = ('a', 'b', 'c')
 STATUS_SQL = "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_connected','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_state_uuid')"
