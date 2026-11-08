@@ -230,7 +230,7 @@ try {
       await rejected.arrayBuffer();assert(rejected.status>=500&&rejected.status<600,'SQL outage must not report a successful write');
     }finally{await dependency('database','start');}
     await until(async()=>(await api(B,root)).id===host,'pooled SQL connections recover with original identity',90);
-    assert(!(await api(B,'/workspaces')).items.some(row=>row.slug===rejectedSlug),'rejected write must not appear after recovery');
+    assert(!(await api(B,'/me')).workspaces.some(row=>row.slug===rejectedSlug),'rejected write must not appear after recovery');
     await until(async()=>(await api(B,root+'/connection-tests',{})).ok,'Runner command recovers after database restart',90);
     await readAsset(origins[2]);
     for(const server of servers)assert.equal(server.exitCode,null,'database outage does not terminate a Ferry process');
