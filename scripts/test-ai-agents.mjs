@@ -111,7 +111,7 @@ try {
   const denied = [];
   limited.on('response', r => { if (r.url().includes('/api/') && r.status() === 403) denied.push(new URL(r.url()).pathname); });
   await limited.goto(`${origin}/en-US${url}`);
-  await limited.getByText('Review Agent', { exact: true }).waitFor();
+  await limited.getByRole('heading', { name: 'Review Agent', exact: true }).waitFor();
   assert.equal(await limited.getByText('Configuration history', { exact: true }).count(),0);
   assert.equal(await limited.getByRole('button', { name: 'Check environment', exact: true }).count(), 0);
   await limited.waitForLoadState('networkidle'); assert.deepEqual(denied, []);
@@ -143,7 +143,7 @@ try {
     await page.getByRole('heading', { name: translations.identity[i], exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: translations.probe[i], exact: true }).count(),0);
     assert.equal(await page.getByRole('heading', { name: translations.revisions[i], exact: true }).count(),0);
-    await page.getByText('Review Agent', { exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Review Agent', exact: true }).waitFor();
   }
   pass('six locale detail labels omit environment diagnostics and revision sections; user content preserved');
   await page.setViewportSize({ width: 390, height: 844 });
