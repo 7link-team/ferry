@@ -5,6 +5,7 @@ import { HostMonitor } from "../../features/hosts/HostMonitor";
 import { api,errorText } from "../../shared/api/api";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
+import { ResourceHeading } from "../../shared/ui/resource-heading";
 import { formConfigs,listConfigs } from "../resources";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
@@ -37,14 +38,14 @@ export function HostDetail({
     if (tab === "terminal" || tab === "files") location.replace(href({ workspace, group: "host", item: "hosts", id: hostId, mode: "workspace" }, { tool: tab }));
   }, [tab, workspace, hostId]);
   const canEnroll = permissions.has("hosts.enroll");
-  const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string }>();
+  const [connection, setConnection] = useState<{ workspace: string; hostId: string; kind: string; name: string }>();
   const [connectionError, setConnectionError] = useState("");
   useEffect(() => {
     setConnection(undefined); setConnectionError("");
     if (!permissions.has("hosts.read")) return;
     const controller = new AbortController();
-    void api<{ connection: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`, { signal: controller.signal })
-      .then(host => { if (!controller.signal.aborted) setConnection({ workspace, hostId, kind: host.connection }); })
+    void api<{ connection: string; name: string }>(`/workspaces/${encodeURIComponent(workspace)}/nodes/${encodeURIComponent(hostId)}`, { signal: controller.signal })
+      .then(host => { if (!controller.signal.aborted) setConnection({ workspace, hostId, kind: host.connection, name: host.name }); })
       .catch(cause => { if (!controller.signal.aborted) setConnectionError(errorText(cause)); });
     return () => controller.abort();
   }, [workspace, hostId, permissions]);
@@ -52,6 +53,7 @@ export function HostDetail({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <ResourceHeading name={connection?.name || hostId} />
 
     <div className="flex flex-wrap items-center justify-between gap-2 border-b">
       <div role="tablist" aria-label={commonText("shell.hostDetail")} className="flex gap-1">
@@ -80,7 +82,7 @@ export function HostDetail({
         </div> : <>
         {connectionError && <p role="alert" className="mb-3 text-sm text-destructive">{commonText("shell.agentUnknown")}{connectionError}</p>}
         <div className={cn("grid w-full min-w-0 items-start gap-6", canConnect && "2xl:grid-cols-[minmax(0,1.5fr)_minmax(22rem,1fr)]")}>
-          {form && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} />}
+          {form && <ResourceForm config={form} workspace={workspace} permissions={permissions} showViewNavigation={false} showHeading={false} />}
           {canConnect && <HostConnectionCommand workspace={workspace} hostId={hostId} compact />}
         </div>
         {connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner" && <RunnerUpdateStatus workspace={workspace} hostId={hostId} canUpdate={permissions.has("hosts.update")} />}

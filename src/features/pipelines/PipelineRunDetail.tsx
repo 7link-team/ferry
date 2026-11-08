@@ -135,7 +135,7 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
       {!run ? !error && <LoadingSkeleton variant="page" label={executionText("run.loading")} /> : <>
         <section aria-label={executionText("run.summary")} className="max-h-[35dvh] shrink-0 space-y-3 overflow-auto overscroll-contain rounded-lg border border-border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="font-semibold">{executionText("run.number", { number: run.number })}</h2>
+            <h2 className="min-w-0 break-words font-semibold [overflow-wrap:anywhere]">{named(run.pipeline_name, run.pipeline_id)} · {executionText("run.number", { number: run.number })}</h2>
             <PipelineState value={run.state} />
             {isActive(run.state) && permissions.has("pipelines.run") && (
               <Button variant="outline" size="sm" disabled={busy || run.state === "cancelling"} onClick={() => void cancel()}>

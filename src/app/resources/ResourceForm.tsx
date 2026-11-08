@@ -1,4 +1,6 @@
 import { useQueryValue, useScrollSync } from "../router";
+import { ResourceHeading } from "../../shared/ui/resource-heading";
+import { ScrollFormSections } from "./ScrollFormSections";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext, FormActions } from "../../shared/forms/auto-form/form-actions";
@@ -97,6 +99,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   onCancel,
   pipelineWorkspace = false,
   showViewNavigation = true,
+  showHeading = true,
   editHref,
   headerActions,
   groupLinks,
@@ -112,6 +115,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   onCancel?: () => void;
   pipelineWorkspace?: boolean;
   showViewNavigation?: boolean;
+  showHeading?: boolean;
   editHref?: string;
   headerActions?: ReactNode;
   groupLinks?: ReactNode;
@@ -395,6 +399,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   }
 
   const hasSectionGroups = config.sections.some(section => section.group);
+  const recordName = String(config.heading(draft as T) || (creating ? commonText("common.create") : route.id || commonText("common.record")));
   const formActions = <>
       {!groupContent && readOnly && showViewNavigation && !protectedRow && permissions.has(`${config.permissionResource ?? config.resource}.update`) && route.id && <FormActions>
         <Button asChild><a href={editHref ?? href({ ...route, mode: "edit" }, {})}>{commonText("common.edit")}</a></Button>
@@ -412,6 +417,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   </>;
   return (
     <AutoForm ref={scrollRef} className={cn("min-w-0 w-full pb-8", readOnly ? "resource-detail" : "space-y-4")} onSubmit={submit}>
+      {showHeading && config.sectionNavigation !== "scroll" && !createInPlace && <ResourceHeading name={recordName} />}
       {hostConnectionTabs}
       {!readOnly && config.description && <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{configText(config.description, config.descriptionKey)}</p>}
       {error && (
@@ -449,11 +455,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
       };
       const groups = [...new Set(config.sections.map(section => section.group).filter((group): group is string => !!group))];
       if (!groups.length) return config.sections.map(renderSection);
+      if (config.sectionNavigation === "scroll") return <ScrollFormSections name={recordName} sections={groups.map(name => ({ key: name, label: configText(name, config.sections.find(section => section.group === name)?.groupKey), content: config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === name).map(({ section, index }) => renderSection(section, index)) }))} footer={formActions} />;
       const active = groups.includes(group) ? group : groups[0]!;
       const sections = config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === active);
       const tabs = sections.filter(({ section }) => section.tab);
       return <div className="flex flex-col gap-4 md:flex-row">
-        <nav aria-label={commonText("form.categories")} className="flex shrink-0 flex-wrap gap-1 md:w-40 md:flex-col">
+        <nav aria-label={commonText("form.categories")} className="sticky top-[var(--resource-heading-height,0px)] z-10 flex shrink-0 flex-wrap gap-1 bg-background md:max-h-[65dvh] md:w-40 md:flex-col md:self-start md:overflow-y-auto">
           {groups.map(name => <button key={name} type="button" aria-current={!groupContent && name === active ? "page" : undefined} onClick={() => { setGroup(name); onGroupChange?.(); }}
             className={cn("min-h-11 rounded px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !groupContent && name === active ? "bg-accent font-medium text-accent-foreground" : "text-foreground hover:bg-accent")}>{configText(name, config.sections.find(section => section.group === name)?.groupKey)}</button>)}
           {groupLinks}

@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import type { PipelineRun } from "../../features/pipelines/pipeline";
 import { commonText,useCommonTranslation } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
+import { RemoteResourceHeading } from "../../shared/ui/resource-heading";
 import { formConfigs,listConfigs } from "../resources";
 import { ResourceForm } from "../resources/ResourceForm";
 import { ResourceTable } from "../resources/ResourceTable";
@@ -19,10 +20,11 @@ export function PipelineDetail({ workspace, pipelineId, permissions, form, runs 
   useCommonTranslation();
   const [tab, setTab] = useQueryValue("tab", "config");
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <RemoteResourceHeading endpoint={`/workspaces/${encodeURIComponent(workspace)}/pipelines/${encodeURIComponent(pipelineId)}`} fallback={pipelineId} />
     <div role="tablist" aria-label={commonText("shell.pipelineDetail")} className="flex gap-1 border-b">
       {([["config", commonText("shell.configuration")], ["runs", commonText("shell.executionRecords")]] as const).map(([value, label]) => <Button key={value} type="button" role="tab" aria-selected={tab === value} variant="ghost" className={cn("rounded-none border-b-2", tab === value ? "border-primary text-primary" : "border-transparent")} onClick={() => setTab(value)}>{label}</Button>)}
     </div>
-    {tab === "runs" ? <ResourceTable key={pipelineId} config={{ ...runs, fixed: { pipeline_id: pipelineId }, actions: [{ label: "查看", labelKey: "common.view", permission: "pipelines.read", to: (row: PipelineRun) => ({ group: "build", item: "runs", id: row.id, mode: "view" as const }) }] }} workspace={workspace} permissions={permissions} /> : <div className="min-h-0 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} /></div>}
+    {tab === "runs" ? <ResourceTable key={pipelineId} config={{ ...runs, fixed: { pipeline_id: pipelineId }, actions: [{ label: "查看", labelKey: "common.view", permission: "pipelines.read", to: (row: PipelineRun) => ({ group: "build", item: "runs", id: row.id, mode: "view" as const }) }] }} workspace={workspace} permissions={permissions} /> : <div className="min-h-0 overflow-auto"><ResourceForm config={form} workspace={workspace} permissions={permissions} showHeading={false} /></div>}
   </div>;
 }
 
