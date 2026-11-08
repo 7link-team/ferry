@@ -29,6 +29,18 @@ pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionK
             crate::i18n::Message::new("runner.monitorUnsupported"),
         ));
     }
+    if kind == wire::SessionKind::Agent && !registration.supports_agent {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.agentUpgrade"),
+        ));
+    }
+    if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            crate::i18n::Message::new("agents.probeUnsupported"),
+        ));
+    }
     registration
         .control
         .send(wire::Control::OpenSession {
@@ -130,6 +142,18 @@ impl RunnerChannel {
                 crate::i18n::Message::new("runner.monitorUpgrade"),
             ));
         }
+        if kind == wire::SessionKind::Agent && !registration.supports_agent {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("runner.agentUpgrade"),
+            ));
+        }
+        if kind == wire::SessionKind::AgentProbe && !registration.supports_agent_probe {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("agents.probeUnsupported"),
+            ));
+        }
         let id = secret();
         let (socket, dialled) = oneshot::channel();
         pending().insert(
@@ -189,6 +213,97 @@ impl RunnerChannel {
 
 #[async_trait::async_trait]
 impl HostChannel for RunnerChannel {
+    async fn agent(
+        &self,
+        request: wire::agent::Request,
+        events: tokio::sync::mpsc::Sender<wire::agent::Event>,
+        mut inputs: tokio::sync::mpsc::Receiver<wire::agent::Input>,
+        mut cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<()> {
+        let mut socket = self.session(wire::SessionKind::Agent).await?;
+        let deadline = tokio::time::sleep(Duration::from_secs(request.timeout_seconds + 85));
+        tokio::pin!(deadline);
+        send_frame(&mut socket, &wire::Session::AgentStart { request }).await?;
+        let mut stopping = false;
+        loop {
+            if *cancel.borrow() && !stopping {
+                send_frame(
+                    &mut socket,
+                    &wire::Session::AgentInput {
+                        input: wire::agent::Input::Cancel,
+                    },
+                )
+                .await?;
+                stopping = true;
+            }
+            tokio::select! {
+                _ = cancel.changed(), if !stopping => {
+                    send_frame(&mut socket, &wire::Session::AgentInput { input: wire::agent::Input::Cancel }).await?;
+                    stopping = true;
+                }
+                input = inputs.recv(), if !stopping => match input {
+                    Some(input) => send_frame(&mut socket, &wire::Session::AgentInput { input }).await?,
+                    None => { send_frame(&mut socket, &wire::Session::AgentInput { input: wire::agent::Input::Cancel }).await?; stopping = true; }
+                },
+                _ = &mut deadline => return Err(ApiError::localized(StatusCode::GATEWAY_TIMEOUT, crate::i18n::Message::new("runner.cleanupTimeout"))),
+                frame = next_frame(&mut socket) => match frame? {
+                    wire::Session::AgentEvent { event } => {
+                        let finished = matches!(event, wire::agent::Event::Finished { .. });
+                        // Backpressure must never strand an owned remote process.
+                        match tokio::time::timeout(Duration::from_secs(10), events.send(event)).await {
+                            Ok(Ok(())) => {},
+                            _ => { let _ = socket.send(Message::Close(None)).await; return Err(garbled()); }
+                        }
+                        if finished { return Ok(()); }
+                    }
+                    wire::Session::Failed { error } => return Err(remote_failed(error)),
+                    _ => return Err(garbled()),
+                }
+            }
+        }
+    }
+    async fn agent_probe(
+        &self,
+        runtime: wire::agent::Runtime,
+        cwd: &str,
+    ) -> Result<wire::agent::Probe> {
+        let (answer, _socket) = self
+            .ask(
+                wire::SessionKind::AgentProbe,
+                wire::Session::AgentProbe {
+                    runtime,
+                    cwd: cwd.into(),
+                    workspace: None,
+                },
+                Duration::from_secs(35),
+            )
+            .await?;
+        match answer {
+            wire::Session::AgentProbeResult { status } => Ok(status),
+            _ => Err(garbled()),
+        }
+    }
+    async fn agent_workspace(
+        &self,
+        runtime: wire::agent::Runtime,
+        key: &str,
+    ) -> Result<wire::agent::Probe> {
+        let (answer, _socket) = self
+            .ask(
+                wire::SessionKind::AgentProbe,
+                wire::Session::AgentProbe {
+                    runtime,
+                    cwd: String::new(),
+                    workspace: Some(key.into()),
+                },
+                Duration::from_secs(35),
+            )
+            .await?;
+        match answer {
+            wire::Session::AgentProbeResult { status } => Ok(status),
+            _ => Err(garbled()),
+        }
+    }
     async fn monitor(&self) -> Result<wire::HostMonitor> {
         let (answer, _socket) = self
             .ask(
@@ -490,6 +605,59 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn legacy_runner_refuses_agent_before_opening_local_or_cluster_session() {
+        let host = uuid::Uuid::new_v4().to_string();
+        let (control, mut commands) = mpsc::channel(4);
+        let (disconnect, _) = watch::channel(false);
+        live().insert(
+            host.clone(),
+            Arc::new(Live {
+                owner: None,
+                owner_revision: std::sync::atomic::AtomicU64::new(0),
+                key_hash: String::new(),
+                control,
+                disconnect,
+                managed: false,
+                supports_monitor: true,
+                supports_agent: false,
+                supports_agent_probe: false,
+                version: "legacy".into(),
+                ready: std::sync::atomic::AtomicBool::new(true),
+                failed_version: Mutex::new(None),
+                update_error: Mutex::new(None),
+            }),
+        );
+        let channel = RunnerChannel {
+            _lease: crate::hosts::runner::reservations::lease(&host).await,
+            cluster: None,
+            host_id: host.clone(),
+            name: "fixture".into(),
+        };
+        let local = channel
+            .session(wire::SessionKind::Agent)
+            .await
+            .err()
+            .expect("legacy local runner must refuse Agent");
+        let remote = cluster_open(&host, "unused", wire::SessionKind::Agent)
+            .await
+            .unwrap_err();
+        assert!(
+            commands.try_recv().is_err(),
+            "unsupported work must never be dispatched"
+        );
+        live().remove(&host);
+        for error in [local, remote] {
+            assert_eq!(error.0, StatusCode::CONFLICT);
+            for locale in crate::i18n::Locale::ALL {
+                assert_eq!(
+                    error.render(locale),
+                    crate::i18n::render(locale, &crate::i18n::Message::new("runner.agentUpgrade"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn legacy_runner_monitor_does_not_send_an_unknown_session_kind() {
         let host_id = "legacy-monitor-fixture";
         let (control, mut receiver) = mpsc::channel(1);
@@ -504,6 +672,8 @@ mod tests {
                 disconnect,
                 managed: false,
                 supports_monitor: false,
+                supports_agent: false,
+                supports_agent_probe: false,
                 version: "0.1.0-alpha.13".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),

@@ -101,7 +101,9 @@ function CallLedger() {
               }}
             >
               <label className="block space-y-1">
-                <span><FieldCaption label={<>{t("aiActualCost")}</>} /></span>
+                <span>
+                  <FieldCaption label={<>{t("aiActualCost")}</>} />
+                </span>
                 <Input
                   type="number"
                   name="actual"
@@ -111,7 +113,9 @@ function CallLedger() {
                 />
               </label>
               <label className="block space-y-1">
-                <span><FieldCaption label={<>{t("aiReconcileReason")}</>} /></span>
+                <span>
+                  <FieldCaption label={<>{t("aiReconcileReason")}</>} />
+                </span>
                 <Input name="reason" required maxLength={2000} />
               </label>
               <Button type="submit" variant="outline">
@@ -134,11 +138,13 @@ export function WorkflowAIParameters({
   value,
   readOnly,
   change,
+  providerOnly = false,
 }: {
   type: string;
   value: Record<string, unknown>;
   readOnly: boolean;
   change: (value: Record<string, unknown>) => void;
+  providerOnly?: boolean;
 }) {
   const { workspace } = useContext(WorkflowAssetContext);
   const [providers, setProviders] = useState<Provider[]>([]),
@@ -173,7 +179,9 @@ export function WorkflowAIParameters({
     numeric = false,
   ) => (
     <label className="block space-y-2 text-sm">
-      <span><FieldCaption label={<>{t(label)}</>} /></span>
+      <span>
+        <FieldCaption label={<>{t(label)}</>} />
+      </span>
       <Input
         aria-label={t(label)}
         disabled={readOnly}
@@ -190,7 +198,9 @@ export function WorkflowAIParameters({
   return (
     <div className="space-y-4">
       <label className="block space-y-2 text-sm">
-        <span><FieldCaption label={<>{t("aiProvider")}</>} /></span>
+        <span>
+          <FieldCaption label={<>{t("aiProvider")}</>} />
+        </span>
         <select
           aria-label={t("aiProvider")}
           className={control}
@@ -214,6 +224,7 @@ export function WorkflowAIParameters({
       {!readOnly && (
         <div className="flex flex-wrap gap-2">
           <Button
+            type="button"
             variant="outline"
             onClick={async () => {
               try {
@@ -254,6 +265,7 @@ export function WorkflowAIParameters({
           </Button>
           {selected && (
             <Button
+              type="button"
               variant="ghost"
               onClick={async () => {
                 try {
@@ -285,7 +297,9 @@ export function WorkflowAIParameters({
             {t("aiPriceHelp")}
           </p>
           <label className="block space-y-2 text-sm">
-            <span><FieldCaption label={<>{t("aiProtocol")}</>} /></span>
+            <span>
+              <FieldCaption label={<>{t("aiProtocol")}</>} />
+            </span>
             <select
               className={control}
               aria-label={t("aiProtocol")}
@@ -314,7 +328,9 @@ export function WorkflowAIParameters({
             {t("aiCredentials")}
           </a>
           <label className="block space-y-2 text-sm">
-            <span><FieldCaption label={<>{t("aiCredential")}</>} /></span>
+            <span>
+              <FieldCaption label={<>{t("aiCredential")}</>} />
+            </span>
             <select
               className={control}
               aria-label={t("aiCredential")}
@@ -344,11 +360,17 @@ export function WorkflowAIParameters({
             ] as const
           ).map(([key, label]) => (
             <label key={key} className="block space-y-2 text-sm">
-              <span><FieldCaption label={<>
-                {key === "name" ? commonText("common.name") : t(label)}
-              </>} /></span>
+              <span>
+                <FieldCaption
+                  label={
+                    <>{key === "name" ? commonText("common.name") : t(label)}</>
+                  }
+                />
+              </span>
               <Input
-                aria-label={t(label)}
+                aria-label={
+                  key === "name" ? commonText("common.name") : t(label)
+                }
                 disabled={
                   !!draft.id && (key === "currency" || key === "timezone")
                 }
@@ -370,7 +392,9 @@ export function WorkflowAIParameters({
           {draft.prices.map((price, index) => (
             <div key={index} className="space-y-2 border-t pt-3">
               <label className="block space-y-2 text-sm">
-                <span><FieldCaption label={<>{t("aiOperation")}</>} /></span>
+                <span>
+                  <FieldCaption label={<>{t("aiOperation")}</>} />
+                </span>
                 <select
                   className={control}
                   value={price.operation}
@@ -397,7 +421,9 @@ export function WorkflowAIParameters({
                 ] as const
               ).map(([key, label]) => (
                 <label key={key} className="block space-y-2 text-sm">
-                  <span><FieldCaption label={<>{t(label)}</>} /></span>
+                  <span>
+                    <FieldCaption label={<>{t(label)}</>} />
+                  </span>
                   <Input
                     aria-label={t(label)}
                     type={key === "model" ? "text" : "number"}
@@ -423,6 +449,7 @@ export function WorkflowAIParameters({
                 </label>
               ))}
               <Button
+                type="button"
                 variant="ghost"
                 disabled={draft.prices.length === 1}
                 onClick={() =>
@@ -437,6 +464,7 @@ export function WorkflowAIParameters({
             </div>
           ))}
           <Button
+            type="button"
             variant="outline"
             onClick={() =>
               setDraft({
@@ -458,6 +486,7 @@ export function WorkflowAIParameters({
           </Button>
           <div className="flex gap-2">
             <Button
+              type="button"
               disabled={busy}
               onClick={async () => {
                 setBusy(true);
@@ -480,57 +509,69 @@ export function WorkflowAIParameters({
             >
               {commonText("common.save")}
             </Button>
-            <Button variant="ghost" onClick={() => setDraft(undefined)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDraft(undefined)}
+            >
               {t("cancel")}
             </Button>
           </div>
         </section>
       )}
-      {field("model", "aiModel")}
-      {type !== "ai.audio.transcribe" && (
-        <label className="block space-y-2 text-sm">
-          <span><FieldCaption label={<>{t("aiPrompt")}</>} /></span>
-          <textarea
-            className="min-h-28 w-full rounded-md border bg-background p-3 text-sm"
-            aria-label={t("aiPrompt")}
-            disabled={readOnly}
-            value={String(value.prompt ?? "")}
-            onChange={(e) => patch("prompt", e.target.value)}
-          />
-        </label>
-      )}
-      {type === "ai.llm.chat" && (
+      {!providerOnly && (
         <>
-          {field("image_field", "aiImageField")}
-          {field("max_tokens", "aiMaxTokens", true)}
+          {field("model", "aiModel")}
+          {type !== "ai.audio.transcribe" && (
+            <label className="block space-y-2 text-sm">
+              <span>
+                <FieldCaption label={<>{t("aiPrompt")}</>} />
+              </span>
+              <textarea
+                className="min-h-28 w-full rounded-md border bg-background p-3 text-sm"
+                aria-label={t("aiPrompt")}
+                disabled={readOnly}
+                value={String(value.prompt ?? "")}
+                onChange={(e) => patch("prompt", e.target.value)}
+              />
+            </label>
+          )}
+          {type === "ai.llm.chat" && (
+            <>
+              {field("image_field", "aiImageField")}
+              {field("max_tokens", "aiMaxTokens", true)}
+            </>
+          )}
+          {type === "ai.image.generate" && (
+            <label className="block space-y-2 text-sm">
+              <span>
+                <FieldCaption label={<>{t("aiImageSize")}</>} />
+              </span>
+              <select
+                aria-label={t("aiImageSize")}
+                className={control}
+                disabled={readOnly}
+                value={String(value.size)}
+                onChange={(e) => patch("size", e.target.value)}
+              >
+                {["1024x1024", "1024x1536", "1536x1024", "auto"].map((size) => (
+                  <option key={size}>{size}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {type === "ai.audio.speech" && field("voice", "aiVoice")}
+          {type === "ai.audio.transcribe" && field("file_field", "binaryField")}
+          {field("output_field", "outputField")}
+          {field("max_cost_micros", "aiCallBudget", true)}
         </>
       )}
-      {type === "ai.image.generate" && (
-        <label className="block space-y-2 text-sm">
-          <span><FieldCaption label={<>{t("aiImageSize")}</>} /></span>
-          <select
-            aria-label={t("aiImageSize")}
-            className={control}
-            disabled={readOnly}
-            value={String(value.size)}
-            onChange={(e) => patch("size", e.target.value)}
-          >
-            {["1024x1024", "1024x1536", "1536x1024", "auto"].map((size) => (
-              <option key={size}>{size}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      {type === "ai.audio.speech" && field("voice", "aiVoice")}
-      {type === "ai.audio.transcribe" && field("file_field", "binaryField")}
-      {field("output_field", "outputField")}
-      {field("max_cost_micros", "aiCallBudget", true)}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
-      {!readOnly && <CallLedger />}
+      {!readOnly && !providerOnly && <CallLedger />}
     </div>
   );
 }

@@ -1,5 +1,271 @@
 //! Table mirrors. HTTP responses explicitly wrap identifiers in `Id`.
 
+pub mod ai_model_profiles {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_model_profiles")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub kind: String,
+        pub runtime: String,
+        pub provider_id: i64,
+        pub models: String,
+        pub default_model: String,
+        pub tool_version: String,
+        pub state: String,
+        pub revision_id: i64,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_chat_members {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_members")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub user_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_reads {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_reads")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub conversation_id: i64,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: i64,
+        pub workspace_id: i64,
+        pub message_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_saves {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_saves")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub message_id: i64,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub user_id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_agents {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_agents")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub agent_id: i64,
+        pub revision_id: i64,
+        pub config: String,
+        pub binding: String,
+        pub native_session_id: String,
+        pub state: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_messages {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_messages")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub owner_id: i64,
+        pub created_at: i64,
+        pub client_id: String,
+        pub prompt: String,
+        pub attachments: String,
+        pub targets: String,
+        pub role: String,
+        pub agent_id: i64,
+        pub turn_id: Option<i64>,
+        pub reply_to: Option<i64>,
+        pub sender_name: String,
+        pub text_items: Option<String>,
+        pub version: i64,
+        pub edited_at: Option<i64>,
+        pub retracted_at: Option<i64>,
+        pub mentions: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_turns {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_turns")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub message_id: i64,
+        pub chat_agent_id: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+pub mod ai_chat_files {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_chat_files")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub owner_id: i64,
+        pub asset_id: i64,
+        pub size: i64,
+        pub created_at: i64,
+        pub name: String,
+        pub mime: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_conversations {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_conversations")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub owner_id: i64,
+        pub agent_id: i64,
+        pub revision_id: i64,
+        pub next_sequence: i64,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub title: String,
+        pub state: String,
+        pub config: String,
+        pub binding: String,
+        pub native_session_id: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_turns {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_turns")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub owner_id: i64,
+        pub expires_at: i64,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+        pub state: String,
+        pub lease_owner: String,
+        pub client_id: String,
+        pub prompt: String,
+        pub attachments: String,
+        pub native_session_id: String,
+        pub candidate_session: String,
+        pub error: String,
+        pub usage: String,
+        pub decisions: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_events {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_events")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub conversation_id: i64,
+        pub turn_id: i64,
+        pub sequence: i64,
+        pub created_at: i64,
+        pub payload: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+pub mod ai_agents {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "ai_agents")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub model_profile_id: i64,
+        pub workspace_id: i64,
+        pub name: String,
+        pub role: String,
+        pub description: String,
+        pub runtime: String,
+        pub model: String,
+        pub host_id: i64,
+        pub owner_id: i64,
+        pub cwd: String,
+        pub system_prompt: String,
+        pub permission: String,
+        pub visibility: String,
+        pub state: String,
+        pub revision_id: i64,
+        pub version: i64,
+        pub created_at: i64,
+        pub updated_at: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod platform_state {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]

@@ -164,6 +164,8 @@ export interface FormField<T> {
   placeholder?: string;
   placeholderKey?: string;
   options?: Options;
+  /** Show a search input above multiselect choices. */
+  searchable?: boolean;
   /** Filter loaded choices against the current record, e.g. exclude itself. */
   optionFilter?: (option: Option, draft: Partial<T>) => boolean;
   /** Legacy values meaning no selection for this field; never applied to numeric metrics. */

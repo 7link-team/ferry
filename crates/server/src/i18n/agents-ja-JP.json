@@ -1,0 +1,1 @@
+{"agents.invalid":"Agent の設定が無効です。名前、実行ツール、ディレクトリ、Runner ホスト、有効な担当者を確認してください。","agents.changed":"Agent が変更されました。再読み込みしてから保存してください。","agents.probeUnsupported":"環境確認には対応する新しい Runner 接続が必要です。","permission.group.ai-agents":"AI エージェント","permission.action.probe":"環境を確認"}

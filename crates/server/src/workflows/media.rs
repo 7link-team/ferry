@@ -178,9 +178,40 @@ async fn download(
     let bytes = store(&s, &backend)
         .read_bytes(&s.db, scope.workspace_id.into(), asset.id)
         .await?;
-    let inline = asset.mime.starts_with("image/")
-        || asset.mime.starts_with("audio/")
-        || asset.mime.starts_with("video/");
+    media_response(bytes, &asset.mime, &headers, None)
+}
+/// Authenticated callers supply the bytes; active document types never render inline.
+pub(crate) fn media_response(
+    bytes: Vec<u8>,
+    mime: &str,
+    headers: &HeaderMap,
+    download_name: Option<&str>,
+) -> Result<Response> {
+    let inline = download_name.is_none()
+        && matches!(
+            mime,
+            "image/png"
+                | "image/jpeg"
+                | "image/gif"
+                | "image/webp"
+                | "image/avif"
+                | "audio/mpeg"
+                | "audio/mp4"
+                | "audio/ogg"
+                | "audio/wav"
+                | "audio/webm"
+                | "video/mp4"
+                | "video/webm"
+                | "video/ogg"
+        );
+    let disposition = if let Some(name) = download_name {
+        format!(
+            "attachment; filename*=UTF-8''{}",
+            percent_encoding::utf8_percent_encode(name, percent_encoding::NON_ALPHANUMERIC)
+        )
+    } else {
+        if inline { "inline" } else { "attachment" }.to_owned()
+    };
     let range = headers.get(header::RANGE).and_then(|h| h.to_str().ok());
     let (status, data, content_range) = if let Some(range) = range {
         let range = range
@@ -228,11 +259,8 @@ async fn download(
     let mut response = (
         status,
         [
-            (header::CONTENT_TYPE, asset.mime.as_str()),
-            (
-                header::CONTENT_DISPOSITION,
-                if inline { "inline" } else { "attachment" },
-            ),
+            (header::CONTENT_TYPE, mime),
+            (header::CONTENT_DISPOSITION, disposition.as_str()),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::CACHE_CONTROL, "private, no-store"),
             (header::ACCEPT_RANGES, "bytes"),

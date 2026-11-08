@@ -199,6 +199,8 @@ async fn hold(
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             managed_updates: cfg.managed,
             supports_monitor: true,
+            supports_agent: true,
+            supports_agent_probe: true,
         },
     )
     .await?;
@@ -287,8 +289,9 @@ async fn hold(
                             };
                             // Dialled on its own task: a slow transfer must not
                             // stall heartbeats or the next session request.
+                            let root = cfg.state_dir.clone();
                             sessions.spawn(async move {
-                                if let Err(error) = session::run(&url, hello, kind).await {
+                                if let Err(error) = session::run(&url, hello, kind, &root).await {
                                     tracing::warn!(%id, ?kind, %error, "会话结束于错误");
                                 }
                             });

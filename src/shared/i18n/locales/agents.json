@@ -1,0 +1,410 @@
+{
+  "title": [
+    "AI Agents",
+    "智能体",
+    "智慧體",
+    "AI エージェント",
+    "AI 에이전트",
+    "Ejen AI"
+  ],
+  "name": [
+    "Name",
+    "名称",
+    "名稱",
+    "名前",
+    "이름",
+    "Nama"
+  ],
+  "role": [
+    "Role / purpose",
+    "角色 / 用途",
+    "角色 / 用途",
+    "役割・用途",
+    "역할 / 용도",
+    "Peranan / tujuan"
+  ],
+  "description": [
+    "Description",
+    "说明",
+    "說明",
+    "説明",
+    "설명",
+    "Penerangan"
+  ],
+  "human": [
+    "Human owner",
+    "Human 负责人",
+    "Human 負責人",
+    "担当者",
+    "담당자",
+    "Penanggungjawab"
+  ],
+  "runtime": [
+    "Runtime",
+    "执行工具",
+    "執行工具",
+    "実行ツール",
+    "실행 도구",
+    "Alat pelaksanaan"
+  ],
+  "model": [
+    "Model",
+    "模型",
+    "模型",
+    "モデル",
+    "모델",
+    "Model"
+  ],
+  "host": [
+    "Runner host",
+    "Runner 主机",
+    "Runner 主機",
+    "Runner ホスト",
+    "Runner 호스트",
+    "Hos Runner"
+  ],
+  "directory": [
+    "Working directory",
+    "工作目录",
+    "工作目錄",
+    "作業ディレクトリ",
+    "작업 디렉터리",
+    "Direktori kerja"
+  ],
+  "prompt": [
+    "Agent instructions",
+    "智能体提示词",
+    "智慧體提示詞",
+    "エージェントへの指示",
+    "에이전트 지침",
+    "Arahan ejen"
+  ],
+  "permission": [
+    "Tool permission",
+    "工具许可",
+    "工具許可",
+    "ツールの許可",
+    "도구 권한",
+    "Kebenaran alat"
+  ],
+  "visibility": [
+    "Who can use",
+    "使用范围",
+    "使用範圍",
+    "利用範囲",
+    "사용 범위",
+    "Skop penggunaan"
+  ],
+  "state": [
+    "State",
+    "状态",
+    "狀態",
+    "状態",
+    "상태",
+    "Status"
+  ],
+  "enabled": [
+    "Enabled",
+    "启用",
+    "啟用",
+    "有効",
+    "활성",
+    "Aktif"
+  ],
+  "disabled": [
+    "Disabled",
+    "停用",
+    "停用",
+    "無効",
+    "비활성",
+    "Tidak aktif"
+  ],
+  "archived": [
+    "Archived",
+    "归档",
+    "封存",
+    "アーカイブ済み",
+    "보관됨",
+    "Diarkibkan"
+  ],
+  "owner": [
+    "Owner only",
+    "仅负责人",
+    "僅負責人",
+    "担当者のみ",
+    "담당자만",
+    "Penanggungjawab sahaja"
+  ],
+  "workspace": [
+    "Workspace members",
+    "工作空间成员",
+    "工作空間成員",
+    "ワークスペースのメンバー",
+    "워크스페이스 구성원",
+    "Ahli ruang kerja"
+  ],
+  "read_only": [
+    "Read-only",
+    "只读",
+    "唯讀",
+    "読み取り専用",
+    "읽기 전용",
+    "Baca sahaja"
+  ],
+  "on_request": [
+    "Native permission requests",
+    "按原生请求授权",
+    "依原生請求授權",
+    "ネイティブの許可リクエスト",
+    "기본 도구 권한 요청",
+    "Permintaan kebenaran asal"
+  ],
+  "identity": [
+    "Identity",
+    "基本资料",
+    "基本資料",
+    "基本情報",
+    "기본 정보",
+    "Maklumat asas"
+  ],
+  "execution": [
+    "Execution configuration",
+    "执行配置",
+    "執行設定",
+    "実行設定",
+    "실행 설정",
+    "Konfigurasi pelaksanaan"
+  ],
+  "environment": [
+    "Execution environment",
+    "执行环境",
+    "執行環境",
+    "実行環境",
+    "실행 환경",
+    "Persekitaran pelaksanaan"
+  ],
+  "revisions": [
+    "Configuration history",
+    "配置修订",
+    "設定修訂",
+    "設定履歴",
+    "설정 이력",
+    "Sejarah konfigurasi"
+  ],
+  "revision": [
+    "Revision",
+    "修订",
+    "修訂",
+    "リビジョン",
+    "버전",
+    "Semakan"
+  ],
+  "search": [
+    "Name / role / description",
+    "名称 / 角色 / 说明",
+    "名稱 / 角色 / 說明",
+    "名前・役割・説明",
+    "이름 / 역할 / 설명",
+    "Nama / peranan / penerangan"
+  ],
+  "empty": [
+    "Create an Agent to configure a CLI identity on a Runner host.",
+    "创建 智能体，配置 Runner 主机上的 CLI 工作身份。",
+    "建立 智慧體，設定 Runner 主機上的 CLI 工作身分。",
+    "Agent を作成して Runner ホストの CLI を設定します。",
+    "에이전트를 생성해 Runner 호스트의 CLI를 설정하세요.",
+    "Cipta ejen untuk mengkonfigurasi CLI pada hos Runner."
+  ],
+  "nativeModel": [
+    "Native default",
+    "原生默认模型",
+    "原生預設模型",
+    "ネイティブの既定値",
+    "기본 모델",
+    "Lalai asal"
+  ],
+  "modelHelp": [
+    "Leave empty to use the CLI's configured model. No automatic fallback.",
+    "留空沿用 CLI 配置的模型，不自动切换模型。",
+    "留空沿用 CLI 設定的模型，不自動切換模型。",
+    "空欄では CLI の設定モデルを使用します。自動切替は行いません。",
+    "비워 두면 CLI 설정 모델을 사용하며 자동 전환하지 않습니다.",
+    "Biarkan kosong untuk model CLI sedia ada. Tiada pertukaran automatik."
+  ],
+  "permissionHelp": [
+    "Claude read-only disables tools; it is not an OS sandbox. Native permission rules remain effective.",
+    "Claude 只读模式禁用工具，并非系统沙箱。原生许可规则仍生效。",
+    "Claude 唯讀模式停用工具，並非系統沙箱。原生許可規則仍生效。",
+    "Claude の読み取り専用はツールを無効にします。OS サンドボックスではありません。ネイティブの許可設定は有効です。",
+    "Claude 읽기 전용은 도구를 비활성화하며 OS 샌드박스가 아닙니다. 기존 권한 규칙이 적용됩니다.",
+    "Mod baca sahaja Claude menyahaktifkan alat, bukan sandbox OS. Peraturan asal kekal berkuat kuasa."
+  ],
+  "visibilityHelp": [
+    "Use also requires the Agent use permission. Conversations will retain independent access controls.",
+    "使用仍需 智能体 使用权限；会话有独立访问控制。",
+    "使用仍需 智慧體 使用權限；會話有獨立存取控制。",
+    "利用には Agent の利用権限も必要です。会話のアクセス権は独立しています。",
+    "에이전트 사용 권한도 필요합니다. 대화 접근 권한은 별도입니다.",
+    "Kebenaran menggunakan ejen juga diperlukan. Kawalan akses perbualan berasingan."
+  ],
+  "probe": [
+    "Check environment",
+    "检测环境",
+    "偵測環境",
+    "環境を確認",
+    "환경 확인",
+    "Semak persekitaran"
+  ],
+  "checking": [
+    "Checking…",
+    "检测中…",
+    "偵測中…",
+    "確認中…",
+    "확인 중…",
+    "Menyemak…"
+  ],
+  "probeHelp": [
+    "Checks the saved configuration on the Runner account without a model call. Installation and login do not prove model availability.",
+    "按已保存配置检测 Runner 账号环境，不调用模型。已安装、已登录不代表模型可用。",
+    "依已儲存設定偵測 Runner 帳號環境，不呼叫模型。已安裝、已登入不代表模型可用。",
+    "保存済み設定と Runner のアカウント環境を確認します。モデルは呼び出しません。インストールとログインはモデルの利用を保証しません。",
+    "저장된 설정으로 Runner 계정 환경을 확인하며 모델을 호출하지 않습니다. 설치와 로그인만으로 모델 사용을 보장하지 않습니다.",
+    "Semak konfigurasi tersimpan pada akaun Runner tanpa memanggil model. Pemasangan dan log masuk tidak menjamin model tersedia."
+  ],
+  "notChecked": [
+    "Not checked for this saved revision.",
+    "此配置修订尚未检测。",
+    "此設定修訂尚未偵測。",
+    "この設定リビジョンは未確認です。",
+    "현재 설정 버전은 확인하지 않았습니다.",
+    "Semakan ini belum diperiksa."
+  ],
+  "executionUser": [
+    "Execution account",
+    "执行账号",
+    "執行帳號",
+    "実行アカウント",
+    "실행 계정",
+    "Akaun pelaksanaan"
+  ],
+  "executable": [
+    "CLI path",
+    "CLI 路径",
+    "CLI 路徑",
+    "CLI パス",
+    "CLI 경로",
+    "Laluan CLI"
+  ],
+  "version": [
+    "CLI version",
+    "CLI 版本",
+    "CLI 版本",
+    "CLI バージョン",
+    "CLI 버전",
+    "Versi CLI"
+  ],
+  "authentication": [
+    "Login status",
+    "登录状态",
+    "登入狀態",
+    "ログイン状態",
+    "로그인 상태",
+    "Status log masuk"
+  ],
+  "logged_in": [
+    "Logged in",
+    "已登录",
+    "已登入",
+    "ログイン済み",
+    "로그인됨",
+    "Telah log masuk"
+  ],
+  "logged_out": [
+    "Not logged in",
+    "未登录",
+    "未登入",
+    "未ログイン",
+    "로그인되지 않음",
+    "Belum log masuk"
+  ],
+  "unknown": [
+    "Unknown",
+    "未知",
+    "未知",
+    "不明",
+    "알 수 없음",
+    "Tidak diketahui"
+  ],
+  "missing": [
+    "CLI not found",
+    "未找到 CLI",
+    "找不到 CLI",
+    "CLI が見つかりません",
+    "CLI를 찾을 수 없음",
+    "CLI tidak ditemui"
+  ],
+  "failed": [
+    "CLI check failed",
+    "CLI 检测失败",
+    "CLI 偵測失敗",
+    "CLI の確認に失敗しました",
+    "CLI 확인 실패",
+    "Semakan CLI gagal"
+  ],
+  "directoryExists": [
+    "Directory exists",
+    "目录存在",
+    "目錄存在",
+    "ディレクトリあり",
+    "디렉터리 존재",
+    "Direktori wujud"
+  ],
+  "directoryMissing": [
+    "Directory missing or inaccessible",
+    "目录不存在或不可访问",
+    "目錄不存在或無法存取",
+    "ディレクトリがないかアクセスできません",
+    "디렉터리가 없거나 접근할 수 없음",
+    "Direktori tiada atau tidak boleh diakses"
+  ],
+  "checkedAt": [
+    "Time",
+    "时间",
+    "時間",
+    "時刻",
+    "시간",
+    "Masa"
+  ],
+  "result": [
+    "Result",
+    "结果",
+    "結果",
+    "結果",
+    "결과",
+    "Hasil"
+  ],
+  "modelProfile": [
+    "Model profile",
+    "模型档案",
+    "模型檔案",
+    "モデル設定",
+    "모델 프로필",
+    "Profil model"
+  ],
+  "selectModelProfile": [
+    "Select a configured model",
+    "选择已配置的模型",
+    "選擇已設定的模型",
+    "設定済みモデルを選択",
+    "설정된 모델 선택",
+    "Pilih model yang dikonfigurasi"
+  ],
+  "configuration": [
+    "Configuration",
+    "配置",
+    "設定",
+    "設定",
+    "설정",
+    "Konfigurasi"
+  ]
+}

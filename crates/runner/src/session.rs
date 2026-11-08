@@ -24,13 +24,14 @@ pub async fn run(
     url: &str,
     hello: wire::SessionHello,
     kind: wire::SessionKind,
+    state_dir: &std::path::Path,
 ) -> anyhow::Result<()> {
     let mut socket = crate::transport::dial(url).await?;
     crate::transport::send(&mut socket, &hello).await?;
     let request: wire::Session = crate::transport::next_frame(&mut socket).await?;
     tracing::info!(?kind, "会话连接已建立");
 
-    let outcome = dispatch(&mut socket, request).await;
+    let outcome = dispatch(&mut socket, request, state_dir).await;
     if let Err(error) = &outcome {
         // The operator sees this sentence in the browser, so say it rather
         // than closing the socket and leaving them to guess.
@@ -46,7 +47,11 @@ pub async fn run(
     outcome
 }
 
-async fn dispatch(socket: &mut Socket, request: wire::Session) -> anyhow::Result<()> {
+async fn dispatch(
+    socket: &mut Socket,
+    request: wire::Session,
+    state_dir: &std::path::Path,
+) -> anyhow::Result<()> {
     match request {
         wire::Session::TerminalStart { cols, rows } => terminal(socket, cols, rows).await,
         wire::Session::ExecStart {
@@ -64,8 +69,68 @@ async fn dispatch(socket: &mut Socket, request: wire::Session) -> anyhow::Result
         wire::Session::CreateDir { path } => create_dir(socket, &path).await,
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
         wire::Session::Monitor => monitor(socket).await,
+        wire::Session::AgentStart { request } => agent(socket, request).await,
+        wire::Session::AgentProbe {
+            runtime,
+            cwd,
+            workspace,
+        } => {
+            let directory = if let Some(key) = workspace {
+                anyhow::ensure!(
+                    cwd.is_empty(),
+                    "managed workspace cannot override a directory"
+                );
+                crate::agent::workspace(state_dir, &key)
+                    .await?
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                cwd
+            };
+            let status = crate::agent::probe(runtime, &directory).await?;
+            crate::transport::send(socket, &wire::Session::AgentProbeResult { status }).await
+        }
         other => anyhow::bail!("服务下发了不是请求的帧：{other:?}"),
     }
+}
+
+async fn agent(socket: &mut Socket, request: wire::agent::Request) -> anyhow::Result<()> {
+    use tokio::sync::{mpsc, watch};
+    let (events, mut receiver) = mpsc::channel(16);
+    let (inputs, commands) = mpsc::channel(16);
+    let (stop, cancelled) = watch::channel(false);
+    let execution = crate::agent::run(request, events, commands, cancelled);
+    tokio::pin!(execution);
+    let outcome = loop {
+        tokio::select! {
+            result = &mut execution => {
+                // All events were queued before the adapter returned.
+                while let Ok(event) = receiver.try_recv() {
+                    tokio::time::timeout(Duration::from_secs(10), crate::transport::send(socket, &wire::Session::AgentEvent { event })).await??;
+                }
+                return result.map(|_| ());
+            }
+            event = receiver.recv() => if let Some(event) = event {
+                let sent = tokio::time::timeout(Duration::from_secs(10), crate::transport::send(socket, &wire::Session::AgentEvent { event })).await;
+                if !matches!(sent, Ok(Ok(()))) { break Err(anyhow::anyhow!("Agent event connection unavailable")); }
+            },
+            frame = socket.next() => match frame {
+                Some(Ok(Message::Text(text))) => match serde_json::from_str::<wire::Session>(&text) {
+                    Ok(wire::Session::AgentInput { input: wire::agent::Input::Cancel }) => { let _ = stop.send(true); }
+                    Ok(wire::Session::AgentInput { input }) => {
+                        if inputs.try_send(input).is_err() { break Err(anyhow::anyhow!("Agent input queue unavailable")); }
+                    }
+                    _ => break Err(anyhow::anyhow!("invalid Agent session frame")),
+                },
+                Some(Ok(Message::Ping(data))) => if socket.send(Message::Pong(data)).await.is_err() { break Ok(()); },
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break Ok(()),
+                _ => {},
+            }
+        }
+    };
+    let _ = stop.send(true);
+    let _ = execution.await;
+    outcome
 }
 
 async fn monitor(socket: &mut Socket) -> anyhow::Result<()> {
@@ -561,6 +626,88 @@ async fn terminal(socket: &mut Socket, cols: u16, rows: u16) -> anyhow::Result<(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    #[ignore = "requires installed, authenticated native CLI; real model usage"]
+    async fn live_native_agent_wire_forwards_approval_and_cancellation() {
+        use wire::agent::{Event, Input, Outcome, Permission, Request, Runtime};
+        let runtime = if std::env::var("AGENT_TEST_RUNTIME").as_deref() == Ok("claude") {
+            Runtime::Claude
+        } else {
+            Runtime::Codex
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let frame = crate::transport::next_frame(&mut socket).await.unwrap();
+            dispatch(&mut socket, frame, std::path::Path::new("."))
+                .await
+                .unwrap();
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        crate::transport::send(&mut client, &wire::Session::AgentStart { request: Request {
+            binding: None,
+            runtime, cwd: dir.path().to_string_lossy().into_owned(), model: None,
+            native_session_id: None, permission: Permission::OnRequest, timeout_seconds: 120,
+            prompt: if runtime == Runtime::Claude {
+                "Use only the Write tool to create wire-marker.txt containing CANCELLED.".into()
+            } else {
+                "Use only the shell tool to run exactly: powershell.exe -NoProfile -NonInteractive -Command \"[System.IO.File]::WriteAllText('wire-marker.txt','CANCELLED')\". Do not use apply_patch.".into()
+            },
+        }}).await.unwrap();
+        let mut bound = false;
+        let mut asked = false;
+        loop {
+            let frame: wire::Session = tokio::time::timeout(
+                Duration::from_secs(130),
+                crate::transport::next_frame(&mut client),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            match frame {
+                wire::Session::AgentEvent {
+                    event: Event::Session { .. },
+                } => bound = true,
+                wire::Session::AgentEvent {
+                    event: Event::Approval { .. },
+                } => {
+                    asked = true;
+                    crate::transport::send(
+                        &mut client,
+                        &wire::Session::AgentInput {
+                            input: Input::Cancel,
+                        },
+                    )
+                    .await
+                    .unwrap();
+                }
+                wire::Session::AgentEvent {
+                    event: Event::Finished { outcome, .. },
+                } => {
+                    assert_eq!(outcome, Outcome::Cancelled);
+                    break;
+                }
+                wire::Session::AgentEvent { .. } => {}
+                other => panic!("unexpected frame {other:?}"),
+            }
+        }
+        tokio::time::timeout(Duration::from_secs(10), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            bound && asked,
+            "actual native session and approval must cross the WebSocket"
+        );
+        assert!(!dir.path().join("wire-marker.txt").exists());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn streaming_wire_delivers_live_output_and_acknowledges_cancel() {
@@ -571,7 +718,9 @@ mod tests {
             let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
             let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
             let frame = crate::transport::next_frame(&mut socket).await.unwrap();
-            dispatch(&mut socket, frame).await.unwrap();
+            dispatch(&mut socket, frame, std::path::Path::new("."))
+                .await
+                .unwrap();
         });
         let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
             .await

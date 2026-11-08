@@ -55,6 +55,23 @@ it("opens configured read-only details from the row or an explicit labeled actio
   await act(async()=>[...element.querySelectorAll('td')].find(cell=>cell.textContent==="Beta")!.click());
   expect(open).toHaveBeenLastCalledWith({id:"2",name:"Beta"});
 });
+it.each(["en-US", "zh-CN", "ja-JP"])("opens the permitted detail action from a row independently of labels in %s", async locale => {
+  await i18n.changeLanguage(locale);
+  const config: ListConfig<{id:string;name:string}> = {
+    resource:"ai-agents", rowKey:row=>row.id,
+    columns:[{key:"name",label:"Name"}], toolbar:{create:false},
+    actions:[
+      {label:"Edit",labelKey:"common-domain:common.edit",permission:"ai-agents.update",to:row=>({id:row.id,mode:"edit"})},
+      {label:"View",labelKey:"common-domain:common.view",to:row=>({id:row.id,mode:"view"}),when:row=>row.id!=="2"},
+    ],
+  };
+  vi.mocked(listResource).mockResolvedValueOnce({items:[{id:"1",name:"Alpha"},{id:"2",name:"Beta"}],total:2,page:1,page_size:20});
+  await act(async()=>root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+  await act(async()=>[...element.querySelectorAll('td')].find(cell=>cell.textContent==="Alpha")!.click());
+  expect(navigate).toHaveBeenLastCalledWith(expect.objectContaining({id:"1",mode:"view"}),{});
+  await act(async()=>[...element.querySelectorAll('td')].find(cell=>cell.textContent==="Beta")!.click());
+  expect(navigate).toHaveBeenCalledTimes(1);
+});
 it("keeps the 15-second default selectable, spins only the refresh icon and resets after failure", async () => {
   vi.useFakeTimers();
   const visibility = vi.spyOn(document, "hidden", "get").mockReturnValue(false);

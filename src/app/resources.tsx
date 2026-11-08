@@ -1,5 +1,8 @@
 import { workflowsForms, workflowsLists } from "../features/workflows/resource-config";
 import { activityLists } from "../features/activity/resource-config";
+import { agentsForms, agentsLists } from "../features/agents/resource-config";
+import { modelsForms, modelsLists } from "../features/models/resource-config";
+import { conversationForms, conversationLists } from "../features/conversations/resource-config";
 import { alertsForms, alertsLists } from "../features/alerts/resource-config";
 import {
   codeInsightsForms,
@@ -87,6 +90,9 @@ export function listConfigs(
     ...variablesLists(context),
     ...credentialsLists(context),
     ...activityLists(context),
+    ...agentsLists(context),
+    ...modelsLists(context),
+    ...conversationLists(context),
   };
   return Object.fromEntries(
     Object.entries(configs).map(([key, config]) => [
@@ -116,6 +122,9 @@ export function formConfigs(
     ...repositoriesForms(context),
     ...schedulingForms(context),
     ...maintenanceForms(context),
+    ...agentsForms(context),
+    ...modelsForms(context),
+    ...conversationForms(context),
     ...templatesForms(context),
     ...workspacesForms(context),
     ...deploymentsForms(context),

@@ -1,0 +1,22 @@
+{
+  "permission.group.conversations": "会話",
+  "conversations.invalid": "会話、メッセージ、またはテキスト添付が無効です。",
+  "conversations.changed": "会話が変更されました。再読み込みして保存してください。",
+  "conversations.agentDisabled": "この Agent は無効またはアーカイブ済みです。",
+  "conversations.directoryMissing": "Agent の作業ディレクトリがないか、アクセスできません。",
+  "conversations.cliMissing": "CLI が見つからないか、確認に失敗しました。",
+  "conversations.loginRequired": "Runner の実行アカウントで CLI にログインしてください。",
+  "conversations.bindingChanged": "実行アカウント、CLI、またはディレクトリが変わりました。新しい会話を作成してください。",
+  "conversations.busy": "現在の実行を停止するか、完了を待ってください。",
+  "conversations.archived": "会話はアーカイブ済み、または中断しています。状態を確認して再開するか、新しい会話を作成してください。",
+  "conversations.staleDecision": "この許可リクエストは終了したか、すでに決定されています。",
+  "conversations.leaseLost": "実行権限の期限が切れたため、以降のイベントと決定を拒否しました。",
+  "conversations.interrupted": "実行が中断しました。実際の結果を確認して新しい会話を作成してください。自動再実行は行っていません。",
+  "conversations.preflightFailed": "実行環境を確認できません。Agent と Runner の接続を確認してください。",
+  "conversations.executionFailed": "実行に失敗したか、接続が切れました。実際の結果を確認してください。",
+  "conversations.outputLimit": "出力が上限を超えたため、実行を停止しました。",
+  "conversations.fileTooLarge": "各ファイルは32 MiB以下にしてください。",
+  "conversations.groupAgentPrivate": "グループにはワークスペース共有のエージェントが必要です。",
+  "conversations.apiPending": "API 会話の実行はまだ利用できません。",
+  "conversations.noRunner": "このモデルを実行できる Runner がありません。"
+}

@@ -72,7 +72,39 @@ pub trait Pty: Send {
 
 #[async_trait::async_trait]
 pub trait HostChannel: Send + Sync {
+    async fn agent(
+        &self,
+        _request: ferry_protocol::agent::Request,
+        _events: tokio::sync::mpsc::Sender<ferry_protocol::agent::Event>,
+        _inputs: tokio::sync::mpsc::Receiver<ferry_protocol::agent::Input>,
+        _cancel: tokio::sync::watch::Receiver<bool>,
+    ) -> Result<()> {
+        Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.agentUpgrade"),
+        ))
+    }
+    async fn agent_probe(
+        &self,
+        _runtime: ferry_protocol::agent::Runtime,
+        _cwd: &str,
+    ) -> Result<ferry_protocol::agent::Probe> {
+        Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("agents.probeUnsupported"),
+        ))
+    }
     async fn monitor(&self) -> Result<HostMonitor>;
+    async fn agent_workspace(
+        &self,
+        _runtime: ferry_protocol::agent::Runtime,
+        _key: &str,
+    ) -> Result<ferry_protocol::agent::Probe> {
+        Err(ApiError::localized(
+            axum::http::StatusCode::CONFLICT,
+            crate::i18n::Message::new("runner.agentUpgrade"),
+        ))
+    }
     /// One-shot command with captured output. Used by scheduled jobs and
     /// deployment steps, never for anything interactive.
     async fn exec(&self, command: &str, timeout: Duration) -> Result<Output>;

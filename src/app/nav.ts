@@ -34,6 +34,11 @@ export const nav: NavGroup[] = [
     ],
   },
   {
+    key: "conversations",
+    get label() { return commonText("conversations:nav"); },
+    items: [{key:"conversations",get label(){return commonText("conversations:nav");},resource:"conversations",permission:"conversations.read"}],
+  },
+  {
     key: "deploy",
     get label() { return commonText("nav.applications"); },
     items: [
@@ -99,6 +104,8 @@ export const nav: NavGroup[] = [
     key: "ops",
     get label() { return commonText("nav.maintenance"); },
     items: [
+      { key: "ai-agents", get label() { return commonText("agents:title"); }, resource: "ai-agents", permission: "ai-agents.read" },
+      { key: "ai-models", get label() { return commonText("models:title"); }, resource: "ai-models", permission: "ai-models.read" },
       { key: "members", get label() { return commonText("nav.members"); }, resource: "members", permission: "members.read" },
       { key: "roles", get label() { return commonText("nav.roles"); }, resource: "roles", permission: "roles.read" },
       { key: "variables", get label() { return commonText("nav.variables"); }, resource: "variables", params: { scope: "global" }, permission: "variables.read" },

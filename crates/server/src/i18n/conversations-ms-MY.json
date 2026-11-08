@@ -1,0 +1,22 @@
+{
+  "permission.group.conversations": "Perbualan",
+  "conversations.invalid": "Perbualan, mesej atau lampiran teks tidak sah.",
+  "conversations.changed": "Perbualan telah berubah. Muat semula sebelum menyimpan.",
+  "conversations.agentDisabled": "Ejen ini dinyahaktifkan atau diarkibkan.",
+  "conversations.directoryMissing": "Direktori ejen tiada atau tidak boleh diakses.",
+  "conversations.cliMissing": "CLI tiada atau pemeriksaannya gagal.",
+  "conversations.loginRequired": "Log masuk ke CLI asal menggunakan akaun Runner terlebih dahulu.",
+  "conversations.bindingChanged": "Akaun pelaksanaan, CLI atau direktori telah berubah. Cipta perbualan baharu.",
+  "conversations.busy": "Tunggu giliran aktif selesai atau hentikannya dahulu.",
+  "conversations.archived": "Perbualan ini diarkibkan atau terganggu. Pulihkan arkib atau cipta perbualan baharu mengikut keadaan.",
+  "conversations.staleDecision": "Permintaan kebenaran ini tidak lagi aktif atau sudah mempunyai keputusan.",
+  "conversations.leaseLost": "Pemilikan pelaksanaan tamat; acara dan keputusan seterusnya ditolak.",
+  "conversations.interrupted": "Pelaksanaan terganggu. Semak hasil sebenar sebelum mencipta perbualan baharu; tiada ulangan automatik dilakukan.",
+  "conversations.preflightFailed": "Persekitaran pelaksanaan tidak dapat disahkan. Semak sambungan ejen dan Runner.",
+  "conversations.executionFailed": "Pelaksanaan asal gagal atau terputus. Semak hasil sebenar dahulu.",
+  "conversations.outputLimit": "Output melebihi had dan pelaksanaan dihentikan.",
+  "conversations.fileTooLarge": "Setiap fail mestilah tidak melebihi 32 MiB.",
+  "conversations.groupAgentPrivate": "Kumpulan memerlukan ejen yang dikongsi dalam ruang kerja.",
+  "conversations.apiPending": "Pelaksanaan perbualan API belum tersedia.",
+  "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini."
+}

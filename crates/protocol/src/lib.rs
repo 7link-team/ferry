@@ -17,6 +17,7 @@
 // ids, no flow control, no head-of-line blocking — an ops host runs a handful
 // of concurrent sessions. Revisit only if that stops being true.
 
+pub mod agent;
 pub mod contribution;
 pub mod release;
 pub mod sandbox;
@@ -71,6 +72,11 @@ pub struct Hello {
     pub managed_updates: bool,
     #[serde(default)]
     pub supports_monitor: bool,
+    /// Structured CLI execution protocol, not proof of an installed/logged-in CLI.
+    #[serde(default)]
+    pub supports_agent: bool,
+    #[serde(default)]
+    pub supports_agent_probe: bool,
 }
 
 /// Runner -> server, first frame on a session connection. The session id is in
@@ -187,6 +193,8 @@ pub enum SessionKind {
     /// Directory listing and deletion: metadata only, no bulk data.
     Files,
     Monitor,
+    Agent,
+    AgentProbe,
 }
 
 /// One directory entry. Mirrors the server's `channel::DirEntry`, which cannot
@@ -228,6 +236,25 @@ pub enum Session {
         timeout_seconds: u64,
     },
     ExecCancel,
+    /// Additive Agent protocol; only sent to a runner advertising support.
+    AgentStart {
+        request: agent::Request,
+    },
+    AgentProbe {
+        runtime: agent::Runtime,
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workspace: Option<String>,
+    },
+    AgentProbeResult {
+        status: agent::Probe,
+    },
+    AgentInput {
+        input: agent::Input,
+    },
+    AgentEvent {
+        event: agent::Event,
+    },
     ExecOutput {
         stream: String,
         data: Vec<u8>,
@@ -338,6 +365,8 @@ mod tests {
             agent_version: "0.1.0".into(),
             managed_updates: false,
             supports_monitor: true,
+            supports_agent: true,
+            supports_agent_probe: false,
         };
         let text = serde_json::to_string(&hello).unwrap();
         assert!(text.contains(r#""type":"enroll""#), "{text}");
@@ -345,9 +374,25 @@ mod tests {
         assert!(matches!(back.auth, Auth::Enroll { token } if token == "7f3a"));
         assert_eq!(back.ip_address, "192.168.0.10");
         assert!(back.supports_monitor);
+        assert!(back.supports_agent);
         let mut legacy: serde_json::Value = serde_json::from_str(&text).unwrap();
         legacy.as_object_mut().unwrap().remove("ip_address");
         legacy.as_object_mut().unwrap().remove("supports_monitor");
+        legacy.as_object_mut().unwrap().remove("supports_agent");
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("supports_agent_probe");
+        assert!(
+            !serde_json::from_value::<Hello>(legacy.clone())
+                .unwrap()
+                .supports_agent_probe
+        );
+        assert!(
+            !serde_json::from_value::<Hello>(legacy.clone())
+                .unwrap()
+                .supports_agent
+        );
         assert!(
             !serde_json::from_value::<Hello>(legacy.clone())
                 .unwrap()
@@ -443,9 +488,50 @@ mod tests {
             Session::Done,
             Session::Eof,
             Session::Failed { error: "no".into() },
+            Session::AgentStart {
+                request: agent::Request {
+                    binding: None,
+                    runtime: agent::Runtime::Codex,
+                    cwd: "/tmp/agent".into(),
+                    prompt: "hello".into(),
+                    model: None,
+                    native_session_id: Some("native-a".into()),
+                    permission: agent::Permission::OnRequest,
+                    timeout_seconds: 60,
+                },
+            },
+            Session::AgentInput {
+                input: agent::Input::Cancel,
+            },
+            Session::AgentInput {
+                input: agent::Input::Decision {
+                    request_id: "a:1".into(),
+                    allow: false,
+                },
+            },
+            Session::AgentEvent {
+                event: agent::Event::Approval {
+                    request_id: "a:1".into(),
+                    tool: "Write".into(),
+                    input: serde_json::json!({"path":"a.txt"}),
+                },
+            },
+            Session::AgentEvent {
+                event: agent::Event::Finished {
+                    outcome: agent::Outcome::TimedOut,
+                    usage: Some(agent::Usage {
+                        input_tokens: 5,
+                        output_tokens: 2,
+                    }),
+                },
+            },
         ] {
             let text = serde_json::to_string(&frame).unwrap();
-            serde_json::from_str::<Session>(&text).unwrap();
+            let restored = serde_json::from_str::<Session>(&text).unwrap();
+            assert_eq!(
+                serde_json::to_value(restored).unwrap(),
+                serde_json::to_value(frame).unwrap()
+            );
         }
     }
 

@@ -106,7 +106,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   config: FormConfig<T>;
   workspace: string;
   permissions: Set<string>;
-  onSaved?: () => void;
+  onSaved?: (id?: string) => void;
   createInPlace?: boolean;
   editInPlace?: boolean;
   onCancel?: () => void;
@@ -261,7 +261,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
         }
         draftAssets.clear();
       }
-      onSaved?.();
+      onSaved?.(savedId);
       if (config.editor && savedId) {
         const row = await getResource<T>(workspace, config.resource, savedId, config.endpoint);
         setDraft(row);
@@ -695,10 +695,12 @@ function Field<T>({
       onChange([...next]);
     };
     return <Wrapper field={field}><fieldset className="space-y-3"><legend>{label}</legend>
-      {field.createOption && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={commonText("form.searchField", { name: field.label })} placeholder={commonText("form.searchField", { name: field.label })} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
+      {(field.searchable || field.createOption) && !readOnly && <div className="flex flex-wrap items-center gap-2"><Input aria-label={commonText("form.searchField", { name: field.label })} placeholder={commonText("form.searchField", { name: field.label })} value={optionSearch} onChange={event => setOptionSearch(event.target.value)} className="min-w-0 flex-1"/>{field.createOption && permissions.has(field.createOption.permission) && <Button type="button" variant="outline" onClick={() => setCreatingOption(true)}>{field.createOption.label}</Button>}</div>}
+      {field.searchable && <div role="status" className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{commonText("table.selected", {count:selected.size})}</span>{options.filter(option => selected.has(option.value)).map(option => <span key={option.value} className="rounded-md bg-muted px-2 py-1 text-foreground">{optionText(option)}</span>)}</div>}
+      {field.searchable && options.length > 0 && !options.some(option => optionText(option).toLowerCase().includes(optionSearch.toLowerCase())) && <p className="text-sm text-muted-foreground">{commonText("table.empty")}</p>}
       {!options.length && <p className="text-sm text-muted-foreground">{commonText("form.noOptions")}{field.label}{field.createOption && permissions.has(field.createOption.permission) ? commonText("form.canCreate") : commonText("form.askCreator")}</p>}
       {creatingOption && field.createOption && workspace && <ResourceActionDialog workspace={workspace} permissions={permissions} row={{}} onClose={() => setCreatingOption(false)} onDone={() => { setCreatingOption(false); reloadOptions(); }} action={{label:field.createOption.label, labelKey:field.createOption.labelKey, parameters:() => field.createOption!.fields, action:async (_row, values) => { const added = await field.createOption!.create(values ?? {}); onChange([...new Set([...selected, added.value])]); }}}/>}
-      {[...new Set(options.filter(o => optionText(o).toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}><p className="mb-2 text-sm text-muted-foreground">{group}</p><div className="flex flex-wrap gap-4">
+      {[...new Set(options.filter(o => optionText(o).toLowerCase().includes(optionSearch.toLowerCase())).map(o => o.group ?? commonText("common.option")))].map(group => <div key={group}>{(!field.searchable || group !== commonText("common.option")) && <p className="mb-2 text-sm text-muted-foreground">{group}</p>}<div className="flex flex-wrap gap-4">
         {options.filter(o => (o.group ?? commonText("common.option")) === group && optionText(o).toLowerCase().includes(optionSearch.toLowerCase())).map(option => <label key={option.value} className="flex items-center gap-2 text-sm"><Checkbox checked={selected.has(option.value)} disabled={readOnly || option.disabled} onCheckedChange={checked => toggle(option.value, !!checked)} />{option.content ?? optionText(option)}</label>)}
       </div></div>)}
       {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}

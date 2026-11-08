@@ -1,0 +1,7 @@
+{
+  "agents.invalid": "智慧體 設定無效，請檢查名稱、執行工具、目錄、Runner 主機及有效負責人。",
+  "agents.changed": "智慧體 已變更，請重新整理後儲存。",
+  "agents.probeUnsupported": "環境偵測需要使用支援此能力的新版 Runner 連線。",
+  "permission.group.ai-agents": "智慧體",
+  "permission.action.probe": "偵測環境"
+}

@@ -1,0 +1,22 @@
+{
+  "permission.group.conversations": "대화",
+  "conversations.invalid": "대화, 메시지 또는 텍스트 첨부가 올바르지 않습니다.",
+  "conversations.changed": "대화가 변경되었습니다. 새로 고친 후 저장하세요.",
+  "conversations.agentDisabled": "이 에이전트는 비활성화되었거나 보관되었습니다.",
+  "conversations.directoryMissing": "에이전트 작업 디렉터리가 없거나 접근할 수 없습니다.",
+  "conversations.cliMissing": "CLI가 없거나 검사에 실패했습니다.",
+  "conversations.loginRequired": "Runner 실행 계정으로 CLI에 먼저 로그인하세요.",
+  "conversations.bindingChanged": "실행 계정, CLI 또는 디렉터리가 변경되었습니다. 새 대화를 만드세요.",
+  "conversations.busy": "현재 실행을 중지하거나 완료를 기다리세요.",
+  "conversations.archived": "대화가 보관되었거나 중단되었습니다. 상태에 따라 보관을 해제하거나 새 대화를 만드세요.",
+  "conversations.staleDecision": "이 권한 요청은 더 이상 유효하지 않거나 이미 결정되었습니다.",
+  "conversations.leaseLost": "실행 소유권이 만료되어 이후 이벤트와 결정을 거부했습니다.",
+  "conversations.interrupted": "실행이 중단되었습니다. 실제 결과를 확인하고 새 대화를 만드세요. 자동 재실행하지 않았습니다.",
+  "conversations.preflightFailed": "실행 환경을 확인할 수 없습니다. 에이전트와 Runner 연결을 확인하세요.",
+  "conversations.executionFailed": "실행에 실패했거나 연결이 끊겼습니다. 실제 결과를 먼저 확인하세요.",
+  "conversations.outputLimit": "출력 한도를 초과하여 실행을 중지했습니다.",
+  "conversations.fileTooLarge": "각 파일은 32 MiB 이하여야 합니다.",
+  "conversations.groupAgentPrivate": "그룹에는 작업 공간 공유 에이전트가 필요합니다.",
+  "conversations.apiPending": "API 대화 실행은 아직 사용할 수 없습니다.",
+  "conversations.noRunner": "이 모델을 실행할 수 있는 Runner가 없습니다."
+}

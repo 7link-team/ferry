@@ -5,6 +5,7 @@
 //! a command the server sends `OpenSession` and the runner dials a second,
 //! dedicated connection for it.
 
+mod agent;
 mod cli;
 mod enrollment;
 mod exec_stream;

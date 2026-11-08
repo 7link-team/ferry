@@ -1,0 +1,1 @@
+{"agents.invalid":"Invalid Agent configuration. Check the name, runtime, directory, Runner host and active owner.","agents.changed":"This Agent changed. Reload before saving.","agents.probeUnsupported":"Environment inspection requires an updated Runner connection.","permission.group.ai-agents":"AI Agents","permission.action.probe":"Inspect environment"}

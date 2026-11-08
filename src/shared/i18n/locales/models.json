@@ -1,0 +1,138 @@
+{
+  "title": [
+    "Models",
+    "模型",
+    "模型",
+    "モデル",
+    "모델",
+    "Model"
+  ],
+  "name": [
+    "Name",
+    "名称",
+    "名稱",
+    "名前",
+    "이름",
+    "Nama"
+  ],
+  "search": [
+    "Search",
+    "搜索",
+    "搜尋",
+    "検索",
+    "검색",
+    "Cari"
+  ],
+  "kind": [
+    "Connection type",
+    "接入类型",
+    "接入類型",
+    "接続タイプ",
+    "연결 유형",
+    "Jenis sambungan"
+  ],
+  "runtime": [
+    "CLI tool",
+    "CLI 工具",
+    "CLI 工具",
+    "CLI ツール",
+    "CLI 도구",
+    "Alat CLI"
+  ],
+  "toolVersion": [
+    "CLI version",
+    "CLI 版本",
+    "CLI 版本",
+    "CLI バージョン",
+    "CLI 버전",
+    "Versi CLI"
+  ],
+  "provider": [
+    "API provider",
+    "API 供应商",
+    "API 供應商",
+    "API プロバイダー",
+    "API 공급자",
+    "Pembekal API"
+  ],
+  "catalog": [
+    "Model catalog (one per line)",
+    "模型列表（每行一个）",
+    "模型清單（每行一個）",
+    "モデル一覧（1行に1つ）",
+    "모델 목록 (한 줄에 하나)",
+    "Senarai model (satu setiap baris)"
+  ],
+  "defaultModel": [
+    "Default model",
+    "默认模型",
+    "預設模型",
+    "既定モデル",
+    "기본 모델",
+    "Model lalai"
+  ],
+  "state": [
+    "State",
+    "状态",
+    "狀態",
+    "状態",
+    "상태",
+    "Status"
+  ],
+  "enabled": [
+    "Enabled",
+    "启用",
+    "啟用",
+    "有効",
+    "활성화",
+    "Aktif"
+  ],
+  "disabled": [
+    "Disabled",
+    "停用",
+    "停用",
+    "無効",
+    "비활성화",
+    "Tidak aktif"
+  ],
+  "nativeDefault": [
+    "CLI default",
+    "CLI 默认",
+    "CLI 預設",
+    "CLI の既定値",
+    "CLI 기본값",
+    "Lalai CLI"
+  ],
+  "empty": [
+    "No model profiles yet.",
+    "暂无模型配置。",
+    "尚無模型設定。",
+    "モデル設定はまだありません。",
+    "모델 설정이 없습니다.",
+    "Belum ada konfigurasi model."
+  ],
+  "discover": [
+    "Load model catalog",
+    "加载模型列表",
+    "載入模型清單",
+    "モデル一覧を取得",
+    "모델 목록 불러오기",
+    "Muat senarai model"
+  ],
+  "discovering": [
+    "Loading models…",
+    "正在加载模型…",
+    "正在載入模型…",
+    "モデルを取得中…",
+    "모델을 불러오는 중…",
+    "Memuatkan model…"
+  ],
+  "partialCatalog": [
+    "The provider returned a partial catalog. You can add other model IDs manually.",
+    "供应商返回了部分模型，可手动补充其他模型标识。",
+    "供應商傳回部分模型，可手動補充其他模型識別碼。",
+    "一覧は一部です。他のモデルIDは手動で追加できます。",
+    "일부 목록입니다. 다른 모델 ID를 직접 추가할 수 있습니다.",
+    "Senarai separa. ID model lain boleh ditambah secara manual."
+  ]
+}

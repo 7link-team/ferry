@@ -1,0 +1,1 @@
+{"models.invalid":"模型配置无效，请检查接入类型、CLI 工具、供应商及模型标识。","models.discoveryFailed":"无法加载模型列表，请检查供应商连接和凭据，或手动填写模型标识。","permission.group.ai-models":"模型"}

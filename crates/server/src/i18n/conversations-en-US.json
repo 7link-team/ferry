@@ -1,0 +1,22 @@
+{
+  "permission.group.conversations": "Conversations",
+  "conversations.invalid": "Invalid conversation, message or text attachment.",
+  "conversations.changed": "This conversation changed. Reload before saving.",
+  "conversations.agentDisabled": "This Agent is disabled or archived.",
+  "conversations.directoryMissing": "The Agent directory is missing or inaccessible.",
+  "conversations.cliMissing": "The CLI is missing or its inspection failed.",
+  "conversations.loginRequired": "Log in to the native CLI as the Runner account before starting.",
+  "conversations.bindingChanged": "The execution account, CLI or directory changed. Create a new conversation.",
+  "conversations.busy": "Wait for the active turn to finish or stop it first.",
+  "conversations.archived": "This conversation is archived or interrupted. Reopen it or create a new conversation as appropriate.",
+  "conversations.staleDecision": "This permission request is no longer active or already has a decision.",
+  "conversations.leaseLost": "Execution ownership expired; further events and decisions were refused.",
+  "conversations.interrupted": "Execution was interrupted. Check actual results before starting a new conversation; no automatic replay was performed.",
+  "conversations.preflightFailed": "The execution environment could not be verified. Check the Agent and Runner connection.",
+  "conversations.executionFailed": "The native execution failed or disconnected. Check actual results before continuing.",
+  "conversations.outputLimit": "Execution exceeded the output limit and was stopped.",
+  "conversations.fileTooLarge": "Each file must be at most 32 MiB.",
+  "conversations.groupAgentPrivate": "Group conversations require workspace-shared Agents.",
+  "conversations.apiPending": "API conversation execution is not available yet.",
+  "conversations.noRunner": "No available Runner can execute this model."
+}

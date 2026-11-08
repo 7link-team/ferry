@@ -1,0 +1,7 @@
+{
+  "agents.invalid": "智能体 配置无效，请检查名称、执行工具、目录、Runner 主机及有效负责人。",
+  "agents.changed": "智能体 已变更，请刷新后保存。",
+  "agents.probeUnsupported": "环境检测需要使用支持此能力的新版 Runner 连接。",
+  "permission.group.ai-agents": "智能体",
+  "permission.action.probe": "检测环境"
+}

@@ -1,4 +1,5 @@
 {
+  "runner.agentUpgrade": "当前主机执行器不支持 AI 执行，请升级后重试。",
   "runner.transportFailed": "代理 WebSocket 连接传输失败，请查看服务端和代理的传输日志。",
   "runner.offline": "主机「{name}」的代理未连接，请确认该主机上的 ferry-runner 正在运行。",
   "runner.remoteFailed": "主机代理执行失败：{detail}",

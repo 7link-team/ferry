@@ -10,10 +10,10 @@ use tokio::{
 pub type Chunk = (String, Vec<u8>);
 
 #[cfg(unix)]
-struct ProcessGroup(u32);
+pub(crate) struct ProcessGroup(pub(crate) u32);
 #[cfg(unix)]
 impl ProcessGroup {
-    fn signal(&self, force: bool) {
+    pub(crate) fn signal(&self, force: bool) {
         #[cfg(unix)]
         unsafe {
             libc::kill(

@@ -138,6 +138,8 @@ async fn control(s: AppState, mut socket: Socket) {
         disconnect,
         managed: hello.managed_updates,
         supports_monitor: hello.supports_monitor,
+        supports_agent: hello.supports_agent,
+        supports_agent_probe: hello.supports_agent_probe,
         version: hello.agent_version.clone(),
         ready: std::sync::atomic::AtomicBool::new(!hello.managed_updates),
         failed_version: Mutex::new(None),

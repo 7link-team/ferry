@@ -1,0 +1,22 @@
+{
+  "permission.group.conversations": "會話",
+  "conversations.invalid": "會話、訊息或文字附件無效。",
+  "conversations.changed": "會話已變更，請重新整理後儲存。",
+  "conversations.agentDisabled": "此 智慧體 已停用或封存。",
+  "conversations.directoryMissing": "智慧體 工作目錄不存在或無法存取。",
+  "conversations.cliMissing": "找不到 CLI，或 CLI 偵測失敗。",
+  "conversations.loginRequired": "請先使用 Runner 執行帳號登入原生 CLI。",
+  "conversations.bindingChanged": "執行帳號、CLI 或目錄已變更，請建立新會話。",
+  "conversations.busy": "請先等待目前回合結束，或停止目前回合。",
+  "conversations.archived": "此會話已封存或中斷，請依實際情況解除封存或建立新會話。",
+  "conversations.staleDecision": "此授權請求已失效或已有決定。",
+  "conversations.leaseLost": "執行租約已失效，後續事件與決定已遭拒絕。",
+  "conversations.interrupted": "執行已中斷，請核對實際結果後建立新會話；未自動重播。",
+  "conversations.preflightFailed": "無法驗證執行環境，請檢查 智慧體 與 Runner 連線。",
+  "conversations.executionFailed": "原生執行失敗或連線中斷，請先核對實際結果。",
+  "conversations.outputLimit": "執行輸出超過限制，已停止執行。",
+  "conversations.fileTooLarge": "每個附件不能超過 32 MiB。",
+  "conversations.groupAgentPrivate": "群聊只能新增工作空間共用的智慧體。",
+  "conversations.apiPending": "API 會話執行尚未接通。",
+  "conversations.noRunner": "沒有可執行此模型的可用 Runner。"
+}

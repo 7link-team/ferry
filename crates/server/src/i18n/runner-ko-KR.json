@@ -1,4 +1,5 @@
 {
+  "runner.agentUpgrade": "AI 실행을 지원하지 않습니다. 호스트 러너를 업그레이드한 후 다시 시도하세요.",
   "runner.transportFailed": "에이전트 WebSocket 연결에서 전송에 실패했습니다. 서버와 에이전트의 전송 로그를 확인하세요.",
   "runner.offline": "호스트 “{name}”의 에이전트가 연결되지 않았습니다. ferry-runner 실행을 확인하세요.",
   "runner.remoteFailed": "호스트 에이전트 작업 실패: {detail}",

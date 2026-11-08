@@ -50,7 +50,7 @@ pub(crate) async fn record(
             Message::new("execution.revisionMessageLong"),
         ));
     }
-    if !matches!(kind, "pipeline" | "workflow") {
+    if !matches!(kind, "pipeline" | "workflow" | "agent" | "model") {
         return Err(ApiError::missing());
     }
     let definition = canonical(definition)?;

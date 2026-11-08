@@ -1,4 +1,7 @@
 mod accounts;
+mod agents;
+mod conversations;
+mod models;
 const DEFAULT_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 mod artifact_store;
 mod assets;
@@ -223,6 +226,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("{}", e.1))?;
 
     let (drain, drain_rx) = tokio::sync::watch::channel(false);
+    let conversation_task = tokio::spawn(conversations::scheduler(s.clone(), drain_rx.clone()));
     let (cluster_stop, cluster_rx) = tokio::sync::watch::channel(false);
     let cluster_task = s
         .cluster
@@ -446,6 +450,9 @@ async fn main() -> anyhow::Result<()> {
             "/{workspace}/cron-runs/{id}/acknowledgements",
             post(cron_jobs::acknowledge),
         )
+        .merge(agents::routes())
+        .merge(models::routes())
+        .merge(conversations::routes())
         .route("/{workspace}/preferences", get(maintenance::preferences))
         .route(
             "/{workspace}/settings/categories",
@@ -1025,6 +1032,7 @@ async fn main() -> anyhow::Result<()> {
     recovery_task.await?;
     cron_task.await?;
     workflow_task.await?;
+    conversation_task.await?;
     deployment_task.await?;
     pipeline_task.await?;
     let _ = cluster_stop.send(true);

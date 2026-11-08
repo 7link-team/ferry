@@ -1,4 +1,5 @@
 {
+  "runner.agentUpgrade": "Pelaksanaan AI tidak disokong. Naik taraf runner hos dan cuba lagi.",
   "runner.transportFailed": "Penghantaran melalui sambungan WebSocket ejen gagal. Semak log penghantaran pelayan dan ejen.",
   "runner.offline": "Ejen hos \"{name}\" terputus. Pastikan ferry-runner sedang berjalan.",
   "runner.remoteFailed": "Operasi ejen hos gagal: {detail}",

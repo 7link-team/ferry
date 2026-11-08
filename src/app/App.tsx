@@ -1,5 +1,6 @@
 import { installIntegrationCatalog, type IntegrationManifest } from "../features/workflows/integrations";
 import { TypedValueList } from "./pages/TypedValueList";
+import { ConversationsWorkspace } from "./pages/ConversationsWorkspace";
 import { cn } from "cn";
 import { LogOut } from "lucide-react";
 import { LoadingSkeleton } from "../shared/ui/loading-skeleton";
@@ -261,7 +262,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
         <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={onSignedOut} />
       </header>
 
-      <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
+      {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-[180px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)]">
         <nav
           className="flex flex-col gap-0.5 overflow-y-auto border-r border-sidebar-border bg-sidebar text-sidebar-foreground p-3 max-sm:flex-row max-sm:overflow-x-auto max-sm:border-r-0 max-sm:border-b"
           aria-label={group.label}
@@ -399,7 +400,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
             <UnavailablePage onBack={() => navigate({ mode: "list" }, {})} />
           )}
         </main>
-      </div>
+      </div>}
     </div>
   );
 }

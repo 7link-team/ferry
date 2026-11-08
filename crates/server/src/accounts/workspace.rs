@@ -29,6 +29,66 @@ use std::collections::HashSet;
 /// `{resource}.{action}` where the resource is the REST resource name.
 pub const PERMISSIONS: &[(&str, &str, &str)] = &[
     (
+        "ai-models.read",
+        "permission.group.ai-models",
+        "permission.action.read",
+    ),
+    (
+        "ai-models.create",
+        "permission.group.ai-models",
+        "permission.action.create",
+    ),
+    (
+        "ai-models.update",
+        "permission.group.ai-models",
+        "permission.action.update",
+    ),
+    (
+        "conversations.read",
+        "permission.group.conversations",
+        "permission.action.read",
+    ),
+    (
+        "conversations.create",
+        "permission.group.conversations",
+        "permission.action.create",
+    ),
+    (
+        "conversations.update",
+        "permission.group.conversations",
+        "permission.action.update",
+    ),
+    (
+        "conversations.run",
+        "permission.group.conversations",
+        "permission.action.run",
+    ),
+    (
+        "ai-agents.read",
+        "permission.group.ai-agents",
+        "permission.action.read",
+    ),
+    (
+        "ai-agents.create",
+        "permission.group.ai-agents",
+        "permission.action.create",
+    ),
+    (
+        "ai-agents.update",
+        "permission.group.ai-agents",
+        "permission.action.update",
+    ),
+    (
+        "ai-agents.use",
+        "permission.group.ai-agents",
+        "permission.action.use",
+    ),
+    (
+        "ai-agents.probe",
+        "permission.group.ai-agents",
+        "permission.action.probe",
+    ),
+    (
         "credentials.use",
         "permission.group.credentials",
         "permission.action.use",
@@ -597,6 +657,8 @@ pub fn dependencies(permission: &str) -> Vec<String> {
         }
     }
     let extra: &[&str] = match permission {
+        "conversations.create" | "conversations.run" => &["ai-agents.read", "ai-agents.use"],
+        "ai-agents.create" | "ai-agents.update" => &["ai-models.read", "members.read"],
         "code-insights.read" => &["repositories.read"],
         "code-insights.sync" => &[
             "code-insights.read",
@@ -712,6 +774,11 @@ fn builtin_permissions(role: &str) -> Vec<String> {
             })
             .chain([
                 "pipelines.run".into(),
+                "ai-agents.use".into(),
+                "conversations.read".into(),
+                "conversations.create".into(),
+                "conversations.update".into(),
+                "conversations.run".into(),
                 "workflows.run".into(),
                 "code-insights.sync".into(),
                 "deployments.apply".into(),
@@ -730,6 +797,11 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 })
                 .chain([
                     "hosts.terminal".into(),
+                    "ai-agents.use".into(),
+                    "conversations.read".into(),
+                    "conversations.create".into(),
+                    "conversations.update".into(),
+                    "conversations.run".into(),
                     "hosts.files".into(),
                     "hosts.enroll".into(),
                     "dashboard.read".into(),
@@ -760,6 +832,9 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .into_iter()
             .filter(|p| {
                 p.starts_with("marketplace-sources.")
+                    || p.starts_with("ai-agents.")
+                    || p.starts_with("ai-models.")
+                    || p.starts_with("conversations.")
                     || p.starts_with("code-insights.")
                     || p.starts_with("config-templates.")
                     || p.starts_with("pipeline-groups.")

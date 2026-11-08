@@ -1,0 +1,850 @@
+{
+  "executionDetails": [
+    "Execution details",
+    "执行详情",
+    "執行詳情",
+    "実行の詳細",
+    "실행 세부 정보",
+    "Butiran pelaksanaan"
+  ],
+  "kind": [
+    "Conversation type",
+    "会话类型",
+    "會話類型",
+    "会話の種類",
+    "대화 유형",
+    "Jenis perbualan"
+  ],
+  "direct": [
+    "Direct conversation",
+    "单独会话",
+    "單獨會話",
+    "個別の会話",
+    "개인 대화",
+    "Perbualan peribadi"
+  ],
+  "group": [
+    "Group conversation",
+    "群聊",
+    "群聊",
+    "グループ会話",
+    "그룹 대화",
+    "Perbualan kumpulan"
+  ],
+  "people": [
+    "People",
+    "成员",
+    "成員",
+    "メンバー",
+    "멤버",
+    "Ahli"
+  ],
+  "additionalAgents": [
+    "Additional Agents",
+    "其他智能体",
+    "其他智慧體",
+    "追加エージェント",
+    "추가 에이전트",
+    "Ejen tambahan"
+  ],
+  "agent": [
+    "AI Agent",
+    "智能体",
+    "智慧體",
+    "AIエージェント",
+    "AI 에이전트",
+    "Ejen AI"
+  ],
+  "member": [
+    "Member",
+    "成员",
+    "成員",
+    "メンバー",
+    "멤버",
+    "Ahli"
+  ],
+  "preview": [
+    "Preview",
+    "预览",
+    "預覽",
+    "プレビュー",
+    "미리 보기",
+    "Pratonton"
+  ],
+  "download": [
+    "Download",
+    "下载",
+    "下載",
+    "ダウンロード",
+    "다운로드",
+    "Muat turun"
+  ],
+  "close": [
+    "Cancel",
+    "取消",
+    "取消",
+    "キャンセル",
+    "취소",
+    "Batal"
+  ],
+  "deleteConversation": [
+    "Delete conversation",
+    "删除会话",
+    "刪除會話",
+    "会話を削除",
+    "대화 삭제",
+    "Padam perbualan"
+  ],
+  "deleteHelp": [
+    "Delete this conversation and its messages for all participants? Attachments will be released for cleanup. Your source directory is preserved. This cannot be undone.",
+    "删除此会话及所有成员的消息记录？附件将释放并等待回收，不删除原工作目录。此操作无法撤销。",
+    "刪除此會話及所有成員的訊息紀錄？附件將釋放並等待回收，不刪除原工作目錄。此操作無法復原。",
+    "全メンバーの会話とメッセージを削除しますか？添付は回収対象になります。元の作業ディレクトリは保持されます。元に戻せません。",
+    "모든 참여자의 대화와 메시지를 삭제할까요? 첨부 파일은 정리 대상으로 해제되며 원본 작업 폴더는 보존됩니다. 되돌릴 수 없습니다.",
+    "Padam perbualan dan mesej semua ahli? Lampiran dilepaskan untuk pembersihan. Direktori asal dikekalkan. Tindakan ini tidak boleh dibatalkan."
+  ],
+  "resizeComposer": [
+    "Resize message input",
+    "调整输入框高度",
+    "調整輸入框高度",
+    "入力欄の高さを調整",
+    "입력창 높이 조절",
+    "Ubah tinggi ruang mesej"
+  ],
+  "messagePlaceholder": [
+    "Write a message…",
+    "输入消息…",
+    "輸入訊息…",
+    "メッセージを入力…",
+    "메시지 입력…",
+    "Tulis mesej…"
+  ],
+  "groupPlaceholder": [
+    "Write to the group; use @ to select Agents…",
+    "发送群消息，点击 @ 选择回复的智能体…",
+    "傳送群訊息，點擊 @ 選擇回覆的智慧體…",
+    "グループへ送信。@でエージェントを選択…",
+    "그룹 메시지 입력. @로 에이전트 선택…",
+    "Tulis ke kumpulan; guna @ untuk memilih ejen…"
+  ],
+  "mentionAgent": [
+    "Mention Agents",
+    "@ 智能体",
+    "@ 智慧體",
+    "エージェントをメンション",
+    "에이전트 멘션",
+    "Sebut ejen"
+  ],
+  "sendShortcut": [
+    "Send shortcut",
+    "发送快捷键",
+    "傳送快捷鍵",
+    "送信ショートカット",
+    "전송 단축키",
+    "Pintasan hantar"
+  ],
+  "enterSends": [
+    "Enter sends · Ctrl+Enter new line",
+    "Enter 发送 · Ctrl+Enter 换行",
+    "Enter 傳送 · Ctrl+Enter 換行",
+    "Enterで送信 · Ctrl+Enterで改行",
+    "Enter 전송 · Ctrl+Enter 줄바꿈",
+    "Enter hantar · Ctrl+Enter baris baharu"
+  ],
+  "ctrlEnterSends": [
+    "Ctrl+Enter sends · Enter new line",
+    "Ctrl+Enter 发送 · Enter 换行",
+    "Ctrl+Enter 傳送 · Enter 換行",
+    "Ctrl+Enterで送信 · Enterで改行",
+    "Ctrl+Enter 전송 · Enter 줄바꿈",
+    "Ctrl+Enter hantar · Enter baris baharu"
+  ],
+  "recordVoice": [
+    "Record voice message",
+    "录制语音",
+    "錄製語音",
+    "音声を録音",
+    "음성 녹음",
+    "Rakam suara"
+  ],
+  "stopRecording": [
+    "Finish recording",
+    "结束录音",
+    "結束錄音",
+    "録音を終了",
+    "녹음 완료",
+    "Tamat rakaman"
+  ],
+  "recording": [
+    "Recording… Click finish to attach (up to 5 minutes).",
+    "录音中… 点击结束后添加为附件（最长 5 分钟）。",
+    "錄音中… 點擊結束後新增為附件（最長 5 分鐘）。",
+    "録音中…終了すると添付されます（最大5分）。",
+    "녹음 중… 완료하면 첨부됩니다 (최대 5분).",
+    "Merakam… Klik tamat untuk melampirkan (maksimum 5 minit)."
+  ],
+  "uploading": [
+    "Uploading attachments…",
+    "正在上传附件…",
+    "正在上傳附件…",
+    "添付をアップロード中…",
+    "첨부 업로드 중…",
+    "Memuat naik lampiran…"
+  ],
+  "recordingUnsupported": [
+    "Voice recording requires a supported browser and HTTPS or localhost.",
+    "当前环境不支持录音，请使用支持的浏览器及 HTTPS 或 localhost。",
+    "目前環境不支援錄音，請使用支援的瀏覽器及 HTTPS 或 localhost。",
+    "録音には対応ブラウザーとHTTPSまたはlocalhostが必要です。",
+    "녹음에는 지원 브라우저와 HTTPS 또는 localhost가 필요합니다.",
+    "Rakaman memerlukan pelayar yang disokong serta HTTPS atau localhost."
+  ],
+  "recordingFailed": [
+    "Recording failed. Try again.",
+    "录音失败，请重试。",
+    "錄音失敗，請重試。",
+    "録音に失敗しました。再試行してください。",
+    "녹음에 실패했습니다. 다시 시도하세요.",
+    "Rakaman gagal. Cuba lagi."
+  ],
+  "microphoneDenied": [
+    "Cannot access the microphone. Check browser permissions.",
+    "无法访问麦克风，请检查浏览器权限。",
+    "無法存取麥克風，請檢查瀏覽器權限。",
+    "マイクにアクセスできません。ブラウザーの権限を確認してください。",
+    "마이크에 접근할 수 없습니다. 브라우저 권한을 확인하세요.",
+    "Tidak dapat mengakses mikrofon. Semak kebenaran pelayar."
+  ],
+  "newConversation": [
+    "New conversation",
+    "新建会话",
+    "新增會話",
+    "新しい会話",
+    "새 대화",
+    "Perbualan baharu"
+  ],
+  "editConversation": [
+    "Edit conversation",
+    "编辑会话",
+    "編輯會話",
+    "会話を編集",
+    "대화 편집",
+    "Sunting perbualan"
+  ],
+  "searchConversations": [
+    "Search conversations",
+    "搜索会话",
+    "搜尋會話",
+    "会話を検索",
+    "대화 검색",
+    "Cari perbualan"
+  ],
+  "conversationList": [
+    "Conversation list",
+    "会话列表",
+    "會話清單",
+    "会話一覧",
+    "대화 목록",
+    "Senarai perbualan"
+  ],
+  "noConversations": [
+    "No conversations yet.",
+    "还没有会话。",
+    "尚無會話。",
+    "まだ会話がありません。",
+    "아직 대화가 없습니다.",
+    "Belum ada perbualan."
+  ],
+  "noSearchResults": [
+    "No matching conversations.",
+    "没有匹配的会话。",
+    "沒有符合的會話。",
+    "一致する会話はありません。",
+    "일치하는 대화가 없습니다.",
+    "Tiada perbualan yang sepadan."
+  ],
+  "startConversation": [
+    "Start a conversation",
+    "开始一段对话",
+    "開始一段對話",
+    "会話を始める",
+    "대화 시작",
+    "Mulakan perbualan"
+  ],
+  "loadMore": [
+    "Load more",
+    "加载更多",
+    "載入更多",
+    "さらに表示",
+    "더 보기",
+    "Muat lagi"
+  ],
+  "nav": [
+    "Conversations",
+    "会话",
+    "會話",
+    "会話",
+    "대화",
+    "Perbualan"
+  ],
+  "title": [
+    "Conversation title",
+    "会话标题",
+    "會話標題",
+    "会話のタイトル",
+    "대화 제목",
+    "Tajuk perbualan"
+  ],
+  "updated": [
+    "Updated",
+    "更新时间",
+    "更新時間",
+    "更新日時",
+    "수정 시간",
+    "Dikemas kini"
+  ],
+  "empty": [
+    "Start a direct conversation or a group with people and Agents.",
+    "发起单独会话，或邀请成员和智能体一起群聊。",
+    "發起個別會話，或邀請成員和智慧體一起群聊。",
+    "個別の会話を始めるか、メンバーとエージェントをグループに招待します。",
+    "개인 대화를 시작하거나 멤버와 에이전트를 그룹에 초대하세요.",
+    "Mulakan perbualan peribadi atau jemput ahli dan ejen ke kumpulan."
+  ],
+  "private": [
+    "Only you can read this conversation. Closing the page does not stop a running turn.",
+    "此会话仅你可见，关闭页面不会停止正在执行的回合。",
+    "此會話僅你可見，關閉頁面不會停止執行中的回合。",
+    "この会話は自分だけが閲覧できます。ページを閉じても実行は続きます。",
+    "본인만 이 대화를 볼 수 있습니다. 페이지를 닫아도 실행은 계속됩니다.",
+    "Hanya anda boleh membaca perbualan ini. Menutup halaman tidak menghentikan giliran aktif."
+  ],
+  "frozen": [
+    "Saved Agent configuration",
+    "已冻结的 智能体 配置",
+    "已凍結的 智慧體 設定",
+    "固定された Agent 設定",
+    "고정된 에이전트 설정",
+    "Konfigurasi ejen tersimpan"
+  ],
+  "revision": [
+    "Revision",
+    "配置修订",
+    "設定修訂",
+    "リビジョン",
+    "설정 버전",
+    "Semakan"
+  ],
+  "account": [
+    "Execution account",
+    "执行账号",
+    "執行帳號",
+    "実行アカウント",
+    "실행 계정",
+    "Akaun pelaksanaan"
+  ],
+  "directory": [
+    "Directory",
+    "工作目录",
+    "工作目錄",
+    "作業ディレクトリ",
+    "작업 디렉터리",
+    "Direktori"
+  ],
+  "runtime": [
+    "Runtime / model",
+    "执行工具 / 模型",
+    "執行工具 / 模型",
+    "実行ツール・モデル",
+    "실행 도구 / 모델",
+    "Alat / model"
+  ],
+  "nativeModel": [
+    "Native default",
+    "原生默认模型",
+    "原生預設模型",
+    "ネイティブの既定値",
+    "기본 모델",
+    "Lalai asal"
+  ],
+  "messages": [
+    "Messages",
+    "消息",
+    "訊息",
+    "メッセージ",
+    "메시지",
+    "Mesej"
+  ],
+  "noMessages": [
+    "Send a message to start.",
+    "发送消息开始会话。",
+    "傳送訊息以開始會話。",
+    "メッセージを送信して開始します。",
+    "메시지를 보내 대화를 시작하세요.",
+    "Hantar mesej untuk bermula."
+  ],
+  "prompt": [
+    "Message",
+    "消息内容",
+    "訊息內容",
+    "メッセージ内容",
+    "메시지 내용",
+    "Kandungan mesej"
+  ],
+  "send": [
+    "Send",
+    "发送",
+    "傳送",
+    "送信",
+    "보내기",
+    "Hantar"
+  ],
+  "cancel": [
+    "Stop",
+    "停止",
+    "停止",
+    "停止",
+    "중지",
+    "Hentikan"
+  ],
+  "allow": [
+    "Allow this request",
+    "允许本次请求",
+    "允許本次請求",
+    "このリクエストを許可",
+    "이 요청 허용",
+    "Benarkan permintaan ini"
+  ],
+  "deny": [
+    "Deny this request",
+    "拒绝本次请求",
+    "拒絕本次請求",
+    "このリクエストを拒否",
+    "이 요청 거부",
+    "Tolak permintaan ini"
+  ],
+  "decisionQueued": [
+    "Decision submitted; waiting for native receipt.",
+    "决定已提交，等待原生进程回执。",
+    "決定已提交，等待原生程序回執。",
+    "決定を送信済み。実行ツールの応答待ちです。",
+    "결정이 제출되었으며 도구의 수신 확인을 기다립니다.",
+    "Keputusan dihantar; menunggu pengesahan alat asal."
+  ],
+  "decisionSent": [
+    "Native process received the decision; tool completion is reported separately.",
+    "原生进程已收到决定，工具完成情况另行反馈。",
+    "原生程序已收到決定，工具完成情況另行回報。",
+    "実行ツールが決定を受信しました。完了は別途報告されます。",
+    "도구가 결정을 수신했습니다. 실행 완료는 별도로 표시됩니다.",
+    "Proses asal menerima keputusan; penyelesaian alat dilaporkan berasingan."
+  ],
+  "decisionExpired": [
+    "This request is no longer active.",
+    "本次请求已失效。",
+    "本次請求已失效。",
+    "このリクエストは終了しました。",
+    "이 요청은 더 이상 유효하지 않습니다.",
+    "Permintaan ini tidak lagi aktif."
+  ],
+  "attach": [
+    "Attach files",
+    "添加附件",
+    "新增附件",
+    "ファイルを添付",
+    "파일 첨부",
+    "Lampirkan fail"
+  ],
+  "remove": [
+    "Remove",
+    "移除",
+    "移除",
+    "削除",
+    "제거",
+    "Buang"
+  ],
+  "attachmentHelp": [
+    "Paste or drop files · Up to 10 files, 32 MB each. Media can be previewed and downloaded; this CLI currently reads text only.",
+    "可粘贴或拖入文件 · 最多 10 个，每个 32 MB。媒体支持预览下载；当前 CLI 仅读取文本内容。",
+    "可貼上或拖入檔案 · 最多 10 個，每個 32 MB。媒體支援預覽下載；目前 CLI 僅讀取文字內容。",
+    "貼り付け・ドロップ対応 · 最大10件、各32 MB。メディアはプレビュー・保存可能。現在のCLIはテキストのみ読み取れます。",
+    "붙여넣기·끌어놓기 지원 · 최대 10개, 각 32 MB. 미디어 미리 보기·다운로드 가능. 현재 CLI는 텍스트만 읽습니다.",
+    "Tampal atau seret fail · Maksimum 10 fail, 32 MB setiap satu. Media boleh dipratonton dan dimuat turun; CLI ini membaca teks sahaja."
+  ],
+  "attachmentLimit": [
+    "Attach up to 10 files, at most 32 MB each.",
+    "最多添加 10 个附件，每个不超过 32 MB。",
+    "最多新增 10 個附件，每個不超過 32 MB。",
+    "最大10件、各32 MBまで添付できます。",
+    "최대 10개 파일, 각 32 MB 이하로 첨부하세요.",
+    "Lampirkan sehingga 10 fail, maksimum 32 MB setiap satu."
+  ],
+  "inputUnsupported": [
+    "This runtime does not accept additional messages while running. Stop it or wait for completion.",
+    "当前执行工具不支持运行中追加消息，请停止或等待回合结束。",
+    "目前執行工具不支援執行中追加訊息，請停止或等待回合結束。",
+    "実行中の追加入力には対応していません。停止するか完了を待ってください。",
+    "실행 중 추가 메시지는 지원하지 않습니다. 중지하거나 완료를 기다리세요.",
+    "Alat ini tidak menerima mesej tambahan semasa berjalan. Hentikan atau tunggu sehingga selesai."
+  ],
+  "reconnecting": [
+    "Connection interrupted. Reconnecting…",
+    "连接中断，正在重连…",
+    "連線中斷，正在重新連線…",
+    "接続が切れました。再接続中…",
+    "연결이 끊어졌습니다. 다시 연결 중…",
+    "Sambungan terputus. Menyambung semula…"
+  ],
+  "inputTokens": [
+    "Input tokens",
+    "输入 Token",
+    "輸入 Token",
+    "入力トークン",
+    "입력 토큰",
+    "Token input"
+  ],
+  "outputTokens": [
+    "Output tokens",
+    "输出 Token",
+    "輸出 Token",
+    "出力トークン",
+    "출력 토큰",
+    "Token output"
+  ],
+  "active": [
+    "Active",
+    "进行中",
+    "進行中",
+    "有効",
+    "활성",
+    "Aktif"
+  ],
+  "archived": [
+    "Archived",
+    "已归档",
+    "已封存",
+    "アーカイブ済み",
+    "보관됨",
+    "Diarkibkan"
+  ],
+  "queued": [
+    "Queued",
+    "等待执行",
+    "等待執行",
+    "待機中",
+    "대기 중",
+    "Dalam giliran"
+  ],
+  "running": [
+    "Running",
+    "执行中",
+    "執行中",
+    "実行中",
+    "실행 중",
+    "Sedang berjalan"
+  ],
+  "stopping": [
+    "Stopping; waiting for Runner receipt…",
+    "停止中，等待 Runner 回执…",
+    "停止中，等待 Runner 回執…",
+    "停止中。Runner の応答待ち…",
+    "중지 중, Runner 확인 대기…",
+    "Menghentikan; menunggu pengesahan Runner…"
+  ],
+  "completed": [
+    "Completed",
+    "已完成",
+    "已完成",
+    "完了",
+    "완료됨",
+    "Selesai"
+  ],
+  "cancelled": [
+    "Stopped",
+    "已停止",
+    "已停止",
+    "停止済み",
+    "중지됨",
+    "Dihentikan"
+  ],
+  "timed_out": [
+    "Timed out",
+    "执行超时",
+    "執行逾時",
+    "タイムアウト",
+    "시간 초과",
+    "Tamat masa"
+  ],
+  "failed": [
+    "Failed",
+    "执行失败",
+    "執行失敗",
+    "失敗",
+    "실패함",
+    "Gagal"
+  ],
+  "interrupted": [
+    "Interrupted",
+    "执行中断",
+    "執行中斷",
+    "中断",
+    "중단됨",
+    "Terganggu"
+  ],
+  "interruptedHelp": [
+    "Execution was interrupted and its side effects are uncertain. Create a new conversation after checking the results; this turn will not be replayed.",
+    "执行中断，副作用尚不确定。请核对实际结果后新建会话，本回合不会自动重放。",
+    "執行中斷，副作用尚不確定。請核對實際結果後建立新會話，本回合不會自動重播。",
+    "実行が中断し、操作結果が不明です。結果を確認して新しい会話を作成してください。自動再実行はしません。",
+    "실행이 중단되어 작업 결과가 불확실합니다. 결과 확인 후 새 대화를 만드세요. 자동 재실행하지 않습니다.",
+    "Pelaksanaan terganggu dan kesannya tidak pasti. Semak hasil sebelum mencipta perbualan baharu; giliran ini tidak diulang secara automatik."
+  ],
+  "sendWithEnter": [
+    "Send (Enter)",
+    "发送（Enter）",
+    "傳送（Enter）",
+    "送信（Enter）",
+    "전송 (Enter)",
+    "Hantar (Enter)"
+  ],
+  "sendWithCtrlEnter": [
+    "Send (Ctrl+Enter)",
+    "发送（Ctrl+Enter）",
+    "傳送（Ctrl+Enter）",
+    "送信（Ctrl+Enter）",
+    "전송 (Ctrl+Enter)",
+    "Hantar (Ctrl+Enter)"
+  ],
+  "conversationInfo": [
+    "Conversation info",
+    "会话信息",
+    "會話資訊",
+    "会話情報",
+    "대화 정보",
+    "Maklumat perbualan"
+  ],
+  "conversationMembers": [
+    "Members",
+    "成员",
+    "成員",
+    "メンバー",
+    "구성원",
+    "Ahli"
+  ],
+  "participants": [
+    "members",
+    "位成员",
+    "位成員",
+    "人のメンバー",
+    "명",
+    "ahli"
+  ],
+  "you": [
+    "You",
+    "你",
+    "你",
+    "自分",
+    "나",
+    "Anda"
+  ],
+  "searchMessages": [
+    "Search messages",
+    "搜索消息",
+    "搜尋訊息",
+    "メッセージを検索",
+    "메시지 검색",
+    "Cari mesej"
+  ],
+  "copyMessage": [
+    "Copy message",
+    "复制消息",
+    "複製訊息",
+    "メッセージをコピー",
+    "메시지 복사",
+    "Salin mesej"
+  ],
+  "copiedMessage": [
+    "Message copied",
+    "已复制消息",
+    "已複製訊息",
+    "コピーしました",
+    "메시지 복사됨",
+    "Mesej disalin"
+  ],
+  "latestMessages": [
+    "Latest messages",
+    "回到最新消息",
+    "回到最新訊息",
+    "最新のメッセージ",
+    "최신 메시지",
+    "Mesej terkini"
+  ],
+  "allMessages": [
+    "All",
+    "全部",
+    "全部",
+    "すべて",
+    "전체",
+    "Semua"
+  ],
+  "unread": [
+    "Unread",
+    "未读",
+    "未讀",
+    "未読",
+    "읽지 않음",
+    "Belum dibaca"
+  ],
+  "mentions": [
+    "Mentions",
+    "@我",
+    "@我",
+    "メンション",
+    "멘션",
+    "Sebutan"
+  ],
+  "saved": [
+    "Saved",
+    "收藏",
+    "收藏",
+    "保存済み",
+    "저장됨",
+    "Disimpan"
+  ],
+  "messageFilters": [
+    "Message filters",
+    "消息筛选",
+    "訊息篩選",
+    "メッセージ絞り込み",
+    "메시지 필터",
+    "Penapis mesej"
+  ],
+  "markRead": [
+    "Mark as read",
+    "标为已读",
+    "標為已讀",
+    "既読にする",
+    "읽음으로 표시",
+    "Tandakan dibaca"
+  ],
+  "reply": [
+    "Reply",
+    "回复",
+    "回覆",
+    "返信",
+    "답장",
+    "Balas"
+  ],
+  "thread": [
+    "Thread",
+    "回复线程",
+    "回覆串",
+    "スレッド",
+    "스레드",
+    "Utas"
+  ],
+  "closeThread": [
+    "Back to conversation",
+    "返回会话",
+    "返回會話",
+    "会話に戻る",
+    "대화로 돌아가기",
+    "Kembali ke perbualan"
+  ],
+  "saveMessage": [
+    "Save message",
+    "收藏消息",
+    "收藏訊息",
+    "メッセージを保存",
+    "메시지 저장",
+    "Simpan mesej"
+  ],
+  "unsaveMessage": [
+    "Unsave message",
+    "取消收藏",
+    "取消收藏",
+    "保存を解除",
+    "저장 취소",
+    "Nyahsimpan mesej"
+  ],
+  "editMessage": [
+    "Edit message",
+    "编辑消息",
+    "編輯訊息",
+    "メッセージを編集",
+    "메시지 편집",
+    "Edit mesej"
+  ],
+  "retractMessage": [
+    "Retract message",
+    "撤回消息",
+    "撤回訊息",
+    "メッセージを撤回",
+    "메시지 회수",
+    "Tarik balik mesej"
+  ],
+  "retracted": [
+    "Message retracted",
+    "消息已撤回",
+    "訊息已撤回",
+    "メッセージは撤回されました",
+    "회수된 메시지",
+    "Mesej ditarik balik"
+  ],
+  "edited": [
+    "Edited",
+    "已编辑",
+    "已編輯",
+    "編集済み",
+    "편집됨",
+    "Diedit"
+  ],
+  "editHistoryHelp": [
+    "This updates the chat message. Requests already executed by an Agent remain in its native context.",
+    "编辑会更新聊天消息，智能体已经执行的请求仍保留在原生上下文中。",
+    "編輯會更新聊天訊息，智慧體已執行的請求仍保留在原生上下文中。",
+    "チャットメッセージを更新します。実行済みの要求はエージェントのコンテキストに残ります。",
+    "채팅 메시지를 수정합니다. 이미 실행한 요청은 에이전트의 기존 컨텍스트에 남습니다.",
+    "Ini mengemas kini mesej sembang. Permintaan yang telah dilaksanakan kekal dalam konteks asal ejen."
+  ],
+  "retractConfirm": [
+    "Retract this message for everyone? Requests already executed by an Agent will not be undone.",
+    "向所有成员撤回这条消息？智能体已经执行的请求不会被撤销。",
+    "向所有成員撤回這則訊息？智慧體已執行的請求不會被復原。",
+    "全員に対して撤回しますか？実行済みの要求は取り消されません。",
+    "모든 참여자에게서 이 메시지를 회수할까요? 이미 실행한 요청은 취소되지 않습니다.",
+    "Tarik balik mesej ini untuk semua? Permintaan yang telah dilaksanakan tidak akan dibatalkan."
+  ],
+  "saveChanges": [
+    "Save changes",
+    "保存修改",
+    "儲存修改",
+    "変更を保存",
+    "변경 저장",
+    "Simpan perubahan"
+  ],
+  "manageMembers": [
+    "Manage members",
+    "管理成员",
+    "管理成員",
+    "メンバー管理",
+    "참여자 관리",
+    "Urus ahli"
+  ],
+  "memberSearch": [
+    "Search people or Agents",
+    "搜索成员或智能体",
+    "搜尋成員或智慧體",
+    "メンバー・エージェントを検索",
+    "사람 또는 에이전트 검색",
+    "Cari orang atau ejen"
+  ],
+  "noFilteredMessages": [
+    "No matching messages",
+    "暂无符合条件的消息",
+    "暫無符合條件的訊息",
+    "該当するメッセージはありません",
+    "일치하는 메시지가 없습니다",
+    "Tiada mesej sepadan"
+  ]
+}

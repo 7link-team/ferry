@@ -418,6 +418,8 @@ mod tests {
                 agent_version: "fixture".into(),
                 managed_updates: false,
                 supports_monitor: false,
+                supports_agent: false,
+                supports_agent_probe: false,
             })
             .unwrap();
             let expected = crate::i18n::Message::new("runnerExtra.protocolMismatch")
@@ -502,6 +504,8 @@ mod tests {
             agent_version: String::new(),
             managed_updates: false,
             supports_monitor: false,
+            supports_agent: false,
+            supports_agent_probe: false,
         })
         .unwrap();
         tokio::time::timeout(

@@ -4,6 +4,13 @@
 
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
+mod agent_models;
+mod ai_agents;
+mod ai_models;
+mod chat;
+mod chat_interactions;
+mod chat_messages;
+mod conversations;
 mod login_guard;
 mod platform_monitor;
 mod platform_storage;
@@ -140,6 +147,13 @@ impl MigratorTrait for Migrator {
             Box::new(platform_monitor::LimitsMigration),
             Box::new(login_guard::Migration),
             Box::new(workflow_node_logs::Migration),
+            Box::new(ai_agents::Migration),
+            Box::new(conversations::Migration),
+            Box::new(chat::Migration),
+            Box::new(ai_models::Migration),
+            Box::new(chat_messages::Migration),
+            Box::new(agent_models::Migration),
+            Box::new(chat_interactions::Migration),
         ]
     }
 }

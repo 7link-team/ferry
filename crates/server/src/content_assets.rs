@@ -283,7 +283,13 @@ impl Store<'_> {
     ) -> Result<()> {
         if !matches!(
             owner_kind,
-            "execution" | "node_run" | "cache" | "pin" | "user_pin" | "workflow"
+            "execution"
+                | "node_run"
+                | "cache"
+                | "pin"
+                | "user_pin"
+                | "workflow"
+                | "conversation_file"
         ) || owner_id <= 0
         {
             return Err(unavailable());
