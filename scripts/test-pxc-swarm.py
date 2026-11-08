@@ -81,7 +81,7 @@ def main():
             return None
         result = engine(node, 'exec', '-e', 'MYSQL_PWD=' + password, container, 'mysql',
                         '--protocol=socket', '-uroot', '--batch', '--raw', '--skip-column-names',
-                        '--connect-timeout=5', '-e', query, check=False, timeout=20)
+                        '--socket=/tmp/mysql.sock', '--connect-timeout=5', '-e', query, check=False, timeout=20)
         return result.stdout.strip() if result.returncode == 0 else None
 
     def status(node):
@@ -129,13 +129,14 @@ def main():
                 '--env', 'MYSQL_ROOT_PASSWORD=' + password, '--env', 'MYSQL_ROOT_HOST=localhost',
                 '--env', 'XTRABACKUP_PASSWORD=' + sst_password, '--env', 'CLUSTER_NAME=' + prefix,
                 '--env', 'PERCONA_TELEMETRY_DISABLE=1',
-                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket -uroot --silent ping',
+                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
                 '--health-interval', '10s', '--health-timeout', '5s', '--health-retries', '6',
                 '--health-start-period', '180s', '--restart-delay', '10s', '--stop-grace-period', '60s',
                 '--limit-memory', '2G']
         if join:
             args += ['--env', 'CLUSTER_JOIN=' + join]
-        manager(*args, IMAGE, 'mysqld', '--pxc-encrypt-cluster-traffic=OFF',
+        manager(*args, IMAGE, 'mysqld', '--defaults-file=/etc/mysql/node.cnf',
+                '--pxc-encrypt-cluster-traffic=OFF',
                 '--innodb-buffer-pool-size=128M', '--max-connections=40',
                 '--log-error=/var/lib/mysql/lab-error.log', timeout=120)
 
@@ -308,14 +309,20 @@ def main():
             diagnostics()
         except Exception as error:
             report['diagnostic_error'] = redact(str(error))[-1000:]
-        if report['result'] == 'FAIL':
-            report['diagnostics'] = {path.name: path.read_text(errors='replace')[-10000:]
-                                     for path in output.glob('*.log')
-                                     if path.name.startswith(('mysql-', 'pxc-', 'tasks-'))}
         (output / 'acceptance.json').write_text(json.dumps(report, indent=2), encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            evidence = json.dumps(report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-            print('::notice title=PXC laboratory evidence::' + evidence, flush=True)
+            # GitHub check annotations truncate messages at 4096 characters.
+            # Keep each chunk bounded and leave the complete report in artifact.
+            evidence = json.dumps(report, separators=(',', ':'))
+            for index, offset in enumerate(range(0, len(evidence), 3000)):
+                chunk = evidence[offset:offset + 3000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                print(f'::notice title=PXC laboratory evidence chunk {index:03d}::' + chunk, flush=True)
+            if report['result'] == 'FAIL':
+                for path in sorted(output.glob('*.log')):
+                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-')):
+                        diagnostic = path.read_text(errors='replace')[-3500:]
+                        diagnostic = diagnostic.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                        print('::notice title=PXC diagnostic ' + path.name + '::' + diagnostic, flush=True)
         (output / 'summary.md').write_text('\n'.join([
             f"Result: {report['result']}", f"Checks: {len(report['checks'])}",
             f"Full outage: {report.get('full_outage_recovery', 'NOT_REACHED')}",
