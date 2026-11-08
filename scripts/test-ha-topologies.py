@@ -147,7 +147,7 @@ def redis_sentinel(lab):
 
 async def nats_jetstream(lab):
     import nats
-    from nats.js.api import StreamConfig, StorageType
+    from nats.js.api import StreamConfig, StorageType, ConsumerConfig, AckPolicy
     routes = ','.join('nats://' + lab.name(node) + ':6222' for node in ('n0', 'n1', 'n2'))
     for node in ('n0', 'n1', 'n2'):
         lab.start(node, 'nats', ['--name', lab.name(node), '--jetstream', '--store_dir', '/data',
@@ -174,7 +174,16 @@ async def nats_jetstream(lab):
             return info if info.cluster and info.cluster.replicas and len(info.cluster.replicas) == 2 and all(member.current for member in info.cluster.replicas) else None
         info = await retry(replicas_current, 'three current JetStream replicas')
         lab.check('JetStream uses three replicas with DNS routes and explicit client endpoints', info.config.num_replicas == 3)
+        consumer = await js.pull_subscribe('proof', durable='proof-consumer', stream='PROOF',
+                                          config=ConsumerConfig(ack_policy=AckPolicy.EXPLICIT,
+                                                                ack_wait=2, num_replicas=3))
         await js.publish('proof', b'before', headers={'Nats-Msg-Id': 'before'})
+        first = (await consumer.fetch(1, timeout=5))[0]
+        lab.check('durable consumer receives first message', first.data == b'before')
+        await first.ack_sync(timeout=5)
+        await js.publish('proof', b'pending', headers={'Nats-Msg-Id': 'pending'})
+        pending = (await consumer.fetch(1, timeout=5))[0]
+        lab.check('second message is pending before leader failure', pending.data == b'pending')
         previous = (await js.stream_info('PROOF')).cluster.leader
         lab.command('stop', '-t', '10', previous)
         async def leader_changed():
@@ -183,13 +192,34 @@ async def nats_jetstream(lab):
         changed = await retry(leader_changed, 'JetStream leader election')
         await retry(lambda: js.publish('proof', b'after', headers={'Nats-Msg-Id': 'after'}), 'publish after leader failure')
         lab.check('JetStream leader changes and committed messages survive', (await js.get_msg('PROOF', seq=1)).data == b'before'
-                  and (await js.get_msg('PROOF', seq=2)).data == b'after')
+                  and (await js.get_msg('PROOF', seq=3)).data == b'after')
+        await consumer.unsubscribe()
+        consumer = await retry(lambda: js.pull_subscribe('proof', durable='proof-consumer', stream='PROOF'),
+                               'rebind existing durable consumer after leader failure')
+        redelivered = (await retry(lambda: consumer.fetch(1, timeout=3), 'pending message redelivery'))[0]
+        lab.check('durable consumer retains ack floor and redelivers unacknowledged message',
+                  redelivered.data == b'pending' and redelivered.metadata.sequence.stream == 2
+                  and redelivered.metadata.num_delivered >= 2)
+        await redelivered.ack_sync(timeout=5)
+        following = (await consumer.fetch(1, timeout=5))[0]
+        lab.check('durable consumer continues with next message without replaying acknowledged data',
+                  following.data == b'after' and following.metadata.sequence.stream == 3)
+        await following.ack_sync(timeout=5)
         lab.command('start', previous)
         await retry(replicas_current, 'returning replica catches up')
         info = await js.stream_info('PROOF')
         lab.check('returning JetStream member restores three current replicas', info.config.num_replicas == 3 and all(member.current for member in info.cluster.replicas))
+        async def consumer_caught_up():
+            state = await js.consumer_info('PROOF', 'proof-consumer')
+            return state if (state.ack_floor.stream_seq == 3 and state.num_ack_pending == 0
+                             and state.cluster and state.cluster.replicas
+                             and len(state.cluster.replicas) == 2
+                             and all(member.current for member in state.cluster.replicas)) else None
+        state = await retry(consumer_caught_up, 'consumer replicas and committed ack floor recover')
+        lab.check('three durable consumer replicas converge with no outstanding acknowledgements',
+                  state.config.num_replicas == 3 and state.ack_floor.stream_seq == 3)
         lab.report['observations'] = {'previous_leader': previous, 'new_leader': changed.cluster.leader, 'messages': info.state.messages,
-                                       'scope': 'stream replication; consumer and application exactly-once behavior not certified'}
+                                       'scope': 'stream and durable explicit-ack consumer recovery; application exactly-once behavior not certified'}
     finally:
         await nc.close()
 
