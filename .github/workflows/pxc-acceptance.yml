@@ -1,0 +1,50 @@
+name: PXC three-member isolated acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ci/pxc-*']
+    paths:
+      - .github/workflows/pxc-acceptance.yml
+      - scripts/test-pxc-swarm.py
+permissions:
+  contents: read
+concurrency:
+  group: pxc-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  pxc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      FERRY_PXC_LAB: '1'
+      FERRY_PXC_OUTPUT: ${{ github.workspace }}/pxc-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check isolated test host
+        run: |
+          docker info
+          df -h /
+          free -m
+      - name: Real PXC cluster, partition, restart and data recovery
+        run: python3 scripts/test-pxc-swarm.py
+      - name: Record scope
+        if: always()
+        run: |
+          {
+            echo '### PXC protocol and isolated Swarm verification'
+            echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
+            echo 'Three nested Docker daemons share one host kernel.'
+            echo 'Direct Swarm experiment, not Ferry API/SSH/Agent or production certification.'
+            echo 'No cross-host volume migration, production TLS, proxy HA, backup restore or physical-host quorum certification.'
+            if [ -f pxc-evidence/summary.md ]; then cat pxc-evidence/summary.md; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pxc-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            pxc-evidence/acceptance.json
+            pxc-evidence/summary.md
+            pxc-evidence/*.log
