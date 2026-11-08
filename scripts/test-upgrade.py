@@ -18,6 +18,18 @@ import time
 import urllib.request
 import urllib.error
 
+# Exact additive grants from accounts/workspace.rs built-in role contracts.
+AI_MANAGER_PERMISSIONS = {
+    'ai-models.read', 'ai-models.create', 'ai-models.update',
+    'ai-agents.read', 'ai-agents.create', 'ai-agents.update', 'ai-agents.use', 'ai-agents.probe',
+    'conversations.read', 'conversations.create', 'conversations.update', 'conversations.run',
+}
+AI_USER_PERMISSIONS = {
+    'ai-agents.read', 'ai-agents.use',
+    'conversations.read', 'conversations.create', 'conversations.update', 'conversations.run',
+}
+AI_VIEWER_PERMISSIONS = {'ai-models.read', 'ai-agents.read', 'conversations.read'}
+
 if os.environ.get('GITHUB_ACTIONS'):
     def report_failure(kind, error, trace):
         message = f'{kind.__name__}: {error}'.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
@@ -146,6 +158,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed |= {'workflows.'+verb for verb in ['read','create','update','delete','run']}
                     allowed |= {'workflow-groups.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
+                    allowed |= AI_MANAGER_PERMISSIONS
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -228,6 +241,11 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {'workflow-groups.'+verb for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 if role['name'] in ['拥有者','管理员']:
                     expected |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
+                    expected |= AI_MANAGER_PERMISSIONS
+                elif role['name'] in ['开发','运维']:
+                    expected |= AI_USER_PERMISSIONS
+                elif role['name'] == '只读':
+                    expected |= AI_VIEWER_PERMISSIONS
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)
@@ -237,6 +255,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             assert len(members) == 1 and members[0]['owner'] and members[0]['version'] == 1
             custom = create('roles', {'name':'Migrated custom','permissions':['hosts.create']})
             assert 'hosts.read' in api('/workspaces/upgrade/roles/'+custom)['permissions']
+            custom_before_restart = api('/workspaces/upgrade/roles/'+custom)
             print('PASS: existing grants/membership preserved; only specified built-in resource permissions appended with version bump')
             deployment=create('deployments', {'name':'new-deployment','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/upgrade-compose',
                 'manifest':json.dumps({'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[{'name':'web','image':'busybox:1.36'}]})})
@@ -291,6 +310,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
             process.terminate();process.wait(timeout=20)
             process=launch(new,log)
             assert api('/workspaces/upgrade/pipelines/'+pipeline)==converted_pipeline
+            assert api('/workspaces/upgrade/roles/'+custom)==custom_before_restart, 'startup must not add AI grants to custom roles'
             if not os.environ.get('FERRY_TEST_DATABASE_URL'):
                 with closing(sqlite3.connect(databases[0])) as database:
                     backup=database.execute('SELECT legacy_definition_backup FROM pipelines WHERE id=?',(int(pipeline),)).fetchone()[0]

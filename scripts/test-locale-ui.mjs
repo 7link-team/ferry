@@ -68,7 +68,7 @@ try {
   for (const locale of ['en-US', 'zh-CN', 'zh-TW', 'ja-JP', 'ko-KR', 'ms-MY']) {
     await switchLanguage(page, locale);
     await page.waitForURL(`**/${locale}/account`, { waitUntil: 'commit' });
-    await page.getByRole('heading', { name: common[locale]['account.title'], exact: true }).waitFor();
+    await page.getByRole('heading', { level: 1, name: common[locale]['account.title'], exact: true }).waitFor();
     await page.getByText(common[locale]['account.verifyHelp'], { exact: true }).waitFor();
     assert.equal(await page.locator('input[name="name"]').inputValue(), 'Unsaved profile draft');
     await page.getByText(common[locale]['account.loginEmail'], { exact: true }).waitFor();

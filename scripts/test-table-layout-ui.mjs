@@ -90,13 +90,14 @@ try {
   await seed(0);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   fills(await geometry(), 'single row');
+  // Credentials expose an edit action; row activation follows that configured action.
   await page.locator('tbody tr').first().locator('td').nth(1).click();
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
   await page.getByText('Credential 000', { exact: true }).waitFor();
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().focus();
   await page.keyboard.press('Enter');
-  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+$/);
+  assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
   await openList(`/workspaces/${workspace_layout}/credentials`);
   await page.locator('tbody tr').first().getByRole('link', { name: '编辑' }).click();
   assert.match(page.url(), /\/workspaces\/\d+\/credentials\/\d+\/edit$/);
