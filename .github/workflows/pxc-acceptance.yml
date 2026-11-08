@@ -15,8 +15,13 @@ jobs:
   pxc:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        pxc: ['8.0', '8.4']
     env:
       FERRY_PXC_LAB: '1'
+      FERRY_PXC_IMAGE_VARIANT: ${{ matrix.pxc }}
       FERRY_PXC_OUTPUT: ${{ github.workspace }}/pxc-evidence
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +30,15 @@ jobs:
           docker info
           df -h /
           free -m
+      - name: Prepare nested Docker AppArmor on disposable CI host
+        run: |
+          # Nested daemons do not install the outer docker-default profile.
+          # Ubuntu's host mysqld attachment otherwise denies the container SST shell.
+          if sudo grep -q '^/usr/sbin/mysqld ' /sys/kernel/security/apparmor/profiles; then
+            sudo test -f /etc/apparmor.d/usr.sbin.mysqld
+            sudo apparmor_parser -C -r /etc/apparmor.d/usr.sbin.mysqld
+            echo 'FERRY_PXC_RESTORE_MYSQL_APPARMOR=1' >> "$GITHUB_ENV"
+          fi
       - name: Real PXC cluster, partition, restart and data recovery
         run: python3 scripts/test-pxc-swarm.py
       - name: Record scope
@@ -41,10 +55,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pxc-${{ github.run_id }}-${{ github.run_attempt }}
+          name: pxc-${{ matrix.pxc }}-${{ github.run_id }}-${{ github.run_attempt }}
           retention-days: 14
           if-no-files-found: error
           path: |
             pxc-evidence/acceptance.json
             pxc-evidence/summary.md
             pxc-evidence/*.log
+      - name: Restore host MySQL AppArmor profile
+        if: always() && env.FERRY_PXC_RESTORE_MYSQL_APPARMOR == '1'
+        run: sudo apparmor_parser -r /etc/apparmor.d/usr.sbin.mysqld

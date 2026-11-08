@@ -9,7 +9,13 @@ import subprocess
 import time
 import uuid
 
-IMAGE = 'percona/percona-xtradb-cluster@sha256:a002b7654a22cb29b2af3e1010b2ad5e5ffdef1dc2eece8bfdf974d09746df44'
+# Qualify each image independently, including after an environment correction.
+IMAGES = {
+    '8.0': 'percona/percona-xtradb-cluster@sha256:ca15bf7f3b53464a546b57a2a2a3e4cd67cedc6ad25c079e1461128465b649ff',
+    '8.4': 'percona/percona-xtradb-cluster@sha256:a002b7654a22cb29b2af3e1010b2ad5e5ffdef1dc2eece8bfdf974d09746df44',
+}
+IMAGE_VARIANT = os.environ.get('FERRY_PXC_IMAGE_VARIANT', '8.0')
+IMAGE = IMAGES[IMAGE_VARIANT]
 ENGINE = 'docker:27.5.1-dind'
 NODES = ('a', 'b', 'c')
 STATUS_SQL = "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_connected','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_state_uuid')"
@@ -26,7 +32,9 @@ def main():
         print('::add-mask::' + password, flush=True)
         print('::add-mask::' + sst_password, flush=True)
     report = {'result': 'RUNNING', 'source': os.environ.get('GITHUB_SHA', 'local'),
-              'prefix': prefix, 'image': IMAGE, 'engine': ENGINE, 'checks': [], 'snapshots': [],
+              'prefix': prefix, 'image': IMAGE, 'variant': IMAGE_VARIANT,
+              'ci_mysql_apparmor_complain': os.environ.get('FERRY_PXC_RESTORE_MYSQL_APPARMOR') == '1',
+              'engine': ENGINE, 'checks': [], 'snapshots': [],
               'boundary': 'Three nested daemons on one shared kernel; direct Swarm experiment, not Ferry API or physical-host certification',
               'uncovered': ['production TLS', 'proxy routing/HA', 'Ferry API/SSH/Agent integration',
                             'backup restore', 'rolling version upgrade', 'physical-host quorum', 'cross-host volume migration']}
@@ -81,7 +89,7 @@ def main():
             return None
         result = engine(node, 'exec', '-e', 'MYSQL_PWD=' + password, container, 'mysql',
                         '--protocol=socket', '-uroot', '--batch', '--raw', '--skip-column-names',
-                        '--connect-timeout=5', '-e', query, check=False, timeout=20)
+                        '--socket=/tmp/mysql.sock', '--connect-timeout=5', '-e', query, check=False, timeout=20)
         return result.stdout.strip() if result.returncode == 0 else None
 
     def status(node):
@@ -129,14 +137,22 @@ def main():
                 '--env', 'MYSQL_ROOT_PASSWORD=' + password, '--env', 'MYSQL_ROOT_HOST=localhost',
                 '--env', 'XTRABACKUP_PASSWORD=' + sst_password, '--env', 'CLUSTER_NAME=' + prefix,
                 '--env', 'PERCONA_TELEMETRY_DISABLE=1',
-                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket -uroot --silent ping',
+                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
                 '--health-interval', '10s', '--health-timeout', '5s', '--health-retries', '6',
                 '--health-start-period', '180s', '--restart-delay', '10s', '--stop-grace-period', '60s',
                 '--limit-memory', '2G']
         if join:
             args += ['--env', 'CLUSTER_JOIN=' + join]
-        manager(*args, IMAGE, 'mysqld', '--pxc-encrypt-cluster-traffic=OFF',
-                '--innodb-buffer-pool-size=128M', '--max-connections=40', timeout=120)
+        # SST helpers read the option file rather than mysqld's command line.
+        # Keep the already-declared unencrypted private laboratory consistent.
+        wrapper = ('sed -i "/^\\[mysqld\\]/a pxc-encrypt-cluster-traffic=OFF" /etc/mysql/node.cnf; '
+                   'sed -i "/^\\[sst\\]/a encrypt=0" /etc/mysql/node.cnf; '
+                   'exec /entrypoint.sh "$@"')
+        manager(*args, '--entrypoint', 'sh', IMAGE, '-c', wrapper, 'ferry-pxc-lab',
+                'mysqld', '--defaults-file=/etc/mysql/node.cnf',
+                '--pxc-encrypt-cluster-traffic=OFF',
+                '--innodb-buffer-pool-size=128M', '--max-connections=40',
+                '--log-error=/var/lib/mysql/lab-error.log', timeout=120)
 
     def diagnostics():
         for node in NODES:
@@ -149,6 +165,37 @@ def main():
             (output / f'pxc-{node}.log').write_text(redact(result.stdout + result.stderr))
             result = manager('service', 'ps', '--no-trunc', prefix + '-db-' + node, check=False, timeout=15)
             (output / f'tasks-{node}.log').write_text(redact(result.stdout + result.stderr))
+            container = task(node)
+            if container:
+                result = engine(node, 'exec', container, 'sh', '-c',
+                                'id; echo "$PATH"; ls -l /bin/sh /usr/bin/sh /etc/my.cnf; '
+                                'cat /proc/1/attr/current; tr "\\0" "\\n" < /proc/1/environ | sed -n "/^PATH=/p"',
+                                check=False, timeout=15)
+                (output / f'runtime-{node}.log').write_text(redact(result.stdout + result.stderr))
+            # Server startup errors are written inside the data volume, not always
+            # to service stdout. Read only this laboratory's existing volume.
+            volume = prefix + '-data-' + node
+            if engine(node, 'volume', 'inspect', volume, check=False).returncode == 0:
+                result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
+                                '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
+                                IMAGE, '-c',
+                                'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" '
+                                '/evidence/lab-error.log 2>/dev/null | head -n 18; '
+                                'tail -n 40 /evidence/lab-error.log /evidence/*.err 2>/dev/null; '
+                                'grep -iE "ERROR|FATAL|WSREP_SST|Permission|not found" /evidence/lab-error.log 2>/dev/null | tail -n 20',
+                                check=False, timeout=30)
+                (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
+            containers = engine(node, 'ps', '-aq', '--filter',
+                                'label=com.docker.swarm.service.name=' + prefix + '-db-' + node,
+                                check=False, timeout=15).stdout.split()
+            if containers:
+                result = engine(node, 'inspect', '--format', '{{json .State}}', *containers,
+                                check=False, timeout=20)
+                (output / f'runtime-state-{node}.log').write_text(redact(result.stdout + result.stderr))
+        result = docker('exec', prefix + '-a', 'sh', '-c',
+                        'dmesg 2>/dev/null | grep -E "DENIED.*(mysqld|bash|sh)" | tail -n 12',
+                        check=False, timeout=15)
+        (output / 'runtime-kernel.log').write_text(redact(result.stdout + result.stderr))
 
     try:
         check('Linux Docker laboratory', os.name == 'posix' and docker('info').returncode == 0)
@@ -280,7 +327,8 @@ def main():
             report['full_outage_recovery'] = 'GALERA_SAME_GROUP_RECOVERED'
         else:
             states = {node: status(node) for node in NODES}
-            check('PXC-07 no isolated Primary or forced bootstrap after full outage', all(
+            report['full_outage_unobservable_members'] = [node for node, state in states.items() if not state]
+            check('PXC-07 no Primary observed; unavailable members remain unknown', all(
                 value.get('wsrep_cluster_status') != 'Primary' for value in states.values()))
             report['full_outage_recovery'] = 'OPERATOR_REQUIRED; automatic full-outage recovery NOT verified'
         snapshot('full-outage-restart')
@@ -300,8 +348,20 @@ def main():
             report['diagnostic_error'] = redact(str(error))[-1000:]
         (output / 'acceptance.json').write_text(json.dumps(report, indent=2), encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
-            evidence = json.dumps(report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-            print('::notice title=PXC laboratory evidence::' + evidence, flush=True)
+            # GitHub check annotations truncate messages at 4096 characters.
+            # Keep each chunk bounded and leave the complete report in artifact.
+            evidence = json.dumps(report, separators=(',', ':'))
+            for index, offset in enumerate(range(0, len(evidence), 3000)):
+                chunk = evidence[offset:offset + 3000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                print(f'::notice title=PXC laboratory evidence chunk {index:03d}::' + chunk, flush=True)
+            if report['result'] == 'FAIL':
+                for path in sorted(output.glob('*.log')):
+                    if path.name.startswith(('mysql-', 'pxc-', 'tasks-', 'runtime-')):
+                        contents = path.read_text(errors='replace')
+                        diagnostic = (contents[:2000] + '\n[... bounded diagnostic ...]\n' + contents[-1400:]
+                                      if len(contents) > 3500 else contents)
+                        diagnostic = diagnostic.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                        print('::notice title=PXC diagnostic ' + path.name + '::' + diagnostic, flush=True)
         (output / 'summary.md').write_text('\n'.join([
             f"Result: {report['result']}", f"Checks: {len(report['checks'])}",
             f"Full outage: {report.get('full_outage_recovery', 'NOT_REACHED')}",
