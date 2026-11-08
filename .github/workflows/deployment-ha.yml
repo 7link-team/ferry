@@ -3,7 +3,7 @@ name: Container deployment acceptance
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'ci/e2e-remediation-*']
+    branches: [main, 'ci/e2e-remediation-*', 'ci/scenario-templates-*']
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
@@ -11,6 +11,9 @@ on:
       - scripts/test-deployments-ui.mjs
       - src/**
       - crates/server/src/deployments/**
+      - crates/server/src/templates.rs
+      - crates/server/src/templates/**
+      - crates/server/src/i18n/repository-*.json
       - crates/runner/**
       - crates/protocol/**
   pull_request:
@@ -21,6 +24,9 @@ on:
       - scripts/test-deployments-ui.mjs
       - src/**
       - crates/server/src/deployments/**
+      - crates/server/src/templates.rs
+      - crates/server/src/templates/**
+      - crates/server/src/i18n/repository-*.json
       - crates/runner/**
       - crates/protocol/**
 
@@ -40,6 +46,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - mode: docker
+            swarm_ha: "0"
+            label: Docker application example acceptance
           - mode: compose
             swarm_ha: "0"
             label: Compose deployment and browser acceptance
@@ -50,6 +59,7 @@ jobs:
       FERRY_REQUIRE_ALL: "1"
       FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
       FERRY_TEST_SWARM_HA: ${{ matrix.swarm_ha }}
+      FERRY_TEST_SCENARIO_TEMPLATES: "1"
       FERRY_TEST_OUTPUT_DIR: ${{ github.workspace }}/harness-logs/fixtures
     steps:
       - uses: actions/checkout@v4
@@ -67,6 +77,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y openssh-client python3 git curl
           docker info
+          # Reuse the runner's Compose v2 plugin explicitly. Copy this exact
+          # binary into the owned SSH/Agent fixture; record version and SHA256.
+          compose_path=$(docker info --format '{{json .ClientInfo.Plugins}}' | python3 -c 'import json,sys; print(next(p["Path"] for p in json.load(sys.stdin) if p["Name"] == "compose"))')
+          test -x "$compose_path"
+          echo "FERRY_TEST_COMPOSE_BINARY=$compose_path" >> "$GITHUB_ENV"
+          "$compose_path" version --short
           mkdir -p "$FERRY_TEST_OUTPUT_DIR"
       - run: npm ci
       - name: Install the deployment browser
@@ -75,7 +91,9 @@ jobs:
       - run: npm run build
       - run: cargo fmt --all -- --check
       - name: Build server and HostAgent
-        run: cargo build --locked -p ferry-server -p ferry-runner
+        run: |
+          cargo build --locked -p ferry-server -p ferry-runner
+          cargo test --locked -p ferry-server templates::tests:: -- --nocapture
       - name: Deployment acceptance through SSH and HostAgent
         shell: bash
         run: |
@@ -88,13 +106,20 @@ jobs:
             python3 .github/scripts/annotate-failures.py harness-logs/acceptance.log
             exit 1
           fi
+      - name: Application template selection and marketplace compatibility
+        if: matrix.mode == 'compose'
+        env:
+          FERRY_SCENARIO_UI_OUTPUT: ${{ github.workspace }}/harness-logs/template-ui
+        run: node scripts/test-marketplace-ui.mjs
       - name: Record the tested boundary
         if: always()
         run: |
           {
             echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
-            if [ "$FERRY_TEST_DEPLOY_MODE" = compose ]; then
+            if [ "$FERRY_TEST_DEPLOY_MODE" = docker ]; then
+              echo 'Real Docker deployment through SSH and HostAgent using the initialized HTTP application template.'
+            elif [ "$FERRY_TEST_DEPLOY_MODE" = compose ]; then
               echo 'Real Compose deployment through SSH and HostAgent, including browser acceptance.'
             else
               echo 'One manager and two workers, each with an isolated Docker daemon.'
@@ -113,3 +138,4 @@ jobs:
             harness-logs/acceptance.log
             harness-logs/fixtures/**/acceptance.json
             harness-logs/fixtures/**/*.log
+            harness-logs/template-ui/*.png

@@ -1,0 +1,97 @@
+name: Ferry shared dependency failure acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ci/ferry-dependencies-*']
+    paths:
+      - .github/workflows/ferry-dependency-acceptance.yml
+      - scripts/test-cluster.mjs
+      - scripts/test-cluster-dependencies.py
+      - crates/**
+      - Cargo.lock
+permissions:
+  contents: read
+concurrency:
+  group: ferry-dependencies-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+          save-if: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - name: Build this source and pinned transport/worker dependencies
+        env:
+          ACTIONS_WORKER_TARGETS: linux/amd64
+        run: |
+          cargo build --locked -p ferry-server -p ferry-runner
+          cargo test --locked -p ferry-server websocket_rejections_and_terminal_errors_follow_each_readers_locale -- --nocapture
+          bash scripts/build-actions-workers.sh
+          go install github.com/nats-io/nats-server/v2@v2.15.2
+          mkdir -p dependency-suite
+          cp target/debug/ferry-server target/debug/ferry-runner dependency-suite/
+          cp "$(go env GOPATH)/bin/nats-server" dependency-suite/
+          cp -r target/debug/actions-workers dependency-suite/
+          strip dependency-suite/ferry-server dependency-suite/ferry-runner
+          git rev-parse HEAD > dependency-suite/source-commit.txt
+          sha256sum dependency-suite/ferry-server dependency-suite/ferry-runner dependency-suite/nats-server dependency-suite/actions-workers/* > dependency-suite/SHA256SUMS
+          tar -czf dependency-suite.tar.gz dependency-suite
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ferry-dependency-binaries-${{ github.sha }}
+          path: dependency-suite.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+  dependencies:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [postgres, mysql]
+    env:
+      FERRY_HA_LAB: '1'
+      FERRY_HA_OUTPUT: ${{ github.workspace }}/dependency-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: ferry-dependency-binaries-${{ github.sha }}
+      - name: Verify the exact built suite
+        run: |
+          tar -xzf dependency-suite.tar.gz
+          test "$(cat dependency-suite/source-commit.txt)" = "$GITHUB_SHA"
+          sha256sum --check dependency-suite/SHA256SUMS
+      - name: Real Ferry cluster and dependency interruption/recovery
+        env:
+          FERRY_BINARY: ${{ github.workspace }}/dependency-suite/ferry-server
+          RUNNER_BINARY: ${{ github.workspace }}/dependency-suite/ferry-runner
+          NATS_SERVER_BINARY: ${{ github.workspace }}/dependency-suite/nats-server
+          ACTIONS_WORKER_DIR: ${{ github.workspace }}/dependency-suite/actions-workers
+        run: python3 scripts/test-cluster-dependencies.py '${{ matrix.database }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ferry-dependencies-${{ matrix.database }}-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            dependency-evidence/acceptance.json
+            dependency-evidence/*.log
+            dependency-evidence/native-logs/*.log

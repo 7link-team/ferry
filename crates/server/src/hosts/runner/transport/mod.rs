@@ -260,6 +260,16 @@ mod tests {
             locale: Locale,
             payload: Value,
         ) -> String {
+            handshake_response(address, path, locale, payload, false).await
+        }
+
+        async fn handshake_response(
+            address: std::net::SocketAddr,
+            path: &str,
+            locale: Locale,
+            payload: Value,
+            retryable: bool,
+        ) -> String {
             let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
             let request = format!(
                 "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAccept-Language: {}\r\n\r\n",
@@ -294,7 +304,16 @@ mod tests {
                     .map(|(index, byte)| byte ^ mask[index % 4]),
             );
             socket.write_all(&frame).await.unwrap();
-            assert_eq!(socket.read_u8().await.unwrap(), 0x81);
+            let opcode = socket.read_u8().await.unwrap();
+            if retryable {
+                assert_eq!(
+                    opcode & 0x0f,
+                    8,
+                    "database failure must close without permanently rejecting the agent"
+                );
+                return String::new();
+            }
+            assert_eq!(opcode, 0x81);
             let length = socket.read_u8().await.unwrap();
             assert_eq!(length & 0x80, 0);
             let length = match length {
@@ -466,6 +485,31 @@ mod tests {
                     .contains("provider 原文 {runnerExtra.terminalEnded}")
             );
         }
+        // Real authentication query against an unavailable connection pool.
+        // Previously this produced a permanent Rejected frame and stopped Runner.
+        scratch.db.clone().close().await.unwrap();
+        // Use the protocol serializer so this stays aligned with the auth tag.
+        let hello = serde_json::to_value(wire::Hello {
+            version: wire::VERSION,
+            auth: wire::Auth::Key {
+                host_id: "7".into(),
+                key,
+            },
+            hostname: "fixture".into(),
+            ip_address: String::new(),
+            os: "linux".into(),
+            arch: "amd64".into(),
+            agent_version: String::new(),
+            managed_updates: false,
+            supports_monitor: false,
+        })
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            handshake_response(address, "/connect", Locale::EnUs, hello, true),
+        )
+        .await
+        .unwrap();
         server.abort();
     }
 
