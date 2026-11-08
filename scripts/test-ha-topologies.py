@@ -69,11 +69,11 @@ class Lab:
     def name(self, node):
         return self.prefix + '-' + node
 
-    def start(self, node, image, args, port=None, env=None, data=False, shell=False):
+    def start(self, node, image, args, port=None, env=None, data=False, shell=False, host_port=None):
         name = self.name(node)
         options = ['run', '-d', '--name', name, '--network', self.prefix]
         if port:
-            options += ['-p', f'127.0.0.1::{port}']
+            options += ['-p', f'127.0.0.1:{host_port or ""}:{port}']
         if data:
             volume = self.name(node) + '-data'
             self.command('volume', 'create', volume)
@@ -308,11 +308,19 @@ def xxl_job(lab):
 
     lab.eventually(lambda: sql('SELECT 1', False) == '1', 'final MySQL TCP service', timeout=180)
     sql(schema.decode(), False)
+    import socket
     for node in ('a0', 'a1'):
         params = ('--spring.datasource.url=jdbc:mysql://' + lab.name('db') + ':3306/xxl_job?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC '
                   '--spring.datasource.username=root --spring.datasource.password=' + password +
                   ' --xxl.job.accessToken=' + token + ' --xxl.job.i18n=en')
-        lab.start(node, 'xxl-admin', [], port=8080, env={'PARAMS': params, 'JAVA_OPTS': '-Xms128m -Xmx384m', 'TZ': 'UTC'})
+        # Docker can allocate a different published port on stop/start when the
+        # host port is omitted. The executor's configured admin URLs must stay
+        # reachable across this restart, so bind an explicitly selected port.
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            admin_port = listener.getsockname()[1]
+        lab.start(node, 'xxl-admin', [], port=8080, host_port=admin_port,
+                  env={'PARAMS': params, 'JAVA_OPTS': '-Xms128m -Xmx384m', 'TZ': 'UTC'})
     urls = {node: 'http://127.0.0.1:' + str(lab.port(node, 8080)) + '/xxl-job-admin' for node in ('a0', 'a1')}
     clients = {node: urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())) for node in urls}
 
@@ -332,7 +340,6 @@ def xxl_job(lab):
               and sql('SELECT COUNT(*) FROM xxl_job_lock') == '1')
     network = json.loads(lab.command('network', 'inspect', lab.prefix).stdout)[0]
     gateway = network['IPAM']['Config'][0]['Gateway']
-    import socket
     with socket.socket() as listener:
         listener.bind(('0.0.0.0', 0))
         executor_port = listener.getsockname()[1]
@@ -407,6 +414,7 @@ def xxl_job(lab):
         lab.check('XXL-04 surviving admin takes over after the last scheduling admin exits',
                   len([r for r in rows() if r['id'] > boundary and r['handle'] == 200]) >= 3)
         lab.command('start', lab.name(active))
+        assert urls[active] == 'http://127.0.0.1:' + str(lab.port(active, 8080)) + '/xxl-job-admin', 'admin callback endpoint changed on restart'
         lab.eventually(lambda: api(active, '/login', {'userName': 'admin', 'password': '123456'}),
                        'returning admin ready', timeout=120)
         returning_boundary = max(r['id'] for r in rows())
