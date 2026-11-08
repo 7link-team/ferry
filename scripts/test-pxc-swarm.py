@@ -136,7 +136,8 @@ def main():
         if join:
             args += ['--env', 'CLUSTER_JOIN=' + join]
         manager(*args, IMAGE, 'mysqld', '--pxc-encrypt-cluster-traffic=OFF',
-                '--innodb-buffer-pool-size=128M', '--max-connections=40', timeout=120)
+                '--innodb-buffer-pool-size=128M', '--max-connections=40',
+                '--log-error=/var/lib/mysql/lab-error.log', timeout=120)
 
     def diagnostics():
         for node in NODES:
@@ -149,6 +150,15 @@ def main():
             (output / f'pxc-{node}.log').write_text(redact(result.stdout + result.stderr))
             result = manager('service', 'ps', '--no-trunc', prefix + '-db-' + node, check=False, timeout=15)
             (output / f'tasks-{node}.log').write_text(redact(result.stdout + result.stderr))
+            # Server startup errors are written inside the data volume, not always
+            # to service stdout. Read only this laboratory's existing volume.
+            volume = prefix + '-data-' + node
+            if engine(node, 'volume', 'inspect', volume, check=False).returncode == 0:
+                result = engine(node, 'run', '--rm', '--network', 'none', '--entrypoint', 'sh',
+                                '--mount', 'type=volume,source=' + volume + ',target=/evidence,readonly',
+                                IMAGE, '-c', 'tail -n 100 /evidence/lab-error.log /evidence/*.err 2>/dev/null',
+                                check=False, timeout=30)
+                (output / f'mysql-{node}.log').write_text(redact(result.stdout + result.stderr))
 
     try:
         check('Linux Docker laboratory', os.name == 'posix' and docker('info').returncode == 0)
@@ -298,6 +308,10 @@ def main():
             diagnostics()
         except Exception as error:
             report['diagnostic_error'] = redact(str(error))[-1000:]
+        if report['result'] == 'FAIL':
+            report['diagnostics'] = {path.name: path.read_text(errors='replace')[-10000:]
+                                     for path in output.glob('*.log')
+                                     if path.name.startswith(('mysql-', 'pxc-', 'tasks-'))}
         (output / 'acceptance.json').write_text(json.dumps(report, indent=2), encoding='utf8')
         if os.environ.get('GITHUB_ACTIONS') == 'true':
             evidence = json.dumps(report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
