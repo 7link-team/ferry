@@ -818,5 +818,13 @@
   "templates.examples.natsToken": "Client authentication secret variable",
   "templates.examples.natsConfig": "Configuration template name or ID",
   "templates.examples.natsPort": "Published client port",
-  "templates.examples.natsAdvertise": "Advertised client endpoint (host:port)"
+  "templates.examples.natsAdvertise": "Advertised client endpoint (host:port)",
+  "templates.examples.redisName": "Example: Redis replication with Sentinel",
+  "templates.examples.redisDescription": "Three Redis members and three Sentinels: Compose on one host, or Stack on three assigned nodes (ferry-redis=a/b/c). Create a deploy secret variable and provide host IPv4 addresses reachable by every member and client. Listening, published and advertised ports must match; all six ports must be unique. Uses example-redis-start and six persistent volumes for data and dynamic role configuration. Clients discover master example through the three Sentinel endpoints and authenticate both Sentinel and data connections. Asynchronous replication does not guarantee zero loss. Fewer than two Sentinels prevents failover, not Redis writes. No TLS, cross-host volume migration or full-outage recovery. Initialization does not deploy.",
+  "templates.examples.redisStartDescription": "Shared Redis/Sentinel startup script creates volume configuration only on first boot and preserves dynamic roles afterward. Runtime configuration contains credentials: protect persistent volumes. Password rotation requires coordinating all six members.",
+  "templates.examples.redisPassword": "Authentication secret variable",
+  "templates.examples.redisStartup": "Startup configuration template name or ID",
+  "templates.examples.redisIp": "Reachable host IPv4",
+  "templates.examples.redisDataPort": "Data listening and published port",
+  "templates.examples.redisSentinelPort": "Sentinel listening and published port"
 }

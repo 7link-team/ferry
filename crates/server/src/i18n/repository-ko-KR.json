@@ -818,5 +818,13 @@
   "templates.examples.natsToken": "클라이언트 인증 비밀 변수",
   "templates.examples.natsConfig": "설정 템플릿 이름 또는 ID",
   "templates.examples.natsPort": "클라이언트 공개 포트",
-  "templates.examples.natsAdvertise": "클라이언트 알림 주소 (호스트:포트)"
+  "templates.examples.natsAdvertise": "클라이언트 알림 주소 (호스트:포트)",
+  "templates.examples.redisName": "예제: Redis 복제 및 Sentinel",
+  "templates.examples.redisDescription": "Redis 3개와 Sentinel 3개입니다. Compose는 단일 호스트, Stack은 지정된 3개 노드(ferry-redis=a/b/c)에 배치합니다. deploy 범위 비밀 변수를 만들고 모든 멤버와 클라이언트가 접근할 수 있는 호스트 IPv4를 입력하세요. 수신·공개·알림 포트가 같아야 하며 6개 포트가 모두 고유해야 합니다. example-redis-start와 영구 볼륨 6개로 데이터와 동적 역할 설정을 보존합니다. 클라이언트는 Sentinel 엔드포인트 3개로 논리 마스터 example을 찾고 Sentinel 및 데이터 연결을 모두 인증합니다. 비동기 복제는 데이터 무손실을 보장하지 않습니다. Sentinel이 2개 미만이면 장애 조치가 불가하지만 Redis 쓰기를 금지하지는 않습니다. TLS, 호스트 간 볼륨 이동, 전체 중단 복구는 포함하지 않습니다. 초기화만 수행하며 배포하지 않습니다.",
+  "templates.examples.redisStartDescription": "Redis/Sentinel 공통 시작 스크립트는 첫 부팅에만 볼륨 설정을 만들고 이후 동적 역할을 보존합니다. 실행 설정에 인증 정보가 포함되므로 영구 볼륨을 보호하세요. 비밀번호 교체는 6개 멤버의 조정이 필요합니다.",
+  "templates.examples.redisPassword": "인증 비밀 변수",
+  "templates.examples.redisStartup": "시작 설정 템플릿 이름 또는 ID",
+  "templates.examples.redisIp": "접근 가능한 호스트 IPv4",
+  "templates.examples.redisDataPort": "데이터 수신 및 공개 포트",
+  "templates.examples.redisSentinelPort": "Sentinel 수신 및 공개 포트"
 }

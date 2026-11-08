@@ -1,0 +1,581 @@
+{
+  "apiVersion": "ferry/v2",
+  "kind": "Application",
+  "metadata": {
+    "name": "example-redis-sentinel"
+  },
+  "strategy": {
+    "type": "recreate",
+    "healthTimeout": 180
+  },
+  "services": [
+    {
+      "name": "redis-a",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "data"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "master"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.data_port_a }}",
+          "published": "{{ .Values.data_port_a }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "redis-a-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "512Mi"
+        }
+      }
+    },
+    {
+      "name": "sentinel-a",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "sentinel"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.sentinel_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "master"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.sentinel_port_a }}",
+          "published": "{{ .Values.sentinel_port_a }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "sentinel-a-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "128Mi"
+        }
+      }
+    },
+    {
+      "name": "redis-b",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "data"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_b }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.data_port_b }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "replica"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.data_port_b }}",
+          "published": "{{ .Values.data_port_b }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "redis-b-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "512Mi"
+        }
+      }
+    },
+    {
+      "name": "sentinel-b",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "sentinel"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_b }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.sentinel_port_b }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "replica"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.sentinel_port_b }}",
+          "published": "{{ .Values.sentinel_port_b }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "sentinel-b-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "128Mi"
+        }
+      }
+    },
+    {
+      "name": "redis-c",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "data"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_c }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.data_port_c }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "replica"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.data_port_c }}",
+          "published": "{{ .Values.data_port_c }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "redis-c-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "512Mi"
+        }
+      }
+    },
+    {
+      "name": "sentinel-c",
+      "image": "redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b22144472b6952",
+      "command": [
+        "sh",
+        "/etc/example-redis-start.sh"
+      ],
+      "env": [
+        {
+          "name": "REDIS_KIND",
+          "value": "sentinel"
+        },
+        {
+          "name": "REDIS_NODE_IP",
+          "value": "{{ .Values.ip_c }}"
+        },
+        {
+          "name": "REDIS_PORT",
+          "value": "{{ .Values.sentinel_port_c }}"
+        },
+        {
+          "name": "REDIS_INITIAL_IP",
+          "value": "{{ .Values.ip_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_PORT",
+          "value": "{{ .Values.data_port_a }}"
+        },
+        {
+          "name": "REDIS_INITIAL_ROLE",
+          "value": "replica"
+        },
+        {
+          "name": "REDISCLI_AUTH",
+          "valueFrom": "{{ .Values.password }}"
+        }
+      ],
+      "ports": [
+        {
+          "container": "{{ .Values.sentinel_port_c }}",
+          "published": "{{ .Values.sentinel_port_c }}"
+        }
+      ],
+      "files": [
+        {
+          "path": "/etc/example-redis-start.sh",
+          "fromTemplate": "{{ .Values.startup }}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "sentinel-c-data",
+          "path": "/data"
+        }
+      ],
+      "resources": {
+        "limits": {
+          "memory": "128Mi"
+        }
+      }
+    }
+  ],
+  "overrides": {
+    "compose": {
+      "services": {
+        "redis-a": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_a }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        },
+        "sentinel-a": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_a }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        },
+        "redis-b": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_b }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        },
+        "sentinel-b": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_b }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        },
+        "redis-c": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_c }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        },
+        "sentinel-c": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_c }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "restart": "unless-stopped"
+        }
+      }
+    },
+    "stack": {
+      "services": {
+        "redis-a": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_a }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == a"
+              ]
+            }
+          }
+        },
+        "sentinel-a": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_a }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == a"
+              ]
+            }
+          }
+        },
+        "redis-b": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_b }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == b"
+              ]
+            }
+          }
+        },
+        "sentinel-b": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_b }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == b"
+              ]
+            }
+          }
+        },
+        "redis-c": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.data_port_c }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == c"
+              ]
+            }
+          }
+        },
+        "sentinel-c": {
+          "healthcheck": {
+            "test": [
+              "CMD-SHELL",
+              "redis-cli --raw -p {{ .Values.sentinel_port_c }} PING | grep -qx PONG"
+            ],
+            "interval": "2s",
+            "timeout": "2s",
+            "retries": 15,
+            "start_period": "5s"
+          },
+          "deploy": {
+            "placement": {
+              "constraints": [
+                "node.labels.ferry-redis == c"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -818,5 +818,13 @@
   "templates.examples.natsToken": "客戶端驗證密鑰變數",
   "templates.examples.natsConfig": "設定範本名稱或 ID",
   "templates.examples.natsPort": "客戶端發布連接埠",
-  "templates.examples.natsAdvertise": "客戶端通告端點（主機:連接埠）"
+  "templates.examples.natsAdvertise": "客戶端通告端點（主機:連接埠）",
+  "templates.examples.redisName": "範例：Redis 主從與 Sentinel",
+  "templates.examples.redisDescription": "三個 Redis 與三個 Sentinel，Compose 單機或 Stack 固定三節點（標籤 ferry-redis=a/b/c）。先建立 deploy 密鑰變數，填寫所有成員及客戶端均可達的主機 IPv4；監聽、發布與通告連接埠一致，六個連接埠須唯一。使用 example-redis-start，六份磁碟區保存資料與動態選主設定。客戶端透過三個 Sentinel 入口探索邏輯主 example，並對 Sentinel 及資料連線驗證。非同步複製不保證零遺失；少於兩個 Sentinel 不允許容錯移轉，不代表 Redis 禁寫。不含 TLS、跨機磁碟區遷移或全停復原；僅初始化，不部署。",
+  "templates.examples.redisStartDescription": "Redis/Sentinel 共用啟動指令碼，僅首次建立磁碟區內設定；後續保留動態角色。執行設定含驗證資訊，須保護持久磁碟區；密碼輪換需六成員協同。",
+  "templates.examples.redisPassword": "驗證密鑰變數",
+  "templates.examples.redisStartup": "啟動指令碼設定範本名稱或 ID",
+  "templates.examples.redisIp": "可達主機 IPv4",
+  "templates.examples.redisDataPort": "資料監聽與發布連接埠",
+  "templates.examples.redisSentinelPort": "Sentinel 監聽與發布連接埠"
 }

@@ -77,6 +77,22 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']
+        redis_template=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-redis-sentinel')
+        redis_path=root+'/app-templates/'+redis_template['id']
+        request(outsider,f'/workspaces/{workspace_other}/app-templates/'+redis_template['id'],expected=404)
+        request(owner,redis_path+'/renderings',{'version':1,'values':{}},expected=400)
+        redis_values={'password':'redis-secret','ip_a':'192.0.2.10','ip_b':'192.0.2.11','ip_c':'192.0.2.12'}
+        redis_doc=json.loads(request(owner,redis_path+'/renderings',{'version':1,'values':redis_values})['manifest'])
+        check(len(redis_doc['services'])==6 and len({s['volumes'][0]['name'] for s in redis_doc['services']})==6,'Redis and Sentinel use six independent persistent volumes')
+        check(all(s['env'][6]['valueFrom']=='variable/redis-secret' and s['ports'][0]['container']==s['ports'][0]['published'] for s in redis_doc['services']),'Redis secret stays a variable reference and published endpoints match listening ports')
+        invalid=dict(redis_values,data_port_a=65536)
+        request(owner,redis_path+'/renderings',{'version':1,'values':invalid},expected=400)
+        request(guest,redis_path+'/renderings',{'version':1,'values':redis_values})
+        request(anonymous,redis_path+'/renderings',{'version':1,'values':redis_values},expected=401)
+        check(True,'Redis template rejects invalid ports and anonymous rendering while readers can preview')
+        redis_config=next(row for row in request(owner,root+'/config-templates')['items'] if row['name']=='example-redis-start')
+        request(outsider,f'/workspaces/{workspace_other}/config-templates/'+redis_config['id'],expected=404)
+        check(redis_config['parameters']=='[]' and 'sentinel.conf' in redis_config['content'],'Redis startup configuration is a workspace-owned template')
         nats_template=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-nats')
         nats_path=root+'/app-templates/'+nats_template['id']
         nats_values={'token':'nats-secret','advertise_a':'a.example.invalid:4222','advertise_b':'b.example.invalid:4223','advertise_c':'c.example.invalid:4224'}

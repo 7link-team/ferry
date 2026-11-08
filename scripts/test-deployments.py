@@ -289,7 +289,7 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         native_template = native_build_template = None
         if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1':
             templates = api(f'/workspaces/{workspace_ops}/app-templates')['items']
-            check('new workspace contains all three application examples', len(templates) == 3)
+            check('new workspace contains all four application examples', len(templates) == 4)
             http_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-http')
             native_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-native-http')
             pipelines = api(f'/workspaces/{workspace_ops}/pipeline-templates?workflow_kind=actions')['items']
@@ -457,6 +457,15 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         for kind,host in [('runner',runner_id),('ssh',ssh_id)]:
             print('== '+kind,flush=True)
             web_port=port()
+            if os.environ.get('FERRY_TEST_REDIS_TEMPLATES') == '1' and mode in ('compose', 'stack'):
+                import importlib.util
+                redis_spec=importlib.util.spec_from_file_location('redis_application_acceptance',Path(__file__).with_name('redis_application_acceptance.py'))
+                redis_module=importlib.util.module_from_spec(redis_spec)
+                redis_spec.loader.exec_module(redis_module)
+                result=redis_module.exercise(api,create,start,done,check,command,mode,workspace_ops,host,kind,
+                    deployment_workdir,templates,projects,engine if mode=='stack' else None,swarm_nodes,
+                    swarm_ids if mode=='stack' else {},name,work,port)
+                report.setdefault('redis_example_runs',[]).append(result)
             if test_nats:
                 assert os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1', 'NATS acceptance requires initialized scenario templates'
                 import asyncio

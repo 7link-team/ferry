@@ -158,6 +158,54 @@ pub(crate) async fn seed_examples(
     })
     .exec(conn)
     .await?;
+    let content = include_str!("templates/examples/redis-start.sh");
+    validate_template(content, "[]", Kind::Config)?;
+    crate::entities::config_templates::Entity::insert(
+        crate::entities::config_templates::ActiveModel {
+            id: Set(s.next_id()?.into()),
+            workspace_id: Set(workspace.into()),
+            name: Set("example-redis-start".into()),
+            description: Set(crate::i18n::message(
+                "templates.examples.redisStartDescription",
+            )),
+            content: Set(content.into()),
+            parameters: Set("[]".into()),
+            version: Set(1),
+            created_at: Set(now),
+            updated_at: Set(now),
+        },
+    )
+    .exec(conn)
+    .await?;
+    let content = include_str!("templates/examples/redis-sentinel.json");
+    let mut definitions = vec![
+        json!({"name":"password","label":crate::i18n::message("templates.examples.redisPassword"),"type":"string","secret":true}),
+        json!({"name":"startup","label":crate::i18n::message("templates.examples.redisStartup"),"type":"string","min_length":1,"max_length":60,"default":"example-redis-start"}),
+    ];
+    for (index, suffix) in ["a", "b", "c"].iter().enumerate() {
+        definitions.push(json!({"name":format!("ip_{suffix}"),"label":format!("{} {}",crate::i18n::message("templates.examples.redisIp"),suffix.to_uppercase()),"type":"string","min_length":7,"max_length":15}));
+        for (prefix, label, port) in [
+            ("data", "templates.examples.redisDataPort", 6379),
+            ("sentinel", "templates.examples.redisSentinelPort", 26379),
+        ] {
+            definitions.push(json!({"name":format!("{prefix}_port_{suffix}"),"label":format!("{} {}",crate::i18n::message(label),suffix.to_uppercase()),"type":"integer","min":1,"max":65535,"default":port+index}));
+        }
+    }
+    let parameters = serde_json::to_string(&definitions).map_err(|_| ApiError::missing())?;
+    validate_template(content, &parameters, Kind::App)?;
+    crate::entities::app_templates::Entity::insert(crate::entities::app_templates::ActiveModel {
+        id: Set(s.next_id()?.into()),
+        workspace_id: Set(workspace.into()),
+        name: Set(crate::i18n::message("templates.examples.redisName")),
+        description: Set(crate::i18n::message("templates.examples.redisDescription")),
+        content: Set(content.into()),
+        parameters: Set(parameters),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(conn)
+    .await?;
     Ok(())
 }
 
@@ -1121,8 +1169,8 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(apps_a["total"], 3);
-        assert_eq!(apps_b["total"], 3);
+        assert_eq!(apps_a["total"], 4);
+        assert_eq!(apps_b["total"], 4);
         assert_ne!(apps_a["items"][0]["id"], apps_b["items"][0]["id"]);
         let app = apps_a["items"].as_array().unwrap().iter().find(|item| {
             serde_json::from_str::<Value>(item["content"].as_str().unwrap()).unwrap()["metadata"]["name"] == "example-http"
@@ -1223,10 +1271,88 @@ mod tests {
         .await
         .unwrap()
         .0;
-        assert_eq!(configs["total"], 1);
+        assert_eq!(configs["total"], 2);
         assert_eq!(
-            configs["items"][0]["content"],
+            configs["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["name"] == "example-nats-config")
+                .unwrap()["content"],
             include_str!("templates/examples/nats-config.conf")
+        );
+        let redis = apps_a["items"].as_array().unwrap().iter().find(|item| {
+            serde_json::from_str::<Value>(item["content"].as_str().unwrap()).unwrap()["metadata"]["name"] == "example-redis-sentinel"
+        }).unwrap();
+        let values = BTreeMap::from([
+            ("password".into(), json!("redis-password")),
+            ("ip_a".into(), json!("192.0.2.10")),
+            ("ip_b".into(), json!("192.0.2.11")),
+            ("ip_c".into(), json!("192.0.2.12")),
+        ]);
+        let text = render_content(
+            redis["content"].as_str().unwrap(),
+            redis["parameters"].as_str().unwrap(),
+            &values,
+            Kind::App,
+        )
+        .unwrap();
+        let doc: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(doc["services"].as_array().unwrap().len(), 6);
+        for mode in ["compose", "stack"] {
+            let manifest = crate::deployments::manifest::parse_for(&text, mode).unwrap();
+            let output: Value = serde_json::from_str(
+                &crate::deployments::manifest::render_for(&manifest, mode).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(output["volumes"].as_object().unwrap().len(), 6);
+            for service in doc["services"].as_array().unwrap() {
+                let name = service["name"].as_str().unwrap();
+                assert_eq!(service["env"][6]["valueFrom"], "variable/redis-password");
+                assert_eq!(
+                    service["ports"][0]["container"],
+                    service["ports"][0]["published"]
+                );
+                assert_eq!(service["files"][0]["fromTemplate"], "example-redis-start");
+                assert_eq!(
+                    output["services"][name]["healthcheck"]["test"][0],
+                    "CMD-SHELL"
+                );
+                if mode == "stack" {
+                    assert_eq!(
+                        output["services"][name]["deploy"]["placement"]["constraints"],
+                        json!([format!(
+                            "node.labels.ferry-redis == {}",
+                            name.chars().last().unwrap()
+                        )])
+                    );
+                } else {
+                    assert!(
+                        output["services"][name]["deploy"]
+                            .get("placement")
+                            .is_none()
+                    );
+                }
+            }
+        }
+        assert!(crate::deployments::manifest::parse_for(&text, "native").is_err());
+        assert!(
+            render_content(
+                redis["content"].as_str().unwrap(),
+                redis["parameters"].as_str().unwrap(),
+                &BTreeMap::new(),
+                Kind::App
+            )
+            .is_err()
+        );
+        assert_eq!(
+            configs["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["name"] == "example-redis-start")
+                .unwrap()["content"],
+            include_str!("templates/examples/redis-start.sh")
         );
         for invalid in [
             BTreeMap::new(),
@@ -1313,7 +1439,7 @@ mod tests {
             .await
             .unwrap()
             .0["total"],
-            2
+            3
         );
         assert_eq!(
             apps::list(
@@ -1324,7 +1450,7 @@ mod tests {
             .await
             .unwrap()
             .0["total"],
-            3
+            4
         );
         // Include a canonical graph discriminator to check SQL filtering, count
         // and pagination alongside the seeded Actions template.

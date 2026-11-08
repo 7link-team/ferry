@@ -124,7 +124,7 @@ try {
     await p.getByRole('button',{name:'导入应用模板',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/app-templates/*`);
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
-    assert.equal(templates.total,4);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
+    assert.equal(templates.total,5);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
     assert.equal(templates.items.filter(row=>JSON.parse(row.content).metadata?.name==='example-http').length,1);
     const example=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-http');
     const nativeExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-native-http');
@@ -188,6 +188,31 @@ try {
         await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`nats-template-${width}.png`)});
       }
     }
+    const redisExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-redis-sentinel');
+    assert(redisExample);
+    for(const width of [1440,900,390,320]){
+      await p.setViewportSize({width,height:900});
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${redisExample.id}`);
+      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      for(const parameter of JSON.parse(redisExample.parameters)){
+        const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+        if(parameter.name==='password') await generator.getByRole('textbox',{name:label}).fill('redis-auth-secret');
+        if(parameter.name.startsWith('ip_')) await generator.getByRole('textbox',{name:label}).fill('192.0.2.'+({a:10,b:11,c:12}[parameter.name.at(-1)]));
+      }
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${redisExample.id}/renderings`)&&response.request().method()==='POST');
+      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      const response=await rendered;assert(response.ok(),await response.text());
+      const manifest=JSON.parse((await response.json()).manifest);
+      assert.equal(manifest.services.length,6);
+      assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,6);
+      assert(manifest.services.every(service=>service.env[6].valueFrom==='variable/redis-auth-secret'));
+      assert(manifest.services.every(service=>service.ports[0].container===service.ports[0].published));
+      assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`Redis page overflow at ${width}`);
+      if(process.env.FERRY_SCENARIO_UI_OUTPUT){
+        await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`redis-template-${width}.png`)});
+      }
+    }
     const deployments=await(await owner.request.get(`${origin}/api${root}/deployments`)).json();
     assert.equal(deployments.total,0,'Selecting and rendering an example must not deploy or save an application');
     await p.setViewportSize({width:1280,height:800});
@@ -197,7 +222,7 @@ try {
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});
     assert(authorizedSyncs>0,'marketplace sync used the selected connection credential');
     assert.deepEqual(errors,[]);
-    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, container, Native and NATS scenario parameters at four widths without deployment and source deletion');
+    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, container, Native, NATS and Redis Sentinel scenario parameters at four widths without deployment and source deletion');
   } finally {fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}
 } finally {
   if (browser) await browser.close();
