@@ -1,7 +1,7 @@
 // Real three-server/JetStream/ordinary Runner acceptance. No installed services.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,mkdir,readFile,rm,open,copyFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,open,copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
@@ -26,18 +26,54 @@ const api=async(origin,path,body,method=body===undefined?'GET':'POST',expected=2
   const raw=await response.text();let value;try{value=raw?JSON.parse(raw):null;}catch{throw new Error(`${path}: invalid response`);}
   assert.equal(response.status,expected,`${path}: ${JSON.stringify(value)}`);return value;
 };
+const dependency=async(component,operation)=>{
+  const command=JSON.parse(process.env.FERRY_TEST_DEPENDENCY_CONTROL||'null');
+  assert(Array.isArray(command)&&command.length&&command.every(part=>typeof part==='string'),'isolated dependency control command required');
+  const child=spawn(command[0],[...command.slice(1),component,operation],{stdio:'inherit',windowsHide:true});
+  await new Promise((done,reject)=>{child.once('error',reject);child.once('exit',code=>code===0?done():reject(new Error(`Dependency ${component} ${operation} failed: ${code}`)));});
+};
 try {
   const suffix=process.platform==='win32'?'.exe':'';
   const serverBinary=join(work,'server'+suffix),runnerBinary=join(work,'runner'+suffix);
   await copyFile(process.env.FERRY_BINARY||'target/debug/ferry-server'+suffix,serverBinary);
   await copyFile(process.env.RUNNER_BINARY||'target/debug/ferry-runner'+suffix,runnerBinary);
-  const np=await port(),ports=[await port(),await port(),await port()];
+  const natsCount=Number(process.env.FERRY_TEST_NATS_NODES||1);
+  assert([1,3].includes(natsCount),'test supports one or three NATS nodes');
+  const brokerPorts=await Promise.all(Array.from({length:natsCount},()=>port()));
+  const monitorPorts=await Promise.all(Array.from({length:natsCount},()=>port()));
+  const routePorts=await Promise.all(Array.from({length:natsCount},()=>port()));
+  const np=brokerPorts[0],ports=[await port(),await port(),await port()];
   const origins=ports.map(port=>`http://127.0.0.1:${port}`);
   const namespace='test_'+randomBytes(6).toString('hex');
-  const env={...process.env,FERRY_MASTER_KEY:randomBytes(32).toString('hex'),FERRY_NATS_URL:`nats://127.0.0.1:${np}`,FERRY_CLUSTER_NAMESPACE:namespace,FERRY_DATABASE_URL:process.env.FERRY_TEST_DATABASE_URL||`sqlite://${join(work,'shared.sqlite').replaceAll('\\','/')}?mode=rwc`};
-  const natsArgs=['-js','-a','127.0.0.1','-p',String(np),'-sd',join(work,'jetstream')];
-  let nats=await launch(process.env.NATS_SERVER_BINARY||'nats-server',natsArgs,process.env,'nats');
-  await sleep(500);assert.equal(nats.exitCode,null,'NATS must start');
+  const env={...process.env,FERRY_MASTER_KEY:randomBytes(32).toString('hex'),FERRY_NATS_URL:`nats://127.0.0.1:${np}`,FERRY_NATS_REPLICAS:String(natsCount),FERRY_CLUSTER_NAMESPACE:namespace,FERRY_DATABASE_URL:process.env.FERRY_TEST_DATABASE_URL||`sqlite://${join(work,'shared.sqlite').replaceAll('\\','/')}?mode=rwc`};
+  const brokers=[],brokerConfigs=[];
+  const startBroker=async(index,label)=>launch(process.env.NATS_SERVER_BINARY||'nats-server',['-c',brokerConfigs[index]],process.env,`nats-${index}${label||''}`);
+  for(let n=0;n<natsCount;n++){
+    const config={server_name:`broker-${n}`,host:'127.0.0.1',port:brokerPorts[n],http:`127.0.0.1:${monitorPorts[n]}`,jetstream:{store_dir:join(work,`jetstream-${n}`)}};
+    if(natsCount===3)config.cluster={name:namespace,host:'127.0.0.1',port:routePorts[n],routes:routePorts.filter((_,i)=>i!==n).map(p=>`nats://127.0.0.1:${p}`)};
+    const path=join(work,`nats-${n}.json`);await writeFile(path,JSON.stringify(config));brokerConfigs.push(path);
+    brokers.push(await startBroker(n));
+  }
+  const monitor=async(index,path)=>(await fetch(`http://127.0.0.1:${monitorPorts[index]}${path}`,{signal:AbortSignal.timeout(2000)})).json();
+  await until(async()=>{
+    for(let n=0;n<natsCount;n++){
+      assert.equal(brokers[n].exitCode,null,`NATS ${n} must start`);
+      if(!(await monitor(n,'/healthz')).status?.includes('ok'))return false;
+      if(natsCount===3&&(await monitor(n,'/routez')).num_routes<2)return false;
+    }return true;
+  },'NATS private routes and health',60);
+  const streams=async()=>{
+    const items=[];
+    for(let n=0;n<natsCount;n++){
+      if(brokers[n].exitCode!==null||brokers[n].signalCode!==null)continue;
+      const detail=await monitor(n,'/jsz?accounts=true&streams=true&config=true');
+      for(const account of detail.account_details||[])for(const stream of account.stream_detail||[])if(stream.name.startsWith(`KV_${namespace}_`))items.push(stream);
+    }return items;
+  };
+  const replicated=async()=>{
+    const items=await streams();
+    return ['owners','sessions','coordination'].every(suffix=>items.some(s=>s.name===`KV_${namespace}_${suffix}`&&s.config?.num_replicas===3&&s.cluster?.leader&&(s.cluster.replicas||[]).filter(r=>r.current&&!r.offline).length===2));
+  };
   const servers=[];
   for(let n=0;n<3;n++){
     const dir=join(work,`server-${n}`);await mkdir(dir);
@@ -69,6 +105,21 @@ try {
   await until(async()=>{if(runner.launchError)throw runner.launchError;assert.equal(runner.exitCode,null,'Runner exited before connecting');return(await api(B,root)).state==='online';},'Runner control on A');
   const result=await api(B,root+'/connection-tests',{});assert(result.ok);
   console.log('PASS command from B, control on A, dedicated session callback forced to C');
+  if(natsCount===3){
+    await until(replicated,'three replicas of all Ferry KV buckets are current',90);
+    const owners=(await streams()).find(s=>s.name===`KV_${namespace}_owners`&&s.cluster?.leader);
+    const leader=Number(owners.cluster.leader.replace('broker-',''));
+    assert(Number.isInteger(leader)&&leader>=0&&leader<3);
+    await stop(brokers[leader]);
+    await until(async()=>{
+      const items=await streams();
+      return items.some(s=>s.name===owners.name&&s.cluster?.leader&&s.cluster.leader!==owners.cluster.leader)&&(await api(B,root+'/connection-tests',{})).ok;
+    },'Ferry commands recover through discovered peers after KV leader exits',90);
+    assert.equal(runner.exitCode,null);
+    brokers[leader]=await startBroker(leader,'-returned');
+    await until(replicated,'returned NATS member catches up all three Ferry KV buckets',90);
+    console.log('PASS three-node JetStream leader failure, real cross-instance command recovery and original-store replica catch-up');
+  }
   if(process.env.FERRY_TEST_CLUSTER_EXECUTIONS==='1'){
     const workspaceRoot=`/workspaces/${ws}`;
     let limit=(await api(B,workspaceRoot+'/settings')).items.find(row=>row.key==='pipeline_concurrent_runs');
@@ -135,9 +186,65 @@ try {
   const other=(await api(B,'/workspaces',{name:'Other',slug:'other'})).id;
   await api(B,`/workspaces/${other}/nodes/${host}/metrics?window_seconds=300&step_seconds=5`,undefined,'GET',404);
   console.log('PASS workspace isolation before cluster forwarding');
-  await stop(nats);
+  if(process.env.FERRY_TEST_CLUSTER_DEPENDENCIES==='1'){
+    assert.equal(env.FERRY_ARTIFACT_STORE,'s3','dependency acceptance requires actual S3');
+    assert.match(env.FERRY_DATABASE_URL,/^(postgres|mysql):\/\//,'dependency acceptance requires shared SQL');
+    const graph={engine:'ferry-graph',schema:1,nodes:[{id:'start',name:'start',type:'core.trigger.manual',type_version:1,params:{input_schema:{type:'object',properties:{}}},position:[0,0]}],connections:[]};
+    const workflow=(await api(A,`/workspaces/${ws}/workflows`,{name:'Cluster shared S3',definition:JSON.stringify(graph)},'POST',201)).id;
+    const assetRoot=`/workspaces/${ws}/workflows/${workflow}/assets`;
+    const uploadAsset=async(origin,bytes,expected=201)=>{
+      const data=new FormData();data.append('file',new Blob([bytes],{type:'application/octet-stream'}),'cluster.bin');
+      const response=await fetch(origin+'/api'+assetRoot,{method:'POST',headers:{Cookie:cookie,'X-Ferry-Request':'1'},body:data,signal:AbortSignal.timeout(90000)});
+      const body=await response.text();assert.equal(response.status,expected,body);return JSON.parse(body);
+    };
+    const assetBytes=randomBytes(128*1024+17),asset=await uploadAsset(A,assetBytes);
+    const assetPath=assetRoot+'/'+asset.asset.slice(7);
+    const readAsset=async(origin,expected=200)=>{
+      const response=await fetch(origin+'/api'+assetPath,{headers:{Cookie:cookie},signal:AbortSignal.timeout(90000)});
+      assert.equal(response.status,expected);const data=Buffer.from(await response.arrayBuffer());
+      if(expected===200)assert.deepEqual(data,assetBytes);return data;
+    };
+    await readAsset(origins[2]);
+    const range=await fetch(B+'/api'+assetPath,{headers:{Cookie:cookie,Range:'bytes=0-63'},signal:AbortSignal.timeout(40000)});
+    assert.equal(range.status,206);assert.deepEqual(Buffer.from(await range.arrayBuffer()),assetBytes.subarray(0,64));
+    await api(B,`/workspaces/${other}/workflows/${workflow}/assets/${asset.asset.slice(7)}`,undefined,'GET',404);
+    console.log('PASS real S3 upload on A, byte-exact download on C, range on B and cross-workspace rejection');
+    const retryBytes=randomBytes(777);
+    try{
+      await dependency('s3','stop');
+      await readAsset(B,409);
+      await uploadAsset(B,retryBytes,409);
+    }finally{await dependency('s3','start');}
+    await readAsset(origins[2]);
+    const retried=await uploadAsset(B,retryBytes);
+    assert.equal(retried.asset,'sha256:'+createHash('sha256').update(retryBytes).digest('hex'));
+    console.log('PASS S3 outage reports failure; same-store recovery preserves bytes and failed upload can be retried');
+    const rejectedSlug='sql-outage-'+randomBytes(5).toString('hex');
+    try{
+      await dependency('database','stop');
+      for(const origin of [A,B]){
+        const response=await fetch(origin+`/api/workspaces/${ws}/nodes/${host}`,{headers:{Cookie:cookie},signal:AbortSignal.timeout(45000)});
+        await response.arrayBuffer();assert(response.status>=500&&response.status<600,'SQL outage must not return fabricated successful data');
+      }
+      const rejected=await fetch(B+'/api/workspaces',{method:'POST',headers:{Cookie:cookie,'content-type':'application/json','X-Ferry-Request':'1'},body:JSON.stringify({name:'Rejected during SQL outage',slug:rejectedSlug}),signal:AbortSignal.timeout(45000)});
+      await rejected.arrayBuffer();assert(rejected.status>=500&&rejected.status<600,'SQL outage must not report a successful write');
+    }finally{await dependency('database','start');}
+    await until(async()=>(await api(B,root)).id===host,'pooled SQL connections recover with original identity',90);
+    assert(!(await api(B,'/workspaces')).items.some(row=>row.slug===rejectedSlug),'rejected write must not appear after recovery');
+    await until(async()=>(await api(B,root+'/connection-tests',{})).ok,'Runner command recovers after database restart',90);
+    await readAsset(origins[2]);
+    for(const server of servers)assert.equal(server.exitCode,null,'database outage does not terminate a Ferry process');
+    console.log('PASS shared SQL outage is explicit; original identities, Runner command and S3 file recover without Ferry restart');
+  }
+  // Start a fresh live terminal if an earlier dependency fault closed it, so
+  // the full-broker-outage assertion cannot pass on a stale closed flag.
+  await page.evaluate(path=>{window.terminal.onclose=null;window.terminal.close();window.terminalClosed=false;window.terminal=new WebSocket(path);window.terminal.onclose=()=>{window.terminalClosed=true;};},B.replace('http:','ws:')+'/api'+root+'/terminal-sessions');
+  await until(()=>page.evaluate(()=>window.terminal.readyState===WebSocket.OPEN),'live terminal before full broker outage');
+  await page.evaluate(()=>{window.terminalClosed=false;});
+  for(const broker of brokers)await stop(broker);
   await until(()=>page.evaluate(()=>window.terminalClosed),'terminal closes on broker failure',35);
-  nats=await launch(process.env.NATS_SERVER_BINARY||'nats-server',natsArgs,process.env,'nats-restarted');
+  for(let n=0;n<natsCount;n++)brokers[n]=await startBroker(n,'-restarted');
+  if(natsCount===3)await until(replicated,'three-node broker full restart restores replicated KV stores',90);
   await until(async()=>{try{return(await api(B,root+'/connection-tests',{})).ok;}catch{return false;}},'broker restart and Runner control recovery',90);
   assert.equal(runner.exitCode,null);
   console.log('PASS broker failure closes live streams; broker restart restores commands with the same Runner identity');
@@ -155,7 +262,7 @@ try {
   console.log('PASS cluster acceptance');
 } catch(error) {
   failed=true;
-  for(const name of ['runner','server-0','server-1','server-2','nats']){
+  for(const name of ['runner','server-0','server-1','server-2','nats-0','nats-1','nats-2']){
     const diagnostic=await readFile(join(work,`${name}.log`),'utf8').catch(()=>'(no log)');
     console.error(`${name} diagnostics:\n${diagnostic.replace(/[a-f0-9]{32,}/gi,'[redacted]').slice(-12000)}`);
   }
