@@ -9,9 +9,13 @@ import subprocess
 import time
 import uuid
 
-# Each pinned image is qualified independently. The previous 8.4.11 candidate
-# failed SST; its failed runs remain evidence, not support for this candidate.
-IMAGE = 'percona/percona-xtradb-cluster@sha256:ca15bf7f3b53464a546b57a2a2a3e4cd67cedc6ad25c079e1461128465b649ff'
+# Qualify each image independently, including after an environment correction.
+IMAGES = {
+    '8.0': 'percona/percona-xtradb-cluster@sha256:ca15bf7f3b53464a546b57a2a2a3e4cd67cedc6ad25c079e1461128465b649ff',
+    '8.4': 'percona/percona-xtradb-cluster@sha256:a002b7654a22cb29b2af3e1010b2ad5e5ffdef1dc2eece8bfdf974d09746df44',
+}
+IMAGE_VARIANT = os.environ.get('FERRY_PXC_IMAGE_VARIANT', '8.0')
+IMAGE = IMAGES[IMAGE_VARIANT]
 ENGINE = 'docker:27.5.1-dind'
 NODES = ('a', 'b', 'c')
 STATUS_SQL = "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size','wsrep_cluster_status','wsrep_connected','wsrep_ready','wsrep_local_state_comment','wsrep_cluster_state_uuid')"
@@ -28,7 +32,9 @@ def main():
         print('::add-mask::' + password, flush=True)
         print('::add-mask::' + sst_password, flush=True)
     report = {'result': 'RUNNING', 'source': os.environ.get('GITHUB_SHA', 'local'),
-              'prefix': prefix, 'image': IMAGE, 'engine': ENGINE, 'checks': [], 'snapshots': [],
+              'prefix': prefix, 'image': IMAGE, 'variant': IMAGE_VARIANT,
+              'ci_mysql_apparmor_complain': os.environ.get('FERRY_PXC_RESTORE_MYSQL_APPARMOR') == '1',
+              'engine': ENGINE, 'checks': [], 'snapshots': [],
               'boundary': 'Three nested daemons on one shared kernel; direct Swarm experiment, not Ferry API or physical-host certification',
               'uncovered': ['production TLS', 'proxy routing/HA', 'Ferry API/SSH/Agent integration',
                             'backup restore', 'rolling version upgrade', 'physical-host quorum', 'cross-host volume migration']}
@@ -304,7 +310,8 @@ def main():
             report['full_outage_recovery'] = 'GALERA_SAME_GROUP_RECOVERED'
         else:
             states = {node: status(node) for node in NODES}
-            check('PXC-07 no isolated Primary or forced bootstrap after full outage', all(
+            report['full_outage_unobservable_members'] = [node for node, state in states.items() if not state]
+            check('PXC-07 no Primary observed; unavailable members remain unknown', all(
                 value.get('wsrep_cluster_status') != 'Primary' for value in states.values()))
             report['full_outage_recovery'] = 'OPERATOR_REQUIRED; automatic full-outage recovery NOT verified'
         snapshot('full-outage-restart')
