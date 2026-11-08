@@ -210,7 +210,17 @@ pub(super) async fn run(
     run_command(request, command, events, inputs, cancel).await
 }
 
-fn directory_lock(directory: &std::path::Path) -> Result<std::fs::File> {
+struct DirectoryLock(std::fs::File);
+
+impl Drop for DirectoryLock {
+    fn drop(&mut self) {
+        // A concurrent fork can briefly inherit this file before CLOEXEC closes
+        // it. Unlock explicitly so its duplicate cannot extend the execution.
+        let _ = self.0.unlock();
+    }
+}
+
+fn directory_lock(directory: &std::path::Path) -> Result<DirectoryLock> {
     let directory = std::fs::canonicalize(directory)?;
     let file = std::fs::OpenOptions::new()
         .read(true)
@@ -220,7 +230,7 @@ fn directory_lock(directory: &std::path::Path) -> Result<std::fs::File> {
         .open(directory.join(".agent-execution.lock"))?;
     file.try_lock()
         .context("another Agent is using this directory")?;
-    Ok(file)
+    Ok(DirectoryLock(file))
 }
 
 async fn write(stdin: &mut tokio::process::ChildStdin, value: Value) -> Result<()> {

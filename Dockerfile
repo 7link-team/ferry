@@ -23,6 +23,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 FROM ${BASE_REGISTRY}/rust:${RUST_VERSION}-bookworm AS server
 WORKDIR /build
 ARG BUILD_JOBS=2
+# Agent protocol fixtures execute Node.js during cargo test; keep it build-only.
+COPY --from=web /usr/local/bin/node /usr/local/bin/node
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY src/shared/workflow-contracts ./src/shared/workflow-contracts

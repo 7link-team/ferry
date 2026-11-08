@@ -39,6 +39,53 @@ fn directory_aliases_share_one_kernel_lock_until_the_execution_releases_it() {
     assert!(directory_lock(dir.path()).is_ok());
 }
 
+#[cfg(unix)]
+#[test]
+fn concurrent_child_before_exec_cannot_extend_a_released_directory_lock() {
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::{net::UnixStream, process::CommandExt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let held = directory_lock(dir.path()).unwrap();
+    let (mut parent, child) = UnixStream::pair().unwrap();
+    let parent_fd = parent.as_raw_fd();
+    parent
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let process = std::thread::spawn(move || {
+        let fd = child.as_raw_fd();
+        let result = unsafe {
+            std::process::Command::new("sh")
+                .args(["-c", "exit 0"])
+                .pre_exec(move || {
+                    // Only async-signal-safe syscalls between fork and exec.
+                    libc::close(parent_fd);
+                    let mut byte = 1u8;
+                    if libc::write(fd, (&byte as *const u8).cast(), 1) != 1
+                        || libc::read(fd, (&mut byte as *mut u8).cast(), 1) != 1
+                    {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                })
+                .status()
+        };
+        drop(child);
+        result
+    });
+    let mut ready = [0];
+    parent.read_exact(&mut ready).unwrap();
+    drop(held);
+    let reacquired = directory_lock(dir.path()).is_ok();
+    parent.write_all(&[1]).unwrap();
+    assert!(process.join().unwrap().unwrap().success());
+    assert!(
+        reacquired,
+        "a pre-exec child must not retain the released lock"
+    );
+}
+
 fn request(runtime: Runtime) -> Request {
     Request {
         binding: None,
