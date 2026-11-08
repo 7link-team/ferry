@@ -281,15 +281,24 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         workspace=api('/workspaces',{'name':'ops','slug':'ops'})
         workspace_ops = workspace['id']
         workspace_other = api('/workspaces',{'name':'other','slug':'other'})['id']
-        if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1' and mode != 'native':
+        native_template = native_build_template = None
+        if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1':
             templates = api(f'/workspaces/{workspace_ops}/app-templates')['items']
-            check('new workspace contains exactly one application example', len(templates) == 1)
-            http_template = templates[0]
+            check('new workspace contains both application examples', len(templates) == 2)
+            http_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-http')
+            native_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-native-http')
+            pipelines = api(f'/workspaces/{workspace_ops}/pipeline-templates?workflow_kind=actions')['items']
+            native_build_template = next(t for t in pipelines if 'Native HTTP artifact build' in t['content'])
             api(f'/workspaces/{workspace_other}/app-templates/'+http_template['id'],status=404)
+            api(f'/workspaces/{workspace_other}/app-templates/'+native_template['id'],status=404)
+            api(f'/workspaces/{workspace_other}/pipeline-templates/'+native_build_template['id'],status=404)
             check('application example cannot be read across workspaces', True)
             check('example initialization starts no deployments', api(f'/workspaces/{workspace_ops}/deployments')['total'] == 0)
             report['scenario_template'] = {'id':http_template['id'],'version':http_template['version'],
                                          'content':http_template['content'],'parameters':http_template['parameters']}
+            report['native_scenario_templates'] = {'application':native_template,'pipeline':native_build_template}
+            if mode == 'native':
+                http_template = None
         workspace_ids = dict(ops=workspace_ops, other=workspace_other)
         viewer=urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users',{'email':'viewer@example.invalid','password':'correct-horse-battery','name':'viewer'},client=viewer)
@@ -576,14 +585,35 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     return '#!/usr/bin/python3\nimport http.server,os\nclass Handler(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path == "/" else 404); self.end_headers(); self.wfile.write('+repr(version)+'.encode())\nopen("/tmp/native-env-'+kind+'","w").write(os.environ["TOKEN"])\nopen("/tmp/native-config-'+kind+'","w").write(open("/etc/native-runtime.conf").read())\nhttp.server.HTTPServer(("0.0.0.0",18081),Handler).serve_forever()\n'
                 definition=artifact_workflow('/tmp/native-build-'+kind+'/{{run}}','printf %s '+shlex.quote(executable('native-v1'))+' > app; chmod 755 app')
                 pipeline=create('pipelines',{'name':'native-build-'+kind,'target_kind':'host','target_ref':host,'repository_id':repo,'definition_format':'github-actions','definition':json.dumps(definition)})
-                def build():
-                    rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline+'/runs',{},status=201)['id']
+                def build(pipeline_id=pipeline):
+                    rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline_id+'/runs',{},status=201)['id']
                     def finished():
                         run=api(f'/workspaces/{workspace_ops}/pipeline-runs/'+rid)
                         return run if run['state'] not in ('queued','running') else None
                     run=eventually(finished)
                     check(kind+' native executable archived',run['state']=='succeeded' and len(run['artifacts'])==1)
                     return rid
+                if native_template is not None:
+                    generated = api(f'/workspaces/{workspace_ops}/pipeline-templates/'+native_build_template['id']+'/renderings',
+                                    {'version':native_build_template['version'],'values':{}})['definition']
+                    sample_pipeline = create('pipelines',{'name':'sample-native-'+kind,'target_kind':'host','target_ref':host,
+                        'repository_id':repo,'definition_format':'github-actions','definition':generated})
+                    sample_run = build(sample_pipeline)
+                    message = "Native example 'quote' $HOME %\nsecond line 你好"
+                    generated = api(f'/workspaces/{workspace_ops}/app-templates/'+native_template['id']+'/renderings',
+                                    {'version':native_template['version'],'values':{'pipeline':sample_pipeline,'port':18081,'message':message}})['manifest']
+                    sample = create('deployments',{'name':'Native example '+kind,'mode':'native','target_kind':'host','target_ref':host,
+                        'workdir':deployment_workdir,'manifest':generated})
+                    sample_project=f"deployment-{workspace['id']}-{sample}";projects.append(sample_project)
+                    sample_revision=start(sample);sample_row=done(sample)
+                    check(kind+' initialized Native example deploys: '+sample_row['latest_revision']['output'],sample_row['state']=='succeeded')
+                    check(kind+' initialized Native example literal HTTP body',eventually(lambda:response(web_port)==message))
+                    check(kind+' initialized Native example readiness endpoint',remote('curl -fsS http://127.0.0.1:18081/health')=='ok')
+                    check(kind+' initialized Native example rejects unknown paths',remote("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/missing")=='404')
+                    check(kind+' initialized Native example persists enabled unit',remote('systemctl is-enabled '+sample_project+'-web.service').strip()=='enabled')
+                    report.setdefault('native_example_runs',[]).append({'transport':kind,'pipeline':sample_pipeline,'run':sample_run,'deployment':sample,'revision':sample_revision})
+                    remote('systemctl disable --now '+sample_project+'-web.service')
+                    api(f'/workspaces/{workspace_ops}/deployments/'+sample,method='DELETE',status=204)
                 build1=build()
                 key='native-token-'+kind;secret='quote" slash\\ dollar$HOME percent% newline\nsecond'
                 variable=create('variables',{'name':key,'scope':'deploy','kind':'secret','value':secret})

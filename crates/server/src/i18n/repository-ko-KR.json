@@ -806,5 +806,10 @@
   "templates.examples.httpDescription": "Docker / Compose / Swarm용 무상태 HTTP 서비스입니다. 호스트, 배포 모드와 사용하지 않는 포트를 선택하세요. busybox:1.36을 내려받아야 합니다. 응답 내용은 환경 변수로 전달합니다. 초기화는 템플릿만 만들고 배포하지 않습니다. 영구 데이터, 다중 호스트 HA 및 인그레스는 포함하지 않습니다.",
   "templates.examples.httpPort": "공개 포트",
   "templates.examples.httpMessage": "응답 내용",
-  "templates.examples.httpWelcome": "HTTP 서비스 예제에 오신 것을 환영합니다"
+  "templates.examples.httpWelcome": "HTTP 서비스 예제에 오신 것을 환영합니다",
+  "templates.examples.nativeBuildName": "예제: Native HTTP 아티팩트 빌드",
+  "templates.examples.nativeBuildDescription": "대응하는 Native HTTP 예제의 실행 파일 app을 수동으로 빌드합니다. Bash와 Python 3이 있는 Linux 호스트를 선택하세요. 외부 패키지는 필요하지 않습니다. 빌드 성공 후 Native 앱 예제에 이 파이프라인의 이름 또는 ID를 입력합니다. 초기화는 파이프라인을 만들거나 실행하지 않습니다.",
+  "templates.examples.nativeName": "예제: Native HTTP 아티팩트 배포",
+  "templates.examples.nativeDescription": "대응하는 Native HTTP 빌드를 먼저 실행한 뒤 이름 또는 ID, Native 모드, Linux 호스트, 사용하지 않는 포트를 선택하세요. 배포 호스트에는 Python 3, systemd와 배포 권한이 필요합니다. app 아카이브와 /health 검사를 사용하며 응답 내용은 환경 변수로 전달합니다. 초기화는 템플릿만 만들고 배포하지 않습니다. 다중 호스트 HA와 운영 환경 인그레스는 포함하지 않습니다.",
+  "templates.examples.nativePipeline": "빌드 파이프라인 이름 또는 ID"
 }

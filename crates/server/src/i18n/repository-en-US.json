@@ -806,5 +806,10 @@
   "templates.examples.httpDescription": "Stateless HTTP service for Docker / Compose / Swarm. Select your host, deployment mode and an unused port; pulling busybox:1.36 is required. Response content is passed through an environment variable. Initialization creates only a template and starts no deployment. Persistent data, multi-host HA and ingress are not included.",
   "templates.examples.httpPort": "Published port",
   "templates.examples.httpMessage": "Response content",
-  "templates.examples.httpWelcome": "Welcome to the HTTP service example"
+  "templates.examples.httpWelcome": "Welcome to the HTTP service example",
+  "templates.examples.nativeBuildName": "Example: Build a Native HTTP artifact",
+  "templates.examples.nativeBuildDescription": "Manually build the executable app for the matching Native HTTP example. Select your Linux host with Bash and Python 3; no third-party packages are used. After a successful build, enter this pipeline name or ID in the Native application example. Initialization neither creates nor runs a pipeline.",
+  "templates.examples.nativeName": "Example: Deploy a Native HTTP artifact",
+  "templates.examples.nativeDescription": "Run the matching Native HTTP build pipeline first, then enter its name or ID and select Native mode, your Linux host and an unused port. The deployment host needs Python 3, systemd and deployment permissions. Uses the app archive with a /health check; response content is passed through an environment variable. Initialization creates only templates without deployment. Multi-host HA and production ingress are not included.",
+  "templates.examples.nativePipeline": "Build pipeline name or ID"
 }

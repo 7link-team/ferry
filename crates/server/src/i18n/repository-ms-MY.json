@@ -806,5 +806,10 @@
   "templates.examples.httpDescription": "Perkhidmatan HTTP tanpa keadaan untuk Docker / Compose / Swarm. Pilih hos, mod penempatan dan port yang belum digunakan; busybox:1.36 perlu dimuat turun. Kandungan respons dihantar melalui pemboleh ubah persekitaran. Pemulaan hanya mencipta templat tanpa memulakan penempatan. Data kekal, HA berbilang hos dan gerbang masuk tidak disertakan.",
   "templates.examples.httpPort": "Port terbitan",
   "templates.examples.httpMessage": "Kandungan respons",
-  "templates.examples.httpWelcome": "Selamat datang ke contoh perkhidmatan HTTP"
+  "templates.examples.httpWelcome": "Selamat datang ke contoh perkhidmatan HTTP",
+  "templates.examples.nativeBuildName": "Contoh: Bina artifak HTTP Native",
+  "templates.examples.nativeBuildDescription": "Bina fail boleh laku app secara manual untuk contoh HTTP Native yang sepadan. Pilih hos Linux sendiri dengan Bash dan Python 3; tiada pakej pihak ketiga digunakan. Selepas binaan berjaya, masukkan nama atau ID saluran paip ini dalam contoh aplikasi Native. Pemulaan tidak mencipta atau menjalankan saluran paip.",
+  "templates.examples.nativeName": "Contoh: Tempatkan artifak HTTP Native",
+  "templates.examples.nativeDescription": "Jalankan saluran paip binaan HTTP Native yang sepadan dahulu, kemudian masukkan nama atau IDnya dan pilih mod Native, hos Linux sendiri serta port yang belum digunakan. Hos penempatan memerlukan Python 3, systemd dan kebenaran penempatan. Menggunakan arkib app dengan pemeriksaan /health; kandungan respons dihantar melalui pemboleh ubah persekitaran. Pemulaan hanya mencipta templat tanpa penempatan. HA berbilang hos dan gerbang masuk pengeluaran tidak disertakan.",
+  "templates.examples.nativePipeline": "Nama atau ID saluran paip binaan"
 }

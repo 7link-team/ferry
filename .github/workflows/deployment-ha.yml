@@ -1,4 +1,4 @@
-name: Container deployment acceptance
+name: Application deployment acceptance
 
 on:
   workflow_dispatch:
@@ -46,6 +46,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - mode: native
+            swarm_ha: "0"
+            label: Native artifact and systemd SSH and Agent acceptance
           - mode: docker
             swarm_ha: "0"
             label: Docker application example acceptance
@@ -68,6 +71,16 @@ jobs:
           node-version: "24"
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        if: matrix.mode == 'native'
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - name: Build the Linux Actions worker for artifact pipelines
+        if: matrix.mode == 'native'
+        env:
+          ACTIONS_WORKER_TARGETS: linux/amd64
+        run: bash scripts/build-actions-workers.sh
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: e2e
@@ -117,7 +130,10 @@ jobs:
           {
             echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
-            if [ "$FERRY_TEST_DEPLOY_MODE" = docker ]; then
+            if [ "$FERRY_TEST_DEPLOY_MODE" = native ]; then
+              echo 'Initialized Actions build and Native application templates: real archive, SSH and HostAgent systemd deployment, HTTP, readiness and rollback regression.'
+              echo 'Isolated Linux fixture shares the runner kernel; does not certify physical host HA or cross-host migration.'
+            elif [ "$FERRY_TEST_DEPLOY_MODE" = docker ]; then
               echo 'Real Docker deployment through SSH and HostAgent using the initialized HTTP application template.'
             elif [ "$FERRY_TEST_DEPLOY_MODE" = compose ]; then
               echo 'Real Compose deployment through SSH and HostAgent, including browser acceptance.'

@@ -62,6 +62,18 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
         workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
         root = f'/workspaces/{workspace_tenant}'
+        examples=request(owner,root+'/app-templates')['items']
+        native=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-native-http')
+        native_path=root+'/app-templates/'+native['id']
+        request(outsider,f'/workspaces/{workspace_other}/app-templates/'+native['id'],expected=404)
+        check(True,'Native example cannot be read across workspaces')
+        request(owner,native_path+'/renderings',{'version':1,'values':{}},expected=400)
+        check(True,'Native example requires a build pipeline')
+        doc=json.loads(request(owner,native_path+'/renderings',{'version':1,'values':{'pipeline':'sample-build','port':23181,'message':'literal " $HOME\n你好'}})['manifest'])
+        check(doc['services'][0]['artifact']['pipeline']=='sample-build' and doc['services'][0]['artifact']['path']=='app','Native example preserves the archive reference')
+        check(doc['services'][0]['ports'][0]['container']==23181 and doc['services'][0]['env'][0]['value']=='23181','Native example port stays numeric and its environment value stays text')
+        check(doc['services'][0]['env'][1]['value']=='literal " $HOME\n你好','Native example message stays literal')
+        check(request(owner,root+'/deployments')['total']==0 and request(owner,root+'/pipelines')['total']==0,'initialization and rendering execute no workloads')
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']

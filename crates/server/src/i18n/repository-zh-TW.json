@@ -806,5 +806,10 @@
   "templates.examples.httpDescription": "Docker / Compose / Swarm 的無狀態 HTTP 服務範例。選擇自己的主機、部署模式和未佔用連接埠；需要拉取 busybox:1.36。回應內容透過環境變數傳入。初始化只建立範本，不啟動部署；不包含持久資料、多機高可用或流量入口。",
   "templates.examples.httpPort": "發佈連接埠",
   "templates.examples.httpMessage": "回應內容",
-  "templates.examples.httpWelcome": "歡迎使用 HTTP 服務範例"
+  "templates.examples.httpWelcome": "歡迎使用 HTTP 服務範例",
+  "templates.examples.nativeBuildName": "範例：建置 Native HTTP 產物",
+  "templates.examples.nativeBuildDescription": "手動建置配套 Native HTTP 範例的可執行產物 app。選擇自己的 Linux 主機；需要 Bash 和 Python 3，無第三方套件。建置成功後，在 Native 應用範例中填寫此流水線的名稱或 ID。初始化不建立或執行流水線。",
+  "templates.examples.nativeName": "範例：Native HTTP 產物部署",
+  "templates.examples.nativeDescription": "先執行配套的 Native HTTP 建置流水線，再填寫其名稱或 ID，選擇 Native 模式、自己的 Linux 主機和未使用連接埠。部署主機需要 Python 3、systemd 及部署權限。使用 app 歸檔，提供 /health 檢查；回應內容透過環境變數傳入。僅初始化範本，不自動部署；不包含多機高可用或正式環境入口。",
+  "templates.examples.nativePipeline": "建置流水線名稱或 ID"
 }
