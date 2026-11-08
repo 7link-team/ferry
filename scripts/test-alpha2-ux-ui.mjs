@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real server, SMTP and optional isolated Redis acceptance for route/refresh/template UX. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -139,15 +140,18 @@ try {
   await results.getByRole('button',{name:'关闭',exact:true}).click();
   report.checks.push('Save and run persists unsaved edits and executes the returned revision; independent read-only results; save conflict prevents execution');
   await page.goto(`${origin}/zh-CN/workspaces/${workspace.id}/workflows/new`);
+  await startBlank(page);
   const defaultName=page.getByLabel('工作流名称',{exact:true});await defaultName.waitFor();
   assert.match(await defaultName.inputValue(),/^工作流-\d{8}-\d{6}-[a-f0-9]{6}$/);assert.equal(await page.locator('.react-flow__node').count(),0);
   const nodeEmpty=page.locator('[data-empty-workflow-canvas]');await nodeEmpty.waitFor();
   const emptyClass=await nodeEmpty.getAttribute('class'),iconClass=await nodeEmpty.locator('svg').first().getAttribute('class'),buttonClass=await nodeEmpty.getByRole('button').getAttribute('class');
   await page.screenshot({path:join(work,'empty-nodes.png')});
   await page.goto(`${origin}/en-US/workspaces/${workspace.id}/workflows/new`);
+  await startBlank(page);
   const englishName=page.getByLabel('Workflow name',{exact:true});await englishName.waitFor();
   assert.match(await englishName.inputValue(),/^Workflow-\d{8}-\d{6}-[a-f0-9]{6}$/);
   await page.goto(`${origin}/zh-CN/workspaces/${workspace.id}/pipelines/new`);
+  await startBlank(page);
   await page.getByLabel('流水线名称',{exact:true}).waitFor();assert.match(await page.getByLabel('流水线名称',{exact:true}).inputValue(),/^工作流-\d{8}-\d{6}-[a-f0-9]{6}$/);
   assert.equal(await page.locator('.react-flow__node').count(),0);
   const jobEmpty=page.locator('[data-empty-workflow-canvas]');await jobEmpty.waitFor();
@@ -172,7 +176,7 @@ try {
   await api(admin,'/platform/mail-test',{email:'recipient@example.invalid'});
   assert.match(messages.at(-1),/multipart\/alternative/);assert.match(messages.at(-1),/text\/plain/);assert.match(messages.at(-1),/text\/html/);
   assert.match(messages.at(-1).replace(/=\r\n/g,''),/max-width:600px/);
-  await page.goto(origin+'/zh-CN/platform/settings/1/edit');await page.getByRole('button',{name:'邮箱配置',exact:true}).click();
+  await page.goto(origin+'/zh-CN/platform/settings/1/edit');await page.getByRole('button',{name:'账号注册',exact:true}).click();
   await page.getByRole('tab',{name:'邮件模板',exact:true}).click();
   await page.getByRole('textbox',{name:'富文本值',exact:true}).waitFor();
   const preview=page.frameLocator('iframe[title="预览（示例数据）"]');await preview.getByText('123456',{exact:false}).waitFor();
@@ -182,14 +186,15 @@ try {
   await page.screenshot({path:join(work,'mail-template-desktop.png')});
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:join(work,'mail-template-mobile.png')});
-  await patch({mail_test_html:'<h2>Custom delivery</h2><p>Hello {{email}}</p>'});await api(admin,'/platform/mail-test',{email:'recipient@example.invalid'});
+  await patch({mail_code_templates:{'zh-CN':{subject:'Custom delivery',html:'<h2>Custom delivery</h2><p>Hello {{email}} code {{code}}</p>'}}});await api(admin,'/platform/mail-test',{email:'recipient@example.invalid'});
   assert.match(messages.at(-1).replace(/=\r\n/g,''),/Custom delivery/);
-  await page.getByLabel('模板类型',{exact:true}).selectOption('test');
+  assert.equal(await page.getByLabel('模板类型',{exact:true}).count(),0,'delivery testing is an action, not a template type');
+  await page.getByLabel('模板语言',{exact:true}).selectOption('en-US');
   await page.getByRole('tab',{name:'HTML',exact:true}).click();
-  assert.equal(new URL(page.url()).searchParams.get('mail_template'),'test');
+  assert.equal(new URL(page.url()).searchParams.get('mail_locale'),'en-US');
   assert.equal(new URL(page.url()).searchParams.get('mail_editor'),'html');
-  await page.reload();await page.getByLabel('模板类型',{exact:true}).waitFor();
-  assert.equal(await page.getByLabel('模板类型',{exact:true}).inputValue(),'test');
+  await page.reload();await page.getByLabel('模板语言',{exact:true}).waitFor();
+  assert.equal(await page.getByLabel('模板语言',{exact:true}).inputValue(),'en-US');
   assert.equal(await page.getByRole('tab',{name:'HTML',exact:true}).getAttribute('aria-selected'),'true');
   assert.equal(errors.length,0,errors.join('\n'));
   report.checks.push('SMTP multipart HTML + plain fallback; styled default, rich editor and rendered preview; template tab survives reload; custom HTML delivered; 390px no overflow');

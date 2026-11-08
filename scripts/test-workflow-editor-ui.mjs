@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 import { chromium } from 'playwright';
 import { mkdtemp, open, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -176,15 +177,18 @@ try {
   passed('mobile layout and no browser exceptions');
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto(`${origin}/zh-CN${root}/workflows/new`);
+  await startBlank(page);
   assert.equal(await nodes.count(), 0, 'new workflow must start with an empty canvas');
   await page.screenshot({ path: `${directory}/workflow-empty.png`, fullPage: true });
   await page.getByRole('button', { name: '节点工作流', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: '节点工作流', exact: true }).getAttribute('aria-pressed'), 'true');
   await page.getByRole('button', { name: '构建流水线', exact: true }).click();
   await page.waitForURL('**/pipelines/new');
+  await startBlank(page);
   assert.equal(await page.getByRole('button', { name: '构建流水线', exact: true }).getAttribute('aria-pressed'), 'true');
   await page.getByRole('button', { name: '节点工作流', exact: true }).click();
   await page.waitForURL('**/workflows/new');
+  await startBlank(page);
   assert.equal(await nodes.count(), 0);
   await page.getByRole('textbox', { name: '工作流名称', exact: true }).fill('Created from canvas');
   await page.getByRole('button', { name: '构建流水线', exact: true }).click();
@@ -291,6 +295,7 @@ try {
   await page.screenshot({ path: `${directory}/workflow-quick-add.png`, fullPage: true });
   passed('border midpoint plus buttons add right/below, preserve positions, connect chosen branches, cancel, undo/redo and persist');
   await page.goto(`${origin}/zh-CN${root}/workflows/new`);
+  await startBlank(page);
   await page.getByRole('textbox', { name: '工作流名称', exact: true }).fill('Node form coverage');
   for (const title of ['手动触发', '设置字段', '条件分支', '多路分支', '筛选条目', '合并', '等待', '透传', '限制条数', '排序', '拆分条目', '重命名字段', '拆分文本', '终止并报错']) {
     await page.getByRole('button', { name: '添加节点', exact: true }).click();

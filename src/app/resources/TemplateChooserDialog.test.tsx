@@ -1,0 +1,65 @@
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { i18n } from "../../shared/i18n/i18n";
+import { TemplateChooserDialog } from "./TemplateChooserDialog";
+
+let host: HTMLDivElement, root: Root;
+const rows = (page: number) => Array.from({ length: page === 1 ? 12 : 1 }, (_, i) => ({ id: String((page - 1) * 12 + i + 1), name: `Template ${(page - 1) * 12 + i + 1}`, version: 2 }));
+const list = vi.fn(async ({ page }: { page: number }) => ({ items: rows(page), total: 13, page, page_size: 12 }));
+const load = vi.fn(async (id: string) => ({ name: `Template ${id}`, version: 2, fields: [{ key: "port", label: "Port", type: "number" as const, required: true }], values: { port: 8080 } }));
+const generate = vi.fn(async (_id: string, _version: number, values: Record<string, unknown>) => ({ manifest: String(values.port) }));
+const blank = vi.fn(), cancel = vi.fn(), done = vi.fn();
+const dialog = () => document.querySelector('[role="dialog"]')!;
+const button = (text: string) => [...dialog().querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+const mount = async (allowBlank = true) => act(async () => root.render(<TemplateChooserDialog config={{ list, load, generate }} allowBlank={allowBlank} onBlank={blank} onCancel={cancel} onGenerated={done} validate={(fields, values) => fields.every(f => !f.required || !!values[f.key])}
+  renderParameter={(field, value, onChange) => <input aria-label={field.label} type="number" required value={String(value ?? "")} onChange={event => onChange(Number(event.target.value))} />} />));
+beforeEach(async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  await i18n.changeLanguage("zh-CN"); history.replaceState({}, "", "/zh-CN/workspaces/test/deployments/new");
+  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+  vi.clearAllMocks();
+});
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); });
+it("starts blank without generating or persisting anything and requests one bounded catalog page", async () => {
+  await mount();
+  expect(list).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 12, search: "" }));
+  expect(dialog().querySelectorAll('[type="radio"]')).toHaveLength(13);
+  await act(async () => button("空白创建").click());
+  expect(blank).toHaveBeenCalledOnce(); expect(generate).not.toHaveBeenCalled(); expect(done).not.toHaveBeenCalled();
+});
+it("paginates on the server and retains the selected template and parameter values across pages", async () => {
+  vi.useFakeTimers();
+  await mount(false);
+  await act(async () => dialog().querySelector<HTMLInputElement>('[type="radio"]')!.click());
+  const input = dialog().querySelector<HTMLInputElement>('[aria-label="Port"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "9000"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await act(async () => button("下一页").click());
+  expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+  expect(dialog().querySelectorAll('[type="radio"]')).toHaveLength(1);
+  await act(async () => vi.advanceTimersByTime(300));
+  expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }));
+  expect(button("上一页").disabled).toBe(false);
+  expect(dialog().querySelector<HTMLInputElement>('[aria-label="Port"]')!.value).toBe("9000");
+  await act(async () => button("使用此模板").click());
+  expect(generate).toHaveBeenCalledWith("1", 2, { port: 9000 }); expect(done).toHaveBeenCalledWith({ manifest: "9000" });
+});
+it("preselects template links and leaves a failed generation open for correction", async () => {
+  history.replaceState({}, "", "/zh-CN/workspaces/test/deployments/new?template=13");
+  generate.mockRejectedValueOnce(new Error("Template version changed"));
+  await mount();
+  expect(load).toHaveBeenCalledWith("13");
+  await act(async () => button("使用此模板").click());
+  expect(dialog().textContent).toContain("Template version changed"); expect(done).not.toHaveBeenCalled();
+  expect(dialog().querySelector<HTMLInputElement>('[aria-label="Port"]')!.value).toBe("8080");
+  await act(async () => button("取消").click()); expect(cancel).toHaveBeenCalledOnce();
+});
+it("aborts catalog loading on unmount and ignores its late response", async () => {
+  const pending: { resolve: (result: Awaited<ReturnType<typeof list>>) => void; signal: AbortSignal }[] = [];
+  const delayed = vi.fn(({ signal }: { signal: AbortSignal }) => new Promise<Awaited<ReturnType<typeof list>>>(resolve => pending.push({ resolve, signal })));
+  await act(async () => root.render(<TemplateChooserDialog config={{ list: delayed, load, generate }} allowBlank onBlank={blank} onCancel={cancel} onGenerated={done} validate={() => true} renderParameter={() => null} />));
+  await act(async () => root.unmount());
+  expect(pending[0]!.signal.aborted).toBe(true);
+  await act(async () => pending[0]!.resolve({ items: rows(1), total: 13, page: 1, page_size: 12 }));
+  root = createRoot(host);
+});

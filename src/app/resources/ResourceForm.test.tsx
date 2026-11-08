@@ -271,20 +271,20 @@ it("pipeline creation uses a wide form and keeps repository/host settings out of
   expect(host.textContent).toContain("新建标签");
   expect(host.textContent).not.toContain("执行环境");
 });
-it("opens a template list directly in the pipeline import dialog", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ok:true,status:200,json:async()=>({items:[],total:0,page:1,page_size:200})})));
+it("uses the same initial blank/template chooser for pipeline and deployment creation", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ok:true,status:200,json:async()=>({items:[],total:0,page:1,page_size:12})})));
   const permissions = new Set(["pipelines.create", "pipeline-templates.read", "deployments.create", "app-templates.read"]);
-  history.replaceState({}, "", "/ops/build/pipelines/new");
-  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions).pipelines!} workspace="ops" permissions={permissions} pipelineWorkspace />));
-  expect(host.querySelector('section[aria-label="从模板生成"]')).toBeNull();
-  await click("从模板导入");
-  expect(document.querySelector('[role="dialog"] [role="listbox"]')).not.toBeNull();
-  expect(document.querySelector('[role="dialog"] [data-slot="select-trigger"]')).toBeNull();
-  await act(async () => (document.querySelector('[role="dialog"] button[aria-label="Close"]') as HTMLButtonElement | null)?.click());
-
-  history.replaceState({}, "", "/ops/deploy/deployments/new");
-  await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions).deployments!} workspace="ops" permissions={permissions}/>));
-  expect(host.querySelector('section[aria-label="从模板生成"]')?.className).toContain("border");
+  for (const [path, resource] of [["/ops/build/pipelines/new", "pipelines"], ["/ops/deploy/deployments/new", "deployments"]]) {
+    await act(async () => root.render(<div />));
+    history.replaceState({}, "", path!);
+    await act(async () => root.render(<ResourceForm config={formConfigs("ops", permissions)[resource!]!} workspace="ops" permissions={permissions} pipelineWorkspace={resource === "pipelines"} />));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("选择创建方式");
+    expect(document.querySelector('[role="dialog"] [type="radio"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"] nav[aria-label="分页"]')).not.toBeNull();
+    expect(host.querySelector('section[aria-label="从模板生成"]')).toBeNull();
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  }
 });
 it("exports the current Actions workflow and executor bindings as a pipeline template", async () => {
   history.replaceState({}, "", "/ops/build/pipelines/new");

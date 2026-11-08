@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real Chromium -> server acceptance for manifest forms, source round trips and saving. */
 import assert from 'node:assert/strict';
 import { parse } from 'yaml';
@@ -47,6 +48,7 @@ try {
   await post(owner, root+'/variables', {name:'token',scope:'deploy',kind:'secret',value:'never-visible-value'});
   const config = await post(owner, root+'/config-templates', {name:'app-conf',content:'enabled=true\n',parameters:'[]'});
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new`);
+  await startBlank(p);
   await p.getByRole('textbox',{name:/^名称/}).fill('Visual application');
   await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
   await p.getByRole('option',{name:'Manifest host',exact:true}).click();
@@ -144,6 +146,7 @@ try {
   const pipeline = await post(owner,root+'/pipelines',{name:'Artifact pipeline',repository_id:repo.id,target_kind:'host',target_ref:host.id,definition:JSON.stringify({workdir:'/tmp/build/{{run}}',steps:[{name:'build',run:'true'}]})});
   for (const [mode,label] of [['docker','Docker'],['native','Native（systemd）'],['stack','Docker Swarm']]) {
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new`);
+  await startBlank(p);
     await p.getByRole('textbox',{name:/^名称/}).fill(`Form ${mode}`);
     await p.getByRole('combobox',{name:/^部署模式/}).click();
     await p.getByRole('option',{name:label,exact:true}).click();

@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Actual server/Chrome acceptance: login redirects, account metadata and system info. */
 import {chromium} from 'playwright';
 import {spawn} from 'node:child_process';
@@ -111,6 +112,7 @@ try {
  await page.screenshot({path:join(work,'footer-mobile.png')});
  const exampleWorkspace=await api(admin,'/workspaces',{name:'Footer layout',slug:'footer-layout'});
  await page.goto(origin+'/zh-CN/workspaces/'+exampleWorkspace.id+'/workflows/new');
+  await startBlank(page);
  const canvas=page.locator('.react-flow');await canvas.waitFor();
  const canvasBox=await canvas.boundingBox();const graphFooter=await footer.boundingBox();
  assert(canvasBox.height>200);

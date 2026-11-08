@@ -133,7 +133,7 @@ try {
       const native=selected.id===nativeExample.id;
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${selected.id}`);
-      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      const generator=p.getByRole('dialog');
       if(native){
         const pipelineParameter=JSON.parse(selected.parameters).find(parameter=>parameter.name==='pipeline');
         const pipelineInput=generator.getByRole('textbox',{name:pipelineParameter.label,exact:true});
@@ -143,9 +143,10 @@ try {
       const message=`HTTP scenario ${width}: 'quotes' $HOME $(false)`;
       await generator.getByRole('textbox',{name:'响应内容',exact:true}).fill(message);
       const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${selected.id}/renderings`)&&response.request().method()==='POST');
-      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      await generator.getByRole('button',{name:'使用此模板',exact:true}).click();
       const response=await rendered;assert(response.ok(),await response.text());
       const manifest=JSON.parse((await response.json()).manifest);
+      await generator.waitFor({state:'hidden'});
       if(native){
         assert.equal(manifest.services[0].ports[0].container,23180);
         assert.equal(manifest.services[0].env[0].value,'23180');
@@ -156,8 +157,8 @@ try {
         assert.equal(manifest.services[0].env[0].value,message);
         assert(!manifest.services[0].command.join(' ').includes(message));
       }
-      await generator.getByRole('status').filter({hasText:'配置已填入'}).waitFor();
-      assert(await generator.getByRole('button',{name:'生成配置',exact:true}).isEnabled());
+      await generator.waitFor({state:'hidden'});
+      assert.equal(await p.locator('[data-form-section]').count(),3);
       assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`page overflow at ${width}`);
       if(process.env.FERRY_SCENARIO_UI_OUTPUT){
         await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
@@ -169,16 +170,17 @@ try {
     for(const width of [1440,900,390,320]){
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${natsExample.id}`);
-      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      const generator=p.getByRole('dialog');
       for(const parameter of JSON.parse(natsExample.parameters)){
         const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
         if(parameter.name==='token') await generator.getByRole('textbox',{name:label}).fill('nats-client-secret');
         if(parameter.name.startsWith('advertise_')) await generator.getByRole('textbox',{name:label}).fill('client.example.invalid:'+({a:4222,b:4223,c:4224}[parameter.name.at(-1)]));
       }
       const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${natsExample.id}/renderings`)&&response.request().method()==='POST');
-      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      await generator.getByRole('button',{name:'使用此模板',exact:true}).click();
       const response=await rendered;assert(response.ok(),await response.text());
       const manifest=JSON.parse((await response.json()).manifest);
+      await generator.waitFor({state:'hidden'});
       assert.equal(manifest.services.length,3);
       assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,3);
       assert(manifest.services.every(service=>service.env[2].valueFrom==='variable/nats-client-secret'));
@@ -193,16 +195,17 @@ try {
     for(const width of [1440,900,390,320]){
       await p.setViewportSize({width,height:900});
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${redisExample.id}`);
-      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      const generator=p.getByRole('dialog');
       for(const parameter of JSON.parse(redisExample.parameters)){
         const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
         if(parameter.name==='password') await generator.getByRole('textbox',{name:label}).fill('redis-auth-secret');
         if(parameter.name.startsWith('ip_')) await generator.getByRole('textbox',{name:label}).fill('192.0.2.'+({a:10,b:11,c:12}[parameter.name.at(-1)]));
       }
       const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${redisExample.id}/renderings`)&&response.request().method()==='POST');
-      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      await generator.getByRole('button',{name:'使用此模板',exact:true}).click();
       const response=await rendered;assert(response.ok(),await response.text());
       const manifest=JSON.parse((await response.json()).manifest);
+      await generator.waitFor({state:'hidden'});
       assert.equal(manifest.services.length,6);
       assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,6);
       assert(manifest.services.every(service=>service.env[6].valueFrom==='variable/redis-auth-secret'));

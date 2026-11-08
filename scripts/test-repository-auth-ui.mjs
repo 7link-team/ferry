@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real Chromium platform connection -> private Git checkout -> build acceptance. */
 
 async function chooseNative(control, value) {
@@ -355,6 +356,7 @@ try {
   }
   await p.setViewportSize({width:1280,height:900});
   await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/new`);
+  await startBlank(p);
   await p.getByRole('textbox',{name:'流水线名称',exact:true}).fill('Build from connection');
   assert.equal(await p.getByLabel('构建代码来源',{exact:true}).count(),0);
   assert.equal(await p.getByRole('combobox',{name:/目标主机/}).count(),0);

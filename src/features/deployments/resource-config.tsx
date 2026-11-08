@@ -167,6 +167,7 @@ export function deploymentsForms({
       resource: "deployments",
       width: "full",
       presentation: "sections",
+      sectionNavigation: "scroll",
       heading: (r: Deployment) => r.name,
       blank: {
         name: "",
@@ -181,6 +182,7 @@ export function deploymentsForms({
       },
       sections: [
         {
+          group: "basics", groupKey: "resource-domain:deployment.basics",
           title: "基本信息", titleKey: "resource-domain:deployment.basics",
           fields: [
             {
@@ -191,9 +193,11 @@ export function deploymentsForms({
               required: true,
             },
             { key: "category", label: "分类", labelKey: "typed-domain:category", type: "select", options: dictionaryOptions(workspace, "app-category") },
+            { key: "description", label: "备注", labelKey: "resource-domain:resource.notes", type: "textarea", span: 2 },
           ],
         },
         {
+          group: "target", groupKey: "resource-domain:deployment.targetSection",
           title: "部署目标", titleKey: "resource-domain:deployment.targetSection",
           fields: [
             {
@@ -264,6 +268,7 @@ export function deploymentsForms({
           ],
         },
         {
+          group: "services", groupKey: "resource-domain:deployment.servicesSection",
           title: "服务配置", titleKey: "resource-domain:deployment.servicesSection",
           fullWidth: true,
           fields: [
@@ -273,17 +278,6 @@ export function deploymentsForms({
               labelKey: "resource-domain:deployment.config",
               type: "manifest",
               required: true,
-              span: 2,
-            },
-          ],
-        },
-        {
-          fields: [
-            {
-              key: "description",
-              label: "备注",
-              labelKey: "resource-domain:resource.notes",
-              type: "textarea",
               span: 2,
             },
           ],

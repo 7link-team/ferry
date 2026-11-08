@@ -4,7 +4,7 @@ import { ManifestEditor } from "../deployments/ManifestEditor";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { TemplateParametersEditor, templateParameterFields, type TemplateParameter } from "./TemplateParametersEditor";
 import { api } from "../../shared/api/api";
-import { deleteResource } from "../../shared/api/resource";
+import { deleteResource, listResource } from "../../shared/api/resource";
 import { commonText, workflowText } from "../../shared/i18n/i18n";
 import { emptyGraph, parseGraph } from "../workflows/graph";
 import { WorkflowEditor } from "../workflows/WorkflowEditor";
@@ -14,7 +14,6 @@ import {
   type AnyRow,
   form,
   list,
-  namedOptions,
 } from "../../shared/resources/config";
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { DEFAULT_ACTIONS, parseActions } from "../pipelines/actions-workflow";
@@ -259,7 +258,10 @@ export const templateGenerator = (
   field: string,
   workflowKind: "actions" | "nodes" = "actions",
 ): NonNullable<FormConfig<AnyRow>["generator"]> => ({
-  options: namedOptions(workspace, resource, undefined, resource === "pipeline-templates" ? {workflow_kind:workflowKind} : {}),
+  list: ({ page, pageSize, search, signal }) => listResource<Template>(workspace, resource, {
+    page, page_size: pageSize, q: search,
+    ...(resource === "pipeline-templates" ? { workflow_kind: workflowKind } : {}),
+  }, signal),
   load: async (id) => {
     const row = await api<Template>(
       `/workspaces/${workspace}/${resource}/${id}`,

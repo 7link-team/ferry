@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real browser canvas -> saved Actions YAML -> remote worker -> persisted logs. */
 import assert from 'node:assert/strict';
 import { parseDocument } from 'yaml';
@@ -40,6 +41,7 @@ try {
  await page.getByRole('button',{name:'创建',exact:true}).click();
  await page.waitForURL(url=>url.pathname.endsWith('/pipelines'));
  await page.goto(origin+`/workspaces/${workspace_actions}/pipelines/new`);
+  await startBlank(page);
  await page.getByLabel('流水线名称',{exact:true}).fill('Canvas pipeline');
  await page.getByRole('button',{name:'流水线设置'}).click();
  await page.getByRole('combobox',{name:'分组',exact:true}).click();

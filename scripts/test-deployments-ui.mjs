@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 import assert from 'node:assert/strict';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const [origin, id, revision] = process.argv.slice(2);
@@ -48,6 +49,7 @@ try {
     await page.getByRole('heading',{name:'产物差异',exact:true}).waitFor();
     assert((await page.locator('body').textContent()).includes('历史目标列表'));
     await page.goto(`${origin}/zh-CN/workspaces/${workspaceId}/deployments/new`);
+    if(identity.workspaces.find(w=>w.id===workspaceId).permissions.includes("app-templates.read"))await startBlank(page);
     await page.getByRole('combobox',{name:'目标类型',exact:true}).click();
     await page.getByRole('option',{name:'主机组（逐台执行）',exact:true}).click();
     await page.getByRole('combobox',{name:'目标主机组',exact:true}).click();

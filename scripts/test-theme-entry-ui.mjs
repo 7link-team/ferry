@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real-server coverage of appearance controls across application layouts. */
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -32,12 +33,12 @@ try{
   const theme=()=>page.getByRole('button',{name:'主题',exact:true});
   const check=async(name,path)=>{
     const ready=()=>name==='platform-forbidden'?page.getByText('当前账号没有平台管理权限。',{exact:true}).waitFor():page.locator('header,h1').first().waitFor();
-    await page.goto(origin+'/zh-CN'+path);await ready();await theme().waitFor();
+    await page.goto(origin+'/zh-CN'+path);await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();
     assert.equal(await theme().count(),1,name+' must have exactly one theme entry');
     assert.equal(await page.getByRole('button',{name:'语言',exact:true}).count(),1);
     await theme().click();await page.getByRole('menuitem',{name:'深色',exact:true}).click();
     assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')),name);
-    await page.reload();await ready();await theme().waitFor();assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')));
+    await page.reload();await ready();if(path.endsWith('/new'))await startBlank(page);await theme().waitFor();assert(await page.locator('html').evaluate(el=>el.classList.contains('dark')));
     await page.setViewportSize({width:390,height:844});const box=await theme().boundingBox();assert(box&&box.x>=0&&box.x+box.width<=390);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.screenshot({path:join(work,name+'.png')});

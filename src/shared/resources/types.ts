@@ -237,7 +237,7 @@ export interface FormConfig<T> {
   viewActions?: (RowAction<T> & { section?: string; iconOnly?: boolean })[];
   pollMs?: (row: Partial<T>) => number;
   generator?: {
-    options: Options;
+    list: (query: { page: number; pageSize: number; search: string; signal: AbortSignal }) => Promise<Envelope<{ id: string; name: string; description?: string; version: number }>>;
     load: (id: string) => Promise<{ name: string; version: number; fields: FormField<Record<string, unknown>>[]; values: Record<string, unknown> }>;
     generate: (id: string, version: number, values: Record<string, unknown>) => Promise<Partial<T>>;
   };

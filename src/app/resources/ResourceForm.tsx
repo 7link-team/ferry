@@ -1,6 +1,7 @@
 import { useQueryValue, useScrollSync } from "../router";
 import { ResourceHeading } from "../../shared/ui/resource-heading";
 import { ScrollFormSections } from "./ScrollFormSections";
+import { TemplateChooserDialog } from "./TemplateChooserDialog";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { AutoField,AutoFields,AutoForm,FieldControl,selectDisplay } from "../../shared/forms/auto-form";
 import { EditorFormActionsContext, FormActions } from "../../shared/forms/auto-form/form-actions";
@@ -37,13 +38,6 @@ import { Button } from "../../shared/ui/button";
 import { Checkbox } from "../../shared/ui/checkbox";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
-import {
-Select,
-SelectContent,
-SelectItem,
-SelectTrigger,
-SelectValue,
-} from "../../shared/ui/select";
 import { Tabs,TabsContent,TabsList,TabsTrigger } from "../../shared/ui/tabs";
 import { CodeInsightAliases,CodeInsightRepositories } from "../pages/CodeInsightFields";
 import { MarketplaceRepository,PipelineRepository } from "../pages/PipelineRepository";
@@ -157,7 +151,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [group, setGroup] = useQueryValue("section", "");
   const [formTab, setFormTab] = useQueryValue("form_tab", "");
-  const [templateDialog, setTemplateDialog] = useState<"import" | "export" | null>(() => new URLSearchParams(location.search).has("template") && pipelineWorkspace ? "import" : null);
+  const [templateDialog, setTemplateDialog] = useState<"start" | "import" | "export" | null>(() => config.generator && creating && !copyId ? "start" : null);
   const [templateName, setTemplateName] = useState("");
   const [templateDescription, setTemplateDescription] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
@@ -168,7 +162,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   const reportOptions = useCallback((key: string, blocked: boolean) => {
     setUnavailableOptions(current => current[key] === blocked ? current : { ...current, [key]: blocked });
   }, []);
-  const optionsBlocked = Object.values(unavailableOptions).some(Boolean) || (!readOnly && incompleteFields(config.sections.flatMap(section => section.fields), draft));
+  const optionsBlocked = !!templateDialog || Object.values(unavailableOptions).some(Boolean) || (!readOnly && incompleteFields(config.sections.flatMap(section => section.fields), draft));
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -235,7 +229,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
   );
 
   const saveForm = async (runAfterSave = false, throwOnError = false) => {
-    if (groupContent || readOnly || !canEdit || loading || optionsBlocked || saving) return;
+    if (groupContent || readOnly || !canEdit || loading || optionsBlocked || saving || templateDialog) return;
     setSaving(true);
     setError("");
     let savedId: string | undefined;
@@ -332,6 +326,14 @@ export function ResourceForm<T extends Record<string, unknown>>({
     {permissions.has("hosts.enroll") ? <RunnerConnection workspace={workspace} inline autoGenerate /> : <p role="alert" className="text-sm text-destructive">{commonText("form.noRunnerPermission")}</p>}
   </div>;
 
+  const templateChooser = config.generator && (templateDialog === "start" || templateDialog === "import") && <TemplateChooserDialog
+    config={config.generator} allowBlank={templateDialog === "start"}
+    onBlank={() => setTemplateDialog(null)}
+    onCancel={() => { const initial = templateDialog === "start"; setTemplateDialog(null); if (initial) { if (onCancel) onCancel(); else replacePath(backToList); } }}
+    onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }}
+    validate={(fields, values) => !incompleteFields(fields, values)}
+    renderParameter={(field, value, onChange, busy) => <Field field={field} value={value} readOnly={busy} asText={false} stored={false} creating draft={{ [field.key]: value }} permissions={new Set<string>()} reportOptions={() => {}} onChange={onChange} />}
+  />;
   if (workspaceEditor) {
     const fields = config.sections.flatMap(section => section.fields).filter(field => !field.when || field.when(draft));
     const editor = fields.find(field => config.editor ? field.key === config.editor.field : ["actions-editor", "actions-template-editor"].includes(field.type));
@@ -370,12 +372,12 @@ export function ResourceForm<T extends Record<string, unknown>>({
       </main>
 
       {pendingAction && <ResourceActionDialog action={pendingAction} row={pendingActionRow!} workspace={workspace} permissions={permissions} onClose={closeAction} onDone={() => setPendingAction(undefined)} />}
-      <Dialog.Root open={templateDialog !== null} onOpenChange={open => { if (!open && !templateBusy) setTemplateDialog(null); }}><Dialog.Portal>
+      {templateChooser}
+      <Dialog.Root open={templateDialog === "export"} onOpenChange={open => { if (!open && !templateBusy) setTemplateDialog(null); }}><Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-lg border bg-background p-6 shadow-lg">
           <Dialog.Title className="text-lg font-semibold">{templateDialog === "import" ? commonText("form.importTemplate") : commonText("form.saveAsTemplate")}</Dialog.Title>
           <Dialog.Description className="mt-2 text-sm text-muted-foreground">{templateDialog === "import" ? commonText("form.importTemplateHelp") : commonText("form.saveTemplateHelp")}</Dialog.Description>
-          {templateDialog === "import" && config.generator && <div className="dialog-form mt-4"><FormGenerator config={config.generator} compactWhenUnused={false} listMode report={reportOptions} onGenerated={value => { setDraft(d => ({ ...d, ...value })); setTemplateDialog(null); }} /></div>}
           {templateDialog === "export" && <div className="dialog-form mt-4">
             <div className="dialog-body space-y-4">
             <AutoField label={commonText("form.templateName")} className="block space-y-2 text-sm"><Input value={templateName} maxLength={60} onChange={event => setTemplateName(event.target.value)} /></AutoField>
@@ -433,7 +435,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
         try { await pendingDelete.action?.(draft as T); if (route.id) setDraft(await getResource<T>(workspace, config.resource, route.id, config.endpoint)); }
         finally { setSaving(false); }
       }} />}
-      {creating && config.generator && <FormGenerator config={config.generator} compactWhenUnused={config.resource === "pipelines"} report={reportOptions} onGenerated={value => setDraft(d => ({ ...d, ...value }))} />}
+      {templateChooser}
+      {creating && config.generator && canEdit && <div className="flex justify-end"><Button type="button" variant="outline" onClick={() => setTemplateDialog("import")}><Download />{commonText("form.selectTemplate")}</Button></div>}
 
       {(() => {
       const primarySection = config.sections.findIndex(section => section.fields.some(field => !field.when || field.when(draft)));
@@ -481,66 +484,6 @@ export function ResourceForm<T extends Record<string, unknown>>({
       {!hasSectionGroups && formActions}
     </AutoForm>
   );
-}
-
-function FormGenerator<T>({ config, compactWhenUnused, listMode = false, report, onGenerated }: {
-  config: NonNullable<FormConfig<T>["generator"]>;
-  compactWhenUnused: boolean;
-  listMode?: boolean;
-  report: (key: string, blocked: boolean) => void;
-  onGenerated: (value: Partial<T>) => void;
-}) {
-  useCommonTranslation();
-  const [id, setId] = useState(() => new URLSearchParams(location.search).get("template") ?? "");
-  const [attempt, setAttempt] = useState(0);
-  const [template, setTemplate] = useState<Awaited<ReturnType<typeof config.load>>>();
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [busy, setBusy] = useState(false);
-  const [generated, setGenerated] = useState(false);
-  const [error, setError] = useState("");
-  const { options, error: optionsError, loading: optionsLoading } = useOptions(config.options);
-  const ignoreOptions = useCallback(() => {}, []);
-  useEffect(() => {
-    let live = true;
-    setTemplate(undefined); setGenerated(false); setError("");
-    if (!id) { setBusy(false); return; }
-    setBusy(true);
-    void config.load(id).then(value => { if (live) { setTemplate(value); setValues(value.values); } })
-      .catch(cause => { if (live) setError(errorText(cause)); })
-      .finally(() => { if (live) setBusy(false); });
-    return () => { live = false; };
-  }, [id, attempt, config]);
-  useEffect(() => { report("$generator", !!id && (!generated || busy)); return () => report("$generator", false); }, [id, generated, busy, report]);
-  const compact = compactWhenUnused && !id;
-  return <section aria-label={commonText("form.fromTemplate")} className={cn(compact ? "flex flex-wrap items-center gap-3" : listMode ? "dialog-form" : "space-y-4 rounded-md border p-4")}>
-    <div className={cn("space-y-4", listMode && "dialog-body")}>
-    {!listMode && <h2 className={cn("font-medium", compact && "text-sm")}>{commonText("form.fromTemplateHeading")}</h2>}
-    {listMode ? <div className="max-h-64 space-y-1 overflow-y-auto" role="listbox" aria-label={commonText("form.templateList")}>
-      {optionsLoading && <LoadingSkeleton variant="inline" label={commonText("form.loadingTemplates")} />}
-      {!optionsLoading && !options.length && <p className="py-3 text-sm text-muted-foreground">{commonText("form.noTemplates")}</p>}
-      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={id === option.value} className={cn("w-full rounded border px-3 py-2 text-left text-sm hover:bg-accent", id === option.value && "border-primary bg-accent")} onClick={() => { setGenerated(false); setId(option.value); }}>{optionText(option)}</button>)}
-    </div> : <AutoField label={<span className={compact ? "sr-only" : undefined}>{commonText("common.template")}</span>} className="flex min-w-0 flex-col gap-2 text-sm">
-      <Select value={id || "__none"} disabled={busy || optionsLoading} onValueChange={value => { setGenerated(false); setId(value === "__none" ? "" : value); }}>
-        <SelectTrigger className={compact ? "w-56 max-w-full" : undefined}><SelectValue placeholder={commonText("form.selectTemplate")} /></SelectTrigger>
-        <SelectContent><SelectItem value="__none">{commonText("form.noTemplate")}</SelectItem>{options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-      </Select>
-    </AutoField>}
-    {(error || optionsError) && <p role="alert" className="text-sm text-destructive">{error || optionsError}</p>}
-    {id && <>
-      {template && <><p className="text-sm text-muted-foreground">{template.name} · {commonText("common.version")} {template.version}</p>
-        <div className="grid gap-4 sm:grid-cols-2">{template.fields.map(field => <Field key={`${id}/${template.version}/${field.key}`} field={field} value={values[field.key]} readOnly={busy} asText={false} stored={false} creating draft={values} permissions={new Set<string>()} reportOptions={ignoreOptions} onChange={value => { setGenerated(false); setValues(current => ({ ...current, [field.key]: value })); }} />)}</div>
-      </>}
-
-      <p role="status" className="text-sm text-muted-foreground">{generated ? commonText("form.generatedHelp") : commonText("form.generateHelp")}</p>
-    </>}
-    </div>
-    {id && <div className={listMode ? "dialog-footer mt-4" : "mt-4 flex gap-2"}><Button type="button" disabled={busy || !template} onClick={async () => {
-        if (!template) return; setBusy(true); setError("");
-        try { const result = await config.generate(id, template.version, values); onGenerated(result); setGenerated(true); }
-        catch (cause) { setError(errorText(cause)); setGenerated(false); }
-        finally { setBusy(false); }
-      }}>{busy ? commonText("common.processing") : commonText("form.generate")}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => setAttempt(n => n + 1)}>{commonText("form.reloadTemplate")}</Button></div>}
-  </section>;
 }
 
 function SecretField<T>({ field, value, stored, creating, asText, readOnly, draft, permissions, onChange }: {

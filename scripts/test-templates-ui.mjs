@@ -1,3 +1,4 @@
+import { startBlank } from './ui-template-chooser.mjs';
 /** Real Chromium acceptance for template management and generated resources. */
 import assert from 'node:assert/strict';
 import { parseDocument } from 'yaml';
@@ -63,7 +64,8 @@ try {
     await p.locator('[data-auto-field="name"] input').fill(name);
     if (app) {
       await p.getByRole('button',{name:'高级 JSON',exact:true}).click(); await writeEditor(p,p.getByRole('textbox',{name:'高级 JSON',exact:true}),JSON.stringify([{name:'image',label:'镜像',type:'string',default:'nginx:alpine'},{name:'token',label:'令牌',type:'string',secret:true}]));
-      await writeEditor(p,p.getByRole('textbox',{name:'应用配置',exact:true}),JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
+      await p.getByRole('button',{name:'源码编辑',exact:true}).click();
+      await writeEditor(p,p.getByRole('textbox',{name:label,exact:true}),JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'web'},services:[{name:'web',image:'{{ .Values.image }}',env:[{name:'TOKEN',valueFrom:'{{ .Values.token }}'}]}]}));
     }
     if (!app) {
       assert.equal(await p.getByLabel('参数定义（JSON 数组）',{exact:true}).count(),0,'new pipeline templates no longer expose dynamic parameters');
@@ -88,24 +90,23 @@ try {
     await p.waitForFunction(text=>!document.body.innerText.includes(text),name+' edited');
     row=p.getByRole('row').filter({hasText:name});
     await row.getByRole('link',{name:'使用模板',exact:true}).click();
-    await p.getByText(/版本 1/).waitFor();
+    await p.getByRole('heading',{level:3,name:/版本 1/}).waitFor();
     if (!app) {
       const dialog=p.getByRole('dialog');
-      await dialog.getByRole('listbox',{name:'模板列表'}).waitFor();
+      await dialog.getByRole('group',{name:'模板列表'}).waitFor();
       assert.equal(await dialog.getByRole('combobox').count(),1,'only the boolean parameter uses a select');
       await dialog.getByLabel('超时',{exact:true}).fill('');
-      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
-      await dialog.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
+      assert(await dialog.getByRole('button',{name:'使用此模板',exact:true}).isDisabled(),'missing required timeout blocks rendering');
       await dialog.getByLabel('超时',{exact:true}).fill('30');
       const template=(await get(root+'/'+resource)).items.find(item=>item.name===name);
       const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
       assert(edited.ok());
-      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
+      await dialog.getByRole('button',{name:'使用此模板',exact:true}).click();
       await dialog.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
       await dialog.getByRole('button',{name:'重新加载模版',exact:true}).click();
-      await dialog.getByText(/版本 2/).waitFor();
+      await dialog.getByRole('heading',{level:3,name:/版本 2/}).waitFor();
       await dialog.getByLabel('超时',{exact:true}).fill('30');
-      await dialog.getByRole('button',{name:'生成配置',exact:true}).click();
+      await dialog.getByRole('button',{name:'使用此模板',exact:true}).click();
       await dialog.waitFor({state:'hidden'});
       const generated=await readWorkflow();
       const step=generated.jobs.build.steps.find(step=>step.name==='test');
@@ -123,55 +124,36 @@ try {
       assert.equal(objects.total,1);
       assert(objects.items[0].executor_bindings.some(binding=>binding.job_id==='build' && binding.target_ref===host.id));
       await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/pipelines/new`);
+      await startBlank(p);
       await p.getByRole('button',{name:'从模板导入',exact:true}).click();
-      await p.getByRole('dialog').getByRole('option',{name,exact:true}).click();
-      await p.getByRole('dialog').getByText(/版本 2/).waitFor();
+      await p.getByRole('dialog').getByRole('radio',{name:new RegExp(name)}).click();
+      await p.getByRole('dialog').getByRole('heading',{level:3,name:/版本 2/}).waitFor();
       assert(await p.getByRole('button',{name:'保存',exact:true,includeHidden:true}).isDisabled(),'pending template generation blocks saving');
       console.log('PASS pipeline-templates: CRUD confirmation, modal template list, typed parameters, stale conflict/reload, generated values and real pipeline creation');
       continue;
     }
-    const create=p.getByRole('button',{name:'创建',exact:true});
-    assert(await create.isDisabled(),'must generate first');
-    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
-    else {
-      await p.getByLabel('超时',{exact:true}).fill('');
-      await p.getByRole('button',{name:'生成配置',exact:true}).click();
-      await p.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
-      await p.getByLabel('超时',{exact:true}).fill('30');
-    }
-    await p.getByRole('button',{name:'生成配置',exact:true}).click();
-    await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
-    if(app) await p.getByRole('button',{name:'源码编辑',exact:true}).click();
-    const generated=parseDocument(await readEditor(p,p.getByRole('textbox',{name:label,exact:true}))).toJS();
-    if(app) assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
-    else {
-      const step=parseDocument(generated.workflow).toJS().jobs.build.steps.find(step=>step.name==='test');
-      assert.equal(step.run,'echo build false'); assert.equal(step['timeout-minutes'],1);
-    }
-    assert(!JSON.stringify(generated).includes('secret-not-in-template'));
-    await p.getByRole('region',{name:'从模板生成'}).getByLabel(app?'镜像':'构建命令',{exact:true}).fill(app?'nginx:latest':'echo revised');
-    // The field invalidates local generation first; its effect reports the
-    // invalid state to the parent form on the next React render.
-    await p.waitForFunction(() => [...document.querySelectorAll('button')].find(button => button.textContent === '创建')?.disabled, null, {timeout:5000});
-    assert(await create.isDisabled(),'changed parameters invalidate generation');
-    const template=(await get(root+'/'+resource)).items[0];
+    const dialog=p.getByRole('dialog');
+    const create=p.getByRole('button',{name:'创建',exact:true,includeHidden:true});
+    assert(await create.isDisabled(),'chooser blocks background creation');
+    await dialog.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
+    const template=(await get(root+'/'+resource)).items.find(item=>item.name===name);
     const edited=await owner.request.patch(`${origin}/api${root}/${resource}/${template.id}`,{headers,data:{...template,description:'Changed concurrently'}});
     assert(edited.ok());
-    await p.getByRole('button',{name:'生成配置',exact:true}).click();
-    await p.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
-    assert(await create.isDisabled(),'stale version blocks creation');
-    await p.getByRole('button',{name:'重新加载模版',exact:true}).click();
-    await p.getByText(/版本 2/).waitFor();
-    if(app) await p.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
-    else {
-      await p.getByLabel('超时',{exact:true}).fill('');
-      await p.getByRole('button',{name:'生成配置',exact:true}).click();
-      await p.getByRole('alert').filter({hasText:'请填写参数 timeout'}).waitFor();
-      await p.getByLabel('超时',{exact:true}).fill('30');
-    }
-    await p.getByRole('button',{name:'生成配置',exact:true}).click();
-    await p.getByText('配置已填入下方编辑器',{exact:false}).waitFor();
-    if(app) await p.getByRole('button',{name:'表单编辑',exact:true}).click();
+    await dialog.getByRole('button',{name:'使用此模板',exact:true}).click();
+    await dialog.getByRole('alert').filter({hasText:'模板已变化'}).waitFor();
+    assert(await create.isDisabled(),'stale version blocks background creation');
+    await dialog.getByRole('button',{name:'重新加载模版',exact:true}).click();
+    await dialog.getByRole('heading',{level:3,name:/版本 2/}).waitFor();
+    await dialog.getByLabel('令牌（密钥变量名）',{exact:true}).fill('token');
+    await dialog.getByLabel('镜像',{exact:true}).fill('nginx:latest');
+    await dialog.getByRole('button',{name:'使用此模板',exact:true}).click();
+    await dialog.waitFor({state:'hidden'});
+    await p.getByRole('button',{name:'源码编辑',exact:true}).click();
+    const generated=parseDocument(await readEditor(p,p.getByRole('textbox',{name:label,exact:true}))).toJS();
+    assert.equal(generated.services[0].env[0].valueFrom,'variable/token');
+    assert.equal(generated.services[0].image,'nginx:latest');
+    assert(!JSON.stringify(generated).includes('secret-not-in-template'));
+    await p.getByRole('button',{name:'表单编辑',exact:true}).click();
     await p.locator('[data-auto-field="name"] input').fill('Generated '+resource);
     await p.getByRole('combobox',{name:'目标主机',exact:true}).click();
     await p.getByRole('option',{name:'Template host',exact:true}).click();
@@ -181,12 +163,43 @@ try {
     assert.equal(objects.total,1);
     assert.equal(objects.items[0].target_ref,host.id);
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/${target === 'apps' ? 'deployments' : target}/new`);
-    await p.getByRole('region',{name:'从模板生成'}).getByRole('combobox').click();
-    await p.getByRole('option',{name,exact:true}).click();
-    await p.getByText(/版本 2/).waitFor();
-    assert(await p.getByRole('button',{name:'创建',exact:true}).isDisabled());
+    await p.getByRole('radio',{name:new RegExp(name)}).click();
+    await p.getByRole('heading',{level:3,name:/版本 2/}).waitFor();
+    assert(await p.getByRole('button',{name:'创建',exact:true,includeHidden:true}).isDisabled());
     console.log(`PASS ${resource}: UI create/copy/edit/delete, template selection, parameters, generate, conflict/reload, real resource creation`);
   }
+  // Pagination and layout remain a permanent CI contract, including a narrow phone.
+  for(let index=0;index<13;index++)await post(owner,root+'/app-templates',{
+    name:`Paged chooser ${String(index).padStart(2,'0')}`,description:'CI pagination',
+    parameters:JSON.stringify([{name:'image',label:'分页镜像',type:'string',default:'nginx:alpine'}]),
+    content:JSON.stringify({apiVersion:'ferry/v1',kind:'Application',metadata:{name:'paged'},services:[{name:'web',image:'{{ .Values.image }}'}]})
+  });
+  for(const width of [1440,900,390,320]){
+    await p.setViewportSize({width,height:960});
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new`);
+    const dialog=p.getByRole('dialog');
+    await dialog.getByRole('textbox',{name:'搜索',exact:true}).fill('Paged chooser');
+    await p.waitForFunction(()=>[...document.querySelectorAll('[role="dialog"] input[type="radio"]')].filter(el=>el.closest('label')?.textContent.includes('Paged chooser')).length===12);
+    const heading=await dialog.getByRole('heading').first().boundingBox(),footer=await dialog.locator('.dialog-footer').boundingBox();
+    await dialog.locator('[data-template-catalog]').evaluate(el=>el.scrollTop=el.scrollHeight);
+    assert(Math.abs(heading.y-(await dialog.getByRole('heading').first().boundingBox()).y)<1,'dialog title is fixed');
+    assert(Math.abs(footer.y-(await dialog.locator('.dialog-footer').boundingBox()).y)<1,'dialog actions are fixed');
+    await dialog.getByRole('button',{name:'下一页',exact:true}).click();
+    await p.waitForFunction(()=>[...document.querySelectorAll('[role="dialog"] input[type="radio"]')].filter(el=>el.closest('label')?.textContent.includes('Paged chooser')).length===1);
+    await dialog.getByRole('radio',{name:/Paged chooser/}).check();
+    await dialog.getByLabel('分页镜像',{exact:true}).fill('nginx:stable');
+    await dialog.getByRole('button',{name:'上一页',exact:true}).click();
+    await p.waitForFunction(()=>[...document.querySelectorAll('[role="dialog"] input[type="radio"]')].filter(el=>el.closest('label')?.textContent.includes('Paged chooser')).length===12);
+    assert.equal(await dialog.getByLabel('分页镜像',{exact:true}).inputValue(),'nginx:stable');
+    await dialog.getByRole('button',{name:'使用此模板',exact:true}).click();
+    await dialog.waitFor({state:'hidden'});
+    assert.equal(await p.locator('[data-form-section]').count(),3);
+    await p.getByRole('link',{name:'服务配置',exact:true}).click();
+    await p.waitForFunction(()=>document.querySelector('[data-section-navigation] [aria-current]')?.textContent==='服务配置');
+    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`no full-page overflow at ${width}`);
+    assert(await p.locator('input').evaluateAll(nodes=>nodes.some(node=>node.value==='nginx:stable')));
+  }
+  console.log('PASS Office chooser: server pagination/search, fixed header/actions, retained parameters, continuous form and section highlighting at four widths');
   await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/config-templates`);
   await p.getByRole('button',{name:'创建',exact:true}).click();
   await p.getByLabel('名称',{exact:true}).fill('Runtime file');
