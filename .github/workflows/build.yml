@@ -338,9 +338,9 @@ jobs:
       - name: Platform initialization and management in Chromium
         if: matrix.harness == 'build-ui'
         run: python3 .github/scripts/annotate-failures.py --run node scripts/test-platform-ui.mjs
-        - name: Database metadata and shared resource list in Chromium
-          if: matrix.harness == 'build-ui'
-          run: python3 .github/scripts/annotate-failures.py --run node scripts/test-database-monitor-ui.mjs
+      - name: Database metadata and shared resource list in Chromium
+        if: matrix.harness == 'build-ui'
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-database-monitor-ui.mjs
       - name: Login protection, global audit and appearance entry acceptance
         if: matrix.harness == 'build-ui'
         run: |
