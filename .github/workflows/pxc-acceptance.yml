@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: pxc-acceptance-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   pxc:
     runs-on: ubuntu-24.04

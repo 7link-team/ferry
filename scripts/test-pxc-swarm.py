@@ -289,6 +289,9 @@ def main():
         report['result'] = 'FAIL'
         report['error'] = redact(str(error))
         print('FAIL ' + report['error'], flush=True)
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            escaped = report['error'].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print('::error title=PXC laboratory failure::' + escaped, flush=True)
         raise
     finally:
         try:
@@ -296,6 +299,9 @@ def main():
         except Exception as error:
             report['diagnostic_error'] = redact(str(error))[-1000:]
         (output / 'acceptance.json').write_text(json.dumps(report, indent=2), encoding='utf8')
+        if os.environ.get('GITHUB_ACTIONS') == 'true':
+            evidence = json.dumps(report, separators=(',', ':')).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print('::notice title=PXC laboratory evidence::' + evidence, flush=True)
         (output / 'summary.md').write_text('\n'.join([
             f"Result: {report['result']}", f"Checks: {len(report['checks'])}",
             f"Full outage: {report.get('full_outage_recovery', 'NOT_REACHED')}",
