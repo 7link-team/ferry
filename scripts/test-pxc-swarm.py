@@ -27,12 +27,16 @@ def main():
     output = Path(os.environ.get('FERRY_PXC_OUTPUT', 'pxc-evidence')).resolve()
     output.mkdir(parents=True, exist_ok=True)
     prefix = 'fpxc-' + uuid.uuid4().hex[:10]
+    # Reconnecting a partitioned manager at its advertised IP requires an
+    # explicitly configured IPAM subnet, rather than Docker's automatic pool.
+    underlay_subnet = f'10.241.{secrets.randbelow(256)}.0/24'
     password, sst_password = secrets.token_hex(24), secrets.token_hex(24)
     if os.environ.get('GITHUB_ACTIONS') == 'true':
         print('::add-mask::' + password, flush=True)
         print('::add-mask::' + sst_password, flush=True)
     report = {'result': 'RUNNING', 'source': os.environ.get('GITHUB_SHA', 'local'),
               'prefix': prefix, 'image': IMAGE, 'variant': IMAGE_VARIANT,
+              'underlay_subnet': underlay_subnet,
               'ci_mysql_apparmor_complain': os.environ.get('FERRY_PXC_RESTORE_MYSQL_APPARMOR') == '1',
               'engine': ENGINE, 'checks': [], 'snapshots': [],
               'boundary': 'Three nested daemons on one shared kernel; direct Swarm experiment, not Ferry API or physical-host certification',
@@ -227,7 +231,7 @@ def main():
 
     try:
         check('Linux Docker laboratory', os.name == 'posix' and docker('info').returncode == 0)
-        docker('network', 'create', prefix + '-underlay')
+        docker('network', 'create', '--subnet', underlay_subnet, prefix + '-underlay')
         for node in NODES:
             docker('volume', 'create', prefix + '-engine-' + node)
             docker('run', '-d', '--privileged', '--tmpfs', '/run', '--name', prefix + '-' + node,
