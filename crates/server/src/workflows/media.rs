@@ -174,9 +174,18 @@ async fn download(
         size: asset.size as u64,
     };
     resolve(&s, scope.workspace_id.into(), workflow.into(), &reference).await?;
+    content_response(&s, asset, headers).await
+}
+
+/// Shared byte response; callers must authorize the asset before invoking it.
+pub(crate) async fn content_response(
+    s: &AppState,
+    asset: assets::Model,
+    headers: HeaderMap,
+) -> Result<Response> {
     let backend = backend(&s).await?;
-    let bytes = store(&s, &backend)
-        .read_bytes(&s.db, scope.workspace_id.into(), asset.id)
+    let bytes = store(s, &backend)
+        .read_bytes(&s.db, asset.workspace_id, asset.id)
         .await?;
     let inline = asset.mime.starts_with("image/")
         || asset.mime.starts_with("audio/")

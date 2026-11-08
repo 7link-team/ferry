@@ -18,7 +18,7 @@ import type { ListConfig } from "../shared/resources/types";
 type Row = Record<string, unknown>;
 type Snapshot = Record<string, any>;
 const t = (key: string) => commonText(`resource-domain:monitor.${key}`);
-export const monitorSections = ["database", "redis", "files", "usage"] as const;
+export const monitorSections = ["database", "redis", "nats", "files", "usage"] as const;
 const bytes = (value: unknown) => {
   if (value == null) return "—";
   let number = Number(value), unit = 0;
@@ -154,6 +154,17 @@ export function PlatformMonitor({ section }: { section: string }) {
           </TabsContent><TabsContent value="info" className="pt-3">
             {!data.connected ? <p role="status">{t(data.configured ? "redisUnavailable" : "redisDisabled")}</p> : <Data title="Redis INFO" rows={Object.entries(data.info ?? {}).map(([name, value]) => ({ name, value }))} columns={["name", "value"]} />}
           </TabsContent>
+      </Tabs>}
+      {data && active === "nats" && <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+        <TabsList aria-label="NATS" className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto"><TabsTrigger value="overview">{t("overview")}</TabsTrigger><TabsTrigger value="client">{t("natsClient")}</TabsTrigger><TabsTrigger value="jetstream">JetStream</TabsTrigger></TabsList>
+        <p role="status" className="text-sm text-muted-foreground">{t(data.connected?"natsConnected":data.configured?"natsUnavailable":"natsDisabled")}</p>
+        <p className="text-sm text-muted-foreground">{t("natsScope")}{data.sampled_at?` · ${new Date(data.sampled_at).toLocaleString()}`:""}</p>
+        <TabsContent value="overview" className="space-y-5 pt-3">{data.connected && <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Metric label={t("natsVersion")} value={data.server?.version}/><Metric label={t("natsServerName")} value={data.server?.name || "—"}/><Metric label={t("natsCluster")} value={data.server?.cluster || "—"}/><Metric label={t("natsMaxPayload")} value={bytes(data.server?.max_payload)}/></div>
+          <Data title={t("instance")} rows={["id","host","port","auth_required","tls_required","jetstream"].map(key=>({name:t(`nats_${key}`),value:data.server?.[key]}))} columns={["name","value"]}/>
+        </>}</TabsContent>
+        <TabsContent value="client" className="space-y-5 pt-3">{data.configured && <><p className="break-all text-sm">{t("instance_id")}: {data.instance_id}</p><div className="grid grid-cols-2 gap-3 lg:grid-cols-3">{["in_messages","out_messages","in_bytes","out_bytes","reconnects"].map(key=><Metric key={key} label={t(`nats_${key}`)} value={key.endsWith("bytes")?bytes(data.client?.[key]):data.client?.[key]??"—"}/>)}</div></>}</TabsContent>
+        <TabsContent value="jetstream" className="space-y-5 pt-3">{data.connected && (data.jetstream?.available?<div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{["memory","storage","streams","consumers"].map(key=><Metric key={key} label={t(`nats_${key}`)} value={["memory","storage"].includes(key)?bytes(data.jetstream[key]):data.jetstream[key]}/>)}</div>:<p role="status" className="text-sm text-muted-foreground">{t("natsJetstreamUnavailable")}</p>)}</TabsContent>
       </Tabs>}
       {data && active === "files" && <Tabs value={tab} onValueChange={setTab} className="min-w-0">
         <TabsList aria-label={t(active)} className="max-w-full flex-wrap group-data-[orientation=horizontal]/tabs:h-auto"><TabsTrigger value="overview">{t("overview")}</TabsTrigger><TabsTrigger value="catalog">{t("fileCatalog")}</TabsTrigger><TabsTrigger value="top">{t("topFiles")}</TabsTrigger><TabsTrigger value="access">{t("fileAccess")}</TabsTrigger></TabsList>

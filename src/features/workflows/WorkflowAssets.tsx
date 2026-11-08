@@ -1,6 +1,6 @@
 import { FieldCaption } from "../../shared/forms/FieldHelp";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { api, errorText } from "../../shared/api/api";
+import { api, errorText, localizedFetch } from "../../shared/api/api";
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { Input } from "../../shared/ui/input";
 
@@ -54,38 +54,67 @@ export function WorkflowAssetPreview({ file }: { file: WorkflowAsset }) {
   if (!/^[a-f0-9]{64}$/.test(hash) || /^0+$/.test(hash) || (!context.workflow && !local))
     return null;
   const url = local ?? `/api/workspaces/${context.workspace}/workflows/${context.workflow}/assets/${hash}`;
-  return (
-    <div className="min-w-0 space-y-2 rounded-lg border p-3">
-      {file.mime.startsWith("image/") && (
-        <img
-          src={url}
-          alt={file.name}
-          className="max-h-64 w-full rounded object-contain"
-        />
-      )}
-      {file.mime.startsWith("audio/") && (
-        <audio src={url} controls preload="metadata" className="w-full" />
-      )}
-      {file.mime.startsWith("video/") && (
-        <video
-          src={url}
-          controls
-          preload="metadata"
-          className="max-h-80 w-full rounded"
-        />
-      )}
-      <a
-        href={url}
-        download={file.name}
-        className="block break-all text-sm text-primary underline"
-      >
-        {file.name || t("downloadFile")}
-      </a>
-      <span className="text-xs text-muted-foreground">
-        {file.mime} · {Math.ceil(file.size / 1024)} KB
-      </span>
-    </div>
-  );
+  return <FileContentPreview file={file} url={url} />;
+}
+
+const TEXT_PREVIEW_BYTES = 256 * 1024;
+export function supportsFilePreview(mime: string) {
+  return /^(image|audio|video|text)\//.test(mime) || /^(application\/(json|xml|javascript|yaml|x-yaml)|[^;]+\+(json|xml))(;|$)/.test(mime);
+}
+function TextFilePreview({ url }: { url: string }) {
+  const [result, setResult] = useState<{ url: string; text?: string; truncated?: boolean; failed?: boolean }>();
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setResult(undefined);
+    void (async () => {
+      try {
+        const response = await localizedFetch(url, { signal: controller.signal, headers: { Range: `bytes=0-${TEXT_PREVIEW_BYTES}` } });
+        if (response.status === 416 && response.headers.get("Content-Range") === "bytes */0") {
+          if (!controller.signal.aborted) setResult({ url, text: "" });
+          return;
+        }
+        if (!response.ok || !response.body) throw new Error();
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let length = 0;
+        try {
+          while (length <= TEXT_PREVIEW_BYTES) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const part = value.subarray(0, TEXT_PREVIEW_BYTES + 1 - length);
+            chunks.push(part); length += part.length;
+          }
+        } finally { await reader.cancel(); }
+        const bytes = new Uint8Array(Math.min(length, TEXT_PREVIEW_BYTES));
+        let offset = 0;
+        for (const chunk of chunks) { const part = chunk.subarray(0, bytes.length - offset); bytes.set(part, offset); offset += part.length; }
+        if (bytes.includes(0)) throw new Error();
+        // React escapes this plain text; HTML/XML is never executed.
+        if (!controller.signal.aborted) setResult({ url, text: new TextDecoder().decode(bytes), truncated: length > TEXT_PREVIEW_BYTES });
+      } catch {
+        if (!controller.signal.aborted) setResult({ url, failed: true });
+      }
+    })();
+    return () => controller.abort();
+  }, [url, attempt]);
+  if (!result || result.url !== url) return <div role="status" aria-label={t("filePreviewLoading")} className="h-32 animate-pulse rounded bg-muted motion-reduce:animate-none" />;
+  if (result.failed) return <div role="alert" className="space-y-2 text-sm text-destructive"><p>{t("filePreviewFailed")}</p><button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>{t("filePreviewRetry")}</button></div>;
+  return <><pre aria-label={t("filePreviewContent")} className="max-h-[55dvh] overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-3 text-sm">{result.text || t("filePreviewEmpty")}</pre>{result.truncated && <p role="status" className="text-xs text-muted-foreground">{t("filePreviewTruncated")}</p>}</>;
+}
+export function FileContentPreview({ file, url, showDownload = true }: { file: Pick<WorkflowAsset, "name" | "mime" | "size">; url: string; showDownload?: boolean }) {
+  const [failedUrl, setFailedUrl] = useState("");
+  const media = /^(image|audio|video)\//.test(file.mime);
+  return <div className="min-w-0 space-y-2 rounded-lg border p-3">
+    {media && failedUrl === url ? <p role="alert" className="text-sm text-destructive">{t("filePreviewFailed")}</p> : <>
+      {file.mime.startsWith("image/") && <img src={url} alt={file.name} onError={() => setFailedUrl(url)} className="max-h-[55dvh] w-full rounded object-contain" />}
+      {file.mime.startsWith("audio/") && <audio src={url} onError={() => setFailedUrl(url)} controls preload="metadata" className="w-full" />}
+      {file.mime.startsWith("video/") && <video src={url} onError={() => setFailedUrl(url)} controls preload="metadata" className="max-h-[55dvh] w-full rounded" />}
+    </>}
+    {!media && (supportsFilePreview(file.mime) ? <TextFilePreview url={url} /> : <p className="text-sm text-muted-foreground">{t("filePreviewUnsupported")}</p>)}
+    {showDownload && <a href={url} download={file.name} className="block break-all text-sm text-primary underline">{t("downloadFile")} · {file.name}</a>}
+    <span className="block break-all text-xs text-muted-foreground">{file.mime} · {Math.ceil(file.size / 1024)} KB</span>
+  </div>;
 }
 export function WorkflowAssetUpload({
   file,

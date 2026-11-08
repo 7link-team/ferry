@@ -563,5 +563,12 @@
 "history.actor": ["Triggered by", "触发人", "觸發人", "実行者", "실행자", "Dicetuskan oleh"],
 "history.endReason": ["End reason", "结束原因", "結束原因", "終了理由", "종료 사유", "Sebab tamat"],
 "actions.emptyTitle": ["Start with your first job", "从第一个任务开始", "從第一個任務開始", "最初のジョブから開始", "첫 작업으로 시작", "Mulakan dengan tugas pertama"],
-"actions.emptyHelp": ["Add a job, configure its host and steps, then connect dependent jobs.", "添加任务，配置执行主机和步骤，再连接有依赖关系的任务。", "新增任務，設定執行主機與步驟，再連接有相依關係的任務。", "ジョブを追加し、ホストとステップを設定して依存ジョブを接続します。", "작업을 추가하고 호스트와 단계를 설정한 후 종속 작업을 연결하세요.", "Tambah tugas, tetapkan hos dan langkah, kemudian sambungkan tugas bergantung."]
+"actions.emptyHelp": ["Add a job, configure its host and steps, then connect dependent jobs.", "添加任务，配置执行主机和步骤，再连接有依赖关系的任务。", "新增任務，設定執行主機與步驟，再連接有相依關係的任務。", "ジョブを追加し、ホストとステップを設定して依存ジョブを接続します。", "작업을 추가하고 호스트와 단계를 설정한 후 종속 작업을 연결하세요.", "Tambah tugas, tetapkan hos dan langkah, kemudian sambungkan tugas bergantung."],
+"filePreviewLoading": ["Loading file preview", "正在加载文件预览", "正在載入檔案預覽", "プレビューを読み込み中", "파일 미리 보기 로드 중", "Memuatkan pratonton fail"],
+"filePreviewFailed": ["Unable to preview this file. Retry or download it.", "无法预览此文件，请重试或下载查看。", "無法預覽此檔案，請重試或下載查看。", "プレビューできません。再試行するかダウンロードしてください。", "파일을 미리 볼 수 없습니다. 다시 시도하거나 다운로드하세요.", "Fail tidak dapat dipratonton. Cuba lagi atau muat turun."],
+"filePreviewRetry": ["Retry", "重试", "重試", "再試行", "다시 시도", "Cuba lagi"],
+"filePreviewContent": ["File content", "文件内容", "檔案內容", "ファイル内容", "파일 내용", "Kandungan fail"],
+"filePreviewEmpty": ["This file is empty.", "此文件内容为空。", "此檔案內容為空。", "ファイルは空です。", "빈 파일입니다.", "Fail ini kosong."],
+"filePreviewTruncated": ["Showing the first 256 KiB. Download the complete file.", "仅显示前 256 KiB，完整内容请下载查看。", "僅顯示前 256 KiB，完整內容請下載查看。", "先頭256 KiBを表示しています。全体はダウンロードしてください。", "처음 256 KiB를 표시합니다. 전체 파일을 다운로드하세요.", "Memaparkan 256 KiB pertama. Muat turun fail penuh."],
+"filePreviewUnsupported": ["Preview is unavailable for this format. Download the file to view it.", "此格式不支持预览，请下载文件查看。", "此格式不支援預覽，請下載檔案查看。", "この形式はプレビューできません。ダウンロードしてください。", "이 형식은 미리 볼 수 없습니다. 파일을 다운로드하세요.", "Format ini tidak menyokong pratonton. Muat turun untuk melihatnya."]
 }

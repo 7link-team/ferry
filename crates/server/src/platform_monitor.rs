@@ -30,6 +30,7 @@ use std::{
 pub mod cache;
 pub mod catalog;
 pub mod database;
+pub mod nats;
 pub mod retention;
 
 #[derive(Clone, Default)]

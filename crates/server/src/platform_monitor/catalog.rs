@@ -1,4 +1,4 @@
-//! Administrator metadata catalog. Content remains behind the existing workspace/object ACLs.
+//! Administrator file catalog. Content access requires the same platform administrator role.
 use super::*;
 
 pub async fn list(
@@ -25,7 +25,7 @@ pub async fn list(
         .and_then(|v| v.parse::<u32>().ok())
         .unwrap_or(20)
         .clamp(1, 100);
-    let union = "(SELECT a.id,a.workspace_id,w.name AS workspace,a.sha256 AS name,a.sha256,a.mime,a.size,a.created_at,'asset' AS kind,(SELECT MIN(r.owner_id) FROM asset_refs r WHERE r.asset_id=a.id AND r.owner_kind='workflow') AS workflow_id,a.execution_id AS run_id FROM assets a JOIN workspaces w ON w.id=a.workspace_id UNION ALL SELECT a.id,a.workspace_id,w.name AS workspace,a.path AS name,a.sha256,'application/octet-stream' AS mime,a.size,a.created_at,'artifact' AS kind,a.pipeline_id AS workflow_id,a.run_id FROM pipeline_artifacts a JOIN workspaces w ON w.id=a.workspace_id) catalog";
+    let union = "(SELECT a.id,a.workspace_id,w.name AS workspace,a.sha256 AS name,a.sha256,a.mime,a.size,a.created_at,'asset' AS kind,COALESCE((SELECT e.workflow_id FROM workflow_executions e WHERE e.id=a.execution_id AND e.workspace_id=a.workspace_id),(SELECT MIN(r.owner_id) FROM asset_refs r JOIN workflows f ON f.id=r.owner_id AND f.workspace_id=a.workspace_id WHERE r.asset_id=a.id AND r.owner_kind='workflow')) AS workflow_id,(SELECT e.id FROM workflow_executions e WHERE e.id=a.execution_id AND e.workspace_id=a.workspace_id) AS run_id FROM assets a JOIN workspaces w ON w.id=a.workspace_id UNION ALL SELECT a.id,a.workspace_id,w.name AS workspace,a.path AS name,a.sha256,'application/octet-stream' AS mime,a.size,a.created_at,'artifact' AS kind,a.pipeline_id AS workflow_id,a.run_id FROM pipeline_artifacts a JOIN workspaces w ON w.id=a.workspace_id) catalog";
     let predicate =
         "WHERE ($1 = 'all' OR kind = $2) AND (name LIKE $3 OR workspace LIKE $4 OR mime LIKE $5)";
     let pattern = format!("%{q}%");
@@ -53,4 +53,18 @@ pub async fn list(
     Ok(Json(
         json!({"items":items,"total":totals.first().and_then(|v|v["count"].as_i64()).unwrap_or(0),"page":page,"page_size":size}),
     ))
+}
+
+/// File IDs are resolved from the catalog, never from a caller supplied storage path.
+pub async fn content(
+    State(s): State<AppState>,
+    _: Admin,
+    crate::error::Path(id): crate::error::Path<crate::snowflake::Id>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response> {
+    let asset = crate::entities::content_assets::Entity::find_by_id(id)
+        .one(&s.db)
+        .await?
+        .ok_or_else(ApiError::missing)?;
+    crate::workflows::media::content_response(&s, asset, headers).await
 }
