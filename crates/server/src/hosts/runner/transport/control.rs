@@ -8,6 +8,17 @@ const METRICS_SECONDS: u64 = 30;
 /// Probes allowed to go unanswered before the connection is considered dead.
 const MISSED_PROBES: u32 = 3;
 
+/// Rejected is terminal for existing agents. Infrastructure failures must close
+/// the socket without that frame so the agent can retry with its stored key.
+async fn authentication_failure(socket: &mut Socket, error: &ApiError) {
+    if error.0.is_server_error() {
+        tracing::warn!(reason=%error.1, "Runner authentication temporarily unavailable");
+        let _ = socket.send(Message::Close(None)).await;
+    } else {
+        reject(socket, error).await;
+    }
+}
+
 /// `GET /api/runners/connect` — the runner's control connection. Deliberately
 /// not behind the session cookie: a runner is not a browser, and it proves
 /// itself with the `Hello` frame instead.
@@ -44,11 +55,11 @@ async fn control(s: AppState, mut socket: Socket) {
     };
     let (host_id, key) = match authenticated {
         Ok(value) => value,
-        Err(error) => return reject(&mut socket, &error).await,
+        Err(error) => return authentication_failure(&mut socket, &error).await,
     };
     if let Some(key) = key.as_deref() {
         if let Err(error) = verify_key(&s, &host_id, key).await {
-            return reject(&mut socket, &error).await;
+            return authentication_failure(&mut socket, &error).await;
         }
     }
 
@@ -61,7 +72,8 @@ async fn control(s: AppState, mut socket: Socket) {
         .await
     {
         Ok(Some(row)) => row,
-        _ => return reject(&mut socket, &runner_extra("runnerExtra.hostUnavailable")).await,
+        Ok(None) => return reject(&mut socket, &runner_extra("runnerExtra.hostUnavailable")).await,
+        Err(error) => return authentication_failure(&mut socket, &error.into()).await,
     };
     // Deliver the newly issued key before attempting a transient cluster lease.
     // A closed socket is retryable by existing Runners; Rejected is permanent.

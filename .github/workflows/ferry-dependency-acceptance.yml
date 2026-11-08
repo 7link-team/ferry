@@ -34,6 +34,7 @@ jobs:
           ACTIONS_WORKER_TARGETS: linux/amd64
         run: |
           cargo build --locked -p ferry-server -p ferry-runner
+          cargo test --locked -p ferry-server websocket_rejections_and_terminal_errors_follow_each_readers_locale -- --nocapture
           bash scripts/build-actions-workers.sh
           go install github.com/nats-io/nats-server/v2@v2.15.2
           mkdir -p dependency-suite
