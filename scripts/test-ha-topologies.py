@@ -378,12 +378,16 @@ def xxl_job(lab):
             'scheduleType': 'CRON', 'scheduleConf': '0/3 * * * * ?', 'misfireStrategy': 'DO_NOTHING',
             'executorRouteStrategy': 'FIRST', 'executorBlockStrategy': 'SERIAL_EXECUTION',
             'executorTimeout': 10, 'executorFailRetryCount': 0, 'glueType': 'GLUE_SHELL',
-            'glueSource': '#!/bin/sh\necho FERRY_XXL_HA_MARKER\n', 'glueRemark': 'owned HA laboratory',
+            # The upstream script handler forwards this as argv[1]; omitting
+            # the API field stores null and Runtime.exec rejects a null argv.
+            'executorParam': 'FERRY_XXL_HA_PARAMETER',
+            'glueSource': '#!/bin/sh\n[ "$1" = "FERRY_XXL_HA_PARAMETER" ] || exit 42\necho FERRY_XXL_HA_MARKER\n',
+            'glueRemark': 'owned HA laboratory',
         })['content'])
 
         def rows():
             return json.loads(sql("SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT('id',id,'time',UNIX_TIMESTAMP(trigger_time),"
-                                  "'trigger',trigger_code,'handle',handle_code,'message',trigger_msg)),JSON_ARRAY()) "
+                                  "'trigger',trigger_code,'handle',handle_code,'message',trigger_msg,'handle_message',handle_msg)),JSON_ARRAY()) "
                                   f'FROM xxl_job_log WHERE job_id={job}'))
 
         api('a0', '/jobinfo/start', {'id': job})
@@ -422,6 +426,18 @@ def xxl_job(lab):
                                            'shell_log_markers': markers,
                                            'global_exactly_once': 'NOT CERTIFIED; finite observation, no business retry/idempotency certification'})
         (lab.output / 'xxl-executions.json').write_text(json.dumps(final, indent=2), encoding='utf8')
+    except Exception:
+        # Preserve real trigger/callback errors before the isolated database is
+        # removed, including failures that never reach the success assertions.
+        if 'rows' in locals():
+            try:
+                failed_rows = rows()
+                sanitized = lab.redact(json.dumps(failed_rows, indent=2))
+                (lab.output / 'xxl-executions.json').write_text(sanitized, encoding='utf8')
+                lab.report['observations']['last_executions'] = json.loads(lab.redact(json.dumps(failed_rows[-3:])))
+            except (RuntimeError, OSError, ValueError) as diagnostic_error:
+                lab.report['observations']['diagnostic_error'] = lab.redact(str(diagnostic_error))
+        raise
     finally:
         executor.terminate()
         try:
