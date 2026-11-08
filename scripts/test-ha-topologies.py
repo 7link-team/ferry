@@ -207,15 +207,27 @@ async def nats_jetstream(lab):
         await consumer.unsubscribe()
         consumer = await retry(lambda: js.pull_subscribe('proof', durable='proof-consumer', stream='PROOF'),
                                'rebind existing durable consumer after leader failure')
-        redelivered = (await retry(lambda: consumer.fetch(1, timeout=3), 'pending message redelivery'))[0]
+        received = {}
+        deliveries = []
+        deadline = time.monotonic() + 60
+        while len(received) < 2 and time.monotonic() < deadline:
+            message = (await retry(lambda: consumer.fetch(1, timeout=3), 'pending or new message delivery', timeout=15))[0]
+            sequence = message.metadata.sequence.stream
+            deliveries.append({'sequence': sequence, 'deliveries': message.metadata.num_delivered,
+                               'data': message.data.decode()})
+            # A pending redelivery can follow a newly available message. Neither
+            # may rewind the durable consumer to the already acknowledged first.
+            assert sequence in (2, 3), 'acknowledged first message was replayed'
+            received[sequence] = message
+            await message.ack_sync(timeout=5)
+        lab.report['observations']['consumer_deliveries'] = deliveries
+        redelivered = received.get(2)
         lab.check('durable consumer retains ack floor and redelivers unacknowledged message',
-                  redelivered.data == b'pending' and redelivered.metadata.sequence.stream == 2
+                  redelivered is not None and redelivered.data == b'pending'
                   and redelivered.metadata.num_delivered >= 2)
-        await redelivered.ack_sync(timeout=5)
-        following = (await consumer.fetch(1, timeout=5))[0]
+        following = received.get(3)
         lab.check('durable consumer continues with next message without replaying acknowledged data',
-                  following.data == b'after' and following.metadata.sequence.stream == 3)
-        await following.ack_sync(timeout=5)
+                  following is not None and following.data == b'after' and following.metadata.sequence.stream == 3)
         lab.command('start', previous)
         await retry(replicas_current, 'returning replica catches up')
         info = await js.stream_info('PROOF')
@@ -229,8 +241,8 @@ async def nats_jetstream(lab):
         state = await retry(consumer_caught_up, 'consumer replicas and committed ack floor recover')
         lab.check('three durable consumer replicas converge with no outstanding acknowledgements',
                   state.config.num_replicas == 3 and state.ack_floor.stream_seq == 3)
-        lab.report['observations'] = {'previous_leader': previous, 'new_leader': changed.cluster.leader, 'messages': info.state.messages,
-                                       'scope': 'stream and durable explicit-ack consumer recovery; application exactly-once behavior not certified'}
+        lab.report['observations'].update({'previous_leader': previous, 'new_leader': changed.cluster.leader, 'messages': info.state.messages,
+                                       'scope': 'stream and durable explicit-ack consumer recovery; application exactly-once behavior not certified'})
     finally:
         await nc.close()
 
@@ -328,7 +340,7 @@ def xxl_job(lab):
         listener.bind(('127.0.0.1', 0))
         web_port = listener.getsockname()[1]
     executor_address = f'http://{gateway}:{executor_port}'
-    api('a0', '/jobgroup/save', {'appname': lab.prefix, 'title': 'HA acceptance executor',
+    api('a0', '/jobgroup/save', {'appname': lab.prefix, 'title': 'HA executor',
                                'addressType': 1, 'addressList': executor_address})
     group = int(sql("SELECT id FROM xxl_job_group WHERE appname='" + lab.prefix + "'"))
     log_dir = lab.output / 'executor-jobs'
