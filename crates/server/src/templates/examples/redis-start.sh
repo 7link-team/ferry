@@ -19,6 +19,12 @@ ipv4 "$REDIS_NODE_IP" && ipv4 "$REDIS_INITIAL_IP" || {
   exit 1
 }
 : "${REDISCLI_AUTH:?A deploy secret variable is required}"
+# Redis 7.4 Sentinel rewrites auth-pass values without quoting. Multi-line
+# credentials cannot be safely recovered as single configuration directives.
+case "$REDISCLI_AUTH" in
+  *'
+'*|*"$(printf '\r')"*) printf '%s\n' 'Redis Sentinel credentials must be a single line.' >&2; exit 1 ;;
+esac
 # Quote a Redis configuration literal inside a single native option argument.
 # This also keeps passwords beginning with "--" from becoming server options.
 auth=$(awk 'BEGIN {
@@ -59,6 +65,12 @@ case "$REDIS_KIND" in
         "$REDIS_PORT" "$REDIS_INITIAL_IP" "$REDIS_INITIAL_PORT" > "$draft"
       mv "$draft" "$config"
     fi
+    # Preserve elected master, peers, epochs and Sentinel identity. Only auth
+    # is supplied again via safely quoted native arguments below: Redis 7.4
+    # may have persisted these two directives with unescaped special chars.
+    draft=$(mktemp /data/sentinel.conf.XXXXXX)
+    awk '!($1 == "sentinel" && ($2 == "sentinel-pass" || ($2 == "auth-pass" && $3 == "example")))' "$config" > "$draft"
+    mv "$draft" "$config"
     set -- redis-server "$config" --port "$REDIS_PORT" "--requirepass $auth" \
       "--sentinel auth-pass example $auth" "--sentinel sentinel-pass $auth" \
       '--sentinel announce-ip' "$REDIS_NODE_IP" '--sentinel announce-port' "$REDIS_PORT" --sentinel

@@ -18,6 +18,14 @@ def exercise(api, create, start, done, check, command, mode, workspace, host, tr
     """Use the harness-owned infrastructure; all mutations go through its API."""
     template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-redis-sentinel')
     startup = next(t for t in api(f'/workspaces/{workspace}/config-templates')['items'] if t['name'] == 'example-redis-start')
+    script = work / ('redis-start-credential-check-' + transport + '.sh')
+    script.write_text(startup['content'], encoding='utf8')
+    for control, label in [('\n', 'LF'), ('\r', 'CR')]:
+        invalid = subprocess.run(['sh', str(script)], capture_output=True, text=True,
+                                 env={'REDIS_NODE_IP': '192.0.2.1', 'REDIS_INITIAL_IP': '192.0.2.1',
+                                      'REDISCLI_AUTH': 'invalid' + control + 'credential'})
+        check(transport + ' startup rejects ' + label + ' credentials before creating runtime files',
+              invalid.returncode != 0 and 'credentials must be a single line' in invalid.stderr)
     password = '--Redis-' + uuid.uuid4().hex + ' "\\$#'
     variable = 'redis-password-' + transport
     create('variables', {'name': variable, 'scope': 'deploy', 'kind': 'secret', 'value': password})
@@ -97,12 +105,12 @@ def exercise(api, create, start, done, check, command, mode, workspace, host, tr
             prefix = ['docker', 'exec', fixture + '-' + node, '/usr/bin/docker'] if mode == 'stack' else ['docker']
             label = ('com.docker.stack.namespace=' if mode == 'stack' else 'com.docker.compose.project=') + project
             for container in command(prefix + ['ps', '-aq', '--filter', 'label=' + label]).decode().split():
-                result.append(command(prefix + ['inspect', '--format', '{{.Name}} {{json .State}}', container]).decode())
-                # Docker sends container stderr to the CLI's stderr even when
-                # logs exits successfully. Keep startup failures in evidence.
-                output = subprocess.run(prefix + ['logs', '--tail', '100', container],
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
-                result.append(output.stdout.decode())
+                # A failed Swarm task may disappear between ps and logs. Keep
+                # stderr and do not mask the original assertion in that race.
+                for args in [['inspect', '--format', '{{.Name}} {{json .State}}', container],
+                             ['logs', '--tail', '100', container]]:
+                    output = subprocess.run(prefix + args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    result.append(output.stdout.decode())
         text = '\n'.join(result).replace(password, '[REDACTED]').replace(json.dumps(password)[1:-1], '[REDACTED]')
         (work / ('redis-' + transport + '-diagnostics.log')).write_text(text, encoding='utf8')
         print(text[-7000:], flush=True)
@@ -192,6 +200,22 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
         retry(lambda: write(original, 'proof:baseline', 'before', 2), 'baseline replicated to two replicas')
         retry(lambda: all(c.get('proof:baseline') == 'before' for c in members.values()), 'baseline visible on all three data members')
         check('baseline reaches both asynchronous replicas before fault injection', True)
+
+        def replicas_discovered():
+            expected = set(data_endpoints.values()) - {original}
+            for voter in voters.values():
+                replicas = voter.sentinel_slaves('example')
+                if {(r['ip'], r['port']) for r in replicas} != expected:
+                    return False
+                if any(r['is_sdown'] or r['is_odown'] or r['is_disconnected']
+                       or r['master-link-status'] != 'ok' for r in replicas):
+                    return False
+            return True
+
+        # Data replication may finish before Sentinel's periodic INFO refresh
+        # has learned the replicas. Inject failure only once voters see them.
+        retry(replicas_discovered, 'all Sentinels discover both eligible replicas')
+        check('all Sentinels know both healthy replicas before fault injection', True)
         stop_member(original_name)
         stopped.add(original_name)
 
@@ -219,11 +243,14 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
         for name in voters:
             expected_monitor = 'sentinel monitor example ' + promoted[0] + ' ' + str(promoted[1]) + ' 2'
             retry(lambda name=name: expected_monitor in persisted_role(name), 'Sentinel persists current master on its own volume')
+            identity = voters[name].execute_command('SENTINEL', 'MYID')
             stop_member(name)
             stopped.add(name)
             restore_member(name)
             stopped.remove(name)
             retry(lambda: agreed() == promoted, 'restarted Sentinel preserves elected master')
+            retry(lambda: voters[name].execute_command('SENTINEL', 'MYID') == identity,
+                  'restarted Sentinel preserves its persistent voter identity')
         stop_member(original_name)
         stopped.add(original_name)
         restore_member(original_name)

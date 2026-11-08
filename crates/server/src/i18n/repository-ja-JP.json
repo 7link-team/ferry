@@ -821,7 +821,7 @@
   "templates.examples.natsAdvertise": "クライアント通知先（ホスト:ポート）",
   "templates.examples.redisName": "例：Redis レプリケーションと Sentinel",
   "templates.examples.redisDescription": "Redis 3台と Sentinel 3台。Compose は単一ホスト、Stack は指定した3ノード（ferry-redis=a/b/c）に配置します。deploy 範囲の秘密変数を作成し、全メンバーとクライアントから到達できるホスト IPv4 を入力します。待受・公開・通知ポートを一致させ、6ポートを一意にします。example-redis-start と6つの永続ボリュームでデータと動的ロール設定を保持します。クライアントは3つの Sentinel 入口から論理マスター example を検出し、Sentinel とデータ接続の両方を認証します。非同期複製はデータ損失ゼロを保証しません。Sentinel が2台未満の場合はフェイルオーバーできませんが、Redis の書き込み禁止は保証しません。TLS、ホスト間ボリューム移行、全停止復旧は含みません。初期化のみでデプロイしません。",
-  "templates.examples.redisStartDescription": "Redis/Sentinel 共通起動スクリプト。初回だけボリューム設定を作成し、以後は動的ロールを保持します。実行設定は認証情報を含むため永続ボリュームを保護してください。パスワード変更は6メンバーの連携が必要です。",
+  "templates.examples.redisStartDescription": "Redis/Sentinel 共通起動スクリプト。初回だけボリューム設定を作成し、以後は動的ロールを保持します。認証情報は1行で指定し、空白・引用符・バックスラッシュを使用できます。再起動時に認証を再適用し、Redis 7.4 の未エスケープ認証行を修復します。実行設定は認証情報を含むため永続ボリュームを保護してください。パスワード変更は6メンバーの連携が必要です。",
   "templates.examples.redisPassword": "認証用秘密変数",
   "templates.examples.redisStartup": "起動設定テンプレート名または ID",
   "templates.examples.redisIp": "到達可能なホスト IPv4",

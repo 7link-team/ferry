@@ -821,7 +821,7 @@
   "templates.examples.natsAdvertise": "客户端通告端点（主机:端口）",
   "templates.examples.redisName": "示例：Redis 主从与 Sentinel",
   "templates.examples.redisDescription": "三个 Redis 与三个 Sentinel，Compose 单机或 Stack 固定三节点（标签 ferry-redis=a/b/c）。先创建 deploy 密钥变量，填写所有成员和客户端均可达的主机 IPv4；监听、发布与通告端口一致，六端口保持唯一。复用 example-redis-start，六份卷保存数据与动态选主配置。客户端通过三个 Sentinel 入口发现逻辑主 example，并对 Sentinel 和数据连接认证。异步复制不承诺零丢失；少于两个 Sentinel 不允许故障转移，但不代表 Redis 禁写。不含 TLS、跨机卷迁移或全停恢复；仅初始化，不部署。",
-  "templates.examples.redisStartDescription": "Redis/Sentinel 共用启动脚本，仅首次创建卷内配置；后续保留动态角色。运行配置包含认证信息，须保护持久卷；密码轮换需六成员协同。",
+  "templates.examples.redisStartDescription": "Redis/Sentinel 共用启动脚本，仅首次创建卷内配置；后续保留动态角色。密钥须为单行，允许空格、引号和反斜杠；重启时重新注入认证，修复 Redis 7.4 认证行未转义的问题。运行配置包含认证信息，须保护持久卷；密码轮换需六成员协同。",
   "templates.examples.redisPassword": "认证密钥变量",
   "templates.examples.redisStartup": "启动脚本配置模板名称或 ID",
   "templates.examples.redisIp": "可达主机 IPv4",
