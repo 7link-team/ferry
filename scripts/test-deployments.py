@@ -484,7 +484,28 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                         engine(['pull',json.loads(generated)['services'][0]['image']],node)
                 sample=create('deployments',{'name':'NATS example '+kind,'mode':mode,'target_kind':'host','target_ref':host,'workdir':deployment_workdir,'manifest':generated})
                 sample_project=f"deployment-{workspace['id']}-{sample}";projects.append(sample_project)
+                def nats_diagnostics():
+                    output=[]
+                    def capture(args):
+                        result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
+                        output.append(result.stdout.decode(errors='replace')[-24000:].replace(token,'[REDACTED]'))
+                        return result.stdout.decode(errors='replace').split()
+                    try:
+                        for node in (swarm_nodes if mode=='stack' else ['host']):
+                            prefix=['docker','exec',name+'-'+node,'/usr/bin/docker'] if mode=='stack' else ['docker']
+                            label=('com.docker.stack.namespace=' if mode=='stack' else 'com.docker.compose.project=')+sample_project
+                            ids=capture(prefix+['ps','-aq','--filter','label='+label])
+                            for container in ids:
+                                capture(prefix+['inspect','--format','{{.Name}} {{json .State}}',container])
+                                capture(prefix+['logs','--tail','100',container])
+                        if mode=='stack':
+                            for member in ['nats-a','nats-b','nats-c']:
+                                capture(['docker','exec',name+'-manager','/usr/bin/docker','service','ps','--no-trunc',sample_project+'_'+member])
+                    except Exception as cause: output.append('Diagnostic collection: '+type(cause).__name__)
+                    (work/('nats-'+kind+'-diagnostics.log')).write_text('\n'.join(output),encoding='utf8')
+                    print('\n'.join(output)[-6000:],flush=True)
                 sample_revision=start(sample);sample_row=done(sample)
+                if sample_row['state']!='succeeded': nats_diagnostics()
                 check(kind+' NATS template deployment succeeds: '+sample_row['latest_revision']['output'],sample_row['state']=='succeeded')
                 check(kind+' NATS secret absent from public deployment and history',token not in json.dumps(sample_row))
                 if mode=='stack':
@@ -501,8 +522,12 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     check(kind+' NATS members have independent containers',len(set(members.values()))==3 and all(members.values()))
                     def stop_member(member): command(['docker','stop','-t','5',members[member]])
                     def restore_member(member): command(['docker','start',members[member]])
-                protocol=asyncio.run(verify_nats(['nats://127.0.0.1:'+str(p) for p in nats_host_ports],token,
-                    lambda label,result:check(kind+' '+label,result),stop_member,restore_member))
+                try:
+                    protocol=asyncio.run(verify_nats(['nats://127.0.0.1:'+str(p) for p in nats_host_ports],token,
+                        lambda label,result:check(kind+' '+label,result),stop_member,restore_member))
+                except Exception:
+                    nats_diagnostics()
+                    raise
                 report.setdefault('nats_example_runs',[]).append({'transport':kind,'deployment':sample,'revision':sample_revision,'protocol':protocol})
                 if mode=='stack':
                     engine(['stack','rm',sample_project])
