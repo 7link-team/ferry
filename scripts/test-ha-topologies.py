@@ -344,8 +344,16 @@ def xxl_job(lab):
                                'addressType': 1, 'addressList': executor_address})
     group = int(sql("SELECT id FROM xxl_job_group WHERE app_name='" + lab.prefix + "'"))
     log_dir = lab.output / 'executor-jobs'
+    # The upstream sample writes application logs to /data/applogs by default.
+    # Keep this isolated host JVM unprivileged and collect its logs in the lab.
+    logging_config = lab.output / 'executor-logback.xml'
+    logging_config.write_text(
+        '<configuration><appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">'
+        '<encoder><pattern>%d %-5level %logger - %msg%n</pattern></encoder></appender>'
+        '<root level="INFO"><appender-ref ref="STDOUT"/></root></configuration>', encoding='utf8')
     executor_log = (lab.output / 'executor.log').open('w', encoding='utf8')
     executor = subprocess.Popen(['java', '-jar', str(jar), '--server.port=' + str(web_port),
+                                 '--logging.config=' + str(logging_config.resolve()),
                                  '--xxl.job.admin.addresses=' + ','.join(urls.values()),
                                  '--xxl.job.accessToken=' + token, '--xxl.job.executor.appname=' + lab.prefix,
                                  '--xxl.job.executor.address=' + executor_address,
