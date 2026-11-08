@@ -101,6 +101,16 @@ def main():
         return dict(line.split('\t', 1) for line in raw.splitlines() if '\t' in line) if raw else {}
 
     def ready(node, size):
+        container = task(node)
+        if not container:
+            return False
+        # The image starts a temporary bootstrap mysqld (port 0) to initialize
+        # users. Its SQL/WSREP status can look ready before entrypoint stops it.
+        # Only the final exec'ed server may donate state to the next member.
+        process = engine(node, 'exec', container, 'cat', '/proc/1/comm',
+                         check=False, timeout=15)
+        if process.returncode != 0 or process.stdout.strip() != 'mysqld':
+            return False
         state = status(node)
         return (state.get('wsrep_cluster_size') == str(size) and state.get('wsrep_cluster_status') == 'Primary'
                 and state.get('wsrep_connected') == 'ON' and state.get('wsrep_ready') == 'ON'
@@ -160,7 +170,7 @@ def main():
                 '--env', 'MYSQL_ROOT_PASSWORD=' + password, '--env', 'MYSQL_ROOT_HOST=localhost',
                 '--env', 'XTRABACKUP_PASSWORD=' + sst_password, '--env', 'CLUSTER_NAME=' + prefix,
                 '--env', 'PERCONA_TELEMETRY_DISABLE=1',
-                '--health-cmd', 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
+                '--health-cmd', 'test "$(cat /proc/1/comm)" = mysqld && MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --protocol=socket --socket=/tmp/mysql.sock -uroot --silent ping',
                 '--health-interval', '10s', '--health-timeout', '5s', '--health-retries', '6',
                 '--health-start-period', '180s', '--restart-delay', '10s', '--stop-grace-period', '60s',
                 '--limit-memory', '2G']
