@@ -342,7 +342,7 @@ def xxl_job(lab):
     executor_address = f'http://{gateway}:{executor_port}'
     api('a0', '/jobgroup/save', {'appname': lab.prefix, 'title': 'HA executor',
                                'addressType': 1, 'addressList': executor_address})
-    group = int(sql("SELECT id FROM xxl_job_group WHERE appname='" + lab.prefix + "'"))
+    group = int(sql("SELECT id FROM xxl_job_group WHERE app_name='" + lab.prefix + "'"))
     log_dir = lab.output / 'executor-jobs'
     executor_log = (lab.output / 'executor.log').open('w', encoding='utf8')
     executor = subprocess.Popen(['java', '-jar', str(jar), '--server.port=' + str(web_port),
