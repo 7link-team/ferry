@@ -801,5 +801,10 @@
   "maintenance.dictionary.insight-state.retry_wait": "Menunggu percubaan semula",
   "maintenance.dictionary.insight-state.unavailable": "Menunggu penemuan atau pemulihan akses",
   "repository.monitor.testTitle": "[Pemberitahuan ujian] Tolakan kod",
-  "repository.monitor.testMessage": "Komit contoh ini mengesahkan saluran pemberitahuan anda."
+  "repository.monitor.testMessage": "Komit contoh ini mengesahkan saluran pemberitahuan anda.",
+  "templates.examples.httpName": "Contoh: Perkhidmatan HTTP dan semakan kesihatan",
+  "templates.examples.httpDescription": "Perkhidmatan HTTP tanpa keadaan untuk Docker / Compose / Swarm. Pilih hos, mod penempatan dan port yang belum digunakan; busybox:1.36 perlu dimuat turun. Kandungan respons dihantar melalui pemboleh ubah persekitaran. Pemulaan hanya mencipta templat tanpa memulakan penempatan. Data kekal, HA berbilang hos dan gerbang masuk tidak disertakan.",
+  "templates.examples.httpPort": "Port terbitan",
+  "templates.examples.httpMessage": "Kandungan respons",
+  "templates.examples.httpWelcome": "Selamat datang ke contoh perkhidmatan HTTP"
 }

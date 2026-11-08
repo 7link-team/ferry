@@ -99,7 +99,8 @@ try {
     await p.getByRole('button',{name:'导入应用模板',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/app-templates/*`);
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
-    assert.equal(templates.total,1);assert.equal(templates.items[0].name,'Browser app');
+    assert.equal(templates.total,2);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
+    assert.equal(templates.items.filter(row=>JSON.parse(row.content).metadata?.name==='example-http').length,1);
     await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/marketplace-sources`);
     await p.getByRole('row').filter({has:p.getByRole('cell',{name:'Browser source',exact:true})}).getByRole('button',{name:'删除',exact:true}).click();
   await p.getByRole('dialog').getByRole('button',{name:'确认删除',exact:true}).click();

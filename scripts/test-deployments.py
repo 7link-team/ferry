@@ -166,7 +166,17 @@ def main():
         result=eventually(finished,150)
         api(f'/workspaces/{workspace_ops}/cron-jobs/'+job,method='DELETE',status=204)
         return result
+    http_template = None
+
     def manifest(value, published):
+        if http_template is not None:
+            generated = api(f'/workspaces/{workspace_ops}/app-templates/'+http_template['id']+'/renderings',
+                            {'version':http_template['version'],'values':{'port':published,'message':value}})['manifest']
+            result = json.loads(generated)
+            if 'FERRY_TEST_IMAGE' in os.environ:
+                result['services'][0]['image'] = os.environ['FERRY_TEST_IMAGE']
+            result['services'][0]['env'].append({'name':'LITERAL','value':'${NOT_INTERPOLATED}'})
+            return result
         return {'apiVersion':'ferry/v1','kind':'Application','metadata':{'name':'web'},'services':[
             {'name':'web','image':os.environ.get('FERRY_TEST_IMAGE','busybox:1.36'),'command':['sh','-c',f'mkdir -p /www; printf {value} > /www/index.html; exec httpd -f -p 8080 -h /www'],
              'health':{'readiness':{'httpGet':{'path':'/','port':8080},'periodSeconds':1},'liveness':{'httpGet':{'path':'/','port':8080},'periodSeconds':2}}, 'resources':{'limits':{'cpu':'500m','memory':'64Mi'},'requests':{'memory':'16Mi'}}, 'ports':[{'container':8080,'published':published}], 'env':[{'name':'LITERAL','value':'${NOT_INTERPOLATED}'}]}]}
@@ -259,6 +269,15 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         workspace=api('/workspaces',{'name':'ops','slug':'ops'})
         workspace_ops = workspace['id']
         workspace_other = api('/workspaces',{'name':'other','slug':'other'})['id']
+        if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1' and mode != 'native':
+            templates = api(f'/workspaces/{workspace_ops}/app-templates')['items']
+            check('new workspace contains exactly one application example', len(templates) == 1)
+            http_template = templates[0]
+            api(f'/workspaces/{workspace_other}/app-templates/'+http_template['id'],status=404)
+            check('application example cannot be read across workspaces', True)
+            check('example initialization starts no deployments', api(f'/workspaces/{workspace_ops}/deployments')['total'] == 0)
+            report['scenario_template'] = {'id':http_template['id'],'version':http_template['version'],
+                                         'content':http_template['content'],'parameters':http_template['parameters']}
         workspace_ids = dict(ops=workspace_ops, other=workspace_other)
         viewer=urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users',{'email':'viewer@example.invalid','password':'correct-horse-battery','name':'viewer'},client=viewer)
@@ -865,6 +884,15 @@ CMD ["/usr/sbin/sshd","-D","-e"]
     finally:
         if report['result'] == 'RUNNING': report['result']='FAIL'
         (work/'acceptance.json').write_text(json.dumps(report,indent=2),encoding='utf8')
+        if os.environ.get('GITHUB_ACTIONS') == 'true' and os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1':
+            import hashlib
+            summary = {key:report[key] for key in ('mode','boundary','result')}
+            summary['source_commit'] = os.environ.get('GITHUB_SHA','')
+            summary['template_sha256'] = hashlib.sha256(Path('crates/server/src/templates/examples/http-service.json').read_bytes()).hexdigest()
+            summary['checks'] = [{'name':row['name'][:180],'passed':row['passed']} for row in report['checks']]
+            summary['scenario_initialized'] = 'scenario_template' in report
+            notice = json.dumps(summary,separators=(',',':')).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+            print('::notice title=Application scenario evidence::'+notice,flush=True)
         for project in projects:
             ids=command(['docker','ps','-aq','--filter',('label=com.docker.compose.project=' if mode=='compose' else 'label=workspace.deployment=')+project]).decode().split()
             if ids: subprocess.run(['docker','rm','-f',*ids],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

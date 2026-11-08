@@ -801,5 +801,10 @@
   "maintenance.dictionary.insight-state.retry_wait": "等待重试",
   "maintenance.dictionary.insight-state.unavailable": "等待发现或恢复访问",
   "repository.monitor.testTitle": "[测试通知] 代码推送",
-  "repository.monitor.testMessage": "这是一条测试提交消息，用于验证通知渠道。"
+  "repository.monitor.testMessage": "这是一条测试提交消息，用于验证通知渠道。",
+  "templates.examples.httpName": "示例：HTTP 服务与健康检查",
+  "templates.examples.httpDescription": "Docker / Compose / Swarm 的无状态 HTTP 服务示例。选择自己的主机、部署模式和未占用端口；需要拉取 busybox:1.36。响应内容通过环境变量传入。初始化只创建模板，不启动部署；不包含持久数据、多机高可用或流量入口。",
+  "templates.examples.httpPort": "发布端口",
+  "templates.examples.httpMessage": "响应内容",
+  "templates.examples.httpWelcome": "欢迎使用 HTTP 服务示例"
 }

@@ -801,5 +801,10 @@
   "maintenance.dictionary.insight-state.retry_wait": "Waiting to retry",
   "maintenance.dictionary.insight-state.unavailable": "Awaiting discovery or restored access",
   "repository.monitor.testTitle": "[Test notification] Code push",
-  "repository.monitor.testMessage": "This sample commit verifies your notification channel."
+  "repository.monitor.testMessage": "This sample commit verifies your notification channel.",
+  "templates.examples.httpName": "Example: HTTP service and health checks",
+  "templates.examples.httpDescription": "Stateless HTTP service for Docker / Compose / Swarm. Select your host, deployment mode and an unused port; pulling busybox:1.36 is required. Response content is passed through an environment variable. Initialization creates only a template and starts no deployment. Persistent data, multi-host HA and ingress are not included.",
+  "templates.examples.httpPort": "Published port",
+  "templates.examples.httpMessage": "Response content",
+  "templates.examples.httpWelcome": "Welcome to the HTTP service example"
 }

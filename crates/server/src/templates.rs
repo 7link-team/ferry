@@ -50,6 +50,29 @@ pub(crate) async fn seed_examples(
         content: Set(content), parameters: Set("[]".into()), version: Set(1),
         created_at: Set(now), updated_at: Set(now),
     }).exec(conn).await?;
+    let content = include_str!("templates/examples/http-service.json");
+    let parameters = json!([
+        {"name":"port","label":crate::i18n::message("templates.examples.httpPort"),
+         "type":"integer","min":1,"max":65535,"default":8080},
+        {"name":"message","label":crate::i18n::message("templates.examples.httpMessage"),
+         "type":"string","min_length":1,"max_length":2000,
+         "default":crate::i18n::message("templates.examples.httpWelcome")}
+    ])
+    .to_string();
+    validate_template(content, &parameters, Kind::App)?;
+    crate::entities::app_templates::Entity::insert(crate::entities::app_templates::ActiveModel {
+        id: Set(s.next_id()?.into()),
+        workspace_id: Set(workspace.into()),
+        name: Set(crate::i18n::message("templates.examples.httpName")),
+        description: Set(crate::i18n::message("templates.examples.httpDescription")),
+        content: Set(content.into()),
+        parameters: Set(parameters),
+        version: Set(1),
+        created_at: Set(now),
+        updated_at: Set(now),
+    })
+    .exec(conn)
+    .await?;
     Ok(())
 }
 
@@ -878,6 +901,14 @@ mod tests {
                         .unwrap()
                         .is_empty()
                 );
+                assert!(
+                    crate::entities::app_templates::Entity::find()
+                        .filter(crate::entities::app_templates::Column::WorkspaceId.eq(id))
+                        .all(&s.db)
+                        .await
+                        .unwrap()
+                        .is_empty()
+                );
             } else {
                 tx.commit().await.unwrap();
                 workspaces.push(id);
@@ -935,6 +966,110 @@ mod tests {
         assert_eq!(graph["nodes"][1]["params"]["repo"], "text");
         assert!(graph.get("pin_data").is_none());
         assert!(graph.get("settings").is_none());
+        let app_scope = |workspace_id| Scope {
+            permissions: ["app-templates.read".into()].into_iter().collect(),
+            ..scope(workspace_id)
+        };
+        let apps_a = apps::list(
+            State(s.clone()),
+            app_scope(workspaces[0]),
+            Query(HashMap::new()),
+        )
+        .await
+        .unwrap()
+        .0;
+        let apps_b = apps::list(
+            State(s.clone()),
+            app_scope(workspaces[1]),
+            Query(HashMap::new()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(apps_a["total"], 1);
+        assert_eq!(apps_b["total"], 1);
+        assert_ne!(apps_a["items"][0]["id"], apps_b["items"][0]["id"]);
+        let app = &apps_a["items"][0];
+        let app_id: Id = serde_json::from_value(app["id"].clone()).unwrap();
+        assert!(
+            apps::get(
+                State(s.clone()),
+                app_scope(workspaces[1]),
+                Path((String::new(), app_id))
+            )
+            .await
+            .is_err()
+        );
+        let values = BTreeMap::from([
+            ("port".into(), json!(23180)),
+            ("message".into(), json!("literal ' \" $HOME $(false)\n你好")),
+        ]);
+        let manifest = render_content(
+            app["content"].as_str().unwrap(),
+            app["parameters"].as_str().unwrap(),
+            &values,
+            Kind::App,
+        )
+        .unwrap();
+        let manifest = crate::deployments::manifest::parse(&manifest).unwrap();
+        assert_eq!(manifest.services[0].ports[0].published, Some(23180));
+        // Template text must remain data: never interpolate it into a shell command.
+        let doc: Value = serde_json::from_str(
+            &render_content(
+                app["content"].as_str().unwrap(),
+                app["parameters"].as_str().unwrap(),
+                &values,
+                Kind::App,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(doc["services"][0]["env"][0]["value"], values["message"]);
+        assert!(
+            !doc["services"][0]["command"][2]
+                .as_str()
+                .unwrap()
+                .contains("$(false)")
+        );
+        for port in [json!(0), json!(65536), json!("8080")] {
+            let mut invalid = values.clone();
+            invalid.insert("port".into(), port);
+            assert!(
+                render_content(
+                    app["content"].as_str().unwrap(),
+                    app["parameters"].as_str().unwrap(),
+                    &invalid,
+                    Kind::App
+                )
+                .is_err()
+            );
+        }
+        crate::entities::app_templates::Entity::delete_by_id(i64::from(app_id))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            apps::list(
+                State(s.clone()),
+                app_scope(workspaces[0]),
+                Query(HashMap::new())
+            )
+            .await
+            .unwrap()
+            .0["total"],
+            0
+        );
+        assert_eq!(
+            apps::list(
+                State(s.clone()),
+                app_scope(workspaces[1]),
+                Query(HashMap::new())
+            )
+            .await
+            .unwrap()
+            .0["total"],
+            1
+        );
         // Include a canonical graph discriminator to check SQL filtering, count
         // and pagination alongside the seeded Actions template.
         rows::Entity::insert(rows::ActiveModel {

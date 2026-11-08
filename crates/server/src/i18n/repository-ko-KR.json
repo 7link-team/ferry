@@ -801,5 +801,10 @@
   "maintenance.dictionary.insight-state.retry_wait": "재시도 대기 중",
   "maintenance.dictionary.insight-state.unavailable": "검색 또는 접근 복구 대기 중",
   "repository.monitor.testTitle": "[테스트 알림] 코드 푸시",
-  "repository.monitor.testMessage": "알림 채널 확인을 위한 예시 커밋입니다."
+  "repository.monitor.testMessage": "알림 채널 확인을 위한 예시 커밋입니다.",
+  "templates.examples.httpName": "예제: HTTP 서비스 및 상태 확인",
+  "templates.examples.httpDescription": "Docker / Compose / Swarm용 무상태 HTTP 서비스입니다. 호스트, 배포 모드와 사용하지 않는 포트를 선택하세요. busybox:1.36을 내려받아야 합니다. 응답 내용은 환경 변수로 전달합니다. 초기화는 템플릿만 만들고 배포하지 않습니다. 영구 데이터, 다중 호스트 HA 및 인그레스는 포함하지 않습니다.",
+  "templates.examples.httpPort": "공개 포트",
+  "templates.examples.httpMessage": "응답 내용",
+  "templates.examples.httpWelcome": "HTTP 서비스 예제에 오신 것을 환영합니다"
 }
