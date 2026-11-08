@@ -57,6 +57,31 @@ try {
   p.on('pageerror', e => errors.push(e.message));
   p.on('dialog', d => d.accept());
   const root=`/workspaces/${workspace_tenant}`;
+  const presetOutput = resolve(process.env.FERRY_SCENARIO_UI_OUTPUT || join(work, 'template-ui'));
+  await mkdir(presetOutput, { recursive: true });
+  for (const width of [1440,900,390,320]) {
+    await p.setViewportSize({width,height:900});
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/new`);
+    await p.getByRole('textbox',{name:/^连接名称/}).fill('Preset Git '+width);
+    for (const [label,provider] of [['GitHub 团队构建','github'],['Codeup 企业仓库','codeup'],['纯 Git 拉取','git']]) {
+      await p.getByRole('button',{name:label,exact:true}).click();
+      assert.equal(await p.getByRole('combobox',{name:'代码平台',exact:true}).inputValue(),provider);
+      assert.equal(await p.getByRole('combobox',{name:'凭据',exact:true}).inputValue(),'0');
+      assert.equal(await p.getByRole('textbox',{name:/^连接名称/}).inputValue(),'Preset Git '+width);
+    }
+    assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Repository preset page overflows');
+    await p.screenshot({path:join(presetOutput,`repository-preset-${width}.png`),fullPage:true});
+    await p.getByRole('button',{name:'创建',exact:true}).click();
+    await p.waitForURL(url=>!url.pathname.endsWith('/new'));
+    const connections=await(await owner.request.get(`${origin}/api${root}/code-connections`)).json();
+    const saved=connections.items.find(row=>row.name==='Preset Git '+width);
+    assert(saved,'Preset connection must persist'); assert.equal(saved.provider,'git');assert.equal(String(saved.credential_id),'0');
+    await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/code-connections/${saved.id}/edit`);
+    await p.getByRole('combobox',{name:'代码平台',exact:true}).waitFor();
+    assert.equal(await p.getByRole('button',{name:'纯 Git 拉取',exact:true}).count(),0);
+    const deleted=await owner.request.delete(`${origin}/api${root}/code-connections/${saved.id}`,{headers});assert.equal(deleted.status(),204);
+  }
+  await p.setViewportSize({width:1280,height:800});
   let authorizedSyncs=0;
   const fixture=createHttpServer((request,response)=>{
     const path=new URL(request.url,'http://localhost').pathname;
@@ -99,29 +124,93 @@ try {
     await p.getByRole('button',{name:'导入应用模板',exact:true}).click();
     await p.waitForURL(`**/workspaces/${workspace_tenant}/app-templates/*`);
     const templates=await (await owner.request.get(`${origin}/api${root}/app-templates`)).json();
-    assert.equal(templates.total,2);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
+    assert.equal(templates.total,5);assert.equal(templates.items.filter(row=>row.name==='Browser app').length,1);
     assert.equal(templates.items.filter(row=>JSON.parse(row.content).metadata?.name==='example-http').length,1);
     const example=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-http');
-    for(const width of [1440,900,390,320]){
+    const nativeExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-native-http');
+    assert(nativeExample);
+    for(const selected of [example,nativeExample]) for(const width of [1440,900,390,320]){
+      const native=selected.id===nativeExample.id;
       await p.setViewportSize({width,height:900});
-      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${example.id}`);
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${selected.id}`);
       const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      if(native){
+        const pipelineParameter=JSON.parse(selected.parameters).find(parameter=>parameter.name==='pipeline');
+        const pipelineInput=generator.getByRole('textbox',{name:pipelineParameter.label,exact:true});
+        await pipelineInput.fill('sample-build');
+      }
       await generator.getByRole('spinbutton',{name:'发布端口',exact:true}).fill('23180');
       const message=`HTTP scenario ${width}: 'quotes' $HOME $(false)`;
       await generator.getByRole('textbox',{name:'响应内容',exact:true}).fill(message);
-      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${example.id}/renderings`)&&response.request().method()==='POST');
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${selected.id}/renderings`)&&response.request().method()==='POST');
       await generator.getByRole('button',{name:'生成配置',exact:true}).click();
       const response=await rendered;assert(response.ok(),await response.text());
       const manifest=JSON.parse((await response.json()).manifest);
-      assert.equal(manifest.services[0].ports[0].published,23180);
-      assert.equal(manifest.services[0].env[0].value,message);
-      assert(!manifest.services[0].command.join(' ').includes(message));
+      if(native){
+        assert.equal(manifest.services[0].ports[0].container,23180);
+        assert.equal(manifest.services[0].env[0].value,'23180');
+        assert.equal(manifest.services[0].env[1].value,message);
+        assert.equal(manifest.services[0].artifact.pipeline,'sample-build');
+      }else{
+        assert.equal(manifest.services[0].ports[0].published,23180);
+        assert.equal(manifest.services[0].env[0].value,message);
+        assert(!manifest.services[0].command.join(' ').includes(message));
+      }
       await generator.getByRole('status').filter({hasText:'配置已填入'}).waitFor();
       assert(await generator.getByRole('button',{name:'生成配置',exact:true}).isEnabled());
       assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`page overflow at ${width}`);
       if(process.env.FERRY_SCENARIO_UI_OUTPUT){
         await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
-        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`http-template-${width}.png`)});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`${native?'native':'http'}-template-${width}.png`)});
+      }
+    }
+    const natsExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-nats');
+    assert(natsExample);
+    for(const width of [1440,900,390,320]){
+      await p.setViewportSize({width,height:900});
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${natsExample.id}`);
+      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      for(const parameter of JSON.parse(natsExample.parameters)){
+        const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+        if(parameter.name==='token') await generator.getByRole('textbox',{name:label}).fill('nats-client-secret');
+        if(parameter.name.startsWith('advertise_')) await generator.getByRole('textbox',{name:label}).fill('client.example.invalid:'+({a:4222,b:4223,c:4224}[parameter.name.at(-1)]));
+      }
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${natsExample.id}/renderings`)&&response.request().method()==='POST');
+      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      const response=await rendered;assert(response.ok(),await response.text());
+      const manifest=JSON.parse((await response.json()).manifest);
+      assert.equal(manifest.services.length,3);
+      assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,3);
+      assert(manifest.services.every(service=>service.env[2].valueFrom==='variable/nats-client-secret'));
+      assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`NATS page overflow at ${width}`);
+      if(process.env.FERRY_SCENARIO_UI_OUTPUT){
+        await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`nats-template-${width}.png`)});
+      }
+    }
+    const redisExample=templates.items.find(row=>JSON.parse(row.content).metadata?.name==='example-redis-sentinel');
+    assert(redisExample);
+    for(const width of [1440,900,390,320]){
+      await p.setViewportSize({width,height:900});
+      await p.goto(`${origin}/zh-CN/workspaces/${workspace_tenant}/deployments/new?template=${redisExample.id}`);
+      const generator=p.getByRole('region',{name:'从模板生成',exact:true});
+      for(const parameter of JSON.parse(redisExample.parameters)){
+        const label=new RegExp('^'+parameter.label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+        if(parameter.name==='password') await generator.getByRole('textbox',{name:label}).fill('redis-auth-secret');
+        if(parameter.name.startsWith('ip_')) await generator.getByRole('textbox',{name:label}).fill('192.0.2.'+({a:10,b:11,c:12}[parameter.name.at(-1)]));
+      }
+      const rendered=p.waitForResponse(response=>response.url().endsWith(`/app-templates/${redisExample.id}/renderings`)&&response.request().method()==='POST');
+      await generator.getByRole('button',{name:'生成配置',exact:true}).click();
+      const response=await rendered;assert(response.ok(),await response.text());
+      const manifest=JSON.parse((await response.json()).manifest);
+      assert.equal(manifest.services.length,6);
+      assert.equal(new Set(manifest.services.map(service=>service.volumes[0].name)).size,6);
+      assert(manifest.services.every(service=>service.env[6].valueFrom==='variable/redis-auth-secret'));
+      assert(manifest.services.every(service=>service.ports[0].container===service.ports[0].published));
+      assert(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`Redis page overflow at ${width}`);
+      if(process.env.FERRY_SCENARIO_UI_OUTPUT){
+        await mkdir(process.env.FERRY_SCENARIO_UI_OUTPUT,{recursive:true});
+        await p.screenshot({path:join(process.env.FERRY_SCENARIO_UI_OUTPUT,`redis-template-${width}.png`)});
       }
     }
     const deployments=await(await owner.request.get(`${origin}/api${root}/deployments`)).json();
@@ -133,7 +222,7 @@ try {
     await p.getByRole('cell',{name:'Browser source',exact:true}).waitFor({state:'detached'});
     assert(authorizedSyncs>0,'marketplace sync used the selected connection credential');
     assert.deepEqual(errors,[]);
-    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, HTTP scenario parameters at four widths without deployment and source deletion');
+    console.log('PASS: legacy source create/edit retention, named connection repository source creation, authenticated HTTP sync, catalog detail, independent template import, container, Native, NATS and Redis Sentinel scenario parameters at four widths without deployment and source deletion');
   } finally {fixture.closeAllConnections();await new Promise(r=>fixture.close(r));}
 } finally {
   if (browser) await browser.close();

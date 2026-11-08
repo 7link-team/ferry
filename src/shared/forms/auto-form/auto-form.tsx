@@ -357,6 +357,7 @@ export function FieldControl({
           </span>
         </SelectTrigger>
         <SelectContent>
+          {!config.options?.length && <SelectItem value="__auto_no_options__" disabled>{commonText("form.noOptions")}</SelectItem>}
           {text && !config.options?.some((option) => option.value === text) && !config.emptyValues?.some(empty => String(empty) === text) && (
             <SelectItem value={text} disabled>{selectDisplay(value, config)}</SelectItem>
           )}

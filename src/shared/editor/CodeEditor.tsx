@@ -1,19 +1,30 @@
 import { LoadingSkeleton } from "../ui/loading-skeleton";
 import Editor, { DiffEditor } from "@monaco-editor/react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type Ref } from "react";
 import type { editor as MonacoEditor } from "monaco-editor";
 import "./runtime";
 import { useTheme } from "../theme/theme";
 
 /** Shared local Monaco runtime for workflow definitions and remote text files. */
-export function CodeEditor({ value, language, path, label, readOnly = false, originalValue, onChange }: {
+export function CodeEditor({ value, language, path, label, readOnly = false, originalValue, onChange, insertRef }: {
   value: string; language: string; path: string; label: string; readOnly?: boolean; originalValue?: string; onChange: (value: string) => void;
+  insertRef?: Ref<{ insertText(value: string): void }>;
 }) {
   const { resolved } = useTheme();
   const change = useRef(onChange);
   change.current = onChange;
   const subscription = useRef<{ dispose(): void } | undefined>(undefined);
   const diffEditor = useRef<MonacoEditor.IStandaloneDiffEditor | undefined>(undefined);
+  const sourceEditor = useRef<MonacoEditor.IStandaloneCodeEditor | undefined>(undefined);
+  useImperativeHandle(insertRef, () => ({ insertText(text: string) {
+    const editor = sourceEditor.current;
+    const selection = editor?.getSelection();
+    if (readOnly || !editor || !selection) return;
+    editor.focus();
+    editor.pushUndoStop();
+    editor.executeEdits("insert-variable", [{ range: selection, text, forceMoveMarkers: true }]);
+    editor.pushUndoStop();
+  } }), [readOnly]);
   const comparing = originalValue !== undefined;
   useEffect(() => () => { subscription.current?.dispose(); subscription.current = undefined; }, [comparing]);
   useLayoutEffect(() => () => {
@@ -33,6 +44,7 @@ export function CodeEditor({ value, language, path, label, readOnly = false, ori
     options={{ occurrencesHighlight: "off", ariaLabel: label, editContext: false, readOnly, originalEditable: false, automaticLayout: true, renderSideBySide: true, useInlineViewWhenSpaceIsLimited: false,
       minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, wordWrap: "on", renderOverviewRuler: false }} />;
   return <Editor loading={<LoadingSkeleton variant="editor" />} path={path} language={language} theme={resolved === "dark" ? "vs-dark" : "vs"}
+    onMount={editor => { sourceEditor.current = editor; }}
     value={value} onChange={next => onChange(next ?? "")}
     options={{ occurrencesHighlight: "off", ariaLabel: label, readOnly, automaticLayout: true,
       // Use Monaco's established textarea input path for controlled React models.

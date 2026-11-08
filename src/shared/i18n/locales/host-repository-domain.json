@@ -1,5 +1,13 @@
 {
   "zh-CN": {
+    "repository.presets.title": "场景预设（可选）",
+    "repository.presets.help": "选择场景后填写自己的授权信息；切换会清空旧授权、地址和组织，保留名称与备注。监控和通知需创建后单独启用。",
+    "repository.presets.github": "GitHub 团队构建",
+    "repository.presets.githubHelp": "绑定团队令牌或网页授权，供构建与节点工作流选择仓库。创建后在监控设置中选择事件和通知渠道。",
+    "repository.presets.codeup": "Codeup 企业仓库",
+    "repository.presets.codeupHelp": "选择访问令牌并填写企业组织 ID。构建时再选择仓库；创建后显式配置监控订阅和通知。",
+    "repository.presets.git": "纯 Git 拉取",
+    "repository.presets.gitHelp": "公开仓库可不选凭据；私有仓库选择令牌、密码或 SSH 密钥。可填写默认仓库地址，平台事件能力以当前 Git 支持范围为准。",
     "notification.webhookUrl": "Webhook 地址",
     "notification.provider.WeCom": "企业微信",
     "notification.provider.DingTalk": "钉钉",
@@ -458,6 +466,14 @@
     "notification.payload": "查看消息数据"
   },
   "en-US": {
+    "repository.presets.title": "Scenario presets (optional)",
+    "repository.presets.help": "Choose a scenario and supply your authorization. Switching clears credentials, endpoints and organization while retaining the name and notes. Enable monitoring and notifications separately after creation.",
+    "repository.presets.github": "GitHub team builds",
+    "repository.presets.githubHelp": "Bind a team token or web authorization for repository selection in builds and node workflows. Select events and notification channels in monitoring settings after creation.",
+    "repository.presets.codeup": "Codeup organization",
+    "repository.presets.codeupHelp": "Select an access token and enter your organization ID. Select repositories when building; configure monitoring subscriptions and notifications explicitly after creation.",
+    "repository.presets.git": "Plain Git checkout",
+    "repository.presets.gitHelp": "Public repositories can use no credential; private repositories use a token, password or SSH key. An optional default repository URL is available. Platform events depend on current Git capabilities.",
     "notification.webhookUrl": "Webhook URL",
     "notification.provider.WeCom": "WeCom",
     "notification.provider.DingTalk": "DingTalk",
@@ -916,6 +932,14 @@
     "notification.payload": "View message payload"
   },
   "zh-TW": {
+    "repository.presets.title": "情境預設（選填）",
+    "repository.presets.help": "選擇情境後填寫自己的授權；切換會清空舊憑證、位址與組織，保留名稱及備註。監控與通知需建立後個別啟用。",
+    "repository.presets.github": "GitHub 團隊建置",
+    "repository.presets.githubHelp": "綁定團隊權杖或網頁授權，供建置及節點工作流程選擇儲存庫。建立後在監控設定選擇事件和通知管道。",
+    "repository.presets.codeup": "Codeup 企業儲存庫",
+    "repository.presets.codeupHelp": "選擇存取權杖並填寫企業組織 ID。建置時再選擇儲存庫；建立後明確設定監控訂閱與通知。",
+    "repository.presets.git": "純 Git 擷取",
+    "repository.presets.gitHelp": "公開儲存庫可不選憑證；私有儲存庫選擇權杖、密碼或 SSH 金鑰。可填預設儲存庫位址，平台事件以目前 Git 支援範圍為準。",
     "notification.webhookUrl": "Webhook 位址",
     "notification.provider.WeCom": "企業微信",
     "notification.provider.DingTalk": "釘釘",
@@ -1374,6 +1398,14 @@
     "notification.payload": "檢視訊息資料"
   },
   "ja-JP": {
+    "repository.presets.title": "シナリオプリセット（任意）",
+    "repository.presets.help": "シナリオを選び、ご自身の認証情報を設定してください。切り替えると認証、接続先、組織がクリアされ、名前とメモは保持されます。監視と通知は作成後に個別に有効化します。",
+    "repository.presets.github": "GitHub チームビルド",
+    "repository.presets.githubHelp": "チームトークンまたは Web 認証を設定し、ビルドやノードワークフローでリポジトリを選択します。作成後、監視設定でイベントと通知先を選びます。",
+    "repository.presets.codeup": "Codeup 組織",
+    "repository.presets.codeupHelp": "アクセストークンを選び、組織 ID を入力します。リポジトリはビルド時に選択し、監視の購読と通知は作成後に明示的に設定します。",
+    "repository.presets.git": "通常の Git チェックアウト",
+    "repository.presets.gitHelp": "公開リポジトリは認証なし、非公開はトークン、パスワード、SSH キーを使用できます。既定の URL は任意です。イベントは現在の Git 対応範囲に従います。",
     "notification.webhookUrl": "Webhook URL",
     "notification.provider.WeCom": "WeCom",
     "notification.provider.DingTalk": "DingTalk",
@@ -1832,6 +1864,14 @@
     "notification.payload": "メッセージデータ"
   },
   "ko-KR": {
+    "repository.presets.title": "시나리오 프리셋(선택)",
+    "repository.presets.help": "시나리오를 선택하고 본인의 인증 정보를 입력하세요. 전환하면 인증 정보, 주소, 조직이 초기화되며 이름과 메모는 유지됩니다. 모니터링과 알림은 생성 후 별도로 활성화합니다.",
+    "repository.presets.github": "GitHub 팀 빌드",
+    "repository.presets.githubHelp": "팀 토큰 또는 웹 인증을 연결하여 빌드와 노드 워크플로에서 저장소를 선택합니다. 생성 후 모니터링 설정에서 이벤트와 알림 채널을 선택하세요.",
+    "repository.presets.codeup": "Codeup 조직 저장소",
+    "repository.presets.codeupHelp": "액세스 토큰을 선택하고 조직 ID를 입력하세요. 저장소는 빌드 시 선택하며 모니터링 구독과 알림은 생성 후 명시적으로 설정합니다.",
+    "repository.presets.git": "일반 Git 체크아웃",
+    "repository.presets.gitHelp": "공개 저장소는 인증 없이, 비공개 저장소는 토큰, 비밀번호 또는 SSH 키로 이용할 수 있습니다. 기본 저장소 URL은 선택 사항입니다. 이벤트는 현재 Git 지원 범위를 따릅니다.",
     "notification.webhookUrl": "Webhook URL",
     "notification.provider.WeCom": "WeCom",
     "notification.provider.DingTalk": "DingTalk",
@@ -2290,6 +2330,14 @@
     "notification.payload": "메시지 데이터 보기"
   },
   "ms-MY": {
+    "repository.presets.title": "Pratetap senario (pilihan)",
+    "repository.presets.help": "Pilih senario dan masukkan kebenaran anda sendiri. Pertukaran mengosongkan kelayakan, alamat dan organisasi tetapi mengekalkan nama serta nota. Aktifkan pemantauan dan pemberitahuan secara berasingan selepas penciptaan.",
+    "repository.presets.github": "Binaan pasukan GitHub",
+    "repository.presets.githubHelp": "Pautkan token pasukan atau kebenaran web untuk memilih repositori dalam binaan dan aliran kerja nod. Pilih acara serta saluran pemberitahuan dalam tetapan pemantauan selepas penciptaan.",
+    "repository.presets.codeup": "Repositori organisasi Codeup",
+    "repository.presets.codeupHelp": "Pilih token akses dan masukkan ID organisasi anda. Pilih repositori semasa membina; tetapkan langganan pemantauan serta pemberitahuan secara nyata selepas penciptaan.",
+    "repository.presets.git": "Daftar keluar Git biasa",
+    "repository.presets.gitHelp": "Repositori awam boleh tanpa kelayakan; repositori peribadi menggunakan token, kata laluan atau kunci SSH. URL repositori lalai adalah pilihan. Acara platform bergantung pada keupayaan Git semasa.",
     "notification.webhookUrl": "URL Webhook",
     "notification.provider.WeCom": "WeCom",
     "notification.provider.DingTalk": "DingTalk",

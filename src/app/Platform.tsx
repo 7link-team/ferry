@@ -81,7 +81,27 @@ const forms: Record<string, FormConfig<Row>> = {
     { key: "name", label: "名称", labelKey: "common-domain:common.name", type: "text", required: true },
     { key: "slug", label: "标识", labelKey: "common-domain:auth.slug", type: "text", required: true, immutable: true, help: "2–40 位小写字母、数字、中划线；创建后不可修改。", helpKey: "resource-domain:platform.slugHelp" },
   ] }, {title:"空间信息",titleKey:"resource-domain:platform.workspaceInfo",fields:[{key:"workspace_overview",label:"空间信息",labelKey:"resource-domain:platform.workspaceInfo",type:"custom",span:2,when:d=>!!d.id,render:({draft})=><WorkspaceOverview draft={draft}/>}]}] },
-  settings: { resource: "settings", endpoint: "/platform/settings", heading: () => commonText("resource-domain:platform.settings"), blank: {}, sections: [{title:"邮箱配置",titleKey:"resource-domain:platform.mailSettings",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"connection",tabKey:"resource-domain:platform.mailConnection",fields:[
+  settings: { resource: "settings", endpoint: "/platform/settings", heading: () => commonText("resource-domain:platform.settings"), blank: {}, sections: [
+{ title: "账号注册", titleKey: "resource-domain:platform.registration", group: "账号注册", groupKey: "resource-domain:platform.registration", tab:"registration", tabKey:"resource-domain:platform.registration", fields: [
+    { key: "registration_enabled", label: "允许注册新账号", labelKey: "resource-domain:platform.allowRegistration", type: "switch", help: "关闭后已有账号仍可登录，公开注册入口将关闭。", helpKey: "resource-domain:platform.registrationHelp" },
+  ] },
+{title:"邮件模板",titleKey:"resource-domain:platform.mailTemplates",group:"账号注册",groupKey:"resource-domain:platform.registration",tab:"templates",tabKey:"resource-domain:platform.mailTemplates",fields:[
+    {key:"mail_templates",label:"邮件模板",labelKey:"resource-domain:platform.mailTemplates",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTemplates draft={draft} readOnly={readOnly} onPatch={onPatch}/>},
+  ]},
+{ title: "登录防护", titleKey:"resource-domain:loginGuard.settings",group:"登录防护",groupKey:"resource-domain:loginGuard.settings",fields:[
+    {key:"login_guard_mode",label:"验证码方式",labelKey:"resource-domain:loginGuard.mode",type:"select",options:[{value:"local",label:"本地随机验证码",labelKey:"resource-domain:loginGuard.local"},{value:"turnstile",label:"Cloudflare Turnstile"}],helpKey:"resource-domain:loginGuard.help"},
+    {key:"login_turnstile_site_key",label:"Site Key",type:"text",when:d=>d.login_guard_mode==="turnstile"},
+    {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
+    {key:"login_turnstile_hostname",label:"Turnstile 站点域名",labelKey:"resource-domain:loginGuard.hostname",type:"text",when:d=>d.login_guard_mode==="turnstile",helpKey:"resource-domain:loginGuard.hostnameHelp"},
+  ] },
+{title:"监控采集",titleKey:"resource-domain:platform.monitorCollection",group:"监控采集",groupKey:"resource-domain:platform.monitorCollection",fields:[
+    {key:"monitor_retention_days",label:"明细保留天数",labelKey:"resource-domain:platform.monitorRetentionDays",type:"number",min:1,max:365,helpKey:"resource-domain:platform.monitorRetentionHelp"},
+    {key:"monitor_max_rows",label:"每节点明细条数上限",labelKey:"resource-domain:platform.monitorMaxRows",type:"number",min:1000,max:1000000,helpKey:"resource-domain:platform.monitorRowsHelp"},
+  ]},
+{ title: "HostAgent", titleKey: "resource-domain:runner.settings", group: "HostAgent", groupKey: "resource-domain:runner.settings", fields: [
+    { key: "runner_auto_update", label: "Runner 默认自动升级", labelKey: "resource-domain:runner.defaultAutoUpdate", type: "switch", help: "空闲时升级到当前服务版本；主机可单独覆盖此默认值。", helpKey: "resource-domain:runner.defaultAutoHelp" },
+  ] },
+{title:"邮箱配置",titleKey:"resource-domain:platform.mailSettings",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"connection",tabKey:"resource-domain:platform.mailConnection",fields:[
     {key:"mail_enabled",label:"启用邮箱",labelKey:"resource-domain:platform.mailEnabled",type:"switch",helpKey:"resource-domain:platform.mailHelp"},
     {key:"mail_security",label:"传输加密",labelKey:"resource-domain:platform.mailSecurity",type:"select",options:[{value:"starttls",label:"STARTTLS (587)"},{value:"tls",label:"TLS (465)"},{value:"none",label:"不加密",labelKey:"resource-domain:platform.mailPlain"}]},
     {key:"mail_host",label:"SMTP 服务器",labelKey:"resource-domain:platform.mailHost",type:"text",placeholder:"smtp.example.com"},
@@ -91,44 +111,36 @@ const forms: Record<string, FormConfig<Row>> = {
     {key:"mail_from",label:"发件人邮箱",labelKey:"resource-domain:platform.mailFrom",type:"text",placeholder:"noreply@example.com"},
     {key:"mail_verified_at",label:"发送验证时间",labelKey:"resource-domain:platform.mailVerified",type:"custom",render:({draft})=><AutoField label={commonText("resource-domain:platform.mailVerified")}><p role="status" className="text-sm text-muted-foreground">{draft.mail_verified_at?new Date(Number(draft.mail_verified_at)).toLocaleString():commonText("resource-domain:platform.mailUnverified")}</p></AutoField>},
     {key:"mail_test",label:"发送验证",labelKey:"resource-domain:platform.mailTest",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTest draft={draft} readOnly={readOnly} onVerified={onPatch}/>},
-  ]}, {title:"邮件模板",titleKey:"resource-domain:platform.mailTemplates",group:"邮箱配置",groupKey:"resource-domain:platform.mailSettings",tab:"templates",tabKey:"resource-domain:platform.mailTemplates",fields:[
-    {key:"mail_templates",label:"邮件模板",labelKey:"resource-domain:platform.mailTemplates",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTemplates draft={draft} readOnly={readOnly} onPatch={onPatch}/>},
-  ]}, {title:"监控采集",titleKey:"resource-domain:platform.monitorCollection",group:"监控采集",groupKey:"resource-domain:platform.monitorCollection",fields:[
-    {key:"monitor_retention_days",label:"明细保留天数",labelKey:"resource-domain:platform.monitorRetentionDays",type:"number",min:1,max:365,helpKey:"resource-domain:platform.monitorRetentionHelp"},
-    {key:"monitor_max_rows",label:"每节点明细条数上限",labelKey:"resource-domain:platform.monitorMaxRows",type:"number",min:1000,max:1000000,helpKey:"resource-domain:platform.monitorRowsHelp"},
-  ]}, {title:"页脚设置",titleKey:"resource-domain:platform.footerSettings",group:"页脚设置",groupKey:"resource-domain:platform.footerSettings",fields:[
-    {key:"footer_html",label:"页脚内容",labelKey:"resource-domain:platform.footerContent",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformFooterEditor value={String(draft.footer_html??"")} readOnly={readOnly} onChange={value=>onPatch({footer_html:value})}/>},
-  ]}, {title:"页面脚本",titleKey:"resource-domain:platform.scripts",group:"页面脚本",groupKey:"resource-domain:platform.scripts",fields:[
-    {key:"analytics_enabled",label:"启用页面脚本",labelKey:"resource-domain:platform.scriptsEnabled",type:"switch",helpKey:"resource-domain:platform.scriptsHelp"},
-    {key:"analytics_ga_id",label:"Google Analytics 测量 ID（可选）",labelKey:"resource-domain:platform.gaId",type:"text",placeholder:"G-XXXXXXXXXX",helpKey:"resource-domain:platform.gaHelp"},
-    {key:"analytics_js",label:"自定义 JavaScript",labelKey:"resource-domain:platform.customJs",type:"textarea",span:2,helpKey:"resource-domain:platform.jsHelp"},
-    {key:"analytics_origins",label:"允许访问的域名",labelKey:"resource-domain:platform.scriptOrigins",type:"textarea",span:2,placeholder:"https://analytics.example.com",helpKey:"resource-domain:platform.originsHelp"},
-  ]}, { title: "HostAgent", titleKey: "resource-domain:runner.settings", group: "HostAgent", groupKey: "resource-domain:runner.settings", fields: [
-    { key: "runner_auto_update", label: "Runner 默认自动升级", labelKey: "resource-domain:runner.defaultAutoUpdate", type: "switch", help: "空闲时升级到当前服务版本；主机可单独覆盖此默认值。", helpKey: "resource-domain:runner.defaultAutoHelp" },
-  ] }, { title: "文件存储", titleKey: "resource-domain:platform.fileStorage", group: "文件存储", groupKey: "resource-domain:platform.fileStorage", fields: [
+  ]},
+{ title: "文件存储", titleKey: "resource-domain:platform.fileStorage", group: "文件存储", groupKey: "resource-domain:platform.fileStorage", fields: [
     {key:"storage_kind",label:"文件存储",labelKey:"resource-domain:platform.fileStorage",type:"select",options:[{value:"local",label:"本地文件（仅单机）",labelKey:"resource-domain:platform.storageLocal"},{value:"s3",label:"S3（单机或集群）",labelKey:"resource-domain:platform.storageS3"}],helpKey:"resource-domain:platform.storageHelp",disabled:d=>d.storage_source==="environment"},
     {key:"storage_source",label:"配置来源",labelKey:"resource-domain:platform.configSource",type:"text",immutable:true},
     {key:"storage_local_path",label:"本机存储路径",labelKey:"resource-domain:platform.storageLocalPath",type:"custom",span:2,when:d=>d.storage_kind==="local",render:({draft})=><code className="block select-all whitespace-normal break-all rounded border bg-muted/30 p-3 text-sm">{String(draft.storage_local_path??"")}</code>,helpKey:"resource-domain:platform.storageLocalPathHelp"},
     ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"], ["region","Region"], ["access_key","Access Key ID"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
     {key:"storage_secret_key",label:"Secret Access Key",type:"secret",stored:"storage_has_secret_key",replaceOnEdit:true,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment",helpKey:"resource-domain:platform.storageSecretHelp"},
-  ] }, { title: "登录防护", titleKey:"resource-domain:loginGuard.settings",group:"登录防护",groupKey:"resource-domain:loginGuard.settings",fields:[
-    {key:"login_guard_mode",label:"验证码方式",labelKey:"resource-domain:loginGuard.mode",type:"select",options:[{value:"local",label:"本地随机验证码",labelKey:"resource-domain:loginGuard.local"},{value:"turnstile",label:"Cloudflare Turnstile"}],helpKey:"resource-domain:loginGuard.help"},
-    {key:"login_turnstile_site_key",label:"Site Key",type:"text",when:d=>d.login_guard_mode==="turnstile"},
-    {key:"login_turnstile_secret_key",label:"Secret Key",type:"secret",stored:"login_turnstile_has_secret",replaceOnEdit:true,when:d=>d.login_guard_mode==="turnstile"},
-    {key:"login_turnstile_hostname",label:"Turnstile 站点域名",labelKey:"resource-domain:loginGuard.hostname",type:"text",when:d=>d.login_guard_mode==="turnstile",helpKey:"resource-domain:loginGuard.hostnameHelp"},
-  ] }, { title: "账号注册", titleKey: "resource-domain:platform.registration", group: "账号注册", groupKey: "resource-domain:platform.registration", fields: [
-    { key: "registration_enabled", label: "允许注册新账号", labelKey: "resource-domain:platform.allowRegistration", type: "switch", help: "关闭后已有账号仍可登录，公开注册入口将关闭。", helpKey: "resource-domain:platform.registrationHelp" },
-  ] }, { title: "公共配置", titleKey: "resource-domain:platform.publicConfig", group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", fields: [
+  ] },
+{ title: "公共配置", titleKey: "resource-domain:platform.publicConfig", group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", fields: [
     { key: "oauth_public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://ops.example.com", span: 2, help: "填写用户浏览器可访问的平台地址。保存后立即生效，无需重启；各工作空间仍分别授权自己的账号。", helpKey: "resource-domain:platform.publicUrlHelp" },
     { key: "oauth_callback_url", label: "当前回调地址", labelKey: "resource-domain:platform.callbackUrl", type: "text", immutable: true, copyable: true, span: 2, help: "将此地址登记到代码平台的 OAuth 应用。修改公开访问地址并保存后，这里会显示新的回调地址。", helpKey: "resource-domain:platform.callbackHelp" },
     { key: "oauth_source", label: "配置来源", labelKey: "resource-domain:platform.configSource", type: "text", immutable: true, span: 2 },
-  ] }, ...([ ["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"] ] as const).map(([key, label]) => ({ title: `${label} OAuth 应用`, titleKey: `resource-domain:platform.${key}App`, group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", tab: label, fields: [
+  ] },
+...([ ["github", "GitHub"], ["gitlab", "GitLab"], ["gitee", "Gitee"], ["gitea", "Gitea"] ] as const).map(([key, label]) => ({ title: `${label} OAuth 应用`, titleKey: `resource-domain:platform.${key}App`, group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", tab: label, fields: [
     { key: `oauth_${key}_enabled`, label: `启用 ${label} 网页授权`, labelKey: `resource-domain:platform.${key}Enable`, type: "switch" as const, span: 2 as const, help: "关闭后不再使用该平台的网页授权凭据；已保存的应用配置保留。Codeup 使用个人访问令牌，无需配置 OAuth 应用。", helpKey: "resource-domain:platform.oauthDisableHelp" },
     { key: `oauth_${key}_client_id`, label: `${label} ${key === "gitlab" ? "Application ID" : "Client ID"}`, labelKey: `resource-domain:platform.${key}Id`, type: "text" as const },
     { key: `oauth_${key}_client_secret`, label: `${label} ${key === "gitlab" ? "Secret" : "Client Secret"}`, labelKey: `resource-domain:platform.${key}Secret`, type: "secret" as const, stored: `oauth_${key}_has_client_secret`, replaceOnEdit: true, placeholder: "留空保留已有应用密钥", placeholderKey: "resource-domain:platform.keepSecret", help: "加密保存，不回显；留空保留已有密钥。修改应用 ID 或接入点后，原账号需重新授权。", helpKey: "resource-domain:platform.secretHelp" },
     { key: `oauth_${key}_base_url`, label: `${label} 网站地址`, labelKey: `resource-domain:platform.${key}Website`, type: "text" as const, placeholder: key === "gitea" ? "https://git.example.com" : `https://${key}.com`, help: "留空使用官方地址；自建 GitLab／GitHub Enterprise 可填写自己的地址。", helpKey: "resource-domain:platform.baseUrlHelp" },
     { key: `oauth_${key}_api_url`, label: `${label} API 地址`, labelKey: `resource-domain:platform.${key}Api`, type: "text" as const, help: "通常留空，由网站地址自动推导；仅在使用自定义 API 接入点时填写。", helpKey: "resource-domain:platform.apiUrlHelp" },
-  ] }))] },
+  ] })),
+{title:"页脚设置",titleKey:"resource-domain:platform.footerSettings",group:"页脚设置",groupKey:"resource-domain:platform.footerSettings",fields:[
+    {key:"footer_html",label:"页脚内容",labelKey:"resource-domain:platform.footerContent",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformFooterEditor value={String(draft.footer_html??"")} readOnly={readOnly} onChange={value=>onPatch({footer_html:value})}/>},
+  ]},
+{title:"页面脚本",titleKey:"resource-domain:platform.scripts",group:"页面脚本",groupKey:"resource-domain:platform.scripts",fields:[
+    {key:"analytics_enabled",label:"启用页面脚本",labelKey:"resource-domain:platform.scriptsEnabled",type:"switch",helpKey:"resource-domain:platform.scriptsHelp"},
+    {key:"analytics_ga_id",label:"Google Analytics 测量 ID（可选）",labelKey:"resource-domain:platform.gaId",type:"text",placeholder:"G-XXXXXXXXXX",helpKey:"resource-domain:platform.gaHelp"},
+    {key:"analytics_js",label:"自定义 JavaScript",labelKey:"resource-domain:platform.customJs",type:"textarea",span:2,helpKey:"resource-domain:platform.jsHelp"},
+    {key:"analytics_origins",label:"允许访问的域名",labelKey:"resource-domain:platform.scriptOrigins",type:"textarea",span:2,placeholder:"https://analytics.example.com",helpKey:"resource-domain:platform.originsHelp"},
+  ]}
+] },
 };
 
 export function Platform({ identity, reload, headerActions }: { identity: Identity; reload: () => void; onSignedOut: () => void; headerActions?: ReactNode }) {

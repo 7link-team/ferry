@@ -70,6 +70,7 @@ def main():
     work = Path(tempfile.mkdtemp(prefix='compose-acceptance-', dir=os.environ.get('FERRY_TEST_OUTPUT_DIR')))
     name = 'compose-check-' + uuid.uuid4().hex[:10]
     server_port, ssh_port, native_port = port(), port(), port()
+    nats_host_ports = [port(), port(), port()]
     origin = f'http://127.0.0.1:{server_port}'
     processes, files, projects = [], [], []
     extra_containers = []
@@ -77,6 +78,7 @@ def main():
     mode = os.environ.get("FERRY_TEST_DEPLOY_MODE", "compose")
     assert mode in ("compose", "docker", "native", "stack")
     swarm_ha = os.environ.get('FERRY_TEST_SWARM_HA') == '1'
+    test_nats = os.environ.get('FERRY_TEST_NATS_TEMPLATES') == '1' and mode in ('compose', 'stack')
     assert not swarm_ha or mode == 'stack', 'Swarm HA acceptance requires stack mode'
     swarm_nodes = ('manager', 'worker', 'worker2') if swarm_ha else ('manager', 'worker')
     report = {'mode': mode, 'swarm_nodes': list(swarm_nodes) if mode == 'stack' else [],
@@ -237,6 +239,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                 # Reusing /run from the container layer can mistake a reused PID for containerd.
                 args=['docker','run','-d','--privileged','--cgroupns=private','--tmpfs','/run','--name',name+'-'+node,'--network',name+'-swarm','-e','DOCKER_TLS_CERTDIR=']
                 if node=='manager': args+=['-v',name+'-socket:/docker-socket','-p',f'127.0.0.1:{native_port}:18081']
+                if node=='manager' and test_nats:
+                    for published, internal in zip(nats_host_ports, [18082,18083,18084]):
+                        args+=['-p',f'127.0.0.1:{published}:{internal}']
                 args+=['deployment-live-test-'+mode,'nested-daemon','--host=unix:///var/run/docker.sock',*(['--host=unix:///docker-socket/docker.sock'] if node=='manager' else []),'--storage-driver=vfs']
                 command(args)
             def engine(args,node='manager'):
@@ -281,15 +286,24 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         workspace=api('/workspaces',{'name':'ops','slug':'ops'})
         workspace_ops = workspace['id']
         workspace_other = api('/workspaces',{'name':'other','slug':'other'})['id']
-        if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1' and mode != 'native':
+        native_template = native_build_template = None
+        if os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1':
             templates = api(f'/workspaces/{workspace_ops}/app-templates')['items']
-            check('new workspace contains exactly one application example', len(templates) == 1)
-            http_template = templates[0]
+            check('new workspace contains all four application examples', len(templates) == 4)
+            http_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-http')
+            native_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-native-http')
+            pipelines = api(f'/workspaces/{workspace_ops}/pipeline-templates?workflow_kind=actions')['items']
+            native_build_template = next(t for t in pipelines if 'Native HTTP artifact build' in t['content'])
             api(f'/workspaces/{workspace_other}/app-templates/'+http_template['id'],status=404)
+            api(f'/workspaces/{workspace_other}/app-templates/'+native_template['id'],status=404)
+            api(f'/workspaces/{workspace_other}/pipeline-templates/'+native_build_template['id'],status=404)
             check('application example cannot be read across workspaces', True)
             check('example initialization starts no deployments', api(f'/workspaces/{workspace_ops}/deployments')['total'] == 0)
             report['scenario_template'] = {'id':http_template['id'],'version':http_template['version'],
                                          'content':http_template['content'],'parameters':http_template['parameters']}
+            report['native_scenario_templates'] = {'application':native_template,'pipeline':native_build_template}
+            if mode == 'native':
+                http_template = None
         workspace_ids = dict(ops=workspace_ops, other=workspace_other)
         viewer=urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         api('/users',{'email':'viewer@example.invalid','password':'correct-horse-battery','name':'viewer'},client=viewer)
@@ -443,6 +457,95 @@ CMD ["/usr/sbin/sshd","-D","-e"]
         for kind,host in [('runner',runner_id),('ssh',ssh_id)]:
             print('== '+kind,flush=True)
             web_port=port()
+            if os.environ.get('FERRY_TEST_REDIS_TEMPLATES') == '1' and mode in ('compose', 'stack'):
+                import importlib.util
+                redis_spec=importlib.util.spec_from_file_location('redis_application_acceptance',Path(__file__).with_name('redis_application_acceptance.py'))
+                redis_module=importlib.util.module_from_spec(redis_spec)
+                redis_spec.loader.exec_module(redis_module)
+                result=redis_module.exercise(api,create,start,done,check,command,mode,workspace_ops,host,kind,
+                    deployment_workdir,templates,projects,engine if mode=='stack' else None,swarm_nodes,
+                    swarm_ids if mode=='stack' else {},name,work,port)
+                report.setdefault('redis_example_runs',[]).append(result)
+            if test_nats:
+                assert os.environ.get('FERRY_TEST_SCENARIO_TEMPLATES') == '1', 'NATS acceptance requires initialized scenario templates'
+                import asyncio
+                import importlib.util
+                protocol_spec=importlib.util.spec_from_file_location('nats_application_acceptance',Path(__file__).with_name('nats_application_acceptance.py'))
+                protocol_module=importlib.util.module_from_spec(protocol_spec)
+                protocol_spec.loader.exec_module(protocol_module)
+                verify_nats=protocol_module.verify
+                nats_template = next(t for t in templates if json.loads(t['content'])['metadata']['name'] == 'example-nats')
+                nats_config = next(t for t in api(f'/workspaces/{workspace_ops}/config-templates')['items'] if t['name']=='example-nats-config')
+                report['nats_scenario_templates']={'application':nats_template,'configuration':nats_config}
+                token_key='nats-token-'+kind
+                # NATS parses environment values as configuration literals. A
+                # letter prefix keeps random hex from being parsed as a number.
+                token='nats-'+uuid.uuid4().hex+uuid.uuid4().hex
+                create('variables',{'name':token_key,'scope':'deploy','kind':'secret','value':token})
+                published_ports = [18082,18083,18084] if mode=='stack' else nats_host_ports
+                values={'token':token_key}
+                for suffix, published, advertised in zip(['a','b','c'],published_ports,nats_host_ports):
+                    values['port_'+suffix]=published
+                    values['advertise_'+suffix]='127.0.0.1:'+str(advertised)
+                generated=api(f'/workspaces/{workspace_ops}/app-templates/'+nats_template['id']+'/renderings',{'version':1,'values':values})['manifest']
+                if mode=='stack':
+                    assert len(swarm_nodes)==3, 'NATS Stack acceptance requires three owned daemons'
+                    for suffix,node in zip(['a','b','c'],swarm_nodes):
+                        engine(['node','update','--label-add','ferry-nats='+suffix,swarm_ids[node]])
+                        engine(['pull',json.loads(generated)['services'][0]['image']],node)
+                sample=create('deployments',{'name':'NATS example '+kind,'mode':mode,'target_kind':'host','target_ref':host,'workdir':deployment_workdir,'manifest':generated})
+                sample_project=f"deployment-{workspace['id']}-{sample}";projects.append(sample_project)
+                def nats_diagnostics():
+                    output=[]
+                    def capture(args):
+                        result=subprocess.run(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
+                        output.append(result.stdout.decode(errors='replace')[-24000:].replace(token,'[REDACTED]'))
+                        return result.stdout.decode(errors='replace').split()
+                    try:
+                        for node in (swarm_nodes if mode=='stack' else ['host']):
+                            prefix=['docker','exec',name+'-'+node,'/usr/bin/docker'] if mode=='stack' else ['docker']
+                            label=('com.docker.stack.namespace=' if mode=='stack' else 'com.docker.compose.project=')+sample_project
+                            ids=capture(prefix+['ps','-aq','--filter','label='+label])
+                            for container in ids:
+                                capture(prefix+['inspect','--format','{{.Name}} {{json .State}}',container])
+                                capture(prefix+['logs','--tail','100',container])
+                        if mode=='stack':
+                            for member in ['nats-a','nats-b','nats-c']:
+                                capture(['docker','exec',name+'-manager','/usr/bin/docker','service','ps','--no-trunc',sample_project+'_'+member])
+                    except Exception as cause: output.append('Diagnostic collection: '+type(cause).__name__)
+                    (work/('nats-'+kind+'-diagnostics.log')).write_text('\n'.join(output),encoding='utf8')
+                    print('\n'.join(output)[-6000:],flush=True)
+                sample_revision=start(sample);sample_row=done(sample)
+                if sample_row['state']!='succeeded': nats_diagnostics()
+                check(kind+' NATS template deployment succeeds: '+sample_row['latest_revision']['output'],sample_row['state']=='succeeded')
+                check(kind+' NATS secret absent from public deployment and history',token not in json.dumps(sample_row))
+                if mode=='stack':
+                    for suffix,node in zip(['a','b','c'],swarm_nodes):
+                        tasks=json.loads(engine(['service','ps','--no-trunc','--filter','desired-state=running','--format','{{json .}}',sample_project+'_nats-'+suffix]).decode().splitlines()[0])
+                        check(kind+' NATS member '+suffix+' placed on assigned node',tasks['Node']==engine(['info','--format','{{.Name}}'],node).decode().strip())
+                    def stop_member(member):
+                        service=sample_project+'_'+member
+                        engine(['service','scale','--detach',service+'=0'])
+                        eventually(lambda:all(not engine(['ps','-q','--filter','label=com.docker.swarm.service.name='+service],node).decode().strip() for node in swarm_nodes))
+                    def restore_member(member): engine(['service','scale','--detach',sample_project+'_'+member+'=1'])
+                else:
+                    members={member:command(['docker','ps','-q','--filter','label=com.docker.compose.project='+sample_project,'--filter','label=com.docker.compose.service='+member]).decode().strip() for member in ['nats-a','nats-b','nats-c']}
+                    check(kind+' NATS members have independent containers',len(set(members.values()))==3 and all(members.values()))
+                    def stop_member(member): command(['docker','stop','-t','5',members[member]])
+                    def restore_member(member): command(['docker','start',members[member]])
+                try:
+                    protocol=asyncio.run(verify_nats(['nats://127.0.0.1:'+str(p) for p in nats_host_ports],token,
+                        lambda label,result:check(kind+' '+label,result),stop_member,restore_member))
+                except Exception:
+                    nats_diagnostics()
+                    raise
+                report.setdefault('nats_example_runs',[]).append({'transport':kind,'deployment':sample,'revision':sample_revision,'protocol':protocol})
+                if mode=='stack':
+                    engine(['stack','rm',sample_project])
+                    eventually(lambda:not engine(['service','ls','-q','--filter','label=com.docker.stack.namespace='+sample_project]).decode().strip())
+                else:
+                    command(['docker','rm','-f',*members.values()])
+                api(f'/workspaces/{workspace_ops}/deployments/'+sample,method='DELETE',status=204)
             if mode=='stack':
                 web_port=native_port
                 source=manifest('stack-v1',18081)
@@ -576,14 +679,35 @@ CMD ["/usr/sbin/sshd","-D","-e"]
                     return '#!/usr/bin/python3\nimport http.server,os\nclass Handler(http.server.BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200 if self.path == "/" else 404); self.end_headers(); self.wfile.write('+repr(version)+'.encode())\nopen("/tmp/native-env-'+kind+'","w").write(os.environ["TOKEN"])\nopen("/tmp/native-config-'+kind+'","w").write(open("/etc/native-runtime.conf").read())\nhttp.server.HTTPServer(("0.0.0.0",18081),Handler).serve_forever()\n'
                 definition=artifact_workflow('/tmp/native-build-'+kind+'/{{run}}','printf %s '+shlex.quote(executable('native-v1'))+' > app; chmod 755 app')
                 pipeline=create('pipelines',{'name':'native-build-'+kind,'target_kind':'host','target_ref':host,'repository_id':repo,'definition_format':'github-actions','definition':json.dumps(definition)})
-                def build():
-                    rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline+'/runs',{},status=201)['id']
+                def build(pipeline_id=pipeline):
+                    rid=api(f'/workspaces/{workspace_ops}/pipelines/'+pipeline_id+'/runs',{},status=201)['id']
                     def finished():
                         run=api(f'/workspaces/{workspace_ops}/pipeline-runs/'+rid)
                         return run if run['state'] not in ('queued','running') else None
                     run=eventually(finished)
                     check(kind+' native executable archived',run['state']=='succeeded' and len(run['artifacts'])==1)
                     return rid
+                if native_template is not None:
+                    generated = api(f'/workspaces/{workspace_ops}/pipeline-templates/'+native_build_template['id']+'/renderings',
+                                    {'version':native_build_template['version'],'values':{}})['definition']
+                    sample_pipeline = create('pipelines',{'name':'sample-native-'+kind,'target_kind':'host','target_ref':host,
+                        'repository_id':repo,'definition_format':'github-actions','definition':json.loads(generated)['workflow']})
+                    sample_run = build(sample_pipeline)
+                    message = "Native example 'quote' $HOME %\nsecond line 你好"
+                    generated = api(f'/workspaces/{workspace_ops}/app-templates/'+native_template['id']+'/renderings',
+                                    {'version':native_template['version'],'values':{'pipeline':sample_pipeline,'port':18081,'message':message}})['manifest']
+                    sample = create('deployments',{'name':'Native example '+kind,'mode':'native','target_kind':'host','target_ref':host,
+                        'workdir':deployment_workdir,'manifest':generated})
+                    sample_project=f"deployment-{workspace['id']}-{sample}";projects.append(sample_project)
+                    sample_revision=start(sample);sample_row=done(sample)
+                    check(kind+' initialized Native example deploys: '+sample_row['latest_revision']['output'],sample_row['state']=='succeeded')
+                    check(kind+' initialized Native example literal HTTP body',eventually(lambda:response(web_port)==message))
+                    check(kind+' initialized Native example readiness endpoint',remote('curl -fsS http://127.0.0.1:18081/health')=='ok')
+                    check(kind+' initialized Native example rejects unknown paths',remote("curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/missing")=='404')
+                    check(kind+' initialized Native example persists enabled unit',remote('systemctl is-enabled '+sample_project+'-web.service').strip()=='enabled')
+                    report.setdefault('native_example_runs',[]).append({'transport':kind,'pipeline':sample_pipeline,'run':sample_run,'deployment':sample,'revision':sample_revision})
+                    remote('systemctl disable --now '+sample_project+'-web.service')
+                    api(f'/workspaces/{workspace_ops}/deployments/'+sample,method='DELETE',status=204)
                 build1=build()
                 key='native-token-'+kind;secret='quote" slash\\ dollar$HOME percent% newline\nsecond'
                 variable=create('variables',{'name':key,'scope':'deploy','kind':'secret','value':secret})
@@ -922,6 +1046,9 @@ CMD ["/usr/sbin/sshd","-D","-e"]
             if ids: subprocess.run(['docker','rm','-f',*ids],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             nets=command(['docker','network','ls','-q','--filter','label=com.docker.compose.project='+project]).decode().split()
             if nets: subprocess.run(['docker','network','rm',*nets],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            if mode=='compose':
+                owned_volumes=command(['docker','volume','ls','-q','--filter','label=com.docker.compose.project='+project]).decode().split()
+                if owned_volumes: subprocess.run(['docker','volume','rm',*owned_volumes],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         for p in reversed(processes):
             if p.poll() is None: p.kill();p.wait()
         for child in extra_containers: subprocess.run(['docker','rm','-f',child],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

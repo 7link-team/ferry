@@ -455,7 +455,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       return <div className="flex flex-col gap-4 md:flex-row">
         <nav aria-label={commonText("form.categories")} className="flex shrink-0 flex-wrap gap-1 md:w-40 md:flex-col">
           {groups.map(name => <button key={name} type="button" aria-current={!groupContent && name === active ? "page" : undefined} onClick={() => { setGroup(name); onGroupChange?.(); }}
-            className={cn("rounded px-3 py-2 text-left text-sm", !groupContent && name === active ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50")}>{configText(name, config.sections.find(section => section.group === name)?.groupKey)}</button>)}
+            className={cn("min-h-11 rounded px-3 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !groupContent && name === active ? "bg-accent font-medium text-accent-foreground" : "text-foreground hover:bg-accent")}>{configText(name, config.sections.find(section => section.group === name)?.groupKey)}</button>)}
           {groupLinks}
         </nav>
         <div className="min-w-0 flex-1 space-y-4" data-form-content>

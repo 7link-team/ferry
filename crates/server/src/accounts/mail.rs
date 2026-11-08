@@ -26,8 +26,22 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
 
 const AAD: &str = "platform/mail/v1";
+#[derive(Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct CodeTemplate {
+    subject: String,
+    body: String,
+    html: String,
+}
+impl CodeTemplate {
+    fn validate(&self) -> Result<()> {
+        validate_template(&self.subject, &self.body, true)?;
+        validate_template("", &self.html, true)
+    }
+}
 fn error(key: &str) -> ApiError {
     ApiError::localized(StatusCode::BAD_REQUEST, crate::i18n::Message::new(key))
 }
@@ -49,6 +63,7 @@ pub struct Configuration {
     test_body: String,
     code_html: String,
     test_html: String,
+    code_templates: BTreeMap<String, CodeTemplate>,
 }
 impl Configuration {
     pub fn read(s: &AppState, stored: Option<&str>) -> Result<Self> {
@@ -66,7 +81,7 @@ impl Configuration {
         self.enabled && self.verified_at.is_some()
     }
     pub fn view(&self) -> Value {
-        json!({"mail_enabled":self.enabled,"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body,"mail_code_html":self.code_html,"mail_test_html":self.test_html})
+        json!({"mail_enabled":self.enabled,"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body,"mail_code_html":self.code_html,"mail_test_html":self.test_html,"mail_code_templates":self.code_templates})
     }
     fn seal(&self, s: &AppState) -> Result<String> {
         s.vault.seal(
@@ -95,6 +110,7 @@ impl Configuration {
             "test_body",
             "code_html",
             "test_html",
+            "code_templates",
         ] {
             if let Some(value) = patch.get(&format!("mail_{key}")) {
                 fields[key] = value.clone();
@@ -116,6 +132,15 @@ impl Configuration {
         validate_template(&config.test_subject, &config.test_body, false)?;
         validate_template("", &config.code_html, true)?;
         validate_template("", &config.test_html, false)?;
+        for (locale, template) in &config.code_templates {
+            if !crate::i18n::Locale::ALL
+                .iter()
+                .any(|item| item.tag() == locale)
+            {
+                return Err(error("mail.invalid"));
+            }
+            template.validate()?;
+        }
         if config.host.len() > 253
             || config
                 .host
@@ -293,10 +318,20 @@ fn html_text(value: &str) -> String {
 }
 impl Configuration {
     fn message(&self, email: &str, code: Option<&str>) -> (String, String) {
+        self.message_in(email, code, crate::i18n::current_locale(), None)
+    }
+    fn message_in(
+        &self,
+        email: &str,
+        code: Option<&str>,
+        locale: crate::i18n::Locale,
+        sample: Option<&CodeTemplate>,
+    ) -> (String, String) {
+        let selected = sample.or_else(|| self.code_templates.get(locale.tag()));
         let (subject, body, subject_key, body_key) = if code.is_some() {
             (
-                &self.code_subject,
-                &self.code_body,
+                selected.map_or(&self.code_subject, |template| &template.subject),
+                selected.map_or(&self.code_body, |template| &template.body),
                 "mail.codeSubject",
                 "mail.codeBody",
             )
@@ -309,20 +344,20 @@ impl Configuration {
             )
         };
         let subject = if subject.trim().is_empty() {
-            crate::i18n::message(subject_key)
+            crate::i18n::render(locale, &crate::i18n::Message::new(subject_key))
         } else {
             render_template(subject, email, code.unwrap_or(""))
         };
         let body = if body.trim().is_empty() {
             crate::i18n::render(
-                crate::i18n::current_locale(),
+                locale,
                 &crate::i18n::Message::new(body_key).with("code", code.unwrap_or("")),
             )
         } else {
             render_template(body, email, code.unwrap_or(""))
         };
         let html = if code.is_some() {
-            &self.code_html
+            selected.map_or(&self.code_html, |template| &template.html)
         } else {
             &self.test_html
         };
@@ -346,10 +381,17 @@ impl Configuration {
 pub struct Recipient {
     email: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestRecipient {
+    email: String,
+    locale: Option<String>,
+    template: Option<CodeTemplate>,
+}
 pub async fn test(
     State(s): State<AppState>,
     admin: Admin,
-    Json(body): Json<Recipient>,
+    Json(body): Json<TestRecipient>,
 ) -> Result<Json<Value>> {
     let row = platform_state::Entity::find_by_id(1)
         .one(&s.db)
@@ -357,7 +399,18 @@ pub async fn test(
         .ok_or_else(ApiError::missing)?;
     let mut config = Configuration::read(&s, row.mail_config.as_deref())?;
     let to = auth::email(&body.email)?;
-    let (subject, body) = config.message(&to, None);
+    let locale = match body.locale {
+        Some(tag) => crate::i18n::Locale::ALL
+            .into_iter()
+            .find(|item| item.tag() == tag)
+            .ok_or_else(|| error("mail.invalid"))?,
+        None => crate::i18n::current_locale(),
+    };
+    if let Some(template) = &body.template {
+        template.validate()?;
+    }
+    // A sample never creates a usable registration challenge or a template type.
+    let (subject, body) = config.message_in(&to, Some("123456"), locale, body.template.as_ref());
     config.send(&to, subject, body).await?;
     let tx = s.db.begin().await?;
     let latest = platform::lock(&tx).await?;
@@ -522,6 +575,68 @@ pub async fn consume(
 #[cfg(test)]
 mod template_tests {
     use super::*;
+    #[test]
+    fn language_templates_are_independent_and_legacy_content_survives() {
+        use crate::i18n::Locale;
+        let mut config = Configuration {
+            code_subject: "Legacy".into(),
+            code_body: "Legacy {{code}}".into(),
+            ..Configuration::default()
+        };
+        config.code_templates.insert(
+            "zh-CN".into(),
+            CodeTemplate {
+                subject: "Chinese {{email}}".into(),
+                html: "<p>CN {{code}}</p>".into(),
+                ..CodeTemplate::default()
+            },
+        );
+        assert_eq!(
+            config
+                .message_in("a@example.invalid", Some("123456"), Locale::ZhCn, None)
+                .0,
+            "Chinese a@example.invalid"
+        );
+        assert!(
+            config
+                .message_in("a@example.invalid", Some("123456"), Locale::ZhCn, None)
+                .1
+                .contains("CN 123456")
+        );
+        assert_eq!(
+            config
+                .message_in("a@example.invalid", Some("654321"), Locale::EnUs, None)
+                .0,
+            "Legacy"
+        );
+        config
+            .code_templates
+            .insert("en-US".into(), CodeTemplate::default());
+        let reset = config.message_in("a@example.invalid", Some("654321"), Locale::EnUs, None);
+        assert_eq!(
+            reset.0,
+            crate::i18n::render(Locale::EnUs, &crate::i18n::Message::new("mail.codeSubject"))
+        );
+        assert!(!reset.1.contains("Legacy"));
+        let sample = CodeTemplate {
+            subject: "Unsaved".into(),
+            html: "<p>{{email}} {{code}} {{expires_minutes}}</p>".into(),
+            ..CodeTemplate::default()
+        };
+        let sent = config.message_in(
+            "<unsafe>@example.invalid",
+            Some("123456"),
+            Locale::ZhCn,
+            Some(&sample),
+        );
+        assert_eq!(sent.0, "Unsaved");
+        assert!(sent.1.contains("&lt;unsafe&gt;@example.invalid 123456 10"));
+        assert_eq!(config.code_templates["zh-CN"].subject, "Chinese {{email}}");
+        let old: Configuration =
+            serde_json::from_str(r#"{"code_subject":"Old","code_body":"{{code}}"}"#).unwrap();
+        assert!(old.code_templates.is_empty());
+        assert_eq!(old.code_subject, "Old");
+    }
     #[test]
     fn html_mail_has_default_design_plain_fallback_and_escaped_variables() {
         let config = Configuration::default();

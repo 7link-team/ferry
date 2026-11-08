@@ -1,7 +1,7 @@
 /** Source wangEditor integration using its native lifecycle, independent of React wrapper versions. */
 import { createEditor,createToolbar,i18nAddResources,i18nChangeLanguage,type IDomEditor } from "@wangeditor-next/editor";
 import "@wangeditor-next/editor/dist/css/style.css";
-import { useEffect,useRef,type CSSProperties } from "react";
+import { useEffect,useImperativeHandle,useRef,type CSSProperties,type Ref } from "react";
 import { useTranslation } from "react-i18next";
 import { typedText } from "../../shared/i18n/i18n";
 import richTextMessages from "../../shared/i18n/locales/richtext-domain.json";
@@ -23,11 +23,18 @@ for (const [column, locale] of ["zh-TW", "ja-JP", "ko-KR", "ms-MY"].entries()) {
   i18nAddResources(locale, resources);
 }
 
-export default function RichTextValueEditor({ value, readOnly, onChange }: { value: string; readOnly: boolean; onChange: (value: string) => void }) {
+export default function RichTextValueEditor({ value, readOnly, onChange, insertRef }: { value: string; readOnly: boolean; onChange: (value: string) => void; insertRef?: Ref<{ insertText(value: string): void }> }) {
   const { i18n } = useTranslation("typed-domain");
   const toolbarContainer = useRef<HTMLDivElement>(null);
   const editorContainer = useRef<HTMLDivElement>(null);
   const editorRef = useRef<IDomEditor | null>(null);
+  useImperativeHandle(insertRef, () => ({ insertText(text: string) {
+    const editor = editorRef.current;
+    if (readOnly || !editor) return;
+    if (!editor.isFocused()) editor.restoreSelection();
+    if (!editor.selection) editor.focus();
+    editor.insertText(text);
+  } }), [readOnly]);
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
   const lastHtml = useRef(value);

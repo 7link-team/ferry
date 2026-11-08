@@ -1,0 +1,18 @@
+{
+  "apiVersion": "ferry/v1",
+  "kind": "Application",
+  "metadata": { "name": "example-native-http" },
+  "services": [{
+    "name": "web",
+    "artifact": { "source": "pipeline", "pipeline": "{{ .Values.pipeline }}", "path": "app" },
+    "env": [
+      { "name": "PORT", "value": "{{ .Values.port }}" },
+      { "name": "WELCOME_MESSAGE", "value": "{{ .Values.message }}" }
+    ],
+    "ports": [{ "container": "{{ .Values.port }}" }],
+    "health": {
+      "readiness": { "httpGet": { "path": "/health", "port": "{{ .Values.port }}" }, "periodSeconds": 1 }
+    },
+    "resources": { "limits": { "cpu": "500m", "memory": "64Mi" } }
+  }]
+}

@@ -1,4 +1,4 @@
-name: Container deployment acceptance
+name: Application deployment acceptance
 
 on:
   workflow_dispatch:
@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
+      - scripts/nats_application_acceptance.py
+      - scripts/redis_application_acceptance.py
       - scripts/test-deployments.sh
       - scripts/test-deployments-ui.mjs
       - src/**
@@ -20,6 +22,8 @@ on:
     paths:
       - .github/workflows/deployment-ha.yml
       - scripts/test-deployments.py
+      - scripts/nats_application_acceptance.py
+      - scripts/redis_application_acceptance.py
       - scripts/test-deployments.sh
       - scripts/test-deployments-ui.mjs
       - src/**
@@ -46,6 +50,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - mode: native
+            swarm_ha: "0"
+            label: Native artifact and systemd SSH and Agent acceptance
           - mode: docker
             swarm_ha: "0"
             label: Docker application example acceptance
@@ -60,6 +67,8 @@ jobs:
       FERRY_TEST_DEPLOY_MODE: ${{ matrix.mode }}
       FERRY_TEST_SWARM_HA: ${{ matrix.swarm_ha }}
       FERRY_TEST_SCENARIO_TEMPLATES: "1"
+      FERRY_TEST_NATS_TEMPLATES: "1"
+      FERRY_TEST_REDIS_TEMPLATES: "1"
       FERRY_TEST_OUTPUT_DIR: ${{ github.workspace }}/harness-logs/fixtures
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +77,16 @@ jobs:
           node-version: "24"
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-go@v5
+        if: matrix.mode == 'native'
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - name: Build the Linux Actions worker for artifact pipelines
+        if: matrix.mode == 'native'
+        env:
+          ACTIONS_WORKER_TARGETS: linux/amd64
+        run: bash scripts/build-actions-workers.sh
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: e2e
@@ -85,6 +104,13 @@ jobs:
           "$compose_path" version --short
           mkdir -p "$FERRY_TEST_OUTPUT_DIR"
       - run: npm ci
+      - name: Install the HA protocol acceptance clients
+        if: matrix.mode == 'compose' || matrix.mode == 'stack'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/nats-client-env"
+          "$RUNNER_TEMP/nats-client-env/bin/python" -m pip install nats-py==2.9.0 redis==5.2.1
+          "$RUNNER_TEMP/nats-client-env/bin/python" -I -c 'import nats, redis'
+          echo "$RUNNER_TEMP/nats-client-env/bin" >> "$GITHUB_PATH"
       - name: Install the deployment browser
         if: matrix.mode == 'compose'
         run: npx playwright install --with-deps chromium
@@ -94,6 +120,11 @@ jobs:
         run: |
           cargo build --locked -p ferry-server -p ferry-runner
           cargo test --locked -p ferry-server templates::tests:: -- --nocapture
+      - name: Full server regression on Linux
+        if: matrix.mode == 'native'
+        run: |
+          mkdir -p harness-logs
+          python3 .github/scripts/annotate-failures.py --run cargo test --locked -p ferry-server -- --nocapture 2>&1 | tee harness-logs/server-tests.log
       - name: Deployment acceptance through SSH and HostAgent
         shell: bash
         run: |
@@ -117,7 +148,10 @@ jobs:
           {
             echo '### ${{ matrix.label }}'
             echo "Commit: $GITHUB_SHA; run: $GITHUB_RUN_ID"
-            if [ "$FERRY_TEST_DEPLOY_MODE" = docker ]; then
+            if [ "$FERRY_TEST_DEPLOY_MODE" = native ]; then
+              echo 'Initialized Actions build and Native application templates: real archive, SSH and HostAgent systemd deployment, HTTP, readiness and rollback regression.'
+              echo 'Isolated Linux fixture shares the runner kernel; does not certify physical host HA or cross-host migration.'
+            elif [ "$FERRY_TEST_DEPLOY_MODE" = docker ]; then
               echo 'Real Docker deployment through SSH and HostAgent using the initialized HTTP application template.'
             elif [ "$FERRY_TEST_DEPLOY_MODE" = compose ]; then
               echo 'Real Compose deployment through SSH and HostAgent, including browser acceptance.'
@@ -125,6 +159,12 @@ jobs:
               echo 'One manager and two workers, each with an isolated Docker daemon.'
               echo 'Covers placement, replica distribution, task replacement, worker outage/rejoin, rolling update, rollback and unsatisfied constraints.'
               echo 'Shares one host kernel; does not certify physical-host isolation, manager quorum, database HA or volume migration.'
+            fi
+            if [ "$FERRY_TEST_DEPLOY_MODE" = compose ] || [ "$FERRY_TEST_DEPLOY_MODE" = stack ]; then
+              echo 'Initialized NATS application through SSH and HostAgent: three persistent members, token authentication, client discovery, leader loss, durable consumer recovery and quorum refusal/restoration.'
+              echo 'Initialized Redis Sentinel application through SSH and HostAgent: six authenticated members, asynchronous replication, majority failover, old-master demotion, persisted dynamic roles and Sentinel quorum loss/restoration.'
+              echo 'Sentinel results do not certify RPO=0, full-outage recovery or network-partition fencing.'
+              echo 'Stack members use distinct assigned daemons and local volumes; no physical three-host, TLS, route authentication or volume migration certification.'
             fi
             echo 'See acceptance.json and daemon logs for actual results.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -136,6 +176,7 @@ jobs:
           if-no-files-found: warn
           path: |
             harness-logs/acceptance.log
+            harness-logs/server-tests.log
             harness-logs/fixtures/**/acceptance.json
             harness-logs/fixtures/**/*.log
             harness-logs/template-ui/*.png

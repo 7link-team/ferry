@@ -62,9 +62,59 @@ with tempfile.TemporaryDirectory(prefix='platform-test-') as directory:
         workspace_tenant = request(owner, '/workspaces', {'name':'Tenant','slug':'tenant'})['id']
         workspace_other = request(outsider, '/workspaces', {'name':'Other','slug':'other'})['id']
         root = f'/workspaces/{workspace_tenant}'
+        examples=request(owner,root+'/app-templates')['items']
+        native=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-native-http')
+        native_path=root+'/app-templates/'+native['id']
+        request(outsider,f'/workspaces/{workspace_other}/app-templates/'+native['id'],expected=404)
+        check(True,'Native example cannot be read across workspaces')
+        request(owner,native_path+'/renderings',{'version':1,'values':{}},expected=400)
+        check(True,'Native example requires a build pipeline')
+        doc=json.loads(request(owner,native_path+'/renderings',{'version':1,'values':{'pipeline':'sample-build','port':23181,'message':'literal " $HOME\n你好'}})['manifest'])
+        check(doc['services'][0]['artifact']['pipeline']=='sample-build' and doc['services'][0]['artifact']['path']=='app','Native example preserves the archive reference')
+        check(doc['services'][0]['ports'][0]['container']==23181 and doc['services'][0]['env'][0]['value']=='23181','Native example port stays numeric and its environment value stays text')
+        check(doc['services'][0]['env'][1]['value']=='literal " $HOME\n你好','Native example message stays literal')
+        check(request(owner,root+'/deployments')['total']==0 and request(owner,root+'/pipelines')['total']==0,'initialization and rendering execute no workloads')
         invitation=request(owner,root+'/members/invitation')['code']
         request(guest,'/workspace-memberships',{'code':invitation})
         host=request(owner,root+'/nodes',{'name':'Fixture','connection':'runner'},expected=201)['id']
+        redis_template=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-redis-sentinel')
+        redis_path=root+'/app-templates/'+redis_template['id']
+        request(outsider,f'/workspaces/{workspace_other}/app-templates/'+redis_template['id'],expected=404)
+        request(owner,redis_path+'/renderings',{'version':1,'values':{}},expected=400)
+        redis_values={'password':'redis-secret','ip_a':'192.0.2.10','ip_b':'192.0.2.11','ip_c':'192.0.2.12'}
+        redis_doc=json.loads(request(owner,redis_path+'/renderings',{'version':1,'values':redis_values})['manifest'])
+        check(len(redis_doc['services'])==6 and len({s['volumes'][0]['name'] for s in redis_doc['services']})==6,'Redis and Sentinel use six independent persistent volumes')
+        check(all(s['env'][6]['valueFrom']=='variable/redis-secret' and s['ports'][0]['container']==s['ports'][0]['published'] for s in redis_doc['services']),'Redis secret stays a variable reference and published endpoints match listening ports')
+        invalid=dict(redis_values,data_port_a=65536)
+        request(owner,redis_path+'/renderings',{'version':1,'values':invalid},expected=400)
+        request(guest,redis_path+'/renderings',{'version':1,'values':redis_values})
+        request(anonymous,redis_path+'/renderings',{'version':1,'values':redis_values},expected=401)
+        check(True,'Redis template rejects invalid ports and anonymous rendering while readers can preview')
+        redis_config=next(row for row in request(owner,root+'/config-templates')['items'] if row['name']=='example-redis-start')
+        request(outsider,f'/workspaces/{workspace_other}/config-templates/'+redis_config['id'],expected=404)
+        check(redis_config['parameters']=='[]' and 'sentinel.conf' in redis_config['content'],'Redis startup configuration is a workspace-owned template')
+        nats_template=next(row for row in examples if json.loads(row['content'])['metadata']['name']=='example-nats')
+        nats_path=root+'/app-templates/'+nats_template['id']
+        nats_values={'token':'nats-secret','advertise_a':'a.example.invalid:4222','advertise_b':'b.example.invalid:4223','advertise_c':'c.example.invalid:4224'}
+        request(owner,nats_path+'/renderings',{'version':1,'values':{}},expected=400)
+        nats_doc=json.loads(request(owner,nats_path+'/renderings',{'version':1,'values':nats_values})['manifest'])
+        check(len(nats_doc['services'])==3 and len({s['volumes'][0]['name'] for s in nats_doc['services']})==3,'NATS template has three distinct persistent members')
+        check(all(s['env'][2]['valueFrom']=='variable/nats-secret' for s in nats_doc['services']),'NATS authentication is a secret reference, never a template token')
+        nats_body={'name':'NATS example','mode':'compose','target_kind':'host','target_ref':host,'workdir':'/tmp/nats-example','manifest':json.dumps(nats_doc)}
+        request(owner,root+'/deployments',nats_body,expected=400)
+        check(True,'NATS deployment rejects missing secret bindings')
+        request(owner,root+'/variables',{'name':'nats-secret','scope':'deploy','kind':'secret','value':'fixture-client-token'},expected=201)
+        nats_app=request(owner,root+'/deployments',nats_body,expected=201)['id']
+        config=next(row for row in request(owner,root+'/config-templates')['items'] if row['name']=='example-nats-config')
+        request(outsider,f'/workspaces/{workspace_other}/config-templates/'+config['id'],expected=404)
+        request(owner,root+'/config-templates/'+config['id'],method='DELETE',expected=409)
+        check(True,'NATS configuration is workspace isolated and protected while referenced')
+        request(owner,root+'/deployments/'+nats_app,method='DELETE',expected=204)
+        builds=request(owner,root+'/pipeline-templates?workflow_kind=actions')['items']
+        build=next(row for row in builds if 'Native HTTP artifact build' in row['content'])
+        generated=json.loads(request(owner,root+'/pipeline-templates/'+build['id']+'/renderings',{'version':1,'values':{}})['definition'])
+        saved=request(owner,root+'/pipelines',{'name':'Native sample build','target_kind':'host','target_ref':host,'definition_format':'github-actions','definition':generated['workflow']},expected=201)
+        check(request(owner,root+'/pipelines/'+saved['id'])['definition']==generated['workflow'],'initialized Native build creates a real Actions pipeline from YAML')
         request(owner,root+'/variables',{'name':'token','scope':'deploy','kind':'secret','value':'never-copy-this-secret'},expected=201)
         for resource, field in [('app-templates','manifest'),('pipeline-templates','definition')]:
             app=field=='manifest'
