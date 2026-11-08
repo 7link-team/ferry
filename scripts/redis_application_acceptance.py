@@ -4,6 +4,14 @@ import time
 import uuid
 
 
+def quorum_ready(voter):
+    # redis-py 5.2.1's combined-command callback compares the full response to
+    # "OK", but Redis CKQUORUM returns "OK <n> usable Sentinels. ...".
+    # Separate command arguments retain the actual reply and NOQUORUM errors.
+    response = voter.execute_command('SENTINEL', 'CKQUORUM', 'example')
+    return isinstance(response, str) and response.startswith('OK ')
+
+
 def exercise(api, create, start, done, check, command, mode, workspace, host, transport,
              deployment_workdir, templates, projects, engine, swarm_nodes, swarm_ids, fixture, work, allocate_port):
     """Use the harness-owned infrastructure; all mutations go through its API."""
@@ -165,7 +173,7 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
                 anonymous.close()
         retry(lambda: all(v.ping() for v in voters.values()), 'authenticated Sentinel health')
         retry(lambda: all(len(v.sentinel_sentinels('example')) == 2 for v in voters.values()), 'three independent Sentinel voters')
-        check('all three Sentinels authorize quorum', all(v.sentinel_ckquorum('example') for v in voters.values()))
+        check('all three Sentinels authorize quorum', all(quorum_ready(v) for v in voters.values()))
         original = retry(lambda: discovery.discover_master('example'), 'initial master discovery')
         check('Sentinel discovery returns a configured reachable data endpoint', original in data_endpoints.values())
         original_name = next(name for name, endpoint in data_endpoints.items() if endpoint == original)
@@ -226,7 +234,7 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
 
         def no_quorum():
             try:
-                survivor.sentinel_ckquorum('example')
+                quorum_ready(survivor)
             except redis.ResponseError as error:
                 return 'NOQUORUM' in str(error)
             return False
@@ -246,7 +254,7 @@ def verify(data_endpoints, sentinel_endpoints, password, check, stop_member, res
             restore_member(name)
             stopped.remove(name)
         current = retry(agreed, 'master discovery after voter restoration')
-        retry(lambda: all(v.sentinel_ckquorum('example') for v in voters.values()), 'Sentinel quorum restored')
+        retry(lambda: all(quorum_ready(v) for v in voters.values()), 'Sentinel quorum restored')
         retry(lambda: write(current, 'proof:recovered', 'recovered', 2), 'write after quorum restoration')
         check('quorum restoration retains baseline and post-failover data',
               all(c.get('proof:baseline') == 'before' and c.get('proof:after') == 'after' for c in members.values()))
