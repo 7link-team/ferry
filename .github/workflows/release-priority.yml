@@ -1,0 +1,21 @@
+name: Prioritize alpha15 release
+on:
+  push:
+    branches: [ci/alpha15-release-priority-20261110]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const targets = [[42721298458, "d2068e4443b5aea83057b51c126c4c647c8424f4", "main", "Build and release"], [42721297866, "d2068e4443b5aea83057b51c126c4c647c8424f4", "main", "Server container"], [42721464321, "d5e7bba0816a8371442b06984711ca9da0fbfbe8", "main", "Build and release"], [42721463681, "d5e7bba0816a8371442b06984711ca9da0fbfbe8", "main", "Server container"]];
+            for (const [run_id, sha, branch, name] of targets) {
+              const {data: run} = await github.rest.actions.getWorkflowRun({...context.repo,run_id});
+              if(run.head_sha !== sha || run.head_branch !== branch || run.name !== name) throw Error('Source mismatch '+run_id);
+              core.info(`${run_id}: ${run.status}/${run.conclusion}`);
+              if(run.status !== 'completed') await github.rest.actions.cancelWorkflowRun({...context.repo,run_id});
+            }
