@@ -25,6 +25,7 @@ import {
   ChevronLeft,
   ArrowUp,
   Terminal,
+  Eye,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
@@ -41,6 +42,7 @@ import {
 
 const builtinCatalog = [
   { type: "host.command", key: "hostCommand", group: "build", icon: Terminal },
+  { type: "host.preview", key: "hostPreview", group: "build", icon: Eye },
   { type: "ai.llm.chat", key: "aiChat", group: "ai", icon: Braces },
   { type: "ai.image.generate", key: "aiImage", group: "ai", icon: Image },
   { type: "ai.audio.speech", key: "aiSpeech", group: "ai", icon: Music },
@@ -105,6 +107,8 @@ export const nodeTitle = (type: string) => {
 export function outputPortLabel(node: GraphNode, port: Pick<Port, "port" | "index">): string {
   if (node.type === "core.if" && (port.port === "true" || port.port === "false"))
     return t(port.port === "true" ? "branchTrue" : "branchFalse");
+  if (node.type === "host.preview" && (port.port === "approved" || port.port === "rejected"))
+    return t(port.port === "approved" ? "branchApproved" : "branchRejected");
   if (node.type === "core.switch") {
     if (port.port === "fallback") return t("branchFallback");
     if (port.port === "case") {

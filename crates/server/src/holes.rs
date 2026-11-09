@@ -52,7 +52,7 @@ pub fn routes() -> Router<AppState> {
 
 const SPEC: Spec = Spec {
     search: &["name"],
-    filters: &["host_id"],
+    filters: &["host_id", "source_kind", "source_id", "source_ref"],
     sortable: &["name", "created_at", "expires_at"],
     default_sort: "-created_at",
 };
@@ -114,7 +114,7 @@ async fn views(s: &AppState, scope: &Scope, rows: Vec<holes::Model>) -> Result<V
         .collect::<HashMap<_, _>>();
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
-        let token = s.vault.open_secret(&row.token_sealed, &aad(&row))?;
+        let url = link(s, &row)?;
         values.push(json!({
             "id": Id::from(row.id),
             "host_id": Id::from(row.host_id),
@@ -122,8 +122,7 @@ async fn views(s: &AppState, scope: &Scope, rows: Vec<holes::Model>) -> Result<V
             "name": row.name,
             "target_port": row.target_port,
             "strip_prefix": row.strip_prefix,
-            // Root-relative: only the browser knows the external scheme and host.
-            "url": format!("/holes/{token}/"),
+            "url": url,
             "state": state(&row, now),
             "expires_at": row.expires_at,
             "revoked_at": row.revoked_at,
@@ -155,6 +154,12 @@ async fn views(s: &AppState, scope: &Scope, rows: Vec<holes::Model>) -> Result<V
     )
     .await?;
     Ok(values)
+}
+
+/// Root-relative: only the browser knows the external scheme and host.
+pub(crate) fn link(s: &AppState, row: &holes::Model) -> Result<String> {
+    let token = s.vault.open_secret(&row.token_sealed, &aad(row))?;
+    Ok(format!("/holes/{token}/"))
 }
 
 async fn view(s: &AppState, scope: &Scope, id: Id) -> Result<Value> {
@@ -439,6 +444,7 @@ pub async fn revoke(
     .await?;
     tx.commit().await?;
     proxy::close(old.id);
+    crate::workflows::preview::nudge(&s.db, &old).await?;
     Ok(Json(view(&s, &scope, id).await?))
 }
 
@@ -463,6 +469,7 @@ pub async fn remove(
     .await?;
     tx.commit().await?;
     proxy::close(old.id);
+    crate::workflows::preview::nudge(&s.db, &old).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

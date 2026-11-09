@@ -4206,6 +4206,119 @@
       ]
     },
     {
+      "type": "host.preview",
+      "type_version": 1,
+      "impl_version": "design-1",
+      "phase": "S1",
+      "status": "design_only",
+      "runtime": {
+        "default": "server",
+        "allowed": [
+          "server"
+        ]
+      },
+      "purity": "side_effect",
+      "cache_allowed": false,
+      "item_mode": "batch",
+      "inputs": [
+        {
+          "port": "main",
+          "type": "main"
+        }
+      ],
+      "outputs": [
+        {
+          "port": "main",
+          "type": "main"
+        },
+        {
+          "port": "approved",
+          "type": "main"
+        },
+        {
+          "port": "rejected",
+          "type": "main"
+        }
+      ],
+      "credential_slots": {},
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "host_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "command": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "input_env": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "strip_prefix": {
+            "type": "boolean"
+          },
+          "ready_timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "review": {
+            "enum": [
+              "none",
+              "human"
+            ]
+          },
+          "review_timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          }
+        },
+        "required": [
+          "host_id",
+          "port"
+        ],
+        "additionalProperties": false
+      },
+      "expression_fields": [
+        "/host_id",
+        "/input_env/*"
+      ],
+      "semantic_rule": "command禁止{{和表达式插值，输入只经 input_env；主机必须是本工作空间的 runner 主机；review=none 只有 main 出口，review=human 只有 approved/rejected 出口；服务与预览随执行终态回收。",
+      "example_params": {
+        "host_id": "1",
+        "command": "",
+        "input_env": {},
+        "port": 5173,
+        "name": "",
+        "strip_prefix": true,
+        "ready_timeout_seconds": 60,
+        "review": "none",
+        "review_timeout_minutes": 60
+      },
+      "required_evidence": [
+        "success",
+        "invalid_input",
+        "restart_or_replay",
+        "workspace_denied"
+      ],
+      "default_cache": "off",
+      "source_ids": []
+    },
+    {
       "type": "host.files",
       "type_version": 1,
       "impl_version": "design-1",

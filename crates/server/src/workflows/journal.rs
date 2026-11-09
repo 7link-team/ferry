@@ -812,7 +812,9 @@ impl Journal<'_> {
     }
 
     /// A new lease resumes the same attempt and its original frozen parameters.
-    pub(crate) async fn wake(&self, version: i64) -> Result<i64> {
+    /// `due` names waiting attempts that an outside event (a preview review)
+    /// released before their deadline.
+    pub(crate) async fn wake(&self, version: i64, due: &[i64]) -> Result<i64> {
         let tx = self.db.begin().await?;
         let run = self.guard(&tx, version).await?;
         let mut context = self.context(&run)?;
@@ -825,7 +827,7 @@ impl Journal<'_> {
             .iter()
             .filter_map(|(id, wake)| {
                 wake.as_i64()
-                    .filter(|wake| *wake <= now)
+                    .filter(|wake| *wake <= now || due.iter().any(|node| node.to_string() == *id))
                     .map(|_| id.clone())
             })
             .collect();

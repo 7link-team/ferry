@@ -560,7 +560,11 @@ pub(crate) fn validate_resolved(node: &Value, base: &str, params: &Value) -> Res
 }
 
 fn validate_semantics(kind: &str, params: &Value, base: &str) -> Result<()> {
-    if kind == "host.command" && params["command"].as_str().unwrap().contains("{{") {
+    if (kind == "host.command" || kind == "host.preview")
+        && params["command"]
+            .as_str()
+            .is_some_and(|command| command.contains("{{"))
+    {
         return Err(invalid(
             format!("{base}/params/command"),
             "workflow.graphCommand",
@@ -742,6 +746,9 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
                     && node["type"] == "core.switch"
                     && port == "fallback"
                     && node["params"]["fallback"] != true)
+                || (direction == "outputs"
+                    && node["type"] == "host.preview"
+                    && !super::preview::port_allowed(&node["params"], port))
             {
                 return Err(invalid(&path, "workflow.graphPort"));
             }
@@ -1187,7 +1194,7 @@ mod tests {
 
     #[test]
     fn draft_contracts_accept_all_catalog_examples_and_reject_unknown_parameters() {
-        assert_eq!(contracts().nodes.len(), 182);
+        assert_eq!(contracts().nodes.len(), 183);
         for kind in contracts().nodes.keys() {
             let mut graph = json!({"engine":"ferry-graph","schema":1,"nodes":[node("test",kind)],"connections":[]});
             accepts(&graph);

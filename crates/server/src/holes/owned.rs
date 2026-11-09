@@ -281,6 +281,7 @@ pub async fn review(
     )
     .await?;
     tx.commit().await?;
+    crate::workflows::preview::nudge(&s.db, &row).await?;
     Ok(Json(view(&s, &scope, id).await?))
 }
 
