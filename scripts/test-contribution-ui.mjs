@@ -61,6 +61,7 @@ try {
     requests.push({ path, query: url.search, method: request.method(), body: request.postDataJSON() });
     const json = body => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     if (path === '/api/platform/footer') return json({ content: '' });
+    if (path === '/api/me/preferences') return json({ theme: null, locale: null });
     if (path === '/api/monitor/pageview') return route.fulfill({ status: 204 });
     if (path === '/api/setup') return json({ required: false, has_users: true, registration_enabled: false });
     if (path === '/api/me') return json({ user: { id: '1', name: 'Fixture owner', email: 'owner@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Fixture workspace', slug: 'fixture', role_name: '拥有者', permissions: [...(allowRepositoryRead?['repositories.read']:[]), 'repositories.update', 'credentials.read', 'code-insights.read', 'code-insights.create', 'code-insights.update', 'code-insights.delete', 'code-insights.sync', ...(allowPipeline ? ['pipelines.read', 'pipelines.run'] : [])] }] });
