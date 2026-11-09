@@ -1,7 +1,7 @@
 import { act,useState } from "react";
 import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
-import { MarketplaceRepository,PipelineRepository,PipelineRepositories } from "../../app/pages/PipelineRepository";
+import { MarketplaceRepository,PipelineRepository } from "../../app/pages/PipelineRepository";
 import { named } from "../../shared/api/resource";
 import { i18n } from "../../shared/i18n/i18n";
 let root:Root, host:HTMLDivElement, saved:Record<string,unknown>;
@@ -46,11 +46,12 @@ it('binds a visible repository and non-default branch to the checkout step, not 
 
 it('expands multiple overlapping groups to distinct repository checkouts and retains them across connections',async()=>{
  vi.stubGlobal('fetch',vi.fn(async(url:string)=>({ok:true,status:200,json:async()=>url.includes('/repositories?')?{items:[{name:'one',full_name:'team/one',url:'https://git.example/team/one.git',default_branch:'main'},{name:'two',full_name:'team/sub/two',url:'https://git.example/team/sub/two.git',default_branch:'release'}],has_more:false}:{items:[{id:'7',name:'GitLab',provider:'gitlab',state:'connected'}],total:1,page_size:200}})));
- function Batch(){const [draft,setDraft]=useState<Record<string,unknown>>({definition,checkout_bindings:[]});saved=draft;return <PipelineRepositories workspace="ops" draft={draft} jobId="build" readOnly={false} onChange={patch=>setDraft(value=>({...value,...patch}))}/>;}
+ function Batch(){const [draft,setDraft]=useState<Record<string,unknown>>({definition,checkout_bindings:[]});saved=draft;return <PipelineRepository workspace="ops" draft={draft} jobId="build" stepIndex={0} readOnly={false} onValidityChange={()=>{}} onChange={patch=>setDraft(value=>({...value,...patch}))}/>;}
  await act(async()=>root.render(<Batch/>));
  const details=host.querySelector('details')!;
  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
- await select('仓库连接','7');
+ const connection=details.querySelector<HTMLSelectElement>('[aria-label="仓库连接"]')!;
+ await act(async()=>{connection.value='7';connection.dispatchEvent(new Event('change',{bubbles:true}));});
  const groups=[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent==='选择分组（可多选）')!;
  await act(async()=>groups.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,button:0})));
  const checkbox=[...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(row=>row.textContent?.startsWith('team ·'));
@@ -63,6 +64,7 @@ it('expands multiple overlapping groups to distinct repository checkouts and ret
  await act(async()=>add.click());
  expect(saved.checkout_bindings).toEqual([expect.objectContaining({connection_id:'7',repository_url:'https://git.example/team/one.git',path:'sources/one'}),expect.objectContaining({connection_id:'7',repository_url:'https://git.example/team/sub/two.git',path:'sources/two'})]);
  expect(saved.definition).toContain('checkout_1');expect(saved.definition).toContain('checkout_2');
+ expect(String(saved.definition).indexOf('checkout_2')).toBeLessThan(String(saved.definition).indexOf('cat proof.txt'));
 });
 
 it('marketplace sources choose a named connection repository without changing source API/project settings',async()=>{

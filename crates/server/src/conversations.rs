@@ -482,13 +482,17 @@ async fn update(
     if c.version != body.version {
         return Err(conflict());
     }
-    if (c.state == "interrupted" && body.state != "interrupted")
-        || (c.state != "interrupted" && body.state == "interrupted")
-    {
+    if c.state != "interrupted" && body.state == "interrupted" {
         return Err(conflict());
     }
     if has_active(&tx, id).await? {
         return Err(error(StatusCode::CONFLICT, "conversations.busy"));
+    }
+    if c.state == "interrupted" && body.state == "active" {
+        // Explicit recovery starts a fresh native session. Old attempts and
+        // their uncertain effects remain recorded and are never replayed here.
+        scope.require("conversations.run")?;
+        c.native_session_id.clear();
     }
     c.title = body.title.trim().into();
     c.state = body.state.clone();

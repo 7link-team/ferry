@@ -11,7 +11,7 @@
   "conversations.archived": "此会话已归档或中断，请按实际情况恢复归档或新建会话。",
   "conversations.staleDecision": "此授权请求已失效或已有决定。",
   "conversations.leaseLost": "执行租约已失效，后续事件与决定已被拒绝。",
-  "conversations.interrupted": "执行已中断，请核对实际结果后新建会话；未自动重放。",
+  "conversations.interrupted": "执行已中断。可重试上一条消息，或继续输入并发送；将重新建立原生会话并带入已完成的聊天记录。重试前请核对先前操作结果，不会自动重放。",
   "conversations.preflightFailed": "无法验证执行环境，请检查 智能体 和 Runner 连接。",
   "conversations.executionFailed": "原生执行失败或连接中断，请先核对实际结果。",
   "conversations.outputLimit": "执行输出超过限制，已停止执行。",

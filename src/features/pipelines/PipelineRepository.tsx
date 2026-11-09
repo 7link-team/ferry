@@ -19,12 +19,16 @@ type Props = { canCreateConnection?:boolean; navigation: Navigation; workspace:s
 const selectClass="w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm";
 
 export function PipelineRepository(props:Props & {jobId:string;stepIndex:number}) {
-  return <CheckoutRepository {...props} jobId={props.jobId} stepIndex={props.stepIndex}/>;
+  return <div className="min-w-0 space-y-4"><CheckoutRepository {...props} jobId={props.jobId} stepIndex={props.stepIndex}/>{!props.readOnly && <PipelineRepositories {...props} jobId={props.jobId} replaceIndex={props.stepIndex}/>}</div>;
 }
 
 /** Groups become an explicit, reproducible checkout snapshot when added. */
-export function PipelineRepositories({navigation,workspace,draft,jobId,readOnly,onChange,canCreateConnection}:Omit<Props,"onValidityChange"> & {jobId:string}) {
-  const [connectionId,setConnectionId]=useState("");
+export function PipelineRepositories({navigation,workspace,draft,jobId,readOnly,onChange,canCreateConnection,replaceIndex}:Omit<Props,"onValidityChange"> & {jobId:string;replaceIndex?:number}) {
+  const [connectionId,setConnectionId]=useState(()=>{
+    if(replaceIndex===undefined)return "";
+    const step=parseActions(String(draft.definition)).jobs.find(job=>job.id===jobId)?.steps[replaceIndex];
+    return ((draft.checkout_bindings??[]) as Binding[]).find(binding=>binding.job_id===jobId&&binding.step_id===step?.id)?.connection_id??"";
+  });
   const [gitUrl,setGitUrl]=useState("");
   const [selected,setSelected]=useState<CheckoutRepositoryChoice[]>([]);
   const [search,setSearch]=useState("");
@@ -43,6 +47,7 @@ export function PipelineRepositories({navigation,workspace,draft,jobId,readOnly,
   if(readOnly)return null;
   return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)} className="space-y-3 rounded-lg border p-3">
     <summary className="cursor-pointer text-sm font-medium">{t("actions.cloneMultiple")}</summary>
+    {open && <>
     <p className="text-xs leading-5 text-muted-foreground">{t("actions.cloneSnapshotHelp")}</p>
     <div className="grid min-w-0 gap-3 sm:grid-cols-2"><ConnectionRepositoryFields navigation={navigation} canCreateConnection={canCreateConnection!==false} workspace={workspace} data={data} connectionId={connectionId} repositoryUrl={gitUrl} repositoryLabel={t("integration.chooseRepository")} gitAction={<Button type="button" variant="outline" disabled={!gitUrl.trim()||!!data.error} onClick={()=>toggle([{connection_id:connectionId,url:gitUrl.trim(),name:data.connection?.name||"repository",default_branch:""}],true)}>{t("actions.addCheckouts")}</Button>} onChange={choice=>{
       if(choice.connection_id!==connectionId){setConnectionId(choice.connection_id);setGitUrl(choice.url);setSearch("");setVisibleCount(100);}
@@ -58,8 +63,9 @@ export function PipelineRepositories({navigation,workspace,draft,jobId,readOnly,
       return <DropdownMenuCheckboxItem key={group} checked={choices.every(row=>selected.some(choice=>key(choice)===key(row)))} onSelect={event=>event.preventDefault()} onCheckedChange={checked=>toggle(choices,!!checked)} className="break-all py-2">{group} · {choices.length}</DropdownMenuCheckboxItem>;
     })}</DropdownMenuContent></DropdownMenu></div>}
     </div>
-    <div className="flex flex-wrap items-center gap-2"><span className="text-sm">{t("actions.selectedRepositories").replace("{{count}}",String(selected.length))}</span><Button type="button" variant="outline" disabled={!selected.length} onClick={()=>setSelected([])}>{t("actions.clearSelection")}</Button><Button type="button" disabled={!selected.length||data.loading||!!data.error} onClick={()=>{try{onChange(addActionCheckouts(String(draft.definition),jobId,selected,(draft.checkout_bindings??[]) as Binding[]));setSelected([]);setError("");}catch(cause){setError(errorText(cause));}}}>{t("actions.addCheckouts")}</Button></div>
+    <div className="flex flex-wrap items-center gap-2"><span className="text-sm">{t("actions.selectedRepositories").replace("{{count}}",String(selected.length))}</span><Button type="button" variant="outline" disabled={!selected.length} onClick={()=>setSelected([])}>{t("actions.clearSelection")}</Button><Button type="button" disabled={!selected.length||data.loading||!!data.error} onClick={()=>{try{onChange(addActionCheckouts(String(draft.definition),jobId,selected,(draft.checkout_bindings??[]) as Binding[],replaceIndex));setSelected([]);setError("");}catch(cause){setError(errorText(cause));}}}>{t("actions.addCheckouts")}</Button></div>
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+    </>}
   </details>;
 }
 function CheckoutRepository({navigation,workspace,draft,jobId,stepIndex,readOnly,onChange,onValidityChange,canCreateConnection}:Props & {jobId:string;stepIndex:number}) {

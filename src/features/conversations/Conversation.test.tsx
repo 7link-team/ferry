@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { conversationTimeline } from "./Conversation";
+import { describe, expect, it, vi } from "vitest";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { Conversation, conversationTimeline } from "./Conversation";
+import * as apiModule from "../../shared/api/api";
+import { conversationText } from "./resource-config";
 
 type Message = Parameters<typeof conversationTimeline>[0][number];
 type Turn = Parameters<typeof conversationTimeline>[1][number];
@@ -69,4 +73,44 @@ describe("conversation timeline", () => {
       conversationTimeline([post, reply], []).map((row) => row.message?.prompt),
     ).toEqual([post.prompt, reply.prompt]);
   });
+});
+
+it("allows typing in an interrupted conversation and explicitly retries without replacing old attempts", async () => {
+  Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT:true});
+  const original = {...turn("10"),state:"failed",prompt:"original request",error:"Native execution failed"};
+  let row = {
+    id:"2",title:"Interrupted chat",kind:"private",state:"interrupted",viewer_id:"2",owner_id:"2",
+    can_manage:true,members:[],agents:[],messages:[],turns:[original],version:2,revision_id:"1",members_version:"1",
+    config:{name:"Agent",runtime:"codex",model:"",cwd:"/tmp/test"},binding:{execution_user:"user",canonical_directory:"/tmp/test"},
+  };
+  const requests: {method:string;body:Record<string,unknown>}[] = [];
+  const mocked = vi.spyOn(apiModule,"api").mockImplementation(async (path, options) => {
+    if (String(path).includes("/events?")) return {items:[],next:0,has_more:false} as never;
+    if (options?.method) {
+      const body=JSON.parse(String(options.body)); requests.push({method:options.method,body});
+      if(options.method==="PATCH") row={...row,state:"active",version:3};
+      return {id:"11"} as never;
+    }
+    return structuredClone(row) as never;
+  });
+  const host=document.createElement("div");document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<Conversation workspace="1" id="2" permissions={new Set(["conversations.read","conversations.run","conversations.update"])} initialDraft={{prompt:"unsent draft",attachments:[]}} />));
+    expect(host.querySelector("textarea")?.disabled).toBe(false);
+    const retry=[...host.querySelectorAll("button")].find(b=>b.textContent?.includes(conversationText("retryLastTurn")));
+    expect(retry).toBeDefined();
+    const failure = retry!.closest("[data-turn-failure]");
+    expect(failure?.getAttribute("data-turn-failure")).toBe(original.id);
+    expect(failure?.textContent).toContain(original.error);
+    expect(host.textContent).not.toContain(conversationText("interruptedHelp"));
+    await act(async()=>retry!.click());
+    expect(requests.map(r=>r.method)).toEqual(["PATCH","POST"]);
+    expect(requests[0]?.body).toMatchObject({state:"active",version:2});
+    expect(requests[1]?.body).toMatchObject({prompt:"original request"});
+    expect(requests[1]?.body.client_id).toBeTruthy();
+    expect(original.state).toBe("failed");
+    expect(host.querySelector("textarea")?.value).toBe("unsent draft");
+  } finally {
+    await act(async()=>root.unmount());host.remove();mocked.mockRestore();
+  }
 });

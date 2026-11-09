@@ -11,7 +11,7 @@
   "conversations.archived": "会話はアーカイブ済み、または中断しています。状態を確認して再開するか、新しい会話を作成してください。",
   "conversations.staleDecision": "この許可リクエストは終了したか、すでに決定されています。",
   "conversations.leaseLost": "実行権限の期限が切れたため、以降のイベントと決定を拒否しました。",
-  "conversations.interrupted": "実行が中断しました。実際の結果を確認して新しい会話を作成してください。自動再実行は行っていません。",
+  "conversations.interrupted": "実行が中断しました。前のメッセージを再試行するか、新しいメッセージを送信できます。完了済みの履歴を引き継いで新しいセッションを開始します。再試行前に操作結果を確認してください。自動再実行はしません。",
   "conversations.preflightFailed": "実行環境を確認できません。Agent と Runner の接続を確認してください。",
   "conversations.executionFailed": "実行に失敗したか、接続が切れました。実際の結果を確認してください。",
   "conversations.outputLimit": "出力が上限を超えたため、実行を停止しました。",

@@ -1121,6 +1121,160 @@ async fn expired_worker_cannot_write_and_recovery_never_replays_unknown_side_eff
     );
 }
 #[tokio::test]
+async fn explicit_recovery_preserves_attempts_and_starts_a_fresh_native_session() {
+    let (_dir, s, id) = seeded().await;
+    let turn = sent(&s, id, "first").await;
+    let (row, _, owner) = run::claim(&s, turn).await.unwrap().unwrap();
+    run::finish(&s, &row, &owner, Some(Outcome::Failed), "", true)
+        .await
+        .unwrap();
+    let c = find(&s.db, &admin(1), id).await.unwrap();
+    let body = || {
+        Json(Update {
+            title: c.title.clone(),
+            state: "active".into(),
+            version: c.version,
+        })
+    };
+    let mut other = admin(1);
+    other.user.id = 999.into();
+    assert!(
+        update(State(s.clone()), other, Path(("1".into(), id)), body())
+            .await
+            .is_err()
+    );
+    assert!(
+        update(State(s.clone()), admin(2), Path(("2".into(), id)), body())
+            .await
+            .is_err()
+    );
+    let mut forbidden = admin(1);
+    forbidden.permissions.remove("conversations.run");
+    assert_eq!(
+        update(State(s.clone()), forbidden, Path(("1".into(), id)), body())
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    update(State(s.clone()), admin(1), Path(("1".into(), id)), body())
+        .await
+        .unwrap();
+    assert_eq!(
+        update(State(s.clone()), admin(1), Path(("1".into(), id)), body())
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::CONFLICT
+    );
+    let next = sent(&s, id, "explicit-retry").await;
+    let retry = turns::Entity::find_by_id(next)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(next, turn);
+    assert!(retry.native_session_id.is_empty());
+    assert_eq!(
+        turns::Entity::find_by_id(turn)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "failed"
+    );
+    assert_eq!(find(&s.db, &admin(1), id).await.unwrap().state, "active");
+    let active = find(&s.db, &admin(1), id).await.unwrap();
+    assert_eq!(
+        update(
+            State(s.clone()),
+            admin(1),
+            Path(("1".into(), id)),
+            Json(Update {
+                title: active.title,
+                state: "active".into(),
+                version: active.version
+            })
+        )
+        .await
+        .unwrap_err()
+        .0,
+        StatusCode::CONFLICT
+    );
+}
+
+#[tokio::test]
+async fn recovered_context_contains_only_completed_same_room_messages_and_is_bounded() {
+    let (_dir, s, id) = seeded().await;
+    let first = sent(&s, id, "completed").await;
+    let (row, _, owner) = run::claim(&s, first).await.unwrap().unwrap();
+    run::append(
+        &s,
+        &row,
+        &owner,
+        Event::Session {
+            native_session_id: "original-native".into(),
+        },
+    )
+    .await
+    .unwrap();
+    run::append(
+        &s,
+        &row,
+        &owner,
+        Event::Text {
+            item_id: "reply".into(),
+            text: "COMPLETED_CONTEXT中文".repeat(2000),
+            replace: false,
+        },
+    )
+    .await
+    .unwrap();
+    run::finish(&s, &row, &owner, Some(Outcome::Completed), "", true)
+        .await
+        .unwrap();
+    let failed = sent(&s, id, "failed").await;
+    let mut failure = turns::Entity::find_by_id(failed)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    failure.prompt = "UNCERTAIN_DO_NOT_REPLAY".into();
+    failure
+        .into_active_model()
+        .reset_all()
+        .update(&s.db)
+        .await
+        .unwrap();
+    let (row, _, owner) = run::claim(&s, failed).await.unwrap().unwrap();
+    run::finish(&s, &row, &owner, Some(Outcome::Failed), "", true)
+        .await
+        .unwrap();
+    let mut next = row.clone();
+    next.id += 1;
+    let context = messages::recovery_context(&s.db, &next, 1024)
+        .await
+        .unwrap();
+    assert!(context.len() <= 1024);
+    assert!(context.contains("COMPLETED_CONTEXT"));
+    assert!(!context.contains("UNCERTAIN_DO_NOT_REPLAY"));
+    assert!(
+        messages::recovery_context(&s.db, &next, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    next.conversation_id += 1000;
+    assert!(
+        messages::recovery_context(&s.db, &next, 1024)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn stopping_requires_receipt_and_permission_revocation_stops_instead_of_dispatching() {
     let (_dir, s, id) = seeded().await;
     let first = sent(&s, id, "request-1").await;

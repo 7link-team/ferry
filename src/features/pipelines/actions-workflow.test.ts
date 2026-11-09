@@ -4,6 +4,24 @@ import { artifactNames, outputSources } from "./action-references";
 import { addActionCheckouts,addActionStep,actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,formatActionYaml,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
 
+it("replaces the selected checkout in place with a batch before build, preserving its ID and controls", () => {
+ const source = '# retain\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: source\n        uses: actions/checkout@v4\n        if: success()\n        env: &checkout_env\n          CI_TEST: yes\n        with:\n          fetch-depth: 5\n          repository: old/app\n      - run: make test\n        env: *checkout_env\n';
+ const a={connection_id:'7',url:'https://git.example/team/app.git',name:'app',default_branch:'main'};
+ const result=addActionCheckouts(source,'build',[a,{...a,url:'https://git.example/team/lib.git',name:'lib'}],[],0);
+ const job=parseActions(result.definition).jobs[0]!;
+ expect(job.steps).toHaveLength(3);
+ expect(job.steps[0]).toMatchObject({id:'source',if:'success()',with:{'fetch-depth':5},env:{CI_TEST:'yes'}});
+ expect(job.steps[1]).toMatchObject({if:'success()',env:{CI_TEST:'yes'}});
+ expect(job.steps[2]?.run).toBe('make test');
+ expect(job.steps[2]?.env).toEqual({CI_TEST:'yes'});
+ expect(result.checkout_bindings.map(row=>row.step_id)).toEqual(['source',job.steps[1]!.id]);
+ expect(job.steps[0]?.with).not.toHaveProperty('repository');
+ expect(result.definition).toContain('# retain');
+ const original={job_id:'build',step_id:'source',connection_id:a.connection_id,repository_url:a.url,ref:'feature/keep',path:'existing-source'};
+ const retained=addActionCheckouts(source,'build',[{...a,url:'https://git.example/team/lib.git',name:'lib'},a],[original],0);
+ expect(retained.checkout_bindings[0]).toMatchObject({...original,step_id:'source'});
+});
+
 it("creates distinct checkout steps from overlapping groups and preserves comments and unknown YAML", () => {
  const source='# keep\non: workflow_dispatch\nx-extension: keep\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: checkout_1\n        uses: actions/checkout@v4\n        with:\n          path: sources/app/child\n      - run: make test\n';
  const a={connection_id:'7',url:'https://git.example/team/app.git',name:'app',default_branch:'main'};

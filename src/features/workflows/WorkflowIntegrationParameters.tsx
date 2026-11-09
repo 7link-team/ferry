@@ -10,6 +10,7 @@ import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
 import { RepositoryConnectionSelect, useConnectionRepositories } from "../repositories/ConnectionRepositoryFields";
 import { WorkflowAssetContext } from "./WorkflowAssets";
+import { RepositoryMultiSelect, type CloneRepository } from "../repositories/RepositoryMultiSelect";
 import {
   integrationText,
   type IntegrationField,
@@ -227,10 +228,12 @@ export function WorkflowIntegrationParameters({
   const profile = spec.ui.application;
   const repositoryIntegration = ["github", "gitlab", "codeup"].includes(profile);
   const gitNetwork = !!spec.git && ["clone", "remote_refs", "fetch", "pull", "push"].includes(spec.git.operation);
+  const clone = spec.git?.operation === "clone";
+  const batch = clone && Array.isArray(value.repositories);
   const independent = !value.connection_id && value.credential_id !== undefined;
   const legacyGit = gitNetwork && !!nodeId && legacyGitNodes?.has(nodeId) && !value.connection_id && !value.auth_mode;
   const connectionMode = (repositoryIntegration || gitNetwork) && !independent && !legacyGit && value.auth_mode !== "anonymous";
-  const repositories = useConnectionRepositories(workspace, String(value.connection_id ?? ""), connectionMode);
+  const repositories = useConnectionRepositories(workspace, String(value.connection_id ?? ""), connectionMode, batch);
   useEffect(() => {
     if (spec.git || connectionMode) return;
     const controller = new AbortController();
@@ -273,7 +276,7 @@ export function WorkflowIntegrationParameters({
     <Field
       key={`${profile}:${key}`}
       name={key}
-      spec={definition}
+      spec={key === "directory" && batch ? {...definition,title_key:"integration.cloneRootDirectory"} : definition}
       value={value[key]}
       required={spec.params_schema.required.includes(key) || (key === "organization_id" && repositoryIntegration && !connectionMode)}
       credential={String(value.credential_id ?? "0")}
@@ -282,7 +285,7 @@ export function WorkflowIntegrationParameters({
     />
   );
   const fields = Object.entries(spec.params_schema.properties).filter(
-    ([key]) => !["credential_id", "connection_id", "auth_mode"].includes(key) && !(connectionMode && (key === "organization_id" || (gitNetwork && key === "url"))),
+    ([key]) => !["credential_id", "connection_id", "auth_mode", "repositories"].includes(key) && !(connectionMode && (key === "organization_id" || (gitNetwork && key === "url"))),
   );
   const required = fields.filter(([key]) =>
     spec.params_schema.required.includes(key),
@@ -295,7 +298,7 @@ export function WorkflowIntegrationParameters({
       {gitNetwork && !spec.git?.provider && !readOnly && <label className="block space-y-2 text-sm">
         <span><FieldCaption label={t("integration.gitAuthentication")} /></span>
         <select className={control} aria-label={t("integration.gitAuthentication")} value={legacyGit?"legacy":value.auth_mode === "anonymous" ? "anonymous" : "connection"} onChange={event=>{
-          const next={...value};delete next.connection_id;delete next.credential_id;
+          const next={...value};delete next.connection_id;delete next.credential_id;delete next.repositories;
           next.auth_mode=event.target.value;
           change(next);
         }}>{legacyGit&&<option value="legacy" disabled>{t("integration.legacyAuth")}</option>}<option value="connection">{t("integration.useConnection")}</option><option value="anonymous">{t("integration.anonymousGit")}</option></select>
@@ -304,7 +307,7 @@ export function WorkflowIntegrationParameters({
       {connectionMode && <div className="space-y-3">
         <RepositoryConnectionSelect workspace={workspace} data={repositories} value={String(value.connection_id ?? "")} readOnly={readOnly} canCreate={canCreateRepositoryConnection!==false} {...(!gitNetwork || spec.git?.provider ? {provider:spec.git?.provider ?? profile} : {})} onChange={(id,created)=>{
           const next = {...value};
-          for (const key of ["credential_id", "organization_id", "auth_mode", "owner", "repo", "project", "repository_id", ...(gitNetwork ? ["url"] : [])]) delete next[key];
+          for (const key of ["credential_id", "organization_id", "auth_mode", "owner", "repo", "project", "repository_id", ...(gitNetwork ? ["url", "repositories"] : [])]) delete next[key];
           if (id) next.connection_id = id; else delete next.connection_id;
           const connection = created??repositories.connections.find(row=>row.id===id);
           if (gitNetwork && connection?.provider==='git' && connection.url) next.url=connection.url;
@@ -312,7 +315,17 @@ export function WorkflowIntegrationParameters({
         }}/>
         <p className="text-xs leading-5 text-muted-foreground">{t("integration.connectionHelp")}</p>
         {repositories.error && <p role="alert" className="text-sm text-destructive">{repositories.error}</p>}
-        {!!value.connection_id && !readOnly && repositories.connection?.provider !== "git" && !spec.type.endsWith("repository.list") && <label className="block space-y-2 text-sm">
+        {clone && !!value.connection_id && repositories.connection?.provider !== "git" && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="size-4 accent-primary" disabled={readOnly} checked={batch} onChange={event => {
+          const next = {...value};
+          if (event.target.checked) next.repositories = repositories.repositories.filter(row => row.url === value.url).map(({url,name,full_name}) => ({url,name,full_name}));
+          else delete next.repositories;
+          change(next);
+        }}/>{t("actions.cloneMultiple")}</label>}
+        {batch && <>
+          <p className="text-xs leading-5 text-muted-foreground">{t("integration.cloneBatchHelp")}</p>
+          {readOnly ? <ul className="space-y-1 text-sm">{(value.repositories as CloneRepository[]).map(row => <li key={row.url} className="break-all">{row.full_name || row.name}</li>)}</ul> : <RepositoryMultiSelect rows={repositories.repositories} selected={value.repositories as CloneRepository[]} disabled={repositories.loading || !!repositories.error} change={rows => change({...value,repositories:rows.map(({url,name,full_name})=>({url,name,...(full_name?{full_name}:{})})),url:rows[0]?.url ?? ""})} />}
+        </>}
+        {!!value.connection_id && !batch && !readOnly && repositories.connection?.provider !== "git" && !spec.type.endsWith("repository.list") && <label className="block space-y-2 text-sm">
           <span className="block font-medium"><FieldCaption label={t("integration.chooseRepository")} /></span>
           <select className={control} aria-label={t("integration.chooseRepository")} value={gitNetwork ? String(value.url ?? "") : ""} required={gitNetwork} disabled={repositories.loading} onChange={event => {
             const remote = repositories.repositories.find(row => row.url === event.target.value);
@@ -331,7 +344,7 @@ export function WorkflowIntegrationParameters({
           </select>
           {repositories.hasMore && <Button type="button" variant="outline" disabled={repositories.loading} onClick={() => repositories.setPage(page => page + 1)}>{t("integration.loadOptions")}</Button>}
         </label>}
-        {gitNetwork && !!value.url && <div className="min-w-0 space-y-1 text-sm"><span className="font-medium">{t("integration.gitUrl")}</span><p className="break-all text-muted-foreground">{String(value.url)}</p></div>}
+        {gitNetwork && !batch && !!value.url && <div className="min-w-0 space-y-1 text-sm"><span className="font-medium">{t("integration.gitUrl")}</span><p className="break-all text-muted-foreground">{String(value.url)}</p></div>}
       </div>}
       {repositoryIntegration && independent && <div className="space-y-2 rounded-md border p-3">
         <p className="text-sm text-muted-foreground">{t("integration.legacyAuth")}</p>

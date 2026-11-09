@@ -5,6 +5,46 @@ use sea_orm_migration::{MigrationTrait, MigratorTrait};
 use std::sync::{Arc, Mutex};
 
 type Requests = Arc<Mutex<Vec<(String, String, String)>>>;
+
+#[test]
+fn clone_selection_expands_to_distinct_safe_directories_and_rejects_bad_batches() {
+    let item = Item {
+        json: Map::new(),
+        binary: Default::default(),
+        paired: Default::default(),
+    };
+    let params = json!({"connection_id":"7","url":"https://git.example/team/app.git","directory":"C:/build/source","depth":1,"repositories":[
+        {"url":"https://git.example/team/app.git","name":"app"},
+        {"url":"https://git.example/team/lib.git","name":"app"}
+    ]});
+    let (items, rows) = clone_inputs(&[item.clone()], &[params.clone()]).unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(rows[0]["directory"], "C:/build/source/001-app");
+    assert_eq!(rows[1]["directory"], "C:/build/source/002-app");
+    assert_eq!(rows[1]["url"], "https://git.example/team/lib.git");
+    assert!(rows.iter().all(|row| row.get("repositories").is_none()));
+    for bad in [
+        json!([]),
+        json!([{"url":"file:///tmp/repo","name":"bad"}]),
+        json!([{"url":"https://git.example/a.git","name":"a"},{"url":"https://git.example/a.git","name":"a"}]),
+        json!(
+            (0..501)
+                .map(|index| json!({"url":format!("https://git.example/{index}.git"),"name":"app"}))
+                .collect::<Vec<_>>()
+        ),
+    ] {
+        let mut bad_params = params.clone();
+        bad_params["repositories"] = bad;
+        assert!(clone_inputs(&[item.clone()], &[bad_params]).is_err());
+    }
+    assert!(clone_inputs(&[item.clone(), item.clone()], &[params.clone(), params]).is_err());
+    for root in ["/srv/repos", "/Users/example/repos", "D:\\build\\repos"] {
+        let mut value = rows[0].clone();
+        value["directory"] = json!(root);
+        let (_, single) = clone_inputs(&[item.clone()], &[value.clone()]).unwrap();
+        assert_eq!(single, [value]);
+    }
+}
 #[tokio::test]
 async fn codeup_uses_yunxiao_header_organization_and_provider_pagination() {
     let (origin, requests, task) = server().await;

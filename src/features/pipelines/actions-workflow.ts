@@ -1,4 +1,4 @@
-import { Document, isAlias, isCollection, isMap, isScalar, parseDocument, visit, type YAMLMap } from "yaml";
+import { Document, isAlias, isCollection, isMap, isScalar, isSeq, parseDocument, visit, type YAMLMap } from "yaml";
 import { executionText, workflowText } from "../../shared/i18n/i18n";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
@@ -176,11 +176,16 @@ export function addActionStep(source: string, job: string, kind: "run" | "checko
 export type CheckoutBinding = { job_id: string; step_id: string; connection_id: string; repository_url: string; ref: string; path: string };
 export type CheckoutRepositoryChoice = { connection_id: string; url: string; name: string; default_branch: string };
 /** Freeze selected groups into explicit, separately addressable checkout steps. */
-export function addActionCheckouts(source: string, jobId: string, repositories: readonly CheckoutRepositoryChoice[], bindings: readonly CheckoutBinding[]) {
+export function addActionCheckouts(source: string, jobId: string, repositories: readonly CheckoutRepositoryChoice[], bindings: readonly CheckoutBinding[], replaceIndex?: number) {
   const job = parseActions(source, true).jobs.find(row => row.id === jobId);
   if (!job || job.raw.uses || job.raw["ferry-approval"] === true) throw new Error(executionText("workflow.jobMissing"));
-  const next = [...bindings];
-  const selected = new Set(bindings.filter(binding => binding.job_id === jobId).map(binding => `${binding.connection_id}\n${binding.repository_url}`));
+  const replaced = replaceIndex === undefined ? undefined : job.steps[replaceIndex];
+  if (replaceIndex !== undefined && (!replaced || !/^actions\/checkout@/.test(String(replaced.uses ?? "")))) throw new Error(executionText("workflow.stepMissing"));
+  const originalBinding = replaced?.id ? bindings.find(binding => binding.job_id === jobId && binding.step_id === replaced.id) : undefined;
+  const keepsOriginal = (repository: CheckoutRepositoryChoice) => !!originalBinding && repository.connection_id === originalBinding.connection_id && repository.url === originalBinding.repository_url;
+  const choices = originalBinding ? [...repositories.filter(keepsOriginal),...repositories.filter(repository => !keepsOriginal(repository))] : repositories;
+  const next = bindings.filter(binding => !(replaced?.id && binding.job_id === jobId && binding.step_id === replaced.id));
+  const selected = new Set(next.filter(binding => binding.job_id === jobId).map(binding => `${binding.connection_id}\n${binding.repository_url}`));
   const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
   const paths = new Set(bindings.filter(binding => binding.job_id === jobId && binding.path && binding.path !== ".").map(binding => normalize(binding.path)));
   for (const step of job.steps) {
@@ -188,7 +193,7 @@ export function addActionCheckouts(source: string, jobId: string, repositories: 
     if (/^actions\/checkout@/.test(String(step.uses ?? "")) && typeof parameters?.path === "string" && parameters.path !== "." && parameters.path) paths.add(normalize(parameters.path));
   }
   const ids = new Set(job.steps.map(step => step.id).filter(Boolean));
-  for (const repository of repositories) {
+  for (const repository of choices) {
     const key = `${repository.connection_id}\n${repository.url}`;
     if (selected.has(key)) continue;
     selected.add(key);
@@ -200,11 +205,39 @@ export function addActionCheckouts(source: string, jobId: string, repositories: 
     let path = base, duplicate = 2;
     const overlaps = (candidate: string) => [...paths].some(existing => existing === normalize(candidate) || existing.startsWith(`${normalize(candidate)}/`) || normalize(candidate).startsWith(`${existing}/`));
     while (overlaps(path)) path = `${base}-${duplicate++}`;
+    if (keepsOriginal(repository)) path = originalBinding!.path;
     paths.add(normalize(path));
     source = addActionStep(source, jobId, "checkout");
     const index = parseActions(source).jobs.find(row => row.id === jobId)!.steps.length - 1;
     source = editActionStep(source, jobId, index, {id, name: `${workflowText("actions.cloneCode")} · ${repository.name}`});
-    next.push({job_id: jobId, step_id: id, connection_id: repository.connection_id, repository_url: repository.url, ref: repository.default_branch, path});
+    next.push({job_id: jobId, step_id: id, connection_id: repository.connection_id, repository_url: repository.url, ref: keepsOriginal(repository) ? originalBinding!.ref : repository.default_branch, path});
+  }
+  if (replaceIndex !== undefined) {
+    const {document} = parseActions(source);
+    const steps = document.getIn(["jobs", jobId, "steps"], true);
+    if (!isSeq(steps)) throw new Error(executionText("workflow.stepsArray", {id:jobId}));
+    const generated = steps.items.splice(job.steps.length);
+    if (!generated.length) return {definition:source,checkout_bindings:bindings};
+    const original = steps.items[replaceIndex];
+    if (!isMap(original)) throw new Error(executionText("workflow.stepMissing"));
+    const generatedIds = generated.map(node => isMap(node) ? String(node.get("id")) : "");
+    const replacements = generated.map((node,index) => {
+      if (!isMap(node)) throw new Error(executionText("workflow.stepMissing"));
+      const copy = index === 0 ? original.clone() : copyActionNode(document, ["jobs",jobId,"steps",replaceIndex]);
+      copy.set("id", index === 0 && replaced?.id ? replaced.id : node.get("id"));
+      copy.set("name", node.get("name"));
+      const parameters = copy.get("with", true);
+      if (isMap(parameters)) for (const key of ["repository","ref","path"]) parameters.delete(key);
+      steps.items.push(copy);
+      return copy;
+    });
+    steps.items.splice(job.steps.length);
+    if (replaced?.id) {
+      const first = next.find(binding => binding.job_id === jobId && binding.step_id === generatedIds[0]);
+      if (first) first.step_id = String(replaced.id);
+    }
+    steps.items.splice(replaceIndex,1,...replacements);
+    source = serialize(document);
   }
   return {definition: source, checkout_bindings: next};
 }

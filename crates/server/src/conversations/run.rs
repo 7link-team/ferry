@@ -293,6 +293,11 @@ pub(super) async fn finish(
         None => "failed",
     }
     .into();
+    let failure = if failure.is_empty() && matches!(outcome, Some(Outcome::Failed)) {
+        "conversations.executionFailed"
+    } else {
+        failure
+    };
     current.error = if failure.starts_with("conversations.") {
         crate::i18n::store_message(&Message::new(failure))
     } else {
@@ -391,6 +396,17 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         .await?;
         if !context.is_empty() {
             prompt = format!("{context}{prompt}");
+        }
+        if row.native_session_id.is_empty() && !groups::is_group(&s.db, c.id.into()).await? {
+            let history = messages::recovery_context(
+                &s.db,
+                &row,
+                (64 * 1024usize)
+                    .saturating_sub(prompt.len() + 256)
+                    .min(16 * 1024),
+            )
+            .await?;
+            prompt = format!("{history}{prompt}");
         }
         Ok((
             channel,

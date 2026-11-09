@@ -11,7 +11,7 @@
   "conversations.archived": "Perbualan ini diarkibkan atau terganggu. Pulihkan arkib atau cipta perbualan baharu mengikut keadaan.",
   "conversations.staleDecision": "Permintaan kebenaran ini tidak lagi aktif atau sudah mempunyai keputusan.",
   "conversations.leaseLost": "Pemilikan pelaksanaan tamat; acara dan keputusan seterusnya ditolak.",
-  "conversations.interrupted": "Pelaksanaan terganggu. Semak hasil sebenar sebelum mencipta perbualan baharu; tiada ulangan automatik dilakukan.",
+  "conversations.interrupted": "Pelaksanaan terganggu. Cuba semula mesej terakhir atau hantar mesej baharu untuk meneruskan dengan sesi natif baharu dan sejarah sembang yang selesai. Semak hasil operasi terdahulu sebelum mencuba semula; tiada ulangan automatik.",
   "conversations.preflightFailed": "Persekitaran pelaksanaan tidak dapat disahkan. Semak sambungan ejen dan Runner.",
   "conversations.executionFailed": "Pelaksanaan asal gagal atau terputus. Semak hasil sebenar dahulu.",
   "conversations.outputLimit": "Output melebihi had dan pelaksanaan dihentikan.",

@@ -532,6 +532,77 @@ async fn git_credential(
     ))
 }
 
+/// Expand a saved repository selection before sending any host operation.
+/// Each clone retains the existing per-item durable call gate and authorization.
+fn clone_inputs(items: &[Item], params: &[Value]) -> Result<(Vec<Item>, Vec<Value>)> {
+    if items.len() != params.len() {
+        return Err(invalid());
+    }
+    let mut expanded_items = Vec::new();
+    let mut expanded_params = Vec::new();
+    let mut directories = std::collections::HashSet::new();
+    for (item, params) in items.iter().zip(params) {
+        let Some(repositories) = params.get("repositories") else {
+            expanded_items.push(item.clone());
+            expanded_params.push(params.clone());
+            continue;
+        };
+        let repositories = repositories
+            .as_array()
+            .filter(|rows| !rows.is_empty())
+            .ok_or_else(invalid)?;
+        if repositories.len() > 500
+            || expanded_params.len() + repositories.len() > 500
+            || params.get("connection_id").is_none()
+            || params["auth_mode"] == "anonymous"
+        {
+            return Err(invalid());
+        }
+        let root = params["directory"].as_str().ok_or_else(invalid)?;
+        crate::hosts::channel::check_path(root)?;
+        let mut urls = std::collections::HashSet::new();
+        for (index, repository) in repositories.iter().enumerate() {
+            let url = repository["url"].as_str().ok_or_else(invalid)?;
+            if !urls.insert(url) {
+                return Err(invalid());
+            }
+            let name = repository["name"]
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .ok_or_else(invalid)?;
+            let slug: String = name
+                .chars()
+                .take(80)
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
+                .collect();
+            let directory = format!(
+                "{}/{:03}-{slug}",
+                root.trim_end_matches(['/', '\\']),
+                index + 1
+            );
+            if !directories.insert(directory.replace('\\', "/").to_lowercase()) {
+                return Err(invalid());
+            }
+            let mut next = params.clone();
+            next.as_object_mut()
+                .ok_or_else(invalid)?
+                .remove("repositories");
+            next["url"] = json!(url);
+            next["directory"] = json!(directory);
+            super::host::git_script("clone", &next)?;
+            expanded_items.push(item.clone());
+            expanded_params.push(next);
+        }
+    }
+    Ok((expanded_items, expanded_params))
+}
+
 pub(super) async fn execute(
     s: &AppState,
     run: &workflow_executions::Model,
@@ -554,6 +625,13 @@ pub(super) async fn execute(
             .collect(),
     }];
     let items = if command { &command_items[..] } else { items };
+    let expanded;
+    let (items, params) = if git == Some("clone") {
+        expanded = clone_inputs(items, params)?;
+        (expanded.0.as_slice(), expanded.1.as_slice())
+    } else {
+        (items, params)
+    };
     let client = client()?;
     if params.len() != items.len() {
         return Err(invalid());
@@ -659,6 +737,10 @@ pub(super) async fn execute(
                     ));
                 }
                 value["operation"] = json!(operation);
+                if operation == "clone" {
+                    value["repository_url"] = params["url"].clone();
+                    value["directory"] = params["directory"].clone();
+                }
                 value["lines"] = json!(
                     value["stdout"]
                         .as_str()

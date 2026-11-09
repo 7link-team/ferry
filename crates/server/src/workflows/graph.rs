@@ -316,6 +316,12 @@ pub(super) fn repository_auth_policy(input: &str, previous: Option<&str>) -> Res
                 continue;
             }
             let params = &node["params"];
+            if spec["git"]["operation"] == "clone"
+                && params.get("repositories").is_some()
+                && params.get("connection_id").is_none()
+            {
+                return Err(invalid(at, "workflow.repositoryConnectionRequired"));
+            }
             if params.get("connection_id").is_some() {
                 if network && params["auth_mode"] == "anonymous" {
                     return Err(invalid(at, "workflow.repositoryConnectionRequired"));
@@ -868,6 +874,18 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn repository_batch_clone_requires_a_connection_at_save_time() {
+        let mut git = node("git", "integration.git.repository.clone");
+        git["params"] = json!({"auth_mode":"anonymous","url":"https://example.invalid/app.git","repositories":[{"url":"https://example.invalid/app.git","name":"app"}]});
+        let value = json!({"nodes":[git.clone()]}).to_string();
+        assert!(repository_auth_policy(&value, None).is_err());
+        assert!(repository_auth_policy(&value, Some(&value)).is_err());
+        git["params"].as_object_mut().unwrap().remove("auth_mode");
+        git["params"]["connection_id"] = json!("7");
+        assert!(repository_auth_policy(&json!({"nodes":[git]}).to_string(), None).is_ok());
     }
 
     fn inputs(values: &[Value]) -> ferry_protocol::sandbox::InputData {

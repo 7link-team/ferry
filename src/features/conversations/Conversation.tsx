@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Pencil,
   Undo2,
+  RotateCcw,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -338,8 +339,12 @@ export function Conversation({
   const current = data?.turns.find(
     (turn) => active(turn.state) && turn.owner_id === data.viewer_id,
   );
-  const runnable =
-    permissions.has("conversations.run") && data?.state === "active";
+  const recoverable = data?.kind === "private" && data.state === "interrupted" &&
+    data.owner_id === data.viewer_id && permissions.has("conversations.update");
+  const runnable = permissions.has("conversations.run") &&
+    (data?.state === "active" || recoverable);
+  const lastTurn = data?.turns.at(-1);
+  const retryable = lastTurn && ["failed", "interrupted", "timed_out", "cancelled"].includes(lastTurn.state);
   async function act(path: string, body: unknown = {}) {
     setError("");
     setBusy(true);
@@ -355,45 +360,60 @@ export function Conversation({
       setBusy(false);
     }
   }
-  async function send() {
+  async function send(retry?: Turn) {
+    const prompt = retry?.prompt ?? draft;
+    const files = retry?.attachments ?? attachments;
+    const replyTo = retry ? data?.messages.find(message => message.role === "user" && message.turn_id === retry.id)?.reply_to : thread;
     if (
-      (!draft.trim() && !attachments.length) ||
+      (!prompt.trim() && !files.length) ||
       (current && data?.kind !== "group") ||
       !runnable ||
       busy
     )
       return;
     const signature = JSON.stringify({
-      prompt: draft,
-      attachments,
+      prompt,
+      attachments: files,
+      retry: retry?.id,
       targets,
       mentions,
-      thread,
+      thread: replyTo,
     });
     if (pending.current?.signature !== signature)
       pending.current = { signature, client_id: crypto.randomUUID() };
     setError("");
     setBusy(true);
     try {
+      if (recoverable && data) {
+        await api(endpoint, {
+          method: "PATCH",
+          body: JSON.stringify({title: data.title, state: "active", version: data.version}),
+        });
+      }
       await api(endpoint + (data?.kind === "group" ? "/messages" : "/turns"), {
         method: "POST",
         body: JSON.stringify({
-          prompt: draft,
-          attachments,
+          prompt,
+          attachments: files,
           client_id: pending.current.client_id,
-          ...(thread ? { reply_to: thread } : {}),
+          ...(replyTo ? { reply_to: replyTo } : {}),
           ...(data?.kind === "group" ? { targets, mentions } : {}),
         }),
       });
-      setDraft("");
-      setAttachments([]);
-      setTargets([]);
-      setMentions([]);
+      if (!retry) {
+        setDraft("");
+        setAttachments([]);
+        setTargets([]);
+        setMentions([]);
+      }
       pending.current = undefined;
       follow.current = true;
       setData(await api<ConversationData>(endpoint));
     } catch (cause) {
       setError(errorText(cause));
+      // Recovery may have succeeded before a send/network failure. Keep the
+      // server version fresh so the next explicit retry can reuse client_id.
+      setData(await api<ConversationData>(endpoint).catch(() => data));
     } finally {
       setBusy(false);
     }
@@ -1080,10 +1100,20 @@ export function Conversation({
                                 </p>
                               </details>
                             )}
-                            {turn.error && (
-                              <p className="text-sm text-destructive">
-                                {turn.error}
-                              </p>
+                            {(["failed", "interrupted", "timed_out", "cancelled"].includes(turn.state) || turn.error) && (
+                              <div data-turn-failure={turn.id} className="space-y-1.5">
+                                <p role="status" className="break-words text-sm text-destructive">
+                                  {turn.error || t(turn.state)}
+                                </p>
+                                {data.kind === "private" && runnable && retryable && turn.id === lastTurn?.id && (
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <Button type="button" variant="ghost" size="sm" className="min-h-11 px-2 text-foreground" disabled={busy || !!current} onClick={() => void send(turn)}>
+                                      <RotateCcw className="size-3.5" />{t("retryLastTurn")}
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">{t("retryEffectsHint")}</span>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </>
                         )}
@@ -1220,10 +1250,8 @@ export function Conversation({
             {t("noSearchResults")}
           </p>
         )}
-      {data.state !== "active" && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {t(data.state === "interrupted" ? "interruptedHelp" : "archived")}
-        </p>
+      {data.state === "archived" && (
+        <p role="status" className="px-3 text-sm text-muted-foreground sm:px-6">{t("archived")}</p>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -1246,7 +1274,7 @@ export function Conversation({
             setTargets(value.targets ?? []);
             setMentions(value.mentions ?? []);
           }}
-          onSend={send}
+          onSend={() => send()}
           disabled={!runnable}
           busy={busy}
           current={current}

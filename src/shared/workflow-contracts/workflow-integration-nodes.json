@@ -67,6 +67,36 @@
             "title_key": "integration.connection",
             "pattern": "^[1-9][0-9]{0,18}$",
             "maxLength": 19
+          },
+          "repositories": {
+            "type": "array",
+            "title_key": "actions.cloneMultiple",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "full_name": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "url",
+                "name"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -4317,7 +4347,14 @@
       "params_schema": {
         "type": "object",
         "properties": {
-          "auth_mode": { "type": "string", "enum": ["connection", "anonymous"], "title_key": "integration.gitAuthentication" },
+          "auth_mode": {
+            "type": "string",
+            "enum": [
+              "connection",
+              "anonymous"
+            ],
+            "title_key": "integration.gitAuthentication"
+          },
           "url": {
             "type": "string",
             "title_key": "integration.gitUrl",
@@ -4341,6 +4378,36 @@
             "title_key": "integration.connection",
             "pattern": "^[1-9][0-9]{0,18}$",
             "maxLength": 19
+          },
+          "repositories": {
+            "type": "array",
+            "title_key": "actions.cloneMultiple",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "full_name": {
+                  "type": "string",
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "url",
+                "name"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [

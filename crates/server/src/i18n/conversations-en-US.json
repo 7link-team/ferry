@@ -11,7 +11,7 @@
   "conversations.archived": "This conversation is archived or interrupted. Reopen it or create a new conversation as appropriate.",
   "conversations.staleDecision": "This permission request is no longer active or already has a decision.",
   "conversations.leaseLost": "Execution ownership expired; further events and decisions were refused.",
-  "conversations.interrupted": "Execution was interrupted. Check actual results before starting a new conversation; no automatic replay was performed.",
+  "conversations.interrupted": "Execution was interrupted. Retry the last message or keep typing to continue with a fresh native session and completed chat history. Check previous operation results before retrying; nothing is replayed automatically.",
   "conversations.preflightFailed": "The execution environment could not be verified. Check the Agent and Runner connection.",
   "conversations.executionFailed": "The native execution failed or disconnected. Check actual results before continuing.",
   "conversations.outputLimit": "Execution exceeded the output limit and was stopped.",

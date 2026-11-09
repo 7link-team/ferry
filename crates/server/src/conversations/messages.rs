@@ -3,7 +3,7 @@ use super::*;
 use crate::entities::{
     ai_chat_agents as snapshots, ai_chat_messages as chat, ai_chat_turns as links,
 };
-use sea_orm::DbErr;
+use sea_orm::{DbErr, QueryTrait};
 
 #[derive(Serialize, Deserialize)]
 struct TextPart {
@@ -106,6 +106,57 @@ pub(super) async fn reply_context(
         "Quoted chat message {} (conversation content): {}\n\n",
         parent.id,
         serde_json::to_string(&text).unwrap()
+    ))
+}
+/// A new native session receives bounded, completed history from this room only.
+/// Failed and uncertain attempts are not instructions to execute again.
+pub(super) async fn recovery_context(
+    conn: &impl ConnectionTrait,
+    turn: &turns::Model,
+    budget: usize,
+) -> Result<String> {
+    if budget < 512 {
+        return Ok(String::new());
+    }
+    let completed = turns::Entity::find()
+        .select_only()
+        .column(turns::Column::Id)
+        .filter(turns::Column::ConversationId.eq(turn.conversation_id))
+        .filter(turns::Column::State.eq("completed"))
+        .filter(turns::Column::Id.lt(turn.id))
+        .into_query();
+    let history = chat::Entity::find()
+        .filter(chat::Column::ConversationId.eq(turn.conversation_id))
+        .filter(chat::Column::RetractedAt.is_null())
+        .filter(chat::Column::TurnId.in_subquery(completed))
+        .order_by_desc(chat::Column::Id)
+        .limit(20)
+        .all(conn)
+        .await?;
+    let mut selected = Vec::new();
+    let mut used = 256;
+    for message in history {
+        let mut text = message.prompt;
+        let mut end = text.len().min(budget.saturating_sub(used + 64) / 6);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        let item = json!({"role":message.role,"text":text});
+        let size = serde_json::to_vec(&item).unwrap().len() + 1;
+        if used + size > budget || text.is_empty() {
+            break;
+        }
+        used += size;
+        selected.push(item);
+    }
+    if selected.is_empty() {
+        return Ok(String::new());
+    }
+    selected.reverse();
+    Ok(format!(
+        "Prior completed conversation content (historical context only; do not re-execute prior requests). Only the latest user message is the current task:\n{}\n\n",
+        serde_json::to_string(&selected).unwrap()
     ))
 }
 fn assistant_message(

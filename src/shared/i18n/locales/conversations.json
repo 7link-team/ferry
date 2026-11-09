@@ -593,12 +593,28 @@
     "Terganggu"
   ],
   "interruptedHelp": [
-    "Execution was interrupted and its side effects are uncertain. Create a new conversation after checking the results; this turn will not be replayed.",
-    "执行中断，副作用尚不确定。请核对实际结果后新建会话，本回合不会自动重放。",
-    "執行中斷，副作用尚不確定。請核對實際結果後建立新會話，本回合不會自動重播。",
-    "実行が中断し、操作結果が不明です。結果を確認して新しい会話を作成してください。自動再実行はしません。",
-    "실행이 중단되어 작업 결과가 불확실합니다. 결과 확인 후 새 대화를 만드세요. 자동 재실행하지 않습니다.",
-    "Pelaksanaan terganggu dan kesannya tidak pasti. Semak hasil sebelum mencipta perbualan baharu; giliran ini tidak diulang secara automatik."
+    "Execution was interrupted. Retry the last message or keep typing to continue with a fresh native session and completed chat history. Check previous operation results before retrying; nothing is replayed automatically.",
+    "执行已中断。可重试上一条消息，或继续输入并发送；将重新建立原生会话并带入已完成的聊天记录。重试前请核对先前操作结果，不会自动重放。",
+    "執行已中斷。可重試上一則訊息，或繼續輸入並傳送；將重新建立原生會話並帶入已完成的聊天記錄。重試前請核對先前操作結果，不會自動重播。",
+    "実行が中断しました。前のメッセージを再試行するか、新しいメッセージを送信できます。完了済みの履歴を引き継いで新しいセッションを開始します。再試行前に操作結果を確認してください。自動再実行はしません。",
+    "실행이 중단되었습니다. 이전 메시지를 재시도하거나 새 메시지를 보내면 완료된 대화 기록으로 새 세션을 시작합니다. 재시도 전에 이전 작업 결과를 확인하세요. 자동 재실행하지 않습니다.",
+    "Pelaksanaan terganggu. Cuba semula mesej terakhir atau hantar mesej baharu untuk meneruskan dengan sesi natif baharu dan sejarah sembang yang selesai. Semak hasil operasi terdahulu sebelum mencuba semula; tiada ulangan automatik."
+  ],
+  "retryEffectsHint": [
+    "Check prior operation results before retrying.",
+    "重试前请核对先前操作结果。",
+    "重試前請核對先前操作結果。",
+    "再試行前に前の操作結果を確認してください。",
+    "재시도 전에 이전 작업 결과를 확인하세요.",
+    "Semak hasil operasi terdahulu sebelum mencuba semula."
+  ],
+  "retryLastTurn": [
+    "Retry last message",
+    "重试上一条",
+    "重試上一則",
+    "前のメッセージを再試行",
+    "이전 메시지 재시도",
+    "Cuba semula mesej terakhir"
   ],
   "sendWithEnter": [
     "Send (Enter)",

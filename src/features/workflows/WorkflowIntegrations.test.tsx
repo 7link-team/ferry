@@ -486,6 +486,23 @@ it("offers Codeup clone in its repository operations and derives its URL from th
   expect(host.querySelector(`[aria-label="${t('integration.gitAuthentication')}"]`)).toBeNull();
 });
 
+it("selects a whole Codeup group across pages without duplicates and saves the repository snapshot",async()=>{
+ calls.mockImplementation(async path => String(path).includes('/repositories?') ? String(path).includes('page=2') ? {items:[{url:'https://git.example/team/sub/lib.git',name:'lib',full_name:'team/sub/lib'}],has_more:false} : {items:[{url:'https://git.example/team/app.git',name:'app',full_name:'team/app',default_branch:'main',remote_id:'42'}],has_more:true} : {items:[{id:'7',name:'Codeup',provider:'codeup',state:'connected'}],total:1,page_size:200});
+ let current:Record<string,unknown>={};
+ function Harness(){const [node,setNode]=useState(()=>newNode(emptyGraph(),'integration.codeup.repository.clone','Clone'));current=node.params;return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(n=>({...n,params}))}/></WorkflowAssetContext.Provider>;}
+ await act(async()=>root.render(<Harness/>));await input(t('integration.connection'),'7');
+ const batch=[...host.querySelectorAll('label')].find(label=>label.textContent===t('actions.cloneMultiple'))!.querySelector<HTMLInputElement>('input')!;
+ await act(async()=>batch.click());
+ expect(calls.mock.calls.some(([path])=>String(path).includes('page=2'))).toBe(true);
+ const group=[...host.querySelectorAll('label')].find(label=>label.textContent==='team · 2')!.querySelector<HTMLInputElement>('input')!;
+ await act(async()=>group.click());
+ expect(current.repositories).toEqual([{url:'https://git.example/team/app.git',name:'app',full_name:'team/app'},{url:'https://git.example/team/sub/lib.git',name:'lib',full_name:'team/sub/lib'}]);
+ const sub=[...host.querySelectorAll('label')].find(label=>label.textContent==='team/sub · 1')!.querySelector<HTMLInputElement>('input')!;
+ expect(sub.checked).toBe(true);
+ expect(current.url).toBe('https://git.example/team/app.git');
+ await input(t('integration.connection'),'');expect(current).not.toHaveProperty('repositories');expect(current).not.toHaveProperty('url');
+});
+
 it("uses configured branch names consistently in output labels and continuation choices",async()=>{
  const branch=newNode(emptyGraph(),'core.switch','Route');branch.params.cases=[{key:'release'},{key:'test'}];
  expect(outputPortLabel(branch,{port:'case',index:1})).toBe('test');

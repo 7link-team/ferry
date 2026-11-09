@@ -1,5 +1,14 @@
 ## 当前事项清单（2026-11-09）
 
+| PIPELINE-CHECKOUT-22 | 待验证 | 4291已更新PID35224/index-DNAdtqaS.js：流水线克隆步骤内可批量选择仓库/组并原位展开，保留原仓库分支/目录/首个ID/条件/环境/checkout参数/YAML引用；节点克隆支持同连接多仓库/整组含子组，完整分页快照去重、独立编号目录、逐仓库授权/发送账本。相关前端60PASS及最终checkout36PASS，集成10PASS、图13PASS/1原有ignore，前后端构建PASS。真实HTTP Git+Runner双仓库克隆、Actions双checkout→构建、跨空间拒绝及四宽度选择/保存回读PASS，repository-batch-clone-20261109/reviewed；Codeup分页多组组件回归PASS，商业Codeup未实连。待用户刷新验收；分组为快照、500仓库上限、不自动重试；未发版。 |
+| CONVERSATION-INTERRUPTION-33 | 待验证 | 私聊中断可继续输入/显式重试，错误及重试紧贴失败消息，移除底部整条中断提示；4291已更新PID35224/index-DNAdtqaS.js。后端19/前端6PASS，构建通过；实际构建前端+API夹具四宽度行内错误/重试PATCH→POST/草稿保留PASS，证据conversation-interruption-20261109/inline-ui.json及截图。原会话真实推理未验证：旧测试登录归另一账号返回404，浏览器工具无用户登录页面；不改所有权、不自动重放。待用户本人刷新验收，未发版。 |
+
+| PREVIEW-LOCAL-32 | 待验证 | 4291最终PID35224/ferry-server-conversation-batch-final.exe/index-DNAdtqaS.js，包含已合并预览、会话恢复和批量克隆。备份pre-conversation-recovery-20261109-204855；37类原记录/密钥/实例/FERRY环境保全PASS，本轮无数据库迁移，证据conversation-interruption-20261109/local-reviewed-update.json。Actions worker仍actions-workers-preview-current；临时Runner仍PID81004，未安装系统服务。待用户刷新体验；真实预览20项证据仍preview-automation-integration-20261109，不冒称本轮重跑预览，未发版。 |
+
+本轮复核（2026-11-09）：直接执行，无代理；复用既有PATCH/Composer/Git连接/发送账本/Runner与Actions，权限、历史数据及部署范围自审通过。首次批量UI保存因远端附加字段被schema拒绝，已仅保存声明字段并补真实字段夹具回归；第二次仅测试Git换行期望失败，给测试仓库添加.gitattributes固定LF；原始失败和各轮证据保留。最终源码实跑scripts/test-repository-batch-clone.mjs：工作流执行113258556303605760，双仓库实际文件与Actions构建标记PASS。桌面/手机截图已查看，无整页溢出。用户验收、原会话真实模型推理、商业Codeup和Figma/原生App不冒称通过。
+
+本地更新检查点（2026-11-09）：复用真实E2E20项通过的同一server/worker构建，未重新改源码。初次新服务启动后，保全脚本未处理旧库不存在holes表而失败；自动回退旧程序因不认识holes_v1/v2迁移无法启动，已立即重启新程序/PID84388恢复健康，并直接对升级前备份完成37类数据逐行核对PASS。原失败日志保留server.log；降级必须同时恢复升级前数据库，不能仅换旧exe。直接执行，自审/部署范围/数据保全核对PASS；本地浏览器烟测仅覆盖登录及匿名权限，完整业务链路证据沿用隔离真实Runner测试，用户验收仍待验证。
+
 预览清理交付（PREVIEW-CLEANUP-31，2026-11-09）：三个原提交630b955/f7e65e8/98548e3均已并入main；1432个源码文件与原提交一致，无未合并差异，另3个为构建缓存。递归删除受工具策略拦截，改为可恢复归档：三个残留目录已移至data/maintenance/preview-cleanup-20261109/source-copies，原worktree路径全部不存在；完整ZIP仍保留。移动后1435个文件逐一SHA256通过，主目录依赖完整，证据audit.json、archive-verification.json。四个预览分支及worktree登记已清理，无本阶段剩余事项；直接执行，自审/代码保全核对PASS。未改业务代码、未更新4291或发版。
 
 
@@ -16,7 +25,6 @@
 
 | PLATFORM-AI-27 | 待设计（未确认未实现） | 用户2026-11-09提出：平台对外提供MCP；对内AI可调用平台功能（会话中创建主机/流水线等）；会话中发进度与预览验收卡片（带预览地址、跳转到流水线节点等审核位置）；会话右侧预览面板（iframe/webview，独立前进后退，多tab区分web/API/远程文件/目录等预览产物），参照主流会话+预览设计。顺序建议：先完成PREVIEW-AUTO-26（提供url输出/验收API/来源跳转）→预览面板+会话卡片→统一工具注册表（对内AI调用含权限与确认）→对外MCP。约束：预览为沙箱opaque origin，浏览器iframe跨源不可读history，独立前进后退需代理注入导航脚本或Tauri原生webview。每块需单独设计并经用户确认。 |
 | PREVIEW-HOLES-25 | 已交付 | 用户2026-11-09验收通过（独立实例4295，已停止并删除演示目录）。main：合并a45f97d（feat/preview-holes@403a5b6，分支与worktree已删除）+ style提交修复a2a1ad4遗留的16个rustfmt文件（逐文件去空白比对确认仅格式），推送origin/main。验证：cargo test --workspace PASS（server577、runner52）、tsc/vitest548/build PASS、fmt PASS；端到端12项PASS，证据data/maintenance/preview-holes-20261109-061002。当前语义：每条预览需人工创建（选Runner+端口），有效期1h/8h/24h/7d可续期、可撤销，过期后不可访问但记录保留；非自动发现/自动托管。已知小问题：不可达原因带英文前缀（探测错误用ApiError默认文本）；手机窄屏操作列挤压名称列（共享表格）。待决PREVIEW-AUTO-26：用户询问是否自动代理Runner上的服务并全托管生命周期，已给出方案建议，未确认未实现。 |
-| PIPELINE-CHECKOUT-22 | 待验证 | 独立克隆类型、多仓库/多组/跨连接选择已实现；分组编辑时展开快照，去重生成独立步骤ID与目录，原生YAML保留。前端526PASS/1skip、Chrome四宽度分组→生成→保存回读PASS。4291已备份更新/PID25120，实际四宽度空白新建/任务/连接入口及401PASS；证据git-capabilities-20261109/{connection-batch-reviewed,local-update.json,local-smoke.json}。待用户体验，未提交推送发版。 |
 | MODEL-CATALOG-SYNC-23 | 待处理 | 用户询问模型清单定时更新；建议可选自动同步、最近成功时间/结果/立即更新，区分手工模型与发现模型，保留默认及历史引用，CLI指定Runner/API指定连接。当前仅建议，周期、不可用模型语义和调度/离线规则待设计，不算已实现。 |
 | WORKFLOW-GIT-CAPABILITIES-24 | 进行中 | 本轮重开：Codeup子功能补克隆入口；连接模式不重复必填仓库地址，选仓库自动带入；明确Mac/Linux/Windows执行主机路径和Git Bash限制；分支节点右侧按输出端口添加，验证第二分支不接第一分支；整理布局保留上下/左右关系，节点出口/线/选择器统一显示条件分支名称。此前已补正：节点库新增代码与构建分类，克隆前置、主机命令结构化表单，复用SSH/Agent权限/容量/取消/日志及防重账本。真实Agent克隆HTTP Git→Go编译→运行产物、非零退出日志、三输入仅执行一次、无hosts.terminal拒绝与四宽度PASS；前端528PASS/1skip、工作流Rust91PASS/1ignore、最终UI23PASS。4291已备份更新/PID25108/index-C3OFHjy1.js，真实四宽度添加克隆/命令并编辑PASS。证据git-capabilities-20261109/node-build-{reviewed,local-update.json,local-smoke.json}。待用户体验；未提交推送发版。基础命令仅sh/Git Bash、同具体主机显式cd、每节点120秒；PowerShell/文件输入/全Git能力/商业写入未认证。 |
 | AI-CREDENTIAL-BOUNDARY-18 | 待验证 | 直接输入Key、加密创建/轮换、留空保留/不回显、失败回滚、默认隐藏AI凭据及消除凭据→工作流反向依赖已更新4291；历史账本身份不变。旧链接实际跳转白屏已修正ops分组并canonical替换；模型六语/四宽度/跨空间/权限/冲突浏览器及Rust回归PASS，证据models-credentials-validation/{result,local-check}.json。待用户体验，未提交推送发版。 |
