@@ -10,9 +10,14 @@ try {
   const context = await browser.newContext({ locale: 'zh-CN', reducedMotion: 'reduce', viewport: { width: 1366, height: 900 } });
   const page = await context.newPage();
   const errors = [];
+  let accountPreferences = { theme: { palette: 'modern', mode: 'dark' }, locale: null };
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', route => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/me/preferences') {
+      if (route.request().method() === 'PATCH') accountPreferences = { ...accountPreferences, ...route.request().postDataJSON() };
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(accountPreferences) });
+    }
     let value = { items: [], total: 0, page: 1, page_size: 20 };
     if (path === '/api/me') value = { user: { id: '1', name: 'Theme reviewer', email: 'reviewer@example.invalid', is_superadmin: false }, workspaces: [{ id: '2', name: 'Test workspace', slug: 'ops', role_name: 'Owner', permissions: ['hosts.read', 'hosts.create', 'hosts.update', 'hosts.delete', 'host-groups.read'] }] };
     if (path.endsWith('/node-groups')) value = { items: [{ id: 'group-1', name: 'Production group', parent_id: '', position: 0 }], total: 1, page: 1, page_size: 200 };
