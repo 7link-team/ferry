@@ -1,7 +1,7 @@
 ## 当前事项清单（2026-11-09）
 
 | SETTINGS-TABS-FONT-28 | 待验证 | 同registration键多个分区归入单Tab，富文本原生字号下拉保留选区格式并同步HTML预览；41项相关测试与真实Chrome四宽度/六语/SMTP验收PASS（settings-tab-font-acceptance.json）。4291已备份更新/PID76440/index-DFd0-wHd.js，36类表/密钥/环境保全；待用户验收。 |
-| COMMIT-PUSH-29 | 进行中 | 用户要求全部提交推送；已审查当前main约124个源码/文档文件与凭据模式，无本地数据/构建产物；提交包含现有已实现功能及修复，不把方案/待办冒称完成；不含独立preview-holes分支合并或发版。 |
+提交推送交付（COMMIT-PUSH-29，2026-11-09）：main@f5a2c0d已通过现有SSH认证推送GitHub，124个源码/文档文件，无密钥/本地数据/构建产物；HTTPS凭据管理器等待认证后停止，未改远程配置。包含此前模型/CLI/凭据边界、Git克隆/节点构建/分支与Runner连接提示、注册验证码配置及本轮重复Tab/字号修复；方案与未验收事项仍按原状态保留。前端535PASS/1既有skip、41项相关回归、前后端构建、真实Chrome四宽度/六语/SMTP验收PASS；最新证据git-capabilities-20261109/settings-tab-font-{acceptance.json,tests-final.log,local-update.json}。4291/PID76440/index-DFd0-wHd.js已备份更新，36类数据/密钥/实例/环境保全。直接执行，自审/需求核对通过。本记录覆盖下文旧“未提交/未推送”检查点的提交状态，不覆盖用户验收结论；未合并独立preview-holes分支、未发新版本。
 
 | RUNNER-COMMAND-DEFAULTS-26 | 进行中 | 已知主机连接命令按上报OS默认；上报系统服务/当前用户服务/直接启动方式，未知不冒认系统服务，保留手动切换；兼容旧Runner与集群转发，验证用户所给节点。 |
 | REGISTRATION-CODE-CONFIG-27 | 待验证 | 已备份更新4291/PID84380/index-BHfCW9Zf.js：账号注册验证码配置区（启用开关、1–60分钟/默认10）；默认模板/预览/签发共用有效期。隔离SMTP及四宽度保存回读、17→3分钟、旧码消费、关闭拒绝签发PASS，registration-code-e2e.log；保留SMTP依赖/六语/原数据密钥。实际嵌入资源校验PASS；4291超管表单烟测未完成（两份旧测试会话为非超管，正确403），待用户验收。未提交推送发版。 |
