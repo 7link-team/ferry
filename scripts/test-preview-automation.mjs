@@ -171,6 +171,26 @@ async function shots(page, name, ready) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
+// Linux shell steps use a PTY. Detach the fixture service from that terminal,
+// retain its own log/PID, and wait for readiness before the step exits.
+const serviceLauncher = join(work, 'launch-service.cjs');
+await writeFile(serviceLauncher, `
+const {spawn} = require('node:child_process');
+const fs = require('node:fs');
+const log = fs.openSync(process.env.SERVICE_LOG, 'a');
+const child = spawn(process.env.SERVICE_NODE, [process.env.SERVICE_SCRIPT, process.env.SERVICE_PORT, 'pipeline'], {detached:true, stdio:['ignore',log,log]});
+fs.writeFileSync(process.env.SERVICE_PID_FILE, String(child.pid));
+child.unref();
+(async()=>{
+  for(let attempt=0;attempt<100;attempt++){
+    try { if((await fetch('http://127.0.0.1:'+process.env.SERVICE_PORT+'/')).ok) return; } catch {}
+    if(child.exitCode!==null) throw Error(fs.readFileSync(process.env.SERVICE_LOG,'utf8'));
+    await new Promise(done=>setTimeout(done,100));
+  }
+  throw Error('Fixture service startup timeout: '+fs.readFileSync(process.env.SERVICE_LOG,'utf8'));
+})().catch(error=>{console.error(error);process.exitCode=1;});
+`);
+
 const finished = (state) => ['succeeded', 'failed', 'cancelled'].includes(state);
 
 async function runLogs(run) {
@@ -191,8 +211,8 @@ async function previewPipeline(name, port) {
           {
             name: 'Start service',
             shell: process.platform === 'win32' ? 'powershell' : 'bash',
-            env: { SERVICE_NODE: process.execPath, SERVICE_SCRIPT: serviceScript, SERVICE_PORT: String(port), SERVICE_PID_FILE: join(work, `service-${port}.pid`) },
-            run: process.platform === 'win32' ? 'Start-Process -WindowStyle Hidden -FilePath $env:SERVICE_NODE -ArgumentList @($env:SERVICE_SCRIPT, $env:SERVICE_PORT, "pipeline")' : 'nohup "$SERVICE_NODE" "$SERVICE_SCRIPT" "$SERVICE_PORT" pipeline > /dev/null 2>&1 & echo $! > "$SERVICE_PID_FILE"',
+            env: { SERVICE_NODE: process.execPath, SERVICE_SCRIPT: serviceScript, SERVICE_PORT: String(port), SERVICE_PID_FILE: join(work, `service-${port}.pid`), SERVICE_LOG: join(work, `service-${port}.log`), SERVICE_LAUNCHER: serviceLauncher },
+            run: process.platform === 'win32' ? 'Start-Process -WindowStyle Hidden -FilePath $env:SERVICE_NODE -ArgumentList @($env:SERVICE_SCRIPT, $env:SERVICE_PORT, "pipeline")' : '"$SERVICE_NODE" "$SERVICE_LAUNCHER"',
           },
           {
             id: 'preview',
@@ -209,7 +229,7 @@ async function previewPipeline(name, port) {
             name: 'Stop fixture service',
             if: 'always()',
             shell: 'bash',
-            env: { SERVICE_PID_FILE: join(work, `service-${port}.pid`) },
+            env: { SERVICE_PID_FILE: join(work, `service-${port}.pid`), SERVICE_LOG: join(work, `service-${port}.log`), SERVICE_LAUNCHER: serviceLauncher },
             run: 'if test -f "$SERVICE_PID_FILE"; then cat "$SERVICE_PID_FILE" | xargs -r kill; rm "$SERVICE_PID_FILE"; fi',
           }]),
         ],
