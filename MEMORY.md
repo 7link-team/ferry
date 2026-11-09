@@ -5,7 +5,7 @@
 
 | PREVIEW-LOCAL-32 | 待验证 | 4291最终PID35224/ferry-server-conversation-batch-final.exe/index-DNAdtqaS.js，包含已合并预览、会话恢复和批量克隆。备份pre-conversation-recovery-20261109-204855；37类原记录/密钥/实例/FERRY环境保全PASS，本轮无数据库迁移，证据conversation-interruption-20261109/local-reviewed-update.json。Actions worker仍actions-workers-preview-current；临时Runner仍PID81004，未安装系统服务。待用户刷新体验；真实预览20项证据仍preview-automation-integration-20261109，不冒称本轮重跑预览，未发版。 |
 
-本轮复核（2026-11-09）：直接执行，无代理；复用既有PATCH/Composer/Git连接/发送账本/Runner与Actions，权限、历史数据及部署范围自审通过。首次批量UI保存因远端附加字段被schema拒绝，已仅保存声明字段并补真实字段夹具回归；第二次仅测试Git换行期望失败，给测试仓库添加.gitattributes固定LF；原始失败和各轮证据保留。最终源码实跑scripts/test-repository-batch-clone.mjs：工作流执行113258556303605760，双仓库实际文件与Actions构建标记PASS。桌面/手机截图已查看，无整页溢出。用户验收、原会话真实模型推理、商业Codeup和Figma/原生App不冒称通过。
+本轮复核（2026-11-09）：源码c2853e8已提交并推送main，本地35224已更新，未发版。HTTPS推送因无可用GCM登录失败，复用本机既有SSH认证推送成功并fetch核对origin/main；未改远端地址/凭据。直接执行，无代理；复用既有PATCH/Composer/Git连接/发送账本/Runner与Actions，权限、历史数据及部署范围自审通过。首次批量UI保存因远端附加字段被schema拒绝，已仅保存声明字段并补真实字段夹具回归；第二次仅测试Git换行期望失败，给测试仓库添加.gitattributes固定LF；原始失败和各轮证据保留。最终源码实跑scripts/test-repository-batch-clone.mjs：工作流执行113258556303605760，双仓库实际文件与Actions构建标记PASS。桌面/手机截图已查看，无整页溢出。用户验收、原会话真实模型推理、商业Codeup和Figma/原生App不冒称通过。
 
 本地更新检查点（2026-11-09）：复用真实E2E20项通过的同一server/worker构建，未重新改源码。初次新服务启动后，保全脚本未处理旧库不存在holes表而失败；自动回退旧程序因不认识holes_v1/v2迁移无法启动，已立即重启新程序/PID84388恢复健康，并直接对升级前备份完成37类数据逐行核对PASS。原失败日志保留server.log；降级必须同时恢复升级前数据库，不能仅换旧exe。直接执行，自审/部署范围/数据保全核对PASS；本地浏览器烟测仅覆盖登录及匿名权限，完整业务链路证据沿用隔离真实Runner测试，用户验收仍待验证。
 
