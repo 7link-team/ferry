@@ -3,6 +3,14 @@ use super::*;
 
 // ----------------------------------------------------------- HostChannel
 
+/// The runner predates preview forwarding.
+pub(crate) fn forward_unsupported() -> ApiError {
+    ApiError::localized(
+        StatusCode::CONFLICT,
+        crate::i18n::Message::new("holes.runnerUpgrade"),
+    )
+}
+
 pub struct RunnerChannel {
     _lease: crate::hosts::runner::reservations::Lease,
     cluster: Option<Arc<crate::cluster::Cluster>>,
@@ -40,6 +48,9 @@ pub(crate) async fn cluster_open(host: &str, session: &str, kind: wire::SessionK
             StatusCode::CONFLICT,
             crate::i18n::Message::new("agents.probeUnsupported"),
         ));
+    }
+    if kind == wire::SessionKind::Forward && !registration.supports_forward {
+        return Err(forward_unsupported());
     }
     registration
         .control
@@ -109,7 +120,11 @@ impl RunnerChannel {
             let mut socket = cluster.socket(&id, false, &route).await.inspect_err(|_| {
                 crate::cluster::diagnostic("nats", "open", "stream_setup_failed");
             })?;
-            socket.hold(self._lease.clone());
+            // A preview connection can stay open for hours; holding the lease
+            // for its lifetime would keep the runner from ever upgrading.
+            if kind != wire::SessionKind::Forward {
+                socket.hold(self._lease.clone());
+            }
             cluster.new_session(&id, &route).await.inspect_err(|_| {
                 crate::cluster::diagnostic("nats", "open", "route_registration_failed");
             })?;
@@ -153,6 +168,9 @@ impl RunnerChannel {
                 StatusCode::CONFLICT,
                 crate::i18n::Message::new("agents.probeUnsupported"),
             ));
+        }
+        if kind == wire::SessionKind::Forward && !registration.supports_forward {
+            return Err(forward_unsupported());
         }
         let id = secret();
         let (socket, dialled) = oneshot::channel();
@@ -280,6 +298,20 @@ impl HostChannel for RunnerChannel {
             .await?;
         match answer {
             wire::Session::AgentProbeResult { status } => Ok(status),
+            _ => Err(garbled()),
+        }
+    }
+    async fn forward(&self, port: u16) -> Result<crate::cluster::Socket> {
+        // The runner tries IPv4 then IPv6 loopback, five seconds each.
+        let (answer, socket) = self
+            .ask(
+                wire::SessionKind::Forward,
+                wire::Session::ForwardStart { port },
+                Duration::from_secs(15),
+            )
+            .await?;
+        match answer {
+            wire::Session::ForwardReady => Ok(socket),
             _ => Err(garbled()),
         }
     }
@@ -621,6 +653,7 @@ mod tests {
                 supports_monitor: true,
                 supports_agent: false,
                 supports_agent_probe: false,
+                supports_forward: false,
                 version: "legacy".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),
@@ -674,6 +707,7 @@ mod tests {
                 supports_monitor: false,
                 supports_agent: false,
                 supports_agent_probe: false,
+                supports_forward: false,
                 version: "0.1.0-alpha.13".into(),
                 ready: std::sync::atomic::AtomicBool::new(true),
                 failed_version: Mutex::new(None),

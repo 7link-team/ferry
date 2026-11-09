@@ -15,6 +15,7 @@ mod deployments;
 mod entities;
 mod error;
 mod executions;
+mod holes;
 mod hosts;
 mod i18n;
 mod lock;
@@ -40,7 +41,7 @@ use axum::{
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{any, delete, get, post},
 };
 use clap::Parser;
 use fs2::FileExt;
@@ -258,6 +259,7 @@ async fn main() -> anyhow::Result<()> {
         drain_rx.clone(),
     ));
     let host_monitor_task = tokio::spawn(hosts::monitor::collect(s.clone(), drain_rx.clone()));
+    let hole_monitor_task = tokio::spawn(holes::monitor(s.clone(), drain_rx.clone()));
     let repository_monitor_task = tokio::spawn(repositories::monitor::scheduler(
         s.clone(),
         cfg.repository_analysis_concurrency,
@@ -451,6 +453,7 @@ async fn main() -> anyhow::Result<()> {
             post(cron_jobs::acknowledge),
         )
         .merge(agents::routes())
+        .merge(holes::routes())
         .merge(models::routes())
         .merge(conversations::routes())
         .route("/{workspace}/preferences", get(maintenance::preferences))
@@ -924,6 +927,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/runners/install.ps1", get(hosts::runner::install::powershell))
         .route("/api/runners/install/{target}", get(hosts::runner::install::artifact))
         .route("/api/runners/sessions/{session}", get(hosts::runner::session))
+        // Preview holes are public by token; see docs/preview-holes-design.md.
+        .route("/holes/{token}", any(holes::serve_root))
+        .route("/holes/{token}/", any(holes::serve))
+        .route("/holes/{token}/{*rest}", any(holes::serve))
         .route("/api/permissions", get(accounts::workspace::permission_catalogue))
         .route(
             "/api/setup",
@@ -996,7 +1003,7 @@ async fn main() -> anyhow::Result<()> {
         }))
         .layer(middleware::from_fn(i18n::middleware))
         .layer(middleware::from_fn_with_state(s.clone(),platform_monitor::middleware))
-        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%request.uri().path())))
+        .layer(TraceLayer::new_for_http().make_span_with(|request: &Request| tracing::debug_span!("http", method=%request.method(), path=%holes::redact(request.uri().path()))))
         .with_state(s.clone());
 
     tracing::info!(address=%listener.local_addr()?, "Ferry 服务已启动");
@@ -1028,6 +1035,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = drain.send(true);
     alerts_task.await?;
     host_monitor_task.await?;
+    hole_monitor_task.await?;
     runner_auto_update_task.await?;
     repository_monitor_task.await?;
     repository_analysis_task.await?;
@@ -1152,8 +1160,12 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
             .path()
             .strip_prefix("/api/repository-events/")
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
+    // A previewed app cannot send the console's header, and its sandboxed
+    // documents send `Origin: null`; the hole sandbox is the boundary there.
+    let preview = req.uri().path().starts_with("/holes/");
     if mutating
         && !provider_event
+        && !preview
         && req
             .headers()
             .get("x-ferry-request")
@@ -1162,10 +1174,11 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     {
         return (StatusCode::FORBIDDEN, i18n::message("guard.request")).into_response();
     }
-    if let Some(origin) = req
-        .headers()
-        .get(header::ORIGIN)
-        .and_then(|v| v.to_str().ok())
+    if !preview
+        && let Some(origin) = req
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|v| v.to_str().ok())
         && origin != format!("http://{host}")
         && origin != format!("https://{host}")
     {

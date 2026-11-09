@@ -13,6 +13,7 @@ import workflowMessages from "./locales/workflow-domain.json";
 import agentMessages from "./locales/agents.json";
 import modelMessages from "./locales/models.json";
 import conversationMessages from "./locales/conversations.json";
+import holeMessages from "./locales/holes.json";
 
 // Column order is explicit so adding/reordering supported locales cannot change translations.
 const typedLocales = ["en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "ms-MY"];
@@ -32,6 +33,7 @@ for (const locale of typedLocales) i18n.addResourceBundle(locale, "workflow-doma
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "agents", Object.fromEntries(Object.entries(agentMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "models", Object.fromEntries(Object.entries(modelMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 for (const locale of typedLocales) i18n.addResourceBundle(locale, "conversations", Object.fromEntries(Object.entries(conversationMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
+for (const locale of typedLocales) i18n.addResourceBundle(locale, "holes", Object.fromEntries(Object.entries(holeMessages).map(([key, values]) => [key, values[typedLocales.indexOf(locale)]])));
 
 export function workflowText(key: keyof typeof workflowMessages): string {
   return i18n.t(key, { ns: "workflow-domain", keySeparator: false });

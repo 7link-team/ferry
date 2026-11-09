@@ -4,6 +4,7 @@ import { agentsForms, agentsLists } from "../features/agents/resource-config";
 import { modelsForms, modelsLists } from "../features/models/resource-config";
 import { conversationForms, conversationLists } from "../features/conversations/resource-config";
 import { alertsForms, alertsLists } from "../features/alerts/resource-config";
+import { holesForms, holesLists } from "../features/holes/resource-config";
 import {
   codeInsightsForms,
   codeInsightsLists,
@@ -86,6 +87,7 @@ export function listConfigs(
     ...pipelinesLists(context),
     ...workflowsLists(context),
     ...hostsLists(context),
+    ...holesLists(context),
     ...tagsLists(context),
     ...variablesLists(context),
     ...credentialsLists(context),
@@ -132,6 +134,7 @@ export function formConfigs(
     ...pipelinesForms(context),
     ...workflowsForms(context),
     ...hostsForms(context),
+    ...holesForms(context),
     ...variablesForms(context),
     ...credentialsForms(context),
     ...tagsForms(context),

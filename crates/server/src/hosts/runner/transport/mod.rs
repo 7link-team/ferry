@@ -420,6 +420,7 @@ mod tests {
                 supports_monitor: false,
                 supports_agent: false,
                 supports_agent_probe: false,
+                supports_forward: false,
             })
             .unwrap();
             let expected = crate::i18n::Message::new("runnerExtra.protocolMismatch")
@@ -506,6 +507,7 @@ mod tests {
             supports_monitor: false,
             supports_agent: false,
             supports_agent_probe: false,
+            supports_forward: false,
         })
         .unwrap();
         tokio::time::timeout(

@@ -1,0 +1,14 @@
+{
+  "permission.group.holes": "Preview tunnels",
+  "holes.invalid": "Invalid preview tunnel. Check the name (1-128 characters), the Runner host, the port (1-65535) and the validity period.",
+  "holes.changed": "This preview tunnel changed. Reload before saving.",
+  "holes.revoked": "This preview tunnel has been revoked and can no longer be changed.",
+  "holes.notActive": "Only an active preview tunnel can be checked.",
+  "holes.runnerUpgrade": "This Runner does not support preview tunnels yet. Upgrade the Runner.",
+  "holes.connectionUnsupported": "Preview tunnels only work with Runner-connected hosts.",
+  "holes.notFound": "This preview link does not exist, has expired or has been revoked.",
+  "holes.unavailable": "The previewed service cannot be reached: the Runner is offline or the local port is not accepting connections.",
+  "holes.busy": "This preview has too many open connections. Try again shortly.",
+  "holes.timeout": "The previewed service did not respond in time.",
+  "holes.tooLarge": "The request body exceeds the 64 MiB preview limit."
+}
