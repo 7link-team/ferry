@@ -1,0 +1,53 @@
+name: Preview domain Linux acceptance
+on:
+  push:
+    branches: [ci/preview-domain-acceptance-20261110]
+permissions:
+  contents: read
+jobs:
+  preview-domains:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: workers/actions/go.mod
+          cache-dependency-path: workers/actions/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+          save-if: false
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh
+      - run: cargo build --locked -p ferry-server -p ferry-runner
+      # Test-only DNS: exact token hosts are registered in /etc/hosts by the
+      # request helper; both Node and Chromium resolve those exact system hosts.
+      # These checks exercise routing and isolation, not public DNS or TLS.
+      - name: Real Runner preview domains and HMR
+        env:
+          PREVIEW_TEST_HOSTS: "1"
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-preview-holes.mjs
+      - name: Actions and node workflow preview lifecycle
+        env:
+          PREVIEW_TEST_HOSTS: "1"
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-preview-automation.mjs
+      - name: Account preference isolation and browser persistence
+        run: python3 .github/scripts/annotate-failures.py --run node scripts/test-account-preferences.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-domain-evidence
+          path: |
+            data/maintenance/preview-holes-*/
+            data/maintenance/preview-automation-*/
+            data/maintenance/account-preferences-*/
+          retention-days: 14
+
