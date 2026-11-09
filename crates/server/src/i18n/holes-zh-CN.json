@@ -1,0 +1,14 @@
+{
+  "permission.group.holes": "预览穿透",
+  "holes.invalid": "预览穿透配置无效。请检查名称（1-128 个字符）、Runner 主机、端口（1-65535）和有效期。",
+  "holes.changed": "该预览穿透已被修改，请刷新后再保存。",
+  "holes.revoked": "该预览穿透已撤销，不能再修改。",
+  "holes.notActive": "只能检测有效中的预览穿透。",
+  "holes.runnerUpgrade": "该 Runner 版本不支持预览穿透，请升级 Runner。",
+  "holes.connectionUnsupported": "预览穿透只支持通过 Runner 连接的主机。",
+  "holes.notFound": "该预览链接不存在、已过期或已撤销。",
+  "holes.unavailable": "无法连接被预览的服务：Runner 离线，或本地端口未接受连接。",
+  "holes.busy": "该预览的并发连接过多，请稍后重试。",
+  "holes.timeout": "被预览的服务响应超时。",
+  "holes.tooLarge": "请求体超过预览的 64 MiB 上限。"
+}

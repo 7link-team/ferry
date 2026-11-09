@@ -80,6 +80,9 @@ pub struct Hello {
     pub supports_agent: bool,
     #[serde(default)]
     pub supports_agent_probe: bool,
+    /// Byte forwarding to a loopback port for preview holes.
+    #[serde(default)]
+    pub supports_forward: bool,
 }
 
 /// Runner -> server, first frame on a session connection. The session id is in
@@ -198,6 +201,8 @@ pub enum SessionKind {
     Monitor,
     Agent,
     AgentProbe,
+    /// Raw bytes between the server and a loopback port on the runner host.
+    Forward,
 }
 
 /// One directory entry. Mirrors the server's `channel::DirEntry`, which cannot
@@ -291,6 +296,11 @@ pub enum Session {
     DeleteFile {
         path: String,
     },
+    /// Forward: the runner connects to its own loopback `port` and answers
+    /// `ForwardReady`; binary frames then carry the TCP bytes both ways.
+    ForwardStart {
+        port: u16,
+    },
 
     // ---- runner -> server answers
     FileMeta {
@@ -308,6 +318,8 @@ pub enum Session {
         stdout: String,
         stderr: String,
     },
+    /// The loopback connection is open; payload follows as binary frames.
+    ForwardReady,
     /// The request is finished and nothing more follows.
     Done,
     /// End of a byte stream, in whichever direction it was flowing.
@@ -371,6 +383,7 @@ mod tests {
             supports_monitor: true,
             supports_agent: true,
             supports_agent_probe: false,
+            supports_forward: true,
         };
         let text = serde_json::to_string(&hello).unwrap();
         assert!(text.contains(r#""type":"enroll""#), "{text}");
@@ -387,6 +400,12 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("supports_agent_probe");
+        legacy.as_object_mut().unwrap().remove("supports_forward");
+        assert!(
+            !serde_json::from_value::<Hello>(legacy.clone())
+                .unwrap()
+                .supports_forward
+        );
         assert!(
             !serde_json::from_value::<Hello>(legacy.clone())
                 .unwrap()
@@ -417,6 +436,10 @@ mod tests {
             Control::OpenSession {
                 session: "a1b2".into(),
                 kind: SessionKind::Terminal,
+            },
+            Control::OpenSession {
+                session: "a1b3".into(),
+                kind: SessionKind::Forward,
             },
             Control::Ping,
             Control::Rejected {
@@ -453,6 +476,8 @@ mod tests {
                 rows: 40,
             },
             Session::TerminalResize { cols: 80, rows: 24 },
+            Session::ForwardStart { port: 5173 },
+            Session::ForwardReady,
             Session::ExecStart {
                 command: "echo hi".into(),
                 timeout_seconds: 15,

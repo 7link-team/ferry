@@ -1,0 +1,14 @@
+{
+  "permission.group.holes": "預覽穿透",
+  "holes.invalid": "預覽穿透設定無效。請檢查名稱（1-128 個字元）、Runner 主機、連接埠（1-65535）與有效期。",
+  "holes.changed": "此預覽穿透已被修改，請重新整理後再儲存。",
+  "holes.revoked": "此預覽穿透已撤銷，無法再修改。",
+  "holes.notActive": "只能檢測有效中的預覽穿透。",
+  "holes.runnerUpgrade": "此 Runner 版本不支援預覽穿透，請升級 Runner。",
+  "holes.connectionUnsupported": "預覽穿透只支援透過 Runner 連線的主機。",
+  "holes.notFound": "此預覽連結不存在、已過期或已撤銷。",
+  "holes.unavailable": "無法連線至被預覽的服務：Runner 離線，或本機連接埠未接受連線。",
+  "holes.busy": "此預覽的並行連線過多，請稍後再試。",
+  "holes.timeout": "被預覽的服務回應逾時。",
+  "holes.tooLarge": "請求本文超過預覽的 64 MiB 上限。"
+}

@@ -194,6 +194,14 @@ static CATALOGS: LazyLock<[Catalog; 6]> = LazyLock::new(|| {
             include_str!("i18n/conversations-ms-MY.json"),
         ],
         [
+            include_str!("i18n/holes-en-US.json"),
+            include_str!("i18n/holes-zh-CN.json"),
+            include_str!("i18n/holes-zh-TW.json"),
+            include_str!("i18n/holes-ja-JP.json"),
+            include_str!("i18n/holes-ko-KR.json"),
+            include_str!("i18n/holes-ms-MY.json"),
+        ],
+        [
             include_str!("i18n/agents-en-US.json"),
             include_str!("i18n/agents-zh-CN.json"),
             include_str!("i18n/agents-zh-TW.json"),

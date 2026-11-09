@@ -1,0 +1,14 @@
+{
+  "permission.group.holes": "Terowong pratonton",
+  "holes.invalid": "Terowong pratonton tidak sah. Semak nama (1-128 aksara), hos Runner, port (1-65535) dan tempoh sah.",
+  "holes.changed": "Terowong pratonton ini telah berubah. Muat semula sebelum menyimpan.",
+  "holes.revoked": "Terowong pratonton ini telah dibatalkan dan tidak boleh diubah lagi.",
+  "holes.notActive": "Hanya terowong pratonton yang aktif boleh disemak.",
+  "holes.runnerUpgrade": "Runner ini belum menyokong terowong pratonton. Naik taraf Runner.",
+  "holes.connectionUnsupported": "Terowong pratonton hanya berfungsi dengan hos yang disambungkan melalui Runner.",
+  "holes.notFound": "Pautan pratonton ini tidak wujud, telah tamat tempoh atau telah dibatalkan.",
+  "holes.unavailable": "Perkhidmatan yang dipratonton tidak dapat dicapai: Runner di luar talian atau port tempatan tidak menerima sambungan.",
+  "holes.busy": "Pratonton ini mempunyai terlalu banyak sambungan terbuka. Cuba lagi sebentar lagi.",
+  "holes.timeout": "Perkhidmatan yang dipratonton tidak bertindak balas tepat pada masanya.",
+  "holes.tooLarge": "Badan permintaan melebihi had pratonton 64 MiB."
+}

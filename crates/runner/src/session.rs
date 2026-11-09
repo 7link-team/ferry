@@ -70,6 +70,7 @@ async fn dispatch(
         wire::Session::DeleteFile { path } => delete_file(socket, &path).await,
         wire::Session::Monitor => monitor(socket).await,
         wire::Session::AgentStart { request } => agent(socket, request).await,
+        wire::Session::ForwardStart { port } => forward(socket, port).await,
         wire::Session::AgentProbe {
             runtime,
             cwd,
@@ -92,6 +93,54 @@ async fn dispatch(
         }
         other => anyhow::bail!("服务下发了不是请求的帧：{other:?}"),
     }
+}
+
+/// How long a preview may wait for the local service to accept.
+const FORWARD_CONNECT: Duration = Duration::from_secs(5);
+
+/// Pipes a loopback port through the session: TCP bytes become binary frames
+/// and back. Either side ending ends both, so neither connection outlives the
+/// other.
+async fn forward(socket: &mut Socket, port: u16) -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    anyhow::ensure!(port != 0, "预览端口必须在 1-65535 之间");
+    let connect = |address: std::net::SocketAddr| {
+        tokio::time::timeout(FORWARD_CONNECT, tokio::net::TcpStream::connect(address))
+    };
+    // A dev server that listens on "localhost" may have bound only one family.
+    let v4 = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, port));
+    let v6 = std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port));
+    let stream = match connect(v4).await {
+        Ok(Ok(stream)) => stream,
+        first => match connect(v6).await {
+            Ok(Ok(stream)) => stream,
+            _ => match first {
+                Ok(Err(error)) => anyhow::bail!("无法连接本机端口 {port}：{error}"),
+                _ => anyhow::bail!("连接本机端口 {port} 超时"),
+            },
+        },
+    };
+    let _ = stream.set_nodelay(true);
+    crate::transport::send(socket, &wire::Session::ForwardReady).await?;
+    let (mut reader, mut writer) = stream.into_split();
+    let mut buffer = vec![0u8; CHUNK];
+    loop {
+        tokio::select! {
+            read = reader.read(&mut buffer) => {
+                let n = read?;
+                if n == 0 { break }
+                socket.send(Message::Binary(buffer[..n].to_vec().into())).await?;
+            }
+            message = socket.next() => match message {
+                Some(Ok(Message::Binary(bytes))) => writer.write_all(&bytes).await?,
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Text(_) | Message::Frame(_))) => {}
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(error)) => return Err(error.into()),
+            },
+        }
+    }
+    let _ = writer.shutdown().await;
+    Ok(())
 }
 
 async fn agent(socket: &mut Socket, request: wire::agent::Request) -> anyhow::Result<()> {
@@ -851,5 +900,113 @@ mod tests {
         });
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["aa", "zz", "a.txt", "b.txt"]);
+    }
+
+    /// Serves one session request on a throwaway WebSocket and hands back the
+    /// client end plus the dispatch outcome.
+    async fn forward_session(
+        port: u16,
+    ) -> (
+        crate::transport::Socket,
+        tokio::task::JoinHandle<anyhow::Result<()>>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let served = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let stream = tokio_tungstenite::MaybeTlsStream::Plain(stream);
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let frame = crate::transport::next_frame(&mut socket).await.unwrap();
+            dispatch(&mut socket, frame, std::path::Path::new(".")).await
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}"))
+            .await
+            .unwrap();
+        crate::transport::send(&mut client, &wire::Session::ForwardStart { port })
+            .await
+            .unwrap();
+        (client, served)
+    }
+
+    #[tokio::test]
+    async fn forward_pipes_bytes_both_ways_and_ends_with_the_local_service() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let local = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = local.local_addr().unwrap().port();
+        let service = tokio::spawn(async move {
+            let (mut stream, _) = local.accept().await.unwrap();
+            let mut request = [0u8; 4];
+            stream.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+            // Closing here must end the session rather than leave it open.
+        });
+        let (mut client, served) = forward_session(port).await;
+        let ready: wire::Session = crate::transport::next_frame(&mut client).await.unwrap();
+        assert!(matches!(ready, wire::Session::ForwardReady));
+        client
+            .send(Message::Binary(b"ping".to_vec().into()))
+            .await
+            .unwrap();
+        let mut received = Vec::new();
+        while let Some(Ok(message)) = client.next().await {
+            if let Message::Binary(bytes) = message {
+                received.extend_from_slice(&bytes);
+            }
+        }
+        assert_eq!(received, b"pong");
+        service.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), served)
+            .await
+            .expect("session must end when the local service closes")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn closing_the_session_closes_the_local_connection() {
+        use tokio::io::AsyncReadExt;
+        let local = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = local.local_addr().unwrap().port();
+        let service = tokio::spawn(async move {
+            let (mut stream, _) = local.accept().await.unwrap();
+            let mut rest = Vec::new();
+            // Returns only once the runner releases its side.
+            stream.read_to_end(&mut rest).await.unwrap();
+            rest
+        });
+        let (mut client, served) = forward_session(port).await;
+        let ready: wire::Session = crate::transport::next_frame(&mut client).await.unwrap();
+        assert!(matches!(ready, wire::Session::ForwardReady));
+        client
+            .send(Message::Binary(b"partial".to_vec().into()))
+            .await
+            .unwrap();
+        client.close(None).await.unwrap();
+        let rest = tokio::time::timeout(Duration::from_secs(5), service)
+            .await
+            .expect("local connection must be released")
+            .unwrap();
+        assert_eq!(rest, b"partial");
+        served.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn forward_to_a_closed_port_fails_instead_of_hanging() {
+        let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = unused.local_addr().unwrap().port();
+        drop(unused);
+        let (_client, served) = forward_session(port).await;
+        let outcome = tokio::time::timeout(Duration::from_secs(12), served)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(outcome.unwrap_err().to_string().contains(&port.to_string()));
+    }
+
+    #[tokio::test]
+    async fn forward_rejects_port_zero() {
+        let (_client, served) = forward_session(0).await;
+        assert!(served.await.unwrap().is_err());
     }
 }

@@ -1,0 +1,14 @@
+{
+  "permission.group.holes": "미리보기 터널",
+  "holes.invalid": "미리보기 터널 설정이 올바르지 않습니다. 이름(1~128자), Runner 호스트, 포트(1~65535), 유효 기간을 확인하세요.",
+  "holes.changed": "이 미리보기 터널이 변경되었습니다. 새로고침한 후 저장하세요.",
+  "holes.revoked": "이 미리보기 터널은 취소되어 더 이상 변경할 수 없습니다.",
+  "holes.notActive": "활성 상태인 미리보기 터널만 검사할 수 있습니다.",
+  "holes.runnerUpgrade": "이 Runner는 미리보기 터널을 지원하지 않습니다. Runner를 업그레이드하세요.",
+  "holes.connectionUnsupported": "미리보기 터널은 Runner로 연결된 호스트에서만 사용할 수 있습니다.",
+  "holes.notFound": "이 미리보기 링크는 존재하지 않거나 만료되었거나 취소되었습니다.",
+  "holes.unavailable": "미리보기 대상 서비스에 연결할 수 없습니다. Runner가 오프라인이거나 로컬 포트가 연결을 받지 않습니다.",
+  "holes.busy": "이 미리보기의 동시 연결이 너무 많습니다. 잠시 후 다시 시도하세요.",
+  "holes.timeout": "미리보기 대상 서비스가 제시간에 응답하지 않았습니다.",
+  "holes.tooLarge": "요청 본문이 미리보기 한도인 64MiB를 초과합니다."
+}

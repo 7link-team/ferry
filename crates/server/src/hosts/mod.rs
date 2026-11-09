@@ -974,7 +974,9 @@ pub async fn delete_host(
         .filter(host_tags::Column::HostId.eq(id))
         .exec(&tx)
         .await?;
+    let holes = crate::holes::delete_for_host(&s, &tx, &scope, id).await?;
     tx.commit().await?;
+    crate::holes::close_all(&holes);
     activity(&s, &scope, "delete", "hosts", &id, json!({})).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1000,6 +1002,7 @@ pub async fn bulk_delete_hosts(
     }
     let transaction = crate::variables::transaction(&s, scope.workspace_id).await?;
     let mut deleted = 0;
+    let mut holes = Vec::new();
     for id in &body.ids {
         // Inside the transaction, so a pipeline created concurrently either
         // blocks this delete or is not yet visible to it — and a refusal rolls
@@ -1016,10 +1019,12 @@ pub async fn bulk_delete_hosts(
                 .filter(host_tags::Column::HostId.eq(*id))
                 .exec(&transaction)
                 .await?;
+            holes.extend(crate::holes::delete_for_host(&s, &transaction, &scope, *id).await?);
         }
         deleted += affected;
     }
     transaction.commit().await?;
+    crate::holes::close_all(&holes);
     activity(
         &s,
         &scope,

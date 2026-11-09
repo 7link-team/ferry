@@ -88,6 +88,7 @@ struct Live {
     supports_monitor: bool,
     supports_agent: bool,
     supports_agent_probe: bool,
+    supports_forward: bool,
     version: String,
     ready: std::sync::atomic::AtomicBool,
     failed_version: Mutex<Option<String>>,

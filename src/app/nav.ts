@@ -92,6 +92,7 @@ export const nav: NavGroup[] = [
     get label() { return commonText("nav.hosts"); },
     items: [
       { key: "hosts", get label() { return commonText("nav.nodes"); }, resource: "hosts", permission: "hosts.read" },
+      { key: "holes", get label() { return commonText("holes:title"); }, resource: "holes", permission: "holes.read" },
       { key: "host-groups", get label() { return commonText("nav.hostGroups"); }, resource: "host-groups", permission: "host-groups.read", hidden: true, parent: "hosts" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", params: { scope: "host" }, permission: "credentials.read" },
       { key: "tags", get label() { return commonText("nav.tags"); }, resource: "tags", permission: "tags.read" },

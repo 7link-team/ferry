@@ -235,6 +235,38 @@ pub mod ai_events {
     impl ActiveModelBehavior for ActiveModel {}
 }
 
+pub mod holes {
+    use sea_orm::entity::prelude::*;
+    #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+    #[sea_orm(table_name = "holes")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: i64,
+        pub workspace_id: i64,
+        pub host_id: i64,
+        pub name: String,
+        pub target_port: i64,
+        pub strip_prefix: bool,
+        pub token_hash: String,
+        pub token_sealed: String,
+        pub expires_at: i64,
+        pub revoked_at: i64,
+        pub revoked_by: i64,
+        pub probe_state: String,
+        pub probe_error: String,
+        pub probed_at: i64,
+        pub probed_by: i64,
+        pub created_at: i64,
+        pub created_by: i64,
+        pub updated_at: i64,
+        pub updated_by: i64,
+        pub version: i64,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
 pub mod ai_agents {
     use sea_orm::entity::prelude::*;
     #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]

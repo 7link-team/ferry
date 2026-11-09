@@ -89,6 +89,26 @@ pub const PERMISSIONS: &[(&str, &str, &str)] = &[
         "permission.action.probe",
     ),
     (
+        "holes.read",
+        "permission.group.holes",
+        "permission.action.read",
+    ),
+    (
+        "holes.create",
+        "permission.group.holes",
+        "permission.action.create",
+    ),
+    (
+        "holes.update",
+        "permission.group.holes",
+        "permission.action.update",
+    ),
+    (
+        "holes.delete",
+        "permission.group.holes",
+        "permission.action.delete",
+    ),
+    (
         "credentials.use",
         "permission.group.credentials",
         "permission.action.use",
@@ -666,6 +686,8 @@ pub fn dependencies(permission: &str) -> Vec<String> {
             "credentials.read",
         ],
         "hosts.terminal" | "hosts.files" | "hosts.enroll" => &["hosts.read"],
+        // Choosing the runner a preview forwards from lists hosts.
+        "holes.create" => &["hosts.read"],
         "pipelines.run" => &["repositories.read"],
         "deployments.apply" | "deployments.rollback" => &["hosts.read", "app-templates.read"],
         "marketplace.install" => &[
@@ -765,6 +787,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
                 "alerts",
                 "cron-jobs",
                 "variables",
+                "holes",
             ]
             .iter()
             .flat_map(|m| {
@@ -788,7 +811,7 @@ fn builtin_permissions(role: &str) -> Vec<String> {
             .collect::<Vec<_>>(),
         ),
         "operator" => expand(
-            &["host-groups", "hosts", "tags", "cron-jobs"]
+            &["host-groups", "hosts", "tags", "cron-jobs", "holes"]
                 .iter()
                 .flat_map(|m| {
                     ["read", "create", "update", "delete"]
@@ -833,6 +856,7 @@ pub async fn prepare_permissions(s: &AppState) -> Result<()> {
             .filter(|p| {
                 p.starts_with("marketplace-sources.")
                     || p.starts_with("ai-agents.")
+                    || p.starts_with("holes.")
                     || p.starts_with("ai-models.")
                     || p.starts_with("conversations.")
                     || p.starts_with("code-insights.")

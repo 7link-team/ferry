@@ -120,12 +120,15 @@ pub(super) async fn run_with_shutdown(
     // normal operation for an agent, not a reason to stop.
     let mut backoff = Duration::from_secs(1);
     let mut sessions = tokio::task::JoinSet::new();
+    // Preview forwards are open-ended byte pipes with no state to finish, so
+    // they are kept apart and cut on stop instead of being waited for.
+    let mut forwards = tokio::task::JoinSet::new();
     let mut activation = None;
     loop {
         let result = tokio::select! {
             biased;
             _ = stopped.wait_for(|value| *value) => break,
-            result = hold(&cfg, &control_url, &mut sessions) => result,
+            result = hold(&cfg, &control_url, &mut sessions, &mut forwards) => result,
         };
         match result {
             Ok(()) => {
@@ -152,6 +155,8 @@ pub(super) async fn run_with_shutdown(
         active_sessions = sessions.len(),
         "停止接收会话，等待在途会话结束"
     );
+    forwards.abort_all();
+    while forwards.join_next().await.is_some() {}
     while sessions.join_next().await.is_some() {}
     if let Some(candidate) = activation {
         service::supervisor::emit(&service::supervisor::Event::Activate {
@@ -167,6 +172,7 @@ async fn hold(
     cfg: &Config,
     control_url: &str,
     sessions: &mut tokio::task::JoinSet<()>,
+    forwards: &mut tokio::task::JoinSet<()>,
 ) -> anyhow::Result<()> {
     let mut socket = dial(control_url).await?;
     let (hostname, os, arch) = facts();
@@ -202,6 +208,7 @@ async fn hold(
             supports_monitor: true,
             supports_agent: true,
             supports_agent_probe: true,
+            supports_forward: true,
         },
     )
     .await?;
@@ -291,7 +298,8 @@ async fn hold(
                             // Dialled on its own task: a slow transfer must not
                             // stall heartbeats or the next session request.
                             let root = cfg.state_dir.clone();
-                            sessions.spawn(async move {
+                            let set = if kind == wire::SessionKind::Forward { &mut *forwards } else { &mut *sessions };
+                            set.spawn(async move {
                                 if let Err(error) = session::run(&url, hello, kind, &root).await {
                                     tracing::warn!(%id, ?kind, %error, "会话结束于错误");
                                 }
@@ -316,6 +324,7 @@ async fn hold(
             }
             _ = report.tick() => send(&mut socket, &metrics()).await?,
             _ = sessions.join_next(), if !sessions.is_empty() => {},
+            _ = forwards.join_next(), if !forwards.is_empty() => {},
         }
     }
 }
@@ -439,5 +448,75 @@ mod tests {
         };
         assert!(memory_total > 0, "a machine has memory");
         assert!(disk_total > 0, "and a root filesystem");
+    }
+
+    #[tokio::test]
+    async fn graceful_stop_cuts_open_forward_sessions() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let local = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = local.local_addr().unwrap().port();
+        let dir = tempfile::tempdir().unwrap();
+        let (stop, stopped) = tokio::sync::watch::channel(false);
+        let running = tokio::spawn(run_with_shutdown(
+            Config {
+                managed: false,
+                installation_scope: None,
+                confirmation: None,
+                failed_version: None,
+                server: format!("http://{address}"),
+                token: Some("fixture-token".into()),
+                state_dir: dir.path().to_owned(),
+            },
+            stopped,
+        ));
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut control = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let hello = control.next().await.unwrap().unwrap().into_text().unwrap();
+        assert!(hello.contains(r#""supports_forward":true"#), "{hello}");
+        for frame in [
+            wire::Control::Welcome {
+                host_id: "1".into(),
+                key: Some("fixture-key".into()),
+                heartbeat_seconds: 20,
+                metrics_seconds: 30,
+            },
+            wire::Control::OpenSession {
+                session: "preview".into(),
+                kind: wire::SessionKind::Forward,
+            },
+        ] {
+            control
+                .send(Message::Text(serde_json::to_string(&frame).unwrap().into()))
+                .await
+                .unwrap();
+        }
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut session = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        session.next().await.unwrap().unwrap();
+        session
+            .send(Message::Text(
+                serde_json::to_string(&wire::Session::ForwardStart { port })
+                    .unwrap()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let (mut held, _) = local.accept().await.unwrap();
+        let ready = session.next().await.unwrap().unwrap().into_text().unwrap();
+        assert!(ready.contains("forward_ready"), "{ready}");
+        // An idle preview connection would otherwise hold the stop forever.
+        stop.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), running)
+            .await
+            .expect("stop must not wait for an open forward")
+            .unwrap()
+            .unwrap();
+        let mut rest = Vec::new();
+        use tokio::io::AsyncReadExt;
+        tokio::time::timeout(Duration::from_secs(5), held.read_to_end(&mut rest))
+            .await
+            .expect("local connection must be released on stop")
+            .unwrap();
     }
 }
