@@ -121,7 +121,7 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         }
         if (!matches!(
             spec["type"].as_str(),
-            Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop")
+            Some("core.trigger.manual" | "data.set" | "core.wait" | "core.stop" | "host.preview")
         ) && !super::transform::supports(spec)
             && !super::media::supports(spec)
             && !super::ai::supports(spec)
@@ -146,13 +146,15 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
             return Err(error("workflow.runImplementation", &node.path));
         }
         // Flat pins and bypass have no defined multi-port routing contract.
-        if matches!(spec["type"].as_str(), Some("core.if" | "core.switch"))
-            && (graph::pin_data(graph, spec, "manual").is_some()
-                || spec.pointer("/settings/mode").and_then(Value::as_str) == Some("bypass")
-                || spec
-                    .pointer("/settings/always_output")
-                    .and_then(Value::as_bool)
-                    == Some(true))
+        if matches!(
+            spec["type"].as_str(),
+            Some("core.if" | "core.switch" | "host.preview")
+        ) && (graph::pin_data(graph, spec, "manual").is_some()
+            || spec.pointer("/settings/mode").and_then(Value::as_str) == Some("bypass")
+            || spec
+                .pointer("/settings/always_output")
+                .and_then(Value::as_bool)
+                == Some(true))
         {
             return Err(error("workflow.runImplementation", &node.path));
         }
@@ -436,7 +438,7 @@ pub async fn cancel(
         .ok_or_else(ApiError::missing)?;
     let workflow = super::scoped(&tx, scope.workspace_id, run.workflow_id.into()).await?;
     access::require(&tx, &scope, &workflow, Operation::Run).await?;
-    request_cancel_in(&tx, &run, scope.user.id.into()).await?;
+    let revoked = request_cancel_in(&tx, &run, scope.user.id.into()).await?;
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -452,16 +454,21 @@ pub async fn cancel(
         .await?
         .ok_or_else(ApiError::missing)?;
     tx.commit().await?;
+    if let Some(revoked) = revoked {
+        super::preview::ended(run.id, &revoked);
+    }
     Ok(Json(summary(&run)))
 }
 
+/// `Some(previews revoked)` when the execution ended now; the caller passes
+/// them to `preview::ended` once the transaction committed.
 async fn request_cancel_in(
     tx: &sea_orm::DatabaseTransaction,
     run: &runs::Model,
     actor: i64,
-) -> Result<()> {
+) -> Result<Option<Vec<i64>>> {
     if !matches!(run.state.as_str(), "queued" | "waiting" | "running") {
-        return Ok(());
+        return Ok(None);
     }
     let immediate = run.state != "running";
     let mut update = runs::Entity::update_many()
@@ -491,10 +498,13 @@ async fn request_cancel_in(
     {
         return Err(super::conflict("execution.versionConflict"));
     }
-    if immediate {
-        finish_nodes(tx, run.id, "cancelled", "user_cancelled", actor, db::now()).await?;
+    if !immediate {
+        return Ok(None);
     }
-    Ok(())
+    finish_nodes(tx, run.id, "cancelled", "user_cancelled", actor, db::now()).await?;
+    Ok(Some(
+        crate::holes::revoke_source(tx, "workflow", run.id, None).await?,
+    ))
 }
 
 pub async fn list(
@@ -819,7 +829,9 @@ async fn finish(
     {
         return Err(executions::ownership_lost());
     }
+    let revoked = crate::holes::revoke_source(&tx, "workflow", run.id, None).await?;
     tx.commit().await?;
+    super::preview::ended(run.id, &revoked);
     Ok(())
 }
 
@@ -929,7 +941,8 @@ async fn dispatch(
     }
     supported(&graph, &start.plan)?;
     if context.pointer("/journal/parked_at").is_some() {
-        journal.wake(run.version).await?;
+        let due = super::preview::due(&s.db, run.id, &graph).await?;
+        journal.wake(run.version, &due).await?;
         run = current(s, run.id).await?;
     }
     let hash = hex::encode(Sha256::digest(b"[]"));
@@ -1096,7 +1109,7 @@ async fn dispatch(
             )
             .await?;
         run = current(s, run.id).await?;
-        let conditional =
+        let mut conditional =
             if super::condition::supports(spec) && !skipped && mode == "active" && pin.is_none() {
                 Some(
                     super::condition::execute(spec, &items[..selected], &active.snapshot.params)
@@ -1163,6 +1176,24 @@ async fn dispatch(
                     ));
                 }
                 "core.merge" => items.into_iter().take(selected).collect(),
+                "host.preview" => {
+                    match super::preview::execute(s, &run, &planned.id, &active.snapshot.params[0])
+                        .await?
+                    {
+                        super::preview::Step::Wait(deadline) => {
+                            journal
+                                .wait(run.version, node_id, active.node.version, deadline)
+                                .await?;
+                            run = current(s, run.id).await?;
+                            waiting = true;
+                            continue;
+                        }
+                        super::preview::Step::Done(output) => {
+                            conditional = Some(output);
+                            vec![]
+                        }
+                    }
+                }
                 _ if super::transform::supports(spec) => {
                     super::transform::execute(spec, &items[..selected], &active.snapshot.params)?
                 }
@@ -1211,6 +1242,8 @@ async fn dispatch(
                 version: 1,
                 ports: super::condition::ports(spec)?,
             }
+        } else if skipped && spec["type"] == "host.preview" {
+            super::preview::skipped(spec)
         } else if spec["type"] == "core.stop" {
             Output {
                 version: 1,

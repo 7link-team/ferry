@@ -111,6 +111,8 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
     delete defaults.connection_id;
     delete defaults.url;
   }
+  // The example names a sample host; a new preview must pick its own.
+  if (type === "host.preview") defaults.host_id = "";
   if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
     delete defaults.credential_id;
     delete defaults.organization_id;
@@ -153,6 +155,11 @@ export function ports(
       ...(node.params.fallback ? [{ port: "fallback", type: "main" }] : []),
     ];
   }
+  // Review mode decides the exits: none -> main; human -> approved / rejected.
+  if (node.type === "host.preview" && direction === "outputs")
+    return spec.outputs.filter((port) =>
+      node.params.review === "human" ? port.port !== "main" : port.port === "main",
+    );
   if (node.type === "core.merge" && direction === "inputs")
     return Array.from(
       { length: Number(node.params.input_count ?? 2) },

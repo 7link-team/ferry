@@ -567,7 +567,7 @@ export function WorkflowEditor({
     targetHandle: `${link.to.port}:${link.to.index}${connectionDirection(graph!, link) === "down" ? ":top" : ""}`,
     type: "insert",
     data: {
-      ...(graph?.nodes.find(node => node.id === link.from.node && (node.type === "core.if" || node.type === "core.switch")) ? {label: outputPortLabel(graph.nodes.find(node => node.id === link.from.node)!, link.from)} : {}),
+      ...(graph?.nodes.find(node => node.id === link.from.node && (node.type === "core.if" || node.type === "core.switch" || node.type === "host.preview")) ? {label: outputPortLabel(graph.nodes.find(node => node.id === link.from.node)!, link.from)} : {}),
       ...(!readOnly ? {
           insert: () => {
             setAdjacent(undefined);
@@ -853,7 +853,7 @@ export function WorkflowEditor({
                     {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : String(execution.end_reason)}
                   </p>
                 ) : null}
-                <WorkflowExecutionView workspace={workspace} execution={execution} graph={executionGraph} attempts={attempts} nodeTypes={nodeTypes} />
+                <WorkflowExecutionView workspace={workspace} execution={execution} graph={executionGraph} attempts={attempts} nodeTypes={nodeTypes} permissions={permissions} />
                 <details className="mt-4"><summary className="cursor-pointer text-sm">{t("execution.records")}</summary>{renderTable?.(resultConfig, refresh)}</details>
               </section>
             );

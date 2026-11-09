@@ -16,13 +16,13 @@ use std::time::Duration;
 
 const NODE_LOG_LIMIT: usize = 256 * 1024;
 #[derive(Default)]
-struct NodeLog {
+pub(super) struct NodeLog {
     text: String,
     truncated: bool,
-    dirty: bool,
+    pub(super) dirty: bool,
 }
 impl NodeLog {
-    fn push(&mut self, stream: &str, bytes: &[u8]) {
+    pub(super) fn push(&mut self, stream: &str, bytes: &[u8]) {
         if bytes.is_empty() || self.truncated {
             return;
         }
@@ -42,7 +42,7 @@ impl NodeLog {
         self.truncated = end < entry.len() || bytes.len() > NODE_LOG_LIMIT;
         self.dirty = true;
     }
-    async fn flush(&mut self, s: &AppState, node: Option<i64>) -> Result<()> {
+    pub(super) async fn flush(&mut self, s: &AppState, node: Option<i64>) -> Result<()> {
         if !self.dirty {
             return Ok(());
         }
@@ -110,7 +110,7 @@ pub(super) fn requested(node: &Value) -> bool {
         == Some("host")
 }
 
-async fn active(s: &AppState, run: &workflow_executions::Model) -> Result<()> {
+pub(super) async fn active(s: &AppState, run: &workflow_executions::Model) -> Result<()> {
     if crate::executions::stop_requested() {
         return Err(crate::executions::ownership_lost());
     }
@@ -134,6 +134,33 @@ async fn active(s: &AppState, run: &workflow_executions::Model) -> Result<()> {
         return Err(ApiError::forbidden());
     }
     Ok(())
+}
+
+/// Opens the host with a fresh private directory for scripts. Windows hosts run
+/// them through Git's sh.
+pub(super) async fn private_channel(
+    s: &AppState,
+    workspace: i64,
+    row: &crate::entities::hosts::Model,
+) -> Result<(Box<dyn HostChannel>, String)> {
+    let ch = crate::hosts::remote::open(s, &Id::from(workspace), &Id::from(row.id)).await?;
+    if row.os == "windows" {
+        let shell = crate::hosts::windows_shell::GitShell::open(ch).await?;
+        let private = shell.private_dir("ferry-workflow").await?;
+        Ok((Box::new(shell), private))
+    } else {
+        let private = format!("/tmp/workflow-{}", uuid::Uuid::new_v4());
+        let output = ch
+            .exec(
+                &format!("umask 077; mkdir {}", quote(&private)),
+                Duration::from_secs(15),
+            )
+            .await?;
+        if output.code != 0 {
+            return Err(invalid());
+        }
+        Ok((ch, private))
+    }
 }
 
 /// The script is transferred privately: credentials never appear in command arguments.
@@ -240,17 +267,7 @@ pub(super) async fn execute_with_credential(
             active(s, run).await?;
             if !lease.renew(&s.db).await? { return Err(crate::executions::ownership_lost()); }
             let row = crate::entities::hosts::Entity::find_by_id(lease.host).one(&s.db).await?.ok_or_else(invalid)?;
-            let ch = crate::hosts::remote::open(s, &Id::from(run.workspace_id), &Id::from(lease.host)).await?;
-            let (ch, private): (Box<dyn HostChannel>, String) = if row.os == "windows" {
-                let shell = crate::hosts::windows_shell::GitShell::open(ch).await?;
-                let private = shell.private_dir("ferry-workflow").await?;
-                (Box::new(shell), private)
-            } else {
-                let private = format!("/tmp/workflow-{}", uuid::Uuid::new_v4());
-                let output = ch.exec(&format!("umask 077; mkdir {}", quote(&private)), Duration::from_secs(15)).await?;
-                if output.code != 0 { return Err(invalid()); }
-                (ch, private)
-            };
+            let (ch, private) = private_channel(s, run.workspace_id, &row).await?;
             let result = async {
                 let path = format!("{private}/operation.sh");
                 let environment = if credential.is_some() { crate::pipelines::runs::credential_environment(ch.as_ref(), &private, credential).await? } else { String::new() };

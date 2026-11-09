@@ -823,6 +823,28 @@ export function WorkflowNodeParameters({
         <StructuredValue label={t("commandInputEnv")} value={p.input_env??{}} readOnly={readOnly} change={value=>patch({input_env:value})}/>
       </>;
       break;
+    case "host.preview":
+      fields = <>
+        <p className="text-sm leading-6 text-muted-foreground">{t("hostPreviewHelp")}</p>
+        {text("host_id", "previewHost")}
+        <p className="text-xs leading-5 text-muted-foreground">{t("previewHostHelp")}</p>
+        <Field label={t("previewCommand")}>
+          <textarea aria-label={t("previewCommand")} maxLength={4000} className="min-h-32 w-full rounded-md border border-input bg-background p-3 font-mono text-sm" readOnly={readOnly} value={String(p.command??"")} onChange={event=>patch({command:event.target.value})}/>
+        </Field>
+        <StructuredValue label={t("commandInputEnv")} value={p.input_env??{}} readOnly={readOnly} change={value=>patch({input_env:value})}/>
+        {number("port", "previewPort", 1)}
+        {text("name", "previewName")}
+        <Check label={t("previewStripPrefix")} value={p.strip_prefix !== false} readOnly={readOnly} change={strip_prefix=>patch({strip_prefix})}/>
+        {number("ready_timeout_seconds", "previewReadyTimeout", 1)}
+        <Field label={t("previewReview")}>
+          <select aria-label={t("previewReview")} className={control} disabled={readOnly} value={p.review === "human" ? "human" : "none"} onChange={event=>patch({review:event.target.value})}>
+            <option value="none">{t("previewReviewNone")}</option>
+            <option value="human">{t("previewReviewHuman")}</option>
+          </select>
+        </Field>
+        {p.review === "human" && number("review_timeout_minutes", "previewReviewTimeout", 1)}
+      </>;
+      break;
     case "ai.llm.chat":
     case "ai.image.generate":
     case "ai.audio.speech":

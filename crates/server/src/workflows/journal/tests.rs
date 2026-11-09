@@ -111,7 +111,7 @@ impl Fixture {
             .unwrap()
             .unwrap()
     }
-    async fn takeover(&mut self) {
+    pub(crate) async fn takeover(&mut self) {
         assert!(self.lease.release(&self.db).await.unwrap());
         self.lease = Lease::claim(
             &self.db,
@@ -1033,7 +1033,7 @@ async fn timed_wait_releases_ownership_and_resumes_original_attempt_without_repl
     assert_eq!(fixture.run().await.not_before, Some(wake_at));
     assert!(!fixture.run().await.context.unwrap().contains("waits"));
     fixture.takeover().await;
-    let resumed = fixture.journal().wake(parked).await.unwrap();
+    let resumed = fixture.journal().wake(parked, &[]).await.unwrap();
     let mut replay = activation(99, "/nodes/1");
     replay.frozen_at_ms = 0;
     let replayed = fixture.journal().activate(resumed, replay).await.unwrap();

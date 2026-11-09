@@ -557,3 +557,156 @@ fn set_rejects_overlapping_paths_pollution_and_scalar_traversal_without_partial_
         assert_eq!(item.json["scalar"], 1);
     }
 }
+
+async fn preview_hole(db: &sea_orm::DatabaseConnection, id: i64, execution: i64, review: &str) {
+    use crate::entities::holes;
+    holes::Entity::insert(
+        holes::Model {
+            id,
+            workspace_id: 11,
+            host_id: 5,
+            name: "Preview".into(),
+            target_port: 5173,
+            strip_prefix: true,
+            token_hash: format!("hash-{id}"),
+            token_sealed: String::new(),
+            expires_at: db::now() + 3_600_000,
+            revoked_at: 0,
+            revoked_by: 0,
+            probe_state: "unknown".into(),
+            probe_error: String::new(),
+            probed_at: 0,
+            probed_by: 0,
+            created_at: 1,
+            created_by: 3,
+            updated_at: 1,
+            updated_by: 3,
+            version: 1,
+            source_kind: "workflow".into(),
+            source_id: execution,
+            source_ref: "target".into(),
+            review_state: review.into(),
+            reviewed_at: 0,
+            reviewed_by: 0,
+        }
+        .into_active_model(),
+    )
+    .exec(db)
+    .await
+    .unwrap();
+}
+async fn revoked_at(db: &sea_orm::DatabaseConnection, id: i64) -> i64 {
+    crate::entities::holes::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .unwrap()
+        .unwrap()
+        .revoked_at
+}
+
+#[tokio::test]
+async fn finishing_revokes_the_execution_previews_and_stops_its_services() {
+    use super::super::journal::tests::Fixture;
+    let fixture = Fixture::new().await;
+    preview_hole(&fixture.db, 501, 8, "none").await;
+    preview_hole(&fixture.db, 502, 9, "none").await;
+    let (cancel, service) = tokio::sync::watch::channel(false);
+    super::super::preview::register(8, cancel);
+    finish(&fixture.db, &fixture.lease, "succeeded", "")
+        .await
+        .unwrap();
+    assert!(*service.borrow(), "the service is cancelled");
+    assert!(revoked_at(&fixture.db, 501).await > 0);
+    assert_eq!(
+        revoked_at(&fixture.db, 502).await,
+        0,
+        "other executions keep theirs"
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_parked_execution_revokes_its_previews_at_once() {
+    use super::super::journal::tests::Fixture;
+    let fixture = Fixture::new().await;
+    preview_hole(&fixture.db, 511, 8, "waiting").await;
+    fixture
+        .db
+        .execute_unprepared("UPDATE workflow_executions SET state='waiting'")
+        .await
+        .unwrap();
+    let tx = fixture.db.begin().await.unwrap();
+    let revoked = request_cancel_in(&tx, &fixture.run().await, 3)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(revoked, Some(vec![511]));
+    assert!(revoked_at(&fixture.db, 511).await > 0);
+
+    // A running execution only asks its owner to stop; `finish` cleans up.
+    let fixture = Fixture::new().await;
+    preview_hole(&fixture.db, 512, 8, "none").await;
+    let tx = fixture.db.begin().await.unwrap();
+    assert_eq!(
+        request_cancel_in(&tx, &fixture.run().await, 3)
+            .await
+            .unwrap(),
+        None
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(revoked_at(&fixture.db, 512).await, 0);
+}
+
+#[tokio::test]
+async fn a_closed_review_wakes_its_parked_preview_before_the_deadline() {
+    use super::super::journal::tests::{Fixture, activation};
+    let mut fixture = Fixture::new().await;
+    let journal = fixture.journal();
+    let active = journal
+        .activate(fixture.run().await.version, activation(32, "/nodes/1"))
+        .await
+        .unwrap();
+    let deadline = db::now() + 3_600_000;
+    let waiting = journal
+        .wait(active.execution_version, 32, active.node.version, deadline)
+        .await
+        .unwrap();
+    let parked = journal.park(waiting).await.unwrap();
+    let mut graph: Value =
+        json!({"nodes":[{"id":"source","type":"data.set"},{"id":"target","type":"host.preview"}]});
+    preview_hole(&fixture.db, 521, 8, "waiting").await;
+    let due = || super::super::preview::due(&fixture.db, 8, &graph);
+    assert!(due().await.unwrap().is_empty(), "the review is still open");
+    fixture
+        .db
+        .execute_unprepared("UPDATE holes SET review_state='approved' WHERE id=521")
+        .await
+        .unwrap();
+    assert_eq!(due().await.unwrap(), vec![32]);
+    // Other node types keep their own deadline.
+    graph["nodes"][1]["type"] = json!("core.wait");
+    assert!(
+        super::super::preview::due(&fixture.db, 8, &graph)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // The review endpoint's nudge makes the parked execution claimable now.
+    let hole = crate::entities::holes::Entity::find_by_id(521)
+        .one(&fixture.db)
+        .await
+        .unwrap()
+        .unwrap();
+    super::super::preview::nudge(&fixture.db, &hole)
+        .await
+        .unwrap();
+    assert!(fixture.run().await.not_before.unwrap() <= db::now());
+    fixture.takeover().await;
+    let woken = fixture.journal().wake(parked, &[32]).await.unwrap();
+    assert!(woken > parked);
+    let node = nodes::Entity::find_by_id(32)
+        .one(&fixture.db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(node.state, "running");
+}

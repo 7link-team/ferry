@@ -7,6 +7,7 @@ import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { connectionDirection, type Graph } from "./graph";
 import { outputPortLabel } from "./WorkflowNodePicker";
 import { WorkflowDataView } from "./WorkflowDataView";
+import { WorkflowPreviewReview } from "./WorkflowPreviewReview";
 import type { NodeExecutionData } from "./workflow-data";
 
 export const executionStateText = (state: unknown) => {
@@ -18,8 +19,8 @@ const failed = (state: unknown) => state === "failed" || state === "cancelled";
 const color = (state: unknown) => failed(state) ? "var(--destructive)" : state === "running" ? "var(--primary)" : ["succeeded", "cached", "pinned", "reused", "bypassed"].includes(String(state)) ? "#16a34a" : "var(--muted-foreground)";
 
 /** Frozen execution graph and recorded node data; no parameter editing or reruns. */
-export function WorkflowExecutionView({ workspace, execution, graph, attempts, nodeTypes }: {
-  workspace: string; execution: Record<string, unknown>; graph: Graph | undefined; attempts: Record<string, unknown>[]; nodeTypes: NodeTypes;
+export function WorkflowExecutionView({ workspace, execution, graph, attempts, nodeTypes, permissions = new Set() }: {
+  workspace: string; execution: Record<string, unknown>; graph: Graph | undefined; attempts: Record<string, unknown>[]; nodeTypes: NodeTypes; permissions?: Set<string>;
 }) {
   const [selected, setSelected] = useState("");
   const [selectedAttempt, setSelectedAttempt] = useState("");
@@ -56,7 +57,7 @@ export function WorkflowExecutionView({ workspace, execution, graph, attempts, n
     const stroke=color(target === "not_started" || !target ? source : target);
     return {id:`execution-link-${index}`,source:link.from.node,target:link.to.node,
       sourceHandle:`${link.from.port}:${link.from.index}${down?":bottom":""}`,targetHandle:`${link.to.port}:${link.to.index}${down?":top":""}`,
-      ...(graph?.nodes.some(node=>node.id===link.from.node && ["core.if","core.switch"].includes(node.type)) ? {label:outputPortLabel(graph.nodes.find(node=>node.id===link.from.node)!,link.from),labelStyle:{fill:"var(--foreground)"},labelBgStyle:{fill:"var(--background)"}} : {}),
+      ...(graph?.nodes.some(node=>node.id===link.from.node && ["core.if","core.switch","host.preview"].includes(node.type)) ? {label:outputPortLabel(graph.nodes.find(node=>node.id===link.from.node)!,link.from),labelStyle:{fill:"var(--foreground)"},labelBgStyle:{fill:"var(--background)"}} : {}),
       animated:execution.state === "running" && (target === "running" || source === "running"),
       markerEnd:{type:MarkerType.ArrowClosed,color:stroke},style:{stroke,strokeWidth:2}};
   });
@@ -71,6 +72,7 @@ export function WorkflowExecutionView({ workspace, execution, graph, attempts, n
         <label className="block space-y-1 text-sm"><span>{t("execution.nodeDetails")}</span><select className="h-9 w-full rounded-md border bg-background px-2" aria-label={t("execution.nodeDetails")} value={chosen?.id ?? ""} onChange={event=>setSelected(event.target.value)}>{graph.nodes.map(node=><option key={node.id} value={node.id}>{node.name} · {executionStateText(latest.get(node.id)?.state)}</option>)}</select></label>
         <p role="status" className={`text-sm font-medium ${failed(attempt?.state)?"text-destructive":""}`}>{executionStateText(attempt?.state)}</p>
         {nodeAttempts.length>1 && <label className="block space-y-1 text-xs"><span>{t("attempt")}</span><select className="h-8 w-full rounded border bg-background px-2" value={String(attempt?.id??"")} onChange={event=>setSelectedAttempt(event.target.value)}>{nodeAttempts.map((row,index)=><option key={String(row.id)} value={String(row.id)}>{index+1} · {t("attempt")} {String(row.attempt)} · {executionStateText(row.state)}</option>)}</select></label>}
+        {chosen?.type === "host.preview" && attempt?.id && permissions.has("holes.read") ? <WorkflowPreviewReview workspace={workspace} execution={String(execution.id)} node={chosen.id} canReview={permissions.has("workflows.run")} refresh={`${String(attempt.state)}:${String(attempt.version)}`} /> : null}
         <div role="tablist" aria-label={t("execution.nodeDetails")} className="flex gap-1 border-b pb-2">{(["process","input","output"] as const).map(key=><Button key={key} type="button" variant={tab===key?"secondary":"ghost"} size="sm" role="tab" aria-selected={tab===key} onClick={()=>setTab(key)}>{t(`execution.${key}`)}</Button>)}</div>
         <div className="max-h-[380px] space-y-3 overflow-y-auto break-words" role="tabpanel">
           {tab === "process" ? <>
