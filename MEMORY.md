@@ -1,8 +1,8 @@
 ## 当前事项清单（2026-11-09）
 
-| PREVIEW-DOMAIN-35 | 待处理 | 用户要求预览由/holes/token改为token.<预览域名>/path，移除剥离前缀开关；正在核对域名配置、完整路径/跳转/WebSocket、旧链接兼容和隔离边界。现token为64位hex，超DNS标签63字节限制，需无损DNS安全编码；已补docs/preview-holes-design.md §17设计/事实依据；配置缺失行为与旧非剥离应用迁移需定稿，未实现，不纳入alpha.10候选。 |
+| PREVIEW-DOMAIN-35 | 待处理 | 用户要求预览由/holes/token改为token.<预览域名>/path，移除剥离前缀开关；兼容domain.xx与subdomain.domain.xx两类预览根域名，DNS/TLS分别覆盖对应通配域名，token固定为左侧单标签，不截取注册域名。已核对完整路径/跳转/WebSocket、旧链接及隔离边界；64位hex改无损Base32的52字符标签。docs/preview-holes-design.md §17已补设计与双域名验收，下一步定稿未配置域名和旧非剥离应用迁移行为，再实施/实测。尚未实现，不纳入alpha.11。 |
 
-| RELEASE-ALPHA9-34 | 进行中 | alpha.11候选：补画布添加步骤菜单选择，修正连接刷新误用凭据翻译，Runner夹具补OS/安装范围。完整canvas及后续15套UI现全部PASS（初次2FAIL及修复日志保留），前端567PASS/1既有skip、build与更新清单4PASS；证据030-alpha10-public-release/local-*及conversation-interruption-20261109/release-*-final.log、release-frontend-raw.log。alpha.10/2afb7cd的CI42629816296为26SUCCESS/1旧脚本FAIL，Release跳过，双架构镜像已发布；alpha.9/10标签不移动。清理CI42632134986成功且临时分支已按租约删除。下一步推送alpha.11并核验完整CI/公开附件/签名/镜像；4291未重启、未部署生产，预览域名方案不冒称实现。 |
+| RELEASE-ALPHA9-34 | 进行中 | alpha.11/8c26345的CI42638803420五个macOS/Windows任务npm ci失败；诊断42641562546明确npmmirror下载zustand返回E500/镜像站数据库表不存在，证据030-alpha11-public-release/diagnose-annotations.json。alpha.12已将327个下载URL转官方npm源，依赖版本/integrity逐项相同，隔离npm ci及更新清单4项PASS；待提交推送/完整CI/实际公开附件签名镜像核验。alpha.11重复main清理42639250692成功，分支已按租约删除；诊断分支4815d26待清理。既有前端567PASS/1skip、完整canvas和后续15套UI全部PASS，证据同前；alpha.9/10/11旧标签不移动。4291未重启，未部署生产，域名改造未实现。 |
 
 | PIPELINE-CHECKOUT-22 | 待验证 | 4291已更新PID35224/index-DNAdtqaS.js：流水线克隆步骤内可批量选择仓库/组并原位展开，保留原仓库分支/目录/首个ID/条件/环境/checkout参数/YAML引用；节点克隆支持同连接多仓库/整组含子组，完整分页快照去重、独立编号目录、逐仓库授权/发送账本。相关前端60PASS及最终checkout36PASS，集成10PASS、图13PASS/1原有ignore，前后端构建PASS。真实HTTP Git+Runner双仓库克隆、Actions双checkout→构建、跨空间拒绝及四宽度选择/保存回读PASS，repository-batch-clone-20261109/reviewed；Codeup分页多组组件回归PASS，商业Codeup未实连。待用户刷新验收；分组为快照、500仓库上限、不自动重试；未发版。 |
 | CONVERSATION-INTERRUPTION-33 | 待验证 | 私聊中断可继续输入/显式重试，错误及重试紧贴失败消息，移除底部整条中断提示；4291已更新PID35224/index-DNAdtqaS.js。后端19/前端6PASS，构建通过；实际构建前端+API夹具四宽度行内错误/重试PATCH→POST/草稿保留PASS，证据conversation-interruption-20261109/inline-ui.json及截图。原会话真实推理未验证：旧测试登录归另一账号返回404，浏览器工具无用户登录页面；不改所有权、不自动重放。待用户本人刷新验收，未发版。 |

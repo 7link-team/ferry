@@ -389,6 +389,7 @@ CREATE INDEX holes_expires ON holes (expires_at);
 ### 17.2 配置与兼容评审边界
 
 - 公开部署需运维配置预览根域名、通配DNS和对应TLS；本地验收使用可指向回环地址的 `*.localhost`。域名不能从页面语言、工作空间名或用户输入的完整URL随意派生。
+- 用户确认兼容两种根域名：配置 `domain.xx` 时生成 `token.domain.xx/path`；配置 `subdomain.domain.xx` 时生成 `token.subdomain.domain.xx/path`。根域名可包含多级标签，token固定为其左侧紧邻的一段标签；不通过截取注册域名推导预览根域名。DNS/TLS须覆盖实际预览根域名对应的通配域名；`*.domain.xx`证书不能覆盖`token.subdomain.domain.xx`，后者须覆盖`*.subdomain.domain.xx`。分别测试两种有效域名、错误后缀、跨根域名token请求与TLS配置提示，不将保存配置等同证书验证成功。
 - 只接受配置域名下恰好一段合法token标签；拒绝后缀伪装、额外标签、非法端口、非法编码、未知token。未知、过期、撤销维持相同404语义，不回退控制台。
 - 旧 `/holes/<hex>/path?query` 在已配置域名时验证记录后重定向至该记录域名的原路径。旧非剥离模式对应应用曾配置base path，不能声称无配置修改即可无缝迁移。
 - 未配置公开预览域名时的新建行为与旧路径兼容窗口仍需在实现前定稿；不能把“已填域名”当作DNS/TLS验证成功，不静默宣称公网可用。
@@ -408,4 +409,4 @@ CREATE INDEX holes_expires ON holes (expires_at);
 | 数据/审计 | 不删除历史记录、不重放执行；新增配置变更按既有平台审计；无逐请求落库扩容 |
 | 设计追踪 | Figma暂缺，实际截图与测试证据待实现；当前仅设计，不冒称已验收 |
 
-实施顺序：定稿配置与兼容边界 → Host分流/编码/链接与代理回归 → UI和两类自动来源统一 → 真实Runner/静态资源/HMR/隔离及四宽度验收。当前alpha.10候选不含本节未实现改造。
+实施顺序：定稿配置与兼容边界 → Host分流/编码/链接与代理回归 → UI和两类自动来源统一 → 真实Runner/静态资源/HMR/隔离及四宽度验收。当前alpha.11候选不含本节未实现改造。
