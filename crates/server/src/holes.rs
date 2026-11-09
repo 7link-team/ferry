@@ -5,10 +5,12 @@
 //! probe) and the background reachability monitor; `proxy` is the public
 //! route and everything that keeps its connections bounded.
 
+mod owned;
 mod proxy;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use owned::{OwnedRequest, open_owned, revoke_source, wait_ready, wait_review};
 pub use proxy::{redact, serve, serve_root};
 
 use crate::{
@@ -45,6 +47,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/{workspace}/holes/{id}/revocations", post(revoke))
         .route("/{workspace}/holes/{id}/probes", post(probe_now))
+        .route("/{workspace}/holes/{id}/reviews", post(owned::review))
 }
 
 const SPEC: Spec = Spec {
@@ -125,7 +128,13 @@ async fn views(s: &AppState, scope: &Scope, rows: Vec<holes::Model>) -> Result<V
             "expires_at": row.expires_at,
             "revoked_at": row.revoked_at,
             "probe_state": row.probe_state,
-            "probe_error": row.probe_error,
+            "probe_error": crate::i18n::render_stored(crate::i18n::current_locale(), &row.probe_error),
+            "source_kind": row.source_kind,
+            "source_id": Id::from(row.source_id),
+            "source_ref": row.source_ref,
+            "review_state": row.review_state,
+            "reviewed_at": row.reviewed_at,
+            "reviewed_by": Id::from(row.reviewed_by),
             "probed_at": row.probed_at,
             "active_connections": proxy::active(row.id),
             "created_at": row.created_at,
@@ -238,41 +247,22 @@ pub async fn create(
         return Err(invalid());
     }
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    hosts::Entity::find_by_id(i64::from(body.host_id))
-        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
-        .filter(hosts::Column::Connection.eq("runner"))
-        .one(&tx)
-        .await?
-        .ok_or_else(invalid)?;
-    let id = s.next_id()?;
-    let now = db::now();
-    let token = crate::hosts::runner::secret();
-    let mut row = holes::Model {
-        id: id.into(),
-        workspace_id: scope.workspace_id.into(),
-        host_id: body.host_id.into(),
-        name,
-        target_port: body.target_port,
-        strip_prefix: body.strip_prefix,
-        token_hash: crate::hosts::runner::fingerprint(&token),
-        token_sealed: String::new(),
-        expires_at: now + ttl,
-        revoked_at: 0,
-        revoked_by: 0,
-        probe_state: "unknown".into(),
-        probe_error: String::new(),
-        probed_at: 0,
-        probed_by: 0,
-        created_at: now,
-        created_by: scope.user.id.into(),
-        updated_at: now,
-        updated_by: scope.user.id.into(),
-        version: 1,
-    };
-    row.token_sealed = s.vault.seal(&token, &aad(&row))?;
-    holes::Entity::insert(row.clone().into_active_model())
-        .exec(&tx)
-        .await?;
+    let row = insert(
+        &s,
+        &tx,
+        &scope,
+        NewHole {
+            host_id: body.host_id,
+            name,
+            target_port: body.target_port,
+            strip_prefix: body.strip_prefix,
+            expires_at: db::now() + ttl,
+            source: ("manual", 0, String::new()),
+            review_state: "none",
+        },
+    )
+    .await?;
+    let id = Id::from(row.id);
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -286,6 +276,71 @@ pub async fn create(
     .await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(view(&s, &scope, id).await?)))
+}
+
+/// What differs between a manual preview and one a pipeline or workflow opens.
+pub(crate) struct NewHole {
+    pub host_id: Id,
+    pub name: String,
+    pub target_port: i64,
+    pub strip_prefix: bool,
+    pub expires_at: i64,
+    /// kind, id, ref: see design section 3.
+    pub source: (&'static str, i64, String),
+    pub review_state: &'static str,
+}
+
+/// The one place a preview row is created: the host must be a runner host in
+/// the caller's workspace, and only a hash and a sealed copy of the token are kept.
+async fn insert(
+    s: &AppState,
+    conn: &impl ConnectionTrait,
+    scope: &Scope,
+    new: NewHole,
+) -> Result<holes::Model> {
+    hosts::Entity::find_by_id(i64::from(new.host_id))
+        .filter(hosts::Column::WorkspaceId.eq(scope.workspace_id))
+        .filter(hosts::Column::Connection.eq("runner"))
+        .one(conn)
+        .await?
+        .ok_or_else(invalid)?;
+    let id = s.next_id()?;
+    let now = db::now();
+    let token = crate::hosts::runner::secret();
+    let (source_kind, source_id, source_ref) = new.source;
+    let mut row = holes::Model {
+        id: id.into(),
+        workspace_id: scope.workspace_id.into(),
+        host_id: new.host_id.into(),
+        name: new.name,
+        target_port: new.target_port,
+        strip_prefix: new.strip_prefix,
+        token_hash: crate::hosts::runner::fingerprint(&token),
+        token_sealed: String::new(),
+        expires_at: new.expires_at,
+        revoked_at: 0,
+        revoked_by: 0,
+        probe_state: "unknown".into(),
+        probe_error: String::new(),
+        probed_at: 0,
+        probed_by: 0,
+        created_at: now,
+        created_by: scope.user.id.into(),
+        updated_at: now,
+        updated_by: scope.user.id.into(),
+        version: 1,
+        source_kind: source_kind.into(),
+        source_id,
+        source_ref,
+        review_state: new.review_state.into(),
+        reviewed_at: 0,
+        reviewed_by: 0,
+    };
+    row.token_sealed = s.vault.seal(&token, &aad(&row))?;
+    holes::Entity::insert(row.clone().into_active_model())
+        .exec(conn)
+        .await?;
+    Ok(row)
 }
 
 #[derive(Deserialize)]
@@ -308,6 +363,13 @@ pub async fn update(
     let old = find(&tx, &scope, id).await?;
     if old.revoked_at > 0 {
         return Err(revoked());
+    }
+    // A pipeline or workflow owns its preview's lifetime; it can only be revoked.
+    if old.source_kind != "manual" {
+        return Err(ApiError::localized(
+            StatusCode::CONFLICT,
+            Message::new("holes.automatic"),
+        ));
     }
     if old.version != body.version {
         return Err(changed());
@@ -469,6 +531,9 @@ pub async fn monitor(s: AppState, mut drain: tokio::sync::watch::Receiver<bool>)
             _ = tick.tick() => {
                 if let Err(error) = probe_round(&s, &owner).await {
                     tracing::warn!(%error, "预览穿透探测失败");
+                }
+                if let Err(error) = owned::sweep(&s).await {
+                    tracing::warn!(%error, "预览穿透来源回收失败");
                 }
                 proxy::forget_stale();
             }

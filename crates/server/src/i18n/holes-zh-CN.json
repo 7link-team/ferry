@@ -10,5 +10,8 @@
   "holes.unavailable": "无法连接被预览的服务：Runner 离线，或本地端口未接受连接。",
   "holes.busy": "该预览的并发连接过多，请稍后重试。",
   "holes.timeout": "被预览的服务响应超时。",
-  "holes.tooLarge": "请求体超过预览的 64 MiB 上限。"
+  "holes.tooLarge": "请求体超过预览的 64 MiB 上限。",
+  "holes.automatic": "该预览由流水线或工作流托管，只能撤销。",
+  "holes.reviewClosed": "该预览当前不在等待验收。",
+  "holes.notReady": "本地服务未在规定时间内就绪：{detail}"
 }

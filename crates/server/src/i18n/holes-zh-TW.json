@@ -10,5 +10,8 @@
   "holes.unavailable": "無法連線至被預覽的服務：Runner 離線，或本機連接埠未接受連線。",
   "holes.busy": "此預覽的並行連線過多，請稍後再試。",
   "holes.timeout": "被預覽的服務回應逾時。",
-  "holes.tooLarge": "請求本文超過預覽的 64 MiB 上限。"
+  "holes.tooLarge": "請求本文超過預覽的 64 MiB 上限。",
+  "holes.automatic": "此預覽由流水線或工作流程託管，只能撤銷。",
+  "holes.reviewClosed": "此預覽目前不在等待驗收。",
+  "holes.notReady": "本機服務未在規定時間內就緒：{detail}"
 }

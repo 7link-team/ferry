@@ -231,7 +231,25 @@ fn classify(error: &ApiError) -> (&'static str, String) {
     } else if error.0 == StatusCode::SERVICE_UNAVAILABLE {
         ("runner_offline", String::new())
     } else {
-        ("unreachable", bounded(&error.to_string()))
+        ("unreachable", stored_error(error))
+    }
+}
+
+/// The error as a stored, viewer-localized message that fits the column.
+pub(super) fn stored_error(error: &ApiError) -> String {
+    let stored = match &error.2 {
+        Some(message) => crate::i18n::store_message(message),
+        None => crate::i18n::store_raw(&error.to_string()),
+    };
+    if stored.chars().count() <= super::ERROR_LIMIT {
+        stored
+    } else {
+        crate::i18n::store_raw(
+            &bounded(&error.to_string())
+                .chars()
+                .take(400)
+                .collect::<String>(),
+        )
     }
 }
 
@@ -267,17 +285,28 @@ async fn open(s: &AppState, target: &Target) -> Result<Socket, ApiError> {
 
 /// Checks that the local service accepts a connection and records the result.
 pub(super) async fn probe(s: &AppState, row: &holes::Model) {
-    let Some(target) = Target::of(row) else {
-        return;
-    };
-    let outcome = match open(s, &target).await {
-        Ok(mut socket) => {
-            let _ = socket.send(Frame::Close(None)).await;
-            ("reachable", String::new())
-        }
+    let outcome = match reach(s, row).await {
+        Ok(()) => ("reachable", String::new()),
         Err(error) => classify(&error),
     };
     record(s, row.id, outcome, true).await;
+}
+
+/// Opens and immediately closes one forward: the local service accepts.
+pub(super) async fn reach(s: &AppState, row: &holes::Model) -> Result<(), ApiError> {
+    let target = Target::of(row).ok_or_else(ApiError::missing)?;
+    let mut socket = open(s, &target).await?;
+    let _ = socket.send(Frame::Close(None)).await;
+    Ok(())
+}
+
+/// Records the outcome of a readiness check the same way a probe does.
+pub(super) async fn record_reach(s: &AppState, hole: i64, outcome: &Result<(), ApiError>) {
+    let outcome = match outcome {
+        Ok(()) => ("reachable", String::new()),
+        Err(error) => classify(error),
+    };
+    record(s, hole, outcome, true).await;
 }
 
 // --------------------------------------------------------- connection

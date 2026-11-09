@@ -261,6 +261,9 @@ fn every_permission_and_message_is_translated() {
             "holes.busy",
             "holes.timeout",
             "holes.tooLarge",
+            "holes.automatic",
+            "holes.reviewClosed",
+            "holes.notReady",
         ] {
             let text = crate::i18n::render(locale, &Message::new(key));
             assert_ne!(text, key, "{key} missing for {locale:?}");
@@ -273,6 +276,234 @@ fn every_permission_and_message_is_translated() {
                 .any(|p| p.0 == permission)
         );
     }
+}
+
+// ----------------------------------------------------- owned previews
+
+fn owned(source_id: i64, review: Option<i64>) -> OwnedRequest {
+    OwnedRequest {
+        host_id: Id::from(11),
+        port: 5173,
+        name: String::new(),
+        strip_prefix: true,
+        source_kind: "pipeline",
+        source_id,
+        source_ref: "review-job".into(),
+        review_minutes: review,
+    }
+}
+
+async fn reload(s: &AppState, id: i64) -> holes::Model {
+    holes::Entity::find_by_id(id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+async fn decide(s: &AppState, scope: Scope, id: i64, decision: &str) -> Result<Json<Value>> {
+    owned::review(
+        State(s.clone()),
+        scope,
+        Path(("1".into(), Id::from(id))),
+        Json(parse(json!({ "decision": decision }))),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn owned_previews_are_reviewed_once_and_never_edited_by_hand() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 11, 1, KEY).await;
+    let manual = create_hole(&s, 11, 80).await;
+    assert_eq!(manual["source_kind"], "manual");
+    assert_eq!(manual["review_state"], "none");
+    let manual_id = i64::from(hole_id(&manual));
+    // Manual previews have nothing to review.
+    assert_eq!(
+        decide(&s, admin(1), manual_id, "approved")
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::CONFLICT
+    );
+
+    let row = open_owned(&s, &admin(1), owned(77, Some(30)))
+        .await
+        .unwrap();
+    assert_eq!(row.name, "review-job", "the job names an unnamed preview");
+    assert_eq!(row.review_state, "waiting");
+    assert!(row.expires_at > db::now() + 29 * 60_000);
+    let edit = update(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), Id::from(row.id))),
+        Json(parse(json!({"version": 1, "name": "x"}))),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(edit.0, StatusCode::CONFLICT, "pipelines own their previews");
+    assert_eq!(
+        decide(&s, admin(1), row.id, "maybe").await.unwrap_err().0,
+        StatusCode::BAD_REQUEST
+    );
+    let mut viewer = admin(1);
+    viewer.permissions.retain(|p| p != "pipelines.run");
+    assert_eq!(
+        decide(&s, viewer, row.id, "approved").await.unwrap_err().0,
+        StatusCode::FORBIDDEN
+    );
+    let reviewed = decide(&s, admin(1), row.id, "approved").await.unwrap().0;
+    assert_eq!(reviewed["review_state"], "approved");
+    assert_eq!(reviewed["reviewed_by"], "1");
+    assert_eq!(
+        decide(&s, admin(1), row.id, "rejected")
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(wait_review(&s, row.id).await.unwrap(), "approved");
+
+    let rejected = open_owned(&s, &admin(1), owned(77, Some(30)))
+        .await
+        .unwrap();
+    decide(&s, admin(1), rejected.id, "rejected").await.unwrap();
+    assert_eq!(wait_review(&s, rejected.id).await.unwrap(), "rejected");
+
+    // An overdue review closes itself as timed out, attributed to the system.
+    let overdue = open_owned(&s, &admin(1), owned(77, Some(1))).await.unwrap();
+    holes::Entity::update_many()
+        .col_expr(
+            holes::Column::ExpiresAt,
+            sea_orm::sea_query::Expr::value(1_i64),
+        )
+        .filter(holes::Column::Id.eq(overdue.id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    assert_eq!(wait_review(&s, overdue.id).await.unwrap(), "timed_out");
+    assert_eq!(reload(&s, overdue.id).await.reviewed_by, 0);
+
+    // A preview revoked while waiting releases the flow as not approved.
+    let gone = open_owned(&s, &admin(1), owned(77, Some(30)))
+        .await
+        .unwrap();
+    revoke(
+        State(s.clone()),
+        admin(1),
+        Path(("1".into(), Id::from(gone.id))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(wait_review(&s, gone.id).await.unwrap(), "revoked");
+
+    for invalid in [
+        OwnedRequest {
+            port: 0,
+            ..owned(77, None)
+        },
+        OwnedRequest {
+            review_minutes: Some(0),
+            ..owned(77, None)
+        },
+        OwnedRequest {
+            review_minutes: Some(1441),
+            ..owned(77, None)
+        },
+        OwnedRequest {
+            host_id: Id::from(2),
+            ..owned(77, None)
+        },
+    ] {
+        assert_eq!(
+            open_owned(&s, &admin(1), invalid).await.unwrap_err().0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let mut no_create = admin(1);
+    no_create.permissions.retain(|p| p != "holes.create");
+    assert_eq!(
+        open_owned(&s, &no_create, owned(77, None))
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn previews_end_with_their_source() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 11, 1, KEY).await;
+    let job_a = open_owned(&s, &admin(1), owned(500, None)).await.unwrap();
+    let job_b = open_owned(
+        &s,
+        &admin(1),
+        OwnedRequest {
+            source_ref: "other-job".into(),
+            ..owned(500, None)
+        },
+    )
+    .await
+    .unwrap();
+    let other_run = open_owned(&s, &admin(1), owned(501, None)).await.unwrap();
+    let manual = create_hole(&s, 11, 80).await;
+
+    // A job ending revokes only that job's previews.
+    let ids = revoke_source(&s.db, "pipeline", 500, Some("review-job"))
+        .await
+        .unwrap();
+    assert_eq!(ids, vec![job_a.id]);
+    assert!(reload(&s, job_a.id).await.revoked_at > 0);
+    assert_eq!(reload(&s, job_b.id).await.revoked_at, 0);
+    // The run ending revokes the rest of the run.
+    assert_eq!(
+        revoke_source(&s.db, "pipeline", 500, None).await.unwrap(),
+        vec![job_b.id]
+    );
+    assert!(
+        revoke_source(&s.db, "pipeline", 500, None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        reload(&s, job_b.id).await.revoked_by,
+        0,
+        "revoked by the system"
+    );
+
+    // The sweep revokes previews whose source no longer exists (run 501 and
+    // the workflow execution were never recorded), and leaves manual ones.
+    let orphan_flow = open_owned(
+        &s,
+        &admin(1),
+        OwnedRequest {
+            source_kind: "workflow",
+            ..owned(9001, None)
+        },
+    )
+    .await
+    .unwrap();
+    owned::sweep(&s).await.unwrap();
+    assert!(reload(&s, other_run.id).await.revoked_at > 0);
+    assert!(reload(&s, orphan_flow.id).await.revoked_at > 0);
+    assert_eq!(reload(&s, i64::from(hole_id(&manual))).await.revoked_at, 0);
+}
+
+#[tokio::test]
+async fn a_service_that_never_comes_up_fails_and_leaves_nothing_open() {
+    let (_dir, s) = setup().await;
+    add_host(&s, 11, 1, KEY).await; // no runner connected
+    let row = open_owned(&s, &admin(1), owned(600, None)).await.unwrap();
+    let error = wait_ready(&s, &row, Duration::from_millis(300))
+        .await
+        .unwrap_err();
+    assert_eq!(error.2.as_ref().unwrap().key, "holes.notReady");
+    let row = reload(&s, row.id).await;
+    assert!(row.revoked_at > 0);
+    assert_eq!(row.probe_state, "runner_offline");
 }
 
 // ---------------------------------------------------------- helpers

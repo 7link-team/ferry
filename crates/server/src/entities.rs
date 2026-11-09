@@ -261,6 +261,12 @@ pub mod holes {
         pub updated_at: i64,
         pub updated_by: i64,
         pub version: i64,
+        pub source_kind: String,
+        pub source_id: i64,
+        pub source_ref: String,
+        pub review_state: String,
+        pub reviewed_at: i64,
+        pub reviewed_by: i64,
     }
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
     pub enum Relation {}

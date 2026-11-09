@@ -10,5 +10,8 @@
   "holes.unavailable": "The previewed service cannot be reached: the Runner is offline or the local port is not accepting connections.",
   "holes.busy": "This preview has too many open connections. Try again shortly.",
   "holes.timeout": "The previewed service did not respond in time.",
-  "holes.tooLarge": "The request body exceeds the 64 MiB preview limit."
+  "holes.tooLarge": "The request body exceeds the 64 MiB preview limit.",
+  "holes.automatic": "This preview is managed by a pipeline or workflow. It can only be revoked.",
+  "holes.reviewClosed": "This preview is not waiting for review.",
+  "holes.notReady": "The local service did not become reachable in time: {detail}"
 }

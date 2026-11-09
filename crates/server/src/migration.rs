@@ -12,6 +12,7 @@ mod chat_interactions;
 mod chat_messages;
 mod conversations;
 mod holes;
+mod holes_sources;
 mod login_guard;
 mod platform_monitor;
 mod platform_storage;
@@ -156,6 +157,7 @@ impl MigratorTrait for Migrator {
             Box::new(agent_models::Migration),
             Box::new(chat_interactions::Migration),
             Box::new(holes::Migration),
+            Box::new(holes_sources::Migration),
         ]
     }
 }

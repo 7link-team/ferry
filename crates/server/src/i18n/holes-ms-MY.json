@@ -10,5 +10,8 @@
   "holes.unavailable": "Perkhidmatan yang dipratonton tidak dapat dicapai: Runner di luar talian atau port tempatan tidak menerima sambungan.",
   "holes.busy": "Pratonton ini mempunyai terlalu banyak sambungan terbuka. Cuba lagi sebentar lagi.",
   "holes.timeout": "Perkhidmatan yang dipratonton tidak bertindak balas tepat pada masanya.",
-  "holes.tooLarge": "Badan permintaan melebihi had pratonton 64 MiB."
+  "holes.tooLarge": "Badan permintaan melebihi had pratonton 64 MiB.",
+  "holes.automatic": "Pratonton ini diurus oleh saluran paip atau aliran kerja. Ia hanya boleh dibatalkan.",
+  "holes.reviewClosed": "Pratonton ini tidak menunggu semakan.",
+  "holes.notReady": "Perkhidmatan tempatan tidak sedia dalam masa yang ditetapkan: {detail}"
 }
