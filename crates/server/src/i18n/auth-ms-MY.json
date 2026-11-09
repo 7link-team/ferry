@@ -96,7 +96,7 @@
   "mail.testSubject": "Ujian konfigurasi e-mel",
   "mail.testBody": "Ini ialah mesej ujian konfigurasi e-mel.",
   "mail.codeSubject": "Kod pengesahan pendaftaran",
-  "mail.codeBody": "Kod pendaftaran anda ialah {code}. Tamat tempoh dalam 10 minit. Jangan kongsi.",
+  "mail.codeBody": "Kod pendaftaran anda ialah {code}. Tamat tempoh dalam {expires_minutes} minit. Jangan kongsi.",
   "monitor.nodeChanged": "Pelayan respons berbeza daripada nod dipaparkan. Segar semula statistik dan cuba lagi; tiada statistik ditetapkan semula.",
   "auth.captchaRequired": "Lengkapkan pengesahan keselamatan baharu sebelum log masuk.",
   "auth.loginRateLimit": "Terlalu banyak percubaan log masuk. Cuba lagi selepas seminit.",

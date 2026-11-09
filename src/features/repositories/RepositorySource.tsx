@@ -16,9 +16,12 @@ type PlatformAuthorization = { id: string; web_available: boolean; setup?: strin
 const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
 
 /** Named platform authorization; repository and branch selection belongs to checkout nodes. */
-export function RepositorySource({ navigation, workspace, draft, readOnly, onChange, onValidityChange }: { navigation: Navigation;
+export function RepositorySource({ navigation, workspace, draft, readOnly, onChange, onValidityChange, onAuthorized, credentialHref, fixedProvider }: { navigation?: Navigation;
   workspace: string; draft: Record<string, unknown>; readOnly: boolean;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (blocked: boolean) => void;
+  onAuthorized?: (id: string) => void;
+  credentialHref?: string;
+  fixedProvider?: boolean;
 }) {
   useCommonTranslation();
   const provider = String(draft.provider ?? "git");
@@ -90,7 +93,8 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
   function authorized(data: { status?: string; connection_id?: string }) {
     closeAuthorization(); setWaiting(false);
     if (data.status === "connected" && data.connection_id) {
-      navigation.navigate({ workspace, group: "repository", item: "repositories", id: encodeURIComponent(String(data.connection_id)), mode: "view" }, {});
+      if (onAuthorized) { onAuthorized(String(data.connection_id)); return; }
+      navigation?.navigate({ workspace, group: "repository", item: "repositories", id: encodeURIComponent(String(data.connection_id)), mode: "view" }, {});
     } else setAuthorizationError(data.status === "connected" ? hostRepositoryText("repository.034") : hostRepositoryText("repository.035"));
   }
   useEffect(() => {
@@ -133,7 +137,7 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
   </dl>;
 
   return <div className="space-y-4">
-    {!draft.id && <fieldset className="min-w-0 space-y-2">
+    {!draft.id && !fixedProvider && <fieldset className="min-w-0 space-y-2">
       <legend className="text-sm font-medium">{hostRepositoryText("repository.presets.title")}</legend>
       <div className="grid gap-2 sm:grid-cols-3">
         {(["github", "codeup", "git"] as const).map(value => <Button key={value} type="button" variant={preset === value ? "secondary" : "outline"}
@@ -144,14 +148,14 @@ export function RepositorySource({ navigation, workspace, draft, readOnly, onCha
       </div>
       <p role="status" className="text-xs leading-relaxed text-muted-foreground">{hostRepositoryText(preset ? `repository.presets.${preset}Help` : "repository.presets.help")}</p>
     </fieldset>}
-    <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.037")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.037")} className={selectClass} value={provider} disabled={waiting || existingOAuth} onChange={event => {
+    <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.037")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.037")} className={selectClass} value={provider} disabled={waiting || existingOAuth || fixedProvider} onChange={event => {
       changeProvider(event.target.value);
     }}><option value="">{hostRepositoryText("repository.044")}</option>{provider && !platforms.some(([key]) => key === provider) && <option value={provider}>{repositoryProviderLabel(provider)}</option>}{platforms.map(([key]) => <option key={key} value={key}>{repositoryProviderLabel(key)}</option>)}</select></AutoField>
     {provider && provider !== "git" && <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.045")}</span>} className="block space-y-2"><select aria-label={hostRepositoryText("repository.045")} className={selectClass} value={method} disabled={waiting || !!draft.id} onChange={event => { closeAuthorization(); setWaiting(false); setMethod(event.target.value); setAuthorizationError(""); }}><option value="token">{hostRepositoryText("repository.046")}</option>{provider !== "codeup" && <option value="web" disabled={!platform?.web_available && !existingOAuth}>{hostRepositoryText("repository.039")}</option>}</select></AutoField>}
     {provider && (provider === "git" || method === "token") && <>
       <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.038")}</span>} className="block space-y-2"><SelectRefresh label={hostRepositoryText("repository.052")} loading={loadingCredentials} onRefresh={() => setRefresh(value => value + 1)}><select aria-label={hostRepositoryText("repository.038")} className={selectClass} value={credentialId} disabled={loadingCredentials} onChange={event => onChange({ credential_id: event.target.value })}><option value="0">{provider === "git" ? hostRepositoryText("repository.040") : hostRepositoryText("repository.047")}</option>{hasCredential && !availableCredentials.some(row => row.id === credentialId) && <option value={credentialId}>{hostRepositoryText("repository.048")}{credentialId}</option>}{availableCredentials.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</select></SelectRefresh></AutoField>
       {loadingCredentials ? !availableCredentials.length && <LoadingSkeleton variant="inline" label={hostRepositoryText("repository.049")} /> : !availableCredentials.length && !credentialError && <p role="status" className="text-sm text-muted-foreground">{hostRepositoryText("repository.050")}</p>}
-      <a className="text-sm text-primary underline underline-offset-4" href={navigation.href({ workspace, group: "repository", item: "credentials", mode: "new" }, { scope: "build" })} target="_blank" rel="noopener noreferrer">{hostRepositoryText("repository.051")}</a>
+      <a className="text-sm text-primary underline underline-offset-4" href={credentialHref ?? navigation?.href({ workspace, group: "repository", item: "credentials", mode: "new" }, { scope: "build" })} target="_blank" rel="noopener noreferrer">{hostRepositoryText("repository.051")}</a>
       <p className="text-xs text-muted-foreground">{provider === "git" ? hostRepositoryText("repository.053") : hostRepositoryText("repository.054")}</p>
       {provider === "git" ? <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.055")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.055")} value={String(draft.url ?? "")} placeholder={hostRepositoryText("repository.056")} onChange={event => onChange({ url: event.target.value })} /></AutoField> : <>
         {provider === "codeup" && <AutoField label={<span className="text-sm font-medium">{hostRepositoryText("repository.057")}</span>} className="block space-y-2"><Input aria-label={hostRepositoryText("repository.057")} value={String(draft.organization ?? "")} onChange={event => onChange({ organization: event.target.value })} /><span className="block text-xs text-muted-foreground">{hostRepositoryText("repository.058")}</span></AutoField>}

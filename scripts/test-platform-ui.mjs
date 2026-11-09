@@ -71,6 +71,28 @@ try {
   await page.screenshot({ path: '/tmp/platform-workspaces.png', fullPage: true });
   // Shared table actions are links rendered in each row's actions menu.
   const row = page.getByRole('row').filter({ hasText: 'First workspace' });
+  const detailsPath = new URL(await row.getByRole('link', { name: '查看', exact: true }).getAttribute('href'), origin).pathname;
+  assert.match(detailsPath, /^\/zh-CN\/platform\/workspaces\/\d+$/, 'workspace exposes its existing detail route');
+  for (const width of [1280, 900, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await row.getByRole('cell', { name: 'First workspace', exact: true }).click();
+    const details = page.locator('form.resource-detail');
+    await details.waitFor();
+    await page.getByRole('heading', { name: 'First workspace', exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, detailsPath, 'row opens read-only details instead of editing');
+    assert.equal(await details.getByRole('textbox').count(), 0, 'detail fields render as text');
+    assert.equal(await details.locator('button[type="submit"]').count(), 0, 'viewing cannot submit changes');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `workspace details fit ${width}px`);
+    await page.screenshot({ path: join(process.env.TEST_SCREENSHOT_DIR || work, `workspace-details-${width}.png`), fullPage: true });
+    await page.reload();
+    await page.locator('form.resource-detail').waitFor();
+    await page.getByRole('link', { name: '编辑', exact: true }).click();
+    await page.getByRole('textbox', { name: '名称', exact: true }).waitFor();
+    assert.equal(new URL(page.url()).pathname, detailsPath + '/edit', 'editing has its own explicit route');
+    await page.getByRole('link', { name: '取消', exact: true }).click();
+    await row.getByRole('cell', { name: 'First workspace', exact: true }).waitFor();
+  }
+  await page.setViewportSize({ width: 1280, height: 800 });
   const enter = row.getByRole('link', { name: '进入工作空间', exact: true });
   if (!(await enter.isVisible())) await row.getByRole('button').last().click();
   const entryPath = new URL(await enter.getAttribute('href'), origin).pathname;
@@ -93,6 +115,9 @@ try {
   const ordinaryPage = await ordinary.newPage();
   await ordinaryPage.goto(`${origin}/_platform/users`);
   await ordinaryPage.getByText('当前账号没有平台管理权限。').waitFor();
+  await ordinaryPage.goto(origin + detailsPath);
+  await ordinaryPage.getByText('当前账号没有平台管理权限。').waitFor();
+  assert.equal((await ordinary.request.get(`${origin}/api/platform/workspaces/${detailsPath.split('/').at(-1)}`)).status(), 403, 'ordinary users cannot read platform workspace details');
   assert.equal(await ordinaryPage.getByRole('cell').count(), 0, 'ordinary account cannot view platform table');
   await page.getByRole('link', { name: '平台设置', exact: true }).click();
   await page.getByRole('button', { name: '账号注册', exact: true }).click();

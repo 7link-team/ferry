@@ -105,6 +105,9 @@ fn supported(graph: &Value, plan: &plan::Plan) -> Result<()> {
         let raw_spec = graph::node_at(graph, &node.path).ok_or_else(ApiError::missing)?;
         let effective_spec = super::host::effective(graph, raw_spec);
         let spec = &effective_spec;
+        if spec["type"] == "host.command" {
+            super::host::command_script(&spec["params"])?;
+        }
         if super::host::requested(spec) && !super::integration::supports(spec) {
             return Err(error("workflow.runImplementation", &node.path));
         }
@@ -1066,7 +1069,7 @@ async fn dispatch(
             let selections = if spec["type"] == "data.set"
                 || super::media::supports(spec)
                 || super::ai::supports(spec)
-                || super::integration::supports(spec)
+                || (super::integration::supports(spec) && spec["type"] != "host.command")
                 || super::transform::per_item(spec)
                 || super::condition::supports(spec)
             {

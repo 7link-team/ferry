@@ -13,7 +13,7 @@ export function PlatformMailTest({readOnly,onVerified,draft,locale,template}:{re
     <Button type="button" variant="outline" disabled={readOnly||busy||!email.trim()} onClick={async()=>{
       setBusy(true);setMessage("");setSuccess(false);try {
         const saved=await api<Record<string,unknown>>("/platform/settings/1");
-        if(["mail_enabled","mail_host","mail_port","mail_security","mail_from","mail_username"].some(key=>String(saved[key]??"")!==String(draft[key]??""))||draft.mail_password)throw new Error(t("resource-domain:platform.mailSaveFirst"));
+        if(["mail_enabled","mail_host","mail_port","mail_security","mail_from","mail_username","mail_code_valid_minutes"].some(key=>String(saved[key]??"")!==String(draft[key]??""))||draft.mail_password)throw new Error(t("resource-domain:platform.mailSaveFirst"));
         onVerified(await api<Record<string,unknown>>("/platform/mail-test",{method:"POST",body:JSON.stringify({email,...(locale?{locale}:{}),...(template?{template}:{})})}));
         setSuccess(true);
       }catch(e){setMessage(errorText(e));}finally{setBusy(false);}

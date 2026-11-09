@@ -1,6 +1,99 @@
 use super::*;
 use crate::agents::tests::{admin, setup};
 use ferry_protocol::agent::{Event, Outcome};
+use sea_orm::TransactionTrait;
+
+#[tokio::test]
+async fn superadmin_group_owner_does_not_require_workspace_membership_or_join_it() {
+    use crate::entities::{ai_chat_members as people, workspace_members};
+    let (_dir, s, id) = seeded().await;
+    let mut scope = admin(1);
+    scope.user.id = 2.into();
+    scope.user.is_superadmin = true;
+    let body: Create = serde_json::from_value(json!({"kind":"group","member_ids":["1"]})).unwrap();
+    let tx = s.db.begin().await.unwrap();
+    groups::insert(&s, &tx, &scope, id, &body, vec![])
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        people::Entity::find()
+            .filter(people::Column::ConversationId.eq(id))
+            .count(&s.db)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        workspace_members::Entity::find()
+            .filter(workspace_members::Column::WorkspaceId.eq(1))
+            .filter(workspace_members::Column::UserId.eq(2))
+            .count(&s.db)
+            .await
+            .unwrap(),
+        0
+    );
+    let mut c = conversations::Entity::find_by_id(id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    c.owner_id = 2;
+    c.into_active_model()
+        .reset_all()
+        .update(&s.db)
+        .await
+        .unwrap();
+    let version = people::Entity::find()
+        .filter(people::Column::ConversationId.eq(id))
+        .order_by_desc(people::Column::Id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+    interactions::members(
+        State(s.clone()),
+        scope.clone(),
+        Path(("1".into(), id)),
+        Json(
+            serde_json::from_value(
+                json!({"version":Id::from(version),"member_ids":["1"],"agent_ids":[]}),
+            )
+            .unwrap(),
+        ),
+    )
+    .await
+    .unwrap();
+    let mut outsider = scope.clone();
+    outsider.user.id = 999.into();
+    assert!(find(&s.db, &outsider, id).await.is_err());
+    people::Entity::delete_many()
+        .filter(people::Column::ConversationId.eq(id))
+        .exec(&s.db)
+        .await
+        .unwrap();
+    let bad: Create = serde_json::from_value(json!({"kind":"group","member_ids":["999"]})).unwrap();
+    let tx = s.db.begin().await.unwrap();
+    assert_eq!(
+        groups::insert(&s, &tx, &scope, id, &bad, vec![])
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    tx.rollback().await.unwrap();
+    scope.user.is_superadmin = false;
+    let tx = s.db.begin().await.unwrap();
+    assert_eq!(
+        groups::insert(&s, &tx, &scope, id, &body, vec![])
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::NOT_FOUND
+    );
+    tx.rollback().await.unwrap();
+}
 
 #[tokio::test]
 async fn persisted_chat_is_independent_of_execution_logs_and_final_text_replaces_deltas() {

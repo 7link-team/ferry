@@ -314,7 +314,7 @@ it("keeps the host command visible offline and replaces it only after confirmed 
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => ({
     ok: true, status: 200,
     json: async () => url.endsWith("/connection-credentials")
-      ? { token: init.method === "POST" ? "new-token" : "old-token", server: "https://example.com", state: init.method === "POST" ? "offline" : "online" }
+      ? { token: init.method === "POST" ? "new-token" : "old-token", server: "https://example.com", os:"linux", installation_scope:"system", state: init.method === "POST" ? "offline" : "online" }
       : { state: online ? "online" : "offline" },
   })));
   await act(async () => root.render(<HostConnectionCommand workspace="ops" hostId="h1" />));
@@ -371,7 +371,7 @@ it("switches both connection surfaces between system service and current-user co
   expect(host.textContent).toContain("仅在该账号登录 Windows 期间运行");
   await choose("系统服务");
   expect(command()).toContain("-Verb RunAs");
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/connection-credentials") ? { token: "host-token", server: "https://example.com", state: "online" } : { state: "online" } })));
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith("/connection-credentials") ? { token: "host-token", server: "https://example.com", state: "online", os:"linux", installation_scope:"system" } : { state: "online" } })));
   await act(async () => root.unmount()); root = createRoot(host);
   await act(async () => root.render(<HostConnectionCommand workspace="ops" hostId="h1" />));
   const current = () => host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')!.value;
@@ -597,4 +597,19 @@ it.each([{ supported: false, ready: true }, { supported: true, ready: false }])(
   expect(fetcher).toHaveBeenCalledTimes(1);
   expect(host.querySelector('[role="alert"]')!.textContent).toBeTruthy();
   expect(host.querySelector("button")!.disabled).toBe(false);
+});
+
+it("defaults a known host to its reported OS and service scope without browser detection",async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,status:200,json:async()=>({token:'host-token',server:'https://example.com',state:'online',os:'windows',installation_scope:'user'})})));
+ await act(async()=>root.render(<HostConnectionCommand workspace="ops" hostId="h1"/>));
+ expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toContain('-User');
+ expect(host.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe('Windows');
+ expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="卸载命令"]')?.value).toBe(runnerUninstallCommand('windows','user'));
+});
+it("does not invent a system service scope for a foreground or older agent",async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,status:200,json:async()=>({token:'host-token',server:'https://example.com',state:'online',os:'windows',installation_scope:'foreground'})})));
+ await act(async()=>root.render(<HostConnectionCommand workspace="ops" hostId="h1"/>));
+ expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前连接命令"]')?.value).toBe('');
+ expect(host.textContent).toContain('当前代理为直接启动');
+ expect(host.querySelector('textarea[aria-label="卸载命令"]')).toBeNull();
 });

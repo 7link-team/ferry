@@ -40,7 +40,7 @@ import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
 import { Tabs,TabsContent,TabsList,TabsTrigger } from "../../shared/ui/tabs";
 import { CodeInsightAliases,CodeInsightRepositories } from "../pages/CodeInsightFields";
-import { MarketplaceRepository,PipelineRepository } from "../pages/PipelineRepository";
+import { MarketplaceRepository,PipelineRepository,PipelineRepositories } from "../pages/PipelineRepository";
 import { RepositorySource } from "../pages/RepositorySource";
 import { RunnerConnection } from "../pages/RunnerConnection";
 import { href,navigate,parse,replacePath,safeLoginRedirect,useRoute } from "../router";
@@ -461,7 +461,8 @@ export function ResourceForm<T extends Record<string, unknown>>({
       if (config.sectionNavigation === "scroll") return <ScrollFormSections name={recordName} sections={groups.map(name => ({ key: name, label: configText(name, config.sections.find(section => section.group === name)?.groupKey), content: config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === name).map(({ section, index }) => renderSection(section, index)) }))} footer={formActions} />;
       const active = groups.includes(group) ? group : groups[0]!;
       const sections = config.sections.map((section, index) => ({ section, index })).filter(({ section }) => (section.group ?? groups[0]) === active);
-      const tabs = sections.filter(({ section }) => section.tab);
+      const tabSections = sections.filter(({ section }) => section.tab);
+      const tabs = tabSections.filter(({ section }, index) => tabSections.findIndex(item => item.section.tab === section.tab) === index);
       return <div className="flex flex-col gap-4 md:flex-row">
         <nav aria-label={commonText("form.categories")} className="sticky top-[var(--resource-heading-height,0px)] z-10 flex shrink-0 flex-wrap gap-1 bg-background md:max-h-[65dvh] md:w-40 md:flex-col md:self-start md:overflow-y-auto">
           {groups.map(name => <button key={name} type="button" aria-current={!groupContent && name === active ? "page" : undefined} onClick={() => { setGroup(name); onGroupChange?.(); }}
@@ -473,7 +474,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
           {sections.filter(({ section }) => !section.tab).map(({ section, index }) => renderSection(section, index))}
           {tabs.length > 0 && <Tabs key={active} value={tabs.some(({section})=>section.tab===formTab)?formTab:tabs[0]!.section.tab} onValueChange={setFormTab}>
             <TabsList>{tabs.map(({ section }) => <TabsTrigger key={section.tab} value={section.tab!}>{configText(section.tab, section.tabKey)}</TabsTrigger>)}</TabsList>
-            {tabs.map(({ section, index }) => <TabsContent key={section.tab} value={section.tab!} className="pt-2">{renderSection(section, index)}</TabsContent>)}
+            {tabs.map(({ section }) => <TabsContent key={section.tab} value={section.tab!} className="space-y-4 pt-2">{tabSections.filter(item => item.section.tab === section.tab).map(({section, index}) => renderSection(section, index))}</TabsContent>)}
           </Tabs>}
           </>}
           {formActions}
@@ -617,9 +618,9 @@ function Field<T>({
   if (field.type === "actions-editor" || field.type === "actions-template-editor") {
     const editorDraft = envelope ? { ...envelope, definition: envelope.workflow } : draft;
     const change = (patch: Record<string, unknown>) => onChange(envelope ? patchTemplateWorkflow(envelope, patch) : patch);
-    return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={editorDraft} options={options} readOnly={readOnly} fillHeight={fillHeight} requireExecutorBinding={!envelope} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={change} onValidityChange={reportManifest} renderCheckout={(jobId,stepIndex)=><PipelineRepository key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={editorDraft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={change} onValidityChange={reportCheckout}/>}/></div>;
+    return <div className={cn("min-w-0 sm:col-span-2", fillHeight && "flex min-h-0 flex-1 flex-col")}><ActionsEditor draft={editorDraft} options={options} readOnly={readOnly} fillHeight={fillHeight} requireExecutorBinding={!envelope} {...(editorMode && onEditorModeChange ? { mode: editorMode, onModeChange: onEditorModeChange } : {})} onChange={change} onValidityChange={reportManifest} renderCheckoutBatch={jobId=><PipelineRepositories canCreateConnection={permissions.has("repositories.create")} key={jobId} workspace={workspace!} draft={editorDraft} jobId={jobId} readOnly={readOnly} onChange={change}/>} renderCheckout={(jobId,stepIndex)=><PipelineRepository canCreateConnection={permissions.has("repositories.create")} key={`${jobId}:${stepIndex}`} workspace={workspace!} draft={editorDraft} jobId={jobId} stepIndex={stepIndex} readOnly={readOnly} onChange={change} onValidityChange={reportCheckout}/>}/></div>;
   }
-  if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
+  if (field.type === "marketplace-repository") return <div className="min-w-0 sm:col-span-2"><MarketplaceRepository canCreateConnection={permissions.has("repositories.create")} workspace={workspace} draft={draft} options={options} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} /></div>;
 
   if (field.type === "connection-repositories") return <CodeInsightRepositories workspace={workspace} value={value} enabled={(draft as Record<string, unknown>).enabled !== false} readOnly={readOnly} permissions={permissions} onChange={onChange} onValidityChange={reportManifest} {...(field.repositoryAddLabelKey ? {addLabel:commonText(field.repositoryAddLabelKey)} : {})} />;
   if (field.type === "author-aliases") return <CodeInsightAliases value={value} readOnly={readOnly} onChange={onChange} onValidityChange={reportManifest} />;

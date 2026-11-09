@@ -18,5 +18,6 @@
   "conversations.fileTooLarge": "各ファイルは32 MiB以下にしてください。",
   "conversations.groupAgentPrivate": "グループにはワークスペース共有のエージェントが必要です。",
   "conversations.apiPending": "API 会話の実行はまだ利用できません。",
-  "conversations.noRunner": "このモデルを実行できる Runner がありません。"
+  "conversations.noRunner": "このモデルを実行できる Runner がありません。",
+  "conversations.cliPermissionUnsupported": "このCLIは読み取り専用の会話にのみ対応しています。"
 }

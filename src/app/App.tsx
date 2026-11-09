@@ -66,7 +66,10 @@ export function App() {
       ?? identity.workspaces.find(workspace => workspace.slug === route.workspace);
     if (!current && route.workspace !== "_platform") return;
     const query = Object.fromEntries(new URLSearchParams(location.search));
-    if ((route.item === "host-groups" || route.item === "pipeline-groups") && (route.mode === "list" || route.mode === "view")) {
+    if (route.item === "ai-models" && (query.scope === "ai" || /\/workflow\/credentials(?:\/|$)/.test(stripLocalePrefix(location.pathname)))) {
+      delete query.scope;
+      navigate({ ...route, workspace: current?.id ?? route.workspace }, query, { replace: true });
+    } else if ((route.item === "host-groups" || route.item === "pipeline-groups") && (route.mode === "list" || route.mode === "view")) {
       if (route.id) query.group_id = route.id;
       navigate({ ...route, workspace: current?.id ?? route.workspace, item: route.item === "host-groups" ? "hosts" : "pipelines", mode: "list" }, query, { replace: true });
     } else if (!stripLocalePrefix(location.pathname).startsWith("/platform/") && !stripLocalePrefix(location.pathname).startsWith(`/workspaces/${current?.id}/`)) {
@@ -191,7 +194,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   const formConfig = useMemo(() => {
     const item = findItem(route.group, route.item);
     const config = item && forms[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
-    return config ? { ...config, blank: { ...config.blank, ...(route.group === "workflow" && item?.key === "credentials" ? {scope:"ai",kind:"token"} : {}), ...item?.params } } : undefined;
+    return config ? { ...config, blank: { ...config.blank, ...(route.group === "workflow" && item?.key === "credentials" ? {scope:"integration",kind:"token"} : {}), ...item?.params } } : undefined;
   }, [forms, route.group, route.item]);
 
   // Nothing to show yet: send the user through workspace creation/joining.

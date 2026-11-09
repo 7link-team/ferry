@@ -18,5 +18,6 @@
   "conversations.fileTooLarge": "Each file must be at most 32 MiB.",
   "conversations.groupAgentPrivate": "Group conversations require workspace-shared Agents.",
   "conversations.apiPending": "API conversation execution is not available yet.",
-  "conversations.noRunner": "No available Runner can execute this model."
+  "conversations.noRunner": "No available Runner can execute this model.",
+  "conversations.cliPermissionUnsupported": "This CLI supports read-only conversations only. Choose read-only access."
 }

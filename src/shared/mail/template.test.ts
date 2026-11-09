@@ -17,3 +17,7 @@ it("escapes subjects and old plain bodies and removes active preview content", (
   expect(html).toContain("user@example.com");
   expect(plainMailHtml("<b>old literal text</b>")).toContain("&lt;b&gt;");
 });
+
+it('uses the configured validity in preview',()=>{
+ expect(mailPreview('Code','<p>{{expires_minutes}} minutes</p>',17)).toContain('17 minutes');
+});

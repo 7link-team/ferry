@@ -22,11 +22,12 @@ import { Button } from "../../shared/ui/button";
 import { DeleteConfirmDialog } from "../../shared/ui/DeleteConfirmDialog";
 import { Input } from "../../shared/ui/input";
 import { ContextMenu } from "radix-ui";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "../../shared/ui/dropdown-menu";
 import { addActionJob,addActionStep,connectActionJobs,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,insertActionJob,parseActions,removeActionJob,removeActionStep,setActionJobApproval,type ActionJob } from "./actions-workflow";
 
 type Binding = { job_id: string; target_kind: string; target_ref: string; image: string };
 type Selection = { job: string; step?: number };
-type JobData = { job: ActionJob; selected?: Selection; readOnly: boolean; canDelete: boolean; missingHost: boolean; select: (value: Selection) => void; addJob: (job: string, mode: "serial" | "parallel") => void; addStep: (job: string) => void; removeJob: (job: string) => void };
+type JobData = { job: ActionJob; selected?: Selection; readOnly: boolean; canDelete: boolean; missingHost: boolean; select: (value: Selection) => void; addJob: (job: string, mode: "serial" | "parallel") => void; addStep: (job: string, kind?: "run" | "checkout" | "action") => void; removeJob: (job: string) => void };
 type JobNode = Node<JobData, "job">;
 function JobCard({ data }: NodeProps<JobNode>) {
   useCommonTranslation();
@@ -36,7 +37,7 @@ function JobCard({ data }: NodeProps<JobNode>) {
       {!data.readOnly && <Button type="button" variant="ghost" size="icon" className="nodrag nopan size-7" aria-label={executionText("editor.deleteJobName", { name: data.job.name })} title={executionText("editor.deleteJob")} disabled={!data.canDelete} onClick={event => { event.stopPropagation(); data.removeJob(data.job.id); }}><Trash2 className="size-4" /></Button>}
     </div>
     <div className="space-y-1 p-2">{data.missingHost && <button type="button" className="nodrag w-full rounded px-2 py-1 text-left text-xs text-destructive" onClick={() => data.select({ job: data.job.id })}>{executionText("editor.chooseHost")}</button>}{data.job.steps.map((step, index) => <button key={index} data-action-step={index} type="button" className={`nodrag flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${data.selected?.job === data.job.id && data.selected?.step === index ? "bg-accent" : ""}`} onClick={() => data.select({ job: data.job.id, step: index })}><span className="text-xs text-muted-foreground">{index + 1}</span><span className="truncate">{step.name || step.uses || executionText("shared.resource.cron.commandAction")}</span></button>)}{data.job.raw["ferry-approval"] === true && <p className="p-2 text-xs text-muted-foreground">{executionText("editor.approvalHelp")}</p>}{!data.job.steps.length && data.job.raw["ferry-approval"] !== true && <p className="p-2 text-xs text-muted-foreground">{executionText("editor.reusableHelp")}</p>}
-      {!data.readOnly && !data.job.raw.uses && data.job.raw["ferry-approval"] !== true && <Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start" onClick={event => { event.stopPropagation(); data.addStep(data.job.id); }}><Plus className="size-4" />{executionText("editor.addStep")}</Button>}
+      {!data.readOnly && !data.job.raw.uses && data.job.raw["ferry-approval"] !== true && <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="sm" className="nodrag nopan w-full justify-start"><Plus className="size-4" />{executionText("editor.addStep")}</Button></DropdownMenuTrigger><DropdownMenuContent>{(["run", "checkout", "action"] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => data.addStep(data.job.id, kind)}>{kind === "checkout" ? workflowText("actions.cloneCode") : kind === "run" ? executionText("shared.resource.cron.commandAction") : executionText("editor.useAction")}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
     </div>
     {!data.readOnly && <div className="flex gap-1 border-t p-1.5">
       <Button type="button" variant="ghost" size="sm" className="nodrag nopan flex-1" title={executionText("editor.addParallel")} onClick={event => { event.stopPropagation(); data.addJob(data.job.id, "parallel"); }}><GitFork className="size-4" />{executionText("editor.parallel")}</Button>
@@ -50,7 +51,7 @@ const edgeTypes = { insert: InsertEdge };
 const YamlEditor = lazy(() => import("./YamlEditor").then(module => ({ default: module.YamlEditor })));
 const inputClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
 
-export function ActionsEditor({ draft, options, readOnly, fillHeight = false, requireExecutorBinding = true, mode, onModeChange, onChange, onValidityChange, renderCheckout }: {
+export function ActionsEditor({ draft, options, readOnly, fillHeight = false, requireExecutorBinding = true, mode, onModeChange, onChange, onValidityChange, renderCheckout, renderCheckoutBatch }: {
   draft: Record<string, unknown>; options: Option[]; readOnly: boolean;
   fillHeight?: boolean;
   requireExecutorBinding?: boolean;
@@ -58,6 +59,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
   onModeChange?: (mode: "visual" | "yaml") => void;
   onChange: (patch: Record<string, unknown>) => void; onValidityChange: (invalid: boolean) => void;
   renderCheckout?: (jobId: string, stepIndex: number) => ReactNode;
+  renderCheckoutBatch?: (jobId: string) => ReactNode;
 }) {
   const { i18n } = useCommonTranslation();
   const source = String(draft.definition ?? "");
@@ -173,12 +175,12 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
       setSelection(undefined);
     } });
   }
-  function addStep(id: string) {
+  function addStep(id: string, kind: "run" | "checkout" | "action" = "run") {
     if (readOnly) return;
     try {
       const index = parsed.jobs.find(row => row.id === id)?.steps.length;
       if (index === undefined) return;
-      commit({ definition: addActionStep(source, id) });
+      commit({ definition: addActionStep(source, id, kind) });
       select({ job: id, step: index });
       setError("");
     } catch (cause) { setError(String(cause)); }
@@ -279,6 +281,7 @@ export function ActionsEditor({ draft, options, readOnly, fillHeight = false, re
           {job.raw["ferry-approval"] !== true && <ActionsConditionField value={job.raw.if} readOnly={readOnly} job change={condition => update({ if: condition })} />}
           {job.raw.uses === undefined && job.raw["ferry-approval"] !== true && <StepMap label={workflowText("environmentVariables")} value={job.raw.env} readOnly={readOnly} change={env => update({ env })} />}
           {job.raw.uses === undefined && job.raw["ferry-approval"] !== true && <ActionsJobSettings value={job.raw} readOnly={readOnly} update={update} />}
+          {job.raw.uses === undefined && job.raw["ferry-approval"] !== true && renderCheckoutBatch?.(job.id)}
           </ActionsPhase>
           <ActionsPhase phase="run">
           {job.raw.uses !== undefined && job.raw["ferry-approval"] !== true && <ActionsJobSettings value={job.raw} readOnly={readOnly} update={update} />}

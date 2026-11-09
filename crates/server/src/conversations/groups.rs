@@ -140,7 +140,7 @@ pub(super) async fn insert(
             .count(tx)
             .await?
             > 0;
-        if !membership {
+        if !membership && !(user == scope.user.id && scope.user.is_superadmin) {
             return Err(ApiError::missing());
         }
         members::Entity::insert(

@@ -1,17 +1,18 @@
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
+import { Dialog } from "radix-ui";
 import { useEffect,useState,type ReactNode } from "react";
 import { api,errorText } from "../../shared/api/api";
-import { named } from "../../shared/api/resource";
-import { AutoField } from "../../shared/forms/auto-form";
+import { AutoField, AutoForm } from "../../shared/forms/auto-form";
 import { SelectRefresh } from "../../shared/forms/SelectRefresh";
-import { commonText,hostRepositoryText,useCommonTranslation } from "../../shared/i18n/i18n";
+import { commonText,hostRepositoryText,useCommonTranslation,workflowText as t } from "../../shared/i18n/i18n";
+import { currentLocale } from "../../shared/i18n/locale";
 import type { Navigation } from "../../shared/routing/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
-import { repositoryProviderLabel } from "../repositories/RepositorySource";
+import { RepositorySource, repositoryProviderLabel } from "../repositories/RepositorySource";
 
 type Connection = {id:string;name:string;provider:string;state:string;url?:string};
-type Remote = {name:string;full_name:string;url:string;default_branch:string};
+type Remote = {name:string;full_name:string;url:string;default_branch:string;remote_id?:string};
 const selectClass="w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm";
 export type RepositorySelection={connection_id:string;name:string;url:string;default_branch:string};
 export function useConnectionRepositories(workspace:string,connectionId:string|undefined,enabled=true,allPages=false) {
@@ -54,16 +55,66 @@ export function useConnectionRepositories(workspace:string,connectionId:string|u
   },[root,connection?.id,connection?.provider,page,revision,enabled,allPages]);
   return {connections,repositories,connection,root,error:connectionError||error,loading,connectionsLoading,page,hasMore,setPage,setRevision};
 }
-export function ConnectionRepositoryFields({ navigation,workspace,data,connectionId,repositoryUrl,repositoryLabel,onChange,group="",onGroupChange,repositoryPicker,gitAction}:{ navigation: Navigation;workspace:string;data:ReturnType<typeof useConnectionRepositories>;connectionId:string;repositoryUrl:string;repositoryLabel:string;onChange:(value:RepositorySelection)=>void;group?:string;onGroupChange?:(group:string)=>void;repositoryPicker?:ReactNode;gitAction?:ReactNode}) {
+
+/** Both workflow editors use this picker and the existing connection form/auth lifecycle. */
+export function RepositoryConnectionSelect({workspace,data,value,onChange,provider,readOnly=false,canCreate=true}:{
+  workspace:string;data:ReturnType<typeof useConnectionRepositories>;value:string;
+  onChange:(id:string,connection?:Connection)=>void;provider?:string;readOnly?:boolean;canCreate?:boolean;
+}) {
+  const [creating,setCreating]=useState(false);
+  const [added,setAdded]=useState<Connection>();
+  const connections=data.connections.filter(row=>!provider||row.provider===provider);
+  const rows=added&&!connections.some(row=>row.id===added.id)&&(!provider||added.provider===provider)?[...connections,added]:connections;
+  return <div className="min-w-0 space-y-2">
+    <AutoField label={t("integration.connection")} className="block space-y-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <SelectRefresh label={t("integration.refresh")} loading={data.connectionsLoading} onRefresh={()=>data.setRevision(n=>n+1)} className="min-w-0 flex-1">
+          <select aria-label={t("integration.connection")} className={selectClass} value={value==='0'?'':value} disabled={readOnly||data.connectionsLoading} onChange={event=>onChange(event.target.value,rows.find(row=>row.id===event.target.value))}>
+            <option value="">{data.connectionsLoading?commonText("common.loading"):hostRepositoryText("repository.018")}</option>
+            {value&&value!=='0'&&!rows.some(row=>row.id===value)&&<option value={value}>{commonText("form.unavailableReference",{id:value})}</option>}
+            {rows.map(row=><option key={row.id} value={row.id} disabled={!['connected','refreshing'].includes(row.state)}>{row.name} · {repositoryProviderLabel(row.provider)}{!['connected','refreshing'].includes(row.state)?hostRepositoryText("repository.019"):''}</option>)}
+          </select>
+        </SelectRefresh>
+        {!readOnly&&canCreate&&<Button type="button" variant="outline" className="min-h-11" onClick={()=>setCreating(true)}>{hostRepositoryText("repository.020")}</Button>}
+      </div>
+    </AutoField>
+    {!data.connectionsLoading&&!data.error&&!rows.length&&<p role="status" className="text-xs text-muted-foreground">{hostRepositoryText("repository.022")}</p>}
+    {creating&&<CreateRepositoryConnection workspace={workspace} {...(provider?{provider}:{})} onClose={()=>setCreating(false)} onCreated={row=>{setAdded(row);data.setRevision(n=>n+1);onChange(row.id,row);setCreating(false);}}/>}
+  </div>;
+}
+
+function CreateRepositoryConnection({workspace,provider,onClose,onCreated}:{workspace:string;provider?:string;onClose:()=>void;onCreated:(row:Connection)=>void}) {
+  const [draft,setDraft]=useState<Record<string,unknown>>({name:'',provider:provider??'',credential_id:'0',base_url:'',api_url:'',organization:'',url:'',description:''});
+  const [blocked,setBlocked]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const update=(patch:Record<string,unknown>)=>setDraft(current=>({...current,...patch}));
+  const credentialHref=`/${currentLocale()}/workspaces/${encodeURIComponent(workspace)}/credentials/new?scope=build`;
+  const authorized=async(id:string)=>{setBusy(true);setError('');try{onCreated(await api<Connection>(`/workspaces/${workspace}/code-connections/${encodeURIComponent(id)}`));}catch(cause){setError(errorText(cause));}finally{setBusy(false);}};
+  return <Dialog.Root open onOpenChange={open=>{if(!open&&!busy)onClose();}}><Dialog.Portal>
+    <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40"/>
+    <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 dialog-shell rounded-xl border bg-background p-5 shadow-xl">
+      <Dialog.Title className="text-lg font-semibold">{hostRepositoryText("repository.020")}</Dialog.Title>
+      <Dialog.Description className="text-sm text-muted-foreground">{t("integration.connectionHelp")}</Dialog.Description>
+      <AutoForm className="dialog-form mt-4" onSubmit={async event=>{event.preventDefault();event.stopPropagation();if(blocked||busy)return;setBusy(true);setError('');try{const row=await api<Connection>(`/workspaces/${workspace}/code-connections`,{method:'POST',body:JSON.stringify(draft)});onCreated({...row,url:String(draft.url??'')});}catch(cause){setError(errorText(cause));}finally{setBusy(false);}}}>
+        <fieldset disabled={busy} className="dialog-body min-w-0 space-y-4">
+          <AutoField label={commonText("resource-domain:repository.connectionName")}><Input aria-label={commonText("resource-domain:repository.connectionName")} required maxLength={200} value={String(draft.name)} onChange={event=>update({name:event.target.value})}/></AutoField>
+          <RepositorySource credentialHref={credentialHref} fixedProvider={!!provider} workspace={workspace} draft={draft} readOnly={false} onChange={update} onValidityChange={setBlocked} onAuthorized={id=>void authorized(id)}/>
+          {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+        </fieldset>
+        <div className="dialog-footer mt-4"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>{commonText("common.cancel")}</Button><Button type="submit" disabled={busy||blocked||!String(draft.name).trim()}>{busy?commonText("common.saving"):commonText("common.create")}</Button></div>
+      </AutoForm>
+    </Dialog.Content>
+  </Dialog.Portal></Dialog.Root>;
+}
+export function ConnectionRepositoryFields({ canCreateConnection=true,workspace,data,connectionId,repositoryUrl,repositoryLabel,onChange,group="",onGroupChange,repositoryPicker,gitAction}:{ canCreateConnection?:boolean;navigation: Navigation;workspace:string;data:ReturnType<typeof useConnectionRepositories>;connectionId:string;repositoryUrl:string;repositoryLabel:string;onChange:(value:RepositorySelection)=>void;group?:string;onGroupChange?:(group:string)=>void;repositoryPicker?:ReactNode;gitAction?:ReactNode}) {
   useCommonTranslation();
-  const {connections,connection,repositories,error,loading,page,hasMore,setPage,setRevision}=data;
+  const {connections,connection,repositories,error,loading,page,hasMore,setPage}=data;
   const groups=[...new Set(repositories.flatMap(row=>{
     const parts=row.full_name.split('/').filter(Boolean);parts.pop();
     return parts.map((_,index)=>parts.slice(0,index+1).join('/'));
   }))].sort((a,b)=>a.localeCompare(b));
   const visibleRepositories=group?repositories.filter(row=>row.full_name.startsWith(group+'/')):repositories;
   return <>
-    <AutoField label={<span className="text-sm">{hostRepositoryText("repository.002")}</span>} className="block space-y-2 sm:col-span-2"><div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center"><SelectRefresh label={hostRepositoryText("repository.021")} loading={data.connectionsLoading||loading} onRefresh={()=>setRevision(value=>value+1)} className="sm:flex-1"><select aria-label={hostRepositoryText("repository.002")} className={selectClass} value={connectionId==='0'?'':connectionId} onChange={event=>{const selected=connections.find(row=>row.id===event.target.value);onChange({connection_id:event.target.value,name:selected?.name??'',url:selected?.provider==='git'?selected.url??'':'',default_branch:''});}}><option value="">{hostRepositoryText("repository.018")}</option>{connectionId&&connectionId!=='0'&&!connections.some(row=>row.id===connectionId)&&<option value={connectionId}>{named(undefined,connectionId)}</option>}{connections.map(row=><option key={row.id} value={row.id}>{named(row.name,row.id)} · {repositoryProviderLabel(row.provider)}{row.state!=='connected'?hostRepositoryText("repository.019"):''}</option>)}</select></SelectRefresh><Button type="button" size="sm" variant="outline" asChild><a href={navigation.href({workspace,group:"repository",item:"repositories",mode:"new",id:""},{})} target="_blank" rel="noopener noreferrer">{hostRepositoryText("repository.020")}</a></Button></div></AutoField>
+    <div className="min-w-0 sm:col-span-2"><RepositoryConnectionSelect canCreate={canCreateConnection} workspace={workspace} data={data} value={connectionId} onChange={(id,created)=>{const selected=created??connections.find(row=>row.id===id);onChange({connection_id:id,name:selected?.name??'',url:selected?.provider==='git'?selected.url??'':'',default_branch:''});}}/></div>
     {data.connectionsLoading&&!connections.length&&<LoadingSkeleton variant="inline" label={hostRepositoryText("repository.loadingConnections")} />}
     {!data.connectionsLoading&&!error&&!connections.length&&<p className="text-xs text-muted-foreground">{hostRepositoryText("repository.022")}</p>}
     {onGroupChange&&connection&&connection.provider!=='git'&&<AutoField label={hostRepositoryText("repository.group")} className="block space-y-2"><select aria-label={hostRepositoryText("repository.group")} className={selectClass} value={group} disabled={loading||!!error} onChange={event=>onGroupChange(event.target.value)}><option value="">{hostRepositoryText("repository.allGroups")}</option>{groups.map(name=><option key={name} value={name}>{name}</option>)}</select></AutoField>}

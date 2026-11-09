@@ -1,4 +1,5 @@
 {
+  "workflow.repositoryConnectionRequired": "Pilih sambungan repositori. Operasi Git awam memerlukan pilihan tanpa pengesahan dan URL HTTP(S) yang jelas.",
   "reviews.waitingAi": "Menunggu kapasiti serentak model.",
   "reviews.invalid": "Konfigurasi semakan kod tidak sah: {reason}.",
   "reviews.waiting": "Menunggu Runner yang sepadan atau kapasiti saluran paip.",

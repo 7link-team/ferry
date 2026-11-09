@@ -320,6 +320,7 @@ pub async fn create(
     scope.require("workflows.create")?;
     let name = name(body.name.as_deref().unwrap_or_default())?;
     let definition = graph::checked(body.definition.as_deref().unwrap_or_default()).await?;
+    graph::repository_auth_policy(&definition, None)?;
     if body
         .lifecycle
         .as_deref()
@@ -330,6 +331,7 @@ pub async fn create(
     let group = Id::reference(body.group_id.as_deref().unwrap_or_default())?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = workspace_admin::authorize(&tx, &scope, "workflows.create").await?;
+    integration::validate_connections(&tx, &scope, &definition).await?;
     crate::pipelines::contexts::check_single(&tx, scope.workspace_id, "workflow_group", group)
         .await?;
     let id = s.next_id()?;
@@ -425,6 +427,8 @@ pub async fn update(
     }
     if let Some(value) = body.definition {
         row.definition = graph::checked(&value).await?;
+        graph::repository_auth_policy(&row.definition, Some(&current.definition))?;
+        integration::validate_connections(&tx, &scope, &row.definition).await?;
     }
     let revision = definitions::record(
         &s,

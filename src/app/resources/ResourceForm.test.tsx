@@ -426,6 +426,23 @@ it("uses the shared full-width footer with cancel before the primary action", as
   expect(actions.at(-2)?.textContent).toBe('取消');
 });
 
+it("renders sections sharing a tab together under one trigger and preserves tab navigation", async () => {
+  history.replaceState({}, "", "/ops/deploy/variables/10/edit?form_tab=registration");
+  const config={resource:"variables",heading:()=>"Settings",blank:{},sections:[
+    {group:"Account",tab:"registration",fields:[{key:"registration",label:"Allow registration",type:"switch" as const}]},
+    {group:"Account",tab:"registration",fields:[{key:"minutes",label:"Code validity",type:"number" as const}]},
+    {group:"Account",tab:"templates",fields:[{key:"template",label:"Email template",type:"text" as const}]},
+  ]};
+  await act(async()=>root.render(<ResourceForm config={config} workspace="ops" permissions={perms} />));
+  expect(host.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(host.querySelectorAll('[role="tabpanel"][data-state="active"]')).toHaveLength(1);
+  expect(host.querySelector('[role="tabpanel"][data-state="active"]')?.textContent).toContain("Allow registration");
+  expect(host.querySelector('[role="tabpanel"][data-state="active"]')?.textContent).toContain("Code validity");
+  await act(async()=>host.querySelector<HTMLButtonElement>('[role="tab"][data-state="inactive"]')!.dispatchEvent(new MouseEvent("mousedown", { bubbles:true, button:0 })));
+  expect(host.querySelector('[role="tabpanel"][data-state="active"]')?.textContent).toContain("Email template");
+  expect(new URLSearchParams(location.search).get("form_tab")).toBe("templates");
+});
+
 it("places grouped form actions with their fields instead of below a taller category sidebar", async () => {
   history.replaceState({}, "", "/ops/deploy/variables/10/edit");
   const base=formConfigs('ops').variables!;

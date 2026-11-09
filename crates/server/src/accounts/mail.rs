@@ -49,6 +49,8 @@ fn error(key: &str) -> ApiError {
 #[serde(default)]
 pub struct Configuration {
     pub enabled: bool,
+    code_enabled: Option<bool>,
+    code_valid_minutes: Option<u32>,
     host: String,
     port: u16,
     security: String,
@@ -78,10 +80,13 @@ impl Configuration {
         }
     }
     pub fn required(&self) -> bool {
-        self.enabled && self.verified_at.is_some()
+        self.enabled && self.verified_at.is_some() && self.code_enabled.unwrap_or(true)
+    }
+    fn code_minutes(&self) -> u32 {
+        self.code_valid_minutes.unwrap_or(10)
     }
     pub fn view(&self) -> Value {
-        json!({"mail_enabled":self.enabled,"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body,"mail_code_html":self.code_html,"mail_test_html":self.test_html,"mail_code_templates":self.code_templates})
+        json!({"mail_enabled":self.enabled,"mail_code_enabled":self.code_enabled.unwrap_or(true),"mail_code_valid_minutes":self.code_minutes(),"mail_host":self.host,"mail_port":self.port,"mail_security":self.security,"mail_username":self.username,"mail_from":self.from,"mail_has_password":!self.password.is_empty(),"mail_verified_at":self.verified_at,"mail_code_subject":self.code_subject,"mail_code_body":self.code_body,"mail_test_subject":self.test_subject,"mail_test_body":self.test_body,"mail_code_html":self.code_html,"mail_test_html":self.test_html,"mail_code_templates":self.code_templates})
     }
     fn seal(&self, s: &AppState) -> Result<String> {
         s.vault.seal(
@@ -99,6 +104,8 @@ impl Configuration {
         let mut fields = previous.clone();
         for key in [
             "enabled",
+            "code_enabled",
+            "code_valid_minutes",
             "host",
             "port",
             "security",
@@ -125,6 +132,9 @@ impl Configuration {
             }
         }
         config = serde_json::from_value(fields).map_err(|_| error("mail.invalid"))?;
+        if !(1..=60).contains(&config.code_minutes()) {
+            return Err(error("mail.invalid"));
+        }
         config.host = config.host.trim().to_owned();
         config.username = config.username.trim().to_owned();
         config.from = config.from.trim().to_owned();
@@ -246,7 +256,7 @@ fn validate_template(subject: &str, body: &str, code: bool) -> Result<()> {
     }
     Ok(())
 }
-fn render_template(template: &str, email: &str, code: &str) -> String {
+fn render_template(template: &str, email: &str, code: &str, minutes: &str) -> String {
     // Single pass: inserted user data is never treated as another template.
     let mut out = String::new();
     let mut rest = template;
@@ -259,7 +269,7 @@ fn render_template(template: &str, email: &str, code: &str) -> String {
         out.push_str(match &rest[start + 2..start + 2 + end] {
             "email" => email,
             "code" => code,
-            "expires_minutes" => "10",
+            "expires_minutes" => minutes,
             _ => "",
         });
         rest = &rest[start + 2 + end + 2..];
@@ -327,6 +337,7 @@ impl Configuration {
         locale: crate::i18n::Locale,
         sample: Option<&CodeTemplate>,
     ) -> (String, String) {
+        let minutes = self.code_minutes().to_string();
         let selected = sample.or_else(|| self.code_templates.get(locale.tag()));
         let (subject, body, subject_key, body_key) = if code.is_some() {
             (
@@ -346,15 +357,15 @@ impl Configuration {
         let subject = if subject.trim().is_empty() {
             crate::i18n::render(locale, &crate::i18n::Message::new(subject_key))
         } else {
-            render_template(subject, email, code.unwrap_or(""))
+            render_template(subject, email, code.unwrap_or(""), &minutes)
         };
         let body = if body.trim().is_empty() {
             crate::i18n::render(
                 locale,
-                &crate::i18n::Message::new(body_key).with("code", code.unwrap_or("")),
+                &crate::i18n::Message::new(body_key).with("code", code.unwrap_or("")).with("expires_minutes", &minutes),
             )
         } else {
-            render_template(body, email, code.unwrap_or(""))
+            render_template(body, email, code.unwrap_or(""), &minutes)
         };
         let html = if code.is_some() {
             selected.map_or(&self.code_html, |template| &template.html)
@@ -369,7 +380,7 @@ impl Configuration {
                 content
             }
         } else {
-            render_template(html, &escape_html(email), &escape_html(code.unwrap_or("")))
+            render_template(html, &escape_html(email), &escape_html(code.unwrap_or("")), &minutes)
         };
         let document = include_str!("../../../../src/shared/mail/layout.html")
             .replacen("{{title}}", &escape_html(&subject), 1)
@@ -522,7 +533,7 @@ pub async fn request_code(
         id: Set(id.clone()),
         code_hash: Set(hash.clone()),
         count: Set(0),
-        expires_at: Set(now + 600000),
+        expires_at: Set(now + i64::from(config.code_minutes()) * 60000),
         updated_at: Set(now),
         config_tag: Set(config.tag.clone()),
     }
@@ -538,7 +549,7 @@ pub async fn request_code(
             .await?;
         return Err(e);
     }
-    Ok(Json(json!({"retry_after":60,"expires_in":600})))
+    Ok(Json(json!({"retry_after":60,"expires_in":config.code_minutes() * 60})))
 }
 /// Called under the same singleton lock/transaction as user creation.
 pub async fn consume(
@@ -575,6 +586,22 @@ pub async fn consume(
 #[cfg(test)]
 mod template_tests {
     use super::*;
+    #[test]
+    fn registration_switch_and_validity_keep_legacy_defaults_and_render_current_configuration() {
+        let mut config = Configuration { enabled:true,verified_at:Some(1),..Configuration::default() };
+        assert!(config.required()); assert_eq!(config.code_minutes(),10);
+        config.code_enabled=Some(false); assert!(!config.required());
+        config.code_enabled=Some(true);config.code_valid_minutes=Some(17);
+        assert!(config.required());
+        for locale in crate::i18n::Locale::ALL {
+            let html=config.message_in("receiver@example.invalid",Some("123456"),locale,None).1;
+            assert!(html.contains("17"));assert!(!html.contains("expires_minutes"));
+        }
+        config.code_html="<p>{{expires_minutes}}</p>".into();
+        assert!(config.message("receiver@example.invalid",Some("123456")).1.contains("<p>17</p>"));
+        config.verified_at=None;assert!(!config.required());
+    }
+
     #[test]
     fn language_templates_are_independent_and_legacy_content_survives() {
         use crate::i18n::Locale;
@@ -678,7 +705,7 @@ mod template_tests {
             render_template(
                 "{{email}} {{code}} {{expires_minutes}}",
                 "{{code}}@example.com",
-                "123456"
+                "123456", "10"
             ),
             "{{code}}@example.com 123456 10"
         );

@@ -1,4 +1,631 @@
-## 当前事项清单
+## 当前事项清单（2026-11-09）
+
+| SETTINGS-TABS-FONT-28 | 待验证 | 同registration键多个分区归入单Tab，富文本原生字号下拉保留选区格式并同步HTML预览；41项相关测试与真实Chrome四宽度/六语/SMTP验收PASS（settings-tab-font-acceptance.json）。4291已备份更新/PID76440/index-DFd0-wHd.js，36类表/密钥/环境保全；待用户验收。 |
+| COMMIT-PUSH-29 | 进行中 | 用户要求全部提交推送；已审查当前main约124个源码/文档文件与凭据模式，无本地数据/构建产物；提交包含现有已实现功能及修复，不把方案/待办冒称完成；不含独立preview-holes分支合并或发版。 |
+
+| RUNNER-COMMAND-DEFAULTS-26 | 进行中 | 已知主机连接命令按上报OS默认；上报系统服务/当前用户服务/直接启动方式，未知不冒认系统服务，保留手动切换；兼容旧Runner与集群转发，验证用户所给节点。 |
+| REGISTRATION-CODE-CONFIG-27 | 待验证 | 已备份更新4291/PID84380/index-BHfCW9Zf.js：账号注册验证码配置区（启用开关、1–60分钟/默认10）；默认模板/预览/签发共用有效期。隔离SMTP及四宽度保存回读、17→3分钟、旧码消费、关闭拒绝签发PASS，registration-code-e2e.log；保留SMTP依赖/六语/原数据密钥。实际嵌入资源校验PASS；4291超管表单烟测未完成（两份旧测试会话为非超管，正确403），待用户验收。未提交推送发版。 |
+
+验证码配置交付检查点（2026-11-09 14:18）：直接执行，现有实现/真实邮件证据核对完成，无重复实现。前端534PASS/1既有skip、server570PASS/9既有ignored、相关Runner/协议/Sandbox通过；typecheck、前后端build及diff检查通过。隔离SMTP证据git-capabilities-20261109/registration-code-e2e.log及Temp/mail-template-workspace-fvXNWv；实际更新/备份/36类表、密钥、实例和环境保全见registration-code-local-update.json，无迁移。默认模板使用{{expires_minutes}}；历史自定义模板的字面10分钟不强制改写，需插入变量或恢复默认模板。自审/本期需求核对通过；实际4291超管UI未覆盖，不能把非超管会话烟测超时记为通过。其余分支拖动/Runner事项不在本次验证码交付中冒称验收。
+
+| PREVIEW-HOLES-25 | ACCEPTANCE（待合并） | 已提交分支feat/preview-holes@403a5b6（worktree/preview-holes，基c8978ab，37文件），未推送未合并。验证：cargo test --workspace PASS（server564/9既有ignored、runner48、protocol7）、fmt PASS、tsc PASS、vitest 531/1skip PASS；真实server+Runner+Vite+Chrome端到端12项PASS（沙箱读不到控制台API/Storage/Cookie/SW/DOM、HMR、上游无控制台Cookie、停服16.7s/恢复10.8s探测、撤销14ms切断、连接归零、Runner离线、四宽度三语无整页横滚），证据worktree/preview-holes/data/maintenance/preview-holes-20261109-061002。合并阻塞：主工作区Codex未提交改动与分支重叠9文件（protocol lib.rs含Codex新增installation_scope、runner runtime、runner transport/updates、nav.ts），需Codex提交后再merge，冲突为相邻字段并存。已知：手机窄屏7个操作图标挤压名称列（共享表格无折叠菜单，容器内可横滚，建议另行改共享组件）。D盘曾满（已删除本worktree增量缓存，构建改用CARGO_INCREMENTAL=0）。下一步：Codex提交后在main执行git merge feat/preview-holes，解决Hello/Live字段相邻冲突（保留installation_scope与supports_forward），合并后重跑cargo test --workspace、npm run typecheck、vitest，再删除worktree。 |
+| PIPELINE-CHECKOUT-22 | 待验证 | 独立克隆类型、多仓库/多组/跨连接选择已实现；分组编辑时展开快照，去重生成独立步骤ID与目录，原生YAML保留。前端526PASS/1skip、Chrome四宽度分组→生成→保存回读PASS。4291已备份更新/PID25120，实际四宽度空白新建/任务/连接入口及401PASS；证据git-capabilities-20261109/{connection-batch-reviewed,local-update.json,local-smoke.json}。待用户体验，未提交推送发版。 |
+| MODEL-CATALOG-SYNC-23 | 待处理 | 用户询问模型清单定时更新；建议可选自动同步、最近成功时间/结果/立即更新，区分手工模型与发现模型，保留默认及历史引用，CLI指定Runner/API指定连接。当前仅建议，周期、不可用模型语义和调度/离线规则待设计，不算已实现。 |
+| WORKFLOW-GIT-CAPABILITIES-24 | 进行中 | 本轮重开：Codeup子功能补克隆入口；连接模式不重复必填仓库地址，选仓库自动带入；明确Mac/Linux/Windows执行主机路径和Git Bash限制；分支节点右侧按输出端口添加，验证第二分支不接第一分支；整理布局保留上下/左右关系，节点出口/线/选择器统一显示条件分支名称。此前已补正：节点库新增代码与构建分类，克隆前置、主机命令结构化表单，复用SSH/Agent权限/容量/取消/日志及防重账本。真实Agent克隆HTTP Git→Go编译→运行产物、非零退出日志、三输入仅执行一次、无hosts.terminal拒绝与四宽度PASS；前端528PASS/1skip、工作流Rust91PASS/1ignore、最终UI23PASS。4291已备份更新/PID25108/index-C3OFHjy1.js，真实四宽度添加克隆/命令并编辑PASS。证据git-capabilities-20261109/node-build-{reviewed,local-update.json,local-smoke.json}。待用户体验；未提交推送发版。基础命令仅sh/Git Bash、同具体主机显式cd、每节点120秒；PowerShell/文件输入/全Git能力/商业写入未认证。 |
+| AI-CREDENTIAL-BOUNDARY-18 | 待验证 | 直接输入Key、加密创建/轮换、留空保留/不回显、失败回滚、默认隐藏AI凭据及消除凭据→工作流反向依赖已更新4291；历史账本身份不变。旧链接实际跳转白屏已修正ops分组并canonical替换；模型六语/四宽度/跨空间/权限/冲突浏览器及Rust回归PASS，证据models-credentials-validation/{result,local-check}.json。待用户体验，未提交推送发版。 |
+| CONVERSATION-GROUP-19 | 待验证 | 仅放行当前超管本人创建/编辑群聊，不自动加入空间；其他受邀者资格与私聊隔离保留，正负Rust回归PASS并更新4291。超管真实UI群聊组合仍待用户验收，不以Codex私聊烟测代替。 |
+| CLI-CATALOG-20 | 待处理 | 已更新4291与临时Runner：模型逐行管理、原生发现、Gemini/Qwen/OpenCode ACP及Pi RPC；Codex实际发现9个模型且示例模型已保存，真实会话completed。4个新增CLI原生初始化PASS，Pi原生本地模拟SSE/UUID恢复PASS；商业推理未验收。尚存CLI自定义API覆盖未进入执行配置（现用Runner原生配置），须继续处理；dsh身份未明不造空壳。证据cli-catalog-audit、models-credentials-validation。 |
+| SITE-TITLE-21 | 待验证 | 4291已更新：URL语言→浏览器语言→英文，静态HTML英文，与运行时六语目录一致；六语/权重/未知语言/禁用JS首屏及实际服务检查PASS。命名推荐“Ferry · 自动化与协作平台 / Automation & Collaboration”，仅建议未确认，尚未全站更名。 |
+
+节点构建补正交付（2026-11-09 13:24）：用户反馈重新打开24后完成真实入口与运行补正，最终4291/PID25108、ferry-server-node-build.exe、index-C3OFHjy1.js；备份pre-node-build-20261109-132302，36类原数据/密钥/实例/环境保全，无迁移。node-build-reviewed/result.json覆盖真实Windows Agent克隆/Go编译产物执行、失败stderr、批量一次、权限拒绝和四尺寸；已查看手机分类/命令截图并修复历史选择栏竖排。node-build-local-smoke.json为实际4291四宽度新建草稿、真正添加克隆/命令和表单编辑，无保存用户数据；本地截图live-node-*。前端528PASS/1skip、Rust工作流91PASS/1ignore、最终UI23PASS、前后端构建/diff检查PASS；直接执行，自审/本阶段需求评审PASS。原失败证据保留（测试cygpath环境、depth夹具、日志须读data、输出变量遮蔽及构建文件占用），修正后最终exit0。未提交/推送/发版；未认证Linux SSH命令本轮实跑、原生键盘/Figma、PowerShell/资产输入、容器/自动制品发布、全Git/商业提供方写入；已有其他待办保留。
+
+本轮Git阶段交付（2026-11-09 12:38）：4291/PID25120、ferry-server-git-connections.exe、index-BwJVBpkp.js；备份pre-git-connections-20261109-123732，36类原数据/密钥/实例/FERRY配置保全PASS，无迁移。节点编辑器窄屏标题独占行，补标题宽度断言并实际看图；连接/批量真实HTTP+Chrome证据connection-batch-reviewed/result.json。批量首轮空steps被API拒绝、后续测试选择卡片非标题导致超时，修正测试夹具后exit0，原始失败保留。local-smoke.json为真实4291四宽度草稿入口/401检查，不写用户数据；隔离夹具覆盖保存与执行。前端526PASS/1skip、工作流Rust90PASS/1ignore，前后端构建/diff检查PASS；直接执行，自审与本阶段需求复核PASS。未提交/推送/发版。商业平台真实写入、全Git能力、软键盘/原生App/Figma未认证；其余未完成项保留。
+
+本轮检查点（2026-11-09 10:47，本地已更新，未提交/推送/发版）：4291/PID53464、ferry-server-cli-catalog.exe、index-DPHN-USw.js；最终备份pre-cli-final-20261109-104555（首轮pre-cli-boundaries-20261109-104036保留），36类表原记录/密钥/实例/FERRY环境保全PASS，local-update-i18n.json为最终依据。临时Runner/PID81004、ferry-runner-cli-catalog.exe，保留原注册/状态目录，不装系统服务；原PID41312/50036已替换，不修改旧证据。518前端PASS/1skip、560后端PASS/9ignored、最终Runner19PASS/5原生ignored（额外原生目录用例已显式运行PASS），相关路由与后端i18n复测、前后端/Runner构建及diff检查PASS。checkout首次两失败为PATH缺Git sh，加入仅测试进程PATH后全量通过。浏览器result.json覆盖六语初始HTML/禁用JS、模型直接Key/行编辑、原API兼容、空间/权限/409/回滚、四宽度及旧链接；真实本地local-check.json覆盖六语/英文回退/不缓存、原生9模型发现并保存示例模型、桌面手机、旧链接及真实Codex会话持久化。新Codex会话113106464549113856已completed返回“会话链路验收成功。”。修复的实际缺陷及首次失败证据均保留：旧AI链接分组maintenance应为ops；Pi不支持--no-mcp/--session-id，使用关闭扩展/--session，0.74.2终态agent_end；目录RPC读完一行未清buffer导致第二帧JSON失败。Pi真实CLI只接本地模拟SSE而非商业推理，Gemini/Qwen/OpenCode仅原生ACP初始化；不可声称全CLI账号链路验收。新增两条服务端错误的六语翻译已补齐。设计与剩余边界见docs/ai-model-cli-boundaries.md；CLI自定义API尚未进入执行配置，保持20未完成，不可宣称有效；命名仍为建议。当前无测试/构建后台任务需要继续等待；后续先处理20的真实执行配置边界，不重复已完成目录/标题验证。
+
+| CODEX-LOCAL-ACCEPTANCE-17 | 待验证 | 4291/PID40988已更新；空间113084458525003776「Codex 会话验收」、模型113084459326115840、助手113084459380641792已配置；临时Runner/PID41312在线，独立目录/只读、复用本机Codex原生配置、不安装服务。真实浏览器发送→原生Codex→completed并返回“会话链路验收成功。”PASS，证据models-direct-validation/{codex-setup,codex-acceptance}.json及桌面/手机截图；原生API-Key状态文案兼容及单测通过。已保留供用户验收；现有烟测会话归示例账号私有，其他账号进入空间后新建自己的会话；超管按既有规则可进空间，普通账号需加入。不提交密钥/本地cookie，不发版。 |
+
+Codex 本轮末检：Runner agent 模块16PASS/4既有原生忽略，另有上述真实Codex浏览器调用PASS；final-review.json记录直接执行、自审及需求核对PASS。首轮Node后台Runner随控制台关闭退出，已改为CREATE_NO_WINDOW独立临时进程并确认末检在线；无系统PATH修改/服务安装。当前账号可在/zh-CN/workspaces/113084458525003776/conversations/new选择「Codex 验收助手」建立自己的私有会话；不修改私有会话隔离规则。原生App/虚拟键盘、完整工具授权链未验收；本轮未提交推送/发版。
+
+| AI-MODEL-CONNECTION-16 | 待验证 | 模型页直接配置API连接，一次事务保存；复用凭据/额度/价格，CLI默认/自定义接入保留，无新增模块/迁移。短字段Desktop/Pad两列，地址/模型列表整行，Phone单列；1440/900/390/320、六语列表/中马长文案表单、真实创建/编辑回读/只读文本、发现不落库、失败原子回滚、权限/跨空间/版本冲突PASS（models-direct-validation/result.json及截图）；518前端PASS/1既有skip、Rust模型2PASS、前后端build PASS。4291备份pre-models-direct-20261109-091422后更新PID40988/index-BfbVfNtK.js，36类表原记录/密钥/实例/FERRY配置保全PASS（local-update.json）；直接执行、自审与本轮需求核对PASS，待用户验收，未提交推送/发版。 |
+
+| PLATFORM-WORKSPACE-VIEW-15 | 待验证 | 复用ResourceTable/ResourceForm补查看动作，点击工作空间行进入/:id只读详情，保留明确编辑/进入空间；真实隔离Chrome的1280/900/390/320只读/刷新/编辑/返回/非超管403 PASS（test-platform-ui.mjs，临时platform-ui目录及截图）。随本轮更新4291/PID40988，待用户验收；无API/模型/迁移变更，未提交推送/发版。 |
+
+| E2E-FULL-ENV-04 | ?? | ??c8978ab?Docker??/??UI???????????gh/???API??/???????????CI??CI??????????Docker???????????CI????????????/Figma?????/??AI??/????HA?????????coverage-boundaries.json? |
+
+E2E-FULL-RERUN-04???2026-11-09??alpha.8/main c8978ab????????data/maintenance/full-e2e-20261109-074859/report.html???ZIP?79???77PASS/0FAIL/2BLOCKED?80????77PASS/1FAIL/2BLOCKED????73??????????6??1164?????????4??????4272?????????????518????PASS/1??skip????/Runner/Sandbox??PASS?????Cargo???????????/???????????/???????/????Runner??????/??120????????PASS???AI???????????FAIL???????startBlank??????PASS?44??AST???????/Agent??2PASS?????????28/39?????114?hash???/???????????manifest?????HTML1336??/??/????/1440/900/390/320?????JS??PASS?report-audit.json???????????PASS????????????????5193/session17668????????4291/PID80908??????/??/????????????????????E2E-FULL-ENV-04?
+
+发布交付（RELEASE-ALPHA4-14 / TEMPLATE-CHOOSER-13 / DEPLOYMENT-FORM-12，2026-11-09 06:28）：已完成本轮模板前置选择与部署连续表单的构建、真实验收、提交推送、本地更新和公开发版。main/v0.3.0-alpha.8均为c8978abdae3a706e0d458301ac835ac38f2aa868，公开预发布https://github.com/7link-team/ferry/releases/tag/v0.3.0-alpha.8。最终Build42524109296全部28SUCCESS，包含全量单测、三库历史升级、完整UI三轮、Native/Docker/Compose/Stack部署、SSH和跨平台Runner服务/升级回滚；双架构源镜像42524109264、版本42524109268 SUCCESS。21公开附件共561071078字节实际下载，全部SHA256/GitHub摘要、6签名、Runner目录及amd64/arm64版本/source/revision核验PASS（030-alpha8-public-release/VERIFIED.txt；template-chooser-20261109/{alpha8-public-verification.log,alpha8-final-review.json,ci/alpha8-final-jobs.json}）。4291/PID80908运行alpha.8/ferry-server-alpha8.exe/index--Tov5q0N.js，备份pre-alpha8-20261109-051212；36类表原记录/密钥/实例/FERRY配置保全，1440/900/390/320真实Chrome模板分页/固定头尾/参数保留/导入及最后健康PASS，烟测数据清理成功，无本轮新增DB迁移。诊断分支ci/alpha4-audit-20261109已按eeeeec5租约删除；业务改动全部提交推送，独立ADR/CLAUDE/MEMORY/remote-desktop留本地。直接执行，两轮自审与需求验收评审PASS；本次发布无剩余动作，待用户体验4291。未更新远程生产服务，不宣称商业AI、原生App实机或物理多机HA认证。alpha.4/5/6失败与alpha.7取消候选未公开、旧标签不移动，原始日志均保留；Node镜像环境与Unix fork锁回归证据alpha6-lock-{before,after}.log、42516937921，旧测试修正与后续通过证据沿用同目录。下文旧版本/PID/未发布描述为历史，以上述最终交付为准。
+
+远程同步（2026-11-09）：main已从f94c70a经e54afd7再次快进至origin/main/cf7ec05（新增2提交），保留本地CLAUDE/MEMORY/remote-desktop及ADR双方内容；备份与证据remote-merge-20261109-023037。4291仍运行f94c70a构建，拉取源码不等于更新服务。
+
+用户已确认消息发送切换器属于误发，本项目不实施。
+
+| CONTENT-CONTEXT-11 | 待验证 | 公共CRUD及仓库/洞察/主机/流水线详情常驻对象名称，执行补流水线名；远程标题切对象丢弃旧请求。506前端PASS/1既有skip、前后端构建、4291隔离API样本桌面/手机直达子Tab PASS；证据template-scroll-20261109/local-context.json。待用户验收，未宣称全站所有页面均已实测。 |
+
+前轮交付（2026-11-09，已被下述滚动目录修正覆盖）：12个业务文件已提交推送main/2784f43；4291备份pre-template-authoring-20261109-015401后更新PID17636/ferry-server-template-authoring.exe/index-BcQySMHe.js，22类原业务表、密钥/实例/FERRY配置保全PASS。502前端PASS/1既有skip、前后端构建及本地三组Chrome验证PASS，证据template-authoring-20261109/review.json。未发新版/远程部署；设计稿、虚拟键盘、原生App实机和全站所有弹窗未覆盖。活动三项待用户体验，NATS实连与PXC等既有未完成事项保持。
+
+| APP-TEMPLATE-AUTHOR-09 | 待验证 | 改为基本信息/应用定义/模板参数三段连续长表单，固定标题/目录，点击定位+滚动高亮+section/at恢复；参数卡片增强边界紧凑、只读定义列表，预览收为默认关闭的工具栏开关。4291已备份pre-template-scroll-20261109-022531并更新PID73656/index-C_5Wy9R7.js，22类原数据/密钥/配置保全；实际创建保存生成、NATS/Redis授权副本四宽度与刷新PASS，证据template-scroll-20261109/{local-acceptance,local-update,review}.json。待用户验收；已提交推送main/f94c70a，无新版/远程部署。 |
+| BUTTON-STATES-10 | 待验证 | main/2784f43：outline/ghost显式采用主题前景色，不再继承灰色说明；分组导航44px/明确可点/焦点环，保留主次/危险/禁用语义；4291六主题×明暗×两变体24组PASS（button-states-20261109/local-acceptance.json），待用户验收。 |
+
+| SELECT-INTERACTION-08 | 待验证 | main/2784f43：空主机下拉item-aligned无法定位/移焦，改共享popper并显示禁选空态；4291四宽度菜单定位、选择/重开、键盘与Esc焦点/无aria-hidden警告PASS（select-interaction-20261109/local-acceptance.json）。实际报告部署路由及参数菜单已覆盖，未认证全站每个弹窗/原生触控；待用户复验。 |
+
+提交交付（GIT-DELIVERY-07，2026-11-09）：20个本轮业务文件已提交并SSH推送main/a8c5d36，远端HEAD与origin/main逐字一致；全前端500PASS/1既有skip，构建、Rust3、真实SMTP/文件四尺寸及本地4291证据保留。PowerShell输出流解析失败由直接Node捕获重跑解决，原日志保留。业务工作树无剩余改动，仅ADR/CLAUDE/MEMORY/remote-desktop按既有约定保留本地；无新发版/远程部署。NATS实连/断线恢复和PXC仍未验收或完成。
+
+本轮本地交付：业务代码已提交推送main/a8c5d36（原构建基线f1b6880）；4291最终备份pre-files-preview-20261109-010114后更新PID81212/index-njJgS4sc.js，22类原数据/密钥/实例/FERRY配置保全，真实本地登录/401/403 PASS。文字说明与实际Admin权限/文本预览能力已同步；以files-preview-20261109/local-update.json为最终版本依据。邮件和文件真实验收、三类尺寸截图见各证据目录；PXC未推进，NATS实连未验收。
+
+| MONITOR-FILE-PREVIEW-06 | 待验证 | 预览/下载拆分，文本/JSON/Markdown真实读取（前256KiB）、空文件/截断/失败重试，媒体真实预览；来源同空间工作流/执行/构建记录，新标签打开，无来源明确提示。12定向测试、实际加密上传/Range/下载/401/403/跨空间和四尺寸Chrome PASS，4291已备份更新；最终证据files-preview-20261109，待用户验收；已提交推送a8c5d36，未发版。 |
+
+| MONITOR-NATS-05 | 待验证 | 已接入系统监控NATS入口、概览/本节点客户端/JetStream账户页与六语；复用已认证client、Admin、2秒有界采样，不暴露凭据/nonce/消息。构建、未配置状态和401/403 PASS，随4291更新；实连/断线恢复尚未验收，下一步用可用NATS环境或CI测试，不能称完整验收。 |
+
+| PLATFORM-SETTINGS-ORDER-04 | 待验证 | 设置顺序已按用户确认：账号注册、登录防护、监控采集、主机代理、邮箱配置、文件存储、仓库关联、页脚设置、页面脚本；邮件模板归账号注册tab。实际菜单顺序/语言保存/四尺寸Chrome PASS，随4291更新，待用户验收。 |
+
+变量语义纠正：{{email}}为收件人邮箱（注册时待验证邮箱，测试时测试收件地址），菜单必须写明对象与示例；{{code}}为验证码，{{expires_minutes}}为有效期分钟数。归入MAIL-TEMPLATE-VARIABLE-03。
+
+| MAIL-TEMPLATE-VARIABLE-03 | 待验证 | 插入变量在富文本/HTML栏右侧单按钮下拉；六语名称/对象/描述/示例，收件人语义明确，主题/富文本/HTML光标插入及Esc焦点回归通过。真实SMTP/四尺寸证据mail-template-locale-20261109/mail-browser-final.json，随4291更新，待用户验收。 |
+
+| MAIL-TEMPLATE-LOCALE-02 | 待验证 | 移除code/test类型选择，仅注册验证码业务模板；六语独立保存、注册按请求语言发送、测试当前未保存草稿不创建验证码/模板；legacy兼容、显式重置、非法配置拒绝。Rust3/实际SMTP/保存刷新/中英马隔离/四尺寸PASS，随4291更新，待用户验收。 |
+
+| APP-SCENARIO-TEMPLATES-01 | 待处理 | Native、NATS、Redis Sentinel及仓库预设已分阶段实测交付；下一步接入PXC应用模板及配置/安全恢复流程，复用已有双版本协议实验，走Compose/Stack×SSH/Agent真实部署后再初始化；其余HA场景及市场未完成，不认证物理多机。 |
+
+最新阶段交付（2026-11-09，覆盖下方邮箱/Sentinel未更新状态）：main/远程f1b6880；CI42497521754四组全部SUCCESS，Native122/Docker64/Compose231/Stack196共613部署检查，Linux后端532PASS/9既有忽略。四完整附件SHA256与GitHub digest、模板源码及SSH/Agent的Redis/NATS协议结果核对PASS，20截图保留，桌面/窄屏已查看。Sentinel特殊字符密码重启保留选主/epoch/ID；邮箱左右编辑预览、窄屏上下及光标插入变量，前端494PASS/1既有skip、实际SMTP/四尺寸保存回读PASS。本地Rust12/HTTP38/MS长文案/build PASS。4291已备份更新PID89228/ferry-server-redis-mail.exe/index-DbVWkzmk.js，22类原业务数据、密钥/实例/FERRY环境保全；实际登录/401/403/四尺寸预设无新增连接PASS。备份pre-redis-mail-20261109-001652，证据sentinel-template-20261108/{ci-artifacts-reviewed.json,review.json,local-update.json,local-browser/acceptance.json,mail-browser/acceptance.json}。邮箱入口平台设置→邮箱配置→邮件模板；Sentinel只初始化新空间，不回填/执行。直接执行，自审/本阶段需求复核PASS，待用户体验；无迁移/远程部署/新发版，不认证物理多机/TLS/跨机卷迁移。后续PXC模板与其余HA/市场尚未完成。
+
+
+分支收拢交付（2026-11-08）：main/远程633a5a9已合并模板、Runner恢复与HA/PXC验收历史，c9d6ede另提交已验收的全宽表单底栏与来源联动。前端491PASS/1既有skip、Rust模板12+Runner32PASS/2既有ignore，fmt/diff检查通过。删除46远程、19本地分支，仅保留main；9工作树detach且status字节一致，33原工作文件逐哈希保全；备份branch-cleanup-20261108/{branches-before.bundle,working-files-before.zip}及cleanup-result.json。旧发布控制/诊断分支已过期，洞察修复为等价补丁，未把旧控制workflow合入main。临时stash已清除，用户ADR/CLAUDE/MEMORY/remote-desktop未提交，4291/远程服务未部署，无发版。本次授权覆盖旧不合并约束；后续在main推进，先修新反馈数据库监控，再继续Native模板。
+| DB-MONITOR-PERF-01 | 待验证 | 4af4c0c增加PG当前库等待摘要，不返回SQL/客户端地址；SeaORM计时在pool acquire之后，含服务端锁等待/网络。线上数据库/等待未读取，慢因未确诊，心跳/租约/1000ms阈值不变；需部署后采样再决定修复，不能用本地通过代替线上性能验证。 |
+| DB-MONITOR-TABLE-SIZE-01 | 待验证 | main/远程ef17b2b，独立CI42476597192三库+Chromium全部SUCCESS，MySQL概览database保留字未转义500已修；本地Rust4/HTTP53/浏览器12及build PASS。已按本轮授权备份更新4291/PID52412/ferry-server-database-monitor.exe/index-DHRJ8rq4.js，19类原数据、密钥/实例/FERRY环境保全，真实本地四尺寸登录、401/403权限及新资源PASS；备份pre-database-monitor-20261108-194315，证据database-monitor-20261108/{ci-pass.json,local-update.json,browser-final,local-browser/acceptance.json}。直接执行，自审/本阶段需求复核PASS，待用户查看表列表；本地超管表UI由隔离实库/CI覆盖，未用本地普通账号冒充超管验收。未执行远程部署，无迁移/新发版。旧MySQL失败、CI缩进失败均保留。 |
+
+Native模板阶段交付（2026-11-08）：main/远程3974b78，f06503d实现配套Actions构建与Native应用模板、六语、新空间事务初始化，后续提交修正验收脚本YAML边界和CI日志。CI42479410971全部SUCCESS：Native122/Docker64/Compose163/Swarm112共461部署检查，Linux后端532PASS/0失败/9忽略；本地30模板HTTP/21市场HTTP、两套模板四尺寸Chrome及原始Python程序5项PASS。完整四份附件已下载逐项检查、模板原文与源码相等、8张CI截图保留，证据native-scenario-20261108/{ci-artifacts-reviewed.json,ci-pass.json,local-update.json,ci-browser}。4291已备份更新PID15168/ferry-server-native-templates.exe/index-DHRJ8rq4.js，21类原记录、密钥/实例/FERRY环境保全；备份pre-native-templates-20261108-202724。既有空间不回填、初始化不执行；不认证物理多机/数据库HA，无迁移、未远程部署/发版。首轮JSON包装错传YAML字段的失败及Windows缺sh的两项失败保留，Linux复验通过。直接执行、自审与本阶段需求验收PASS，待用户本地体验。
+
+NATS与连接预设阶段交付（2026-11-08）：main/远程eac11c6，新增NATS JetStream三成员应用/配置模板与GitHub/Codeup/纯Git创建预设，复用既有模板/CRUD/SSH/Agent。CI42487907756全部SUCCESS：Native122/Docker64/Compose193/Stack146，共525部署检查；Linux后端532PASS/9既有忽略。Compose/Stack各经SSH与Agent验证认证、单入口发现、三副本、leader故障、durable恢复、无仲裁拒写及恢复保留原消息；四完整附件逐项下载/校验、源码模板比对、16截图核对PASS。最新本地Rust12/HTTP34/四尺寸浏览器及build PASS；前端493PASS/1既有skip。4291已备份更新PID9388/ferry-server-nats-presets.exe/index-DrWajIe9.js，22类原记录、密钥/实例/FERRY环境保全；备份pre-nats-presets-20261108-221840，实际登录/401/403/四尺寸预设且未新增连接PASS。证据nats-template-20261108/{ci-artifacts-reviewed.json,review.json,local-update.json,local-browser/acceptance.json}。失败附件保留；修正Swarm健康选主/DNS循环、恢复读取有界等待；数字开头token触发NATS字面量解析，六语明确本示例字母前缀安全字符格式，CI一致，通用密钥规则不改。末检脚本误请求GET /api/workspaces，改用既有/me.workspaces后复验PASS，无产品变更。仅新空间初始化不回填、不执行；无迁移/远程部署/新发版，不认证物理多机/TLS/路由认证/跨机卷迁移。直接执行，自审与本阶段需求复核PASS，待用户体验。
+
+
+| APP-HA-TOPOLOGY-02 | 待验证 | f5885d9/42469058781 SUCCESS，PG/MySQL各17项PASS：SQL/S3/三NATS故障、命令/文件/真实终端恢复、owner退出/轮换；终端26/29次握手后有界恢复。Runner认证DB5xx误发永久Rejected已修正，本地32PASS/2既有忽略。公开摘要含源/二进制/镜像哈希，web-evidence-42469058781-*；完整附件未独立下载校验。首405/Runner缺陷/旧终端失败保留，PRD§12已更新。4291/main未变，无迁移/发布；注册途中恢复、物理多机、SQL/S3自身HA未验。 |
+
+
+| APP-PXC-PLAN-TEST-01 | 待验证 | ba2fd24/42448847067两版各25检查PASS：三成员多写/任务崩溃/分区拒写与恢复/原卷归队/空卷SST；全停后三成员均不可观测，未强制bootstrap，自动或人工全停恢复均未验证。修正临时初始化server过早就绪竞态及网络IPAM；两任务AppArmor恢复SUCCESS，旧取消任务亦恢复。分版evidence JSON与final-pxc-review.json保留，完整附件未独立下载校验。方案/脚本整合18042bb已推ci/ha-topologies-20261108；直接执行，自审/本轮实验范围复核PASS。4291不变，无main合并/发布；物理三机/Ferry集成/TLS/备份迁移未验。 |
+
+APP-PXC-CAPABILITY-01核对交付：代码与方案1141/1156/1214/1227核对，现有HTTP readiness/liveness转Docker healthcheck及Swarm副本/约束调度；未内置PXC拓扑、MySQL协议探针、安全bootstrap/SST/IST流程、数据卷跨机迁移，现有同宿主三daemon故障恢复不认证物理三机PXC多活。已明确答复不能完整承诺，推荐复用Swarm补PXC服务拓扑和恢复而非另造调度器；本轮仅能力核对，未授权实现，范围仍见APP-HA-01。
+
+| DEPLOY-SOURCE-MODE-01 | 待验证 | Native仅产物、Docker/Compose/Stack仅镜像、v2允许双来源；已有不兼容来源不静默删改，编辑显示必选占位，查看保留实际来源。19单测、前后端build及真实隔离HTTP/Chrome创建Docker/Native/Stack、源码往返/保存回读/窄屏PASS；脚本补不兼容选项不可选断言。已备份更新4291/PID2512/ferry-server-deploy-source.exe/index-_VN2L_L3.js，保留全宽底栏，19类原数据/密钥/实例/环境保全PASS；备份pre-deploy-source-20261108-025429，证据data/maintenance/deploy-source/local-update.json与deploy-source-{tests,browser,build-final,server-build-final}.log。初次TS校验捕获测试下标非空声明、修正后build PASS；PowerShell包装返回1但Cargo日志完成，显式捕获原生退出码复核0。直接执行，自审/本轮需求复核PASS，待用户验收；无DB变更，未提交推送或新发版，独立文档保留。 |
+
+| CRUD-FOOTER-WIDTH-01 | 待验证 | 共用底栏单个铺满/多个等分，12px内边距与间隙、至少44px高度、长文案换行，保留取消→保存。47相关测试、前后端build及预览/4291实际嵌入浏览器1280/900/390/320新增编辑查看、1440/768/390部署滚动/只读PASS；8次fixture写入不代表后端持久化。已备份更新4291/PID48352/ferry-server-crud-footer.exe/index-BXftnGg-.js，19类数据/密钥/实例/环境保全PASS；备份pre-crud-footer-20261108-024701，证据data/maintenance/crud-footer/{local-update.json,browser-local-final/result.json}及crud-footer-{build,server-build,tests}.log。首次更新被日志UTF16读取拦截、随后误测旧服务的失败日志与截图保留，修正编码后更新复验PASS。直接执行，自审与本轮需求核对通过；待用户刷新验收，未提交推送/新发版，独立文档保留。此要求覆盖此前底栏按钮紧凑宽度规则。 |
+
+
+RELEASE-ALPHA3-01交付（2026-11-08）：用户授权合并、CI、本地更新与发布已执行完成。main及v0.3.0-alpha.3均指向b2c2fba3ba4761a73104d205a27f04965f5487c8；完整Build42395741718全部28PASS、HA42395312420与双架构源镜像42395312432SUCCESS；publish-verified42401317582、版本镜像42401400087、控制42401305643均SUCCESS。公开预发布https://github.com/7link-team/ferry/releases/tag/v0.3.0-alpha.3，21文件约528MiB实际下载，全部SHA256/GitHub digest、6签名、Runner目录及amd64/arm64镜像manifest/revision核验PASS（030-alpha3-public-release/VERIFIED.txt、public-{download,verification}.log）。4291已备份更新PID46016/ferry-server-alpha3.exe，无新增DB迁移，19类原数据逐字段/密钥/实例/FERRY环境/嵌入dist保全PASS；备份data/backups/pre-alpha3-20261108-022542含私密runtime.json不得上传。真实服务登录1440/768/390及表单1280/390/320、部署空白滚动1440/768/390与只读模式PASS，浏览器API fixtures不代表后端持久化；末次健康final-status.json。证据data/maintenance/030-alpha3-public-release。直接执行，自审范围/复用/架构/回归/复杂度及本轮交付核对PASS；本轮发布无剩余动作，待用户体验4291。未部署远程服务；未宣称同提交重跑原全部73组、全PRD/商业AI/原生实机/物理多机仲裁/DB-HA/卷迁移认证。控制分支不合并main，独立ADR/CLAUDE/remote-desktop与MEMORY变更保留不提交，发布未夹带这些文件；旧alpha.2标签及原始测试报告保留。
+
+E2E-RERUN-ENV-02交付：用户授权继续补测，AutoForm修复及四份正式测试脚本已提交推送aa358fe8918bc1e6fdb509f54d8850246d969b5f至ci/e2e-remediation-20261107；本轮Actions42385325738两组SUCCESS（Compose128441369256/Swarm128441369065），Docker预检及SSH/Agent完整部署验收步骤均SUCCESS，原本轮Docker预检/部署UI两阻塞关闭，额外三节点Swarm恢复PASS。补充报告full-e2e-20261107-220555/container-ci-report.html，ci/{supplement.json,run-42385325738.json,jobs-42385325738.json,artifacts-42385325738.json,report-audit.json}；原report.html保持SHA256 caf7532158cc0c011210b63a1f22d7c42b619f2212d2d1152bbc6472003ea0bc。补测页5本地引用、1440/900/390/320无横溢出/JS错误PASS。两附件保留至2026-11-21，摘要仅GitHub元数据，未下载或独立校验附件字节；未重跑同提交全部73组，不宣称全功能认证，三daemon共宿主不证明物理多机/manager仲裁/DB-HA/卷迁移。4291/PID75664/原程序与实例健康复核PASS，无重启部署；main仍973fe0f，未合并发版，独立文档与本地规则状态未提交。直接执行，范围/复用/回归/证据及需求自审通过；本次补测无剩余执行项。
+
+E2E-SCRIPTS-SYNC-03交付：正式scripts/test-{actions-ui,manifest-ui,workflow-host-boundaries}.mjs已同步三份适配并规范LF；隔离真实复验3PASS/exit均0（16.2s/9.1s/131.9s），含真实120秒超时/取消/撤权/断连/容量回收。证据full-e2e-20261107-220555/targeted-formal-scripts/{results.json,handoff.json,formal-scripts.patch,assertion-preservation.json}及各同名目录run.log/PNG/screenshots.jsonl/provenance.json/executed-source.mjs。AST核对原业务assert调用52/36/37数量、顺序与内容保留（归一Monaco读取方式与空白），git diff --check PASS；执行与最终源码仅LF规范差异。明确语义差异：pathname接受query/hash（保存返回路径精确锁定zh-CN/工作空间）；无效源码保存禁用由立即断言改为最多2.5s后仍断言；测试浏览器新增clipboard权限、通过可见编辑器键盘读写，历史按钮改当前精确“查看详情”。已按原artifact-manifest验证原HTML字节未变，首失败与原报告/ZIP保留，不重算旧失败。直接执行、自审与本轮需求核对PASS；结果回传01a19fad用于CI快照，当前无其他动作，不动4291/容器CI，不提交推送发布，独立ADR/CLAUDE/remote-desktop未动。
+
+| E2E-SESSION-COORD-01 | 已完成 | 用户授权对接报告会话“梳理设计要点”(01a1b474-8293-7570-a77e-826f51c9cd05)，对方已明确确认接手三份适配patch回迁正式脚本与复验，保留业务断言及首失败；本会话协调后续容器CI，不重复改三脚本。已同步4291/PID75664/备份及勿重启部署、暂不提交推送发布约束；对方正在核对patch与现文件。CI受阻仍独立保留E2E-RERUN-ENV-02，不代表对接完成即测试完成。 |
+
+新版报告复核（2026-11-07）：已读取full-e2e-20261107-220555/report.html、final-results.json、issues.json及三份适配patch。最终逻辑73组=71PASS/0FAIL/2BLOCKED，原始3FAIL分别为return_to查询参数断言、Monaco虚拟输入读取、历史详情按钮旧名称，均有本轮保留业务断言的适配PASS；正式scripts三处尚未同步，不能宣称原脚本均通过。功能覆盖矩阵按原始执行计数仍显示FAIL，须与最终逻辑汇总区分。Docker预检/部署UI仍受阻，旧容器CI不得替代本轮快照。1163引用/四尺寸无横溢出为已有report-audit.json证据，本次仅核对未重跑。未新增已确认产品失败；本轮仅审阅，未改报告/产品、提交/部署/发版，4291仍PID75664。
+
+E2E-FULL-RERUN-02交付：89eddf1与未提交AutoForm修正重新构建并全量复验，full-e2e-20261107-220555/report.html及同名ZIP；73组全部重新尝试，当前71PASS/0FAIL/2BLOCKED，76次原始执行71PASS/3FAIL/2BLOCKED，1008测试截图、3737方法断言调用（非独立用例数）；旧11FAIL本轮全部PASS。三尺寸真实数据闭环/断网恢复、Runner排队/取消/撤权/断连/真实120秒超时与容量回收、调度告警恢复及重启持久化PASS；486前端单测PASS/1既有skip、前后端/Runner/Sandbox构建PASS，未跑全量Cargo单测。Actions查询参数/Monaco输入/历史按钮旧脚本首失败与仅交互适配副本及patch保留，不改产品。报告1163引用/筛选/图片解码/1440/900/390/320无横溢出与无JS错误PASS，report-audit.json；报告长哈希换行修正。Docker仍缺本机环境，两项受阻；89eddf1已有容器CI属历史、不计本轮通过；商业AI/全部页面五态×三端/原生实机/跨系统/生产升级与多物理机仍未验收。自审与交付需求核对完成，整体功能认证仍受阻；旧报告未覆盖、无提交推送/部署，4291未动，本轮5193预览已停止。
+
+
+| UI-BOTTOM-SPACE-01 | 待验证 | 最终已更新4291/PID75664、ferry-server-bottom-space-final.exe、index-Do-dQLvB.js。部署长表单sr-only绝对定位legend越过无定位滚动祖先撑高document（1440多454px/390多1354px），AutoForm自身加relative收束；三尺寸顶部/中部/底部无document及外层平台容器多余滚动、取消可点击/创建可见，字典三尺寸增改查/fixture保存6次/双轴表格/只读回归PASS，无JS错误。11表单测试及前后端build PASS；备份pre-bottom-space-20261107-212039，19类核心表原记录、密钥/实例/Redis与Sandbox环境保全PASS。证据data/maintenance/bottom-space/{before.json,browser-final2.log,local-update-final.json,final-local.json}、crud-layout-ui/result.json及截图；4291嵌入资源逐字节一致，真实服务页面+API fixture复验三尺寸内外滚动PASS，不声明真实部署业务验收。待用户原页刷新体验；未提交推送/合并/发版。 |
+
+最新运行覆盖：4291最终PID75664取代下文PID61480，AutoForm滚动修复已构建/部署/末检通过。第一版PlatformFrame定位仅把空白转移到外层容器，已撤回，保留首轮日志与备份；正式回归新增外层scrollHeight断言，最终三尺寸内外容器与document通过。原Swarm回滚修复保留，main与发布均未改动。直接执行，自审范围/复用/回归及需求复核通过，待用户体验。
+
+最新本地更新检查点（覆盖下文旧PID及未更新结论）：用户授权后已将89eddf19b1463f5084c1daee68d4b7f1d8c227a4编译并更新4291/PID61480、target/debug/ferry-server-swarm-89eddf1.exe，嵌入index-CS_WPNW0.js与dist一致；Win构建PASS/3既有警告，同源Actions42364255247两组PASS。备份data/backups/pre-swarm-rollback-89eddf1-20261107-204901含SQLite/密钥/实例/旧程序及运行配置；更新前无活动任务，更新前后20类核心表原记录逐字段、密钥/实例、Redis/Sandbox环境保全PASS。报告e2e-remediation-20261107/report.html已同步本地状态，local-89eddf1-{build.log,update.json,server.log}保留证据；49本地引用、1440/768/390报告与4291登录两尺寸无溢出/JS错误PASS（report-audit.json），健康检查PASS。直接执行，自审/复用/数据保全及本轮部署核对PASS；待用户刷新4291体验。未合并main、未发版，独立文档与本地规则状态未提交；本机未运行Docker，Swarm实测使用同提交CI结果。
+
+CI补测阶段交付（E2E-GAPS-01 / APP-HA-CI-01已完成）：验收源码804fa07、诊断4bb1deb及回滚修复89eddf1已提交推送ci/e2e-remediation-20261107；最终Actions 42364255247两组SUCCESS，原Docker/部署UI两阻塞项关闭，Compose浏览器及Runner/SSH三节点Swarm故障恢复通过。修复失败start-first更新遗留任务占满放置容量：显式回滚先收束旧原生更新，再部署所选历史快照；保留副本/约束/策略/超时，增加历史HTTP、两健康任务、start-first与放置限制断言。Rust部署模块20PASS/1本机Docker忽略、webhook6PASS及fmt/check通过。e2e-remediation-20261107/report.html更新为原缺口13PASS/0FAIL/0BLOCKED并单列额外Swarm；未重跑全部73组，首两轮失败及旧报告保留。ci/{run-42364255247.json,jobs-42364255247.json,artifacts-42364255247.json,deployment-unit.log}记录实际源89eddf19b1463f5084c1daee68d4b7f1d8c227a4与两份14天附件摘要；附件保留Actions，匿名下载403，未伪称本地附件内容/摘要验证。报告47本地引用、1440/768/390及4291登录两尺寸无溢出/JS错误PASS，直接执行、自审与本轮CI需求核对PASS。main仍973fe0f、未合并/发版；4291/PID84564仍为此前已验收本地程序，此次Swarm修复未替换4291。共享内核不证明物理多机/三manager仲裁/DB高可用；独立ADR/remote-desktop与本地规则状态未提交。
+
+E2E修复阶段交付（覆盖下文旧PID）：原报告11个FAIL检查组全部隔离复验PASS；新报告data/maintenance/e2e-remediation-20261107/report.html（11PASS/0FAIL/2BLOCKED），summary.json逐组关联末轮报告/日志/截图，旧报告及失败轮次保留，未重新执行全部73组。产品补齐ResourceForm可见字段必填集合与数值有限值/min/max校验，共享动作表单逻辑；新增4项回归，全量486PASS/1既有skip，前后端build PASS（3既有Rust警告）。正式测试修正CRUD路由/搜索/输出记录折叠入口及Windows命令、SQLite关闭，未削弱业务断言。4291已更新PID84564、ferry-server-e2e-remediation.exe、index-CS_WPNW0.js；备份pre-e2e-remediation-20261107-145828，原391审计/4账号/4空间/3凭据/连接/构建/工作流/文件/昵称清单逐字段及密钥实例保全PASS，嵌入资源等于dist，Redis/worker/sandbox保持。报告39本地引用、1440/768/390无整页溢出及4291登录两尺寸无JS错误PASS（report-audit.json）；直接执行，自审及本轮需求核对PASS，整体功能验收仍NOT READY（容器2项受阻）；未提交推送发布。
+
+E2E-REPORT-COLOR-01交付：full-e2e-20261107-132533/report.html及同名ZIP已更新；统计、覆盖矩阵、问题表、检查组统一PASS绿色/FAIL红色/BLOCKED与PENDING黄色，保留中英文状态及图例；原始结论60PASS/11FAIL/2BLOCKED及885测试截图不变。Chrome1440/390无横溢出、970引用/图片加载/筛选/无JS错误PASS，证据report-audit.json与report-preview-{1440,390}.png；自审及需求核对PASS，仅报告样式与生成器修改，无产品修改或部署；E2E-GAPS-01沿用独立进度。
+
+2026-11-07用户指定full-e2e-20261107-132533/report.html复核：报告14:08生成，逻辑检查组60PASS/11FAIL/2BLOCKED，原始27FAIL含被后续覆盖的旧执行，不能据此说全功能通过。CRUD失败日志实际为创建连接名称超过60字符（browser-rerun/test-crud-detail-ui/run.log）；与本轮合法上限样本、真实PATCH/409留稿/三尺寸等独立PASS证据crud-detail-final-browser.log（Temp/crud-detail-UYGBZS）不同，当前报告未纳入该证据，不覆盖原始报告或自动改判。其余旧监控入口/贡献导航/布局/模板/节点集成/AI脚本需逐项复验，Windows POSIX与Docker环境缺口保留E2E-GAPS-01待处理；本轮仅复核报告，未重新全量执行、修改产品或部署。
+
+E2E-FULL-REPORT-01交付记录：生产场景测试及HTML/截图证据已交付，data/maintenance/full-e2e-20261107-132533/report.html与同名.zip；当前检查组60PASS/11FAIL/2BLOCKED，原始60PASS/27FAIL/2BLOCKED，885测试截图、3778方法断言调用（非独立用例数）；前后端/Runner/sandbox构建及482前端测试PASS/1既有skip，未执行全量Cargo单测。真实三尺寸任务/断网恢复/Runner取消撤权断连与120秒超时/定时重叠与重启持久化证据保留；商业API协议模拟明确标注。报告970本地引用/唯一锚点/筛选/图片解码/1440与390无横溢出及无JS错误PASS，report-audit.json；报告预览图另计。自审与交付核对完成，产品全功能验收NOT READY，缺口保留E2E-GAPS-01；仅新增ignored测试报告工具及维护MEMORY，无本轮产品修改、提交推送或部署，4291未动，已停止本轮5193预览。
+
+当前检查点（覆盖下文旧PID）：4291已备份更新至PID46240、target/debug/ferry-server-crud-detail-final.exe、index-B_vW_yC5.js；备份pre-crud-detail-final-20261107-135505（首版pre-crud-detail-20261107-134303保留）。CRUD三处详情只读/独立编辑/安全return_to已实现；482前端PASS/1既有skip，末轮85相关PASS、前后端build通过（Rust3既有警告）；真实隔离实例32条尺寸/语言及交互检查PASS（Temp/crud-detail-UYGBZS/acceptance.json及截图），覆盖三处真实PATCH/版本冲突留稿/取消/刷新/44px触控，EN/MS与150%字体；洞察既有浏览器回归PASS。4291原391审计/4账号/4空间/3凭据/1连接及洞察/构建/工作流/文件/姓名邮箱清单、配置密钥实例逐字段保全PASS（crud-detail-final-local-update.json），Redis/worker/sandbox保留。仅已列场景验证；Figma暂缺，Phone虚拟键盘与原生App实机未覆盖，不宣称全站符合新设计门槛。Windows构建曾被运行中的测试exe占用，保留旧文件并改名后cargo build成功，未停止用户服务；首次PowerShell XML日志异常的全量测试已停止，改cmd重跑60文件全通过。正在做4291嵌入资源浏览器末检，未提交推送发布，待用户验收。
+
+弹窗阶段最终检查点：直接执行，自审范围/复用/架构/回归/复杂度及本轮需求复核PASS；登录安全验证真实Chrome PASS（Temp/login-guard-fIi07Q），导入导出/主机标签/45导航页面/敏感预览脱敏实际浏览器PASS（dialog-transfer-browser.log），补齐UI-DIALOG-STRUCTURE-01末轮回归，已无本轮待执行检查。节点工作流编辑/检查器/告警端到端亦PASS，相关日志dialog-{workflow,inspector,alerts}-final-browser.log；新增scripts/test-dialog-layout-ui.mjs并接build.yml门禁，远端CI未运行。只验证已列场景，不声称所有弹窗的全部业务组合均逐一人工验收。4291嵌入前端版本与数据/配置/密钥保全PASS；预留前版exe与SQLite备份。源码最后仅去尾空白/规范LF，无运行逻辑变动；未提交、推送或发布，待用户刷新4291验收。
+
+最新本地覆盖：4291 PID59364、target/debug/ferry-server-dialog-layout.exe、index-rrRbPiRg.js；备份pre-dialog-layout-20261107-120550。原391审计/4账号/4空间/3凭据/1连接/9构建运行/2构建/3工作流/16执行/9文件及洞察姓名邮箱清单、配置、密钥与实例逐字段保全PASS（ui-order-space-local-update.json）。Redis/worker/sandbox保持，4292停用；本轮未提交推送/发版。此段覆盖下文旧PID。MON-NOTICE-PREVIEW-01与MON-COMMIT-COLOR-01本轮追加结果：54平台语言预览、真实本地Webhook收发成功/503、匿名及外账号拒绝/只读不可发、订阅完整勾选状态、1440/390px PASS；企微原生warning橙色强调，标签和值同行、飞书蓝色，预览从实际payload渲染。未向外部真实渠道发消息，待用户实际渠道验收，证据Temp/ui-order-space-dYjME8/acceptance.json。
+
+本轮直接执行并完成范围/复用/回归自审及需求核对：68内置页面桌面和390px无溢出/JS错误，普通按钮宽度与顺序、分组页按钮归属PASS。最初测试把构建编辑器的两个submit当一个定位失败，改逐个验证宽度，保留原顺序断言，未改产品适配测试。最终52相关测试PASS；全量471PASS/1既有skip；最终前后端build通过（3既有Rust警告）。这是内置静态页面和通知交互验收，不代表所有语言、数据组合和业务全链路均已覆盖。统一UI事项待用户体验；多节点CI回滚问题仍未完成。
+
+当前交付：统一配置基座15f2b1e已提交且更新4291：v2双来源/四引擎兼容检查/Swarm放置已实现并验证；HA拓扑/Nomad及真实多机调度尚未实现。应用体验f1e90cf已提交；本轮骨架首载补查ec0de88已提交且更新4291；GitHub HTTPS凭据缺失，但本轮已通过现有SSH身份快进推送至11e818a，未另发版。v0.3.0-alpha.2 已发布并公开核验通过，tag/source为91c3a471521abf83a76c76f09f42f2a39f4c1262。随后新增系统监控默认服务器节点9213995、README去截图与重整fd7690b均已提交推送main；这两项不在alpha.2发布快照内，菜单已更新4291，待用户体验。公开发布不代表全部PRD完成。
+
+本阶段交付记录：完整构建42215086460最终28/28 SUCCESS，源双架构镜像42213960849、公开附件发布42228001024、版本镜像42228148233、控制器18/58321f0/run42219314364均SUCCESS；watch18/session87217退出CONTROLLER_SUCCESS。公开21附件全部下载/SHA256和GitHub摘要、6签名、Runner目录、amd64/arm64版本镜像与源提交一致PASS，证据data/maintenance/030-alpha2-public-release/VERIFIED.txt、release-metadata.json、alpha2-public-release-final.log、alpha2-public-range-download.log。直连下载超时后按HTTP Content-Range分段下载并复用原验证器，未放松任何校验。不要移动已发布tag或再次触发alpha.2发布。
+
+复验证据：91c首次完整构建仅日语390px主机文件页语言选择器越界；Windows本机及同源Linux独立复验42218740770通过，原样重跑整个失败UI任务后通过，未改源代码/断言，历史根因未确定，不宣称修复。首失败保留alpha2-91c-ui-failure-annotations.json、alpha2-locale-local-geometry.log及alpha2-locale-geometry-jobs.json。此前alpha.1/733ac14完整发布证据仍保留030-alpha1-public-release/VERIFIED.txt。
+
+本地范围：4291 PID76840、target/debug/ferry-server-notification-preview.exe、index-DiPyQ8Qm.js；最新备份pre-notification-preview-20261107-094045；备份pre-history-live-20261107-090704（此前pre-portable-20261107-081437保留）（此前pre-app-ux-20261107-015047保留）（此前pre-loading-skeleton-20261107-010854保留）（此前pre-monitor-entry-20261106-214746保留）。原388审计/4账号/4空间/3凭据/1连接/9构建运行/2构建/3工作流/16执行/9文件、密钥和实例保全PASS，证据portable-local-update.json（此前app-ux-local-update.json、loading-skeleton-local-update.json保留）（此前monitor-entry-local-update.json保留）。4292停用，Redis及Actions worker沿用。main已推973fe0f，原文档ADR.md和docs/remote-desktop-feasibility.md保持独立未提交，MEMORY仅本地。
+
+验收证据：菜单release030-menu-browser.json（六语30页）；37项浏览器（10+27）、两旧版本alpha.34/alpha.1三库6组升级PASS（release030-tail-final-results.json、release030-upgrade-db-results-*.json）；前端444PASS/1既有skip、真实MySQL/PG贡献测试保留原证据。最终远端完整Linux/Windows/macOS门禁均通过，不以本机Windows旧POSIX忽略代替Linux验收。整体WF未完成项继续保留，版本发布不等于PRD全部完成，商业账号/自有主机/Linux原生性能等边界见发布说明及各事项。
+
+故障证据保留：旧466的Windows PowerShell原20秒超时，本机同期限5次通过；最终两候选worker通过，仅证明复验，不宣称历史根因已修复。旧amd64上传unknown blob被tee掩盖，9cf2349显式bash启用pipefail修复（原失败release030-latest-42095570240-annotations.json；本机模拟退出码0→17）。旧9cf模板测试粘贴后立即读取禁用状态，733ac14等待原预期状态且保留断言，本机与最终Linux完整浏览器均PASS；原失败release030-current-job-127486449768.html保留。旧控制器/完整构建及worker复验已取消，未跳过门禁。
+
+约束：ADR.md及docs/remote-desktop-feasibility.md为独立工作，不随版提交；MEMORY.md仅本地。源代码交付路径干净，独立文档改动保留。下表历史PID/部署描述为各项初测证据，当前发布范围与本地实例以本段为准；未完成事项保留，不再重复发版。
+
+设计门槛已采纳（2026-11-07）：用户给定的事实依据/逐项非空评审/全状态/三类尺寸/时区/审计DDL等规则已写入CLAUDE.md。本次模式修正评审在docs/code-insights-design.md，Figma明确暂缺；不代表旧页面均已符合或授权修改历史模型。
+
+末检交付：4291当前嵌入资源真实Chrome回归PASS（crud-detail-4291-browser.log；该脚本使用隔离API样本，不修改本地业务记录），覆盖洞察只读/作者映射独立编辑/采集策略/多语言及原有刷新保留状态。最终diff检查PASS；本轮范围、复用、权限/数据隔离接口沿用、无迁移及异常留稿自审通过。已结束本轮实际执行，CRUD-VIEW-EDIT-01待用户验收，不以截图和测试替代用户验收；未提交推送发布。
+
+| 编号 | 状态 | 事项及下一步 / 验收证据 |
+|---|---|---|
+| E2E-LOCAL-01 | 待验证 | 已备份更新4291/PID61480至CI通过的89eddf1（含Swarm显式回滚修复），本机构建、数据密钥/Redis/Sandbox配置保全、健康/嵌入资源及登录浏览器验收PASS；证据e2e-remediation-20261107/{local-89eddf1-update.json,report-audit.json,report.html}。待用户刷新4291体验；未合并main或发版。 |
+| DESIGN-CONTRACT-01 | 待处理 | 用户新增设计范围/事实来源/状态/i18n/术语/时区、逐项评审及三端响应式交付契约；先完成E2E，再归并现有规范，不将通用端名或字段当作项目事实。 |
+| CRUD-VIEW-EDIT-01 | 待验证 | 三处详情只读与独立编辑已备份更新4291/PID46240；配置/作者映射无输入，监控移除铅笔弹窗；安全返回原Tab/at、权限、44px触控、真实PATCH与409留稿、三尺寸/320边界及EN/MS通过。证据crud-detail-final-local-update.json、Temp/crud-detail-UYGBZS/acceptance.json；Figma/虚拟键盘/原生App实机未覆盖，待用户验收；未提交推送发布。 |
+| UI-DIALOG-STRUCTURE-01 | 待验证 | 已备份更新4291/PID59364/index-rrRbPiRg.js：盘点全部20处Radix弹窗，移除分组编辑/主机新增告警2处，18处保留专用编辑/临时确认；公共dialog-shell/body/form/footer明确固定标题按钮，仅中间滚动。分组/子分组/主机告警走CRUD页，保留父分组/目标主机；保存取消按同空间安全return_to回原筛选滚动位置。476前端PASS/1既有skip、前后端build、真实32项工作流/24项构建长参数1440与390px位置不变、子分组持久化、告警与节点编辑/检查器回归PASS；证据Temp/dialog-layout-UhElCg/acceptance.json、dialog-layout-local-update.json。登录验证及导入末轮回归收尾，待用户验收；未提交推送/发布。 |
+| README-REFINE-01 | 待验证 | fd7690b已提交推送main：移除截图展示（原文件保留），按功能/两种Docker启动/桌面与主机接入/配置/兼容范围/开发/文档/反馈重整；12个本地文档链接、代码围栏和diff检查PASS，修正过时版本及安装描述；待用户阅读反馈，不在91c发布快照内。 |
+| PLATFORM-MONITOR-ENTRY-01 | 待验证 | 9213995已提交推送main并备份更新4291/PID7468/index-BuFwskJ_.js：系统监控默认服务器节点，顶部及面包屑直接URL，根路由替换跳转、侧栏选中；实际嵌入服务浏览器与18项回归/前后端构建PASS。证据platform-monitor-entry-{browser,local-browser,regression,local-update}.log、monitor-entry-local-update.json；备份pre-monitor-entry-20261106-214746，原数据/密钥保全PASS；待用户验收，不在91c的alpha.2附件内。 |
+| ACTIONS-YAML-PRETTY-01 | 待验证 | 4ddbda6已提交推送main并更新4291：用户数据实际为两行flow-style YAML；读取pretty展示不写库、表单生成block YAML、显式格式化/错误保留；注释/锚点/JSON命令/表达式/CRLF语义保留。24单测、453全前端/1旧skip、真实Chrome+模板回归PASS（Temp/actions-yaml-pretty-fH61xV），新验收加入CI；待用户验收。 |
+| LIST-DEFAULT-SORT-01 | 待验证 | 36c5db6已包含alpha.2/91c并更新4291：14处默认排序按场景调整、同时间ID同向稳定分页；8类资源HTTP/手动排序/最近编辑/角色顺序/隔离PASS（Temp/list-default-sort-VFASuS）；最终远端28门禁通过，待用户验收。 |
+| ROUTE-STATE-01 | 待验证 | 创建/加入独立URL、返回原事件URL、筛选分页滚动PASS；b6f7ed1加入后概览、75c3845注册后onReady、91c3a47平台设置原地保存保留section/form_tab。真实空间管理、平台认证/OTP、alpha2-ux和仓库授权全链路PASS；4291已更新PID56844，待用户体验。 |
+| AUTH-RELOGIN-01 | 待验证 | 失效凭证428重新开启验证；挑战按账号/IP/令牌独立存储，防多标签和空证明请求覆盖。重复退出登录、凭证过期恢复及双标签真实HTTP/Chrome PASS：Temp/login-guard-Pq2S8B；14项账号Rust测试通过。已更新4291/PID900，待用户验收和用户验收。 |
+| MAIL-HTML-01 | 待验证 | 富文本/HTML同一正文、默认样式及隔离预览；服务端与预览共用邮件布局，旧纯文本兼容，实际SMTP发送multipart HTML及纯文本回退。Temp/alpha2-ux-9Pm5mi及邮件Rust用例PASS；已更新4291/PID900，待用户验收。 |
+| REDIS-SCAN-UX-01 | 待验证 | 输入不请求、搜索保留数据/焦点；游标0明确完成，未完成可下一批。独立Redis真实300键全部遍历及URL筛选/Tab恢复PASS：Temp/alpha2-ux-9Pm5mi；待本地更新。 |
+| APP-PORTABLE-01 | 待验证 | 15f2b1e已提交并备份更新4291/PID69212/index-C5Ft36z7.js：显式ferry/v2镜像+原生产物、四引擎按目标渲染，v1结果兼容；Swarm放置/每节点副本上限与override同校验；纯兼容检查/六语表单。463前端PASS/1旧skip、20部署RustPASS/1需Docker忽略、typecheck/前后端build及真实API/Chrome/跨空间引用拒绝/6语390px PASS（Temp/deployment-portable-PqsUQR/acceptance.json）。原数据/密钥保全portable-local-update.json；待用户验收。推送认证仍缺失，未发版。HA/Nomad另见APP-HA-01。 |
+| APP-HA-01 | 待处理 | HA服务模板/协议探针、三manager仲裁、跨物理机网络/持久卷及Nomad仍未实现或验收；GitHub Actions独立daemon故障测试见APP-HA-CI-01，不混同数据库HA。 |
+| UI-ORDER-SPACE-01 | 待验证 | 已备份更新4291/PID7816/index-CJwVpiFS.js：公共字段/卡片紧凑间距、详情去双层空隙、普通按钮右侧取消→保存/创建、分组按钮归内容栏；SMTP/主机/工作流字段依赖重排。最终68内置页面桌面及390px/按钮顺序宽度/无JS错误PASS，52相关测试及前后端build通过，全量471PASS/1既有skip。证据Temp/ui-order-space-dYjME8/acceptance.json、ui-order-space-local-update.json；原数据/密钥保全，待用户验收，未提交推送/发版。 |
+| MON-SUBSCRIPTION-UX-01 | 待验证 | 已更新4291：只读订阅完整勾选/未选状态，通知平台/语言及预览/指南分别同行，窄屏换行。实际浏览器和相关测试PASS（Temp/ui-order-space-dYjME8/acceptance.json），保留订阅配置，待用户验收。 |
+| MON-NOTICE-PREVIEW-01 | 待验证 | 用户反馈预览布局/提交颜色与实际消息不符，重新打开；按实际平台payload渲染并核对颜色，旧测试不作当前验收。此前： 973fe0f已提交推送main并备份更新4291/PID76840/index-DiPyQ8Qm.js。每渠道预览/发送测试使用当前未保存配置及正式消息生成器；明确测试标题/成功失败/发送禁重，读者仅预览，审计无密钥。前端21/后端6测试、构建、54平台语言预览、真实本地收发成功/503、读者403/跨账号404/匿名401、设置/基线/事件不变及1440/390px嵌入UI PASS；证据Temp/notification-preview-PAkm7D/acceptance.json及data/maintenance/notification-preview-{ui,rust,build,server-build,browser}.log、notification-preview-local-update.json。原数据/密钥/实例保全PASS；未向真实渠道发消息，未发版，待用户点击验收。 |
+| MON-COMMIT-COLOR-01 | 待验证 | 用户补充企微提交灰色太浅及实际单行消息样例；改企微原生橙色强调、飞书保持蓝色，预览按实际payload保留标签和值同一行，验证后更新4291。此前： 633c342已提交SSH推送并备份更新4291/PID41744：提交信息复用Accent::Blue，飞书蓝色，企微原生comment降级，其他渠道不输出不支持的色标签；增绿/删红保持。5通知测试/格式/build/原数据密钥保全PASS，monitor-commit-color-{tests,server-build}.log和local-update.json；待用户查看后续真实推送。未主动向外部通知渠道发送测试消息。 |
+| APP-HISTORY-LIVE-01 | 待验证 | 439bda8已提交SSH推送，463前端PASS/1旧skip、typecheck/build/server build及真实嵌入Chrome受控API复验PASS（Temp/deployment-history-live-aAus6q）。已备份更新4291/PID89376/index-BbTfEuCt.js，原数据/密钥全保留history-live-local-update.json；真实Compose CI重跑仍待结果。 |
+| APP-UX-01 | 待验证 | f1e90cf已提交并更新4291：模板参数可视化/高级JSON、默认YAML与Monaco、部署表单分区/目标重置/列表元信息/历史快照与轮询修复、市场同步防重复。前端460PASS/1skip、部署Rust16PASS/1需Docker忽略、typecheck/build及真实Chrome创建模板→生成部署/六语390px/跨账号跨空间404通过，证据Temp/alpha2-ux-ggPLYg/acceptance.json；原数据保全app-ux-local-update.json。待用户体验；未实际部署容器/HA。推送凭据缺失，未另发版。 |
+| LOADING-SKELETON-01 | 待验证 | ec0de88补齐仪表盘/节点输入输出/仓库及引用选择/Runner与编辑器首载骨架；刷新保留结果。前端453+新增2项PASS/1既有skip、慢请求/失败/390px/reduced-motion浏览器PASS；4291已更新index-4NX9ityP.js，待用户体验。 |
+| WF-RUN-ENTRY-01 | 待验证 | 测试确认后进入独立只读执行画布，不回节点编辑；最终真实Chrome通过，4291已更新，待用户验收。 |
+| WF-SAVE-RUN-01 | 待验证 | 保存/保存并运行/发布同栏；保存成功用最新版本执行，409保存失败不发执行。Temp/alpha2-ux-6BaevS通过，4291已更新，待用户验收；首次新建需先创建。 |
+| WF-CREATE-DEFAULTS-01 | 待验证 | 中英文默认名称为当前语言+日期时间+6位随机hex可改；两类工作流空白起步，复制及模板保持，首个Actions任务可添加。真实Chrome通过，4291已更新，待用户验收。 |
+| WF-EXEC-UX-01 | 待验证 | 独立冻结版本画布：节点状态/连线箭头动效/各次尝试/时间/错误/输入输出；真实Agent Git日志封顶256KiB、250ms合并写库，失败重启保留，无文本日志明确说明。main 1改主输出，空对象明确显示。450前端+82工作流+4迁移PASS（各1旧skip/环境ignored），Temp/workflow-execution-view-O2zhZC真实成功/失败/运行/取消/390px/跨空间404通过。4291已更新，待用户验收。 |
+| WF-EMPTY-UI-01 | 待验证 | 两类画布共用EmptyWorkflowCanvas，图标/标题/说明/按钮统一，仅任务与节点语义不同；真实Chrome样式与首个任务添加PASS（Temp/alpha2-ux-HyM7sU截图）。4291已更新，待用户验收。 |
+| ACTIONS-WORKER-LOCAL-01 | 待验证 | vmware/Linux SSH失败源于ACTIONS_WORKER_DIR仅Windows内核；已按当前源码补Linux amd64，SHA256 00e197f2f2b653a89788b63efcb48aa8e8bf200b41dd924165edd86db49f30ff4。临时Linux真实Actions命令PASS：actions-worker-linux-smoke.json、Temp/actions-worker-linux-smoke-27ng419v。4291沿用该目录，无需改用户任务；未重跑用户原任务，真实vmware复验仍待。 |
+| HOST-MONITOR-TOOLBAR-01 | 待验证 | 监控时段标签与下拉同排不拆行，监控与ResourceTable共用RefreshControl分体刷新/倒计时/间隔菜单；真实宽屏及390px、关闭自动刷新和18项控件回归PASS。4291已更新，待用户验收。 |
+| WF-ARCHIVE-ACTION-01 | 待验证 | 操作文案改归档，显式Archive图标；状态/筛选仍已归档，六语动作状态分离。前后端构建、真实Chrome按钮与图标及执行历史回归PASS：Temp/workflow-execution-view-oRZtCg。4291已备份更新PID53600/index-CSpFP5vy.js，原数据/密钥/实例保全PASS；待用户验收。 |
+| WF-EXEC-HISTORY-01 | 待验证 | 明确眼睛+查看详情，行点击/版本最近执行链接均打开独立结果，URL记录执行ID且刷新恢复；两列表统一v序号，版本补节点数/当前草稿与发布标识/最近执行状态及时间，执行补触发人/起止/耗时/原因/状态筛选。真实Agent草稿+正式、节点数和最近记录映射及浏览器PASS：Temp/workflow-execution-view-pDkwmP。4291已更新，待用户验收。 |
+| WF-PUBLISH-REVIEW-01 | 已完成 | 保留草稿/发布隔离。代码核对：历史修订可查看，执行接口Revision仅Draft/Published，无任意历史恢复或运行UI；已向用户说明边界，未宣称实现。 |
+| THEME-ENTRY-ALL-01 | 待验证 | 各入口及全屏布局复用语言/主题控件，真实Chrome各分支/持久化/390px PASS（test-theme-entry-ui证据），4291已更新；待用户体验。 |
+| AUTH-CHALLENGE-UX-01 | 待验证 | 4291已备份更新PID78408/index-icuDQ7Bx.js。独立安全弹窗/滑块松开自动验证/失败换图/网络异常保留重试/通过自动登录；随机斜线路径及不同高度干扰，适量曲线与字形偏移；4×2候选及三槽顺序。verify签发账号IP绑定、2分钟一次性哈希凭证，保留旧证明兼容。最终构建/3组Rust与真实HTTP+Chrome PASS，覆盖凭证并发单次/过期/账号IP绑定/网络重试/斜移/自动登录/390px；证据challenge-ux-acceptance.json、Temp/login-guard-pfRqbF及Z7bIme截图；业务/密钥保全PASS。自审及本轮技术验收通过，待用户验收，未提交发布。覆盖此前登录时混合验证方案，真实Turnstile站点仍未验。 |
+| REPO-NOTICE-STYLE-01 | 待验证 | 4291已更新PID90980；六语referenceLabel删除，按实际分支/标签使用两个独立键；事件标题去仓库/着色，正文仓库链接，增删行数按渠道着色；不完整统计不显示。正文不显示轮询方式，结构化source保留兼容。16通知+27monitor Rust及158项仓库HTTP回归PASS。Codeup真实统计API未验、纯Git无行数；待用户体验，未提交发布。 |
+| AUTH-LOGIN-GUARD-01 | 待验证 | 4291已更新PID90980：15分钟累计5次错误后本地四种随机验证码，单次5分钟/绑定账号IP；账号10/IP30次每分钟，挑战20次/IP每分钟，最多2万行/索引/每次清理200。可配置Turnstile，密钥加密、校验域名/login动作、CSP官方域名。3组Rust、TS、33前端测试及真实HTTP/Chrome并发复用拒绝/绑定/重启恢复/390px PASS（Temp/login-guard-sto4qO）。真实Turnstile站点未验，待用户验收，未提交发布。 |
+| SECURITY-TENANT-01 | 待验证 | 158项仓库真实HTTP回归PASS（repository-auth-login-guard-final.log，exit0），覆盖跨账号/跨空间、资源ID伪造、只读角色、通知与凭据；全局审计匿名401/普通用户403及隔离PASS（Temp/platform-activity-Mij48U），登录配置权限/挑战账号IP绑定PASS（Temp/login-guard-sto4qO）。覆盖本轮变动路径，不声明全系统安全审计完成，待用户验收。 |
+| STORAGE-PATH-01 | 待验证 | 本机存储绝对目录只读可复制，S3模式隐藏；真实API/Chrome 1440与390px通过，4291已更新PID82496/index-D9Y9Jnhh.js，待用户验收；未提交推送或再发版。 |
+| PLATFORM-AUDIT-01 | 待验证 | 系统监控操作记录汇总平台及全部空间既有审计，支持范围/空间/关键词/资源/动作筛选和分页；匿名401/普通用户403、空间隔离及读取不留痕通过，4291已更新并保全361条原记录；待用户验收。不回补历史未记录操作。 |
+| REPO-VISIBILITY-01 | 待验证 | 已备份更新4291/PID44056：命名仓库连接/洞察按空间角色共享，超管未加入也最高权限；列表/详情/事件/选择/聚合/定时采集一致，保留跨空间及个人OAuth准备会话边界、洞察创建者及独立映射。查询无空间activity/不加入，修改删除及手动采集提交按真实actor审计；112Rust通过/3既有环境忽略，双账号/只读拒绝/写入/未加入超管/跨空间HTTP+Chrome通过，repo-workspace-share-acceptance.json及audit-*证据。原Codeup连接和demo洞察均保留，待用户刷新原列表验收；已随733ac14提交推送发布v0.3.0-alpha.1。 |
+| NODE-MONITOR-NAV-01 | 待验证 | 已更新4291/PID69884：系统监控左侧首项服务器节点，移除设置入口；两类旧地址自动跳转，六语Chrome选中/刷新/无保存按钮/390px通过，证据node-monitor-nav-browser.json及feedback04-final-update.json，待用户体验。此决策覆盖PLATFORM-NAV-01此前服务器节点归属设置的约束。 |
+| WORKSPACE-COUNT-ORDER-01 | 待验证 | 已更新4291：空间详情统计按业务显式排序，构建流水线/节点工作流相邻；1440/390实测同排，截图node-monitor-workspace-{1440,390}.png，待用户体验。 |
+| MON-RETENTION-01 | 待验证 | 已更新4291/PID86128：明细默认30天可配1～365天，每节点默认10万条可配1000～100万；4096有界队列、50ms/最多100条批量写入，满队列丢弃不阻塞；过期/超限每批最多1000条淘汰，有索引，配置其它节点每分钟同步。统计显示保留规则/最早记录，长周期只覆盖保留数据；SQLite删除后复用空页，不自动重型VACUUM。3500次请求验证1000条上限、淘汰隔离测试PASS；存量超限分批收敛，不承诺瞬时清空或业务文件/日志磁盘配额，证据platform-feedback04-{acceptance.json,monitor-tests.log}及feedback04-runtime.json。 |
+| MAIL-TEMPLATE-01 | 待验证 | 已更新4291：邮箱配置连接/模板两Tab，注册验证码/测试邮件主题与纯文本正文，变量插入/预览/留空默认；服务端限制大小/拒绝主题换行和未知变量、验证码正文必须带code。真实本地SMTP两类邮件发送/变量替换、模板修改保持SMTP验证时间PASS；未自动发送用户真实SMTP，证据platform-feedback04-{acceptance.json,mail-tests.log}。 |
+| WORKER-REUSE-01 | 已完成 | 本轮源码复核：1024槽位（0～1023）、10秒心跳，正常退出立即释放，异常最后心跳超过60秒可复用；旧进程失租停止发号，离线行保留至槽位复用，不永久占ID。再次运行cargo test -p ferry-server worker::tests:: -- --nocapture，3/3 PASS，覆盖回收/释放/重启/并发/耗尽及旧属主不能释放新租约。无需新增清理机制；本轮仅核对，未改源码或重启服务。 |
+| NODE-FOOTER-01 | 待验证 | 已更新4291：共享ResourceTable扩展footerSummary复用AutoTable底栏，在线/总数显示左下角与分页同排，移除顶部独占行；真实浏览器及43相关前端测试PASS，见platform-feedback04-{acceptance.json,ui-tests.log}。 |
+| SQL-STATS-01 | 待验证 | 已更新4291：复用AutoTable数值排序，≥1000ms慢次数/耗时红色+文字；管理员重置当前节点内存及已上报摘要/记录审计，异步报告锁避免旧摘要回写，不重置其它节点。每节点200模板/每个≤1504字节，指纹最多扫描16384字符、短锁外JSON化、采集try_lock竞争跳过并计数、计数饱和；内存不无限增长，心跳最多20摘要覆盖worker行。内存上限/竞争测试、真实ACL/重置摘要、浏览器数值排序与慢SQL样例样式PASS；不声称真实生产慢SQL压测。证据platform-feedback04-{monitor-tests.log,acceptance.json,locales-browser.json}。 |
+| PLATFORM-DETAIL-04 | 待验证 | 已更新4291：平台四页统一面包屑替代重复标题；空间详情ID/拥有者/我的成员关系/创建更新时间和成员/主机/仓库/凭据/两类工作流/内容资产数量，保留进入操作。未加入仅未加入，平台管理员不冒充空间角色；真实两空间隔离/非管理员403/未加入展示/六语和390px PASS，证据platform-feedback04-{acceptance.json,locales-browser.json}及feedback04-workspace.png。 |
+| NODE-DISK-TYPE-01 | 待验证 | 已更新4291：复用sysinfo DiskKind在挂载分区明细显示SSD/HDD/未知，补六语；本机C/D均SSD，与Get-PhysicalDisk及分区映射对照，真实采集/浏览器PASS。保全原数据/密钥、Redis保持接入；备份pre-feedback04-20261105-220704，证据feedback04-{update,runtime}.json。未宣称Linux/macOS实机验收，未提交发布。 |
+| NODE-RESOURCES-01 | 待验证 | 已更新4291/PID86128：资源随成功心跳每10秒采样，显示采样时间/离线最后采样，刷新读取快照；修复Windows扩展路径磁盘匹配，挂载分区弹窗列容量/已用/可用/使用率；CPU实测1颗/20物理核/28逻辑处理器；仅物理网卡IPv4优先、无IPv4再IPv6，监听地址分开。6个Rust测试、43项前端及真实Windows/CIM对照/下一心跳采样推进/浏览器PASS；证据node-resources-tests.log、node-files-{acceptance,local-runtime,update}.json。构建/自审及本轮需求核对通过，待用户体验；未验证Linux/macOS实机，不宣称未挂载分区全覆盖，未提交发布。 |
+| PLATFORM-FILES-01 | 待验证 | 已更新4291/PID86128：文件统计新增文件列表Tab，复用ResourceTable及现有权限下载/预览，支持搜索/类型/分页/空间与来源，图片音视频预览及下载；覆盖内容资产和构建产物，不提供任意服务器目录访问；资产无原文件名显示内容标识。真实上传PNG/预览解码/下载字节、匿名401/普通用户403、雪花ID字符串及六语×4监控页全部Tab/1440和390px PASS；证据node-files-acceptance.json、platform-feedback03-browser.json；原数据/密钥保全，备份pre-node-files-20261105-211929。Windows+SQLite验证，未宣称多数据库运行验收；待用户体验，未提交发布。 |
+| REDIS-LOCAL-01 | 待验证 | 已启动独立Redis8.10.3（Windows移植包SHA256通过），127.0.0.1:6381/PID83004，仅本机+密码认证+AOF；已接入4291/PID86128，psutil核验实际子进程URL、SQLite/无NATS和原实例ID。真实Redis API及Chrome三Tab、内存/命中统计、六个ferry:demo:*示例键覆盖五类型、永久/24h TTL、密码不回传PASS，证据redis-local/{acceptance.json,runtime.json,overview.png,keys.png,info.png}。重启前备份pre-redis-local-20261105-205544，逐字段保全与SQLite完整性PASS；同一二进制/资产未改，未提交发布。等待用户在/platform/monitor/redis验收，Redis及4291保留运行。单机默认SQLite+本地文件/进程内通信，Redis不是核心依赖，NATS仅多实例需要；其它项目Redis进程与6379 Java未改。 |
+| PLATFORM-FEEDBACK-03 | 待验证 | 已更新4291/PID86412/index-DL0MXKsQ.js：数据库5个Tab，Redis/文件/访问各3个，保留选中状态；工作空间详情/编辑增加进入；修复两处刷新翻译键、补齐运行数据列六语；Redis未配置提示准确化（本地未配置，6379为Java进程，未擅接）。43测试、6语×4页全部Tab/数据表头/进入/1440与390px浏览器PASS；原数据/密钥逐字段保全及SQLite完整性PASS，备份pre-feedback03-20261105-202701，证据platform-feedback03-{browser.json,tests.log,build.log,server-build.log}和feedback03-update.json。Direct自审/本次限定验收PASS，未提交/推送/发布，待用户体验；系统监控整体及WF-07仍未完成。 |
+| NAV-NOUN-01 | 待验证 | 菜单去管理、四模块凭据统一；已包含733ac14/发布v0.3.0-alpha.1并更新4291，六语30页侧栏PASS，远端28任务/公开21附件及版本镜像核验PASS，待用户体验。 |
+| PLATFORM-MONITOR-01 | 待处理 | 用户新增平台系统监控：数据库连接配置脱敏/实例/池实时/慢SQL/占用空间；Redis同类指标及图表，参考芋道；评估DB/Redis网页操作；文件空间/访问记录/Top100；访问统计按日周月季年活跃用户等；服务器节点CPU/内存/磁盘配置和可用量。先核对实际后端，不虚构Redis连接或历史指标。前批4291更新及README截图继续完成。 |
+| FORM-HELP-01 | 待验证 | 已更新4291/PID75204：SMTP移除未设置密钥和密码保留说明；公共SecretField说明移到控件下方；页脚富文本/高级HTML均仅一处底部小字。38表单/路由测试、生产构建及真实Chrome通过，待用户体验；证据platform-nav-help-*。 |
+| PLATFORM-UX-02 | 待处理 | 设置页横向溢出定位公共保存栏负边距，移除；只读/禁用不显示通用填写提示，保留业务说明；系统信息从设置移除统一看节点列表，地址列限宽换行；平台右上角复用空间账号/语言/主题/切换操作；用户列表新增状态/角色后端组合筛选。待回归和再次更新4291。 |
+| PLATFORM-NAV-01 | 待验证 | 已更新4291/PID75204：顶部一级导航保持原位；服务器节点仅在平台设置左侧二级菜单，旧链接跳转settings/1/edit?section=server-nodes；系统监控左侧仅自身分项。Chrome刷新/组返回/无保存且不可误提交/1440与390px通过，待用户体验。 |
+| README-SHOTS-01 | 待处理 | 用户要求本轮完成后更新本地，再自行制作关键、吸引眼球的生产示例截图放README，图片集中单独目录并用Markdown相对引用。沿用现有截图/README结构，示例数据避免泄露凭据；不提交推送。 |
+| MON-ACTOR-01 | 待处理 | 用户反馈仓库事件操作人全空。4291只读核对：126条记录中102条actor空，主要轮询push/tag，2条旧记录无source；代码有意不把提交作者当推送者。继续核对展示与来源说明，不伪造历史操作人。 |
+| WF-LEGACY-01 | 待处理 | 用户询问旧流水线是否丢失；4291确认demo空间原流水线23及3次执行完整保留。核对工作流→构建流水线入口/权限，提供原详情链接，不重建或覆盖数据。 |
+| DICT-STATE-01 | 待处理 | 用户明确要求：固定流程/不可随意维护的状态不放字典，清掉数据库记录与子项/初始化/展示读取；只保留可维护业务选项（环境/分类等）。前端状态字典读取已移除，后端清理迁移已补，待回归/更新4291。 |
+| TYPED-UI-01 | 待处理 | 字典与配置项按8092/zh-CN/sys/dicts/1001/edit参考：基本信息/值类型在前→类型约束→匹配类型的值编辑器（富文本/Monaco/图片文件等），控件联动、校验/保存/重开全验证。已用参考公开原型账号登录查看；不照搬原型源码。 |
+| TYPED-LIST-01 | 待处理 | 用户要求参照172.28.0.1:4280/#/catalog/kind，字典/配置项列表左侧复用主机GroupSidebar分类，并加全部/分类数量，当前空间隔离/切换筛选/刷新与窄屏验证。参考只到登录页，按用户明确描述推进，不虚称已看其登录后目录。 |
+| LOCAL-4291 | 已完成 | 已先备份并更新4291/PID81068为已验证预览同一二进制；原账号/空间/密钥/凭据/连接/流水线及记录保全、SQLite/Chrome页面PASS；4292已停且数据保留，见本批交付。登录使用原4291账号密码，预览凭据不适用；未代登录，未改密码。系统浏览器打开命令被自动审批策略拒绝，已给用户入口链接。 |
+| AUTHOR-01 | 待验证 | 已更新4292：自动列出所选授权仓库的原始姓名+邮箱，昵称可空；完整二元组逐字去重，空值/大小写不同保留，不按同昵称合并。每个洞察独立映射，清空昵称不影响其它洞察。后端77PASS/3环境忽略，前端28PASS；浏览器及部署证据见本批检查点，待用户体验。 |
+| HEAT-01 | 待验证 | 已更新4292：热力图月份YY-MM、避开短首月碰撞/右端裁切；六语×1280/390px×普通/跨年/月末起始36组几何检查通过，日期格数量不变，待用户体验。 |
+| MON-01 | 待验证 | 已更新4292：仅改通知/频率/启停保留轮询快照、检查时间及错误，真正采集范围改变才重建基线；26个监控测试通过，含版本隔离与暂停恢复。待用户体验；4291未动。 |
+| REFRESH-01 | 待验证 | 刷新80ab185已推main/更新4291：统一关闭/5/10/15/30/60逐秒倒计时，到期仅左侧图标旋转、右侧0s，成功或失败完成后重新计时；不等宽一体胶囊，关闭仅下三角。392前端PASS/1既有skip，构建及真实4291嵌入Chrome六主题明暗/慢请求/成功失败/手动/切换/监控通过；等待DEL-01发布。 |
+| CI-01 | 待验证 | 洞察动态计数/阅读位置修复d163260已合入main并推送，集成前端392PASS/1skip、服务构建及4291嵌入洞察浏览器通过，PID79348；已纳入alpha2候选1e1f5bb。线上941b9d9a/alpha1为独立实例，发布后待实际部署升级验证；无线上部署入口，不擅改线上。 |
+| WF-01 | 待处理 | 用户要求全部完成、不停顿；PDR-01～05已确认。已按最新授权迁至主目录feat/workflow-platform，TPL-01并入本项；原worktree仅保留历史证据。Stop、Workflow归属与发布账本/身份已验收：workspace535 PASS/13忽略，SQLite/MySQL/PostgreSQL各67 HTTP，证据worktree/workflow-platform/data/maintenance/workflow-publication-results.json。继续流水线ACL/归属/生产授权迁移；自动触发/投递、其它执行器、人工/表单/聊天/通知、数据/AI/预算、UI及全量三库跨平台未完成。超时待答、PDR-06待选型；未提交/推送/合并/更新4291。 |
+| WF-02 | 待处理 | Workflow阶段验收不变。流水线已接owner追加迁移、新建归属、对象/分组ACL、列表/历史/日志/产物/运行鉴权及owner转让；首轮cargo check通过，正在workspace单元与三库HTTP验收，未宣称完成。PDR-04停自动触发、生产发布身份/指针与迁移仍待接入。 |
+| WF-03 | 待处理 | 冻结时钟/时区与日期helper阶段已验证，见交付记录；图执行/预览UI、Linux原生性能与macOS仍待交付，不以Windows通过代替跨平台验收。 |
+| WF-04 | 待处理 | 人工任务/审批/保护、公开表单/聊天、通知/同步回应；会话/权限/撤权/外审/去重及三库并发验收。 |
+| WF-05 | 待处理 | 媒体/AI首批已更新4292/PID86104：文件/图片/音视频上传运行预览下载、文本/JSON读写、OpenAI/Anthropic文本识图及OpenAI图片/语音/转写、价格预留/限流/对账，实际HTTP+Chrome十一组PASS，Temp/workflow-media-ai-IURCJL/acceptance.json；旧编辑器十一组PASS，Temp/workflow-editor-3KtH8d/ui-acceptance.json。商业实账号、视频生成/主机处理、剩余格式与完整执行级预算/三库故障验收仍待完成，详见本阶段交付记录。 |
+| WF-06 | 待验证 | 本轮节点反馈已更新4292（见本批界面交付记录）：线上插入应居中并推开右侧后继；节点库应用→资源→操作＋全局搜索、返回保留目录/滚动并可回顶部；编辑页不显示历史/执行页签，仅详情保留；画布铺满宽高。Chrome回归与嵌入页面已通过，待用户体验；不将局部验收视为整体完成，4291不动、不提交推送。 |
+| WF-07 | 待处理 | 当前Workflow HTTP三库各67项已通过；其余全量单元/集成/浏览器E2E、PG内部故障/MVCC/集群、历史升级与跨平台仍待逐FR/AC/TC/源清单验收，全部通过后保留现场，不提交/推送/合并。 |
+| WF-09 | 待验证 | workflow_kind专用筛选修复已更新4292/PID56316，实际两类模板页面/计数/渲染/未知参数拒绝PASS：template-examples-preview/acceptance.json；12后端模板测试PASS。其余Actions快捷键/右键、模板tab、凭据与空间菜单维持此前交付，待用户体验；面包屑第一项为空间名，无需改。 |
+| WF-10 | 待验证 | 新建可直接选文件本地预览，首次保存上传归属；不隐藏创建。失败保留文件和已创建ID/版本，离开释放blob；4292媒体AI十二组PASS（Temp/workflow-media-ai-4Bj4yu/acceptance.json），包括失败重试无重复创建/保存重开运行；待用户体验。 |
+| WF-11 | 待处理 | 用户确认一起实现Codeup及通用Git操作；复用声明式集成表单/凭据/调用账本与HostChannel。首批Codeup仓库/分支/提交/合并请求查询，Git远程引用、状态/日志/分支/标签及clone/fetch；待实际执行和4292验收，不能只上目录。 |
+| WF-15 | 待处理 | 容量排队/主机组/升级独占等待修复已更新4292/PID55964：115测试PASS/1环境忽略、真实Agent容量4组及部署后浏览器PASS，详见本批交付记录。下一步跨实例租约/升级协调专项；外部Agent未升级，AI/媒体不虚标主机执行，4291不动。 |
+| WF-16 | 待验证 | 已更新4292/PID79384：复用事务修复节点output/data及binary pin保存死等，最终接口200/12ms、10ms；真实Agent Git/HTTP及公开仓库→JSON报告PASS。新空间默认各1个构建/节点示例，模板导入画布、隔离/回滚12测试及检查器7组PASS，证据见本批交付记录；两库构建仅复核此前成功run。待用户体验，4291未动。 |
+| PLATFORM-STORE-01 | 待处理 | 用户要求平台文件存储可选本地（仅单机）/S3（单机或集群），并展示服务器节点数/IP等，复用自动workerId。已发现ArtifactStore有环境变量S3后端，继续核对统一配置、集群限制和成员API，补平台配置/节点视图，待切换及跨实例验证；不得擅自迁移现有用户文件。 |
+| AUTH-LOGOUT-01 | 待验证 | 已更新4292/PID75512：修复已有工作空间时Workspace挂载抢先覆盖redirect，新增回归单测；真实Chrome登录回跳query/hash/过期/外链/主动退出/Back与慢初始化通过，64前端PASS。证据platform-settings-acceptance/acceptance.json；待用户体验，4291/线上未动。 |
+| PLATFORM-INFO-01 | 待验证 | 已更新4292：平台设置独立“系统信息”分组显示系统/协议版本、运行平台/模式与实例标识，复用平台settings API只读表单及六语。实际Chrome与390px/值对照status/普通用户403通过：Temp/platform-auth-OPY4rw/acceptance.json及截图。无构建SHA/时间字段，待用户体验。 |
+| PLATFORM-ACCOUNT-01 | 待验证 | 已更新4292：平台账号最近登录IP/最后登录/注册时间与时间排序；成功登录同事务写入，失败/退出不改，不触发配置version冲突；旧/未登录未知值留空。可信代理CIDR→XFF从右至左首个非信任地址，默认直连、不信伪造头，README/Compose有配置。迁移/实际HTTP/管理员权限/IPv6单测/Chrome通过，证据Temp/platform-auth-OPY4rw；线上代理配置未改，待用户体验。 |
+| PLATFORM-FOOTER-01 | 待验证 | 已更新4292/PID75512：页脚富文本/高级HTML、安全清洗/空值隐藏、登录及业务页同步；真实保存/备案与邮件链接/脚本移除/390px表单及画布滚动可达PASS，证据platform-settings-acceptance及platform-settings-preview。待用户体验，4291/线上未动。 |
+| PLATFORM-SCRIPTS-01 | 待验证 | 已更新4292：通用JavaScript不限厂商，可选GA4 ID、独立开关及来源白名单，文档级nonce CSP；真实浏览器SDK加载/网络上报/登录页/SPA不重复/关闭或清空后刷新停用PASS。保存后刷新生效，未配置真实统计账号；待用户体验。 |
+| PLATFORM-MAIL-01 | 待验证 | 已更新4292：SMTP配置/凭据加密/发送验证与状态；启用且SMTP接受测试邮件后注册强制6位码（10分钟/单次/5次尝试/60秒发送间隔、邮箱10次及IP20次每小时，数据库共享）；改传输配置取消验证。64前端、真实SMTP/HTTP/Chrome注册及错误边界PASS；默认未配置，需用户填写实际SMTP验证外部投递。 |
+| UI-HELP-01 | 待验证 | 已更新4292/PID70940：公共AutoField及工作流原生标签统一问号，支持悬浮/键盘/触屏；Actions关键字段专属说明，其他字段由控件类型/范围/示例提供基础用法。443前端PASS/1skip，最终15专项及两类真实浏览器通过，详见本批检查点。待用户体验；更细节点业务说明与未接公共组件的全站独立标签仍需补齐。 |
+| WF-12 | 待处理 | 执行前/执行/执行后分区已更新4292/PID70940，任务/步骤统一标题分隔，工作流默认值归执行前；Shell/目录前置、命令/Action/复用引用/超时归执行、失败处理/输出归执行后，实际Chrome与390px及原值/YAML保持通过，待用户体验。步骤ID自动分配/即时冲突/引用保护、Codeup Flow映射仍待补齐。 |
+| WF-14 | 待处理 | 协议/依赖初改，代码插件尚未完成；本轮优先处理WF-12表单反馈，后续继续接入JS/QuickJS、Lua内置解释器和WASM解释器代码插件：复用扩展包版本锁/节点表单、隔离进程与Item数据，ABI1为单Item+params到JSON对象、保留binary/paired。复用超时/内存/取消与错误，不加载外部解释器；Python暂缓。正在实现协议/引擎/运行链路，待真实安装运行、失败隔离和4292更新，不动4291，不提交推送。 |
+
+## 2026-11-05 本地入口统一4291（运维交付）
+- 用户明确授权取代此前隔离约束：先备份4291并升级，验证后停4292。已执行，无源码构建变化/提交推送/线上发布。当前4291 PID81068、target/debug/ferry-server-workflow-local.exe，沿用data/dev-backend及原实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2；二进制SHA与已验收4292预览一致，UI asset index-COPob1ao.js。
+- 备份data/backups/pre-consolidate-4291-20261105-180046：SQLite一致性备份、master.key/instance-id、非日志文件/缓存及旧ferry-server-template-editor.exe；备份目录ACL限制当前用户/SYSTEM/管理员。升级前无活跃pipeline/workflow；consolidate-local-preview.json验证原3账号/3空间/3凭据/1流水线/3执行/1仓库连接/平台配置的所有原字段未改变，密钥/实例校验和及SQLite完整性PASS。
+- Chrome真实页面PASS：当前登录UI/asset加载且无页面错误、未登录工作流路由跳登录，证据consolidated-local-browser.json。此轮无4291可用明文凭据：沿用4292预览access尝试真实登录返回401，未修改任何密码，未代登录；没有声称登录后全功能在原空间重新验收。用户可用之前4291原账号密码登录。打开默认系统浏览器的Start-Process URL命令被自动审批策略拒绝，已告知链接，无外部权限申请。
+- 检查预览无活跃任务后停止4292/PID55964，确认4291独立监听、4292无监听；data/workflow-preview-20261104原数据未删除、未合并。后续更新/测试需面向4291，旧4292私有检查器的固定资源ID不适用于4291；历史证据保留，不盲目运行旧重启器。
+- Direct运维，自审范围/保全/回归/状态及本次入口统一验收PASS。整体工作流其余事项未完成；登录凭据仍由用户持有，不自动重置。
+
+## 2026-11-05 主机容量与升级等待（阶段交付）
+- 修复拿槽后等待升级独占预留时不能取消/撤权、不续租，以及锁放开后未复验槽位归属的问题。将Actions既有wait_for_reservation移入hosts/runner/reservations复用，保留并发轮询以避免唯一SQL连接死锁；接入执行监督停止信号，等待每10秒续租，开通道前再次核验owner和过期时间。沿用原锁、容量与租约，不新增执行体系。
+- 回归：workflows80PASS/1既有环境忽略、scheduler7（含唯一SQL连接与取消后释放）、executions21、host slots3、reservations4，共115PASS。cargo build -p ferry-server通过（3个既有dead_code警告）；日志data/maintenance/workflow-host-wait-{green,scheduler,executions,slots,reservations,build}.log。原RED日志workflow-host-wait-red.log保留；接管测试夹具已改显式Set(owner)并在放锁前断言接管落库，原夹具的runner.offline失败不能独立证明接管边界。
+- 新二进制真实Agent容量4组PASS：单槽主机组排队取消不发命令/不影响持槽者；释放后仅启动一次；异空间组拒绝；取消后真实Git status恢复并记录选中主机ID。证据data/maintenance/workflow-host-boundaries-capacity.json，原始Temp/workflow-host-boundaries-cHf3UJ。升级独占等待用真实锁/SQLite后端回归验证，未声称真实远程升级验收或跨实例验证。
+- 4292已更新PID55964，原实例8156fe6f-f423-45a6-a25a-a22b66a6b488和嵌入asset index-COPob1ao.js不变；备份data/backups/pre-workflow-host-wait-20261105-173642。保全workflow-host-wait-preview-preservation.json PASS：原80工作流/175版本/9凭据/8模板/1账号/平台配置未改，SQLite完整，4291原实例/PID63240未动。更新后取消浏览器桌面/390px PASS（workflow-cancellation-preview/acceptance.json）；原历史output/data均200（15/161ms，existing-workflow-output.json）。
+- Direct执行；自审范围/复用/架构/回归/复杂度/状态PASS，限定本阶段验收PASS。未提交/推送/合并/线上发布；整体工作流仍NOT READY，跨实例专项等未完成项继续保留清单。
+
+## 2026-11-05 主机取消与失败边界（阶段交付）
+- Direct执行，复用Run对象权限、事务、审计、执行租约与HostChannel；新增workflow-executions/{id}/cancellations及执行结果取消按钮。queued/waiting直接结束，running先cancelling；主机停止并清理后，租约持有者结束cancelled并保留已成功节点。失效租约不能修改父/子；取消不能被迟到成功覆盖，重复取消幂等，跨空间/撤销run权限拒绝。
+- 新增supervise任务局部停止信号供主机500ms权限检查读取，修复主机撤权错误被泛化为node_failed，关闭输出队列后不再空转，补stderr尾块上限。workflows测试76PASS/1既有环境忽略、executions监督21PASS、前端34PASS及typecheck/build/server build通过；证据workflow-cancellation-{workflows-tests,supervision-tests,frontend-tests,frontend-build,server-build}.log。
+- 真实Agent验收首轮发现Windows取消后SSH子进程未断开（原始workflow-host-boundaries-vgW7Zr保留）。将既有服务WorkerJob提取为共享ProcessJob，命令流使用Windows Job终止/关闭时杀整棵子进程树；Unix原有TERM清理不变，无新增依赖。最终真实浏览器取消、撤权、新运行拒绝发命令、Agent异常退出/重连、真实120秒超时、后续槽恢复均PASS：workflow-host-boundaries-agent.json（原始workflow-host-boundaries-rx5UUZ）。Windows取消/超时子进程及正常stdout/stderr/退出码回归通过；runner全量28PASS/1既有忽略+CLI3PASS（workflow-cancellation-runner-tests.log）。首次重编译遇测试Agent占用exe，测试退出后重跑已通过。
+- 无Docker/本机sshd，复用已验证QEMU与Alpine依赖解析/CPIO工具，新增test-workflow-ssh-linux-vm.py启动一次性Linux，实测SSH/SFTP私有脚本→Git日志（SSH_WORKFLOW_REAL）、取消后SSH子进程退出、执行槽再次使用均PASS：workflow-host-boundaries-ssh.json（原始workflow-host-boundaries-uxNUYO，VM原始workflow-ssh-linux-mi_yt5pn/serial.log及inputs.json包/内核SHA）。仅TCG虚拟机功能验证，不代表Linux原生性能；VM/隔离server/测试Agent均已退出。前两次VM夹具缺sshd系统用户、API缺username已修正，原日志保留；未改产品迎合夹具。
+- 4292最终PID16444、asset index-COPob1ao.js，备份pre-workflow-cancellation-20261105-170549；79工作流/174版本/9凭据/6模板/用户/平台配置保全及实例/SQLite/exe hash PASS：workflow-cancellation-preview-preservation.json。实际4292等待节点取消/终态刷新/成功历史保留/390px PASS：workflow-cancellation-preview/acceptance.json；最终检查器7组PASS（workflow-inspector-A1Zu2a）、旧output/data最终200/9ms与11ms。cargo check --workspace PASS：workflow-cancellation-workspace-check.log。4291/PID63240未动；外部Agent未自动升级，Windows修复在本地target/debug/ferry-runner.exe。
+- Direct自审（范围/复用/架构/回归/复杂度/状态）及本批限定验收PASS，UI沿用组件/右侧操作并应用ui-ux-pro-max禁用与加载反馈规则。整体工作流仍NOT READY：主机组/容量队列/独占升级预留时取消与租约/跨实例等尚未专项覆盖，不能以基本成功代替。未提交/推送/合并/发布；下一轮先补主机容量等待与独占预留取消专项，再推进其余基座清单，用户可先验收4292执行记录中的取消功能。
+
+## 2026-11-05 节点输出事务与真实场景（阶段交付）
+- 已复现历史成功节点output/data均6秒超时，确认SeaORM 2 SQLite默认单连接；ArtifactStore在snapshot事务内通过池读取平台配置造成等待。新增for_connection复用当前事务，覆盖node_output/node_data及二进制pin归属保留；for_state委托同一实现。未调大连接池或绕过权限/快照。
+- 真实4292最终已更新PID79384，旧节点两接口最终200/12ms与10ms：existing-workflow-output.json；原数据与9凭据、实例/SQLite完整性/binary hash保全PASS：workflow-output-preview-preservation.json及workflow-examples-preview-preservation.json，最终备份pre-workflow-examples-20261105-163507（原输出修复备份亦保留）。4291/PID63240未动。
+- 默认平台存储配置（取消测试强制FERRY_ARTIFACT_STORE=local）下7组节点检查器Chrome回归PASS：workflow-output-inspector.log，原证据C:/Users/FULLST~1/AppData/Local/Temp/workflow-inspector-CBubkF。真实Agent Git clone/log→文件报告及主机HTTP请求PASS：workflow-host-real-latest.json（原始ferry-real-workflow-90VOCk）；构建是复核已有成功run与SHA标记，没有重跑两库构建。
+- 原样repository-report.json真实执行公开GitHub查询→JSON报告并下载检查golang/text，二进制pin保存PASS：repository-report-real.json。seed_examples已新增该便携手动示例，未带主机/凭据/pin，不回填旧空间；模板隔离/回滚/两类计数12PASS、主机单测2PASS、server build PASS（workflow-output-{template-tests,host-tests,server-build}.log）。最终4292真实新空间两类列表/渲染/节点模板生成导入后3节点画布/无浏览器错误/非法过滤拒绝全部PASS：template-examples-preview/acceptance.json；导入需点击“生成配置”，测试已按现有真实交互完成。
+- Direct自审范围/复用/架构/复杂度/回归/状态PASS，本批限定需求验收PASS；整体工作流仍NOT READY，WF-11/15的SSH、撤权、超时取消断连等未被本轮基本Agent场景覆盖。未提交/推送/合并/发布。下一步用户可在4292体验真实示例；后续技术验收继续WF-15失败与权限边界，不需要新产品决定。探测器异常曾包含自建临时会话，已立即按哈希撤销并脱敏本地诊断，后续只记录错误名；未涉及用户密码。
+
+## 2026-11-05 页脚、通用脚本与SMTP（阶段交付）
+- Direct执行，无子代理；用户要求全部做完后统一更新本地。已复用平台ResourceForm/权限/版本锁、Vault、富文本清洗与既有客户端IP规则，不提交/推送/合并/发布。
+- 最终真实Chrome/HTTP/本地SMTP验收PASS：data/maintenance/platform-settings-acceptance/acceptance.json及截图（原始C:/Users/FULLST~1/AppData/Local/Temp/platform-auth-jQRIW7）；覆盖页脚保存/链接/脚本清洗/移动端画布可达、CSP nonce/非Google SDK与上报/GA加载/登录页/SPA不重复/停用、邮件凭据加密/配置验证/真实表单注册/错码5次/过期/单次/发送频控/IP额度/配置变更失效。GA使用请求拦截验证加载，未验证Google真实账号报表；SMTP为本地真实协议服务，外部邮箱实际投递待用户配置。
+- 修复验收暴露的App登录redirect与Workspace首次挂载竞争；已有工作空间仍正确回跳，query/hash/过期/外链回归通过。64前端测试与账号/工作空间真实HTTP本地化后端回归PASS，日志platform-final-frontend-tests.log、platform-settings-backend-tests.log。
+- 最终typecheck/前端build/服务build/64前端测试及账号HTTP后端回归PASS，日志platform-final-{typecheck,web-build,server-build,frontend-tests}.log、platform-settings-backend-tests.log；SMTP状态显示可读日期/尚未验证。源码差异检查、自审与本批需求验收PASS。
+- 4292已更新PID75512，实例8156fe6f-f423-45a6-a25a-a22b66a6b488不变，嵌入/assets/index-D1o7ZNen.js；实际4292三分组桌面/390px/默认无页脚脚本与邮箱注册门禁/无页面错误PASS：data/maintenance/platform-settings-preview/acceptance.json。未自动填备案、版权、统计账号或SMTP部署信息。
+- 备份data/backups/pre-platform-settings-20261105-155839；重启前后SQLite完整性、76工作流/170版本/9凭据/2模板/原用户与平台配置逐字段保全及binary SHA一致PASS：platform-settings-preview-preservation.json。4291/PID63240及原实例/版本未动；无提交/推送/线上发布。待用户实际配置和体验；本轮实现无后台未完任务，长期WF欠项仍见唯一活动清单。
+
+## 2026-11-05 默认示例、模板筛选、退出路由与平台信息（阶段交付）
+- WF-16：真实构建证据在data/maintenance/workflow-host-real-latest.json（总报告FAIL，构建阶段PASS、节点输出读取超时）；仅接入已经真实验证的Go上下游构建。新空间create_in事务调用templates::seed_examples，复用pipeline_templates普通资源，手动触发、不携带主机/凭据、不改旧空间/用户模板，删除后不补回。YAML在crates/server/src/templates/examples/dependency-build.yml；与原实测脚本的定义语义逐项比对通过（仅末尾换行不同），scripts/test-workflow-host-real.mjs已复用同一YAML。
+- WF-09：用户报workflow_kind过滤错误，template_api只对Pipeline剥离专用参数后交ListQuery解析，原SQL分类/空间范围/分页保持。最终12模板测试PASS（template-examples-tests-final.log）：新空间初始化、回滚、两空间隔离、两类筛选/计数/未知参数拒绝与删除保留。
+- AUTH-LOGOUT-01：原源码明确设计为不改变未登录URL，当前仍有问题；现router提供本地化login及安全站内redirect，App区分主动退出清目标/会话失效保留查询锚点，登录后恢复，浏览器返回未登录页也转login；Platform复用统一退出回调，Entry注释已同步。前端相关43PASS（login-platform-frontend-tests.log）；真实浏览器待跑scripts/test-platform-auth-ui.mjs。
+- PLATFORM-INFO-01：get_settings增加system_version/protocol/runtime/mode/instance，只读字段复用原ResourceForm；六语标签。PLATFORM-ACCOUNT-01：追加user_login_metadata_v1迁移，users可空last_login_at/ip，登录成功在session同事务写入、不更新配置version，平台用户只读列表及时间排序；注册/旧账号未知记录为空。FERRY_TRUSTED_PROXIES为CIDR逗号列表（空值=不信转发头），直接TCP为默认，可信代理XFF由右往左首个非信任地址，XReal仅无XFF时使用。IP信任/伪造/坏值/IPv6单测PASS（login-ip-tests.log）；README/两Compose同步，未设置实际线上代理值。
+- 后续反馈登录页不应闪初始化检查：Entry先显示可输入登录表单，后台确认才切初始化；失败保留输入并可重试。最终44专项PASS（template-auth-final-frontend-tests.log）；新增慢接口/失败重试/首次安装测试，旧平台策略测试按新增系统信息分组先切主机代理后继续原不丢未保存值断言。全量前端447PASS/1既有skip为本次Entry补丁前基线（template-auth-all-frontend-tests-native.log），不冒称最后补丁全量重跑；最后web生产构建PASS（template-auth-login-final-web-build.log），最后server构建PASS（template-auth-delivery-server-build.log）。i18n原真实HTTP测试补代理扩展/真实ConnectInfo后PASS（login-http-locales-tests.log），可信代理专项PASS。
+- scripts/test-platform-auth-ui.mjs最终真实服务+Chrome四组PASS：Temp/platform-auth-OPY4rw/acceptance.json及桌面/390px截图；覆盖成功/失败/退出元数据、用户403、系统信息对照status、主动退出/Back、实际挂起setup后表单立即可输入且不清空、深链接查询锚点还原/过期回跳/外链拒绝。已接build-ui CI，未宣称远端CI通过。初版新单测未用真实React输入事件导致断言失败，已改原生setter+input；新分组导致旧测试未切tab，已修定位而不削弱业务断言。
+- 4292已更新PID56316，实例8156fe6f-f423-45a6-a25a-a22b66a6b488保持；备份data/backups/pre-template-auth-20261105-151934。原76工作流/170修订/9凭据/1模板/1用户（登录元数据新增列除外）和SQLite完整性、构建与运行exe哈希PASS：template-auth-preview-preservation.json。真实4292新空间111726243757424640初始化示例111726243824533504、两类模板列表/渲染、错误参数拒绝与浏览器无异常PASS：template-examples-preview/acceptance.json。4291/PID63240未动，未提交/推送/合并/线上发布；Direct自审/本阶段需求技术验收PASS，待用户体验。下一步沿WF-16修复节点输出读取并完成真实节点场景，完整验收前不加入默认模板；其余既有事项保留。
+
+
+## 2026-11-05 配置执行阶段分区（WF-12）
+- 用户要求执行前/执行/执行后分区，复用ActionsExecutionFields内ActionsPhase，沿用现有标题/分隔线/间距，不新增卡片或隐藏字段。名称与ID在顶部；任务执行前为依赖/条件/环境/命令默认，执行区为类型/执行器/运行方式/超时，执行后为输出；步骤执行前为条件/环境/Shell/目录，执行为命令或Action与参数/仓库绑定/超时，执行后为失败处理。复用工作流引用与输入归执行区，工作流全局默认仅显示有内容的执行前，不造空区。高级YAML保留底部；只是布局分组，不改变执行链或已有字段值。
+- 生产及服务最终构建PASS：data/maintenance/actions-phases-final-build.log；真实Actions画布回归PASS：actions-phases-canvas.log（表单/YAML、环境条件、复制删除、checkout绑定清理、连线/撤销/导入、320/390/1280）。未新增仅镜像JSX结构的单测。实际4292登录无替身、仅未保存草稿Chrome验证三层阶段顺序及字段归属、Action切换、复用工作流引用归属、原始YAML保持和390px布局PASS：data/maintenance/actions-phases-preview/acceptance.json与截图。新增验收脚本最初用步骤名模糊定位命中删除按钮，已改按指定任务与步骤序号定位，未降低业务断言；源功能无此故障。
+- 4292最终PID70940、实例8156fe6f-f423-45a6-a25a-a22b66a6b488保持；备份data/backups/pre-actions-phases-20261105-135439，原74工作流/167修订/9凭据、SQLite完整性与二进制哈希通过：actions-phases-preview-preservation.json。4291/PID63240未动。直接执行、自审与限定本次布局验收通过；未提交/推送/合并/线上发布，待用户体验。
+
+## 2026-11-05 命令默认设置前置纠正（WF-12）
+- 用户指出Shell和工作目录仍靠后，重新打开顺序项。核对工作流与步骤层顺序已有，但任务ActionsJobSettings整组仍位于执行器后；现移到环境变量之后、任务类型及执行目标之前，原审批/复用条件与事件回调保持。仅移动组件，不改YAML、继承规则或已有字段值。
+- npm生产构建与cargo服务构建PASS：data/maintenance/command-defaults-order-build.log。实际4292登录、未保存草稿Chrome验证三层顺序、任务自定义Shell和目录、390px无溢出及YAML注释/原值保持PASS：data/maintenance/command-defaults-order/acceptance.json及桌面/手机截图。Windows剪贴板会转CRLF，验收改为与粘贴后的剪贴板基线精确比较，并先确认基线仅换行规范差异；不是放宽YAML内容断言。未新增实现镜像单测或重复全量测试。
+- 4292最终PID66908，实例保持；备份data/backups/pre-command-defaults-order-20261105-134649；原74工作流/167修订/9凭据、SQLite完整性及构建哈希PASS：command-defaults-order-preservation.json。4291/PID63240未动，不提交/推送/合并/线上发布。直接执行、自审及本次三层顺序验收通过，待用户体验。
+
+## 2026-11-05 字段帮助与配置顺序阶段交付（UI-HELP-01 / WF-12）
+- 任务outputs复用StepMap，专属添加/删除输出、输出名/值提示与下游引用帮助，长说明收进问号。任务依赖/运行条件/环境变量前置，步骤条件/环境变量在执行内容前，Shell/目录在命令前，任务输出移到执行配置与超时后；仅调整表单顺序，不改已有YAML。步骤ID规则及现有限制已明确，尚未实现全量自动ID或引用联动，不能宣称已完成。
+- 公共FieldHelp/FieldCaption复用Radix浮层，悬浮/键盘聚焦/Enter/Space/触屏可打开、Esc/外部点击可关闭，不抢输入焦点、不误触checkbox/提交，隐藏标签不引入隐形焦点。字段标题与帮助按钮分离命名，修复首轮checkbox读屏名称受影响；更新浏览器模糊标签定位为精确定位，不降低执行断言。公共AutoField自动使用既有help；Actions关键字段专属中文及六语说明，所有Action预设输入按接口/默认/示例解释；节点参数/AI/集成/资产/Inspector等30处原生标签已接入。其他字段提供真实类型/范围/占位示例的基础用法，不泄露已填值；尚不能视为全站业务说明编写完成。
+- 最终生产/服务构建PASS（workflow-field-help-delivery-final.log）；全量443PASS/1既有skip（workflow-field-help-tests-final.log），最后隐藏标签补丁后定向15PASS。真实Actions画布回归PASS（workflow-field-help-browser-complete.log），包含悬浮/键盘Esc、环境顺序、旧表单/YAML/删除/连接及320/390/1280布局。隔离真实节点编辑器13组PASS：Temp/workflow-editor-gnhRZX/ui-acceptance.json；原始失败日志保留，未以旧测试代替修复验证。
+- 实际4292登录无API替身、仅未保存草稿的桌面/390px悬浮/触屏帮助、环境顺序、添加输出、YAML自定义值保留验收PASS：data/maintenance/workflow-field-help-preview/acceptance.json及截图。最终PID87096，实例8156fe6f-f423-45a6-a25a-a22b66a6b488保持；备份data/backups/pre-workflow-field-help-20261105-133305，最终二进制与构建一致、原74工作流/167修订/9凭据和SQLite完整性PASS：workflow-field-help-preview-preservation.json的final_result。4291/PID63240未动。直接执行与限定阶段自审PASS，未提交/推送/合并/线上发布。
+
+## 2026-11-05 Shell与运行条件表单修正（WF-12）
+- 用户反馈Shell不应靠填字、if普通用户不会写。步骤及任务/工作流命令默认设置统一解释器下拉（继承/Bash/sh/PowerShell/CMD/Python/自定义）；任务与步骤条件统一默认成功/成功/失败/始终/未取消/高级自定义，中文说明区分步骤与needs依赖任务。已有自定义解释器/条件原样显示，未操作不改YAML；仅自定义才展开表达式输入，继续复用变量助手与YAML AST编辑。
+- 前端生产构建、服务构建、Actions24定向测试PASS；真实ReactFlow画布脚本PASS，含预设写入、移除if恢复默认、自定义Shell、旧操作及320/390/1280布局。证据data/maintenance/actions-fields-{build,server-build,tests,browser}.log。实际4292登录、桌面/390px、导入自定义值/选择/YAML切换PASS：data/maintenance/actions-fields-preview/acceptance.json与截图；仅未保存验收草稿，无API替身、未启动用户任务。
+- 4292更新PID15316，实例8156fe6f-f423-45a6-a25a-a22b66a6b488不变；备份data/backups/pre-actions-fields-20261105-130935，data/maintenance/actions-fields-preview-preservation.json核验原74工作流/167修订/9凭据行保持与SQLite完整性PASS。4291/PID63240未动。直接执行、自审及本轮限定需求检查通过；不代表全部流水线完成，未提交/推送/合并/线上发布。JS/Lua/WASM仍仅协议/依赖初改，恢复WF-14继续实现。
+
+## 2026-11-05 Actions表单/YAML基座补强与两类编辑器验收
+
+- 已更新4292/PID67856，binary SHA256 ae2fc104f2966787983dafe29249f291a233bf4f2c92ed11314f3ba51e3a1546；实例8156fe6f-f423-45a6-a25a-a22b66a6b488不变，4291/PID63240未动。备份data/backups/pre-actions-base-20261105-124117；原70工作流/159修订/9凭据逐行hash及SQLite完整性通过，actions-base-preview-preservation.json。未提交/推送/发布。
+- Actions复制任务/步骤改为复用YAML AST clone，保留节点注释/引号/标量类型，克隆内部锚点独立命名并改写内部alias，外部共享引用保留；回归验证修改副本不影响原任务。Shell与工作流/任务默认Shell共用可搜索下拉，保留自定义命令/表达式。引用助手自动列出已知Action输出；下载产物name可选依赖祖先与此前步骤的静态上传名称，排除无依赖任务、未来步骤及生产者上下文表达式，未知名称可手输，不改needs。
+- 24项Actions定向测试、完整前端440PASS/1既有skip，npm build/cargo build通过。证据actions-base-tests.log、actions-base-full-ui-tests.log、actions-base-ui-build.log、actions-base-server-build.log；复制注释问题先复现后修复。源码与脚本LF、diff check通过；直接执行，自审及本批需求验收PASS。
+- test-actions-ui.mjs真实服务+runner+act worker通过创建/表单/YAML/保存重开/执行/持久化日志/只读与受限账号编辑。worker原缺失，已通过现有actpatch生成并构建target/debug/actions-workers/actions-worker-windows-amd64.exe；未修改worker产品源码。修正脚本两处陈旧假设：PowerShell echo逐参数分行，逐个要求同一步实际环境值；对象ACL启用后先验证403再授予对象All，保留不授予额外分组/标签权限的保存断言。证据actions-base-real-browser.log。
+- test-actions-canvas.mjs通过含新增上游产物选择、Shell搜索键盘选择/自定义、已知输出插入、用户复杂runs-on原样保留；截图actions-canvas/outputs-and-shell.png。真实登录更新后4292（无API mocks、仅草稿）再验同操作及390px，证据actions-base-preview/acceptance.json与截图。用户入口http://127.0.0.1:4292/zh-CN/workspaces/111632826427768832/pipelines/new。
+- 节点工作流更新后4292真实API/Chrome13组通过：插入与分支/撤销保存、普通条件/测试输入表单、沙箱运行/隔离/历史、只读、右键与快捷键、拖拽逐帧可见、空白创建与连接、右/下添加、14类节点配置及六语。证据C:/Users/FullStack/AppData/Local/Temp/workflow-editor-GfqG1z/ui-acceptance.json。该脚本创建独立验收空间/资源，原用户资源未覆盖。
+- 尚未实现Codeup Flow方言导入/语义映射、JS/WASM/Lua代码插件加载执行及扩展生命周期/集群；不以编辑器基座通过冒称整个平台完成。下阶段优先设计并实现代码插件与既有隔离进程/Item/限额/取消的接入，复用现有QuickJS，不把表达式运行冒充插件运行；Python继续暂缓。
+
+## 2026-11-05 作者清单、热力图与监控修复本地交付
+
+- 4292已更新PID84936，二进制SHA256 cb9bc3a2e4fec7abc9ec7f9f1f9231f436ac9e32428b276f5f7cd095dd6a800e；实例8156fe6f-f423-45a6-a25a-a22b66a6b488不变，4291/PID63240未动。备份data/backups/pre-insight-fixes-20261105-121638；原70工作流/159修订/9凭据逐行hash及SQLite完整性通过，证据insight-fixes-preview-preservation.json。未提交/推送/发布。
+- 作者清单由所选授权仓库的原始提交事实派生，新作者打开洞察即补齐，不改配置版本或原始提交；只持久化填写的昵称，空昵称还原原提交身份。完整原始姓名+邮箱逐字匹配，不作大小写/空格归一化，不按同姓名/邮箱/昵称自动合并；洞察本地映射与人员行独立，历史显式共享ID保留。旧连接级身份模块未改。
+- 后端analysis 77PASS/3环境忽略，monitor26PASS；前端洞察与分析28PASS；npm build/cargo build通过。证据data/maintenance/insight-author-tests.log、monitor-preserve-final-tests.log、insight-ui-final-tests.log、insight-ui-final-build.log、insight-server-final-build.log。
+- 更新后的4292嵌入页面通过作者空昵称保存、六语×1280/390px×普通/跨年/月末起始36组热力图无重叠/无裁切/日期格数量检查，证据insight-author-heatmap/acceptance.json。完整test-code-insights-ui.mjs通过创建/多选/作者/刷新保留阅读位置等。该两组浏览器使用API fixtures；真实持久化与两洞察隔离由Rust数据库测试覆盖，不冒称用户线上数据已验收。
+- 真实登录4292菜单/编辑器8项冒烟通过，workflow-updated-preview/acceptance.json；自审与需求验收检查通过，用户体验仍待反馈。本批不代表WF整体完成。
+
+## 2026-11-05 本批界面与菜单本地交付
+
+- 4292已更新PID73328，二进制SHA256 2c25abcf7a052a3fc0b6b4a039a7d4638124473441b424708dddeab6255a759e；实例8156fe6f-f423-45a6-a25a-a22b66a6b488不变，4291/PID63240不动。备份data/backups/pre-ui-batch-20261105-115433；原70工作流/159修订/9凭据逐行hash及SQLite完整性通过，证据workflow-menu-preview-preservation.json。未提交/推送/发布。
+- 已运行界面包含空间二级单选菜单、两类列表模板入口、统一凭据管理、局部插入推移、节点库分层/搜索/滚动恢复、编辑页移除历史与执行tab、画布填充、Actions表单/YAML/变量助手与菜单操作。最新用户纠正主机/仓库/应用菜单仍叫“凭据”，已全部复用“凭据管理”六语文案并再构建更新；保留各scope过滤及权限。
+- npm/cargo最终构建原生exit0。前端437PASS/1既有skip（workflow-final-ui-tests.json）；随后命名专项35PASS。Actions真实画布脚本PASS；节点编辑器13组PASS，Temp/workflow-editor-L6eWmU/ui-acceptance.json。脚本跟随用户要求调整：历史转详情查看、回编辑发布、右键菜单快捷键后缀、构建流水线去Actions后缀，保留原功能断言。
+- 真实4292登录后8项PASS，data/maintenance/workflow-updated-preview/acceptance.json及截图：空间二级列表/当前标识、节点/构建模板入口、统一凭据列表、host/build/deploy侧栏命名、嵌入编辑页。空间35条长列表/1280与390px及键盘另见workspace-submenu/acceptance.json。仅模板入口展示已验证，模板完整创建/应用闭环、Actions新增配置实际Runner及变量助手专项仍待验收，不冒称平台全部完成。
+- Direct自审已完成；用户继续反馈监控状态重置，转MON-01修复。清单WF-06/09/12仍有上述未验收边界，后续以本交付记录覆盖旧“未build/未更新”描述。
+
+## 2026-11-05 基座及本轮用户反馈实施检查点（历史编码状态，更新情况见上）
+
+- 主目录feat/workflow-platform持续修改，尚未build/更新4292，不动4291/5678。执行模式Direct；不启动子代理。用户要求把本轮反馈全部清单化、完成后更新本地预览；不得在工作中因新消息丢弃旧项。
+- 已编码：actions-workflow.ts递归AST映射补丁（保留null/数字/布尔/注释/引号，别名可独立修改）、结构化runs-on标签读取、任务级片段应用/approval转换、默认命令echo CI_${{ github.job }}_STEP_N；ActionsSettings/ActionInputs/ActionMapFields/action-inputs提供工作流/任务配置、9种常用Action建议参数/枚举/表达式/自定义参数、步骤id和任务outputs。ActionFragmentYaml复用步骤弹窗支持任务，片段保留外部锚点引用。
+- 已编码未验收：ComboInput搜索建议保留自由值；ActionsVariableHelper悬浮助手和action-references变量/输出/光标插入工具，ActionsEditor已接入口，参数字段已加data-action-expression。变量来自本地act0.2.89的run_context.go/step.go及Ferry worker，不读密钥值；尚需真实浏览器验证插入、焦点和搜索。命令默认使用github.job（任务ID），没有伪造不存在的步骤名环境变量。
+- 节点insertNode改为局部推移而非arrangeGraph全量重排，WorkflowEditor传measurements；仍需抽取两种画布共用插入布局、补Actions推移。旧graph.test最后要求插入结果等于全局arrangeGraph，现唯一失败为该旧全量布局断言；应按新需求改为局部位置保留验收，保留全局arrangeGraph自身幂等检验，不能简单删全部布局断言。
+- 节点库已改应用→资源→操作、搜索跨目录平铺、useLayoutEffect按route恢复滚动和回顶部按钮；待补测试/浏览器及焦点恢复。节点编辑页隐藏历史/执行tab（rowReadOnly详情仍有），测试运行返回节点面板；ResourceForm自定义编辑字段改flex填充，WorkflowEditor移除桌面固定最小高，待几何验收。
+- App右上空间列表复用DropdownMenuSub/Portal/Content与RadioGroup/RadioItem，新增六语switchWorkspace；窄屏按Popper可用宽度收缩、名称/角色换行、长列表滚动。npm build通过，真实Chrome1280/390px各6项通过，证据data/maintenance/workspace-submenu/{acceptance.json,1280.png,390.png,build.log}；API为隔离fixture，不改真实空间。App.test为24PASS/1FAIL，失败为先前凭据菜单收拢导致旧nav[aria-label=仓库]断言不符，需在凭据子项处理，未修改测试掩盖。Direct代码/本次需求自审完成，4292未更新。菜单去后缀、模板tabs/节点模板、统一凭据、Actions菜单快捷键/undo尚未实现，不得标已完成。
+- 验证现状：AST新增回归17PASS，Actions两文件旧16PASS；后续3文件29PASS/1失败（上述旧布局断言）。最新tsc -b通过；本轮尚无npm build/server build/实际浏览器。scripts/test-actions-ui.mjs已扩workflow/job env、结构化runs-on、保存重开和真实env日志断言，但尚未运行；有选择器需要实跑确认。
+- Action参数接口已实际读取9个官方tag的action.yml，事实清单data/maintenance/actions-input-contracts.json，获取脚本verify-actions-inputs.mjs。未复制执行源码，不把建议参数当作自定义版本通用契约。
+- 下一步：完成Actions快捷键/右键/undo和共享插入布局，补节点/表单组件测试；合并凭据菜单并给可选scope表单，处理模板双列表切换及节点模板真实闭环；再build、隔离浏览器回归、备份4292数据库/exe、只更新4292并校验原资源/凭据与instance。用户已授权本地预览更新，无需重复问确认。
+
+## 2026-11-05 免编译声明包与三栏面板交付（WF-14/WF-06）
+
+- 主目录feat/workflow-platform，未提交/推送/合并/发版。独立4292已更新PID49552，SHA256 508dba0f516ae9bb7e9c30752c3d642e1f6a74393898d917380842f8a35d3209，instance8156fe6f-f423-45a6-a25a-a22b66a6b488保持；4291/PID63240、n8n5678/PID69168不动。备份data/backups/pre-extensions-20261105-090359；原58工作流/127修订/6凭据逐行hash及SQLite完整性通过，证据data/maintenance/workflow-extensions-preview-preservation.json。
+- 新增部署管理员数据目录JSON声明包启动加载，固定HTTPS、只支持现有普通标量表单/HTTP执行。类型与凭据均按包ID+版本命名空间隔离，原包版本SHA256锁不可改写、禁用保留锁；非法包/同版本变更/重复类型拒绝启动，集群有启用包明确拒绝。复用原校验/表达式/加密凭据/请求账本；目录接口驱动前端搜索与表单，目录失败提供重试且不先创建草稿。示例与安装/边界说明examples/workflow-extensions/README.md；运行源码不依赖docs。
+- 实测：前端全量430PASS/1既有跳过，data/maintenance/workflow-extensions-ui-tests.json；Workflow后端70PASS/1环境忽略，workflow-extensions-backend.log（PowerShell重定向包装报告exit1，但原生测试明确70PASS；不隐去包装问题）；npm最终build/cargo build通过。隔离Chrome12组PASS，Temp/workflow-integrations-Ym9bol/acceptance.json，含同一二进制实际重启、同版本篡改拒绝且锁不变、禁用不改旧定义、恢复后真实执行。4292最终Chrome集成11组PASS，Temp/workflow-integrations-ENxS6x/acceptance.json；仅真实GitHub读，Slack/GitLab不执行外部写入。
+- 三栏面板真实浏览器恢复验收发现并修复已有可读字段路径再次包裹插入表达式的问题，补专项回归；修正测试过时的输入控件/折叠字段/选择器/保存监听时序与merge输入端口，保留原功能断言。最终4292七组PASS，Temp/workflow-inspector-KJesNC/acceptance.json；媒体AI隔离十二组PASS，Temp/workflow-media-ai-vDsJU8/acceptance.json（AI为协议fixture，非商业账号）。首次失败原始证据均保留。
+- 可见已登录Chrome辅助72428，data/workflow-preview-20261104/extension-preview.{json,png}；打开http://127.0.0.1:4292/zh-CN/workspaces/111632826427768832/workflows/111632827128217600/edit，展示独立包节点与普通表单。Direct自审/阶段需求验收通过；不冒称全平台/代码插件完成。尚无热加载、界面包管理、JS/TS/WASM加载器、扩展多语言包、社区生态或集群包一致性。语言建议JSON＋隔离JS/TS＋WASM，Lua暂不加入，Python复用主机环境；用户尚未明确确认代码插件实现方案。后续独立工作继续按活动事项及PRD执行，不将表达式沙箱算插件加载器。
+- 用户追问扩展逻辑是否完整稳定：复核结论为受控单实例JSON/HTTP首版功能闭环已验证，不能称完整插件平台或生产稳定。生命周期仍缺依赖工作流检查/禁用前在途保护与升级回滚管理；坏包会阻止整个服务启动、禁用会使依赖节点不可运行，这是当前明确边界。JS/WASM隔离、集群目录一致性、长期压力/多包升级故障验证仍无证据。后续应先补生命周期及失败恢复验收，再大规模扩充与代码插件；本轮仅复核与同步状态，未改运行代码或重复测试。
+- 最新用户要求基座支持JSON/WASM/JS/Lua/Python中可内置集成的运行时，覆盖此前“Lua暂不加入”的建议。已核对仅JSON包及rquickjs表达式沙箱存在；统一包声明/Item协议/权限与生命周期、多运行时适配仍待设计实现。建议JSON随服务解释，JS复用隔离QuickJS工作进程，WASM/Lua使用隔离工作进程内的嵌入引擎，Python由统一管理的独立解释器环境或主机执行器承载；“内置分发”不等于在服务主进程执行。上述接法是方案建议，不记为已实现或用户已确认的引擎选型，不承诺Node/npm及第三方插件兼容。
+
+## 2026-11-05 声明式集成首版交付（WF-14）
+
+- 主目录feat/workflow-platform，HEAD a7f097f加未提交改动；独立4292已更新PID58944，二进制SHA256为1909F76D7FE02A886B1AEEB57D6DD9874A57007E682C2D0D509E8A2815613CA2。备份data/backups/pre-integrations-20261105-044911含旧exe/SQLite/旧演示hash；新服务instance保持8156fe6f-f423-45a6-a25a-a22b66a6b488，SQLite完整性、旧演示111403845065637888定义hash及新增迁移均通过。4291/PID63240及n8n5678/PID69168保持不变，未提交/推送/合main/线上发布。
+- GitHub10/GitLab.com7/Slack9操作通过统一声明驱动应用/资源/操作搜索、普通表单、专用加密token凭据、动态频道/用户选项、表达式与HTTP执行；AI搜索openai/anthropic复用已有协议。新增操作无需改TS/Rust业务dispatch，声明随构建分发，未实现运行时安装或n8n插件兼容。分页逐页；固定HTTPS目标、应用凭据隔离、禁止重定向、响应限额、通用失败提示；请求账本在发送前占位，成功加密缓存，未知结果不自动重发。
+- 验证：前端全量418PASS/1既有skip（data/maintenance/workflow-integrations-ui-tests.json），随后专项4文件28PASS及新增凭据失败重试后集成7PASS；typecheck、最终npm build/cargo build通过。Rust全量492PASS/9忽略，含集成5项；首次全量失败的两处图契约/无序权限断言已修正，checkout测试使用Git Bash路径复验通过。Direct代码/需求自审通过；截图复查纠正了创建接口仅返回ID造成的凭据名称空白，并以真实返回形状补断言后重建。
+- 实际Chrome：最终4292集成9组PASS，证据C:/Users/FullStack/AppData/Local/Temp/workflow-integrations-2X6JNv/acceptance.json及三张截图，含真实GitHub读取、输入表达式、真实404错误、凭据profile/kind/不可改绑/lookup限制、跨应用写入发送前拒绝、搜索10个GitHub操作、表单修改保存重开、新建凭据名称和ID绑定、390px滚动可见参数且无横溢/JS异常。独立环境最终同类9组PASS在Temp/workflow-integrations-LewuTS；编辑器13组PASS在Temp/workflow-editor-Eex938/ui-acceptance.json，媒体AI12组PASS在Temp/workflow-media-ai-PkW8a5/acceptance.json（AI为协议fixture，不是商业账号）。
+- 用户演示已登录可见Chrome，辅助进程55072保持运行；地址http://127.0.0.1:4292/zh-CN/workspaces/111568350630379520/workflows/111568351284690944/edit；入口资料与截图data/workflow-preview-20261104/integration-preview.{json,png}，对应首次4292完整9组证据Temp/workflow-integrations-wglqZ9。点击测试运行可真实读取octocat/Spoon-Knife，无需令牌。尚未验证真实Slack/GitLab账号写入，不向用户索要密钥；三栏节点体验WF-06、全目录映射WF-11及其它平台需求仍待处理，不能宣称全平台完成。
+
+## 2026-11-05 n8n 内置目录提取交付（WF-11阶段）
+
+- 用户要求先列完整内置清单，本轮暂停产品实现，实际安装n8n2.45.7，基础/AI包各2.45.6；读取包内types/known索引，并登录5678从/types/nodes.json及/types/credentials.json取得真实运行目录，原始快照仅留D:/bench/n8n-preview，不含社区插件。
+- docs/reference/n8n-2.45.7/{README.md,nodes.csv,operations.csv,credentials.csv,catalog.json}已生成：包内572类型（基础445/AI127），568已加载+278Tool变体（含10人工审核）+78MCP目录=运行924类型；历史版本描述1003条不重复算类型。完整表包含4个未加载类型，共928行类型。527凭据类型仅列元数据，无秘密。
+- 包内默认描述静态operation记录4101，分3496专用选项/605通用Custom API Call；保留资源与显示/版本条件，不当作已测试能力数或全部同时可用操作。Tool继承参数及远端MCP不冒充新增独立应用/完整远端能力；普通发送等待的webhook不误算触发器，隐藏/弃用均标记。
+- 可复现提取脚本scripts/inventory-n8n.mjs；node --test scripts/inventory-n8n.test.mjs六项PASS，默认版本/资源同名操作/动态与嵌套选项/通用API/人工审核分类/去重及不导出凭据值。独立Python核对运行924类型集合、278变体父节点、三份CSV往返及示例PASS，证据D:/bench/n8n-preview/inventory-verification.json。Direct自审与本次清单需求验收通过；只新增清单/提取脚本与更新MEMORY，未提交/推送/改产品服务。后续执行WF-11映射与WF-14声明式闭环，未冒称平台完成。
+
+## 2026-11-05 n8n 实机预览交付（WF-13）
+
+- 已完成独立安装n8n 2.45.7（便携Node24.22.2；npm安装exit0），目录D:/bench/n8n-preview；5678仅监听127.0.0.1，独立数据目录，未改Ferry源码或4291/4292服务。服务PID69168，healthz实测200。
+- 已创建本地预览账号并登录可见Chrome（辅助进程PID72484，独立browser-profile），打开http://127.0.0.1:5678/workflow/DU9IkYRMfC7x1LvY；示例手动触发→Sample Data→Score Check→Pass/Fail真实执行成功，停留Score Check输入/参数/输出三栏，输出True Branch含Alice/72。截图canvas.png、node-configuration.png及ready.json位于该目录；凭据仅保存在access.json，不打印密码。
+- Direct自审与启动/登录/展示需求验收通过，服务和浏览器保持运行；重启脚本start.ps1、浏览器辅助open-preview.mjs。未提交/推送/合并/线上发布。本次仅交付n8n预览，WF-06的Ferry节点体验改进仍待处理。
+
+## 2026-11-04 工作流统一分支与编辑器融合（WF-01/02/06）
+
+- 11-05最新纠正与下一步：用户明确指出“节点配置布局和操作方式”不像n8n、节点操作远不止当前少量菜单。已重新查看D:/bench/shots/n8n/07-ndv-if-input-output.png、10-ndv-node-settings.png、13-node-context-menu.png：实际为输入/参数设置/输出三栏，含Schema/Table/JSON、Execute step；菜单含Open/Execute/Rename/Replace/Deactivate/Pin/Copy/Duplicate/Tidy/子工作流/全选/清选择/Delete及快捷键，设置含Always Output/Execute Once/Retry/On Error/Notes。下一步优先WF-06完整节点编辑调试闭环，验收数据查看→引用→参数配置→执行→输出/错误→保存重开；逐项复用已有引擎/预览/固定数据机制，不能只添加无执行语义的按钮。WF-11随各项补真实对标证据；之后WF-12丰富Actions及Flow映射、WF-02生产授权触发、WF-04人工流程、WF-05媒体AI扩展、WF-07全量验收。此次只核对与修正优先级，未改产品或更新服务。
+
+- 23:03本轮交付：4292最终PID40580，实例不变，exe与最新cargo构建一致；4291原PID63240未动，原演示workflow111403845065637888逐字段保持，SQLite完整性PASS。备份data/backups/workflow-preview-forms-20261104-225743与workflow-preview-forms-final-20261104-230244。最终导航/原编辑器/顶部保存真实嵌入smoke通过，data/maintenance/workflow-unified-final-smoke.json及两张workflow-unified-{navigation,editor}.png；节点13组Temp/workflow-editor-GWyLse/ui-acceptance.json、媒体AI12组Temp/workflow-media-ai-4Bj4yu/acceptance.json通过，含首次保存前选图/本地预览、503失败后保留/只创建一次/重试保存/重开/沙箱运行。前端413PASS/1既有skip及新增最终菜单路由14PASS，npm/cargo最终构建PASS；Actions普通表单/注释未知字段保留/模式切换及原画布删除布局320px通过，模板浏览器4组通过。初次本地预览被CSP拒绝已限定补img/media blob源；中间媒体脚本硬编码start已改按实际手动触发器ID运行，不削弱执行断言。Direct自审/本轮需求验收通过；未提交/推送/合main/线上发布。WF-11全量覆盖盘点及WF-12深层Flow融合仍未完成，不冒称全平台交付。
+
+- 本轮恢复检查点：用户已确认长期一级“工作流”及普通表单↔高级YAML/折叠JSON；新增快捷删除/右键、按钮一致性、新建先选文件、整体完成度盘点。导航已融合且旧build书签兼容；节点结构值/嵌套schema和运行输入改为递归表单；Actions步骤补名称/命令/with/env/if/shell/目录/超时/失败继续，未知字段与注释保留。页面保存移顶部右侧、节点删除移面板标题右侧、删除弹窗底部右侧取消/确认。413前端PASS/1既有skip，报告workflow-forms-navigation-tests.json；Actions画布真实Chrome验证普通表单→YAML/无损切换/删除/320px通过；模板浏览器四组PASS；节点浏览器13组PASS，Temp/workflow-editor-kKNdK3/ui-acceptance.json。新建本地文件预览首轮发现CSP拒绝blob，已限定补img/media源，正在重建服务后重验媒体AI及新建上传失败重试。尚未更新4292、未提交/推送/合main/发布。
+- 完成度口径核对：设计评审自查v1.14记录858格（703已覆盖/105待补/31不适用/19无），适用格703/808≈87.0%，这是文档审查而非实现或验收完成率。能力清单A–G共841行组及多个成员，交付表仍为初始未开始，未同步后续局部证据；流水线对标“Ferry现状”还是2026-10-31快照。当前不能据此报Codeup/n8n/ComfyUI整体实现百分比；不能用24节点/文件数或UI局部通过冒充全功能覆盖。已知未交付包括人工审批/公开表单聊天/大量集成及Comfy模型加载采样处理，商业模型和全三库跨平台验收亦未齐。WF-11仍需逐行逐成员追踪，不能以本次说明标记盘点全完成。
+
+- 22:07 WF-05 首批本地交付：4292通过实例/进程校验更新PID86104，instance8156fe6f-f423-45a6-a25a-a22b66a6b488保持；4291仍PID63240未改。最终外部Chrome/真实HTTP媒体AI十一组PASS（Temp/workflow-media-ai-IURCJL/acceptance.json，含上传/预览/保存重开/执行输出弹窗、32MB/Range、两协议与费用/未知对账），编辑器十一组PASS（Temp/workflow-editor-3KtH8d/ui-acceptance.json）。npm build/cargo build/fmt/diff通过，二进制资产10测与整次微币取整1测通过。全前端410PASS/1既有skip/1个App既有测试5s超时，原报告data/maintenance/workflow-media-ai-ui-tests.json保留；未放宽超时，同App套24项独立复验全PASS，报告workflow-media-ai-app-recheck.json；此前新原生form违反共用组件的检查已改AutoForm并通过。部署前备份data/backups/workflow-preview-media-ai-20261104-220542。未提交/推送/合main/线上发布。此阶段验收不等于WF-05全完成：商业模型实账号、视频生成/主机ffmpeg/图片变换、剩余文件格式/执行总预算和精确Token预估、全三库并发/故障仍未覆盖。下一步保持WF-05进行中按能力源清单补齐；不以协议fixture冒充商业账号验收。
+- 20:29卡片快速添加交付：每个可编辑节点右/下边框中点＋分别向右/下放置新节点；复用搜索选择器，已有节点/手动位置/连线不动，按测量尺寸避让。分支显式选择出口；只展示单一兼容输入节点，多输入需常规添加后手动接线；终止节点仍有＋并明确提示不自动连线。输出拖线手柄外移32px并保留短连接线，避免被边框＋遮住。普通添加/连线插入不变，只读无新增按钮，六语文案。真实Chrome几何验证＋中点、方向/避让/原位置/false出口、取消/撤销重做/保存重开、终止无虚构连线及拖拽持续可见通过；410PASS/1既有skip证据data/maintenance/workflow-quick-add-ui-tests.json；npm build/cargo build/diff检查PASS。最终4292嵌入十一组PASS：C:/Users/FULLST~1/AppData/Local/Temp/workflow-editor-vs0x2u/ui-acceptance.json及workflow-quick-add.png。4292更新PID69956、instance不变；备份data/backups/workflow-preview-quick-add-20261104-202806含SQLite及旧exe。4291仍PID63240未改，未提交/推送/合main/发布。本批自审与需求验收通过，等用户体验；其余WF业务能力仍按清单保留。
+- 19:18交付检查点：空白新建及Actions/节点类型选择、搜索/分组节点选择器、连线＋插入自动分列避免重叠、14种现有节点普通参数表单与按schema填写测试输入均已验收。拖拽消失根因是受控节点每次更新未保留React Flow测量尺寸；WorkflowEditor保留measured和尺寸事件状态，真实4292逐帧41帧/0隐藏（旧版6帧隐藏），位置保存重开通过。前端407PASS/1既有skip（data/maintenance/workflow-interaction-ui-tests.json）、npm build/cargo build/diff检查通过。隔离嵌入Chrome十组PASS证据C:/Users/FULLST~1/AppData/Local/Temp/workflow-editor-7fsCZl/ui-acceptance.json；更新4292后同十组PASS证据C:/Users/FULLST~1/AppData/Local/Temp/workflow-editor-JCW8FN/ui-acceptance.json，含普通条件表单保存、真实沙箱路由/执行历史、版本发布/只读/手机/六语言。4292现PID83948，instance8156fe6f-f423-45a6-a25a-a22b66a6b488不变，备份data/backups/workflow-preview-interaction-20261104-191826（SQLite在线backup及旧exe）；4291仍PID63240，未改。未提交/推送/合main/线上发布；本批交互已自审及需求验证，仍待用户体验验收，不能宣称全平台完成。后续继续WF-04人工任务/审批/表单等已授权范围。
+- WF-08源码目录修正已验证：四份JSON单一源位于src/shared/workflow-contracts，TS import/Rust include_str/两份Python契约夹具均引用源码；docs仅链接。补Docker服务端COPY契约，src/crates扫描无docs/prd引用；npm build通过，Python契约505/索引32、图编辑4及Rust图校验10通过/1既有沙箱忽略。Docker镜像未实构建。用户追问完整版预览：继续完成节点/连线＋/配置/保存重开/真实运行记录和Actions浏览器闭环后更新独立4292；不能称全部平台完成，不承诺无依据时间。
+- 18:33新服务及sandbox构建成功；隔离完整节点Chrome七组PASS，证据C:/Users/FULLST~1/AppData/Local/Temp/workflow-editor-DRup9X/ui-acceptance.json（含新建拖线/六语言）；4292通过身份校验更新PID58912，旧instance保持，4291未更新。嵌入4292五组复验通过，data/workflow-preview-20261104/ui-acceptance.json。Actions回归发现测试旧假设：点击连线中点现在会点到＋，改点1/4线段保留删除连接断言；含services夹具却绑定host导致渲染拒绝，改为node:22容器绑定保留字段保真断言。脚本首次默认Playwright未安装，改用现有Chrome；未下载依赖。Actions模板复验前三组PASS，完整结束及canvas待收集。
+- 本阶段交付：CodeEditor用layout cleanup先setModel(null)再dispose两个模型，修复四次Monaco diff释放异常，未屏蔽异常。npm全量405 PASS/1既有skip、typecheck/build和新server构建PASS；真实完整模板Chrome四组（含无浏览器异常）通过。4292更新PID79764并复验节点五组PASS。Actions画布最终Chrome PASS：步骤首中尾删除/取消、检出清理、串并行、删除依赖/取消、环拒绝、保存重开及1280/900/390；截图data/maintenance/actions-canvas。测试按elementFromPoint找未被＋遮挡的真实线段后鼠标点击，原断言保留。仅本地预览，未提交/推送/合main/发版；4291未改。本阶段源码目录及节点基础交付不代表审批/表单/通知/AI等完成，下一步WF-04。
+- 用户授权单开服务看当前效果：4292独立预览已启动，PID86272，target/debug/ferry-server-workflow-preview.exe；独立数据data/workflow-preview-20261104，instance8156fe6f-f423-45a6-a25a-a22b66a6b488。新建演示账号/空间/Actions模板；access.json保存本地访问凭据，editor.png为真实Chrome截图。健康API、编辑器加载/无页面错误及截图人工核对通过。4291仍为PID63240，未更新/迁移旧服务。仅展示当前Actions编辑器，不代表Workflow图UI已交付；后续继续生产授权及完整浏览器验收。
+- 最新授权：用户选择单独流水线分支推进，已在主目录 D:/Projects/github/ferry 创建并切换 feat/workflow-platform（基于 a7f097f）。原独立工作树只保留历史现场与证据；后续产品改动在主目录执行。未提交/推送/合 main/发布/更新4291；运行环境迁移仍未授权。
+- 108个相关文件已逐文件三方融合；备份及逐文件hash/冲突处理证据 data/backups/workflow-branch-migration-20261104-170903/manifest.json。保留主目录已有迁移、退休流水线拒绝逻辑、mark_cancelling共享函数、数组字段重置及其它会话文档；原 worktree 未删除。不要再从旧worktree整文件覆盖主目录。
+- TPL-01已并入WF-06：取消新流水线模板动态参数；保留旧模板/API兼容及标准workflow_dispatch inputs；模板/流水线共用编辑器、分菜单、模板无运行。YAML默认，画布辅助，步骤用YAML片段显式应用/取消，原文注释与信封未知字段保留，Monaco全屏与左右diff以打开时保存版本为基准。尚待完整浏览器验收及旧canvas/legacy模板脚本适配；两处中文??已修。
+- 两类编排已获用户同意：Actions用于构建测试交付，节点工作流用于数据/AI/人工编排；共享权限/凭据/版本/运行基础设施，保留各自YAML/图JSON编辑与执行语义，跨类型调用未交付。
+- 用户明确目标：借鉴成熟逻辑，减少设计、踩坑及用户学习成本；兼容且许可允许的现成能力优先复用，Ferry已有编辑器/权限/凭据/版本/执行基础优先共享，不为自行实现而重造。“抄逻辑”不等于直接搬第三方源码或删除来源/许可；参照 Flow/GitHub Actions/n8n/ComfyUI 的功能逻辑、交互及边界，按需求融合，不能直接复用的部分自行实现。保留用户熟悉的术语、配置与操作习惯，按原FR/AC/TC及能力清单逐成员验收，文件数量不作为完成标准。
+- 用户明确预览验收目标为融合后的节点工作流及完整业务界面；新增连线中间“＋”插入任务并自动重接两段连接，按原端口/分支保留语义。运行时契约不可引用docs/prd：四个JSON已按原hash移至src/shared/workflow-contracts，前后端/夹具共用单一源，文档仅引用；节点界面与插入操作正在实现，尚未验收。
+- 最新主目录验证：typecheck、fmt、diff通过；全前端400 PASS/1既有skip，证据data/maintenance/workflow-integrated-ui-tests.json。Rust全workspace已结束，各套件0失败（server 485 PASS/9忽略），日志workflow-integrated-workspace.log；尚未完成主目录构建/三库HTTP/浏览器，不引用旧二进制冒充融合版本已验收。
+- 流水线后端已实现待融合验收：owner追加迁移（历史NULL）、新建真实归属、对象/分组ACL、分页前权限过滤、历史/日志/产物/运行鉴权、owner转让、审批/取消锁内重授权与原子审计。PDR-04停旧自动触发和生产发布身份/指针仍未接入。原worktree最后workspace536 PASS/13ignored及server构建exit0，仅为迁移前证据；Workflow上一阶段三库各67 HTTP、535 PASS证据仍在worktree/data/maintenance/workflow-publication-results.json。
+- 其余原实现/故障现场恢复资料见迁移备份 workflow-memory-before.md 与保留worktree MEMORY的历史记录；当前唯一进度清单为本文件顶部WF-01～07。整体NOT READY。
+
+## 2026-11-04 流水线模板可视化（TPL-01，历史交接，已并入WF-06）
+- 交接：用户明确要求本会话工作交给融合会话统一推进；接手线程01a19fad-abbc-7c52-9021-c8bdb3b83046。本会话停止产品改动；以下草稿可由接手方挑选迁入独立worktree，不可直接提交主工作区全部脏文件。TPL-01并入WF-01跟踪，未验证草稿不得标完成。
+- 草稿文件：src/app/resources/ResourceForm.tsx（YAML默认、详情编辑按钮全宽）；src/features/templates/resource-config.tsx（新流水线模板DEFAULT_ACTIONS、parameters=[]、仅隐藏流水线模板参数，保留应用/配置模板与旧参数兼容）；src/features/pipelines/{ActionsEditor,YamlEditor,WorkflowFragmentEditor}.tsx（完整YAML默认、步骤片段显式校验应用/取消、全屏/diff，保留任务及检出绑定）；actions-workflow.ts与对应test（AST片段提取/替换，保留其它字段）；src/shared/editor/CodeEditor.tsx（Monaco DiffEditor）；execution-domain.json（六语）；actions-form.test.ts和两份浏览器脚本。
+- 验证边界：新草稿只通过typecheck，尚未完整单元/构建/浏览器/部署。scripts/test-actions-ui.mjs约71/73行中文被PowerShell→Python写成??，需恢复“步骤 YAML”/“应用到工作流”；test-actions-canvas.mjs仍依赖旧步骤表单，须改为片段编辑并显式切可视化；test-templates-ui.mjs旧参数模板应经API种入验证兼容，应用/配置模板参数测试保留。test-pipeline-template-editor-ui.mjs已重写但未跑，需验证Monaco diff、全屏、取消/应用与原文注释保留、窄屏和全宽编辑按钮；检查其它依赖默认可视化的脚本。禁止使用PowerShell here-string经Python stdin写中文（会损坏）；使用apply_patch。
+- 后续命令/部署证据：data/maintenance/run-template-tests.mjs用Node直连文件描述符跑全Vitest，避免PowerShell CLIXML挂起；先npm run build再cargo build -p ferry-server，使用新唯一exe避免覆盖运行文件；临时服务真实浏览器先验收，再复用start-template-editor-local.ps1的备份/身份/凭据校验流程更新4291。当前运行template-editor.exe/PID63240、原instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2、data/dev-backend；重启前重新核实。不得使用旧start-template-button-local.ps1未经修改直接部署。data/maintenance/template-parameter-*和template-action-help.json为取消方案残留，不运行。
+- 范围约束：无AI占位实现，不合并数据库表；模板和流水线共用编辑能力但分菜单，模板无运行；不要误删标准workflow_dispatch inputs。YAML为工作流事实源，主机/池与业务绑定保留信封；用户问单步YAML时解释为子片段，不独立运行的workflow。融合文档FR-PIPE-13/v3 B19旧动态参数要求须按最新用户决定修订。
+- 用户暂停本轮编辑改造，先核对融合。已读v3§V2/18.1、PRD FR-PIPE-01/13/14/19与原型12：Actions YAML与Workflow图JSON并存；共享基础设施；原型的任务参数含部署/审批等Ferry业务绑定，不等于Action with表单。FR-PIPE-13、v3§18.2 B19仍写模板参数，与用户最新取消动态参数要求冲突，需融合时更新契约，不直接沿旧文档实现。
+- 另一会话01a19fad-abbc-7c52-9021-c8bdb3b83046已实际回复：独立worktree进行流水线ACL/归属/转让验证，生产发布及存量停自动触发未完；Workflow发布/身份等三库各67 HTTP通过。当前不改Actions编辑器，继续沿用github-actions信封/YAML/executor_bindings/checkout_bindings/graph_layout；已约定不覆盖本轮草稿，编辑契约变更先对齐。双方未合并/发布本轮功能。后续适配重点为草稿/发布、不可变版本与授权，以及业务任务配置；全屏diff可复用，但此时不继续实现。
+- a7f097f已提交并推fix/pipeline-template-visual-editor，main发布候选58d5083保持不变；本次不冒充已包含于正在发布的alpha2。模板新建/编辑/详情复用ResourceForm工作区、ActionsEditor/Monaco及PipelineRepository，保留参数、runtime表达式、执行/检出绑定、布局和未知envelope元数据；模板保存不强制绑定主机，流水线仍强制；畸形envelope显示错误与原内容供修复，不覆盖数据。
+- 构建PASS（template-editor-{build,server-build}.log）；全前端399PASS/1既有skip（template-editor-ui-tests-direct.json）。PowerShell重定向全量测试遇CliXml解析挂起，保留原log并终止仅该测试进程，改node直接文件描述符收集后完整通过；不是删测试/跳过错误。
+- 新增真实浏览器+临时服务测试test-pipeline-template-editor-ui.mjs：创建/编辑/视觉与YAML切换/HTTP保存/参数与绑定布局保留/只读详情/390px无横溢/服务端渲染PASS（template-editor-browser.log）；原模板CRUD/生成参数校验/版本冲突/真实流水线创建PASS（template-editor-existing-browser.log）；原画布新增/删除/串并行/布局等PASS（template-editor-canvas-browser.log）。已加入两处现有CI，未声称新提交CI通过。
+- 4291已更新ferry-server-template-editor.exe/PID63240，原instance不变，备份data/backups/pre-ui-fixes-20261104-161238；当前嵌入资产/SQLite完整性/原资源ID/3凭据密文绑定PASS。只读核对用户指定模板109171073907425280为支持的github-actions envelope，0参数；未改用户模板内容。截图data/maintenance/template-editor/{detail,mobile}.png。自审与需求验收PASS；待用户体验验收，尚未合main或发布。
+
+## 2026-11-04 主机远程桌面与截图方案（RD-01 调研交付）
+- 需求：服务端随包远控服务、HostAgent随包被控端、Web控制端及独立截图，覆盖Windows/Linux/macOS；本轮仅评估，不实施/发布。交付docs/remote-desktop-feasibility.md，含六路线推荐分数、优劣/许可证、三平台边界、架构接入、截图和分期验收。
+- 核对现有HostChannel/独立二进制回连协议/HostWorkspace及上游官方README/API/许可证。建议先原型MeshCentral/MeshAgent成套路线（Apache-2.0、Node及第二agent）；严格轻量则noVNC+受管VNC组件+Ferry中继（被控实现与许可证另核）。RustDesk OSS不等于官方自托管Web可免费内置。
+- Windows用户会话/Session0及UAC、Linux X11/Wayland与无GUI、macOS TCC/FileVault边界已明确。截图可评估XCap或引擎当前帧；均未实机验证。Direct自审/需求核对完成；只改调研文档与私有MEMORY，未改业务代码/安装/提交推送/更新/发布。下一步为选型后的三平台原型，未作最终技术决策。
+- 用户追问Mesh轻量及CPU/内存：方案已补资源说明。官方归档指南有共享单CPU/0.6GB旧版演示，不等于当前最低配置或RSS；未找到统一agent性能基准。建议小规模原型服务额外预留512MB–1GB/1vCPU、每机agent先预留50–100MB（均为规划预算非实测/承诺）；CPU必须按分辨率/动态画面/并发与平台实测。仅补调研，未安装或运行引擎。
+
+## 2026-11-04 alpha2 发布检查点（15:34）
+- 用户确认继续发版，随后要求先更新本地；4291已完成，15:54再次实测/api/status健康、版本0.2.0-alpha.2、原instance不变，/zh-CN返回200。继续发布，不提问。main/origin为58d5083658e038556df11cebbff2977eddfd95c5，版本0.2.0-alpha.2尚未发布。相关源码全部提交推送，私有MEMORY/.gitignore和其他会话WF/远程桌面文档不提交。
+- 产品提交80ab185（统一刷新倒计时/一体胶囊/关闭下三角）、d163260/9322357（合入原已在4291运行的洞察动态计数及阅读位置修复）、1e1f5bb（旧字典升级测试保留值/顺序/自定义及六语labels）。392全前端PASS/1既有skip，生产及服务构建PASS；新脚本test-auto-refresh-ui.mjs已加入CI，生产与4291嵌入Chrome通过六主题明暗/请求结束后计时/慢请求/失败/单旋转图标加0s/切换及关闭。
+- 4291为target/debug/ferry-server-020-alpha2-refresh.exe/PID79348，原实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2不变；备份data/backups/pre-ui-fixes-20261104-143555，SQLite完整性/原资源ID/3凭据密文及绑定校验通过。嵌入洞察创建/动态计数/自动刷新保留阅读/展开/筛选也通过（alpha2-local-final-insight-browser.log）。后续ebc30ed/58d5083只改测试，无需再替换本地产品。
+- 第一轮41787423498：数据库及alpha34三库升级等24项通过，build-ui旧测试仍要求普通导航请求preferences而超时。ebc30ed改为实际离开维护页触发刷新，不削弱草稿断言；真实浏览器→服务→Runner端到端连续3次PASS（alpha2-build-ui-cache-{regression,repeat}.log），App偏好24测试PASS。
+- 第二轮41791117169：build-ui在test-language-switcher-ui.mjs:226点击外部后等菜单关闭超时。本地原测试也复现197行键盘选语言超时；Radix焦点移动/外部pointer监听为延迟挂载，原脚本连续按键/原始坐标点击未等待。58d5083补逐步焦点确认、菜单稳定及坐标实际在外部断言；未改产品/未删断言，修后连续3次PASS（alpha2-language-stable-repeat.log）。第二轮不发布，控制器会取消过期任务。
+- 最终发布控制器分支feat/020-alpha2-release-dispatch在C:/Users/FullStack/AppData/Local/Temp/ferry-020-alpha2-release-dispatch，提交1ed75aa；锁定58d5083，仅复用相同SHA已有dispatch，不重复启动。取消已知旧控制器后取消过期main CI与当前冗余push，再dispatch完整build；全部成功后publish-verified，再给已验证源镜像加版本tag。旧controller96ca0ea/41791086053和ebc任务已过期。
+- 观察exec43945运行data/maintenance/watch-020-alpha2-release.py（旧47099/88876/33293已停），每90秒API查58d5083。最终完整dispatch41793132827运行中，冗余push41793086090已取消；15:54已17任务成功/10进行中/无失败，e2e-build-ui通过。源镜像41793086063已成功。不要重复触发。API偶发匿名额度403曾出现，额度已恢复；公开GitHub actions HTML也可查，无需凭据。
+- 下一步：继续观察当前控制器和完整构建。失败读取/check-runs/{job}/annotations定位，不能删测试/跳过断言/盲目重试。通过后观察自动发布和版本镜像；watcher会fetch v0.2.0-alpha.2并执行verify-020-alpha2-public-release.py，下载全部assets、核对SHA256/Runner目录与桌面签名、amd64/arm64镜像源码标签。最后更新唯一清单，完成项压缩交付；生产实例未部署（无入口），本地已好。
+
+## 2026-11-04 代码洞察动态计数及阅读不中断刷新（独立分支）
+- 产品修复caa8ca3：列表/详情repository_count复用授权selected_sources按实际发现源去重，动态范围不再按选择条数计1，无可用发现为0；不实时请求平台目录，总数随后端发现更新。状态每15秒检查，新增开关/倒计时/手动刷新，源发布变化触发报表读数据；不触发采集。概览保留旧数据等待新响应，明细移除refreshKey组件key，筛选/展开/滚动保持；后台错误仍显示。
+- Direct自审及本地需求验收PASS。npm生产构建、服务cargo build通过；相关前端36、后端insights::tests 11通过。生产与实际4291嵌入Chrome通过：手动/自动刷新数值、请求等待期间图表身份与滚动、刷新后滚动/展开/筛选、暂停、动态总数、明细表身份及原有创建/六语320px/映射回归。证据worktree/code-insight-count/data/maintenance/insight-refresh-{build,browser,embedded-browser}.log及code-insights-ui/refresh-controls-{mobile,desktop}.png。
+- 4291已备份更新target/debug/ferry-server-code-insight-refresh.exe，PID49264，alpha2，实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2不变；备份data/backups/pre-ui-fixes-20261104-140833；SQLite完整性/原资源ID/3凭据密文及绑定/当前嵌入资源验证通过。浏览器仅API fixtures，未改真实洞察配置。原发布DEL-01继续使用f15d214，不擅改候选；此次fix分支已推，未合并main/发版/线上部署。线上/api/status确认alpha1实例941b9d9a-b924-469e-aecf-71c96f1900ee，已异步询问部署入口，收到后继续线上部署与验收。
+
+## 2026-11-04 取消洞察报告（4875622）
+- 用户取消整个洞察报告功能，覆盖先前图标/概览调整；代码走查同样保持取消，代码洞察不变。删除两者业务入口、报告页面/配置/查询/导出/定时生成与专用CI；保留已发布迁移、历史表及数据。角色编辑隐藏退休授权，旧API返回JSON404。历史方案注明两功能取消，不得擅自重建。
+- 验证：前端386PASS/1既有skip（insights-only-ui-results.json），仓库后端110PASS/3外部环境ignored、权限6PASS/角色2PASS（insights-only-backend-verified.log）；迁移幂等及保留历史记录测试通过。npm与cargo构建通过，代码洞察创建/仓库多选/分组/作者映射浏览器通过；真实API与39菜单浏览器通过（insights-only-real-api-browser.log）。取消功能的专用测试随功能移除，共用及代码洞察回归保留，升级测试增加退休接口404断言。
+- 本地4291于13:19更新PID75396，target/debug/ferry-server-020-insights-only.exe；实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2不变，备份data/backups/pre-ui-fixes-20261104-131936。历史报告定义/生成记录各1条及绑定表逐字段核验一致；原资源ID/3凭据密文及引用/嵌入UI通过；退休API包括嵌套路径均JSON404。提交4875622已SSH推main，未发新版，CI见DEL-01。自审范围/兼容/冗余清理及本轮验收通过；私有MEMORY/.gitignore/无关WF文档保持不提交。
+
+## 2026-11-04 取消代码走查与报告创建修复（e835ed8，后续报告亦取消）
+- 用户明确取消代码走查。删除菜单/页面/权限目录/API/调度/执行及测试AI实现，报告不再采集或展示走查证据；历史表/记录及已发布迁移保留，旧专用流水线禁止新启动，旧角色编辑隐藏退休授权；原始历史报告不改写，读取/导出移除走查字段，仍强制仓库及凭据授权。设计文档已注明取消，不得重新实现。
+- 报告创建真实根因：来源选择resetOnChange把applications数组清成空字符串，后端Vec校验失败；共享表单按已有值/blank保留数组类型，标量仍清空字符串。人员显示去重昵称/姓名/邮箱/别名，选择仍使用稳定人员key。
+- 验证：npm生产构建/cargo服务构建通过；全前端394PASS/1既有skip（reports-only-final-ui-results.json）；报告8/权限6/退休流水线迁移1/监控25/角色2通过；报告外部PG/MySQL测试1项未本地执行。浏览器覆盖普通来源选择、人员与应用创建、编辑、生成、映射快照、CSV导出、历史筛选、图表hover/键盘、手机布局。真实产品API证据reports-reviews-live/fixture-9tz2ku46；GET及旧创建/执行/取消接口404，菜单无入口。首轮实测发现旧接口落入SPA返回200，已在workspace_api补JSON404fallback并真实复测通过，未弱化断言。
+- 本地4291于12:52更新，PID20656，target/debug/ferry-server-020-reports-only.exe，实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2不变；备份data/backups/pre-ui-fixes-20261104-125251。原资源ID/SQLite完整性/3凭据密文及绑定校验通过；REPORTS_REVIEWS_UI_URL=4291嵌入浏览器通过。提交e835ed8已SSH推main，尚未发布新版本；私有MEMORY/.gitignore/独立WF文档未提交。自审与本轮需求验收通过；外部CI另记DEL-01。
+
+## 2026-11-04 邀请码及旧空间菜单恢复（743b8e8）
+- I18N-03已交付main/本地：Invitation曾整块硬编码中文，已补标题/说明/确认/复制及重置反馈六语，反馈存key使切换语言后同步；相关单测7、完整前端395PASS/1skip（invitation-roles-ui-results.json）、生产及4291嵌入375px六语浏览器通过。
+- AUTH-01已交付main/本地：实际4291的3个旧空间拥有者均缺insight-reports及code-reviews权限，prepare_permissions仅迁移旧模块遗漏新模块。修复仅追加各内置角色原设计授权，自定义角色不动；权限6测试通过（旧授权保留/自定义不改/幂等）。alpha1真实升级后旧session访问两模块接口成功；SQLite3个空间现各10项授权已只读核验。用户浏览器刷新加载/me后看到菜单，不需要重新创建空间。当前本地报告/走查配置均0条，因此列表为空不是功能缺失。
+- 用户贴旧alpha40表，核对当前0.2alpha1已有五周期报告/人员映射或应用多仓库/测试与AI走查/共享分配容量/主机OS槽锁。真实产品API+Chromium报告创建生成别名与走查启动复验PASS，data/maintenance/reports-reviews-live/fixture-5cu1jthf。所有平台实账号与真实商业AI验收仍不全，历史34根因未证实，不宣称全部验收完成。
+- 默认初始化核对9类均有消费者：7受控状态显示、environment流水线环境建议、app-category应用过滤/表单/后端校验；无未用默认项被发现，不删除用户数据或破坏业务引用。
+- 完整CI回归发现：旧字典测试仍断言label而当前语言覆写存labels；已对齐且保留值/颜色/排序/隔离断言。维护HTTP进一步发现normalize用JSON索引可插入labels:null，现改get_mut并加防回归；本地受影响数据0条。维护HTTP最终97PASS（maintenance-http-locale-final.log）；六状态真实编辑、应用颜色、环境建议、40秒心跳浏览器PASS；旧版升级PASS（Windows没有POSIX旧Runner，不宣称历史命令实际对比）。
+- 本地最终4291于12:18更新，PID53856，target/debug/ferry-server-020-role-access.exe，版本0.2.0-alpha.1，实例不变，备份data/backups/pre-ui-fixes-20261104-121801；资源ID/数据库完整性/3凭据及绑定校验通过。源码已推743b8e8；CI41772427523 pending、41772427460 in_progress。旧4af81e0CI维护脚本失败已本地重现修复，新CI尚未通过。未发布新版本，独立WF文档/私有MEMORY/.gitignore不提交。
+
+## 2026-11-04 状态多语言与通知/加载体验阶段
+- I18N-02：七类运行状态（host/pipeline/deployment/cron/alert/repository/insight）固定机器值，后端CRUD及导入拒绝增删改值、非法类型和删除；默认名从六种旧初始化语言识别后读时提供六语，逐语言自定义名称可编辑，颜色/排序保留。生成翻译保存时去除，避免冻结默认翻译；业务环境/应用分类仍可维护。筛选、标签、表单、导出共用optionText。状态测试覆盖七类×六种种子语言×六种阅读语言、实际CRUD拒绝及回显；真实Chromium六语下拉与固定API参数通过。
+- NTF-01：平台先选/专属配置/官方帮助、自动URL识别、加密签名与Token、逐渠道语言、原生可跳转链接已实现；通知9/监控25通过，320/375/768/1280浏览器回显/切换/保存通过。不宣称真实外部机器人投递验收。
+- I18N-01/UX-01/UI-01/UI-02：All/Ungrouped及复数、偏好复用/失败保留/空间隔离、主题空数据插画/筛选区别/错峰骨架、1px独立路由与请求进度完成。路由底层不透明主题色，上层请求0.62独立颜色与寿命；六主题明暗、减少动画、并发收尾和375px通过。宽表空状态用100cqw在可见区域居中；真实几何1280/900/390与冻结边缘阴影通过。
+- 提交：ebe7362实现与CI接入；4af81e0补手机筛选最大30dvh内部滚动，保留表头和行操作空间；升级测试明确验证新增agent_update_available=false、agent_update_state=null（未接入代理样本），保留原数据完整对比。两项旧CI失败本地重现后修复；主机工作区浏览器、alpha1真实SQLite升级通过（Windows缺POSIX旧Runner，不宣称命令执行对比）。
+- 证据：data/maintenance/state-locale-frontend.json（394PASS/1skip）、state-locale-backend-final.log（8）、notification-backend-final.log（9）、monitor-backend-final.log（25）；生产及嵌入四脚本：scripts/test-{controlled-state,workspace-feedback,activity-progress,repository-monitor}-ui.mjs。4291最终于11:31更新4af81e0，PID82440，target/debug/ferry-server-020-feedback-final.exe，备份data/backups/pre-ui-fixes-20261104-113111；原实例46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2、资源ID、3凭据及绑定校验通过。最终嵌入六语状态/偏好/空状态浏览器再验通过。main/origin-main已推4af81e0，无本轮源代码遗漏；仅无关.gitignore/私有MEMORY/WF文档脏文件保留。CI41767530221/41767530199排队；前一ebe7362容器CI41767104727仍运行，不能宣称成功。
+
+## Completed HostAgent node UX (2026-11-04)
+- Delivered: small HostAgent version + immediate update on node list/detail; shared execution badge; self excluded from jump-host dropdown (existing backend rejection retained).
+- Reuse: signed catalog for exact running server release, version precedence, draining/admission and existing upgrade endpoint. Empty POST resolves/verifies server catalog; explicit signed body remains compatible. Host JSON computes availability/state without per-row polling; detail retains existing polling. hosts.update gates action, offline disabled, busy status replaces button; unsupported/unready preflight does not POST. Shared uses execution.shared.
+- PASS: npm typecheck/build; targeted UI 61 (1 existing Windows skip); hosts regression 62 (2 external-service skips); final upgrade suite 13 (1 isolated NATS skip). Desktop +375px production browser and local4291 embedded browser PASS: versions, shared, upgrades, permissions, jump exclusions, existing connect/reset/Monaco behavior. Browser upgrade requests use fixtures; no user's remote HostAgent was upgraded by these tests.
+- Local4291 updated: version0.2.0-alpha.1, PID43620, exe target/debug/ferry-server-020-host-language.exe; latest embedded asset index-4NppSU6k.js. Instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2, SQLite/resource IDs/credential ciphertext+bindings verified preserved; backup data/backups/pre-ui-fixes-20261104-092602. Private updater data/maintenance/start-host-language-local.ps1 guards OLD metadata exe; do not rerun without adapting.
+- Follow-up delivered: connection labels use only selected language (zh-CN main-agent label without HostAgent suffix, English HostAgent; six locales incl install tabs aligned). Focused 35PASS/1Windows skip; rebuild+local embedded browser PASS, explicit no-bilingual-label assertion. Commits ad48e8f+b838dc6 pushed origin/main using existing SSH443 authentication (HTTPS GCM had no usable credentials; no permanent Git config changed). Direct execution; self-review/final requirement acceptance PASS. No task implementation outstanding; no new release requested. Preserve unrelated workflow docs/private MEMORY/worktree.
+
+
+- 2026-11-04 WF-01执行后端阶段交付：未提交/推送/合并/发布/更新4291；HEAD仍a7afc43。手动运行首批证据workflow-run-results.json保留；新增次数预算及运行中接管证据worktree/workflow-platform/data/maintenance/workflow-budget-results.json，全量506通过/13环境忽略，SQLite34/MySQL36检查通过，MySQL Journal11及资产专项通过。5000次上限/并发最后一槽/满额重放、真实运行中强杀及SQL租约过期接管通过；隔离服务和MySQL均退出并检查端口释放，原始失败保留。Direct自审及限定阶段验收PASS，整体NOT READY；超时语义/完整费用与字节预算/PG与集群等剩余范围见worktree MEMORY，无后台任务。
+
+## 0.2.0-alpha.1 DELIVERED / verified (2026-11-04; overrides historical states below)
+- ResultPASS. Finalmain/tag6b45f35040a322fc74cf788e376aacc05282dcc3 committed and SSHpushed; origin/main fetched/same. PUBLIC https://github.com/7link-team/ferry/releases/tag/v0.2.0-alpha.1 . FinalfullCI41702882559 SUCCESS28jobs; sourceimage41702823239 SUCCESS; publication41718144912 SUCCESS; versionimage41718262133 SUCCESS; helper41702859166 SUCCESS. No release tasks remain. Published40tag unchanged.
+- Publicverifier71311 exit0: all21assets downloaded, everySHA256 checked, desktop6signatures+signedRunnercatalogPASS, versionamd64/arm64image identicalexactreleasecommit/sourceimage. Evidence020-public-release-verification.log,020-public-release/VERIFIED.txt,020-delivery-acceptance.json,020-final-ci-jobs.json. Scope/reuse/architecture/regression/complexity/commit hygiene/durablestate and originalmodules acceptancePASS.
+- Local4291 UPDATED0.2alpha1 PID61572 target/debug/ferry-server-020.exe, originalinstance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2 data/dev-backend. Backupdata/backups/pre-ui-fixes-20261104-031137. AFTERpublication independentstatus/currentembeddedUI index-BxJo3nKS.js/SQLite/IDs/masterkey/3credentials+bindingsPASS. Embeddedreports/reviews6locales/mobileCRUDPASS020-local-embedded-reports-reviews.log. DoNOT rerun oldversion-onlystart-020-local.ps1.
+- Implementedreportfiveperiods/peoplealiases-or-appmultirepo/timezones/immutable revisions/exports/evidence; reviewsfixedSHA/dedicatededitablepipeline/manualpush/testsAI/JUnit/findings/fencedcancel; hostOSslotlocks; post40notification/HostAgent/upgradefixes included. b7featurefollowedbytestonlyfixesf273/navloader,db1/notificationChinese labels,63eb/nativeprocessdeadline,6b45/remove2duplicateoldtimeoutargs. Allfinaltypecheck/build/native19PASS1skip; fullCI also passesLinuxGo-race AND WindowsGo/Actions/nativeupgrade/rollback. LocalWindowsfullGo earlierhang is historical, not claimedlocalPASS.
+- Broaderacceptance: localUI374PASS1existingSkip, Rust438PASS14environmentIgnored; PG/MySQL4groupsPASSinclcancellation; realHTTPbrowserPASS; realWindowsprivateGitActionsreview14PASSinclrunningcancel+cleanupACK; transfers41realAPIpagesPASS; notification320/375/768/1280PASS; CRUDproduction1280/390/320originalassertionsPASS. See logs020-*.
+- Limitsremainexplicit: allplatformHTTPcontracts!=allplatformrealaccounts (oneCodeupaccount pluspublic/privateGit actualevidence); localAIHTTPcontract!=commercialsupplier; historicalalpha34incidentrootcauseunprovenwithoutlogs. DoNOTcalltheseverified. Generalchecklist retainsrealaccount/environmentfollowups.
+- Source/app/test deliverypaths CLEAN vsHEAD; unrelateddirty .gitignore/privateMEMORY/WFdocs/prd/schemas remainintact and UNSTAGED. SeparateWFworktree tasknotmerged/published. No furtherworkfor thisrelease; no newagentorpermission needed.
+
+## 0.2.0-alpha.1 当前交付（2026-11-04，用户授权无需提问）
+
+- 阶段 RELEASE：goal仍active。功能已提交推送main b7be871528b8e04e9b8f0c74fd2096f624b30370；尚未发布，不可声称完成。
+- 内容：洞察报告（五周期/人员昵称或应用多仓库/时区/快照/导出/走查证据）、代码走查（固定SHA/专用可编辑流水线/手动push/独立测试AI/JUnit/发现/带fence的取消）、主机OS执行槽锁、40后通知/术语/升级修复随新版本交付。版本0.2.0-alpha.1，40tag不可改。
+- 验收PASS：最终UI374pass1既有skip（data/maintenance/020-final-ui-tests.json）；完整workspace78083=438pass14环境ignored（server390pass10ignored）；check95207与fmtcheckPASS；reports8pass1ignored+bridge1pass；reviews取消suite14216=25pass1ignored。
+- 真实验收PASS：最终build85848（dist含取消）；生产mock浏览器55271；实际HTTP浏览器13763（fixture-9rkv8fhi）报告/走查CRUD、生成/映射/CSV、分支解析/等待、delete409保护→UIcancel200→delete200；Windows私有Git实际Actions走查25475=14PASS（固定SHA/JUnit/HTTP模型/失败测试独立AI/密钥隔离/真实running取消+清理ACK）。
+- 最新PG/MySQL原生matrix12374四组PASS，含取消事务/幂等；data/maintenance/020-db-matrix-results.json，root Temp/ferry020-db-test-ifjnryi6。SQLite扩展ignored scenario另1PASS。原Actions24/24、容量14/14与Go槽锁/取消专项PASS；Windows全Go曾超时终止，最终LinuxCI全race待验。
+- 已通过SSH推main；辅助发布分支feat/020-alpha1-release-dispatch，helper8fd8414，独立worktree data/maintenance/020-release-control。辅助workflow等exactmain完整build+image成功后发布并version image；禁止重复dispatch。
+- CI目前：helper41694947329 in_progress；exact b7完整dispatch41695678228 pending，等待push41694857508取消结束（仅macOS Native服务编译仍active，其余已cancel）。sourceimage41694857242双arch build-push进行中。push的e2e-build-ui在取消前真实失败 Import/export browser acceptance；frontend020已重新激活定位/最小修复测试harness（疑nav新evidenceText导入与dataURL transpile loader不兼容，未证实）。public annotations巨大base64不含有效error，需artifact。匿名quota约49。发布保持阻断，禁止忽略失败。gh不可用/无token，复用SSH helperworkflow，不索要权限。
+- 下一步：跟随helper发现exact b7be871的workflow_dispatch build，处理真实CI失败再重提候选（不移动40tag）；成功发布后运行data/maintenance/verify-020-public-release.py（全部21附件/签名/镜像对sourceSHA）。准备的data/maintenance/020-release-notes.md与prepare-020-dispatch.py仅本地，不stage。
+- 本地4291仍alpha40-host-terms PID66072，instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2，data/dev-backend；完成发布验收后copy最新server到target/debug/ferry-server-020.exe，再运行data/maintenance/start-020-local.ps1（检查原进程/属主→一致SQLite备份→身份/密钥/3凭据捕获校验→新worker目录actions-worker-020→健康/当前UI）。尚未执行；不要提前声称本地更新。已准备candidate ferry-server-020.exe，SHA256 0739FF97AE8C1AC6D03F88C86FDABC4631174DD4DF85196D04D0824E34EBEC13；只读status再次确认4291仍40与原instance。
+- 自审/本地需求验收已通过；交付剩CI/发布/公众artifact校验/4291更新。所有agents完成且源冻结。不得stage私有MEMORY、另一会话WF PRD/docs/schemas/.gitignore。
+- 验证边界：只有1本地Codeup连接，全平台HTTP契约不等于全平台实账号；AI用本地HTTP模型契约非商业API；alpha34原线上断连根因无证据。Docker目录迁移/cloudflared真实证据来自40。公开release notes必须准确保留边界。
+
+## 交付状态纠正（2026-11-04，用户要求逐项对齐）
+
+不得把“40 发布校验通过”当成“全部需求验收完成”。此前 goal 标记完成的口径过宽；本表优先于历史完成表述。
+
+| 事项 | 当前状态 | 未闭环内容 |
+|---|---|---|
+| 主机代理 / 执行器术语 | 本地已修复，未发版 | e8177e1：简中繁中/fallback已改主机代理（HostAgent），连接列200px防止手机换行撑高。当前源码26测试通过/1既有跳过；生产/Rust构建、预览与本地嵌入UI浏览器通过。4291 PID66072 host-terms.exe；SQLite资源ID/身份及3凭据密文绑定独立verify通过。更新捕获壳退出后句柄等待被终止，非正常exit；实际独立核验通过。不在40tag。 |
+| 多渠道通知 | 功能已发40，弹窗交付未闭环 | 多渠道、独立语言、投递结果在40；弹框加宽/自动识别渠道90a9780仅main和本地。2026-11-04只读线上status确认40；git show40组件仍手填名称/旧四列布局，没有自动识别。用户反馈属发布遗漏，不能让其反复升级40或归因缓存。新版预览及本地嵌入UI浏览器320/375/768/1280保存回显/独立语言/识别通过，后端官方端点/原生消息体/投递判断3测试通过；没有实测用户外部机器人投递。 |
+| 洞察范围/采集/查询 | 已实现，实账号验收不齐 | 动态分组、全分支保留、项目SHA去重、映射、图表/明细、共享增量已实现；缺所有平台当前实账号矩阵，不以契约测试替代。早期本地Codeup成功记录仅证明该连接。 |
+| 执行器分配/容量 | 已发40，边界限制 | 共享/私有、标签/OS/架构/指定主机、容量/排空/占用已测；服务完整停顿超5分钟租约TTL的远程任务隔离保障不足。 |
+| 配置分类/受控字典 | 已发40 | 当前业务接入与CRUD/隔离/重启有证据；显示文案仍须术语复核，不宣称所有硬编码都变成可编辑字典。 |
+| 仓库最近事件 | 已发40 | 跨分支最近提交批量读取与列表已有验证。 |
+| 部署/目录迁移 | CI已验收，用户部署待确认 | 双数据库真实Docker旧卷迁移/中断/恢复/tar搬迁通过；用户服务器实际续升未确认。 |
+| cloudflared | 真实快速隧道通过 | HTTPS/WSS/接入/执行/重启已测；用户named tunnel未实测。 |
+| 连接所属服务不可用 | 根因未闭环 | 故障注入/多服务重连已测；alpha34原事故缺原始日志，不能说根治。 |
+| 性能/运行细节 | 部分验收 | YAML懒加载/无仓库ref提示/并行构建已有改动；完整CI仍有托管macOS节点及构建耗时问题。首轮CI重连超时保留，不以重跑通过证明根因已修。 |
+| 主题/共用表单/列表/分组 | 已发40并有浏览器证据 | 2026-11-04完整当前src前端364PASS/1Windows不适用既有skip，47文件，显式--dir src排除临时旧源码；JSON checklist-current-ui-results.json。并非逐条最新线上体验验收；用户新发现重新打开，不能用已有测试否认问题。 |
+| 升级脚本 | 修复已推main并真实Docker验收 | 实际容器版本/健康判断、中断续升、跳过不完整发布；40tag内脚本未改，raw main命令可用。 |
+| 40发布 | 已发布并校验 | 21附件/签名/双架构镜像通过；不代表以上剩余事项完成。 |
+| 洞察报告 | 已发 0.2.0-alpha.1，本地已更新 | 仓库独立菜单、五周期、人员昵称映射/应用多仓库、时区、不可变修订及导出；单元、双数据库、浏览器及最终 CI 通过。公开附件、签名和镜像已校验。 |
+| 代码走查 | 已发 0.2.0-alpha.1，本地已更新 | 构建独立菜单、固定 SHA、手动/提交触发、专用可编辑流水线、独立测试和 AI、JUnit、发现及取消；真实 Windows Git/Actions、浏览器及最终 CI 通过。商业模型未实测。 |
+
+新增需求待确认：仓库/洞察报告（五周期多选、人员或应用单选、多仓库、昵称映射）；构建/代码走查（提交触发测试/AI审计）。方案 docs/insight-reports-code-reviews-design.md，仅方案未开发。
+
+当前下一步：e8177e1术语修复、a7afc43独立方案已提交并SSH推main成功。新提交CI：41678573110 Server container运行中，41678573117 Build and release排队；不可宣称CI通过。当前完整前端364PASS/1既有skip；通知后端3PASS，预览和本地嵌入浏览器通过。向用户给出完整原表验收状态和新方案入口。新增模块仅方案待确认，未开发。未发布下一版本，不覆盖其他会话WF文档，不移动40tag。
+
+# Current task / alpha.40 (2026-11-03 23:20)
+
+User: finish full checklist, test/commit/push/release40/update4291 autonomously. Never change published tag. Other session owns WF docs/PRD/schemas; exclude those and private MEMORY from commits.
+
+| Item | Verified state / evidence |
+|---|---|
+| Disk | Cleaned73.3GiB + npm cache; C136.6/D160.2GiB free. BusinessDB/keys/backups protected. Two archive cleanup actions were auto-review rejected; never bypassed. |
+| Group / terms | Up/down/add/edit/delete in ellipsis (a7dbfc2). Host connection HostAgent/host proxy vs SSH; pipeline Runner/executor; six locales. |
+| Notification / recent events | Encrypted multi-channel, per-channel language/results/editor-visibleURL/viewerredaction, actualHTTP155+ChromiumPASS. Latest commit event cross-branch batched/listPASS. |
+| Insights | Project+SHA dedup, branches retained, dynamic groups/future repos, shared collectors, full/incremental/retry, mappings, compositecolumns, chart axes/hover. Rust76PASS3ignored; publicGitHub+privateHTTPGit and five-providercontractsPASS. Private liveGitLab/Gitee/Gitea/Codeup accounts unavailable: NOT real-account acceptance. |
+| Capacity | Private cap1 default; shared opt-in;1..64, OS/arch/tags/explicit placement/atomic leases/drain/recovery/occupancy/batched reads. FinalWindows24default+14capacityPASS, PG/MySQLcapacity14eachPASS. Remote fencing after complete server stall>5minTTL not guaranteed; do not overclaim. |
+| Dictionaries / settings | Host+six operational fixed machine values; labels/colors/order editable and batch preferences. Category/env CRUD/legacy/isolation/restartPASS; realHTTP97+ChromiumPASS. Workspace literal data seeded locale retained. |
+| Deployment | Real Docker CI41631009244 MySQL+PG SUCCESS: legacy volumes, metadata, interrupted migration/recovery, tar relocation. Real credentialless cloudflaredHTTPS/WSS/enroll/exec/restartPASS (not named tunnel). Real3-serverbroker/ownerfailure/reconnect/files/isolationPASS. Historicalalpha34 root cause unproven without original logs. |
+| Regression | UI355PASS1existingSkip/48files; workspace403PASS12ignored; deterministic renewal1PASS0.02s; Windows24+14; strictalpha1legacyupgrade; readonly detail375/768/1280/1920light/dark; OAuth/monitor/forms/theme/group/table/state/category/charts/buildUI PASS. |
+| Critical fixes | SQLite singleconnection renewal no longer starves execution; Box::pin fixes Windows future stackoverflow exactHTTP repro. No-repository warning skip only emptycontext, realrepo errors preserved; Windows echo warnings0. |
+| Main / local | Main5bb7f41 pushed SSH (90a9780 UI, e0c274a recovery, 5bdb146 published-release selection). Local4291 UPDATED22:57 PID15216 target/debug/ferry-server-alpha40-notifications.exe, instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2; latestdist embedded; DB IDs/key/credentials capture+verifyPASS; backupdata/backups/pre-ui-fixes-20261103-225752. Actualstate2hosts/3credentials at restart. |
+| Upgrade follow-up | Main e0c274a + 5bdb146 + 5bb7f41(errorwording) pushed AFTER immutable40tag: actualcontainerimage/health before no-op; same-version target with older/missing/unhealthy runtime resumes pull/up; refuse actual runtime downgrade. INT/TERM before startup restore oldconfig; afterstartup retain target/backup for resume, no implicit DB rollback. Defaultlatest skips Atom tags missing runnercatalog orsignature; explicit --version unchanged. Full GitBash stub/process-signal regressionsPASS (quickstart-published-release-final.log). RealDocker PG/MySQL acceptance extended for38->40 interruption/resume/stop/IDs/secrets/no-op; RealDocker BOTH enginesPASS on e0run41665138885 and latest5bdbrun41666291034; jobHTML126022385486(postgres)/126022385068(mysql) actualscriptstepsSUCCESS, originals126018318884/126018318476 alsoSUCCESS. LocalDockerunavailable, actualDocker ranLinuxCI. |
+| Latest UI follow-up | Main90a9780 AFTER immutable40tag, not in40release: modalwide48rem, URL ownrow, language ownrow, wrapping controls. Automatic officialURL detection (WeCom/DingTalk/Feishu/Lark/Telegram/Slack/Discord/GoogleChat), generic fallback, unique automatic names, no name/provider inputs. Unit71+App44/build/serverbuildPASS; Chromium320/375/768/1280 and legacy1440/768/390PASS; save/reload/remove/same-provider duplicate namesPASS. |
+| Release | PUBLISHED AND VERIFIED. Workflow41646896763 attempt2SUCCESS; public release15:51:42UTC,21assets full SHA256, signed Runner catalog and six detached signatures, five desktop packages, both OCIarch labels exactbbc444d. Evidence data/maintenance/alpha40-public-release/VERIFIED.txt; verifier session87100 exit0. Initial proxied downloads truncated and rejected; direct curl retry succeeded, no test weakened. Immutabletagv0.1.0-alpha.40 -> bbc444d2b25372b6ac061010b0a30438f95b8eec (annotatedf4fc6f4). OCI PUBLIC verifiedamd64+arm64 againstsamecommit (alpha40-version-image-verified.json). FullGitHubrelease stillpending. Do not move/delete/recreate tag. |
+
+Delivery checkpoint: alpha40 public verification PASS, local4291 updated/healthy, all scoped source pushed. Actual38->40 interruption/resume PostgreSQL+MySQL Docker acceptancePASS. No remote deployment executed. User Debian next command: curl raw main quickstart | sh -s -- --upgrade --dir /root/ferry --version v0.1.0-alpha.40; regenerate agent command after upgrade. UI90a follows immutable40tag (main/local only); mainquickstart fixes available immediately. External private-platform liveaccounts and original34rootcause remain honestly unverified as stated in table; no claim beyond evidence.
+
+Monitor EXECsession19043 LIVE, childPID55268 runs data/maintenance/watch-alpha40-public-release.py; appendlogalpha40-public-release-watch.log. It observedattempt2 without stopping, so NO restartneeded. Scriptondisk updatedcontrollerID41659479898. Pollsamehandle; never restart solelyonobservationtimeout. OnCI success automatically runs verify-alpha40-public-release.py: downloadsALLassets, checks allSHA256/set/sizes/GitHubdigests, signedRunnercatalog/all.sig, OCIcommit+botharch; writesalpha40-public-release/VERIFIED.txt onlyonsuccess. Attempt2failure exits3: inspect annotations before decidingnextaction. No broadblindrerun.
+
+Pipeline firstfailurecheck125965168303: scripts/test-pipelines.py:624 eventually(runner_reconnected),30s budget. Sameproductsource prior d13tagrun passed3rounds. IndependentWindows graceful restart6times reconnect1.391/1.718/3.500/7.875/15.750/29.765s (allPASS): demonstrates30s edge, NOT proof exactCI cause. Runnerbackoff1/2/4/8/16/30 resetonlyholdOk; originalCIrunnerlog notuploaded. Preservefailure; rerunpass is verification, not claimedrootcausefix. Do not weaken checks or retag publishedcode.
+
+Evidence: alpha40-workspace-results.json; alpha40-workspace-renewal-results.json; alpha40-ui-all-final3.log; alpha40-maintenance-boxed-http.log97PASS; alpha40-final-windows-{default24,capacity14}.log; alpha40-readonly-{build,browser,upgrade}.log; alpha40-catchup-test-build-ui.log5PASS; alpha40-contribution-tooltip-axes.log; alpha40-cloudflared.log+cloudflared-9da4f8938b/result.json; alpha40-reconnect-probe/attempts.json+runner.log+serverlogs; alpha40-ci-pipelines-failure-annotations.json; notification-dialog-{unit,app,build,browser,legacy-browser,server-build}.log.
+
+PG/MySQL audit: originalscriptspopFERRY_DATABASE_URL/useSQLite; runtimewrapper %TEMP%/ferry-release-tools/alpha40-db-wrapper.py reinjectsURL inPopen afterpop and replaces sqlite3.connect(ferry.sqlite) with psycopg/PyMySQL. Fourlogs beginACTUALDATABASE (PG59142/MySQL60447 separate schemas), SQLpersistent4/4/4/3facts+12refs+clockupdates prove actualDB despite staticfinalSQLitewording. Snapshotsalpha40-db-wrapper-evidence.py/alpha40-sql-matrix-runtime-wrapper.py. Don't claim fullOCIrerun.
+
+Stableworkers: data/maintenance/actions-worker-alpha40-no-repository/actions-worker-windows-amd64.exe SHA25602D14085D940F0F76649F9AFB8AE17EF45FABA1C822D0A8E5D6F6EC40D314353. Neverreuse20:16ferry-server-alpha40-complete.exe (stackoverflow). Sourceboxfixretained.
+
+OnlinePVE incident: fresh token metadata read-only returned400 releaseUnavailable confirmed; oldtoken401 expired/used. User manuallyinterruptedpull, originalscriptconfig40/runtime38 no-opbugconfirmed andfixedmain; publicraw byte-verified latestscript.  ferry.7link.top status38 instance941b9d9a-b924-469e-aecf-71c96f1900ee. Script200; alpha38release/catalog404 and validmetadata previously400releaseUnavailable. Latest exact read-onlymetadata confirmedFerry401JSON expired/usedenrollmenttoken (no redirect/no consumption); don't repeat/storetoken. User told regeneratecommand; evenfresh38tokenblockeduntilverified40releaseupgrade. TLS EOF stageunknown; noDNS/certcauseproven, no -k. No productionchanges/SSH performed. Once40fullyverified, provide deploymentSERVER command fromactualFerrydirectory: curl -fsSL https://raw.githubusercontent.com/7link-team/ferry/main/scripts/quickstart.sh | sh -s -- --upgrade --dir . --version v0.1.0-alpha.40 ; then regenerateUIagentcommand. PVE may onlyagenthost, do not run serverupgrade there byassumption.
+
+API quota exhausted intermittently until15:57:37UTC; monitor19043 keeps retrying observations, no buildrestarts. PublicGitHubHTML works; runpages/storage and check-step attributes saved underdata/maintenance. Publicrelease40API404 andexpanded_assets source-only as15:35UTC. Feedlistsunreleasedtags, rootcauseoffailed-versionselection; newresolvernowcorrectlydefaults36 until40catalog/signaturepublished. User given explicit40command above for interrupted upgrade. Publiconline38 confirmed15:46 withbrowserUA; one PythonUA403 wasedgefilter, notservicefailure.
+
+Final audit remains: originalCI+publicasset verifier, localidentity/assets health, compactstate, explicitlimits. Markgoalcomplete onlyactualfullreleaseverified. Historical detailed ownhandoff archiveddata/maintenance/alpha40-continuity-before-compaction.txt; unrelatedWFnotes below preserved.
+
+## WF-01 文档补充与评审 — 2026-11-03
+- 2026-11-04固定范围终审交付：保留v1.14，不加新批次；自查§15原116格逐一处置为11已有设计引用过时、36产品待决、68设计待交、1运行待验；11格已同步矩阵/详表，现703覆盖105待补/31不适用19无=858。68设计格含26文案、20屏幕映射（10功能同套交付）、22精确契约；不把它们改称运行验证，不取消交付。G-17预算SQL只有步骤/聚合查询，不能关闭完整事务SQL格；旧i18n/端口检查说明已修正为历史快照。505契约例、32索引例、449链接374表、原22+5组SQLite、26表300字段/43时间配对/70增量、额外8文件13链接及diff格式PASS；终审作者字节幂等PASS。参考checker新增116格唯一性/完整映射/分类与矩阵一致性守卫；证据别名及历史hash快照保留data/maintenance。Direct同一执行者自评/原需求终审两遍PASS，仅评审交付完成，完整设计包及平台NOT READY；未产品开发/迁移/提交推送/实例更新/发布，其它会话改动保留。PDR及V6/V7未批准。恢复时以本条及自查§15为当前结论，旧作者脚本v114及以前不要重跑覆盖收口；workflow-review-closeout.py仅复现本次终审，无新语义。
+- v1.14交付记录：PRD§24/core.graph_publication_contract/README/自查§14；分开structure与resolved_contract，新增确定排序的拓扑告警、显式触发入口及端口静态关系，Merge缺连不伪造E，main/model冲突、同槽多来源、未选入口投影及Loop接口仍未冻结。修正pin_data严格UTF-8计量；505例（473+32）、32索引例、448链接372表及额外8文件13链接、26表300字段/43时间配对/70增量、原22+5组SQLite、858逐格及diff格式PASS。重复生成发现README历史前缀叠加，修复作者脚本后文档/core/graph字节幂等PASS；最新契约证据含产物hash，历史快照保留在data/maintenance/workflow-review-evidence。Direct同一执行者自评与原需求验收两遍PASS，692覆盖116待补不变；真实草稿API/表达式、publisher/trigger索引原子性/planner、typed/GPU及真实鉴权未验，平台NOT READY。本阶段仅本地文档/参考校验，无产品开发/迁移/提交推送/实例更新/发布，其它会话改动保留；PDR/V6/V7无新确认，v114作者可重入，历史one-shot禁重跑。
+- v1.13交付记录：PRD§23/core.credential_contract及3个直接凭据槽/README/自查§13；8种逻辑profile与密码学操作条件，保留password/ssh-key/token及host/build/deploy；逻辑类型存储与workflow module绑定未冻结，不虚构scope/credentials.use。缓存复用ID+行version+profile/adapter/公开配置投影，秘密不hash入键；所有轮换写路径待验。53manifest/75映射/473例（原430+43）、32索引参考例、26表300字段/43时间配对/70增量、原22+5组SQLite、447链接368表、额外8文件无BOM/LF及12链接、858逐格/diff格式PASS。Direct同一执行者自评及原需求验收PASS，692覆盖116待补不变。合成active/allowed_actors等资格投影不是新增字段；无vault/真实鉴权/外部认证/撤权竞态验收，平台NOT READY。本轮无产品代码/依赖/迁移/提交推送/实例更新/发布，其它会话改动保留。证据最新别名及不可覆盖hash快照在data/maintenance；workflow-review-v113-docs.py仅更新本阶段章节，可重入，历史one-shot/v110禁重跑规则保持，PDR/V6/V7无新确认。
+- v1.12交付记录：PRD§22/core.embedded_schema_contract/README/自查§12；单资源2020-12设计配置，真实Schema位置Pointer/anchor解析、严格一次解码、false目标、引用环检测不展开，显式编译预算先于元Schema；注解不执行，资源切换/动态词汇/未知扩展明确不支持。53manifest/75映射430例（原376+54）、32索引参考例，26表300字段/43时间配对/70增量、原22+5组SQLite、445链接364表、额外8文件无BOM/LF及11链接、858逐格与diff格式PASS。Direct同一执行者两遍自评/原需求验收PASS；仅静态文档编译，不是运行实例验证/正则中止/OS或整图资源保护，数字限额仅夹具示例。692覆盖116待补不变，平台NOT READY，无产品代码/依赖/迁移/提交推送/实例更新/发布。证据最新别名及hash快照在data/maintenance；workflow-review-v112-docs.py只更新本阶段章节，可重入，历史one-shot及v110禁重跑规则保留。PDR/V6/V7无新确认。
+- v1.11交付记录：PRD§21/模型§14/core.merge_readiness/README及自查§11；16行两输入表与N输入规则、D/E/S/F投影、P/H/C/U门槛、冻结context/确切来源attempt、lease+version原子提交及8类故障点。53manifest/75映射/376例（原303+73）及32索引参考例PASS，9个最小SQLite事务例只验回滚/旧owner与version/重复finish/取消，不是真实调度恢复或快照构建。26表300字段/43时间配对/70增量、原22+5组SQLite、444本地链接/360表、额外8文件UTF8无BOM/LF及10链接、858逐格/diff格式PASS。Direct同一执行者自评及原需求验收PASS；692覆盖116待补不变，产品NOT READY。无产品代码/依赖/迁移/提交推送/实例更新/发布。证据最新别名及不可覆盖hash快照在data/maintenance；contracts增加PRD和模型hash。workflow-review-v111-docs.py只更新本阶段章节，可重入；旧workflow-review-v110-docs.py属历史，不再重跑（会截断后续章节），此前可重入描述仅适用于v1.10阶段。PDR及V6/V7未获新确认。
+- v1.10交付记录：PRD§20、4个S2文件/归档manifest、75源映射及README/自查§10；53契约303例（保留245+新增58）、32索引参考例、26表300字段/43时间配对/70增量、原22组SQLite约束+5组数据查询PASS。显式限额非默认，CSV有损/公式输出转义、XLSX时区/缓存公式、PDF无OCR、归档路径/冲突/流式守卫与资产事务/GC边界明确；修正sheet条件和源成员名称，PRD逐源表直接比对清单。Direct同一执行者自评与原需求验收PASS；矩阵692覆盖116待补不变。文档/契约/索引三份证据及hash快照在data/maintenance；真实解析器/库版本/格式往返/OS隔离/权限并发未验，平台NOT READY。无产品代码/迁移/提交推送/实例更新/发布。workflow-review-v110-docs.py和file作者脚本可重入，历史one-shot禁重跑规则保留。
+- v1.9交付记录：PRD§19/模型§13及目标DDL/字段表、S2存储契约与check_index_contracts.py、自查§9；文本槽为UTF-8前128字节二进制候选，完整原值复核先于计数分页/排序；向量完整键JSON封装保留PG NUL，32字节hash+碰撞槽并核对原键，集合锁守卫不变。245参数/图例、32索引参考例、原22+5组SQLite、26表300字段/43时间配对/70增量、440链接351表、额外7文件无BOM/LF与6链接、858逐格和diff格式PASS。Direct同一执行者两遍自评/原需求验收PASS；仅闭合G-11索引技术格，692覆盖116待补。无产品实现/真实三库/锁竞态/负载/历史迁移/提交推送发布；平台NOT READY，PDR未获新确认。三份最新证据及hash快照在data/maintenance；新增one-shot workflow-review-v19-matrix.py禁止重跑。
+- v1.8交付记录：PRD§18、模型§12、workflow-data-nodes.json（data.table/vector.upsert/vector.search）及自查§8；原46个S1保留，新增3个S2，B008补参数映射不改清单未开始状态，不指定嵌入提供方。243契约例（原215+28）、原22+新5组SQLite结构/查询夹具、858逐格/稳定FR-AC-TC、26表298字段/43时间配对/70增量、439链接349表及额外6文件UTF8/LF/无BOM+5链接、scoped diff格式PASS。容量为合成计数守卫，非真实负载/多实例验收；证据含hash并按内容留快照，无提交推送/迁移/部署。；v1.8自评/原需求验收（Direct，同一执行者两遍）修正float32下溢后cosine判零、同键upsert不加新增计数、数据库版本/一致快照缓存、游标排序及操作字段边界。仅G-11 SQL示例格关闭；索引格因长字符串/向量键跨库映射未冻结而保留，不能拿VARCHAR(191)当用户JSON上限。当前691覆盖117待补，平台整体NOT READY，长尾/选型/屏幕六语言/真实权限三库并发仍未验。新增one-shot workflow-review-v18-matrix.py也禁止重跑；两个JSON作者脚本可重入。
+- v1.7交付记录：PRD§17、schemas条件Schema/静态checker、自查§7；46节点/75映射不变，Merge显式input_count无默认，补条件必填/端口越界、重复连接、严格JSON与内嵌Schema外部引用拒绝。215契约例（旧158+新57）、437链接/349表、26表298字段/43时间配对/70增量、22组SQLite、858格及diff格式PASS。Direct，同一执行者自评+原需求验收PASS；平台整体NOT READY。无commit/推送/迁移/部署。证据最新别名及不可覆盖内容hash快照在data/maintenance/workflow-review-evidence，保留后续版本结果。
+- 保留边界：Schema运行断言/整图聚合预算/正则中断与跨语言兼容、Merge数据代数/端口投影及条件真实执行、凭据类型及权限、三库并发、OS沙箱/三方、长尾服务商/模型、三端专属屏/六语言。局部引用静态编译及Merge就绪表已有文档证据，不重复列未补。PDR及V6/V7具体选型需要明确决议，不把“继续”当确认；不冒称独立人员评审。原“沿116格不断细分”已被用户要求收口取代；以自查§15固定处置及105格保留项为准，不自动扩展。
+- v1.6历史交付记录：PRD§16/模型§11/schemas四文件及清单元数据纠错；46个S1契约/75源映射、状态守卫与组织/公共会话/滚动限流目标结构。158契约例、26表298字段/43时间配对/70增量、22组SQLite、436链接348表通过；仅G-09模型/索引/SQL三技术格闭合为690覆盖118待补。未做引擎/真实权限服务/多实例限流/三库迁移/SSH沙箱GPU/六语言验收，无提交推送部署；后续证据由v1.7覆盖。
+- v1.5历史交付记录：PRD§15/模型§10/自查，687覆盖121待补；39技术格闭合、26语言格转L10N-01，修正资源组ACL/发布修订/token身份/unknown预算/GC竞态。22表268列、39时间配对、70增量、14SQLite例、430链接341表通过。阶段历史统计已被后续复验覆盖，无产品迁移或发布。
+- 恢复注意：不得重跑one-shot workflow-review-update.py及workflow-review-v16-matrix.py；workflow-contracts-write.py是可重入JSON作者脚本。保留原始验证快照和用户数据。
+
+### 接续核对基线
+- 输入是完整历史讨论，最终确认范围为三执行面平台；末尾停在文档评审，不将历史记录中的提交/推送建议当作本轮新增授权。
+- 实际已有PRD v1.4-draft及自查（648覆盖/134待补/26待澄清/31不适用/19无），不是记录末尾提及的v1.3/338待补。未重新验证截图及其历史渲染报告。
+- PRD的“无i18n”事实已过时：src/shared/i18n已有六语言资源及切换器。后续应基于当前架构修正文档R01，不能照旧提议仅中文或重新引入框架。
+- P0核对：pipelines/runs.rs:1099已有JoinSet并发、工作空间pipeline_concurrent_runs限制；cron_jobs.rs:951调用trigger_as(...,"schedule")，不是从零实现定时来源。
+- 核心缺口仍在：runs.rs:1104启动全局清扫running/cancelling；执行实体无P0 lease_owner/lease_epoch；finish(:1031)、append_record(:1309)未带执行租约栅栏。仓库洞察采集租约不是流水线执行租约，不可误算P0已完成。
+- 建议开发首阶段：按v2 §8.1/8.2/8.4及§24 P0-1，先冻结与当前Actions执行/取消/审批/主机升级机制的兼容实现，直接实施核心调度，双实例故障注入、旧写入者拒写、等待审批恢复、主机槽/排空/全停升级逐项验收。P0-2/3后续衔接；未更改运行实例、未执行迁移、未运行本批测试。
+- 本轮目标疑问已解除：用户选择先补缺口并评审。事项清单已移至MEMORY顶部，保留原有事项。
+
+## VERIFIED independent collection ? 2026-11-03 12:08
+- DELIVERED commit fd4de54 (native collector) + 71d757f (custom theme) pushed main; remote HEAD verified. Only local MEMORY remains uncommitted. No new release or production deployment.
+- Local4291 UPDATED final native collector PID20084 executable target/debug/ferry-server-native-collector-final.exe, backup data/backups/pre-ui-fixes-20261103-120745; original instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2/DB resource IDs/vault/encrypted credentials/bindings PASS.
+- REAL Codeup ops-scripts SUCCESS after final restart: source complete/error empty; 7 present branches; 1187 ancestry records/111 complete commits in configured history; job complete generation100/100; no duplicate facts after repeated synchronization. Latest synced1793678882962. This establishes this Codeup connection, not all private platforms.
+- Architecture: API-first, authorized native bare Git completion; pure Git direct; no new business pipeline/Runner dependency; existing started pipeline artifacts resume. Stable cache across token rotation, force/prune all heads, full parent graph, known-complete/in-range statistics plus cached old metadata reuse, existing fenced importer. SQL durable queues/leases/concurrency unchanged; running phase exposed. Fixed heartbeat starvation of SQLite transaction owner; cancelled futures drop DB transaction before finish.
+- PASS backend73 analysis tests/3 ignored (two existing DB integration and one network); public Hello-World network test separately PASS, two native queue/import executions without pipeline/Runner and no duplicate facts; private HTTP credential/fetch/prune/queue/import twice PASS; raw Git fact edge tests all branches/merge/binary/rename/negative dates/nonmonotonic ancestry/legacy encoding PASS.
+- PASS frontend316 tests/1 existing skip; production UI build, both actual Chrome insight creation+contribution suites, actual4291 contribution browser. Theme307 tests/1skip + six palettes light/dark/six locales320px/390px/desktop/fixed header+Tabs/footer/export+reimport browsers PASS (theme unchanged in later collector build).
+- Final server build PASS with one Windows incremental-cache finalization access-denied warning (not a source/build failure). Docker build not run; Docker runtime now includes git/openssh-client and web stage copies required theme generator. Secrets not committed. No active assigned agents or required background tasks.
+- NEXT: remaining table issues MON-01 notification channels/per-channel locales; REPO-01 branch/recent event list; RUN-01/02 scheduling and capacity, INS-06 broader platform and behavior audit. Follow confirmed scope and maintain table; do not reimplement completed collector/theme. MEMORY stays private.
+
+### 已验收阶段（压缩记录）
+
+- 本批 UI-01～06、FORM-02、NAV-01～02、INS-01～04、QA-01 已验收：Raft 官方 tokens/本地字体/六主题明暗；共用列表、列显隐及本地化导出、CRUD 等宽卡片与 sticky；洞察分组批量选择/七维统一筛选/作者映射/真实任务状态/cron；Webhook 回填保留替换清除。前端307通过/1既有跳过，Rust analysis65通过/2既有忽略，CSV/XLSX真实113项通过；六语言桌面/手机、CRUD320/390/1280、39导航页面及主题/刷新/通知浏览器通过。采集脱离流水线及全平台验证仍属 INS-05～06，未宣称完成。
+- 本地4291于10:37更新为当前alpha.36源码快照，PID74688，target/debug/ferry-server-raft-ui.exe，嵌入index-DCcLer2K.js；备份data/backups/pre-ui-fixes-20261103-103738。SQLite/资源ID/实例身份/凭据密文及绑定全部校验通过。DEL-01完成：提交fb31127c87b678757866d4ae182d3e779dd8ada1已SSH推送main，ls-remote核对一致；仅MEMORY本地记录未提交。线上未部署、未发新版本，远端CI结果待跟进。
+- alpha.35 / alpha.36 已发布并验证；36 为独立结构治理提交 `9e3d331`，完整 CI 26/26，发布资产/签名/多架构镜像及本地升级已验证。历史证据见下方 FINAL 检查点；不代表后续 UI 修复已发布。
+- 既有能力：Runner 默认自动升级策略、六语言首批支持、字典/配置类型迁移已在前阶段交付；当前用户反馈的界面问题以上表重新跟踪。
+
+## ACTIVE Raft theme and current UI integration — 2026-11-03
+- 用户最新确认“主题名字不要变”：保留原“新粗野主义”及六语言原显示名，严格采用Raft设计仅涉及样式。已撤回本轮试改，未提交、未部署任何改名；本地4291仍为fb31127原名版本。禁止再自行改名。
+- 新粗野主题唯一规范改为 botiverse/raft-design，固定 1656b5a1c25add2ceda52c4e4d50aab99db27835；其余主题仍按 7link 参考。官方 tokens 与本地逐字节一致，SHA256 3fe5fce4d7a26a9b9a913e350ee2f1fc68d9adf554a92914e717dd7cb7fd5c0a。reference_switchers 负责主题及真实 Chrome 状态验收；root 负责统一 dist、本地更新及集成。
+- 本轮 npm typecheck PASS；全量单元 307 PASS / 1 existing skip（41 文件，data/maintenance/ui-current-unit-clean.log）。旧菜单及返回入口断言按已确认需求更新，并补连接事件来源/查询保留断言。Raft tokens --check 已纳入 npm build，无构建时联网。
+- Rust analysis65通过/2既有忽略，data/maintenance/ui-analysis-regression.log；最终dist/server构建及六主题浏览器通过，日志raft-final-server-build.log/raft-final-theme-browser.log。10:37已更新本地4291并验证身份与凭据，见上方验收记录。
+- finish_repository_groups 已完成受控导出列/本地化表头修复，真实CSV/XLSX113通过；最终CRUD/洞察六语言尺寸矩阵、真实transfers-ui均通过。root最终monitor浏览器通过（保留/替换/清除、分组、全宽卡片）；修正测试旧switch角色为实际checkbox，不改生产行为。无活动子任务，剩余清单继续保留。
+
+## Previous insight dashboard checkpoint — 2026-11-03
+- LIVE4291 NOWUPDATED 2026-11-03 09:32:44 to target/debug/ferry-server-insight-dashboard.exe PID61972 backupdata/backups/pre-ui-fixes-20261103-093244; identity/SQLite/credentials PASS. This snapshotincludesreferenceTHEME/LANGUAGE, newdashboard/status, noeditdescription/synccoveragesection, Croncustomfix/pipelineheaderdelete asatbuild99405. DoesNOTYETinclude latestdropdownrefresh/multiselect/sharedsticky/navevents. Needsecondguardedrestartnewfilename afterfinalchecks. Userwasangrybecausepreviousthemechangesonlysource notlive; toldcandidlythenupdated.
+- NEWscopeafterinitialtests: ROOTimplemented repositorysearchablecheckboxmulti immediateadd/remove/noAddbuttonforplatform; groupfilter+selectcurrentresults (supportsnamespace/search). SelectedpipelinebindingsdetailscollapsedexceptGitrequired; genericGitmanualaddinlineURL via gitAction slot. ROOTaliasaddmovedheaderright; pipelineoptionretryembeddedleft; ROOTResourceForm reusedreference FormActions stickybottomdetailEdit/allSave/Create/pipelineworkspaceSaveRun; objectactionsowncardheader; AutoTable footerbordersticky. ROOTnav仓库事件 shownabove洞察, existingworkspaceeventAPI scopesownedconnections+workspace(readpermission); unitorderassertadded.
+- Agentsactive: reference_switchers ownsSelectRefresh+ConnectionRepositoryFields slots/RepositorySource/PipelineRepository plusnewtest-select-refresh-ui.mjs (nativeChromePASS; fixingRadixpaddingoverlap beforehandoff). finish_repository_groups ownsActionsEditor/TypedValueEditor actionplacement+tests, platformmulti CodeInsight.test.tsx/test-code-insights-ui.mjs +contributionbrowser adaptation(finaldistwaiting). insight_queue_status Cronfix4units+realbackendrunnerChromePASS nowownsnewtest-crud-layout-ui.mjs(actualsticky/tablegeometry, sourceharnessdiagnostic). Rootneedsadd2newCIcommands.
+- Existingverification beforelastrequests: fullfrontend304PASS/1existingSkip; statusnewedge9unitsPASS; Rustanalysis65PASS/2existingignored; actualHTTPindependentinsights+collectorPASS; maintenanceChromeactualdictionaryselection-tabroundtrips+40secondrunnerheartbeatPASS. SharedCRUD24relatedunitsPASSafterfooterchanges. Finalalltests/build/browser/secondlocalupdate/explicitcommitpush stillpending. No newrelease/remotedeploy.
+- Latestuser explicitly EDITmustexcludeentire04同步覆盖section/runtime rawtimestamps/progress/errors; removed entiresectionfromcodeInsightForm, plusdescriptionfieldandlistcolumn, preservebackenddescriptiondata. Addedunit+browserchecks. Customcronexpressionmustselectable (insight_queue_statusownsfrontendcron); ALLexistingdropdownrefreshbuttons mustinsetlefticon(nooutsidewordbuttons), reference_switchersowns sharedselects+affectedconsumers. Finalbuild/localrestart MUSTWAITthesechanges+browser. Priorfinalproductiondashboard/group/statusbrowserPASS butnewrequestsnotyetintegrated. DoNOTclaimlocalupdateduntilguardedrestartdone.
+- User rejects stacked7independentfilters/tables and blindwaiting. Fetched GitInsightbaseline25db35e: overview12barcards sixperiodbranch/authors; sharedConditionFilter. Implemented AnalysisOverview sixcompactpairedcharts/KPIs, onefilterform+advanceddisclosure,7dimensions retained, sharedResourceTable details, fixedUTCperioddrilldown. Statuscard now effectiveblocked/queued/running/retry/complete, lastsuccess vsnexttrigger vschecktime; nofalsegenerationprogress/ETA. Backend exposes effective_state/pipeline_required/timestamps/runid; retainsretry policy. Missingfiles+nopipeline blocked, waitingalonecannotfinish.
+- Dictionaryselection/tabpreservesoptions tested and local4291alreadyupdated to ferry-server-dictionary-type.exe PID33784 backup085545. Finalbatchembed/restart stillpending, no remotedeployment/newrelease.
+- Groups DONE units24PASS+productionChromePASS automaticpages/parent-subgroup/batchdedup/errorretry/noLoadMore. Theme/language DONE directreferenceadaptation6locale/mobile/keyboard/themeproductionChromePASS. Status8unitsPASS; frontendfull41files304PASS/1existingSkip; tscPASSaftertestsignaturefix. Rustanalysis65PASS/2existingIgnored +newDBstatusPASS.
+- Remaining: contributionChrome+visualreview, finalproductionbuild andisolatedbackendregressions, guardedlocal4291update, explicitcommitpush/remoteHEADverify. MEMORYlocalonly. Rootowns integration; finish_repository_groups runs contributionbrowser.
+
+## Prior checkpoint dictionary type + grouped insight picker + reference switchers - 2026-11-03
+- User exact dictionary environment id109124836747378693 is builtin selection. Frontend disabled all builtin types although backend permits selection/tab. Fixed to disable only builtin SETTINGS; builtin dictionary type offers selection/tab, compatible switch preserves all value_json/items/schema. Real backend E2E extended both directions save/reopen, awaiting fresh binary/test (build66224). No live user data edited.
+- User authorized insight group selection and removing Load more repositories. Design: provider namespace/path group selector and batch-add visible group to existing explicit memberships; automatic pagination in insights (all accessible repos, abort on connection change, errors/retry; no omitted laterpages). Keep manual paging for other shared consumers unless needed. Not implemented yet.
+- User requests reference components directly: source remains D:/Projects/github/7link-mall-prd/apps/7link-mall-web. Audited actual language-switcher and theme-switcher: current Ferry wrappers differ materially. Need migrate exact reference layout/classes (language native names/tags/activeCheck; theme system/light/dark segmented header+previews) adapting existing i18next/theme store/Radix keyboard behavior, six locales and no ERP. Existing fonts/theme CSS and custom panel already migrated; don't reinvent.
+- Current prior main3f7cf9d pushed, localeditable-settings PID85968/index-BPqxq9H9.js. Next dictionary fresh maintenanceE2E/localguardedupdate then continue group+switcher changes and realbrowser regressions/commitpush. No questions user repeatedly authorizes autonomous completion.
+
 
 - FM-15｜已完成｜代码/文档已提交推送，累计22远程提交无冲突合并；功能交付ee8f650已确认远程同SHA，4292最终合并版验收脚本PASS。用户指出仍有未提交文件后纠正：MEMORY进度记录经检查一并纳入提交，不再作为排除项；本条随文档修正提交推送并复核干净工作区。ignored原始证据/凭据/构建物不纳入版本，未正式发布。
 - FM-14｜已完成｜文档不得依赖本机外部项目或其路径；必要代码/设计先迁入仓库再用相对路径记录。融合计划已改为仓库内设计/实现入口，清理外部源码路径/版本依赖及当前事项中的本机项目引用；公有发布URL保留。进度记录可提交，新增内容通过外部本机路径与凭据扫描；不提交原始本机证据、凭据或外部工作区信息。
@@ -1403,3 +2030,229 @@ User continued after nextalpha proposal, explicitlyauthorizes packaging/publicat
 - Reviewed remaining PRD, data model, design review, responsive HTML prototypes/screenshots/report, contribution research/source material, research script and this tracked task record. No credential patterns found in changed text.
 - Verification: Node syntax checks passed for both prototype scripts; Python AST and disposable Git/SQLite research cases passed; all 48 screenshot sizes and dimensions match the delivery report.
 - Stage only the reviewed documentation, research script and task record. Generated application caches, runtime data, backups and credentials remain ignored. Release tags remain unchanged.
+
+## Runner scheduling/status evaluation - 2026-11-03
+- User requests assessment of shared automatic/label scheduling versus dedicated host binding, plus meaningful occupancy indicators and bounded parallelism; CPU/memory alone are insufficient.
+- Verified source: pipelines/actions.rs currently treats runs-on as descriptive and requires executor host bindings; actions_run/scheduler.rs starts ready DAG jobs concurrently; hosts/runner/reservations.rs uses shared task leases for upgrade exclusion, not a concurrency-slot limit. Runner metrics already report CPU/memory/disk.
+- Proposed design (not implemented/verified): preserve existing explicit bindings; add authorized workspace runner-pool selection with evaluated labels/capabilities; capacity slots per Runner (new registrations default 1, existing bindings preserved during migration); online/admission/capacity/resource metrics separate. Durable atomic job leases across servers, Runner-side slot enforcement, cleanup-before-release, drain-before-upgrade. No automatic retry of ambiguous executed jobs.
+- Pending: inspect existing group selection and actual executor isolation; finish detailed implementation/migration and regression plan before changing scheduling. Do not claim this feature exists. Include in user's consolidated requirement/status checklist.
+
+## alpha.37 release continuation — 2026-11-03 13:10
+- User requested all delivery commits/push/release, then removal of standalone appearance mode button. Implemented, production build and full theme Chromium PASS; menu modes preserved.
+- Commit 2e386f1878d0730dcf613112ebaeb97339d9ebba pushed main via SSH. Versions alpha.37; LF attributes fix Windows generated CSS checks; provider fixture distinguishes unavailable Git service without weakening API auth. Real collector HTTP five-platform contracts and independent-insight HTTP suites PASS.
+- Main Build run41582008119 and image41582008138 pending. No alpha.37 tag/release yet. Follow CI, then tag/publish and verify release assets/image.
+- Unrelated PRD review changes are concurrently owned elsewhere; do not overwrite or include them in UI/release commit. MEMORY private/uncommitted. Local4291 remains previous native collector embedded UI, standalone button removal not yet installed there.
+
+## alpha.37 delivery active ? 2026-11-03 13:20
+- Current release commit4464bade7d17dae25ef9df8801fe6efcf22fe492 pushed main and annotated tag v0.1.0-alpha.37 via SSH. Tag release run41583176386; tag image41583176377; main image41583154023 pending behind previous image41582008138. Release not yet uploaded.
+- Fixed real E2E race in maintenance test: invalid alert renders before passive validity effect disables submit; reproduced exact assertion locally; diagnostic establishes eventual disabled + unchanged database; wait for disabled then original assertion preserved. Full real maintenance UI PASS incl invalid heartbeat guard/save/reopen/custom metadata/preferences/dictionaries/actual40s timeout. Commit4464bad.
+- Local4291 UPDATED alpha.37 binary target/debug/ferry-server-alpha37.exe PID77708; current production UI incl removed standalone mode button; backup data/backups/pre-ui-fixes-20261103-131900. DB/IDs/instance/vault/encrypted credential/binding checks PASS. Built from2e386f1;4464bad is test-only so product bytes same source.
+- NEXT monitor release all gates, handle failures, verify release21assets/signatures/checksums/Windowsdownloads/multiarch image SHA4464bad. Unrelated docs+privateMEMORY remain unstaged.
+
+## alpha.38 replaces failed unpublished alpha.37 ? 2026-11-03 13:39
+- IMPORTANT latest intended release alpha.38, not37. Tag37 public but no release because gates failed; do NOT rewrite tag. User informed37 gate failure kept and38 will publish.
+- Actual upgrade failure reproduced with SHA256-verified official alpha.1 Windows installer extracted using7Zip, original script fails line142 because allowed migration grants omitted code-insights. Fixed exact owner/admin/developer CRUD+sync/viewer-read/operator-none expectations; original permissions retained. Corrected full SQLite migration/reopen PASS; POSIX successful execution remains CI-only. Commit6b2b414 versions38.
+- Tag37 E2E later failed marketplace helper reading native select options before async fetch. Real local normal suite PASS; inject500ms fixture delay yields originalFAIL/fixedPASS (complete create/sync/import/delete retained), fixed helper waits actual target option. Commit804e7ac5b181b3a820fdb24ce1bd96a0d2eed85f pushed main; latest intended release SHA804e7ac.
+- Latest main Build41584845282 pending behind2e386f1 Build41582008119; latest main image41584845216 pending behind4464bad image41583154023. Tag37 release41583176386 has expected backends+marketplace failures, other gates mostly PASS, Windows/IntelMac still running. Tag37 image41583176377 may time out waiting source; no need repair abandoned37.
+- NEXT wait latest main image804e7ac verified (avoid tag image15min wait timing out), assess remaining gates, then create+SSH push v0.1.0-alpha.38. All gates still required. Verify assets21/signatures/checksums/Windowsdownloads and imageSHA804e7ac. No38tag yet.
+- Local38 build PASS target/debug/ferry-server-alpha38.exe (built6b2b414;804e7ac test-only). Local4291 still alpha37PID77708 pending guarded upgrade38 after verification. PrivateMEMORY/unrelatedPRD review remain uncommitted.
+
+## FINAL intended alpha.38 tag ? 2026-11-03 13:42
+- CURRENT RELEASE SHA c27a4f9b3178b7f014574ae6b1348a471ade0a87; annotated v0.1.0-alpha.38 SSH pushed. Release run41585624277; tag image41585624254; main image41585584053; main build41585584122.
+- Actual37 tag-image job timed out while source build still healthy; fixed existing version wait seq1..30 to1..120 (60min bound) retaining sameSHA+architectures+digest refusal checks. Workflow YAML parse PASS. Commitc27a4f9. No application logic change after local38 build6b2b414.
+- NEXT monitor release38 all gates and images; verify21assets/checksums/signatures/Windows downloads/multiarch at SHA c27a4f9; then guarded local38 upgrade. No38release uploaded yet. Do not re-tag37/38.
+
+## Local alpha.38 installed / UI accepted ? 2026-11-03 13:55
+- Guarded local update PASS, executable target/debug/ferry-server-alpha38.exe PID85696; current production embedded UI. Backup data/backups/pre-ui-fixes-20261103-135404. Instance46a21cc9-ad8e-4e24-bad3-9929a6fbe7a2 preserved; DB integrity/resourceIDs/vault/credentials/bindings PASS.
+- Actual4291 Chromium theme suite PASS sixpalettes light/dark/sidebar/table/buttons/sixlocales/mobile/custom fixedheader+Tabs+footer/export+reimport/no console errors; asserts external standalone mode button absent. Log data/maintenance/alpha38-live-theme-browser.log.
+- Release38 run41585624277 currently10success/10running/5queued; mainimage41585584053 ARM64building/amd64queued; no38failures. Need complete verification before final claim published.
+
+## alpha.39 active checkpoint - 2026-11-03
+- HEAD4ebaa2d pushed. Notifications readable webhook + six-language subscription implemented; frontend317pass/1skip; realHTTP150checks including backgroundJapanese delivery PASS; monitorChromium PASS. alpha37/38 release gates failed, do not rewrite tags. alpha39 not tagged yet.
+- Local4291 alpha39 binary currently embeds OLD UI (asset mismatch): must sequentially npm build then cargo build, guarded restart to alpha39-ui executable, verify dist asset+DB/credentials before claim updated.
+- New requested run detail independent scroll + linked pipeline + immutable config snapshot tab IN PROGRESS. Expose only saved authored document, never resolved checkout credentials or sealed variable values. Test Chromium scroll geometry and snapshot navigation.
+- Next complete tests/build/localrestart, commit explicit product/test files excluding privateMEMORY and concurrent docs/prd, push main/tag39 and monitor all release gates/assets/image.
+
+## alpha.39 run detail accepted / local updated - 2026-11-03 14:42
+- Run detail independent sidebar/steps/log scroll incl overscroll; linked source pipeline; shareable ?tab=snapshot saved authored workflow+bindings and existing variable provenance (no credential/sealed values). Reused RadixTabs and useQueryValue. Legacy no-snapshot explicit.
+- PASS frontend318/1skip; Rust real DB reader test across sixlocales with exact saved document and internal-checkout exclusion; npm productionbuild; Rustbuild; fmt/diffcheck; Chromium1440/768/390 independent scroll/link/snapshot/reload/legacy/noerrors; sixlocale browser regression. New test wired CI e2e-build. Logs data/maintenance/run-detail-*.log.
+- Local4291 updated target/debug/ferry-server-alpha39-ui.exe PID26276, dist asset verified, DB/credential/identity PASS, backup data/backups/pre-ui-fixes-20261103-144153. Same browser regression rerun against LOCAL embedded UI PASS (HTTP fixtures, not actual user auth). Production NOT deployed.
+- NEXT explicit commit9files excluding privateMEMORY/concurrentPRD, push main and tag39, monitor gates, verify21assets/Windowsdownloads/signatures/multiarchimage.
+
+## alpha.39 tagged - 2026-11-03 14:44
+- Actual commit8files0a8ec599494a52a8ece717ce510ad20573a543b6 main+annotated v0.1.0-alpha.39 pushed SSH. Tag release41591706812, tagimage41591706771, mainimage41591667206, mainbuild41591667296. Release not uploaded yet.
+- Prior main build41589604930 (4ebaa2d) still running; no credential-enabled API tools. Public API rate limit60/hr; batch jobs and avoid rapid polling. No gh login.
+- Local4291 and targeted requested run saved snapshot confirmed present (read-onlyDB); all changes already installed. Next monitor tag39 checks, fix actual failures if any, verify21releaseassets/signatures/checksums/Windowsdownloads/imageSHA. Do not rewrite existing tags.
+
+## Release gate exposed genuine mobile list bug - 2026-11-03 15:00
+- Prior main4ebaa2d CI e2e-build125767203359 FAIL test-host-workspace-ui line110: sticky actions header intercepts delete. EXACT local reproduction against39 UI FAIL. Geometry390x844: mobile group sidebar185px + toolbar312px leaves tableviewport46px(header40px), making row actions physically unreachable. No forceclick/testweakening.
+- Minimal fix GroupSidebar bounds mobile height128px and scrolls internally, desktop unchanged; add viewport>=100 regression before original real delete click. Preparing alpha40 versions (39 tag immutable, likely same failure). Run local productionbuild then complete host browser + table regressions before commit/tag40.
+
+## Additional user requirement - 2026-11-03 15:07
+- Shared lists need shadows between fixed/scrolling regions. Root cause existing --sticky-shadow-color referenced but NEVER defined, all computed shadows none. Added light/dark token in src/style.css; slightly wider directional shadows in table-sticky.ts; pagination top shadow in AutoTable. Added actual computed browser assertions all6themes x2modes for header/left/right/footer, middle cells stay flat. Needs build/test/localinstall.
+- Mobile grouping fix geometry now table97px usable vs46 before; authored regression changed arbitrary100px to exact header+firstrow height (40+49), original normal delete click stays mandatory. Bounds grouped nav128px, internally scrollable.
+
+## Deployment user steering / quickstart pushed - 2026-11-03 15:28
+- Commit d60ccd2 pushed main: --proxy-domain NAME repeats, validates, allows external domains + secure cookie, no Caddy, keeps existing version/secrets; new install + compose default bind0.0.0.0. Full GitBash stub quickstart tests PASS. Provided remote one-command update; no manual env edits needed.
+- User wants NO redundant --dir or --bind args: defaults ./ferry and0.0.0.0. Added proxy-domain implicit0 when noexplicitbind, including prior127 installs; explicitbind127.0.0.1 wins. PENDING full quickstart rerun+push this3file patch.
+- NEW USER TASK pending implementation: ALL persistent service data within ./ferry/data (Ferry, Postgres/MySQL, Redis,NATS,Caddy certs), tar lossless relocation. Existing named volumes need explicit backed-up, stopped, verified migration (never empty mounts). Need design and real DockerCI tests, no Docker installed locally. Do not claim implemented.
+- UI alpha40 source complete: shadows token missing fixed, header/columns/footer shadows; checkbox first (sequence follows), grouped mobile sidebar bounded128 internallyscrolling. PASS tableUnit7, realUI table tests (6themes x2modes shadow computed + desktop/mobile geometry), hostworkspace full UI including original normal delete (beforeFAIL repro), runDetailUI. Build40binary target/debug/ferry-server-alpha40.exe READY (sequential UI then Rust). NEED guarded local40 restart script data/maintenance/start-alpha40-local.ps1; servercurrently39-ui.
+- Screenshot shadow-review: light good, dark screenshot mid-transition; changed animations:disabled screenshot capture (testscript only). No unscope theme changes.
+- alpha39 tag41591706812 FAILED backends test-upgrade.py legacy run GET adds definition_snapshot:null (old/new equality fields[]). Exact additive null assertion added in defaults (never ignore nonnull). Need rerun oldofficialalpha1 extracted ferry-server.exe vsnew40; originalsnapshot Rustunit PASS. Tag39 e2ebuild also has knownmobile bug before40fix. Do notrewrite39.
+- Version7files alpha40 UNCOMMITTED plusUI/scripts; commits onlyexplicit scope. Concurrent docs/prd and privateMEMORY MUST stay unstaged. After script urgent push, finishlocal/tests, commit40,push/tag40 then verify release assets/images.
+
+## Current exact delivery checkpoint - 2026-11-03 15:30
+- mainHEAD1429a7f pushed: proxy setup no --bind needed, defaults0 including old127 unless explicitbindoverride. Full quickstart tests PASS logalpha40-quickstart-default-bind.log. Provided simplest curl|sh --proxy-domain actualdomain (default ./ferry). Prior d60ccd2 includesproxyfirstimplementation.
+- Local4291 UPDATED alpha40 target/debug/ferry-server-alpha40.exe PID85508; distresourcehash + SQLiteintegrity/IDs/instance/vault/credentialchecks PASS; backupdata/backups/pre-ui-fixes-20261103-152427; no activejobs at stop. UIchanges source still UNCOMMITTED with7versionfiles.
+- Exact officialalpha1 binary ->new40 SQLite upgrade PASS logalpha40-legacy-upgrade.log after adding exact legacy definition_snapshot:null default; no permission/data checks removed.
+- New storage task DESIGN (not implemented): rootCompose newbindmounts ./data/{ferry,postgres,mysql,nats,redis,caddy-data,caddy-config}; no unused namedvolume declarations. Quickstart generated compose.storage.yaml compatibility override based on FERRY_STORAGE_LAYOUT directory(new) / volume(existing/no marker), included LAST by compose_for; keeps prior volume deployments unchanged until explicit --migrate-storage. Needed because quickstart can configure old38Compose files immediately. Must regenerate and recompute compose_for afterupgradefiles change.
+- Explicit migration proposal: requireexisting deployment andexclusive --migrate-storage +optional--dir; verifyownerproject/dirs, pullsmallhelper BEFOREstop; stopservices; backup .env/Compose/config + full namedvolume archives; copytoemptydata dirs preservinguid/mode; verifyallfilechecksums before changing envlayout to directory; retainoriginalvolumes+archives, never dockerdown-v. Resumeold onpre-switchfailure; no automatic rollback afternewservices mayacceptwrites. Newservicesmusthealthy before reportPASS. Newhosttarrestore docs muststopstack first and preserve.env/masterkey/allservicefiles.
+- No Docker installed locally; migration requires real disposableDockerCI acceptance (bothDB, Redispersistedkey,NATSstream,Ferryvault/IDs,copyfail rollback) beforeclaiminglossless. Do not replace namedmounts for existing users without the compatibility override.
+- StillTODO commit40UI/tests/versionfiles explicit excludingprivateMEMORYand concurrentdocs/prd; tag40 onlyafter final scope tests. Tags37/38/39 failedhistoricalgates, neverrewrite;39backendsfailure exactlegacyGETnull fixed. No40tagyet. Previous39release41591706812 failure;mainimage0a8ec...statusunknown.
+
+
+## Directory storage migration implemented; real Docker acceptance pending - 2026-11-03
+- main e65022a + e36f8d3 PUSHED. Root Compose now ./data/{ferry,nats,redis,postgres,mysql}; generated Caddy bind data/caddy-{data,config}. New installs FERRY_STORAGE_LAYOUT=directory; no marker keeps legacy named volumes through generated compose.storage.yaml LAST override, including upgrades to new base files. prepare_storage uses network-isolated alpine helper to initialize NEW dirs with nonroot Ferry10001/NATS1000, never recursively chowns existing DBs.
+- --migrate-storage standalone (optional --dir only): validates existing deployment, ownership and volume consumers, target absence, disk >=2x logicaldata+100MiB, pre-pulls before stop; stop with optional Redis, assert no remaining writers, archive each source, preserve tar ownership/mode/links, SHA256 all files + metadata comparison, then directory marker and healthy restart. Before-cutover failure restores config, moves partial dirs into backup and resumes prior running services. After-cutover failure NEVER auto-restores stale volumes. Original volumes never deleted. Lock excludes simultaneous normal/upgrade runs. Protect lost env over existing directory data. Repeated completed migration no-op.
+- Local GitBash quickstart stub suite PASS data/maintenance/alpha40-storage-quickstart.log (fresh binds/nonroot helper/legacy volumes retained/access/upgrade/failure guards). YAML parse, Python syntax, git diffcheck PASS. No local Docker or WSL installed; DO NOT claim real migration accepted yet.
+- Real test scripts/test-compose-storage.py fresh directory real release38 image with both DBs; API seeded credential+encrypted variable reveal; exact ciphertext/IDs/settings; Redis persistedkey/NATSJetStream/Caddy files; reconstruct legacy volumes from actual bytes; injected mid-copy restoresold; injected postcutover upfailure retainsdirectory, normalrerunrecovers; complete root tar relocation preserves UID/mode and originalfacts/secret decryption. Not yet executed. Standalone .github/workflows/storage.yml push-trigger runs immediately independently of long main build queue; reusable workflow gates tagged releases via build.yml storage job. e36f8d3 pushed to launch this.
+- User asks Caddy inCompose: answered YES generated compose.https.yaml with --domain; --proxy-domain Cloudflare does not need Caddy; includes both Caddy data directories. No server migration command yet, waiting actual Docker CI.
+- UI40/version7files remain UNCOMMITTED and local4291 already40 as previous checkpoint. All frontend tests verified320PASS/1skip logalpha40-all-frontend. Do not stage privateMEMORY or concurrent docs/prd/schemas. No40tag. Still need UIcommit/release40 after scope tests and all release verification. NEXT query standalone Deployment storage acceptance run/jobs, fix real failures, only then provide migration command and claim ready.
+
+
+## Storage actual-CI recovery checkpoint - 2026-11-03 15:58
+- HEAD502481b PUSHED; UI40 all15files committed9063ea1 and pushed (320PASS/1skip + realbrowser checks + officialalpha1 upgrade previouslyverified). Only privateMEMORY/concurrentdocs leftdirty. No40tag.
+- Independent storage CI runs41598807648/e36f8d3,41599160457/07f3ac0,41599414228/a65ed58 FAILED during FRESH test installation: Ferryunhealthy. No real migration has run yet. GitHub public joblogs403; annotations initiallytruncated. Added boundedtracebackannotations + service diagnostics. Root identified source cluster namespace validation allows ONLYalphanumeric+underscore; test projectstorage-hex invalid. Latest502481b usesstorage_hex, pushes newtest41599724823 currentlyQUEUED. Need waitthisrun, do notclaimreadymigration.
+- Future CI helper commands existing temp ci-discover.mjs main storage.yml (publicweb, noAPIquota), ci-api.mjs jobs41599724823; annotationsjobID onfailure. Testdiagnostics nowreturnlast700quickoutput +last1300service logs, underannotationlimit.
+- Storage migration source latest also checks no writer after fullstop, optionalRedisstop/resumeprofile, fullfileSHA manifests + metadata includes linktarget/hardlinkcount (avoids diff on danglingMySQLsocket symlinks); uniquePID backups. MigrationcodeNOTYETacceptedonDocker; local fullstubPASS and realCIstubPASSbothDB. No localDocker/WSL.
+- All storage commits publiclymain but user explicitlytold doNOTmigrateuntil actualtests PASS. Answered latest Caddyquestion: generatedComposeHTTPSconditional--domain; CloudflaredproxyrequiresnoCaddy, data/caddy-*included. NEXT wait41599724823 andfixrealDockerfailures, provide commandonlywhensuccess. Thenrelease40 gate/verifyassets/images aspreviouslyauthorized, mainheavybuildcurrentlybackloggedbehindold0a8ec39 build41591667296.
+
+- Latest HEADcc26b19 pushed: migration config backup explicitly enumerates Compose files because main set -f disables globs; also backs up init script. Latest actual storage acceptance41600299839 jobs125797190202(mysql)/125797190511(pg) BOTHQUEUED; priorfixednamespace502run41599724823 alsoQUEUED. GitHubpublicstatus operational, no localDocker. No40tag; storage acceptance stillNOTREADY, no server migration authorized asready. Mainold0a8ec build nowfinished expectedbackends+mobile failures alreadyfixed40. Need waitRunneravailability and inspect actualstorage tests, then release40 gates. Caddy asked answered yes.
+
+
+## Group tree heading request accepted / migration still pending - 2026-11-03 16:20
+- User requested slight background on ALL group-tree titles. Shared GroupSidebar covers host + pipeline trees (rg verified only two consumers). Added rounded-md bg-muted/70 text-foreground, no dimension/selection changes. Commit52555f7 pushed. Frontend build PASS; temporary Chromium acceptance reused full host-workspace fixture with 6themes x light/dark header background checks + existing mobile row-action/group-order regressions PASS, log group-title-theme-browser.log. Browser cached chromium1234 requires PLAYWRIGHT_CHROME_PATH (default new1248 cache absent, no download needed).
+- UI build then Rust build PASS (23.64s). Guarded local4291 update to target/debug/ferry-server-alpha40-tree.exe PID3884; no active pipeline runs; original instance/IDs/vault/encryptedcredentials PASS; backup data/backups/pre-ui-fixes-20261103-161839; embeddedUI hash matches dist. No40tag, no release yet.
+- Migration realtests now fresh nonroot containers/API credential+variable+Nats/Redis seeds and legacy restart reached (fixed fixture namespace + NATS test-only egress network because internal-only Docker cannotpublishports). Latest d4e5a84 realrun41602057769 FAILED assert expectedinjectedcopyfail at line207; failure occurs BEFORE expected injected NATS-copy failure, need actualstdout. HEAD6df44eb pushed adds assertionstdout diagnostic, new independentstorage run pending. Suspect first Ferry archive metadata check; not yet established. Do NOT claim migration ready. NEXT find6df44eb storage run using ci-discover.mjs main storage.yml; inspect jobs/annotations; fixactualsource error. Previous cc26b19 glob-disabled backup fix is included. Keep privateMEMORY and concurrentdocs/prd unstaged.
+
+- 2026-11-03: User requested repository list/group switch on left. Moved shared ResourceTable view switch to first toolbar position before filters; refresh/export/create stay right. Typecheck PASS; ResourceTable tests 3/3 PASS. Frontend build running; local embedded server and public deployment not updated yet.
+
+## Insight contribution metric colors - 2026-11-03
+- Requested: additions green, deletions red, effective changes blue. Existing pending analysis table/tooltip implementation uses contribution CSS tokens (light/dark); completed missing overview KPI and period ranking numeric colors in AnalysisOverview.tsx using the same metricClass helper. Commit identity and author merged columns already present in pending analysis-config.tsx.
+- PASS npm run build; targeted CodeInsight + CodeInsightStatus tests 32/32; real Chromium production-preview check across six themes x light/dark exact metric colors plus merged commit columns/no browser errors. Temporary acceptance harness data/maintenance/check-insight-metrics.mjs (not deliverable).
+- This check used fixture API responses; local embedded service has NOT been rebuilt/restarted by this task. Broad pending working tree remains intact. Next integrate with current pending UI batch and guarded local update; do not claim local4291 updated from dist build alone.
+
+## Active local update + OAuth audit - 2026-11-03
+- User continued local update, then requested GitHub error investigation and GitLab/Gitea/Gitee audit. Four OAuth platforms require Client ID + Client Secret; Gitea also requires Base URL. Codeup remains PAT.
+- Implemented accurate Client ID/Client Secret labels across six locales; shared SecretField exposes unset input immediately while preserving existing-secret explicit replacement/omitted values. Added unset-secret regression. Backend saves identify missing platform/field (six locales), keep atomic writes.
+- Real pre-update findings: stale tests assumed branch rankings and standalone SHA; updated for requested repository rankings/merged columns without weakening safe-URL checks. Browser author mapping adapted to per-row insertion; read-only fixture now explicitly sets aliases after a different create changed its test entity. Table geometry now finds actual sequence header (credentials has no bulk checkbox; previous hardcoded second cell was name). No product sticky bug found in that fixture.
+- PASS all frontend 334/1skip; relevant34 tests; backend analysis75/3ignored; production build; complete insight browser; table browser six themes/two modes and desktop/tablet/mobile geometry.
+- Pending: cargo build currently running after backend OAuth validation changes; run updated test-repository-auth-ui.mjs (four platform fields and nine atomic missing-field checks + existing OAuth popup flow), test-repository-auth.py all platforms, then copy binary target/debug/ferry-server-alpha40-insights.exe and execute existing guarded start-alpha40-insights-local.ps1; old listener PID3884 alpha40-tree.
+- Prepared temporary metric browser harness supports FERRY_UI_ORIGIN=http://127.0.0.1:4291 for actual embedded UI verification with fixture API responses. No authenticated production OAuth accounts configured or used. Do not claim external live acceptance.
+
+## 2026-11-06 alpha.2 最终本地验收
+- 4291已备份更新PID900，ferry-server-alpha2.exe/index-CjoTQqjn.js；原业务表逐字段、363审计、密钥/实例、SQLite完整性保全PASS，备份pre-alpha2-local-20261106-123841，alpha2-local-update.json。Redis沿用，4292仍停。
+- 448前端PASS/1既有skip，npm生产构建与server构建PASS。真实Chrome/独立Redis300键/SMTP multipart HTML、双角色URL/长列表滚动恢复及缺入口添加场景PASS：Temp/alpha2-ux-8b59m2/acceptance.json，alpha2-ux-final.log。Direct自审/本轮限定验收PASS，用户体验待反馈；本批已提交180c45f；推送被GitHub认证阻断，公开发布未执行。
+
+## 2026-11-06 工作流交互复验中
+- 用户纠正：n8n式输入/参数/输出三栏保留；修复的是节点编辑→运行确认→自动返回编辑的链路。画布/节点面板运行均展示独立只读执行结果；运行节点与运行整条流程区分，真实单节点执行尚未实现，不冒用按钮。
+- 已实现保存并运行复用表单校验/上传/乐观锁，等待保存返回版本再执行；错误透传确认弹窗。保存/保存并运行/发布同栏。名称本地语言+年月日时分秒+6位随机hex，复制/模板不覆盖；Actions空白草稿仅UI允许，正式执行仍需至少一任务，添加首任务按钮。默认位置去Runner字样。main 1改明确输出端口，流程失败与节点数据分别说明。
+- 449全量前端PASS/1旧skip；新增失败流程保留成功节点数据专项通过，最后受影响61项PASS。真实浏览器保存成功/409不发运行/节点编辑入口不回弹/中英文名称/空图首任务PASS：Temp/alpha2-ux-cDot8E。最终构建及4291更新尚在执行，不以旧PID部署代替最终交付。
+
+- 已补节点日志：workflow_node_runs新增可空logs/截断标记/更新时间，Host Git stdout/stderr每250ms合并刷新、单次节点256KiB封顶，截断后停止写入。HTTP提供商原始响应不记日志以保持原有保密边界，输入输出仍走原快照权限。列表仅返回日志更新时间，界面按1秒既有轮询读取选中节点。真实Agent成功stdout、失败stderr、取消动效停止、跨空间404、390px及server重启日志保留PASS：Temp/workflow-execution-view-Ne7cuH。Rust8项Host通过（包含UTF8大小/封顶后不写及双流测试）。最终UI构建/全量回归/4291更新仍在执行。
+
+## 2026-11-06 独立可视化执行视图本地交付
+- 真实Agent Git成功stdout、失败stderr、运行与取消、连线箭头/动画停止、空数据、390px和跨空间404；服务重启保留失败日志。最终证据Temp/workflow-execution-view-O2zhZC/acceptance.json；UX回归Temp/alpha2-ux-6BaevS/acceptance.json，均exit0。
+- 前端450PASS/1既有skip，后端workflows82PASS/1环境ignored，迁移4PASS；最终npm build、cargo build PASS。旧最终构建因本轮测试遗留进程占用exe失败，修正测试stop判断signalCode并清理已确认的本轮进程后重建PASS，未绕过断言。日志workflow-execution-{frontend-tests-final,rust-tests,migration-tests,server-build-retry,browser-final}.log、workflow-followup-ux-final.log。
+- 范围及技术自审PASS：复用ReactFlow/NodeCard/资源保存与授权API；使用冻结graph、失败不伪造输出，日志有限额且不泄露HTTP上游响应。4291本地保全证据见顶部。单节点真正Execute step尚未实现，任意历史恢复/指定历史运行UI仍未实现；不以整条运行冒充。
+- 本轮源码提交ab68c3a（29文件）；180c45f与ab68c3a均尚未推送/发版，GitHub Git认证缺失仍受阻。
+
+## 2026-11-06 执行历史/统一空白画布/监控工具栏本地交付
+- 沿用资源列表与授权快照，API只追加可读版本号、触发者名字、节点数与各版本最近运行摘要；批量查询仅当前分页，最大ID按版本分组，不一次加载全量执行历史；原id/definition字段保持兼容，无新增迁移。
+- 验证：workflows82PASS/1环境ignored；前端450全量PASS/1旧skip后新增行点击与文字按钮专项18PASS，最终全量见history-frontend-all-green.log；构建history-ui-build-final.log/history-server-build.log PASS。真实浏览器history-browser-green.log、history-ux-browser-green.log均exit0；成功/失败/取消/重启日志旧回归保留。
+- 原失败证据保留：history-browser.log无效测试夹具fields空数组、history-browser-final.log匹配两个#4按钮、history-ux-browser*.log创建host返回201但旧测试helper固定200；均修正夹具/定位/明确期望状态后通过，未弱化业务断言。
+- 4291备份/旧业务保全及内嵌UI匹配PASS；Linux缺失worker补齐并在无网络/无宿主盘共享的临时Linux实跑命令。用户原vmware失败任务未重试；本轮无其可用登录会话，不声称真实原主机复验通过。
+- 范围和技术自审PASS；单节点Execute step、任意历史恢复/运行仍不在本轮完成范围。GitHub认证缺失仍阻塞推送与发版，独立ADR/MEMORY/远程桌面文档不随源码提交。
+
+- 本轮源码提交e6008d2（14文件），最终前端451PASS/1旧skip；4291 PID61292/index-Bcb-jkRK.js运行正常。仅独立ADR/MEMORY/远程桌面文档未提交；推送/发版仍受GitHub认证阻塞。
+
+## 2026-11-06 归档操作文案与图标修正
+- 仅调整节点工作流归档动作的六语文案和显式图标，权限/归档确认/写入及已归档状态不变。源码提交见本轮Git最新提交；workflow-archive-{web-build,server-build,browser}.log PASS；本地备份/保全workflow-archive-local-update.json PASS。用户验收待反馈，推送发布仍受GitHub认证阻塞。
+
+## 2026-11-06 列表默认排序交付边界
+
+提交36c5db6仅包含15处Rust文件与scripts/test-list-default-sort.mjs，未提交MEMORY/独立ADR/远程桌面文档。已调整14个Spec：主机/凭据/仓库及连接/定时任务/告警规则/部署应用/模板/构建上下文按-created_at；构建流水线与节点工作流统一-updated_at；成员/授权记录-created_at；跨流水线执行和跨应用发布不再按局部number排序，改-created_at。既有审计/事件/产物/洞察最新优先保持；版本列表-number保持；角色/标签/变量/市场目录名称、字典/配置key、分组position、步骤/日志/节点尝试正序、时间序列与Top指标排序保持。服务器节点显式worker_id正序。前端ResourceTable无sort参数时采用后端默认，URL手动sort优先；分组/目录视图仍保持目录顺序。
+
+证据：list-sort-rust.log（6PASS）、list-sort-server-build.log（PASS）、list-sort-http-final.log与Temp/list-default-sort-VFASuS/acceptance.json（8类真实HTTP，含编辑优先/显式排序/分页/跨空间隔离）。首两次HTTP失败是验收夹具未指定环境主机/空Actions jobs，修正夹具后通过，未放宽业务校验，原日志保留。完整后端list-sort-server-tests.log为524PASS/3FAIL/9环境ignored；两checkout失败为PATH缺少sh，补现有Git/bin仅在测试进程后4项PASS（list-sort-checkout-with-shell.log）。剩i18n断言把ms-MY的Tag与英语同形判未翻译，相关源码/翻译均未改，本轮未扩范围修复（list-sort-i18n-isolate.log）。不能宣称全量通过。
+
+4291已备份pre-list-sort-20261106-180906并更新ferry-server-list-sort.exe/PID55144；嵌入UI不变index-CSpFP5vy.js；原384审计/4账号/4空间/3凭据/1连接/6构建运行/2构建/3节点工作流/16执行/9文件及所有原字段、密钥/实例与SQLite完整性保全PASS，Redis和Linux/Windows worker目录保留。当前本地最新提交36c5db6；GitHub认证受阻未尝试交互推送、未发版。下一步仅等待用户验收排序，不扩大为其它模块修复。
+
+## 2026-11-07 骨架首载补查交付检查点
+
+- 用户要求大部分“加载中”统一骨架；直接执行，复用LoadingSkeleton，无新依赖。13文件ec0de88；保留提交、执行、等待首份监控采样等操作反馈，原生option保留合法文本。
+- npm build产物index-4NX9ityP.js、npm typecheck、cargo build -p ferry-server通过。全前端453PASS/1既有skip；新增WorkflowDataView两个首载/空态/刷新保留结果与选中视图测试PASS。PowerShell重定向曾将测试子进程CLIXML误解析，再用npm.cmd直接执行全套PASS；未更改断言。
+- 真实隔离服务浏览器慢请求首载、刷新保留、首载503错误退出骨架、390px无溢出、减少动画PASS。证据C:/Users/FULLST~1/AppData/Local/Temp/alpha2-ux-fCitfN/acceptance.json、mobile-skeleton.png；脚本data/maintenance/test-loading-skeleton-ui.mjs。首轮临时脚本中文按钮名编码成问号，修正为Unicode码点后原断言通过；首失败日志目录保留。
+- 4291备份/重启/身份密钥及原数据逐字段保全PASS：data/maintenance/loading-skeleton-local-update.json，PID576。仅本地更新，不另发版；真实业务区域未逐一浏览器操作，复用组件测试、构建及人工代码审查覆盖。
+- 自审和需求复核PASS；用户体验待验收。
+
+- 推送结果：原push等待凭据后取消；禁交互复试明确报could not read Username，gh不在PATH且常用安装路径不存在。本轮ec0de88尚未推送；恢复GitHub认证后执行git push origin main。不要把此前main已推fd7690b误写为本轮已推。
+
+## 2026-11-07 应用体验与统一部署设计检查点
+
+- APP-UX-01：已直接实现部署表单分区/目标类型变化清空目标、列表状态筛选/模式/版本/时间及历史直达；模板参数表单（文本/整数/布尔、默认值、密钥变量引用、校验、可选值）与高级JSON双向保持；应用/配置模板与manifest源码用共享Monaco，模板默认用YAML。
+- 部署详情新增目标名称/模式/目录/版本/更新时间和历史触发人/起止时间；差异复用只读Monaco DiffEditor。修正历史渲染原先读取当前配置、历史完成后仍按当前应用运行态轮询的问题。服务端详情复用租户names::attach；市场同步进行中禁重复同步、错误红色显示。
+- 首次全前端458PASS/1既有skip/1架构FAIL：参数编辑器type import回引用resource-config造成图循环，已把参数类型移至参数编辑器、保留原类型re-export，架构+参数5项复验PASS。历史渲染/轮询8项PASS。前端build通过；Rust部署单测正在编译，cargo build等待同一artifact锁。尚未本地更新，勿称已交付。
+- 初始真实Chrome六个应用页面审查：Temp/alpha2-ux-1eGtbu/{acceptance.json,audit-0..5.png/txt}；修改后需重验模板创建→生成应用→渲染、目标切换、名字及状态筛选、跨空间拒绝、六语/390px及暗色。
+- APP-PORTABLE-01：用户新增一套配置兼容Native/Docker/Compose/Swarm Stack及PXC/Redis/NATS/TiDB HA、健康和Nomad式调度。已核对v1四模式渲染实际存在，但image/artifact互斥、Docker和Native单副本、Stack不接受Compose依赖等限制。已在docs/ferry-运维平台产品与技术方案.md末尾加入能力矩阵、可移植定义版本兼容、集群配方及调度边界和阶段验收。当前仅设计，尚未实现v2、四种HA配方及Nomad驱动，不允许冒充已完成。
+- 后续：完成编译→隔离HTTP/Chrome验收→修正发现的问题→备份并更新4291→自审/需求复核→精确提交；GitHub认证仍缺失，不重复交互推送。独立ADR/MEMORY/远程桌面文档不提交。
+
+### 2026-11-07 应用体验本地交付 f1e90cf
+
+直接执行、自审及当前体验范围核对通过。真实浏览器证据 `C:/Users/FULLST~1/AppData/Local/Temp/alpha2-ux-ggPLYg/acceptance.json`，覆盖模板UI创建、生成应用、目标类型切换、详情目标名、Monaco、预览执行保护、状态筛选、跨账号/空间404及六语390px无溢出。测试脚本先后误用hosts/host-groups而失败，修为实际nodes/node-groups；非成员404为隐藏资源的既有行为，未修改权限实现。失败证据保留。历史快照回归及全量460PASS/1skip，typecheck与前后端build通过，Rust部署16PASS/1Docker忽略。
+
+4291备份 `pre-app-ux-20261107-015047`，PID85684，`ferry-server-app-ux.exe`，UI `index-DJJUNnxb.js`；SQLite/实例/密钥及原业务记录保全PASS，Redis/worker/sandbox沿用。状态脚本 `data/maintenance/app-ux-local-state.py`、报告 `app-ux-local-update.json`。未新增发布、未重复交互式推送；GitHub HTTPS认证仍缺失。用户未验收，未验证Linux实际部署或HA故障恢复；可移植v2/HA/Nomad不宣称完成。
+
+### 2026-11-07 统一配置第二阶段实施计划
+
+用户“继续”承接上一轮统一配置与集群目标设计，直接执行；本阶段顺序耦合，同一代理修改manifest/表单与验证，未委派。复用Manifest/四引擎render_for、现有部署目标host（Stack为manager入口）及预览/权限/快照保护，不新建调度控制器或数据库表。新增显式v2允许image+artifact并存，仍校验两种定义；仅目标选中的source进入渲染产物。Swarm新增placement.constraints/maxReplicasPerNode，非Stack拒绝。界面显式选择版本，v2显示两套来源配置且切换不丢值，v1保持互斥。验收：v1字节稳定、v2四引擎选择/不支持字段拒绝、overrides不可绕过限制、前后端测试/浏览器和本地数据保全。HA数据库模板/Nomad接入不在此阶段交付范围。
+
+#### 统一配置阶段实现检查点（服务端构建中）
+
+已实现v2双来源按目标渲染、Swarm placement及override同校验、v1保持互斥；新增只读POST deployment-capabilities（deployments.read）和表单检查结果/失效取消，六语版本选择/双来源/放置配置。前端463PASS/1旧skip、typecheck/build通过；部署Rust20PASS/1Docker忽略（随后补充约束控制字符拒绝，服务端build进行中）。真实验收脚本scripts/test-deployment-portability.mjs已写入现有build.yml门禁，待新二进制完成后运行；无Docker CLI，不能声称实际Swarm/HA部署通过。4291当前仍上一轮PID85684/index-DJJUNnxb.js，不提前标记已更新。
+
+### 2026-11-07 统一配置基座交付 15f2b1e
+
+直接执行；自审及本阶段需求核对通过：复用四引擎、HostChannel、权限/预览/快照/回滚，不增加调度器或数据库表。v2双运行来源持久化与模式选择、Stack placement约束及override同校验、非Stack拒绝、v1输出与对应单来源v2逐字一致。只读兼容检查不查询外空间/执行命令/写提交审计；编辑/换语言取消并清除旧结果。六语定义版本/来源/放置/兼容性表单已验证。
+
+前端463PASS/1原skip、部署Rust20PASS/1需要Docker忽略、typecheck、Vite、cargo build通过（3个既有dead_code警告）。控制字符约束在最终真实API测试验证拒绝。真实隔离服务+Chrome报告 `C:/Users/FULLST~1/AppData/Local/Temp/deployment-portable-PqsUQR/acceptance.json`：同一配置四引擎创建/渲染/双来源保存、v1拒绝、Stack约束映射、其他引擎拒绝、匿名401/非成员404/外空间流水线400、纯检查不增加提交审计、UI当前未保存值/失效清理/保存、六语390px无溢出；已纳入build.yml。初脚本误用/render（应为/renderings）导致404，修测试路径后通过，失败证据Temp/deployment-portable-Qe8uta保留；未改生产路由来适配脚本。
+
+4291已备份pre-portable-20261107-081437，PID69212、ferry-server-portable.exe、index-C5Ft36z7.js；原388审计/4账号/4空间/3凭据/1仓库连接/9流水线运行/2流水线/3工作流/16执行/9资产及实例ID/密钥逐字段保全PASS，Redis/Actions worker/sandbox保持接入，脚本start-portable-local.ps1与portable-local-state.py，报告portable-local-update.json。实际数据不含隔离测试样例。未推送（既有HTTPS认证缺失）、未新发版。用户验收仍待反馈，HA模板/Nomad/真实多机故障调度未实现或验证，移至APP-HA-01继续。
+
+### 2026-11-07 GitHub Actions多节点测试实现 63dbcca（运行待验证）
+
+直接执行，复用scripts/test-deployments.py的隔离Swarm和SSH/HostAgent真实部署链路。可选FERRY_TEST_SWARM_HA=1将2节点扩为manager+2worker，两个副本、标签约束、maxReplicasPerNode=1，保留一个更新/替换位置。检查真实服务规格、跨节点健康副本、容器退出补副本、worker停机后替换、节点恢复且无额外Ferry部署、无法满足约束失败及回滚；原有滚动/历史变量/定时重启/就绪失败断言保留。新工作流支持手动/相关main推送与PR触发，上传精简acceptance.json（两种transport各4阶段快照）、输出和daemon日志，14天保留；不上传数据库或主密钥。自审修正诊断日志文件名和HTTP恢复轮询；规范格式只修前轮新增Rust三文件，已比对其内容等于HEAD经rustfmt输出，不含行为修改。
+
+Python py_compile、actionlint v1.7.12（官方发布checksum验证；未装shellcheck，禁用该集成）、cargo fmt全量、git diff检查PASS；证据data/maintenance/ha-ci-static-checks.json。自审范围/复用/安全隔离/提交卫生完成，最终运行验收NOT READY：本机无Docker CLI，GitHub HTTPS认证缺失且无可用gh/连接器，未推送、未触发CI，不宣称三节点故障测试通过。后续需认证恢复后推送并运行Multi-node deployment acceptance，核对job结论与artifact；共享内核测试不证明跨物理机、manager仲裁、数据库HA或卷迁移。HA业务模板和Nomad仍独立待处理；4291保持15f2b1e/PID69212，本轮无运行行为变更，未重启/发版。独立ADR.md、MEMORY.md和docs/remote-desktop-feasibility.md未纳入本提交。
+
+### 2026-11-07 多节点CI真实执行启动
+
+续做检查发现本机没有WSL安装（已取消安装提示，未安装系统组件），无Docker CLI；转查现有SSH非交互认证 `ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes git@github.com` 成功，身份robotism。原HTTPS凭据缺失结论仍真实，但不再阻止推送：远端main核验fd7690b与本地基线一致，使用显式SSH URL快进push HEAD:main成功，包含ec0de88/f1e90cf/15f2b1e/63dbcca，不改origin、不强推、不提交独立文档。实际Actions多节点42320847854已in_progress，build42320848069及server-container42320847905亦触发；公开API结果ha-ci-runs.json。下一步持续观察运行与诊断，真实通过前保持待验收；不新建发布、不移动alpha.2标签。
+
+
+首次真实故障测试42320847854失败，artifact已下载data/maintenance/ha-ci-42320847854.zip并安全解压同名目录。17断言通过、runner三个阶段快照已记录；worker2 daemon最后明确报 `/var/run/docker.pid: process with PID 1 is still running`。任务退出补副本、worker停机后在manager补齐健康副本已通过，但恢复未通过，不宣称全通过。修正专属nested-daemon entrypoint在启动dockerd前删除容器内遗留/var/run/docker.pid（容器唯一daemon，PID1重用），不改用户主机或业务执行器，不弱化断言；待完整重跑SSH及Agent两链路。
+
+修复11e818a已精确提交并SSH推送，Python编译/diff检查通过；重跑三节点42321382393、完整构建42321382423、镜像42321382391已触发，初始queued/pending。所有故障断言保留，未新增发布。
+
+第二轮真实42321382393仍在worker恢复失败（17断言/3阶段）：日志证实dockerd已启动但containerd runtime pid重用，`containerd is still running pid=18` 后超时。第一轮pidfile修复不足；改为专属daemon容器挂载tmpfs /run，模拟节点重启清空所有运行时PID/socket，持久/var/lib/docker和Swarm身份不变；移除局部pidfile补丁。失败artifact全量保留ha-ci-42321382393.zip与解压目录，未绕过worker恢复断言。历史页439bda8已提交SSH推送，8相关/463全前端PASS（1旧skip）、typecheck/build/server build及隔离嵌入Chrome受控API状态复验PASS：Temp/deployment-history-live-aAus6q/acceptance.json；本地更新待执行。
+
+历史页修复439bda8已备份更新4291，PID89376/index-BbTfEuCt.js，备份pre-history-live-20261107-090704；原388审计/4用户/4空间/3凭据/1连接/9构建运行/2构建/3工作流/16执行/9资产等记录、密钥/实例全保留（history-live-local-update.json），Redis/worker/sandbox沿用。当前新增代码监控提交通知着色：复用commitMessageLabel字段Accent::Blue，飞书蓝色，企微仅原生info/comment/warning，蓝色降级comment不伪装警告，其他渠道保留可读文本；变更monitor.rs/webhook.rs，相关Rust测试编译中。
+
+
+代码监控提交信息配色633c342已精确提交SSH推送并备份更新4291：PID41744，ferry-server-commit-color.exe，嵌入UI维持index-BbTfEuCt.js；备份pre-commit-color-20261107-091206，原388审计/4用户/4空间/3凭据/1连接/9运行/2构建/3工作流/16执行/9文件等记录和master.key/instance-id逐字段保全PASS，Redis/Actions worker/sandbox沿用。5项通知测试、cargo fmt、diff/server build PASS；仅飞书支持蓝色字段，企微仅原生info/comment/warning，蓝色字段安全降级comment，DingTalk/Slack等按既有格式不注入不支持HTML；增绿删红保留，提交原文依旧转义。未主动给外部渠道发送消息，等待用户真实下一次代码通知验收。三节点第三轮42322248196仍运行中，未新发版。
+
+第三轮42322248196失败：98条检查、8阶段快照齐全，SSH/Agent节点恢复及无额外部署均通过，Agent全流程通过；SSH末次readiness失败后的显式回滚未恢复（第98条失败）。swarm-services日志3/2副本，无法仅凭daemon日志区分更新并发/任务错误，不能推断根因或直接延长超时。补充已生成但漏上传的*-tasks.log及白名单.UpdateStatus日志后完整复现；不上传完整service spec/环境变量，不放宽断言。artifact ha-ci-42322248196.zip与目录保留。
+
+第四轮实际42323374060/job128252912097（28c5ede）已进入真实部署测试，跟踪ha-ci-job-fourth.html。公开API匿名限额到2026-11-07 01:23:15 UTC，期间通过GitHub公开HTML观察状态及nightly.link下载明确的公开测试artifact；不访问凭据、不放松权限。新增review-ha-ci.py用于独立复核8阶段节点/任务ID差异及报告全断言，第三轮仍FAIL，未标通过。
+
+### 通知预览与测试检查点（2026-11-07）
+直接执行，复用现有渠道验证、授权/空间边界、正式Notice与各平台body/deliver_configured；未增加依赖或更改轮询行为。代码自审与需求复核通过：预览请求不含渠道密钥/不发消息；测试只在显式点击时发送、10秒超时且不跟随重定向、不自动重试；每个测试写不含地址和密钥的操作审计。测试通知均标注测试，通用payload test=true；外部平台真实凭据未测，不声称接收平台最终排版一致。前端忙碌/失败/变更后丢弃旧响应覆盖；只读成员预览200/发送403通过真实HTTP验证。更新脚本精确校验旧PID/路径/运行账号后备份，数据逐字段保全，Redis/worker保持；本次不移动alpha.2标签。下一步用户验收通知按钮，APP-HA-CI-01按保留任务诊断分析回滚未收敛，不能报告多节点CI通过。

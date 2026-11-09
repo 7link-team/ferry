@@ -293,6 +293,7 @@ pub fn dispatch() -> anyhow::Result<bool> {
                         token: settings.token,
                         state_dir: settings.state_dir,
                         managed: true,
+                        installation_scope: Some(if settings.user_service { "user" } else { "system" }.into()),
                         confirmation: Some(confirmation),
                         failed_version,
                     },

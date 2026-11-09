@@ -58,6 +58,10 @@ pub(super) async fn workspace(
 
 fn validate(request: &Request) -> Result<()> {
     ensure!(
+        request.runtime != Runtime::Pi || request.permission == Permission::ReadOnly,
+        "Pi currently supports read-only conversations only"
+    );
+    ensure!(
         std::path::Path::new(&request.cwd).is_absolute(),
         "Agent workdir must be absolute"
     );
@@ -138,11 +142,65 @@ fn command(request: &Request) -> Command {
             }
             c
         }
+        Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+            let name = match request.runtime {
+                Runtime::Gemini => "gemini",
+                Runtime::Qwen => "qwen",
+                _ => "opencode",
+            };
+            let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new(name)));
+            c.arg(match request.runtime {
+                Runtime::Gemini => "--experimental-acp",
+                Runtime::Qwen => "--acp",
+                _ => "acp",
+            });
+            c
+        }
+        Runtime::Pi => {
+            let mut c = native_command(executable.as_deref().unwrap_or(std::path::Path::new("pi")));
+            // Pi's MCP integrations are extensions; disabling extensions also disables them.
+            c.args([
+                "--mode",
+                "rpc",
+                "--no-tools",
+                "--no-extensions",
+                "--no-skills",
+                "--no-prompt-templates",
+            ]);
+            if let Some(model) = &request.model {
+                c.arg("--model").arg(model);
+            }
+            if let Some(id) = &request.native_session_id {
+                c.arg("--session").arg(id);
+            }
+            c
+        }
     };
     command
 }
 
 fn native_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let program = std::path::Path::new(program.as_ref());
+    #[cfg(windows)]
+    let mut command = if program
+        .extension()
+        .is_some_and(|ext| matches!(ext.to_str(), Some("js" | "mjs" | "cjs")))
+    {
+        let node = std::env::var_os("PATH")
+            .and_then(|path| {
+                std::env::split_paths(&path)
+                    .filter(|directory| directory.is_absolute())
+                    .map(|directory| directory.join("node.exe"))
+                    .find(|path| path.is_file())
+            })
+            .unwrap_or_else(|| program.with_extension("requires-node-exe"));
+        let mut command = Command::new(node);
+        command.arg(program);
+        command
+    } else {
+        Command::new(program)
+    };
+    #[cfg(not(windows))]
     let mut command = Command::new(program);
     // Keep native user login/config discovery, exclude the platform service's
     // enrollment tokens, database credentials and arbitrary inherited secrets.

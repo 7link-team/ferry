@@ -1,4 +1,5 @@
 {
+  "workflow.repositoryConnectionRequired": "請選擇倉庫連線。公開 Git 操作需明確選擇免認證並填寫 HTTP(S) 位址。",
   "reviews.waitingAi": "等待模型並行可用容量。",
   "reviews.invalid": "程式碼審查設定無效：{reason}。",
   "reviews.waiting": "等待符合的執行器或流水線可用容量。",

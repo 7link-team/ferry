@@ -18,5 +18,6 @@
   "conversations.fileTooLarge": "每个附件不能超过 32 MiB。",
   "conversations.groupAgentPrivate": "群聊只能添加工作空间共享的智能体。",
   "conversations.apiPending": "API 会话执行尚未接通。",
-  "conversations.noRunner": "没有可执行此模型的可用 Runner。"
+  "conversations.noRunner": "没有可执行此模型的可用 Runner。",
+  "conversations.cliPermissionUnsupported": "此CLI当前仅支持只读会话，请选择只读权限。"
 }

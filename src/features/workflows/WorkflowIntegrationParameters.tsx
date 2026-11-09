@@ -8,6 +8,7 @@ import { AutoForm } from "../../shared/forms/auto-form";
 import { commonText, workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
+import { RepositoryConnectionSelect, useConnectionRepositories } from "../repositories/ConnectionRepositoryFields";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import {
   integrationText,
@@ -68,8 +69,14 @@ function Field({
         <span className="block font-medium"><FieldCaption label={<>
           {label}
           {required ? ` · ${t("required")}` : ""}
-        </>} /></span>
-        {spec.enum ? (
+        </>} help={name === "directory" ? t("integration.gitDirectoryHelp") : undefined} /></span>
+        {spec.type === "boolean" ? (
+          <select className={control} aria-label={label} disabled={readOnly} value={value === undefined ? "" : String(value)} onChange={event => change(event.target.value === "" ? undefined : event.target.value === "true")}>
+            <option value="">{t("selectValue")}</option>
+            <option value="true">{t("integration.enum.true")}</option>
+            <option value="false">{t("integration.enum.false")}</option>
+          </select>
+        ) : spec.enum ? (
           <select
             className={control}
             aria-label={label}
@@ -196,17 +203,19 @@ function Field({
 }
 
 export function WorkflowIntegrationParameters({
+  nodeId,
   spec,
   value,
   readOnly,
   change,
 }: {
+  nodeId?: string;
   spec: IntegrationManifest;
   value: Params;
   readOnly: boolean;
   change: (value: Params) => void;
 }) {
-  const { workspace } = useContext(WorkflowAssetContext);
+  const { workspace, legacyGitNodes, canCreateRepositoryConnection } = useContext(WorkflowAssetContext);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -216,8 +225,14 @@ export function WorkflowIntegrationParameters({
   const [token, setToken] = useState("");
   const [name, setName] = useState("");
   const profile = spec.ui.application;
+  const repositoryIntegration = ["github", "gitlab", "codeup"].includes(profile);
+  const gitNetwork = !!spec.git && ["clone", "remote_refs", "fetch", "pull", "push"].includes(spec.git.operation);
+  const independent = !value.connection_id && value.credential_id !== undefined;
+  const legacyGit = gitNetwork && !!nodeId && legacyGitNodes?.has(nodeId) && !value.connection_id && !value.auth_mode;
+  const connectionMode = (repositoryIntegration || gitNetwork) && !independent && !legacyGit && value.auth_mode !== "anonymous";
+  const repositories = useConnectionRepositories(workspace, String(value.connection_id ?? ""), connectionMode);
   useEffect(() => {
-    if (spec.git) return;
+    if (spec.git || connectionMode) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -247,7 +262,7 @@ export function WorkflowIntegrationParameters({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [workspace, profile, revision]);
+  }, [workspace, profile, revision, connectionMode]);
   const patch = (key: string, next: unknown) => {
     const result = { ...value };
     if (next === undefined) delete result[key];
@@ -260,14 +275,14 @@ export function WorkflowIntegrationParameters({
       name={key}
       spec={definition}
       value={value[key]}
-      required={spec.params_schema.required.includes(key)}
+      required={spec.params_schema.required.includes(key) || (key === "organization_id" && repositoryIntegration && !connectionMode)}
       credential={String(value.credential_id ?? "0")}
-      readOnly={readOnly}
+      readOnly={readOnly || (repositoryIntegration && independent && key === "organization_id")}
       change={(next) => patch(key, next)}
     />
   );
   const fields = Object.entries(spec.params_schema.properties).filter(
-    ([key]) => key !== "credential_id",
+    ([key]) => !["credential_id", "connection_id", "auth_mode"].includes(key) && !(connectionMode && (key === "organization_id" || (gitNetwork && key === "url"))),
   );
   const required = fields.filter(([key]) =>
     spec.params_schema.required.includes(key),
@@ -277,13 +292,59 @@ export function WorkflowIntegrationParameters({
   );
   return (
     <div className="space-y-5">
-      {!spec.git && <label className="block space-y-2 text-sm">
+      {gitNetwork && !spec.git?.provider && !readOnly && <label className="block space-y-2 text-sm">
+        <span><FieldCaption label={t("integration.gitAuthentication")} /></span>
+        <select className={control} aria-label={t("integration.gitAuthentication")} value={legacyGit?"legacy":value.auth_mode === "anonymous" ? "anonymous" : "connection"} onChange={event=>{
+          const next={...value};delete next.connection_id;delete next.credential_id;
+          next.auth_mode=event.target.value;
+          change(next);
+        }}>{legacyGit&&<option value="legacy" disabled>{t("integration.legacyAuth")}</option>}<option value="connection">{t("integration.useConnection")}</option><option value="anonymous">{t("integration.anonymousGit")}</option></select>
+      </label>}
+      {gitNetwork && value.auth_mode === "anonymous" && <p className="text-xs text-muted-foreground">{t("integration.anonymousGitHelp")}</p>}
+      {connectionMode && <div className="space-y-3">
+        <RepositoryConnectionSelect workspace={workspace} data={repositories} value={String(value.connection_id ?? "")} readOnly={readOnly} canCreate={canCreateRepositoryConnection!==false} {...(!gitNetwork || spec.git?.provider ? {provider:spec.git?.provider ?? profile} : {})} onChange={(id,created)=>{
+          const next = {...value};
+          for (const key of ["credential_id", "organization_id", "auth_mode", "owner", "repo", "project", "repository_id", ...(gitNetwork ? ["url"] : [])]) delete next[key];
+          if (id) next.connection_id = id; else delete next.connection_id;
+          const connection = created??repositories.connections.find(row=>row.id===id);
+          if (gitNetwork && connection?.provider==='git' && connection.url) next.url=connection.url;
+          change(next);
+        }}/>
+        <p className="text-xs leading-5 text-muted-foreground">{t("integration.connectionHelp")}</p>
+        {repositories.error && <p role="alert" className="text-sm text-destructive">{repositories.error}</p>}
+        {!!value.connection_id && !readOnly && repositories.connection?.provider !== "git" && !spec.type.endsWith("repository.list") && <label className="block space-y-2 text-sm">
+          <span className="block font-medium"><FieldCaption label={t("integration.chooseRepository")} /></span>
+          <select className={control} aria-label={t("integration.chooseRepository")} value={gitNetwork ? String(value.url ?? "") : ""} required={gitNetwork} disabled={repositories.loading} onChange={event => {
+            const remote = repositories.repositories.find(row => row.url === event.target.value);
+            if (!remote) return;
+            const next = {...value};
+            if (gitNetwork) next.url = remote.url;
+            else if (profile === "github") {
+              const parts = remote.full_name.split('/'); next.owner = parts[0]; next.repo = parts.slice(1).join('/');
+            } else if (profile === "gitlab") next.project = remote.remote_id || remote.full_name;
+            else next.repository_id = remote.remote_id || remote.full_name;
+            change(next);
+          }}>
+            <option value="">{repositories.loading ? commonText("common.loading") : t("integration.chooseRepository")}</option>
+            {gitNetwork && !!value.url && !repositories.repositories.some(row => row.url === value.url) && <option value={String(value.url)}>{String(value.url)}</option>}
+            {repositories.repositories.map(row => <option key={row.url} value={row.url}>{row.full_name || row.name}</option>)}
+          </select>
+          {repositories.hasMore && <Button type="button" variant="outline" disabled={repositories.loading} onClick={() => repositories.setPage(page => page + 1)}>{t("integration.loadOptions")}</Button>}
+        </label>}
+        {gitNetwork && !!value.url && <div className="min-w-0 space-y-1 text-sm"><span className="font-medium">{t("integration.gitUrl")}</span><p className="break-all text-muted-foreground">{String(value.url)}</p></div>}
+      </div>}
+      {repositoryIntegration && independent && <div className="space-y-2 rounded-md border p-3">
+        <p className="text-sm text-muted-foreground">{t("integration.legacyAuth")}</p>
+        {!readOnly && <Button type="button" variant="outline" onClick={()=>{const next={...value};delete next.credential_id;delete next.organization_id;change(next);}}>{t("integration.useConnection")}</Button>}
+      </div>}
+      {legacyGit && <p className="text-sm text-muted-foreground">{t("integration.legacyAuth")}</p>}
+      {!spec.git && !connectionMode && <label className="block space-y-2 text-sm">
         <span className="block font-medium"><FieldCaption label={<>{t("integration.credential")}</>} /></span>
         <select
           className={control}
           aria-label={t("integration.credential")}
           value={String(value.credential_id ?? "0")}
-          disabled={readOnly || loading}
+          disabled={readOnly || loading || repositoryIntegration}
           onChange={(event) => patch("credential_id", event.target.value)}
         >
           <option value="0">
@@ -309,7 +370,7 @@ export function WorkflowIntegrationParameters({
           ))}
         </select>
       </label>}
-      {!spec.git && !readOnly && (
+      {!spec.git && !repositoryIntegration && !connectionMode && !readOnly && (
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
@@ -334,9 +395,9 @@ export function WorkflowIntegrationParameters({
           </Button>
         </div>
       )}
-      <p className="text-xs leading-5 text-muted-foreground">
+      {!connectionMode && <p className="text-xs leading-5 text-muted-foreground">
         {integrationText(spec.ui.credential_help_key)}
-      </p>
+      </p>}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

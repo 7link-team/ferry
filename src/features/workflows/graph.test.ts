@@ -272,3 +272,17 @@ describe("workflow connection editing", () => {
     ]);
   });
 });
+
+
+it("arranges mixed right/down successors without changing their branch identities",()=>{
+ const graph=emptyGraph(); const branch=newNode(graph,'core.switch','Route');
+ branch.position=[80,80]; branch.params.cases=[{key:'build'},{key:'test'}];graph.nodes.push(branch);
+ let next=addAdjacentNode(graph,{node:branch.id,port:'case',index:0},'right',newNode(graph,'core.no_op','Build'));
+ next=addAdjacentNode(next,{node:branch.id,port:'case',index:1},'down',newNode(next,'core.no_op','Test'));
+ const links=structuredClone(next.connections), result=arrangeGraph(next);
+ expect(result.connections).toEqual(links);
+ expect(connectionDirection(result,links[0]!)).toBe('right');
+ expect(connectionDirection(result,links[1]!)).toBe('down');
+ expect(arrangeGraph(result)).toEqual(result);
+ expect(next.nodes[0]!.position).toEqual([80,80]);
+});

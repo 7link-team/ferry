@@ -43,6 +43,7 @@ function parseRoute(pathname: string, search: string): Route {
   if (segments[0] === "workspaces") {
     const [, workspace = "", resource = "dashboard", detail = "", action = ""] = segments;
     const scope = new URLSearchParams(search).get("scope");
+    if (resource === "credentials" && scope === "ai") return {workspace,group:"ops",item:"ai-models",mode:detail === "new" ? "new" : "list"};
     const workflowKind = new URLSearchParams(search).get("workflow_kind");
     const candidates = nav.flatMap(group => group.items
       .filter(item => resourceName(item.resource) === resource)
@@ -65,13 +66,13 @@ function parseRoute(pathname: string, search: string): Route {
     return { workspace, group: "platform", item: ["users", "workspaces", "settings", "server-nodes", "monitor"].includes(group) ? group : "workspaces",
       mode, ...(mode === "view" || mode === "edit" ? { id: item } : {}) };
   }
+  if (group === "workflow" && item === "credentials") return {workspace,group:"ops",item:"ai-models",mode:third === "new" ? "new" : "list"};
   const fallback = nav[0]!;
   const groupKey = group === "build" && movedRepositoryItems.has(item) ? "repository" : group === "build" ? "workflow" : group === "infrastructure" ? "host" : group;
   const resolved = nav.find((g) => g.key === groupKey) ?? fallback;
   const legacyRepository = ["repository-auth", "api-tokens"].includes(item);
   const pipelineGroups = group === "build" && item === "pipelines" && third === "groups";
   const resolvedItem = pipelineGroups ? "pipeline-groups" : legacyRepository ? "repositories" :
-    group === "workflow" && item === "credentials" ? "ai-credentials" :
     resolved.key === "host" && item === "nodes" ? "hosts" :
     resolved.items.find((i) => i.key === item)?.key ?? resolved.items[0]!.key;
   const detail = pipelineGroups ? fourth : third;

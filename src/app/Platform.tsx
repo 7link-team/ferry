@@ -66,7 +66,7 @@ const lists: Record<string, ListConfig<Row>> = {
     filters: [{ key: "q", label: "名称或标识", labelKey: "resource-domain:platform.nameSlug", type: "text" }],
     columns: [{ key: "name", label: "名称", labelKey: "common-domain:common.name", sortable: true }, { key: "slug", label: "标识", labelKey: "common-domain:auth.slug", sortable: true },
       { key: "my_role", label: "我的角色", labelKey: "resource-domain:platform.myRole", render: r => myRole(r.relation, r.my_role) }],
-    actions: [edit, { label: "进入工作空间", labelKey: "resource-domain:platform.enter", icon: <LogIn className="size-4" />, to: r => workspaceEntry(r.id) }],
+    actions: [{ label: "查看", labelKey: "common-domain:common.view", to: r => ({ id: r.id, mode: "view" as const }) }, edit, { label: "进入工作空间", labelKey: "resource-domain:platform.enter", icon: <LogIn className="size-4" />, to: r => workspaceEntry(r.id) }],
     toolbar: { create: { label: "创建工作空间", labelKey: "common-domain:auth.createWorkspace" }, import: false, export: false }, empty: "还没有工作空间，创建后即可配置主机和部署。", emptyKey: "resource-domain:platform.noWorkspaces",
   },
 };
@@ -85,6 +85,10 @@ const forms: Record<string, FormConfig<Row>> = {
 { title: "账号注册", titleKey: "resource-domain:platform.registration", group: "账号注册", groupKey: "resource-domain:platform.registration", tab:"registration", tabKey:"resource-domain:platform.registration", fields: [
     { key: "registration_enabled", label: "允许注册新账号", labelKey: "resource-domain:platform.allowRegistration", type: "switch", help: "关闭后已有账号仍可登录，公开注册入口将关闭。", helpKey: "resource-domain:platform.registrationHelp" },
   ] },
+{title:"验证码配置",titleKey:"resource-domain:platform.mailCodeSettings",group:"账号注册",groupKey:"resource-domain:platform.registration",tab:"registration",tabKey:"resource-domain:platform.registration",fields:[
+    {key:"mail_code_enabled",label:"启用邮箱验证码",labelKey:"resource-domain:platform.mailCodeEnabled",type:"switch",helpKey:"resource-domain:platform.mailCodeEnabledHelp"},
+    {key:"mail_code_valid_minutes",label:"验证码有效时间（分钟）",labelKey:"resource-domain:platform.mailCodeMinutes",type:"number",required:true,min:1,max:60,helpKey:"resource-domain:platform.mailCodeMinutesHelp"},
+  ]},
 {title:"邮件模板",titleKey:"resource-domain:platform.mailTemplates",group:"账号注册",groupKey:"resource-domain:platform.registration",tab:"templates",tabKey:"resource-domain:platform.mailTemplates",fields:[
     {key:"mail_templates",label:"邮件模板",labelKey:"resource-domain:platform.mailTemplates",type:"custom",span:2,render:({draft,readOnly,onPatch})=><PlatformMailTemplates draft={draft} readOnly={readOnly} onPatch={onPatch}/>},
   ]},

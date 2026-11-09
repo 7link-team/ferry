@@ -81,6 +81,12 @@ try {
   await insert('email');
   assert.equal(await rich.innerText(),'Before {{email}}After');
   await frame.getByText('Before user@example.comAfter',{exact:true}).last().waitFor();
+  await rich.focus();await page.keyboard.press('ControlOrMeta+A');
+  await page.locator('button[data-menu-key="fontSize"]').click();
+  await page.locator('li[data-value="24px"]').click();
+  assert((await rich.innerHTML()).includes('font-size: 24px'),'Selected text retains the chosen font size');
+  await frame.locator('[style*="font-size: 24px"]').waitFor();
+  report.checks.push('Native rich-text font-size picker changes selected text and preserves formatting in the HTML email preview');
   report.checks.push('Subject and rich-text variables inserted at caret; preview updates with example data');
   await page.getByRole('tab',{name:'HTML',exact:true}).click();
   const code=page.locator('.monaco-editor textarea').first();await code.waitFor();
@@ -131,6 +137,30 @@ try {
   for(const width of [1440,900,390,320]){await page.setViewportSize({width,height:1000});await page.getByRole('button',{name:'插入变量',exact:true}).click();const menu=page.getByRole('menu');await menu.waitFor();assert.match(await menu.innerText(),/收件人邮箱/);assert.match(await menu.innerText(),/不是发件人/);const bounds=await menu.boundingBox();assert(bounds.x>=0&&bounds.x+bounds.width<=width+1);await page.screenshot({path:join(work,`mail-menu-${width}.png`),fullPage:true});await page.keyboard.press('Escape');await menu.waitFor({state:'hidden'});await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='插入变量');assert(await page.getByRole('button',{name:'插入变量',exact:true}).evaluate(el=>el===document.activeElement));}
   report.checks.push('Six language drafts stay independent; persistence/reload and actual registration SMTP select locale; current unsaved draft test creates neither a template nor a usable challenge; invalid language/content rejected; compact accessible variable menu includes recipient descriptions at four widths; settings groups follow approved order');
   assert.equal(errors.length,0,errors.join('\n'));
+  if(process.env.TEST_CODE_CONFIG){
+    for(const invalid of [0,61,1.5]) await api('/platform/settings/1',{...await api('/platform/settings/1'),mail_code_valid_minutes:invalid},'PATCH',400);
+    for(const width of [1440,900,390,320]){
+      await page.setViewportSize({width,height:1000});await page.goto(origin+'/zh-CN/platform/settings/1/edit?section='+encodeURIComponent('账号注册')+'&form_tab=registration');
+      await page.getByRole('checkbox',{name:'启用邮箱验证码',exact:true}).waitFor();
+      assert.equal(await page.getByRole('tab',{name:'账号注册',exact:true}).count(),1,'Only one registration tab for both settings sections');
+      const minutes=page.getByLabel('验证码有效时间（分钟）',{exact:true});assert.equal(await minutes.getAttribute('min'),'1');assert.equal(await minutes.getAttribute('max'),'60');
+      if(width===1440){await minutes.fill('17');const response=page.waitForResponse(r=>r.url().endsWith('/api/platform/settings/1')&&r.request().method()==='PATCH');await page.getByRole('button',{name:'保存',exact:true}).click();assert.equal((await response).status(),200);}
+      else assert.equal(await minutes.inputValue(),'17');
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:join(work,'registration-code-'+width+'.png'),fullPage:true});
+    }
+    assert.equal((await api('/platform/settings/1')).mail_code_valid_minutes,17);
+    await api('/registration-code',{email:'configured@example.invalid'},'POST',200,'en-US');
+    const configuredMail=decode(messages.at(-1));assert(configuredMail.parts.every(part=>part.includes('expires 17')));
+    const issued=sql("SELECT expires_at,updated_at FROM email_codes WHERE id='code:configured@example.invalid'")[0];assert.equal(issued[0]-issued[1],17*60000);
+    const issuedCode=configuredMail.parts[0].match(/code (\d{6})/)[1];
+    await patch({mail_code_valid_minutes:3});assert.deepEqual(sql("SELECT expires_at,updated_at FROM email_codes WHERE id='code:configured@example.invalid'")[0],issued);
+    const publicContext=await browser.newContext();const registered=await publicContext.request.post(origin+'/api/users',{headers:{'X-Ferry-Request':'1'},data:{name:'Configured code',email:'configured@example.invalid',password:'configured-code-password',verification_code:issuedCode}});assert.equal(registered.status(),200,await registered.text());
+    await api('/registration-code',{email:'new-duration@example.invalid'},'POST',200,'en-US');assert(decode(messages.at(-1)).parts.every(part=>part.includes('expires 3')));assert.equal(sql("SELECT expires_at-updated_at FROM email_codes WHERE id='code:new-duration@example.invalid'")[0][0],3*60000);
+    await patch({mail_code_enabled:false});assert.equal((await api('/setup')).email_verification_required,false);await api('/registration-code',{email:'disabled@example.invalid'},'POST',403);
+    await patch({mail_code_enabled:true});assert.equal((await api('/setup')).email_verification_required,true);
+    report.checks.push('Registration code switch and 1–60 minute validation; four-width UI save/reload; real SMTP/plain+HTML 17→3 minutes; database expiry agrees; already-issued challenge remains valid and consumable after TTL change; disable/enable affects public setup and issuance');
+    await publicContext.close();
+  }
   report.result='PASS';
 }catch(error){report.result='FAIL';report.error=String(error);if(page){await page.screenshot({path:join(work,'failure.png'),fullPage:true}).catch(()=>{});await writeFile(join(work,'failure.html'),await page.content()).catch(()=>{});}throw error;}
 finally{await writeFile(join(work,'acceptance.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));await browser?.close();server?.kill();for(const socket of sockets)socket.destroy();if(smtp.listening)await new Promise(r=>smtp.close(r));await log.close();}

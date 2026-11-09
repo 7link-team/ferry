@@ -7,35 +7,17 @@ import { Button } from "../../shared/ui/button";
 import { WorkflowAssetContext } from "./WorkflowAssets";
 import { AutoForm } from "../../shared/forms/auto-form";
 
-type Price = {
-  model: string;
-  operation: string;
-  input_micros: number;
-  output_micros: number;
-  unit_size: number;
-};
-type Provider = {
-  protocol: "openai" | "anthropic";
-  id: string;
-  name: string;
-  credential_id: string;
-  base_url: string;
-  currency: string;
-  timezone: string;
-  monthly_limit_micros: number;
-  qps: number;
-  concurrency: number;
-  prices: Price[];
-  version: number;
-};
+import {
+  ProviderFields,
+  type Provider,
+} from "../../shared/forms/ai-provider-fields";
+export {
+  ProviderFields,
+  type Provider,
+  type Price,
+} from "../../shared/forms/ai-provider-fields";
 const control =
-  "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
-const operations = [
-  "ai.llm.chat",
-  "ai.image.generate",
-  "ai.audio.speech",
-  "ai.audio.transcribe",
-];
+  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm";
 function CallLedger() {
   const { workspace } = useContext(WorkflowAssetContext);
   const [rows, setRows] = useState<
@@ -147,10 +129,7 @@ export function WorkflowAIParameters({
   providerOnly?: boolean;
 }) {
   const { workspace } = useContext(WorkflowAssetContext);
-  const [providers, setProviders] = useState<Provider[]>([]),
-    [credentials, setCredentials] = useState<
-      { id: string; name: string; kind: string }[]
-    >([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
   const [draft, setDraft] = useState<Provider>(),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -228,16 +207,10 @@ export function WorkflowAIParameters({
             variant="outline"
             onClick={async () => {
               try {
-                const result = await api<{
-                  items: { id: string; name: string; kind: string }[];
-                }>(
-                  `/workspaces/${workspace}/credentials?scope=ai&page_size=200`,
-                );
-                setCredentials(result.items.filter((c) => c.kind === "token"));
                 setDraft({
                   id: "",
                   name: "",
-                  credential_id: "",
+                  credential_id: "0",
                   base_url: "https://api.openai.com/v1",
                   protocol: "openai",
                   currency: "USD",
@@ -269,14 +242,6 @@ export function WorkflowAIParameters({
               variant="ghost"
               onClick={async () => {
                 try {
-                  const result = await api<{
-                    items: { id: string; name: string; kind: string }[];
-                  }>(
-                    `/workspaces/${workspace}/credentials?scope=ai&page_size=200`,
-                  );
-                  setCredentials(
-                    result.items.filter((c) => c.kind === "token"),
-                  );
                   setDraft(structuredClone(selected));
                 } catch (e) {
                   setError(errorText(e));
@@ -293,197 +258,7 @@ export function WorkflowAIParameters({
           aria-label={t("aiAddProvider")}
           className="space-y-3 rounded-lg border p-3"
         >
-          <p className="text-xs leading-5 text-muted-foreground">
-            {t("aiPriceHelp")}
-          </p>
-          <label className="block space-y-2 text-sm">
-            <span>
-              <FieldCaption label={<>{t("aiProtocol")}</>} />
-            </span>
-            <select
-              className={control}
-              aria-label={t("aiProtocol")}
-              value={draft.protocol}
-              onChange={(e) =>
-                setDraft({
-                  ...draft,
-                  protocol: e.target.value as Provider["protocol"],
-                  base_url:
-                    e.target.value === "anthropic"
-                      ? "https://api.anthropic.com/v1"
-                      : "https://api.openai.com/v1",
-                })
-              }
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-            </select>
-          </label>
-          <a
-            className="block text-sm text-primary underline"
-            href={`/${document.documentElement.lang || "zh-CN"}/workspaces/${workspace}/credentials?scope=ai`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {t("aiCredentials")}
-          </a>
-          <label className="block space-y-2 text-sm">
-            <span>
-              <FieldCaption label={<>{t("aiCredential")}</>} />
-            </span>
-            <select
-              className={control}
-              aria-label={t("aiCredential")}
-              disabled={!!draft.id}
-              value={draft.credential_id}
-              onChange={(e) =>
-                setDraft({ ...draft, credential_id: e.target.value })
-              }
-            >
-              <option value="">{t("selectValue")}</option>
-              {credentials.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {(
-            [
-              ["name", "name"],
-              ["base_url", "aiBaseURL"],
-              ["currency", "aiCurrency"],
-              ["timezone", "aiTimezone"],
-              ["monthly_limit_micros", "aiMonthlyBudget"],
-              ["qps", "aiQPS"],
-              ["concurrency", "aiConcurrency"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="block space-y-2 text-sm">
-              <span>
-                <FieldCaption
-                  label={
-                    <>{key === "name" ? commonText("common.name") : t(label)}</>
-                  }
-                />
-              </span>
-              <Input
-                aria-label={
-                  key === "name" ? commonText("common.name") : t(label)
-                }
-                disabled={
-                  !!draft.id && (key === "currency" || key === "timezone")
-                }
-                type={typeof draft[key] === "number" ? "number" : "text"}
-                min={0}
-                value={draft[key]}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    [key]:
-                      typeof draft[key] === "number"
-                        ? Number(e.target.value)
-                        : e.target.value,
-                  })
-                }
-              />
-            </label>
-          ))}
-          {draft.prices.map((price, index) => (
-            <div key={index} className="space-y-2 border-t pt-3">
-              <label className="block space-y-2 text-sm">
-                <span>
-                  <FieldCaption label={<>{t("aiOperation")}</>} />
-                </span>
-                <select
-                  className={control}
-                  value={price.operation}
-                  onChange={(e) =>
-                    setDraft({
-                      ...draft,
-                      prices: draft.prices.map((p, i) =>
-                        i === index ? { ...p, operation: e.target.value } : p,
-                      ),
-                    })
-                  }
-                >
-                  {operations.map((op) => (
-                    <option key={op}>{op}</option>
-                  ))}
-                </select>
-              </label>
-              {(
-                [
-                  ["model", "aiModel"],
-                  ["input_micros", "aiInputPrice"],
-                  ["output_micros", "aiOutputPrice"],
-                  ["unit_size", "aiPriceUnit"],
-                ] as const
-              ).map(([key, label]) => (
-                <label key={key} className="block space-y-2 text-sm">
-                  <span>
-                    <FieldCaption label={<>{t(label)}</>} />
-                  </span>
-                  <Input
-                    aria-label={t(label)}
-                    type={key === "model" ? "text" : "number"}
-                    min={key === "unit_size" ? 1 : 0}
-                    value={price[key]}
-                    onChange={(e) =>
-                      setDraft({
-                        ...draft,
-                        prices: draft.prices.map((p, i) =>
-                          i === index
-                            ? {
-                                ...p,
-                                [key]:
-                                  key === "model"
-                                    ? e.target.value
-                                    : Number(e.target.value),
-                              }
-                            : p,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-              ))}
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={draft.prices.length === 1}
-                onClick={() =>
-                  setDraft({
-                    ...draft,
-                    prices: draft.prices.filter((_, i) => i !== index),
-                  })
-                }
-              >
-                {t("delete")}
-              </Button>
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              setDraft({
-                ...draft,
-                prices: [
-                  ...draft.prices,
-                  {
-                    model: "",
-                    operation: type,
-                    input_micros: 0,
-                    output_micros: 0,
-                    unit_size: 1,
-                  },
-                ],
-              })
-            }
-          >
-            {t("aiAddPrice")}
-          </Button>
+          <ProviderFields draft={draft} onChange={setDraft} type={type} />
           <div className="flex gap-2">
             <Button
               type="button"

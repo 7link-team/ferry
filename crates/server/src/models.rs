@@ -59,6 +59,8 @@ struct Body {
     state: String,
     #[serde(default)]
     version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    connection: Option<crate::workflows::ai::Body>,
 }
 async fn provider(conn: &impl ConnectionTrait, workspace: Id, id: Id) -> Result<providers::Model> {
     providers::Entity::find_by_id(id)
@@ -97,7 +99,8 @@ impl Body {
                 && (!self.runtime.is_empty()
                     || !self.tool_version.is_empty()
                     || self.default_model.is_empty()))
-            || (self.kind == "cli" && !["codex", "claude"].contains(&self.runtime.as_str()))
+            || (self.kind == "cli"
+                && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none())
             || self.tool_version.len() > 64
             || !self
                 .tool_version
@@ -152,7 +155,15 @@ async fn detail(
     scope: Scope,
     Path((_, id)): Path<(String, Id)>,
 ) -> Result<Json<Value>> {
-    Ok(Json(view(&find(&s.db, &scope, id).await?)))
+    let row = find(&s.db, &scope, id).await?;
+    let mut value = view(&row);
+    if row.provider_id != 0 && scope.permissions.contains("credentials.read") {
+        value["connection"] = crate::workflows::ai::view(
+            &provider(&s.db, scope.workspace_id, Id::from(row.provider_id)).await?,
+        );
+        value["connection"].as_object_mut().unwrap().remove("id");
+    }
+    Ok(Json(value))
 }
 async fn create(
     State(s): State<AppState>,
@@ -188,6 +199,19 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
     };
     if old.as_ref().is_some_and(|v| v.version != body.version) {
         return Err(changed());
+    }
+    if let Some(mut connection) = body.connection.take() {
+        connection.name = body.name.clone();
+        let provider_id = Id::reference(&body.provider_id)?;
+        let saved = crate::workflows::ai::save_in(
+            s,
+            &current,
+            &tx,
+            (i64::from(provider_id) != 0).then_some(provider_id),
+            connection,
+        )
+        .await?;
+        body.provider_id = saved.id.to_string();
     }
     let provider_id = body.validate(&tx, &current).await?;
     let id = match id {
@@ -254,7 +278,14 @@ async fn save(s: &AppState, scope: &Scope, id: Option<Id>, mut body: Body) -> Re
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Discovery {
+    #[serde(default)]
     provider_id: Id,
+    #[serde(default)]
+    runtime: String,
+    #[serde(default)]
+    host_id: Id,
+    #[serde(default)]
+    connection: Option<crate::workflows::ai::Body>,
 }
 async fn discover(
     State(s): State<AppState>,
@@ -264,19 +295,91 @@ async fn discover(
     if !scope.permissions.contains("ai-models.create") {
         scope.require("ai-models.update")?;
     }
+    if !body.runtime.is_empty() {
+        scope.require("hosts.read")?;
+        scope.require("ai-agents.probe")?;
+        let runtime = ferry_protocol::agent::Runtime::parse(&body.runtime).ok_or_else(invalid)?;
+        let host = crate::entities::hosts::Entity::find_by_id(body.host_id)
+            .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .filter(crate::entities::hosts::Column::Connection.eq("runner"))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        let channel = crate::hosts::remote::open(&s, &scope.workspace_id, &body.host_id).await?;
+        let status = channel.agent_probe(runtime, "").await?;
+        crate::accounts::workspace_admin::authorize(&s.db, &scope, "ai-agents.probe").await?;
+        // The selected host cannot be silently replaced by another Runner.
+        if crate::entities::hosts::Entity::find_by_id(host.id)
+            .filter(crate::entities::hosts::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&s.db)
+            .await?
+            .is_none()
+        {
+            return Err(ApiError::missing());
+        }
+        if status.models.is_empty() {
+            return Err(ApiError::localized(
+                StatusCode::BAD_REQUEST,
+                Message::new("models.nativeCatalogUnavailable"),
+            ));
+        }
+        crate::hosts::activity(
+            &s,
+            &scope,
+            "discover",
+            "ai-models",
+            &body.provider_id,
+            json!({"host_id":body.host_id,"runtime":body.runtime}),
+        )
+        .await?;
+        return Ok(Json(
+            json!({"models":status.models,"has_more":false,"source":"native_catalog","host_id":body.host_id}),
+        ));
+    }
     scope.require("credentials.use")?;
     scope.require("credentials.read")?;
-    let p = provider(&s.db, scope.workspace_id, body.provider_id).await?;
-    let c = credentials::Entity::find_by_id(p.credential_id)
-        .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&s.db)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    if c.scope != "ai" || c.kind != "token" {
+    let stored = if body.connection.is_none() {
+        Some(provider(&s.db, scope.workspace_id, body.provider_id).await?)
+    } else {
+        None
+    };
+    let (credential_id, base_url, protocol) = if let Some(ref connection) = body.connection {
+        (
+            i64::from(connection.credential_id),
+            connection.base_url.as_str(),
+            connection.protocol.as_str(),
+        )
+    } else {
+        let p = stored.as_ref().unwrap();
+        (p.credential_id, p.base_url.as_str(), p.protocol.as_str())
+    };
+    if base_url.len() > 512 || !matches!(protocol, "openai" | "anthropic") {
         return Err(invalid());
     }
-    let (_, _, secret) =
-        crate::credentials::unseal(&s, &scope.workspace_id, &Id::from(p.credential_id)).await?;
+    let supplied_key = body
+        .connection
+        .as_ref()
+        .and_then(|c| c.api_key.as_deref())
+        .map(str::trim)
+        .filter(|key| !key.is_empty());
+    let secret = if let Some(key) = supplied_key {
+        if key.len() > 16_384 || key.chars().any(char::is_control) {
+            return Err(invalid());
+        }
+        key.to_owned()
+    } else {
+        let c = credentials::Entity::find_by_id(credential_id)
+            .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if c.scope != "ai" || c.kind != "token" {
+            return Err(invalid());
+        }
+        let (_, _, secret) =
+            crate::credentials::unseal(&s, &scope.workspace_id, &Id::from(credential_id)).await?;
+        secret
+    };
     crate::hosts::activity(
         &s,
         &scope,
@@ -297,7 +400,7 @@ async fn discover(
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|_| unavailable())?;
-    let url = reqwest::Url::parse(&p.base_url).map_err(|_| invalid())?;
+    let url = reqwest::Url::parse(base_url).map_err(|_| invalid())?;
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -306,8 +409,8 @@ async fn discover(
     {
         return Err(invalid());
     }
-    let request = client.get(format!("{}/models", p.base_url.trim_end_matches('/')));
-    let request = if p.protocol == "anthropic" {
+    let request = client.get(format!("{}/models", base_url.trim_end_matches('/')));
+    let request = if protocol == "anthropic" {
         request
             .header("x-api-key", secret)
             .header("anthropic-version", "2023-06-01")
@@ -349,12 +452,24 @@ async fn discover(
     }
     current.require("credentials.use")?;
     current.require("credentials.read")?;
-    if provider(&s.db, scope.workspace_id, body.provider_id)
-        .await?
-        .version
-        != p.version
-    {
-        return Err(changed());
+    if let Some(p) = stored {
+        if provider(&s.db, scope.workspace_id, body.provider_id)
+            .await?
+            .version
+            != p.version
+        {
+            return Err(changed());
+        }
+    }
+    if supplied_key.is_none() {
+        let c = credentials::Entity::find_by_id(credential_id)
+            .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(&s.db)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if c.scope != "ai" || c.kind != "token" {
+            return Err(invalid());
+        }
     }
     Ok(Json(
         json!({"models":models,"has_more":data["has_more"].as_bool().unwrap_or(false)}),

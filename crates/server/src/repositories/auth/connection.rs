@@ -865,6 +865,28 @@ pub async fn resolve_connection(
     resolve_connection_row(s, conn, scope, row, address).await
 }
 
+/// Reuse named repository connections without accepting a client-supplied token,
+/// endpoint or credential override. Refresh OAuth using the existing lifecycle.
+pub(crate) async fn repository_api_access(
+    s: &AppState,
+    scope: &Scope,
+    connection_id: Id,
+    provider: &str,
+) -> Result<super::RepositoryApiAccess> {
+    scope.require("repositories.read")?;
+    scope.require("credentials.use")?;
+    let row = owned_connection(&s.db, scope, connection_id).await?;
+    if row.provider != provider || !matches!(row.state.as_str(), "connected" | "refreshing") || row.credential_id == 0 {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            crate::i18n::Message::new("repository.auth.connectionAuthorizationInvalid"),
+        ));
+    }
+    Ok(MonitorAccess::load(s, &row)
+        .await?
+        .into_api_access(row.credential_id.into()))
+}
+
 /// Execution of a saved binding follows workspace permissions; editing still requires ownership.
 pub async fn resolve_saved_connection(
     s: &AppState,

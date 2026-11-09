@@ -53,6 +53,13 @@
 - Tradeoffs: CLI installation/authentication detection and product persistence are P1/P2 work. Claude tool disabling is not an OS sandbox; native local permission rules remain effective. Unknown structured-input/permission requests fail closed. DecisionSent acknowledges transport to the native process only. P0 transport disconnect cancels execution; browser-independent runs need Server ownership in P2.
 - Status: P0 verified on Windows; real Codex and Claude reply/resume, allow/deny, pending-approval cancellation and Runner WebSocket forwarding passed. Legacy local/cluster capability refusal, related Runner/server regressions and workspace compilation passed; raw evidence and unsupported environments are recorded in MEMORY.md. No product conversation loop or release implied.
 
+## 工作流导航与普通/高级编辑（2026-11-04，用户确认）
+- 长期使用一级“工作流”，下分“构建流水线（Actions）”与“节点工作流”；资源URL与既有权限不变，旧build书签继续映射。
+- 两类编辑基于同一份定义：Actions可视化表单↔高级YAML，节点参数表单＋默认折叠高级JSON。保留未知字段与注释，不在创建时要求不可切换的编辑视图选择。
+- GitHub Actions与阿里云Flow交互可融合，YAML方言与执行语义不默认等价；格式兼容需逐字段验证。
+- 新建时文件选择和预览暂存于当前表单内存，首次保存才通过既有资产接口上传；不隐藏创建，不放宽归属和下载授权。失败保留文件及已创建ID/版本供重试，离开释放预览；刷新前未保存文件需重选。
+- 页面保存顶部右侧，面板删除/关闭标题右侧，弹窗取消/确认底部右侧；画布右/下及连线＋保留空间语义。删除键受输入焦点、只读和弹窗保护，仍需确认，并复用撤销历史。
+
 ## Notification provider forms and independent navigation feedback (2026-11-04)
 - Notification configuration follows Uptime Kuma's provider-first interaction (https://github.com/louislam/uptime-kuma/tree/master/src/components/notifications), while retaining automatic URL detection and legacy channel records. The implementation is independent; no Kuma runtime or source code is bundled.
 - Use official endpoint terminology and protocols: WeCom/DingTalk Markdown links, Feishu/Lark rich-text post links, Telegram HTML, Slack/Google Chat native links, Discord Markdown with automatic mentions disabled. Generic Webhook retains its original JSON.
@@ -67,6 +74,59 @@
 - Alternatives: a heartbeat watchdog still needs proof of child cleanup before its deadline; never reclaiming SQL slots prevents automatic recovery. Neither is used as the physical exclusion mechanism.
 - Tradeoffs: an expired SQL lease does not authorize killing the old worker; a successor waits up to 60 seconds for physical capacity, then fails closed with a diagnostic. Shared-directory permission failures also fail closed. Existing standalone worker requests without host-slot fields remain compatible. This fences worker invocations; it does not claim to prevent arbitrary detached processes deliberately created by repository scripts.
 - Verification: native Windows cross-process exclusion/crash recovery and capacity-reduction tests passed; full worker/server and real remote execution regression pending.
+
+
+## Pipeline object grants and ownership (2026-11-04, verification in progress)
+- Decision: extend the existing definition ACL query/API to pipeline and pipeline_group subjects. Intersect the caller's live workspace capabilities with owner/direct/current-group grants; keep Workflow and pipeline subject kinds distinct even when IDs coincide. Filter before pagination and count, including run and artifact lists.
+- Ownership: append a nullable owner_id migration; historical owners remain unknown rather than being guessed from editors. Every create_in caller records the actual creator. Only the current owner may transfer, under the workspace mutation lock, to an active member with live workspace and object Edit. CAS and the transfer audit commit together; revisions do not change and ordinary saves cannot inject an owner.
+- Reuse/reason: share EXISTS-based authorization, ACL persistence, membership validation and workspace locking with Workflow. Group grant management requires the existing roles.update authority and group update permission.
+- Scope/status: local implementation and acceptance in progress. This change alone does not implement production publication, pause legacy scheduled/event triggers, or fulfill PDR-04. No running environment migration is authorized or performed.
+
+## Execution packet assets: encrypted locators and physical generations (2026-11-04)
+
+- Decision: canonical packet plaintext determines the workspace-scoped SHA256 dedup identity. A randomly encrypted object is bound to workspace, asset ID and hash; the execution column stores a separately encrypted locator bound to the existing execution/node/field AAD. Retaining the asset reference and changing the node result share the fenced journal transaction.
+- Reason: random encryption must not defeat dedup or allow moving an execution snapshot into a different identity. Creating a candidate/quota reservation before object I/O makes an interrupted or rolled-back upload discoverable by GC.
+- Alternatives considered: plaintext objects violate output encryption; hashing random ciphertext loses content dedup; overwriting a deterministic physical key after uncertain deletion allows an old DELETE to erase a new upload.
+- Tradeoff: a physical key includes the asset ID generation. Same-workspace live content still has one metadata/hash identity; rebuilding after collection gets a new key. Object storage and database commit are explicitly separate, recoverable steps.
+- Scope/status: implementation of internal journal params/output assets and local/S3 storage; pending full platform acceptance, public scheduler/API integration, retention cleanup and pin provenance. Does not convert pipeline path addressing or claim a cross-system atomic transaction.
+
+## Workflow object grants (2026-11-04, locally verified)
+- Scope: shared definition_acl storage and the Workflow/resource-group API adapter; no legacy Actions access change, ownership transfer, publication or executable graph registration.
+- Decision: intersect live workspace permissions with owner or direct/current-resource-group view/run/all grants. Use capability sets and EXISTS rather than ordering role names or joining/paging before authorization. Only the existing platform superadmin is an object override; an ordinary workspace read/update permission is not one.
+- Administration: Workflow ACL management requires workspace update and object all/owner. Resource-group grants use the existing workspace roles.update administration authority plus workflow-groups.update. A grant recipient must be an active account and active member in the same workspace; granting cannot mutate owner. Immutable grants use idempotent creation and version-checked deletion, both audited under the workspace transaction lock. Parent deletion cleans only that parent's grants.
+- Consistency: parent/detail/history authorization and data reads use one snapshot; list total/items use the same authorized snapshot (SQLite transaction, PostgreSQL/MySQL repeatable read). Writes and ACL mutations use the existing workspace lock and re-authorize after acquiring it, so stale queued requests cannot reuse revoked authority. No new product dependency.
+- Verification: 454 workspace tests passed, 0 failed, 12 existing ignored. Rebuilt server passed all 17 HTTP/draft/ACL checks on isolated SQLite and MySQL 8.4.8, plus 8 real Actions Runner/history/restart regression checks. Evidence: data/maintenance/workflow-acl-workspace-results.json and workflow-acl-live-results.json, including source/runtime hashes and retained fixtures. Test MySQL was shut down through mysqladmin and its port release checked.
+- Boundary: PostgreSQL runtime behavior, pipeline ACL adapter, ownership transfer confirmation (PDR-02), publication, graph execution and UI remain unverified or pending. Schema/SQL generation for three backends is not a substitute for PostgreSQL runtime acceptance. No commit, push, merge, deployment or existing service update.
+
+## Workflow draft resources and save-time validation (2026-11-04, locally verified)
+- Scope: Workflow draft CRUD, immutable history, lifecycle and separate resource groups. Saving a draft never creates production authority; publication, object ACL and graph execution remain separate pending requirements.
+- Decision: reuse shared REST list/query contracts, workspace transaction lock, fresh transaction authorization, definition revision ledger and context groups. CAS definition/version/revision pointer/audit commit together; archive and restore clear publication; deletion retains immutable revisions and refuses execution or cross-definition revision references.
+- Validation: execute the bundled graph and 53 node parameter schemas through jsonschema 0.60.2 with default features disabled (no default HTTP/file resolver); no preexisting dependency version upgrades. Only trusted bundled schemas are compiled. Structural save validation is distinct from resolved runtime validation, credential authorization and executor registration.
+- Verification: 450 workspace tests passed, 0 failed, 12 existing ignored; rebuilt server passed 11 isolated SQLite HTTP checks plus all 8 real Actions Runner/history/restart regressions. Evidence: data/maintenance/workflow-drafts-workspace-results.json and workflow-drafts-live-results.json. First failed fixture used main instead of the declared Merge input port input; corrected the fixture without weakening validation and retained the failure log.
+- Boundary: no PostgreSQL/MySQL draft CRUD verification, publication, object ACL, graph execution or new UI acceptance. No commit, push, merge, deployment or existing service update.
+
+## Workflow persistence foundation (2026-11-04, locally verified)
+- Scope: production Workflow definition/execution/node-attempt tables and workspace-wide execution numbering. CRUD, graph validation/planning, publication and object authorization remain pending; no legacy pipeline authorization or trigger policy changed.
+- Decision: implement the model's baseline plus §10.11 fields together, using BIGINT identities, nullable unknown owner/publication/run-as links, immutable revision references, durable context/resolved-parameter fields and attempt identity `(execution_id,node_id,iteration_hash,attempt)`. Reuse the existing lease implementation against the actual migrated Workflow table. Preserve all data on down by refusing destructive removal.
+- Numbering: the new workspace counter starts at 0 and is incremented under the existing workspace transaction lock, in the same transaction as an execution insert. Rollback restores both; reject i64 overflow. Do not use MAX()+1 or share the Actions number counter.
+- Verification: 444 workspace tests passed with 12 existing ignored; real prior-binary-to-current upgrades passed 4 checks each on SQLite and isolated MySQL 8.4.8, and the rebuilt server passed 8 real Runner/revision regression checks. Evidence: data/maintenance/workflow-storage-workspace-results.json and workflow-storage-live-results.json. Current server SHA256 4fb5039fa6b8e6e3de8ca2a6e4be9fc48666058ed81939a2ed73c8c9fc6b91d0. PostgreSQL and real SQL contention/MVCC remain unverified. No commit, push, merge or service update.
+
+
+## Immutable Actions definition history (2026-11-04, locally verified)
+- Scope: shared revision ledger and existing Actions save/run adapters; publication pointers, object ACL and Workflow execution are separate pending requirements.
+- Decision: reuse the workspace transaction lock and shared REST list contract. Canonicalize JSON object keys while preserving YAML string bytes. Only substantive definition changes append a revision; normal save of older content creates a new revision. Save validation, optimistic version checks and revision insertion share one transaction. A run freezes the source revision before analysis-specific checkout specialization.
+- Migration: backfill one current revision per legacy pipeline using its existing Snowflake in the separate revision table, unknown author 0 and migration timestamp. Never invent a publication or historical author; unknown old run provenance remains revision 0. Repeated upgrade must not overwrite history. No destructive down migration.
+- Verification: 440 workspace tests passed with 12 existing ignored; real HTTP/Windows Runner/restart acceptance passed all 8 checkpoints on the rebuilt server. Evidence: data/maintenance/workflow-revisions-workspace-final.log and workflow-revisions-live-results.json. PostgreSQL/MySQL runtime migration and new UI remain unverified. No commit, push, merge or service update.
+
+
+## Shared execution ownership integration (2026-11-04, worktree implementation)
+- Scope: workflow-platform execution foundation and compatibility with existing Actions runs; no change to other workspace sessions or the running local service.
+- Decision: reuse the workspace row lock to serialize concurrency limits, group exclusion and lease claim in one transaction. Every scheduler attempt has a per-boot identity and epoch and runs under the independent heartbeat supervisor. Child mutations use an ownership predicate; completion uses the execution-row CAS and child updates in one transaction. Artifact publication locks and checks the execution row before publishing staged files.
+- Recovery: existing Actions commands have no durable replay checkpoint, so an expired owned Actions run is claimed before being finalized under its existing interruption policy, without repeating external commands. Live leases are not swept at startup. Resumable graph/node execution remains required and is not replaced by this compatibility policy.
+- Cancellation: database queries and log persistence are polled alongside the remote stream and stop channel; SQL pool contention cannot suppress the cancellation signal or drop the stream before cleanup acknowledgement. Transport output remains bounded through backpressure.
+- Expiry: runtime SQL guards and renewal compare against the database execution clock, rather than a timestamp captured before waiting for a connection. PostgreSQL uses clock_timestamp to avoid transaction-start time; MySQL uses SYSDATE(3); SQLite uses millisecond strftime. Deterministic lease tests inject their logical clock separately. Real PostgreSQL/MySQL waiting/MVCC boundaries remain unverified.
+- Reservation acquisition: poll the pending host reservation and persistent status reads concurrently; both may need the default single SQLite connection. Drop acquisition/check futures before cancellation finalization. The original four-instance run exposed a stalled queued command; retained evidence is workflow-cluster-executions-live.log. Acceptance requires rerunning the unchanged cluster assertions with rebuilt code.
+- Verification: current workspace regression passed (436 passed, 12 existing ignored; server 388 passed, 8 ignored), including delayed expiry and reservation progress/cancellation regressions. Rebuilt binaries passed 24 real Windows Actions checks, 14 real host-capacity checks and all 12 cluster checkpoints, including four schedulers beyond TTL and queued command effects exactly once after cancellation. Evidence is retained in worktree data/maintenance/workflow-reservation-*, workflow-actions-*-after.log and workflow-cluster-executions-after.log; cluster raw data is cluster-acceptance-6hYlbd in the local temp directory. PostgreSQL/MySQL contention and graph recovery remain unverified. This decision is not a claim that the complete platform is implemented or accepted.
 
 ## Localized mixed execution output (2026-11-02, confirmed)
 - Context: execution outputs mix product summaries with literal command logs. A single Message has a 256 KiB metadata limit, while existing logs allow 1 MiB of raw bytes.
@@ -500,3 +560,87 @@ Decision: user approves NATS JetStream for node connection ownership and cross-i
 - Reuse/scope: Rust Server scheduler/leases, Scope, resource forms, themes, six languages; direct execution, no subagents, no new dependencies, no global CLI changes or production deployment.
 - Validation: owner/member/nonmember/admin privacy, target-only dispatch, independent Agent native state, forbidden cross-conversation file references, range/download byte equality, deletion during execution, record cleanup; browser upload/paste/drop/audio and desktop/mobile flows. Status: implementation in progress.
 
+## Conditional execution and branch projection - implementation design (2026-11-04)
+- Scope: existing core.filter/if/switch contracts and core.merge append only; no new product defaults, dependencies, migration or UI. Remaining merge collision/join rules remain unresolved, not silently chosen.
+- Reuse: graph parameter resolution, bounded QuickJS subprocess, immutable attempt snapshots and Journal atomic multi-port output. Optional internal capture_presence envelopes distinguish top-level undefined from null only for conditional operands; ordinary expressions remain strict JSON and nested undefined/nonfinite/functions remain errors. Literal operands are enveloped by the resolver too, preventing user object values from impersonating internal metadata.
+- Routing: persist every declared output port, including explicit skipped branches. Upstream lookup flattens ports in manifest order; paired indices include preceding-port offsets. Merge waits for every predecessor terminal projection, then consumes inputs in index order; any_items excludes skipped/empty inputs and skips only when none has items, all_inputs skips on a skipped input while executed-empty inputs participate.
+- Verification: sandbox presence/cache/syntax and bounded regex tests; conditional truth tables/type errors/missing/null; real HTTP branch routing, downstream paired lookup, merge empty/skipped, immutable restart recovery on isolated SQLite/MySQL. Multi-port pin/bypass semantics are not invented; unsupported execution combinations must reject explicitly until defined.
+- Status: technically necessary implementation design within existing authorized workflow scope; not approval of unresolved PDR business decisions.
+
+## Failed execution terminal bookkeeping - implementation design (2026-11-04)
+- Problem: an executor error can terminate its parent execution while its activated node row still says running. That stale row must not look like ongoing work or become replayable.
+- Design: extend the existing lease-fenced workflow finish transaction. Acquire the parent row in the same order as Journal, mark its running node attempts failed with only the bounded public end-reason code, then recheck lease/version/expiry in the final parent terminal update. Node and execution timestamps/versions commit together; succeeded and waiting historical rows and encrypted snapshots are preserved. No raw exception, expression or stop details enter public error fields.
+- Reuse: existing execution lease/CAS, workflow_node_runs fields and transaction; reuse the Journal database fixture for real production-schema tests. No new table, dependency, product default, retry or continue/error-output semantics.
+- Acceptance: runtime executor failures produce failed attempts with completion timestamps; completed attempts remain byte-for-byte unchanged; failed history survives hard restart; expired/stale owners and expiry injected before final write roll back all node/parent changes. Verify isolated SQLite and MySQL; fault-trigger injection remains SQLite-only and explicitly excluded from MySQL.
+- Scope boundary: this fixes existing stop-on-error terminal bookkeeping. Outputless Stop nodes, retry, cancellation state codes, other error policies and undefined product defaults remain separate existing work; no claim those features are implemented.
+
+## PDR-01 through PDR-05 confirmed as documented (2026-11-04)
+- Decision: user explicitly selected the documented recommendations in both asynchronous confirmation questions: PDR-01 through PDR-03, and PDR-04 through PDR-05, in PRD section 15.10. The complete corresponding table rows are the approved rules, including their limits and edge cases; this record does not replace those details with an abbreviated interpretation.
+- Scope: implement shared form/API validation and resource limits, human operation/protection defaults, trigger/session/notification rules, safe legacy production-authorization migration and the documented currency/month/reservation/rate-limit accounting rules.
+- Constraints: implementation and tests remain in the isolated workflow worktree. Confirmation of migration behavior does not authorize applying that migration to running user deployments, publication, commit, push, merge or updating port 4291.
+- Status: CONFIRMED. PDR-06 provider/model/hardware choices and the separate execution-timeout question remain unresolved; they are not implied by this approval. Continue all independently authorized work without requesting these five approvals again.
+
+## Outputless Stop node - implementation design (2026-11-04)
+- Scope: implement the existing core.stop contract on the current stop-on-error execution policy. Its resolved message/details remain in the encrypted attempt snapshot; public termination uses the existing bounded node_failed reason and a localized generic stopped message. It uses the same terminal transaction as other executor failures.
+- Outputless history: freeze a default-false outputless flag in new attempt snapshots from the manifest's declared outputs. Empty output-port packets are permitted only for these authenticated snapshots, so mute/upstream-skipped Stop nodes can finish skipped without fabricating a main output. Old snapshots retain the prior nonempty-output rule. Ordinary nodes still reject an empty output-port packet; an executed empty main port remains valid and distinct.
+- Boundaries: flat pins and bypass have no defined outputless routing contract and remain explicitly rejected for this node; this does not silently add ports to its manifest. Active Stop always fails, so always_output cannot turn it into success. No new state codes, retry rules, credential or external I/O.
+- Verification: old-snapshot compatibility and output shape guards, node/parent failure atomicity and six locale strings; real active Stop/mute/upstream-skipped behavior, encrypted private details, immutable failure/skip history across restart on isolated SQLite and MySQL.
+
+## Workflow ownership transfer - implementation design (2026-11-04)
+- Implement FR-AUTH-02/05 and AC-AUTH-06 with POST /workspaces/{workspace}/workflows/{id}/owner-transfers, accepting only owner_id and version. Ordinary draft writes continue ignoring ownership fields. Only the current owner can transfer, including when the caller is a platform administrator.
+- Reuse the workspace mutation lock, live caller reauthorization, object Edit checks and Scope::for_actor_in. Require explicit active workspace membership even for a superadmin recipient, then require the recipient's existing workspace and object editing permissions. No implicit grants or old-owner grant are added.
+- Compare-and-swap owner/version and write old/new owner identifiers in the same activity transaction. Do not change revisions, production identity, publication pointer or in-flight runs. No migration or new dependencies.
+- Validate with real isolated SQLite/MySQL HTTP: target membership/activity, workspace ceiling, object edit grants, owner-only authority, stale/concurrent requests, audit and revision preservation, scope/body injection, and restart persistence. UI confirmation follows the approved PDR-02 ordinary confirmation rule when the shared UI is implemented.
+
+## Workflow publication ledger and identity - implementation design (2026-11-04)
+- Implement the approved definition_publications table with append-only metadata, exact case-sensitive trimmed 1-64 character names, optional 200-character change notes and optional bounded request keys. Use the existing schema builder's explicit MySQL binary collation and unique subject/name and subject/request indexes. Do not backfill publications or run production migrations.
+- Workflow publications use existing workspace update and run ceilings plus object Edit/Run. The publisher becomes run_as; a different previous publisher requires an explicit matching previous_run_as confirmation. Lock the workspace, reread live authority, validate the selected current draft revision and runtime, then write the immutable ledger, pointer, identity and audit atomically with version CAS. Ordinary draft saves keep production pointer and identity untouched.
+- Reuse graph checked validation, plan compilation and the current explicit runtime support gate. Publication ignores pin_data, and unsupported runtime/credential/host nodes remain refused until their actual executors and authority adapters exist. Do not promote advisory topology warnings into product errors. No tenant expressions are executed by publishing.
+- GET/POST workflow publications and POST unpublication use separate endpoints and existing list envelopes. An identical request-key retry returns its original publication without republishing; a changed payload/actor conflicts. Unpublication clears only the active pointer, retaining ledger and prior identity for later identity-change confirmation. Archived workflows cannot publish.
+- Verify isolated SQLite/MySQL names and limits, request races/retries, publisher switching/confirmation/revocation, draft-versus-published manual runs, archive/unpublish, immutable in-flight snapshots and hard restart. This step does not claim automatic trigger delivery, pipeline publication or UI completion; those remain required subsequent work.
+
+## Administrator-installed declarative workflow packages (2026-11-05)
+- Decision: extend the existing HTTP declarations with startup-loaded JSON packages under the server data directory; expose the combined catalog through an authenticated workspace endpoint for the existing editor and credential forms. Installation/enabling/disabling requires restart and browser refresh, not recompilation. User authorized continuing extension work; this is the first data-only increment, not a JS/WASM plugin implementation.
+- Reuse: graph schema compilation, expression restrictions, existing encrypted profile-bound credentials, HTTP request builder, object/run authorization and durable request ledger. No tenant code loading or new runtime/dependency.
+- Identity: package id/version namespace both node types and credential profiles. Canonical package SHA256 is recorded in a durable version lock; changing a registered version fails startup. New versions coexist with previous packages. A disabled package is not silently substituted; dependent definitions become unavailable until restored.
+- Trust/scope: packages are installed by the deployment administrator, never via a tenant upload endpoint. First version restricts parameter forms to supported flat scalar controls, fixed HTTPS HTTP execution and single-server deployments. Cluster mode with enabled packages fails explicitly until shared catalog identity is implemented. JS/TS and WASM are recommended future code extension targets; Lua is not added by this increment.
+- Tradeoffs: avoids a compilation requirement for new HTTP integrations and preserves old versions without mutable global reloads. No hot installation, package manager, sandbox for arbitrary third-party code, npm/custom-node compatibility or extension translation bundle is claimed. Removing a package can prevent pending workflows from running; the operator must finish running work before disabling and back up the lock with workflow data.
+
+## Foundation priority and embedded extension engines (2026-11-05)
+- Confirmed: stabilize Actions/Codeup visual and YAML editing and n8n-style node editing/execution before expanding the integration catalogue. JSON plus embedded JS/QuickJS, WASM and Lua are in scope; Python and externally installed interpreters are deferred. Reuse isolated workers, not the business server process, for code execution. This supersedes the earlier suggestion to defer Lua; engine/plugin support is not yet implemented.
+- Current implementation unit: keep Actions YAML as the sole editable truth and reuse its AST, existing inspector, map rows and save/binding contracts. Add workflow/job environment and command defaults, job conditions, safe structured runner editing and reusable-workflow form fields. Patch mapping entries in place so comments, aliases, scalar types and unknown siblings survive unrelated edits. Do not infer Flow dialect compatibility from the form UI or introduce automatic conversion.
+- Validation: regression tests for comments/types/aliases/unknown fields and actual browser visual/YAML round trips, save/reopen, real runner execution, read-only and narrow viewport. Retain invalid YAML for correction; mutations must not silently rewrite unsupported mapping forms. Only isolated 4292 may be updated after backup/verification; no commit, push, merge or production release.
+## AI模型直接配置与响应式表单（2026-11-09）
+- 范围：模型页直接配置连接，一次事务保存；复用既有供应商、凭据、额度和价格校验，无新增连接管理模块或数据库迁移，历史 provider_id API 兼容。
+- 布局：Desktop/Pad 短字段两列，地址和模型清单整行，价格卡片两列；Phone 单列，保留标签、帮助、错误及统一底部按钮；禁止整页横溢。
+- 状态：创建默认现有 OpenAI 参数，编辑回填；版本冲突保留输入；非法配置回滚；无凭据链接现有凭据页；加载和错误明确；只读显示文本。CLI 无连接及历史自定义连接保留。
+- 权限/审计：保留工作空间 Scope 与既有模型/连接独立权限，提交审计，查询不增加业务审计；共享连接的编辑影响沿用既有行为，不复制。无删除、保留、公式、索引、灰度、第三方变更；配置来源仍为用户配置。
+- 文案/时区：复用六语及建议值必选、检测提示。验收覆盖真实创建/编辑/查看、权限、跨空间、冲突和回滚，1440/900/390/320 布局截图。Figma 暂缺、虚拟键盘和原生 App 实机未覆盖，不冒充全站认证。
+
+## 仓库连接与洞察按工作空间共享（2026-11-05，用户确认）
+- Decision：命名仓库连接及代码洞察按空间角色权限可见、使用和维护，不再以创建者作为访问边界；列表、详情、事件、仓库解析、洞察聚合和定时采集采用相同范围。
+- Reason：用户进入demo空间后管理员看不到原demo账号创建的连接/洞察，明确要求进入空间就应按权限可见。
+- Reuse：继续使用Scope工作空间提取/权限检查、既有连接查询及资源列表，不改数据归属，不新增共享开关或第二套权限。
+- Boundaries：跨空间继续隔离；读权限不赋予修改/删除/采集权限；未命名OAuth授权准备会话、回调state及密钥保持个人隔离/不回显；洞察编辑保留原创建者及独立身份映射，后台授权身份不随查看者改变。
+- 用户补充：平台超管进入任意存在的空间即拥有最高权限，无需加入、不创建成员关系；查询不增加空间活动/业务操作记录，提交修改/删除/触发等操作按真实超管身份审计。平台内部请求监控/错误日志保留，普通空间用户不可访问。
+- Alternatives：仅移除列表过滤会导致详情404/采集需求丢失，未采用；更改所有者或复制记录会丢失语义并重复数据，未采用。
+- Status：已实施并备份更新4291，角色/跨空间/未加入超管/查询无业务留痕及提交审计测试通过；具体证据与用户验收状态以MEMORY.md为准。
+
+
+## 预览穿透 Preview Holes（2026-11-09，用户确认）
+
+- Decision：复用Runner会话通道新增`SessionKind::Forward`，公开路由`/holes/{token}/...`按路径反代到Runner本机`127.0.0.1:{port}`；同源下强制`CSP sandbox`（不含allow-same-origin），剥离Ferry Cookie/Set-Cookie/Service-Worker-Allowed。
+- Reason：不分配额外域名；Rathole为L4按端口转发、与现有通道重复；同源不加沙箱时预览页JS可用查看者会话调用全部Ferry API。
+- Alternatives Considered：Rathole；子域名/独立端口origin；仅凭token权限（不安全，风险来自查看者登录态）；HTML改写（不可靠）。
+- Tradeoffs：被预览应用不能用Cookie/localStorage/IndexedDB；Web预览需应用配置base或相对路径。
+- Scope：详见docs/preview-holes-design.md；转发长连接不持有升级租约，Runner停止/升级时主动关闭。
+- Status：已实现并验证，提交于feat/preview-holes@403a5b6，待合并main（2026-11-09）。实现补充：导航放host分组；url返回根相对路径由浏览器拼接；错误页为带沙箱CSP的纯文本；转发会话不持有Runner升级租约。
+
+## 已知主机的连接命令默认值（2026-11-09）
+
+- 事实/范围：用户要求已知主机按OS及系统/当前用户服务默认展示命令。复用hosts.os、Runner Hello、在线注册和集群RunnerInfo，不靠浏览器OS/用户名/管理员权限推断。
+- 设计：Hello可选installation_scope仅接受system/user/foreground；官方service worker从现有service.json.user_service报告system/user，直接CLI报告foreground。旧Runner缺字段为未知；在线集群复制同一可选元数据；不新增数据库列。connection-credentials在原hosts.enroll和workspace范围检查后返回os/installation_scope，不新增权限豁免。
+- UI/状态：已知OS自动选择Windows/macOS/Linux；已知system/user选择对应安装范围；foreground显示直接启动说明，旧版/离线未知要求手选范围再生成/卸载命令。不执行安装/重装/重置，不改已有服务。当前页手动选择不被状态轮询覆盖；切主机清旧令牌和默认值。元数据仅展示，不作授权依据。
+- 数据/兼容：无新表/字段/时间审计/索引/DDL或up/down迁移；旧Hello和集群记录默认None；新字段可被旧端忽略；离线范围不持久化，不伪装已知。无删除/金额/计算/新增依赖；命令生成/重置审计沿用现有规则，查询不新增操作记录。
+- 校验/全状态：限定OS枚举和三种上报值，未知值丢弃；空/请求错误/离线/旧版保留手选且不生成错范围命令；长文案换行，令牌不写日志。六语；Desktop/Pad/Phone沿用连接卡片与通用Tabs/表单、纵滚/安全区/键盘；截图测试四宽度，Figma和原生触控未提供。
+- 验收：RunnerConnection单测Windows用户服务默认与foreground不冒认系统服务；协议旧Hello兼容、server Runner transport/集群回归；隔离真实Runner握手和用户指定本地主机页面验证。system/user语义来自官方worker配置，未经真实OS安装流程不宣称系统服务安装验收。

@@ -114,13 +114,39 @@ fn check_scope(value: &str) -> Result<()> {
     Ok(())
 }
 
+// Shared credential contracts are data, not workflow execution dependencies.
+static EXTENSION_PROFILES: std::sync::OnceLock<std::collections::HashSet<String>> =
+    std::sync::OnceLock::new();
+pub(crate) fn register_profiles(nodes: &[Value]) {
+    let profiles = nodes
+        .iter()
+        .filter_map(|n| n["http"]["auth"]["profile"].as_str().map(str::to_owned))
+        .collect();
+    let _ = EXTENSION_PROFILES.set(profiles);
+}
+fn credential_profile(profile: &str) -> bool {
+    static BUILTIN: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    let catalog = BUILTIN.get_or_init(|| {
+        serde_json::from_str(include_str!(
+            "../../../src/shared/workflow-contracts/workflow-integration-nodes.json"
+        ))
+        .expect("credential contracts")
+    });
+    catalog["nodes"].as_array().is_some_and(|nodes| {
+        nodes
+            .iter()
+            .any(|n| n["http"]["auth"]["profile"] == profile)
+    }) || EXTENSION_PROFILES
+        .get()
+        .is_some_and(|profiles| profiles.contains(profile))
+}
+
 fn check(body: &Body, creating: bool) -> Result<String> {
     if let Some(value) = &body.scope {
         check_scope(value)?;
     }
     if body.scope.as_deref() == Some("integration")
-        && ((creating && body.kind != "token")
-            || !crate::workflows::integration::credential_profile(body.username.trim()))
+        && ((creating && body.kind != "token") || !credential_profile(body.username.trim()))
     {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
@@ -170,8 +196,12 @@ pub async fn list(
         check_scope(value)?;
     }
     let query = ListQuery::parse(&SPEC, &raw)?;
-    let (rows, total) =
-        resource::list(&s.db, &SPEC, summary_query(), &scope.workspace_id, &query).await?;
+    let select = if raw.contains_key("scope") {
+        summary_query()
+    } else {
+        summary_query().filter(credentials::Column::Scope.ne("ai"))
+    };
+    let (rows, total) = resource::list(&s.db, &SPEC, select, &scope.workspace_id, &query).await?;
     Ok(Json(json!({
         "items": rows.iter().map(to_json).collect::<Vec<_>>(),
         "total": total, "page": query.page, "page_size": query.page_size,

@@ -96,7 +96,7 @@
   "mail.testSubject": "이메일 설정 테스트",
   "mail.testBody": "이메일 설정 테스트 메시지입니다.",
   "mail.codeSubject": "가입 인증 코드",
-  "mail.codeBody": "가입 코드는 {code}입니다. 10분 동안 유효합니다. 공유하지 마세요.",
+  "mail.codeBody": "가입 코드는 {code}입니다. {expires_minutes}분 동안 유효합니다. 공유하지 마세요.",
   "monitor.nodeChanged": "응답 서버가 표시된 노드와 다릅니다. 통계를 새로 고친 후 다시 시도하세요. 초기화는 실행되지 않았습니다.",
   "auth.captchaRequired": "새 보안 인증을 완료한 후 로그인하세요.",
   "auth.loginRateLimit": "로그인 시도가 너무 많습니다. 1분 후에 다시 시도하세요.",

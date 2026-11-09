@@ -278,6 +278,48 @@ pub(crate) async fn checked(input: &str) -> Result<String> {
     Ok(canonical)
 }
 
+/// Legacy authentication is retained only for the same persisted node and auth
+/// configuration. Clients cannot opt a newly created node into legacy behavior.
+pub(super) fn repository_auth_policy(input: &str, previous: Option<&str>) -> Result<()> {
+    let graph: Value = serde_json::from_str(input).map_err(|_| invalid("/", "workflow.graphSchema"))?;
+    let previous = previous.and_then(|value| serde_json::from_str::<Value>(value).ok());
+    fn layer(graph: &Value, previous: Option<&Value>, path: &str) -> Result<()> {
+        for (index, node) in graph["nodes"].as_array().into_iter().flatten().enumerate() {
+            let at = format!("{path}/nodes/{index}/params");
+            let old = previous.and_then(|graph| graph["nodes"].as_array())
+                .and_then(|nodes| nodes.iter().find(|old| old["id"] == node["id"] && old["type"] == node["type"]));
+            if node["type"] == "core.loop" {
+                layer(&node["params"]["body"], old.map(|old| &old["params"]["body"]), &format!("{at}/body"))?;
+            }
+            let Some(spec) = manifest(node) else { continue; };
+            let api = matches!(spec["http"]["auth"]["profile"].as_str(), Some("github" | "gitlab" | "codeup"));
+            let network = matches!(spec["git"]["operation"].as_str(), Some("clone" | "remote_refs" | "fetch" | "pull" | "push"));
+            if !api && !network { continue; }
+            let params = &node["params"];
+            if params.get("connection_id").is_some() {
+                if network && params["auth_mode"] == "anonymous" { return Err(invalid(at, "workflow.repositoryConnectionRequired")); }
+                continue;
+            }
+            let legacy = old.is_some_and(|old| old["params"].get("connection_id").is_none()
+                && ["credential_id", "organization_id", "auth_mode"].iter().all(|key| old["params"].get(key) == params.get(key)));
+            if legacy { continue; }
+            if network && params["auth_mode"] == "anonymous" {
+                if params["url"].as_str().is_some_and(|url| url.starts_with('=')) { continue; }
+                if anonymous_git_url(params["url"].as_str().unwrap_or_default()) { continue; }
+            }
+            return Err(invalid(at, "workflow.repositoryConnectionRequired"));
+        }
+        Ok(())
+    }
+    layer(&graph, previous.as_ref(), "")
+}
+
+pub(super) fn anonymous_git_url(raw: &str) -> bool {
+    reqwest::Url::parse(raw).is_ok_and(|url| matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some() && url.username().is_empty() && url.password().is_none()
+        && url.query().is_none() && url.fragment().is_none())
+}
+
 pub(crate) fn node_at<'a>(graph: &'a Value, path: &str) -> Option<&'a Value> {
     let suffix = path.strip_prefix("/nodes/")?;
     let (index, nested) = suffix
@@ -703,6 +745,43 @@ fn validate_layer(graph: &Value, base: &str, nesting: usize, total: &mut usize) 
 mod tests {
     use super::*;
 
+    #[test]
+    fn repository_auth_policy_rejects_new_legacy_and_preserves_only_saved_identity() {
+        let legacy = node("repo", "integration.github.repository.get");
+        let previous = json!({"nodes":[legacy.clone()]}).to_string();
+        resolved_error(repository_auth_policy(&previous,None).unwrap_err(),
+            "workflow.repositoryConnectionRequired", "/nodes/0/params");
+        assert!(repository_auth_policy(&previous,Some(&previous)).is_ok());
+        let mut changed = legacy.clone();
+        changed["params"]["credential_id"] = json!("123");
+        assert!(repository_auth_policy(&json!({"nodes":[changed]}).to_string(),Some(&previous)).is_err());
+        let mut copied=legacy.clone();copied["id"]=json!("copy");
+        assert!(repository_auth_policy(&json!({"nodes":[legacy.clone(),copied]}).to_string(),Some(&previous)).is_err());
+        let mut connected=legacy.clone();connected["params"]["connection_id"]=json!("123");
+        assert!(repository_auth_policy(&json!({"nodes":[connected.clone()]}).to_string(),None).is_ok());
+        assert!(repository_auth_policy(&previous,Some(&json!({"nodes":[connected]}).to_string())).is_err());
+        let nested=json!({"nodes":[{"id":"loop","type":"core.loop","params":{"body":{"nodes":[legacy]}}}]}).to_string();
+        resolved_error(repository_auth_policy(&nested,None).unwrap_err(),
+            "workflow.repositoryConnectionRequired", "/nodes/0/params/body/nodes/0/params");
+        assert!(repository_auth_policy(&nested,Some(&nested)).is_ok());
+    }
+
+    #[test]
+    fn repository_auth_policy_requires_explicit_anonymous_http_and_no_local_connection() {
+        let mut git=node("git","integration.git.repository.clone");
+        assert!(repository_auth_policy(&json!({"nodes":[git.clone()]}).to_string(),None).is_err());
+        git["params"]["auth_mode"]=json!("anonymous");
+        for url in ["https://example.invalid/repo.git","http://example.invalid/repo.git"] {
+            git["params"]["url"]=json!(url);
+            assert!(repository_auth_policy(&json!({"nodes":[git.clone()]}).to_string(),None).is_ok());
+        }
+        for url in ["ssh://git@example.invalid/repo","https://token@example.invalid/repo","https://u:p@example.invalid/repo","file:///repo","https://example.invalid/repo?token=secret"] {
+            git["params"]["url"]=json!(url);
+            assert!(repository_auth_policy(&json!({"nodes":[git.clone()]}).to_string(),None).is_err());
+        }
+        assert!(repository_auth_policy(&json!({"nodes":[node("status","integration.git.repository.status")]}).to_string(),None).is_ok());
+    }
+
     fn inputs(values: &[Value]) -> ferry_protocol::sandbox::InputData {
         serde_json::from_value(json!({"items":values.iter().map(|value|json!({"json":{"value":value}})).collect::<Vec<_>>(),"upstream":[]})).unwrap()
     }
@@ -1027,7 +1106,7 @@ mod tests {
 
     #[test]
     fn draft_contracts_accept_all_catalog_examples_and_reject_unknown_parameters() {
-        assert_eq!(contracts().nodes.len(), 98);
+        assert_eq!(contracts().nodes.len(), 182);
         for kind in contracts().nodes.keys() {
             let mut graph = json!({"engine":"ferry-graph","schema":1,"nodes":[node("test",kind)],"connections":[]});
             accepts(&graph);

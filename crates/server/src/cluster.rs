@@ -87,6 +87,8 @@ pub struct Owner {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RunnerInfo {
     pub managed: bool,
+    #[serde(default)]
+    pub installation_scope: Option<String>,
     pub ready: bool,
     pub version: String,
     pub failed_version: Option<String>,

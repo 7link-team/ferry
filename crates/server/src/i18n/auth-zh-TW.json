@@ -96,7 +96,7 @@
   "mail.testSubject": "郵件設定測試",
   "mail.testBody": "這是一封郵件設定測試信。",
   "mail.codeSubject": "註冊信箱驗證碼",
-  "mail.codeBody": "您的註冊驗證碼為 {code}，10 分鐘有效，請勿洩露。",
+  "mail.codeBody": "您的註冊驗證碼為 {code}，{expires_minutes} 分鐘有效，請勿洩露。",
   "monitor.nodeChanged": "回應伺服器與目前顯示節點不同，請重新整理統計後重試；未重設任何節點。",
   "auth.captchaRequired": "請完成新的安全驗證後再登入。",
   "auth.loginRateLimit": "登入請求過於頻繁，請一分鐘後再試。",

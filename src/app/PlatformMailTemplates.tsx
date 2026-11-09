@@ -31,7 +31,7 @@ export function PlatformMailTemplates({draft,readOnly,onPatch}:{draft:Record<str
   const editor = useRef<{ insertText(value: string): void }>(null);
   const insertionTarget = useRef<"subject" | "body">("body");
   const inserted = useRef(false);
-  const preview = useMemo(() => mailPreview(subject, body), [subject, body]);
+  const preview = useMemo(() => mailPreview(subject, body, Number(draft.mail_code_valid_minutes ?? 10)), [subject, body, draft.mail_code_valid_minutes]);
   const insertVariable = (key: string) => {
     if (readOnly) return;
     inserted.current = true;

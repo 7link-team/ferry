@@ -1,1 +1,1 @@
-{"models.invalid":"モデル設定が無効です。接続タイプ、CLI、プロバイダー、モデルIDを確認してください。","models.discoveryFailed":"モデル一覧を取得できません。接続と認証情報を確認するか、IDを手動入力してください。","permission.group.ai-models":"モデル"}
+{"models.invalid":"モデル設定が無効です。接続タイプ、CLI、プロバイダー、モデルIDを確認してください。","models.discoveryFailed":"モデル一覧を取得できません。接続と認証情報を確認するか、IDを手動入力してください。","permission.group.ai-models":"モデル","models.nativeCatalogUnavailable":"モデル一覧を取得できません。CLIのログインを確認するか、手動で追加してください。"}

@@ -1,4 +1,11 @@
 {
+  "catalogRunner": ["Catalog Runner", "获取模型清单的主机", "取得模型清單的主機", "モデル一覧のホスト", "모델 목록 호스트", "Hos katalog model"],
+  "nativeCatalogHelp": ["Read the selected Runner user's native CLI catalog. Availability depends on that host's login and provider; unavailable catalogs can be entered manually, one model per row.", "读取所选主机执行用户的原生CLI模型清单，可用模型取决于该主机的登录与服务商；无法获取时按行手动添加。", "讀取所選主機執行使用者的原生CLI模型清單，可用模型取決於該主機的登入與服務商；無法取得時按行手動新增。", "選択したホストのCLIモデル一覧を取得します。取得できない場合は行ごとに追加できます。", "선택한 호스트 사용자의 CLI 모델 목록을 읽습니다. 가져올 수 없으면 행별로 추가하세요.", "Baca katalog CLI pengguna hos yang dipilih. Ketersediaan bergantung pada log masuk dan pembekal hos; tambah model setiap baris jika katalog tidak tersedia."],
+  "nativeCatalogUnavailable": ["This Runner did not provide a native model catalog. Check its CLI login, or add model identifiers manually.", "该主机未提供原生模型清单，请检查CLI登录状态，或按行手动添加模型。", "該主機未提供原生模型清單，請檢查CLI登入狀態，或按行手動新增模型。", "モデル一覧を取得できません。CLIのログインを確認するか、手動で追加してください。", "모델 목록을 가져올 수 없습니다. CLI 로그인을 확인하거나 모델을 직접 추가하세요.", "Runner ini tidak menyediakan katalog model asli. Semak log masuk CLI atau tambah ID model secara manual."],
+  "detectedTimezone": ["Detected browser time zone: {{timezone}}. Select an explicit time zone.", "检测到浏览器时区：{{timezone}}。请选择明确的时区。", "偵測到瀏覽器時區：{{timezone}}。請選擇明確的時區。", "ブラウザーのタイムゾーン：{{timezone}}。タイムゾーンを選択してください。", "감지된 브라우저 시간대: {{timezone}}. 시간대를 선택하세요.", "Zon waktu pelayar dikesan: {{timezone}}. Pilih zon waktu yang jelas."],
+  "customApi": ["Use a custom API connection", "使用自定义 API 连接", "使用自訂 API 連線", "カスタム API 接続を使用", "사용자 지정 API 연결 사용", "Gunakan sambungan API tersuai"],
+  "loadingConnection": ["Loading connection…", "正在加载连接…", "正在載入連線…", "接続を読み込み中…", "연결을 불러오는 중…", "Memuatkan sambungan…"],
+  "connectionRestricted": ["Connection details require credential read permission.", "查看连接配置需要凭据读取权限。", "檢視連線設定需要憑據讀取權限。", "接続設定には認証情報の読み取り権限が必要です。", "연결 설정을 보려면 자격 증명 읽기 권한이 필요합니다.", "Kebenaran membaca kelayakan diperlukan untuk melihat sambungan."],
   "title": [
     "Models",
     "模型",

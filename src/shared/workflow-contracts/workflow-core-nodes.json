@@ -4188,11 +4188,9 @@
       ],
       "semantic_rule": "command禁止{{和表达式插值；输入只环境/文件，凭据槽安全注入；主机槽/版本/OS/授权/drain运行前复核。",
       "example_params": {
-        "command": "echo \"$FERRY_INPUT_MESSAGE\"",
+        "command": "pwd",
         "shell": "sh",
-        "input_env": {
-          "MESSAGE": "hello"
-        },
+        "input_env": {},
         "input_assets": {}
       },
       "required_evidence": [

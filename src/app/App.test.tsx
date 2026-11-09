@@ -3,7 +3,7 @@ import { createRoot,type Root } from "react-dom/client";
 import { afterEach,beforeEach,expect,it,vi } from "vitest";
 import { parseActions } from "../features/pipelines/actions-workflow";
 import integrationCatalog from "../shared/workflow-contracts/workflow-integration-nodes.json";
-import { i18n } from "../shared/i18n/i18n";
+import { i18n, executionText } from "../shared/i18n/i18n";
 import { setLocale } from "../shared/i18n/locale";
 import { App } from "./App";
 import { Entry } from "./Entry";
@@ -400,7 +400,8 @@ it("gives pipeline creation a full-page editor with its own action bar", async (
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === "添加第一个任务")!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[title="在此任务后添加串行任务"]')!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[title="添加并行任务"]')!.click());
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[data-id="job_1"] button')].find(button => button.textContent?.trim() === "添加步骤")!.click());
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[data-id="job_1"] button')].find(button => button.textContent?.trim() === "添加步骤")!.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,button:0})));
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === executionText('shared.resource.cron.commandAction'))!.click());
   await act(async () => host.querySelector<HTMLButtonElement>('[data-id="job_3"] button[title="删除任务"]')!.click());
   expect(document.body.textContent).toContain('确认删除任务“新任务”？');
   await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '确认删除任务')!.click());

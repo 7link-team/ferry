@@ -99,6 +99,151 @@ fn request(runtime: Runtime) -> Request {
     }
 }
 
+fn acp_ready(runtime: Runtime, permission: Permission) -> protocol::Protocol {
+    let mut r = request(runtime);
+    r.permission = permission;
+    let mut p = protocol::Protocol::new(r, "acp-test".into());
+    assert_eq!(p.initial()["params"]["protocolVersion"], 1);
+    assert_eq!(
+        p.receive(
+            json!({"id":0,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}})
+        )
+        .unwrap()
+        .writes[0]["method"],
+        "session/new"
+    );
+    let step = p.receive(json!({"id":1,"result":{"sessionId":"native-acp","modes":{"availableModes":[{"id":"default"},{"id":"plan"}]}}})).unwrap();
+    assert_eq!(
+        step.writes[0]["params"]["modeId"],
+        if permission == Permission::ReadOnly {
+            "plan"
+        } else {
+            "default"
+        }
+    );
+    assert_eq!(
+        p.receive(json!({"id":2,"result":{}})).unwrap().writes[0]["method"],
+        "session/prompt"
+    );
+    p
+}
+
+#[test]
+fn acp_engines_stream_resume_and_never_convert_once_into_permanent_approval() {
+    for runtime in [Runtime::Gemini, Runtime::Qwen, Runtime::Opencode] {
+        let mut p = acp_ready(runtime, Permission::OnRequest);
+        let step = p.receive(json!({"method":"session/update","params":{"sessionId":"native-acp","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}})).unwrap();
+        assert!(matches!(&step.events[0], Event::Text {text,replace:false,..} if text == "hello"));
+        let step = p.receive(json!({"id":10,"method":"session/request_permission","params":{"sessionId":"native-acp","toolCall":{"title":"Write"},"options":[{"kind":"allow_always","optionId":"all"},{"kind":"allow_once","optionId":"once"}]}})).unwrap();
+        let Event::Approval { request_id, .. } = &step.events[0] else {
+            panic!("approval missing")
+        };
+        let request_id = request_id.clone();
+        assert_eq!(
+            p.input(Input::Decision {
+                request_id: request_id.clone(),
+                allow: true
+            })
+            .unwrap()
+            .writes[0]["result"]["outcome"]["optionId"],
+            "once"
+        );
+        assert!(
+            p.input(Input::Decision {
+                request_id,
+                allow: true
+            })
+            .is_err()
+        );
+        assert_eq!(
+            p.receive(json!({"id":4,"result":{"stopReason":"end_turn"}}))
+                .unwrap()
+                .done,
+            Some(Outcome::Completed)
+        );
+        let mut r = request(runtime);
+        r.native_session_id = Some("native-acp".into());
+        let mut p = protocol::Protocol::new(r, "resume".into());
+        assert_eq!(p.receive(json!({"id":0,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}})).unwrap().writes[0]["method"],"session/load");
+        assert!(
+            p.receive(json!({"id":1,"error":{"code":-1,"message":"private native diagnostic"}}))
+                .is_err()
+        );
+    }
+}
+
+#[test]
+fn acp_readonly_cancels_tools_and_rejects_foreign_sessions_or_missing_safe_modes() {
+    let mut p = acp_ready(Runtime::Gemini, Permission::ReadOnly);
+    assert_eq!(p.receive(json!({"id":9,"method":"session/request_permission","params":{"sessionId":"native-acp"}})).unwrap().writes[0]["result"]["outcome"]["outcome"],"cancelled");
+    assert!(
+        p.receive(json!({"method":"session/update","params":{"sessionId":"foreign","update":{}}}))
+            .is_err()
+    );
+    let mut p = protocol::Protocol::new(request(Runtime::Qwen), "modes".into());
+    p.receive(json!({"id":0,"result":{"protocolVersion":1}}))
+        .unwrap();
+    assert!(
+        p.receive(
+            json!({"id":1,"result":{"sessionId":"a","modes":{"availableModes":[{"id":"yolo"}]}}})
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn pi_agent_end_preserves_final_text_and_failed_outcomes() {
+    for failed in [false, true] {
+        let mut r = request(Runtime::Pi);
+        r.permission = Permission::ReadOnly;
+        let mut p = protocol::Protocol::new(r, "pi".into());
+        assert_eq!(p.initial()["type"], "get_state");
+        assert_eq!(p.receive(json!({"id":"initialize","type":"response","success":true,"data":{"sessionId":"native-pi"}})).unwrap().writes[0]["type"],"prompt");
+        p.receive(json!({"type":"message_start","message":{"role":"assistant"}}))
+            .unwrap();
+        let s=p.receive(json!({"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"answer"}],"stopReason":if failed{"error"}else{"stop"},"usage":{"input":2,"output":3}}})).unwrap();
+        assert!(matches!(&s.events[0],Event::Text{text,replace:true,..} if text=="answer"));
+        assert_eq!(
+            p.receive(json!({"type":"agent_end","messages":[]}))
+                .unwrap()
+                .done,
+            Some(if failed {
+                Outcome::Failed
+            } else {
+                Outcome::Completed
+            })
+        );
+    }
+    let mut r = request(Runtime::Pi);
+    r.permission = Permission::ReadOnly;
+    let args = command(&r)
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    for flag in [
+        "--no-tools",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+    ] {
+        assert!(args.contains(&flag.to_owned()));
+    }
+    assert!(!args.contains(&"--no-mcp".to_owned()));
+    r.native_session_id = Some("saved-session".into());
+    let args = command(&r)
+        .as_std()
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        args.windows(2)
+            .any(|pair| pair == ["--session", "saved-session"])
+    );
+    r.permission = Permission::OnRequest;
+    assert!(validate(&r).is_err());
+}
+
 fn codex() -> protocol::Protocol {
     let mut p = protocol::Protocol::new(request(Runtime::Codex), "invocation-a".into());
     p.receive(json!({"id":0,"result":{}})).unwrap();

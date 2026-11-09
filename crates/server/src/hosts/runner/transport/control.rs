@@ -137,6 +137,7 @@ async fn control(s: AppState, mut socket: Socket) {
         control,
         disconnect,
         managed: hello.managed_updates,
+        installation_scope: hello.installation_scope.as_deref().filter(|scope| matches!(*scope, "system" | "user" | "foreground")).map(str::to_owned),
         supports_monitor: hello.supports_monitor,
         supports_agent: hello.supports_agent,
         supports_agent_probe: hello.supports_agent_probe,
@@ -279,7 +280,7 @@ async fn pump_control(
                 if !matches!(hosts::Entity::find_by_id(i64::from(row_id)).filter(hosts::Column::RunnerKeyHash.eq(&registration.key_hash)).one(&s.db).await,Ok(Some(_))) {break;}
                 let cluster=s.cluster.as_ref().unwrap();
                 let mut owner=registration.owner.as_ref().unwrap().clone();
-                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone()});
+                owner.info=Some(crate::cluster::RunnerInfo {managed:registration.managed,installation_scope:registration.installation_scope.clone(),ready:registration.ready.load(std::sync::atomic::Ordering::Acquire), version:registration.version.clone(), failed_version:registration.failed_version.lock().unwrap_or_else(|error|error.into_inner()).clone()});
                 let revision=registration.owner_revision.load(std::sync::atomic::Ordering::Acquire);
                 match cluster.renew_owner(s,host_id,&owner,revision).await {
                     Ok(revision)=>registration.owner_revision.store(revision,std::sync::atomic::Ordering::Release),

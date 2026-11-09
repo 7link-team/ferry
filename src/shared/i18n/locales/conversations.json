@@ -1,4 +1,5 @@
 {
+  "cliPermissionUnsupported": ["This CLI supports read-only conversations only. Choose read-only access.", "此CLI当前仅支持只读会话，请选择只读权限。", "此CLI目前僅支援唯讀會話，請選擇唯讀權限。", "このCLIは読み取り専用の会話にのみ対応しています。", "이 CLI는 읽기 전용 대화만 지원합니다.", "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja."],
   "executionDetails": [
     "Execution details",
     "执行详情",

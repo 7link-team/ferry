@@ -353,6 +353,7 @@ fn load(directory: &Path, clustered: bool) -> Result<Catalog> {
 
 pub(crate) fn initialize(directory: &Path, clustered: bool) -> Result<()> {
     let catalog = load(directory, clustered)?;
+    crate::credentials::register_profiles(&catalog.nodes);
     if CATALOG.set(catalog).is_err() {
         bail!("workflow extensions already initialized");
     }

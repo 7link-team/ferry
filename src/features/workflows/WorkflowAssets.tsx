@@ -42,7 +42,7 @@ export async function uploadWorkflowDraftAssets(workspace: string, workflow: str
     return value;
   });
 }
-export const WorkflowAssetContext = createContext({
+export const WorkflowAssetContext = createContext<{workspace:string;workflow:string;legacyGitNodes?:ReadonlySet<string>;canCreateRepositoryConnection?:boolean}>({
   workspace: "",
   workflow: "",
 });

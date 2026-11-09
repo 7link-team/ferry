@@ -18,5 +18,6 @@
   "conversations.fileTooLarge": "Setiap fail mestilah tidak melebihi 32 MiB.",
   "conversations.groupAgentPrivate": "Kumpulan memerlukan ejen yang dikongsi dalam ruang kerja.",
   "conversations.apiPending": "Pelaksanaan perbualan API belum tersedia.",
-  "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini."
+  "conversations.noRunner": "Tiada Runner tersedia untuk melaksanakan model ini.",
+  "conversations.cliPermissionUnsupported": "CLI ini hanya menyokong perbualan baca sahaja. Pilih akses baca sahaja."
 }

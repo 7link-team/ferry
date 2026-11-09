@@ -1,6 +1,6 @@
 import { deleteResource, listResource } from "../../shared/api/resource";
 import { commonText, workflowText } from "../../shared/i18n/i18n";
-import { integrationManifests } from "../workflows/integrations";
+import { integrationManifests } from "../../shared/workflow-contracts/integration-catalog";
 import type { ResourceConfigContext } from "../../shared/resources/config";
 import { type AnyRow, form, label, list } from "../../shared/resources/config";
 import type {
@@ -25,7 +25,11 @@ export const CREDENTIAL_KINDS: Option[] = [
     labelKey: "resource-domain:credential.token",
   },
 ];
-export const credentialScopes = (): Option[] => (["host", "build", "deploy", "ai", "integration"] as const).map(value => ({value,label:workflowText(`credentialScope.${value}`)}));
+export const credentialScopes = (): Option[] =>
+  (["host", "build", "deploy", "integration"] as const).map((value) => ({
+    value,
+    label: workflowText(`credentialScope.${value}`),
+  }));
 
 export const sshCredentialOptions =
   (workspace: string) => async (): Promise<Option[]> => {
@@ -55,7 +59,12 @@ export function credentialsLists({
       resource: "credentials",
       rowKey: (row: Credential) => row.id,
       filters: [
-        {key:"scope",label:workflowText("credentialScope"),type:"select",options:credentialScopes()},
+        {
+          key: "scope",
+          label: workflowText("credentialScope"),
+          type: "select",
+          options: credentialScopes(),
+        },
         {
           key: "q",
           label: "名称/账号",
@@ -73,7 +82,11 @@ export function credentialsLists({
         },
       ],
       columns: [
-        {key:"scope",label:workflowText("credentialScope"),render:(row:Credential)=>label(credentialScopes(),row.scope)},
+        {
+          key: "scope",
+          label: workflowText("credentialScope"),
+          render: (row: Credential) => label(credentialScopes(), row.scope),
+        },
         { key: "name", label: "名称", labelKey: "common-domain:common.name" },
         {
           key: "kind",
@@ -147,7 +160,19 @@ export function credentialsForms({}: ResourceConfigContext): Record<
       sections: [
         {
           fields: [
-            {key:"scope",label:workflowText("credentialScope"),type:"custom",immutable:true,render:({draft,readOnly,onPatch})=><AutoField label={workflowText("credentialScope")}><select aria-label={workflowText("credentialScope")} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" disabled={readOnly} value={String(draft.scope ?? "build")} onChange={event=>onPatch({scope:event.target.value,kind:["ai","integration"].includes(event.target.value)?"token":(draft.kind??"password"),username:""})}>{credentialScopes().map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></AutoField>},
+            {
+              key: "scope",
+              label: workflowText("credentialScope"),
+              type: "custom",
+              immutable: true,
+              render: ({ draft }) => (
+                <AutoField label={workflowText("credentialScope")}>
+                  <p className="text-sm">
+                    {label(credentialScopes(), String(draft.scope ?? "build"))}
+                  </p>
+                </AutoField>
+              ),
+            },
             {
               key: "name",
               label: "名称",
@@ -184,7 +209,19 @@ export function credentialsForms({}: ResourceConfigContext): Record<
               type: "select",
               required: true,
               immutable: true,
-              options: [...new Map(integrationManifests.filter(node => node.http).map(node => [node.ui.application, { value: node.ui.application, label: node.ui.application_name }])).values()],
+              options: [
+                ...new Map(
+                  integrationManifests
+                    .filter((node) => node.http)
+                    .map((node) => [
+                      node.ui.application,
+                      {
+                        value: node.ui.application,
+                        label: node.ui.application_name,
+                      },
+                    ]),
+                ).values(),
+              ],
               when: (draft) => draft.scope === "integration",
             },
             {

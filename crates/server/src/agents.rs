@@ -157,7 +157,8 @@ impl Body {
             || self.model.len() > 256
             || self.model.starts_with('-')
             || self.model.chars().any(char::is_control)
-            || !["codex", "claude", "api"].contains(&self.runtime.as_str())
+            || (self.runtime != "api"
+                && ferry_protocol::agent::Runtime::parse(&self.runtime).is_none())
             || (self.runtime == "api" && i64::from(profile_id) == 0)
             || !["read_only", "on_request"].contains(&self.permission.as_str())
             || !["owner", "workspace"].contains(&self.visibility.as_str())
@@ -499,10 +500,7 @@ async fn probe(
             })?
             .id;
     }
-    let runtime = match execution.runtime.as_str() {
-        "codex" => ferry_protocol::agent::Runtime::Codex,
-        _ => ferry_protocol::agent::Runtime::Claude,
-    };
+    let runtime = ferry_protocol::agent::Runtime::parse(&execution.runtime).ok_or_else(invalid)?;
     let channel =
         crate::hosts::remote::open(&s, &scope.workspace_id, &execution.host_id.into()).await?;
     let status = channel.agent_probe(runtime, &execution.cwd).await?;

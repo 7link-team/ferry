@@ -9,6 +9,8 @@ pub(super) struct Config {
     #[arg(skip)]
     pub(super) managed: bool,
     #[arg(skip)]
+    pub(super) installation_scope: Option<String>,
+    #[arg(skip)]
     pub(super) confirmation: Option<tokio::sync::watch::Receiver<bool>>,
     #[arg(skip)]
     pub(super) failed_version: Option<String>,

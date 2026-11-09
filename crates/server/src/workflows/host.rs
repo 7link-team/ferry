@@ -144,6 +144,17 @@ pub(super) async fn execute(
     script: &str,
     log_output: bool,
 ) -> Result<Value> {
+    execute_with_credential(s, run, node, script, log_output, None).await
+}
+
+pub(super) async fn execute_with_credential(
+    s: &AppState,
+    run: &workflow_executions::Model,
+    node: &Value,
+    script: &str,
+    log_output: bool,
+    credential: Option<&(String, String, String)>,
+) -> Result<Value> {
     let log_node = if log_output {
         use crate::entities::workflow_node_runs as nodes;
         nodes::Entity::find()
@@ -242,7 +253,8 @@ pub(super) async fn execute(
             };
             let result = async {
                 let path = format!("{private}/operation.sh");
-                let bytes = Bytes::from(script.to_owned());
+                let environment = if credential.is_some() { crate::pipelines::runs::credential_environment(ch.as_ref(), &private, credential).await? } else { String::new() };
+                let bytes = Bytes::from(format!("{environment}\n{script}"));
                 ch.write_file(&path, 0o700, Box::pin(futures::stream::once(async move {Ok(bytes)}))).await?;
                 let (cancel, receiver) = tokio::sync::watch::channel(false);
                 let (sender, mut output) = tokio::sync::mpsc::channel(16);
@@ -294,16 +306,40 @@ pub(super) async fn execute(
     result
 }
 
+/// Batch command inputs are data, never interpolated into executable script text.
+pub(super) fn command_script(params: &Value) -> Result<String> {
+    if !matches!(params["shell"].as_str(), Some("auto" | "sh"))
+        || !params["input_assets"].as_object().is_some_and(|assets| assets.is_empty()) {
+        return Err(ApiError::localized(StatusCode::BAD_REQUEST, Message::new("workflow.runImplementation")));
+    }
+    let mut script = String::from("#!/bin/sh\nset -eu\n");
+    for (key, value) in params["input_env"].as_object().ok_or_else(invalid)? {
+        if key.is_empty() || !key.bytes().enumerate().all(|(index, byte)| byte.is_ascii_alphabetic() || byte == b'_' || (index > 0 && byte.is_ascii_digit())) {
+            return Err(invalid());
+        }
+        let text = value.as_str().map(str::to_owned).unwrap_or_else(||value.to_string());
+        if text.contains('\0') { return Err(invalid()); }
+        script.push_str(&format!("export FERRY_INPUT_{key}={}\n", quote(&text)));
+    }
+    script.push_str(params["command"].as_str().filter(|value| !value.trim().is_empty() && !value.contains("{{")).ok_or_else(invalid)?);
+    script.push('\n');
+    Ok(script)
+}
+
 pub(super) fn git_script(operation: &str, params: &Value) -> Result<String> {
+    let anonymous = params["auth_mode"] == "anonymous" && params.get("connection_id").is_none();
+    if anonymous && !super::graph::anonymous_git_url(params["url"].as_str().unwrap_or_default()) {
+        return Err(invalid());
+    }
     let git =
-        "git -c core.hooksPath=/dev/null -c protocol.file.allow=never -c protocol.ext.allow=never";
+        "git -c core.hooksPath=/dev/null -c protocol.file.allow=never -c protocol.ext.allow=never -c http.followRedirects=false";
     let url = || -> Result<String> {
         let raw = params["url"].as_str().ok_or_else(invalid)?;
         let url = reqwest::Url::parse(raw).map_err(|_| invalid())?;
-        if !matches!(url.scheme(), "https" | "ssh")
+        if !matches!(url.scheme(), "http" | "https" | "ssh")
             || url.host_str().is_none()
             || url.password().is_some()
-            || (url.scheme() == "https" && !url.username().is_empty())
+            || (matches!(url.scheme(), "http" | "https") && !url.username().is_empty())
             || url.query().is_some()
             || url.fragment().is_some()
         {
@@ -315,6 +351,27 @@ pub(super) fn git_script(operation: &str, params: &Value) -> Result<String> {
         let directory = params["directory"].as_str().ok_or_else(invalid)?;
         crate::hosts::channel::check_path(directory)?;
         Ok(quote(directory))
+    };
+    let remote = || -> Result<String> {
+        if params.get("url").is_some() { url() } else { Ok("origin".into()) }
+    };
+    let reference = |key: &str| -> Result<String> {
+        let raw = params[key].as_str().ok_or_else(invalid)?;
+        if raw.is_empty() || raw.len() > 512 || raw.starts_with('-')
+            || raw.chars().any(char::is_control)
+            || raw.contains([':', '\\', '~', '^', '?', '*', '[', ' '])
+            || raw.contains("..") || raw.contains("@{") || raw.ends_with('.') || raw.ends_with('/')
+        { return Err(invalid()); }
+        Ok(quote(raw))
+    };
+    let message = || -> Result<String> {
+        let text = params["message"].as_str().filter(|v| !v.trim().is_empty() && v.len() <= 102400 && !v.contains('\0')).ok_or_else(invalid)?;
+        Ok(quote(text))
+    };
+    let identity = || -> Result<String> {
+        let name = params["author_name"].as_str().filter(|v| !v.is_empty() && v.len() <= 200 && !v.chars().any(char::is_control)).ok_or_else(invalid)?;
+        let email = params["author_email"].as_str().filter(|v| !v.is_empty() && v.len() <= 320 && !v.chars().any(char::is_control)).ok_or_else(invalid)?;
+        Ok(format!("-c user.name={} -c user.email={} -c commit.gpgsign=false", quote(name), quote(email)))
     };
     let command = match operation {
         "remote_refs" => format!("{git} ls-remote --heads --tags -- {}", url()?),
@@ -333,13 +390,50 @@ pub(super) fn git_script(operation: &str, params: &Value) -> Result<String> {
         "branches" => format!("{git} -C {} branch --all --no-color", directory()?),
         "tags" => format!("{git} -C {} tag --list", directory()?),
         "fetch" => format!(
-            "{git} -C {} fetch --no-recurse-submodules origin",
-            directory()?
+            "{git} -C {} fetch --no-recurse-submodules -- {}",
+            directory()?, remote()?
         ),
+        "pull" => format!("{git} -C {} pull --ff-only --no-recurse-submodules -- {} {}", directory()?, remote()?, reference("ref")?),
+        "push" => format!("{git} -C {} push --porcelain -- {} {}", directory()?, remote()?, quote(&format!("HEAD:refs/heads/{}", params["branch"].as_str().ok_or_else(invalid)?))),
+        "checkout" => format!("{git} -C {} switch -- {}", directory()?, reference("branch")?),
+        "create_branch" => format!("{git} -C {} branch -- {} {}", directory()?, reference("branch")?, reference("ref")?),
+        "delete_branch" => format!("{git} -C {} branch -d -- {}", directory()?, reference("branch")?),
+        "create_tag" => format!("{git} -C {} tag -- {} {}", directory()?, reference("tag")?, reference("ref")?),
+        "delete_tag" => format!("{git} -C {} tag -d -- {}", directory()?, reference("tag")?),
+        "diff" => format!("{git} -C {} diff --no-ext-diff --no-textconv {} {} --", directory()?, reference("from")?, reference("to")?),
+        "show" => format!("{git} -C {} show --no-ext-diff --no-textconv --format=fuller --stat {} --", directory()?, reference("ref")?),
+        "add" => {
+            let path = params["path"].as_str().ok_or_else(invalid)?;
+            if path.is_empty() || path.len() > 4096 || path.starts_with('/') || path.contains(['\\', ':', '\0']) || path.split('/').any(|v| v == "..") { return Err(invalid()); }
+            format!("{git} -C {} add -- {}", directory()?, quote(path))
+        },
+        "commit" => format!("{git} {} -C {} commit -m {}", identity()?, directory()?, message()?),
+        "merge" => format!("{git} -C {} merge --ff-only -- {}", directory()?, reference("ref")?),
+        "cherry_pick" => format!("{git} {} -C {} cherry-pick -- {}", identity()?, directory()?, reference("ref")?),
+        "revert" => format!("{git} {} -C {} revert --no-edit -- {}", identity()?, directory()?, reference("ref")?),
+        "reset" => {
+            let mode = params["mode"].as_str().unwrap_or("soft");
+            if !matches!(mode, "soft" | "mixed" | "hard") { return Err(invalid()); }
+            format!("{git} -C {} reset --{mode} {} --", directory()?, reference("ref")?)
+        },
+        "stash" => format!("{git} -C {} stash push -m {}", directory()?, message()?),
+        "stash_list" => format!("{git} -C {} stash list", directory()?),
+        "stash_pop" => format!("{git} -C {} stash pop", directory()?),
+        "remotes" => format!("{git} -C {} remote -v", directory()?),
         _ => return Err(invalid()),
     };
+    if operation == "push" { reference("branch")?; }
+    let isolation = if anonymous {
+        let mut isolation = "export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_COUNT=0\nunset GIT_CONFIG_PARAMETERS GIT_ASKPASS SSH_ASKPASS GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR\nexport HOME=\"$(dirname \"$0\")\" XDG_CONFIG_HOME=\"$(dirname \"$0\")\"\n".to_owned();
+        if operation == "remote_refs" { isolation.push_str("cd \"$HOME\"\n"); }
+        // Never inherit repository-local credentials, URL rewrites or config includes.
+        if matches!(operation, "fetch" | "pull" | "push") {
+            isolation.push_str(&format!("if git -C {} config --local --name-only --get-regexp '^(credential\\.|http\\.|url\\.|include\\.|includeif\\.|core\\.askpass)' >/dev/null; then exit 1; else test \"$?\" = 1 || exit 1; fi\n", directory()?));
+        }
+        isolation
+    } else { String::new() };
     Ok(format!(
-        "#!/bin/sh\nset -eu\nexport GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0\n{command}\n"
+        "#!/bin/sh\nset -eu\nexport GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0\n{isolation}{command}\n"
     ))
 }
 
@@ -347,6 +441,65 @@ pub(super) fn git_script(operation: &str, params: &Value) -> Result<String> {
 mod tests {
     use super::*;
     use sea_orm::{ColumnTrait, ConnectionTrait, IntoActiveModel, QueryFilter};
+
+    #[test]
+    fn command_inputs_are_data_and_unsupported_shells_are_rejected() {
+        let value = "$(printf INJECTED); 'quoted'\nnext line";
+        let params = json!({"command":"printf '%s' \"$FERRY_INPUT_MESSAGE\"", "shell":"sh", "input_env":{"MESSAGE":value}, "input_assets":{}});
+        let script = command_script(&params).unwrap();
+        let output = std::process::Command::new("sh").args(["-c", &script]).output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), value);
+        for patch in [json!({"shell":"powershell"}),json!({"input_assets":{"file":"123"}}),json!({"input_env":{"X;bad":"injection"}}),json!({"command":"echo {{ unsafe }}"})] {
+            let mut bad=params.clone();
+            for (key,value) in patch.as_object().unwrap() { bad[key]=value.clone(); }
+            assert!(command_script(&bad).is_err());
+        }
+    }
+
+    #[test]
+    fn anonymous_git_ignores_host_auth_and_refuses_local_auth_configuration() {
+        use std::{io::{Read,Write},net::TcpListener,process::Command};
+        let temp=tempfile::tempdir().unwrap();
+        let private=temp.path().join("private");std::fs::create_dir(&private).unwrap();
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url=format!("http://{}/repo.git",listener.local_addr().unwrap());
+        let request=std::thread::spawn(move||{
+            let deadline=std::time::Instant::now()+Duration::from_secs(10);
+            let mut stream=loop {
+                match listener.accept() {
+                    Ok((stream,_))=>break stream,
+                    Err(error) if error.kind()==std::io::ErrorKind::WouldBlock && std::time::Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(10)),
+                    Err(error)=>panic!("anonymous Git did not connect: {error}"),
+                }
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut raw=Vec::new();
+            while raw.len()<16384 && !raw.ends_with(b"\r\n\r\n") {
+                let mut chunk=[0;1024];let count=stream.read(&mut chunk).unwrap();
+                if count==0 {break;}raw.extend_from_slice(&chunk[..count]);
+            }
+            stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=git\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            String::from_utf8_lossy(&raw).to_ascii_lowercase()
+        });
+        let poison=temp.path().join("poison");std::fs::create_dir(&poison).unwrap();
+        std::fs::write(poison.join(".gitconfig"),"[http]\n extraHeader = Authorization: Bearer PRIVATE_HOST_TOKEN\n").unwrap();
+        let script=private.join("anonymous.sh");
+        std::fs::write(&script,git_script("remote_refs",&json!({"url":url,"auth_mode":"anonymous"})).unwrap()).unwrap();
+        let output=Command::new("sh").arg(&script).env("HOME",&poison).output().unwrap();
+        assert!(!output.status.success());
+        assert!(!request.join().unwrap().contains("authorization:"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE_HOST_TOKEN"));
+        let root=temp.path().join("repo");std::fs::create_dir(&root).unwrap();
+        assert!(Command::new("git").arg("init").arg(&root).output().unwrap().status.success());
+        assert!(Command::new("git").arg("-C").arg(&root).args(["config","http.extraHeader","Authorization: Bearer PRIVATE_LOCAL_TOKEN"]).output().unwrap().status.success());
+        let directory=if cfg!(windows){let out=Command::new("cygpath").arg("-u").arg(&root).output().unwrap();String::from_utf8(out.stdout).unwrap().trim().to_owned()}else{root.to_string_lossy().into_owned()};
+        std::fs::write(&script,git_script("fetch",&json!({"url":"https://example.invalid/repo.git","directory":directory,"auth_mode":"anonymous"})).unwrap()).unwrap();
+        let output=Command::new("sh").arg(&script).output().unwrap();
+        assert!(!output.status.success());
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("PRIVATE_LOCAL_TOKEN"));
+    }
 
     #[test]
     fn node_logs_bound_unicode_and_stop_growing_after_truncation() {
@@ -568,6 +721,81 @@ mod tests {
         .unwrap();
         assert!(script.contains("'/srv/repo'\\''; touch /tmp/escape #'"));
         assert!(script.contains("protocol.file.allow=never"));
+    }
+    #[test]
+    fn git_write_operations_reject_option_and_path_injection() {
+        for value in ["--upload-pack=evil", "HEAD:refs/heads/main", "../outside", "x\nmain", "main^", "x@{1}"] {
+            for (op,key) in [("checkout","branch"),("push","branch"),("create_branch","branch"),("delete_tag","tag"),("merge","ref"),("reset","ref")] {
+                let mut params=json!({"directory":"/srv/repo","ref":"HEAD","mode":"soft"});
+                params[key]=json!(value);
+                assert!(git_script(op,&params).is_err(),"{op}: {value}");
+            }
+        }
+        for path in ["../outside","/etc/passwd","C:/outside","a/../../b"] {
+            assert!(git_script("add",&json!({"directory":"/srv/repo","path":path})).is_err());
+        }
+        assert!(git_script("reset",&json!({"directory":"/srv/repo","ref":"HEAD","mode":"hard;evil"})).is_err());
+        assert!(git_script("commit",&json!({"directory":"/srv/repo","message":"write"})).is_err());
+    }
+
+    #[test]
+    fn git_generated_scripts_execute_a_real_local_repository_lifecycle() {
+        use std::process::Command;
+        let temp=tempfile::tempdir().unwrap();
+        let root=temp.path().join("repository with spaces");
+        std::fs::create_dir(&root).unwrap();
+        let run=|args:&[&str]| {
+            let out=Command::new("git").args(args).current_dir(&root).output().unwrap();
+            assert!(out.status.success(),"git {args:?}: {}",String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        };
+        run(&["init","-b","main"]);
+        run(&["config","core.autocrlf","false"]);
+        run(&["config","user.name","Fixture"]);run(&["config","user.email","fixture@example.invalid"]);
+        let directory=if cfg!(windows) {
+            let out=Command::new("cygpath").arg("-u").arg(&root).output().unwrap();
+            assert!(out.status.success());String::from_utf8(out.stdout).unwrap().trim().to_owned()
+        } else {root.to_string_lossy().into_owned()};
+        let apply=|op:&str, mut params:Value| {
+            params["directory"]=json!(directory);
+            let script=git_script(op,&params).unwrap();
+            let out=Command::new("sh").args(["-c",&script]).current_dir(&root).output().unwrap();
+            assert!(out.status.success(),"{op}: {}",String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let identity=json!({"author_name":"Workflow","author_email":"workflow@example.invalid","message":"Initial"});
+        std::fs::write(root.join("proof.txt"),"initial\n").unwrap();
+        apply("add",json!({"path":"proof.txt"}));apply("commit",identity.clone());
+        apply("create_branch",json!({"branch":"feature/demo","ref":"HEAD"}));
+        apply("checkout",json!({"branch":"feature/demo"}));
+        std::fs::write(root.join("proof.txt"),"feature\n").unwrap();
+        apply("add",json!({"path":"."}));apply("commit",identity.clone());
+        let feature=run(&["rev-parse","HEAD"]);
+        assert!(apply("diff",json!({"from":"main","to":"HEAD"})).contains("+feature"));
+        assert!(apply("show",json!({"ref":"HEAD"})).contains("Workflow"));
+        apply("create_tag",json!({"tag":"v1.0.0","ref":"HEAD"}));
+        assert!(apply("tags",json!({})).contains("v1.0.0"));
+        apply("delete_tag",json!({"tag":"v1.0.0"}));
+        apply("checkout",json!({"branch":"main"}));
+        apply("merge",json!({"ref":"feature/demo"}));
+        let mut params=identity.clone();params["ref"]=json!(feature);
+        apply("revert",params.clone());
+        assert_eq!(std::fs::read_to_string(root.join("proof.txt")).unwrap(),"initial\n");
+        let reverted=run(&["rev-parse","HEAD"]);
+        apply("cherry_pick",params);
+        assert_eq!(std::fs::read_to_string(root.join("proof.txt")).unwrap(),"feature\n");
+        std::fs::write(root.join("proof.txt"),"temporary\n").unwrap();
+        apply("stash",json!({"message":"temporary"}));
+        assert!(apply("stash_list",json!({})).contains("temporary"));
+        apply("stash_pop",json!({}));
+        assert_eq!(std::fs::read_to_string(root.join("proof.txt")).unwrap(),"temporary\n");
+        for mode in ["soft","mixed","hard"] {apply("reset",json!({"mode":mode,"ref":reverted}));}
+        assert_eq!(std::fs::read_to_string(root.join("proof.txt")).unwrap(),"initial\n");
+        apply("delete_branch",json!({"branch":"feature/demo"}));
+        assert!(!apply("branches",json!({})).contains("feature/demo"));
+        assert!(apply("log",json!({"limit":10})).contains("Workflow"));
+        assert!(apply("status",json!({})).contains("main"));
+        apply("remotes",json!({}));
     }
     #[test]
     fn workflow_defaults_apply_only_to_supported_nodes_and_node_overrides_win() {

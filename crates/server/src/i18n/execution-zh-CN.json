@@ -1,4 +1,5 @@
 {
+  "workflow.repositoryConnectionRequired": "请选择仓库连接。公开 Git 操作需显式选择免认证并填写 HTTP(S) 地址。",
   "reviews.waitingAi": "等待模型并发空闲容量。",
   "reviews.invalid": "代码走查配置无效：{reason}。",
   "reviews.waiting": "等待匹配的执行器或流水线空闲容量。",

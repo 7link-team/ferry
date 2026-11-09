@@ -105,6 +105,16 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
   let id = base,
     number = 2;
   while (graph.nodes.some((node) => node.id === id)) id = `${base}_${number++}`;
+  const defaults = structuredClone(spec.example_params);
+  if (spec.params_schema.properties?.auth_mode && spec.params_schema.properties?.connection_id) {
+    // Examples describe the schema; a new node must not select a sample connection/repository.
+    delete defaults.connection_id;
+    delete defaults.url;
+  }
+  if (spec.params_schema.properties?.connection_id && spec.params_schema.properties?.credential_id) {
+    delete defaults.credential_id;
+    delete defaults.organization_id;
+  }
   return {
     id,
     name,
@@ -117,7 +127,7 @@ export function newNode(graph: Graph, type: string, name: string): GraphNode {
             format: "text",
             asset: "={{ $binary.file.asset }}",
           }
-        : structuredClone(spec.example_params),
+        : defaults,
     position: [
       graph.nodes.length
         ? Math.max(...graph.nodes.map((node) => node.position[0])) + 320
@@ -268,6 +278,7 @@ export function addAdjacentNode(
       width: 224,
       height: Math.max(
         160,
+        ports(item, "outputs").length > 1 ? ports(item, "outputs").length * 44 + 140 : 0,
         Math.max(ports(item, "inputs").length, ports(item, "outputs").length) *
           30 +
           72,
@@ -362,8 +373,8 @@ export function insertNode(
   };
 }
 
-/** Reflow the DAG into columns, reserving each node's complete port/card height. */
-export function arrangeGraph(graph: Graph): Graph {
+/** Reflow the DAG without turning explicitly downward successors into horizontal ones. */
+export function arrangeGraph(graph: Graph, sizes: Record<string, {width: number; height: number}> = {}): Graph {
   const incoming = new Map(
     graph.nodes.map((node) => [node.id, new Set<string>()]),
   );
@@ -395,6 +406,30 @@ export function arrangeGraph(graph: Graph): Graph {
   // Invalid cyclic drafts remain editable; arranging them must not hang or drop nodes.
   if (queue.length !== graph.nodes.length) return graph;
   const positions = new Map<string, [number, number]>();
+  const height = (node: GraphNode) => sizes[node.id]?.height ?? Math.max(160, Math.max(ports(node, "inputs").length, ports(node, "outputs").length) * 30 + 72, ports(node, "outputs").length > 1 ? ports(node, "outputs").length * 44 + 140 : 0);
+  if (graph.connections.some(link => connectionDirection(graph, link) === "down")) {
+    const placed: GraphNode[] = [];
+    for (const id of queue) {
+      const node = graph.nodes.find(item => item.id === id)!;
+      const links = graph.connections.filter(link => link.to.node === id);
+      let x = links.length ? 0 : Math.max(0, node.position[0]);
+      let y = links.length ? 80 : Math.max(80, node.position[1]);
+      for (const link of links) {
+        const parent = placed.find(item => item.id === link.from.node);
+        if (!parent) continue;
+        const down = connectionDirection(graph, link) === "down";
+        x = Math.max(x, parent.position[0] + (down ? 0 : 320));
+        y = Math.max(y, parent.position[1] + (down ? height(parent) + 64 : 0));
+      }
+      // Resolve collisions by moving down, retaining the chosen horizontal column.
+      while (placed.some(other => Math.abs(x - other.position[0]) < 272 && y < other.position[1] + height(other) + 64 && y + height(node) + 64 > other.position[1])) {
+        y = Math.max(...placed.filter(other => Math.abs(x - other.position[0]) < 272 && y < other.position[1] + height(other) + 64 && y + height(node) + 64 > other.position[1]).map(other => other.position[1] + height(other) + 64));
+      }
+      placed.push({...node, position: [x, y]});
+      positions.set(id, [x, y]);
+    }
+    return {...graph, nodes: graph.nodes.map(node => ({...node, position: positions.get(node.id)!}))};
+  }
   for (let rank = 0; rank <= Math.max(0, ...ranks.values()); rank++) {
     let bottom = 80;
     const preferred = (node: GraphNode) => {
@@ -412,15 +447,7 @@ export function arrangeGraph(graph: Graph): Graph {
       positions.set(node.id, [rank * 320, y]);
       bottom =
         y +
-        Math.max(
-          160,
-          Math.max(
-            ports(node, "inputs").length,
-            ports(node, "outputs").length,
-          ) *
-            30 +
-            72,
-        ) +
+        height(node) +
         64;
     }
   }

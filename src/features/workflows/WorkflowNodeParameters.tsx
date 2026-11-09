@@ -807,6 +807,22 @@ export function WorkflowNodeParameters({
   );
   let fields: ReactNode;
   switch (node.type) {
+    case "host.command":
+      fields = <>
+        <p className="text-sm leading-6 text-muted-foreground">{t("hostCommandHelp")}</p>
+        <Field label={t("commandShell")}>
+          <select aria-label={t("commandShell")} className={control} disabled={readOnly} value={String(p.shell ?? "sh")} onChange={event=>patch({shell:event.target.value})}>
+            <option value="sh">sh</option>
+            <option value="auto">{t("commandShellAuto")}</option>
+            {!["sh","auto"].includes(String(p.shell)) && <option value={String(p.shell)} disabled>{String(p.shell)}</option>}
+          </select>
+        </Field>
+        <Field label={t("commandScript")}>
+          <textarea aria-label={t("commandScript")} className="min-h-48 w-full rounded-md border border-input bg-background p-3 font-mono text-sm" readOnly={readOnly} value={String(p.command??"")} onChange={event=>patch({command:event.target.value})}/>
+        </Field>
+        <StructuredValue label={t("commandInputEnv")} value={p.input_env??{}} readOnly={readOnly} change={value=>patch({input_env:value})}/>
+      </>;
+      break;
     case "ai.llm.chat":
     case "ai.image.generate":
     case "ai.audio.speech":
@@ -1190,7 +1206,7 @@ export function WorkflowNodeParameters({
       );
       break;
     default:
-      fields = integrationManifest(node.type) ? <WorkflowIntegrationParameters spec={integrationManifest(node.type)!} value={p} readOnly={readOnly} change={update} /> : (
+      fields = integrationManifest(node.type) ? <WorkflowIntegrationParameters nodeId={node.id} spec={integrationManifest(node.type)!} value={p} readOnly={readOnly} change={update} /> : (
         <p className="text-sm text-muted-foreground">{t("advancedHelp")}</p>
       );
   }

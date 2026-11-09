@@ -24,12 +24,13 @@ import {
   Plug,
   ChevronLeft,
   ArrowUp,
+  Terminal,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
-import { manifest, type Port } from "./graph";
+import { manifest, type GraphNode, type Port } from "./graph";
 import {
   integrationManifests,
   integrationManifest,
@@ -39,6 +40,7 @@ import {
 } from "./integrations";
 
 const builtinCatalog = [
+  { type: "host.command", key: "hostCommand", group: "build", icon: Terminal },
   { type: "ai.llm.chat", key: "aiChat", group: "ai", icon: Braces },
   { type: "ai.image.generate", key: "aiImage", group: "ai", icon: Image },
   { type: "ai.audio.speech", key: "aiSpeech", group: "ai", icon: Music },
@@ -73,9 +75,9 @@ const catalog = () => [
     hint: () => t(`nodeHint.${node.key}`),
     keywords: manifest(node.type)?.search_aliases?.join(" ") ?? "",
   })),
-  ...integrationManifests.map((node) => ({
+  ...[...integrationManifests].sort((left, right) => Number(right.git?.operation === "clone") - Number(left.git?.operation === "clone")).map((node) => ({
     type: node.type,
-    group: "integrations",
+    group: node.git && !node.git.provider ? "build" : "integrations",
     icon: Plug,
     application: node.ui.application,
     resource: node.ui.resource_key,
@@ -90,6 +92,7 @@ const groups = [
   "data",
   "media",
   "ai",
+  "build",
   "integrations",
 ] as const;
 export const nodeTitle = (type: string) => {
@@ -98,6 +101,19 @@ export const nodeTitle = (type: string) => {
   const node = builtinCatalog.find((node) => node.type === type);
   return node ? t(node.key) : type;
 };
+
+export function outputPortLabel(node: GraphNode, port: Pick<Port, "port" | "index">): string {
+  if (node.type === "core.if" && (port.port === "true" || port.port === "false"))
+    return t(port.port === "true" ? "branchTrue" : "branchFalse");
+  if (node.type === "core.switch") {
+    if (port.port === "fallback") return t("branchFallback");
+    if (port.port === "case") {
+      const branch = (node.params.cases as {key: string}[] | undefined)?.[port.index ?? 0];
+      return branch?.key || `${t("branch")} ${(port.index ?? 0) + 1}`;
+    }
+  }
+  return `${port.port}${port.index === undefined ? "" : ` ${port.index + 1}`}`;
+}
 
 /** Add and inline insertion share one searchable, keyboard accessible picker. */
 export function WorkflowNodePicker({
@@ -116,6 +132,7 @@ export function WorkflowNodePicker({
         ports: Port[];
         value: string;
         change: (value: string) => void;
+        label?: (port: Port) => string;
       }
     | undefined;
 }) {
@@ -204,8 +221,7 @@ export function WorkflowNodePicker({
                       key={`${port.port}:${port.index ?? 0}`}
                       value={`${port.port}:${port.index ?? 0}`}
                     >
-                      {port.port}
-                      {port.index === undefined ? "" : ` ${port.index + 1}`}
+                      {connection.label?.(port) ?? `${port.port}${port.index === undefined ? "" : ` ${port.index + 1}`}`}
                     </option>
                   ))}
                 </select>

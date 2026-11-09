@@ -67,7 +67,7 @@ import {
   type Graph,
   type GraphNode,
 } from "./graph";
-import { nodeTitle, WorkflowNodePicker } from "./WorkflowNodePicker";
+import { nodeTitle, outputPortLabel, WorkflowNodePicker } from "./WorkflowNodePicker";
 import { WorkflowNodeInspector } from "./WorkflowNodeInspector";
 import { WorkflowExecutionTarget } from "./WorkflowExecutionTarget";
 import { WorkflowExecutionView, executionStateText } from "./WorkflowExecutionView";
@@ -100,18 +100,18 @@ type CardNode = Node<
     state?: string;
     bottomPorts: string[];
     topPorts: string[];
-    addAdjacent?: (direction: "right" | "down") => void;
+    addAdjacent?: (direction: "right" | "down", output?: { port: string; index?: number }) => void;
   },
   "workflow"
 >;
 function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
   const updateInternals = useUpdateNodeInternals();
-  const handleLayout = JSON.stringify([data.bottomPorts, data.topPorts]);
+  const inputs = ports(data.node, "inputs"),
+    outputs = ports(data.node, "outputs");
+  const handleLayout = JSON.stringify([data.bottomPorts, data.topPorts, inputs, outputs]);
   useEffect(() => {
     updateInternals(id);
   }, [id, handleLayout, updateInternals]);
-  const inputs = ports(data.node, "inputs"),
-    outputs = ports(data.node, "outputs");
   const Icon = data.node.type.startsWith("core.trigger.")
     ? Zap
     : data.node.type === "core.if" || data.node.type === "core.switch"
@@ -156,7 +156,7 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
           title={`${port.port} ${port.index ?? 0}`}
         />
       ))}
-      {outputs.map((port, index) => (
+      {outputs.length === 1 && outputs.map((port, index) => (
         <Handle
           key={`${port.port}:${port.index ?? 0}`}
           type="source"
@@ -166,10 +166,10 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
             top: `${((index + 1) * 100) / (outputs.length + 1)}%`,
             right: -36,
           }}
-          title={`${port.port} ${port.index ?? 0}`}
+          title={outputPortLabel(data.node, port)}
         />
       ))}
-      {outputs.map((port, index) => (
+      {outputs.length === 1 && outputs.map((port, index) => (
         <span
           key={`stem-${port.port}:${port.index ?? 0}`}
           aria-hidden
@@ -178,12 +178,14 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
         />
       ))}
       {outputs.length > 1 && (
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+        <div className="mt-3 border-t pt-1 text-xs">
           {outputs.map((port) => (
-            <span key={`${port.port}:${port.index ?? 0}`}>
-              {port.port}
-              {port.index === undefined ? "" : ` ${port.index + 1}`}
-            </span>
+            <div key={`${port.port}:${port.index ?? 0}`} className="relative flex min-h-11 min-w-0 items-center justify-end border-b border-border/50 last:border-0">
+              <span className="max-w-full truncate pr-2 font-medium" title={outputPortLabel(data.node, port)}>{outputPortLabel(data.node, port)}</span>
+              <Handle type="source" position={Position.Right} id={`${port.port}:${port.index ?? 0}`} style={{right:-52,top:"50%"}} title={outputPortLabel(data.node, port)} />
+              <span aria-hidden className="pointer-events-none absolute -right-12 top-1/2 w-8 border-t border-muted-foreground/50" />
+              {data.addAdjacent && <button type="button" className="nodrag nopan absolute -right-[34px] top-1/2 z-10 grid size-8 -translate-y-1/2 place-items-center rounded-full border bg-background text-primary shadow-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring" aria-label={`${t("addRight")} · ${outputPortLabel(data.node, port)}`} title={`${t("addRight")} · ${outputPortLabel(data.node, port)}`} onClick={event=>{event.stopPropagation();data.addAdjacent?.("right",port);}}><Plus className="size-4" /></button>}
+            </div>
           ))}
         </div>
       )}
@@ -212,16 +214,16 @@ function NodeCard({ id, data, selected }: NodeProps<CardNode>) {
         />
       ))}
       {data.addAdjacent &&
-        (["right", "down"] as const).map((direction) => (
+        ([...(outputs.length <= 1 ? [{ direction: "right" as const, output: outputs[0] }] : []), { direction: "down" as const, output: undefined }]).map(({direction, output}) => (
           <button
-            key={direction}
+            key={`${direction}:${output?.port ?? ""}:${output?.index ?? 0}`}
             type="button"
             className={`nodrag nopan absolute z-10 grid size-8 place-items-center rounded-full border bg-background text-primary shadow-sm hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring ${direction === "right" ? "right-0 top-1/2 -translate-y-1/2 translate-x-1/2" : "bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2"}`}
-            aria-label={t(direction === "right" ? "addRight" : "addDown")}
-            title={t(direction === "right" ? "addRight" : "addDown")}
+            aria-label={`${t(direction === "right" ? "addRight" : "addDown")}${output && outputs.length > 1 ? ` · ${outputPortLabel(data.node, output)}` : ""}`}
+            title={`${t(direction === "right" ? "addRight" : "addDown")}${output && outputs.length > 1 ? ` · ${outputPortLabel(data.node, output)}` : ""}`}
             onClick={(event) => {
               event.stopPropagation();
-              data.addAdjacent?.(direction);
+              data.addAdjacent?.(direction, output);
             }}
           >
             <Plus className="size-4" />
@@ -312,6 +314,17 @@ export function WorkflowEditor({
     }
   }, [draft.definition]);
   const graph = parsed.graph;
+  const [legacyGitNodes] = useState(() => {
+    const ids = new Set<string>();
+    const collect = (graph: Graph | undefined) => {
+      for (const node of graph?.nodes ?? []) {
+        if (node.type.startsWith("integration.git.") && !node.params.connection_id && !node.params.auth_mode) ids.add(node.id);
+        if (node.type === "core.loop") collect(node.params.body as Graph);
+      }
+    };
+    if (draft.id) collect(graph);
+    return ids;
+  });
   const formActions = useContext(EditorFormActionsContext);
   const [selected, setSelected] = useQueryValue("node", "");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -528,8 +541,8 @@ export function WorkflowEditor({
         ...(attempt ? { state: String(attempt.state) } : {}),
         ...(!readOnly
           ? {
-              addAdjacent: (direction: "right" | "down") => {
-                const output = ports(node, "outputs")[0];
+              addAdjacent: (direction: "right" | "down", selectedOutput?: { port: string; index?: number }) => {
+                const output = selectedOutput ?? ports(node, "outputs")[0];
                 setAdjacent({
                   from: {
                     node: node.id,
@@ -553,15 +566,16 @@ export function WorkflowEditor({
     sourceHandle: `${link.from.port}:${link.from.index}${connectionDirection(graph!, link) === "down" ? ":bottom" : ""}`,
     targetHandle: `${link.to.port}:${link.to.index}${connectionDirection(graph!, link) === "down" ? ":top" : ""}`,
     type: "insert",
-    data: readOnly
-      ? {}
-      : {
+    data: {
+      ...(graph?.nodes.find(node => node.id === link.from.node && (node.type === "core.if" || node.type === "core.switch")) ? {label: outputPortLabel(graph.nodes.find(node => node.id === link.from.node)!, link.from)} : {}),
+      ...(!readOnly ? {
           insert: () => {
             setAdjacent(undefined);
             setInsertAt(index);
             setPickerOpen(true);
           },
-        },
+        } : {}),
+    },
   }));
   const runnable =
     permissions.has("workflows.run") &&
@@ -845,7 +859,7 @@ export function WorkflowEditor({
             );
   return (
     <WorkflowAssetContext.Provider
-      value={{ workspace, workflow: draft.id ?? "" }}
+      value={{ workspace, workflow: draft.id ?? "", legacyGitNodes, canCreateRepositoryConnection:permissions.has("repositories.create") }}
     >
       <div
         className="flex min-h-0 min-w-0 flex-1 flex-col gap-3"
@@ -923,7 +937,7 @@ export function WorkflowEditor({
                   variant="ghost"
                   disabled={!graph?.nodes.length}
                   onClick={() => {
-                    if (graph) change(arrangeGraph(graph));
+                    if (graph) change(arrangeGraph(graph, measurements));
                   }}
                 >
                   <LayoutGrid />
@@ -1175,7 +1189,7 @@ export function WorkflowEditor({
                     <h3 className="border-t pt-4 text-sm font-semibold">
                       {t("parameters")}
                     </h3>
-                    {integrationManifest(node.type) && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={!!integrationManifest(node.type)?.git} inherit />}
+                    {(integrationManifest(node.type) || node.type === "host.command") && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => updateNode({settings})} readOnly={readOnly} hostOnly={node.type === "host.command" || !!integrationManifest(node.type)?.git} inherit />}
                     <WorkflowInputFields.Provider value={inputFields}>
                       <WorkflowNodeParameters
                         key={node.id}
@@ -1212,6 +1226,7 @@ export function WorkflowEditor({
                       "outputs",
                     ),
                     value: `${adjacent.from.port}:${adjacent.from.index}`,
+                    label: port => outputPortLabel(graph.nodes.find(node => node.id === adjacent.from.node)!, port),
                     change: (value) => {
                       const [port, index] = value.split(":");
                       setAdjacent({

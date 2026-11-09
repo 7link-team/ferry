@@ -4,6 +4,8 @@ use anyhow::{Result, bail, ensure};
 use ferry_protocol::agent::{Event, Input, Outcome, Permission, Request, Runtime, Usage};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+mod acp;
+mod pi;
 
 #[derive(Default)]
 pub(super) struct Step {
@@ -51,6 +53,12 @@ impl Protocol {
                 "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}}),
             Runtime::Claude => json!({"type":"control_request","request_id":"initialize",
                 "request":{"subtype":"initialize","hooks":{}}}),
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+                json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+                "protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
+                "clientInfo":{"name":"agent_runtime","version":env!("CARGO_PKG_VERSION")}}})
+            }
+            Runtime::Pi => json!({"id":"initialize","type":"get_state"}),
         }
     }
 
@@ -62,6 +70,8 @@ impl Protocol {
         match self.request.runtime {
             Runtime::Codex => self.codex(value),
             Runtime::Claude => self.claude(value),
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => self.acp(value),
+            Runtime::Pi => self.pi(value),
         }
     }
 
@@ -81,6 +91,15 @@ impl Protocol {
                 "request_id":pending.native_id,"response":if allow {
                     json!({"behavior":"allow","updatedInput":pending.input})
                 } else { json!({"behavior":"deny","message":"The user declined this tool request."}) }}}),
+            Runtime::Gemini | Runtime::Qwen | Runtime::Opencode => {
+                let outcome = if allow {
+                    json!({"outcome":"selected","optionId":pending.input["allow_once"]})
+                } else {
+                    json!({"outcome":"cancelled"})
+                };
+                json!({"jsonrpc":"2.0","id":pending.native_id,"result":{"outcome":outcome}})
+            }
+            Runtime::Pi => bail!("Pi does not support tool approvals"),
         };
         Ok(Step {
             writes: vec![response],

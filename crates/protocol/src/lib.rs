@@ -70,6 +70,9 @@ pub struct Hello {
     pub agent_version: String,
     #[serde(default)]
     pub managed_updates: bool,
+    /// Official service scope; absent on older agents. This is host metadata, not authorization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation_scope: Option<String>,
     #[serde(default)]
     pub supports_monitor: bool,
     /// Structured CLI execution protocol, not proof of an installed/logged-in CLI.
@@ -364,6 +367,7 @@ mod tests {
             arch: "x86_64".into(),
             agent_version: "0.1.0".into(),
             managed_updates: false,
+                installation_scope: None,
             supports_monitor: true,
             supports_agent: true,
             supports_agent_probe: false,

@@ -119,6 +119,17 @@ pub(super) struct Configuration {
     pub runner_key_hash: String,
 }
 impl Configuration {
+    fn authentication_usable(&self, authentication: &str) -> bool {
+        authentication == "logged_in"
+            || (authentication == "unknown"
+                && matches!(
+                    self.runtime,
+                    ferry_protocol::agent::Runtime::Gemini
+                        | ferry_protocol::agent::Runtime::Qwen
+                        | ferry_protocol::agent::Runtime::Opencode
+                        | ferry_protocol::agent::Runtime::Pi
+                ))
+    }
     fn for_conversation(a: &ai_agents::Model, body: &Create) -> Result<Self> {
         let mut config = Self::from_agent(a)?;
         if let Some(cwd) = &body.cwd {
@@ -126,6 +137,14 @@ impl Configuration {
         }
         if let Some(permission) = body.permission {
             config.permission = permission;
+        }
+        if config.runtime == ferry_protocol::agent::Runtime::Pi
+            && config.permission != ferry_protocol::agent::Permission::ReadOnly
+        {
+            return Err(error(
+                StatusCode::BAD_REQUEST,
+                "conversations.cliPermissionUnsupported",
+            ));
         }
         if config.cwd.len() > 4096 || config.cwd.contains('\0') {
             return Err(invalid());
@@ -137,11 +156,7 @@ impl Configuration {
     }
     fn from_agent(a: &ai_agents::Model) -> Result<Self> {
         Ok(Self {
-            runtime: match a.runtime.as_str() {
-                "codex" => ferry_protocol::agent::Runtime::Codex,
-                "claude" => ferry_protocol::agent::Runtime::Claude,
-                _ => return Err(invalid()),
-            },
+            runtime: ferry_protocol::agent::Runtime::parse(&a.runtime).ok_or_else(invalid)?,
             cwd: a.cwd.clone(),
             host_id: a.host_id.into(),
             model: a.model.clone(),
@@ -395,7 +410,7 @@ async fn bind_execution(
         .executable
         .filter(|_| probe.error.is_none())
         .ok_or_else(|| error(StatusCode::CONFLICT, "conversations.cliMissing"))?;
-    if probe.authentication != "logged_in" {
+    if !config.authentication_usable(&probe.authentication) {
         return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
     }
     if probe.execution_user.is_empty()

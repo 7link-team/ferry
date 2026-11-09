@@ -1,4 +1,5 @@
 {
+  "workflow.repositoryConnectionRequired": "リポジトリ接続を選択してください。公開 Git では認証なしと HTTP(S) URL を明示してください。",
   "reviews.waitingAi": "モデルの同時実行枠を待機中です。",
   "reviews.invalid": "コードレビュー設定が無効です：{reason}。",
   "reviews.waiting": "対応する Runner またはパイプラインの空きを待機中です。",

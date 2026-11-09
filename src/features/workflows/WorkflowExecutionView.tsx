@@ -5,6 +5,7 @@ import { workflowText as t } from "../../shared/i18n/i18n";
 import { Button } from "../../shared/ui/button";
 import { LoadingSkeleton } from "../../shared/ui/loading-skeleton";
 import { connectionDirection, type Graph } from "./graph";
+import { outputPortLabel } from "./WorkflowNodePicker";
 import { WorkflowDataView } from "./WorkflowDataView";
 import type { NodeExecutionData } from "./workflow-data";
 
@@ -55,6 +56,7 @@ export function WorkflowExecutionView({ workspace, execution, graph, attempts, n
     const stroke=color(target === "not_started" || !target ? source : target);
     return {id:`execution-link-${index}`,source:link.from.node,target:link.to.node,
       sourceHandle:`${link.from.port}:${link.from.index}${down?":bottom":""}`,targetHandle:`${link.to.port}:${link.to.index}${down?":top":""}`,
+      ...(graph?.nodes.some(node=>node.id===link.from.node && ["core.if","core.switch"].includes(node.type)) ? {label:outputPortLabel(graph.nodes.find(node=>node.id===link.from.node)!,link.from),labelStyle:{fill:"var(--foreground)"},labelBgStyle:{fill:"var(--background)"}} : {}),
       animated:execution.state === "running" && (target === "running" || source === "running"),
       markerEnd:{type:MarkerType.ArrowClosed,color:stroke},style:{stroke,strokeWidth:2}};
   });

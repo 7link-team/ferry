@@ -2,9 +2,9 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "../../shared/api/api";
-import { i18n, workflowText as t } from "../../shared/i18n/i18n";
+import { i18n, workflowText as t, hostRepositoryText, commonText } from "../../shared/i18n/i18n";
 import { WorkflowAssetContext } from "./WorkflowAssets";
-import { WorkflowNodePicker } from "./WorkflowNodePicker";
+import { outputPortLabel, WorkflowNodePicker } from "./WorkflowNodePicker";
 import { WorkflowNodeParameters } from "./WorkflowNodeParameters";
 import { emptyGraph, newNode } from "./graph";
 import {
@@ -22,6 +22,7 @@ vi.mock("../../shared/api/api", () => ({
 let root: Root, host: HTMLDivElement;
 const calls = vi.mocked(api);
 beforeEach(async () => {
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
   await i18n.changeLanguage("zh-CN");
   calls.mockReset();
   calls.mockResolvedValue({
@@ -47,6 +48,124 @@ const button = (label: string) =>
       button.getAttribute("aria-label") === label ||
       button.textContent?.trim() === label,
   )!;
+
+it("offers clone and command together in the code and build category", async()=>{
+  const select=vi.fn();
+  await act(async()=>root.render(<WorkflowNodePicker inserting={false} accepts={()=>true} select={select} close={()=>{}}/>));
+  await act(async()=>button(t('category.build')).click());
+  const clone=integrationManifests.find(node=>node.git?.operation==='clone' && !node.git.provider)!;
+  expect(button(integrationTitle(clone))).toBeDefined();
+  expect(button(t('hostCommand'))).toBeDefined();
+  await act(async()=>button(t('hostCommand')).click());
+  expect(select).toHaveBeenCalledWith('host.command');
+  await input(t('search'),'克隆');
+  expect(button(integrationTitle(clone))).toBeDefined();
+});
+
+it("edits host command without JSON and exposes the supported shell contract",async()=>{
+  let current:Record<string,unknown>={};
+  function Harness(){const [node,setNode]=useState(()=>newNode(emptyGraph(),'host.command','Build'));current=node.params;return <WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(value=>({...value,params}))}/>;}
+  await act(async()=>root.render(<Harness/>));
+  expect(host.querySelector<HTMLSelectElement>(`select[aria-label="${t('commandShell')}"]`)?.options.length).toBe(2);
+  await input(t('commandScript'),'cd /srv/app\nmake test');
+  expect(current.command).toBe('cd /srv/app\nmake test');
+  expect(host.textContent).toContain('$FERRY_INPUT_MESSAGE');
+  await act(async()=>root.render(<WorkflowNodeParameters node={{...newNode(emptyGraph(),'host.command','Build'),params:current}} readOnly invalid={()=>{}} update={()=>{}}/>));
+  expect(host.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true);
+});
+
+it("requires a shared connection for new platform nodes and fills the provider identity", async () => {
+  calls.mockImplementation(async (path) => String(path).includes('/repositories?') ? {items:[{name:'app',full_name:'team/app',url:'https://code.example/team/app.git',default_branch:'main',remote_id:'42'}],has_more:false} : String(path).includes('/code-connections') ? {items:[{id:'7',name:'Existing Codeup',provider:'codeup',state:'connected'},{id:'8',name:'GitHub',provider:'github',state:'connected'}],total:2,page_size:200} : {items:[],total:0,page_size:200});
+  let current:Record<string,unknown>={};
+  function Harness() {
+    const [node,setNode]=useState(()=>newNode(emptyGraph(),'integration.codeup.branch.create','Create branch'));
+    current=node.params;
+    return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(value=>({...value,params}))}/></WorkflowAssetContext.Provider>;
+  }
+  await act(async()=>root.render(<Harness/>));
+  expect(button(t('integration.createCredential'))).toBeUndefined();
+  expect(host.querySelector('select[aria-label="仓库连接"]')?.textContent).toContain('Existing Codeup');
+  expect(host.querySelector('select[aria-label="仓库连接"]')?.textContent).not.toContain('GitHub');
+  await input(t('integration.connection'),'7');
+  await input(t('integration.chooseRepository'),'https://code.example/team/app.git');
+  expect(current.connection_id).toBe('7');expect(current.repository_id).toBe('42');
+  expect(current).not.toHaveProperty('credential_id');expect(current).not.toHaveProperty('organization_id');
+  expect(button(t('integration.independent'))).toBeUndefined();
+  expect(button(t('integration.createCredential'))).toBeUndefined();
+});
+
+it("retains legacy credentials read-only and switches explicitly to a shared connection",async()=>{
+  const original=newNode(emptyGraph(),'integration.github.repository.get','Legacy');
+  let current:Record<string,unknown>={credential_id:'8',owner:'team',repo:'app'};
+  function Harness(){const [params,setParams]=useState(current);current=params;return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:'22'}}><WorkflowNodeParameters node={{...original,params}} readOnly={false} invalid={()=>{}} update={setParams}/></WorkflowAssetContext.Provider>;}
+  await act(async()=>root.render(<Harness/>));
+  expect(host.textContent).toContain(t('integration.legacyAuth'));
+  expect(host.querySelector<HTMLSelectElement>(`[aria-label="${t('integration.credential')}"]`)?.disabled).toBe(true);
+  expect(button(t('integration.createCredential'))).toBeUndefined();
+  await act(async()=>button(t('integration.useConnection')).click());
+  expect(current).not.toHaveProperty('credential_id');
+  expect(host.querySelector(`[aria-label="${t('integration.connection')}"]`)).not.toBeNull();
+});
+
+it("offers anonymous HTTP Git separately and keeps local Git free of connection fields",async()=>{
+  const original=newNode(emptyGraph(),'integration.git.repository.clone','Clone');
+  let current:Record<string,unknown>=original.params;
+  function Harness(){const [params,setParams]=useState(current);current=params;return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={{...original,params}} readOnly={false} invalid={()=>{}} update={setParams}/></WorkflowAssetContext.Provider>;}
+  await act(async()=>root.render(<Harness/>));
+  await input(t('integration.gitAuthentication'),'anonymous');
+  expect(current.auth_mode).toBe('anonymous');expect(current).not.toHaveProperty('connection_id');
+  expect(host.querySelector(`[aria-label="${t('integration.connection')}"]`)).toBeNull();
+  await input(t('integration.gitAuthentication'),'connection');
+  expect(current.auth_mode).toBe('connection');
+  await act(async()=>root.render(<WorkflowNodeParameters node={newNode(emptyGraph(),'integration.git.repository.status','Status')} readOnly={false} invalid={()=>{}} update={()=>{}}/>));
+  expect(host.querySelector(`[aria-label="${t('integration.connection')}"]`)).toBeNull();
+  expect(host.querySelector(`[aria-label="${t('integration.gitAuthentication')}"]`)).toBeNull();
+});
+
+it("keeps false as a boolean and offers fixed merge methods as choices", async () => {
+  let current:Record<string,unknown>={};
+  function Harness() {
+    const [node,setNode]=useState(()=>newNode(emptyGraph(),'integration.codeup.merge_request.merge','Merge'));
+    current=node.params;
+    return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(value=>({...value,params}))}/></WorkflowAssetContext.Provider>;
+  }
+  await act(async()=>root.render(<Harness/>));
+  const method=host.querySelector<HTMLSelectElement>('select[aria-label="合并方式"]');
+  expect([...method!.options].map(option=>option.value)).toEqual(['','ff-only','no-fast-forward','squash','rebase']);
+  await input('合并后删除源分支','false');
+  expect(current.remove_source_branch).toBe(false);
+  await input('合并后删除源分支','true');
+  expect(current.remove_source_branch).toBe(true);
+});
+
+it("creates a connection in place, preserves failed input, then selects it without saving the outer editor",async()=>{
+  let created=false,attempts=0;
+  calls.mockImplementation(async(path,options)=>{
+    if(String(path).endsWith('/code-connections')&&options?.method==='POST'){
+      attempts++;
+      if(attempts===1)throw new Error('Connection failed');
+      created=true;return {id:'44',name:'Build GitLab',provider:'gitlab',state:'connected'};
+    }
+    if(String(path).includes('/code-connections'))return String(path).includes('/repositories?')?{items:[],has_more:false}:{items:created?[{id:'44',name:'Build GitLab',provider:'gitlab',state:'connected'}]:[],total:created?1:0,page_size:200};
+    if(String(path).includes('/repository-providers'))return {items:[]};
+    return {items:[{id:'8',name:'Git token',kind:'token'}],total:1,page_size:200};
+  });
+  let current:Record<string,unknown>={};const outerSubmit=vi.fn();
+  function Harness(){const [node,setNode]=useState(()=>newNode(emptyGraph(),'integration.gitlab.project.get','Project'));current=node.params;return <form onSubmit={outerSubmit}><WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(value=>({...value,params}))}/></WorkflowAssetContext.Provider></form>;}
+  await act(async()=>root.render(<Harness/>));
+  await act(async()=>button(hostRepositoryText('repository.020')).click());
+  expect(document.querySelector<HTMLSelectElement>(`[role="dialog"] [aria-label="${hostRepositoryText('repository.037')}"]`)?.disabled).toBe(true);
+  await input(commonText('resource-domain:repository.connectionName'),'Build GitLab');
+  await input(hostRepositoryText('repository.038'),'8');
+  const submit=()=>document.querySelector('[role="dialog"] form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  await act(async()=>{submit();});
+  expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('Connection failed');
+  expect(document.querySelector<HTMLInputElement>(`[role="dialog"] input[aria-label="${commonText('resource-domain:repository.connectionName')}"]`)?.value).toBe('Build GitLab');
+  await act(async()=>{submit();});
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(current.connection_id).toBe('44');expect(current).not.toHaveProperty('credential_id');
+  expect(outerSubmit).not.toHaveBeenCalled();
+});
 async function input(label: string, value: string) {
   const field = [
     ...document.querySelectorAll<
@@ -341,4 +460,42 @@ it("runtime packages join the existing picker and graph without retaining remove
     installIntegrationCatalog(bundled);
     expect(() => newNode(emptyGraph(), extension.type, "Removed")).toThrow("Unknown node type");
   } finally { installIntegrationCatalog(bundled); }
+});
+
+
+it("offers Codeup clone in its repository operations and derives its URL from the selected repository", async()=>{
+  const select=vi.fn();
+  await act(async()=>root.render(<WorkflowNodePicker inserting={false} accepts={()=>true} select={select} close={()=>{}}/>));
+  await act(async()=>button(t('category.integrations')).click());
+  await act(async()=>button('Codeup').click());
+  await act(async()=>button(t('integration.resource.repository')).click());
+  const clone=integrationManifests.find(node=>node.type==='integration.codeup.repository.clone')!;
+  await act(async()=>button(integrationTitle(clone)).click());
+  expect(select).toHaveBeenCalledWith(clone.type);
+  calls.mockImplementation(async path => String(path).includes('/repositories?') ? {items:[{name:'app',full_name:'team/app',url:'https://codeup.example/team/app.git'}],has_more:false} : {items:[{id:'7',name:'Codeup shared',provider:'codeup',state:'connected'},{id:'8',name:'Other GitHub',provider:'github',state:'connected'}],total:2,page_size:200});
+  let current:Record<string,unknown>={};
+  function Harness(){const [node,setNode]=useState(()=>newNode(emptyGraph(),clone.type,'Clone')); current=node.params; return <WorkflowAssetContext.Provider value={{workspace:'11',workflow:''}}><WorkflowNodeParameters node={node} readOnly={false} invalid={()=>{}} update={params=>setNode(n=>({...n,params}))}/></WorkflowAssetContext.Provider>;}
+  await act(async()=>root.render(<Harness/>));
+  expect(host.querySelector(`[aria-label="${t('integration.connection')}"]`)?.textContent).not.toContain('Other GitHub');
+  expect(host.querySelector(`input[aria-label="${t('integration.gitUrl')}"]`)).toBeNull();
+  await input(t('integration.connection'),'7');
+  await input(t('integration.chooseRepository'),'https://codeup.example/team/app.git');
+  expect(current.connection_id).toBe('7'); expect(current.url).toBe('https://codeup.example/team/app.git');
+  expect(host.textContent).toContain('https://codeup.example/team/app.git');
+  expect(host.querySelector<HTMLSelectElement>(`[aria-label="${t('integration.chooseRepository')}"]`)?.value).toBe(current.url);
+  expect(host.querySelector(`[aria-label="${t('integration.gitAuthentication')}"]`)).toBeNull();
+});
+
+it("uses configured branch names consistently in output labels and continuation choices",async()=>{
+ const branch=newNode(emptyGraph(),'core.switch','Route');branch.params.cases=[{key:'release'},{key:'test'}];
+ expect(outputPortLabel(branch,{port:'case',index:1})).toBe('test');
+ expect(outputPortLabel(branch,{port:'fallback'})).toBe('未匹配');
+ const condition=newNode(emptyGraph(),'core.if','If');
+ expect(outputPortLabel(condition,{port:'true'})).toBe('满足条件');
+ expect(outputPortLabel(condition,{port:'false'})).toBe('不满足条件');
+ const change=vi.fn();
+ await act(async()=>root.render(<WorkflowNodePicker inserting={false} accepts={()=>true} select={()=>{}} close={()=>{}} connection={{ports:[{port:'case',index:0,type:'main'},{port:'case',index:1,type:'main'}],value:'case:1',change,label:port=>outputPortLabel(branch,port)}}/>));
+ const selector=document.querySelector<HTMLSelectElement>(`select[aria-label="${t('continueFrom')}"]`)!;
+ expect(selector.selectedOptions[0]!.textContent).toBe('test');
+ await input(t('continueFrom'),'case:0');expect(change).toHaveBeenCalledWith('case:0');
 });

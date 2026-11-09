@@ -96,7 +96,7 @@
   "mail.testSubject": "Email configuration test",
   "mail.testBody": "This is an email configuration test message.",
   "mail.codeSubject": "Registration verification code",
-  "mail.codeBody": "Your registration code is {code}. It expires in 10 minutes. Do not share it.",
+  "mail.codeBody": "Your registration code is {code}. It expires in {expires_minutes} minutes. Do not share it.",
   "monitor.nodeChanged": "The responding server differs from the displayed node. Refresh the statistics and retry; no statistics were reset.",
   "auth.captchaRequired": "Complete a new security verification before signing in.",
   "auth.loginRateLimit": "Too many login attempts. Please try again in a minute.",

@@ -1,4 +1,5 @@
 {
+  "workflow.repositoryConnectionRequired": "Choose a repository connection. Public Git operations require an explicit anonymous HTTP(S) URL.",
   "reviews.waitingAi": "Waiting for model concurrency capacity.",
   "reviews.invalid": "Invalid code review configuration: {reason}.",
   "reviews.waiting": "Waiting for a matching Runner or pipeline capacity.",

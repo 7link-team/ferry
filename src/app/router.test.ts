@@ -33,8 +33,10 @@ it("unifies both editors without changing resource URLs or legacy AI credential 
     }
   }
   const legacy = parse(`/${workspace}/workflow/credentials/new`, "");
-  expect(legacy).toMatchObject({ group: "workflow", item: "ai-credentials", mode: "new" });
-  expect(href(legacy, {})).toBe(`/en-US/workspaces/${workspace}/credentials/new?scope=ai&kind=token`);
+  expect(legacy).toMatchObject({ group: "ops", item: "ai-models", mode: "new" });
+  expect(parse(`/workspaces/${workspace}/credentials/new`, "?scope=ai")).toMatchObject({ group: "ops", item: "ai-models", mode: "new" });
+  expect(parse(`/workspaces/${workspace}/ai-models/new`, "").group).toBe(legacy.group);
+  expect(href(legacy, {})).toBe(`/en-US/workspaces/${workspace}/ai-models/new`);
 });
 it("preserves each module through credential list, create, detail and edit links", () => {
   for (const scope of ["host", "build", "deploy"]) {

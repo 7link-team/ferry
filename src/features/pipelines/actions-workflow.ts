@@ -1,5 +1,5 @@
 import { Document, isAlias, isCollection, isMap, isScalar, parseDocument, visit, type YAMLMap } from "yaml";
-import { executionText } from "../../shared/i18n/i18n";
+import { executionText, workflowText } from "../../shared/i18n/i18n";
 
 export type ActionStep = Record<string, unknown> & { name?: string; run?: string; uses?: string; env?: Record<string, string> };
 export interface ActionJob { id: string; name: string; needs: string[]; runsOn: string[]; steps: ActionStep[]; raw: Record<string, unknown> }
@@ -165,12 +165,48 @@ export function addActionJob(source: string, checkout = false, placement?: { job
   document.setIn(["jobs", id], { name: "新任务", needs, "runs-on": "self-hosted", "timeout-minutes": 30, steps: [...(checkout ? [{ name: "步骤1", uses: "actions/checkout@v4" }] : []), { name: checkout ? "步骤2" : "步骤1", run: defaultActionRun(checkout ? 2 : 1) }] });
   return { source: serialize(document), id };
 }
-export function addActionStep(source: string, job: string, kind: "run" | "checkout" = "run"): string {
+export function addActionStep(source: string, job: string, kind: "run" | "checkout" | "action" = "run"): string {
   const { document, jobs } = parseActions(source);
   const row = jobs.find(row => row.id === job); if (!row) throw new Error(executionText("workflow.jobMissing"));
   const name = `步骤${row.steps.length + 1}`;
-  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name, uses: "actions/checkout@v4" } : { name, run: defaultActionRun(row.steps.length + 1) });
+  document.addIn(["jobs", job, "steps"], kind === "checkout" ? { name: workflowText("actions.cloneCode"), uses: "actions/checkout@v4" } : kind === "action" ? { name, uses: "actions/setup-node@v4" } : { name, run: defaultActionRun(row.steps.length + 1) });
   return serialize(document);
+}
+
+export type CheckoutBinding = { job_id: string; step_id: string; connection_id: string; repository_url: string; ref: string; path: string };
+export type CheckoutRepositoryChoice = { connection_id: string; url: string; name: string; default_branch: string };
+/** Freeze selected groups into explicit, separately addressable checkout steps. */
+export function addActionCheckouts(source: string, jobId: string, repositories: readonly CheckoutRepositoryChoice[], bindings: readonly CheckoutBinding[]) {
+  const job = parseActions(source, true).jobs.find(row => row.id === jobId);
+  if (!job || job.raw.uses || job.raw["ferry-approval"] === true) throw new Error(executionText("workflow.jobMissing"));
+  const next = [...bindings];
+  const selected = new Set(bindings.filter(binding => binding.job_id === jobId).map(binding => `${binding.connection_id}\n${binding.repository_url}`));
+  const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
+  const paths = new Set(bindings.filter(binding => binding.job_id === jobId && binding.path && binding.path !== ".").map(binding => normalize(binding.path)));
+  for (const step of job.steps) {
+    const parameters = step.with as Record<string, unknown> | undefined;
+    if (/^actions\/checkout@/.test(String(step.uses ?? "")) && typeof parameters?.path === "string" && parameters.path !== "." && parameters.path) paths.add(normalize(parameters.path));
+  }
+  const ids = new Set(job.steps.map(step => step.id).filter(Boolean));
+  for (const repository of repositories) {
+    const key = `${repository.connection_id}\n${repository.url}`;
+    if (selected.has(key)) continue;
+    selected.add(key);
+    let suffix = 1;
+    while (ids.has(`checkout_${suffix}`)) suffix++;
+    const id = `checkout_${suffix}`; ids.add(id);
+    const slug = repository.name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 80) || id;
+    const base = paths.has("sources") ? `source-${slug}` : `sources/${slug}`;
+    let path = base, duplicate = 2;
+    const overlaps = (candidate: string) => [...paths].some(existing => existing === normalize(candidate) || existing.startsWith(`${normalize(candidate)}/`) || normalize(candidate).startsWith(`${existing}/`));
+    while (overlaps(path)) path = `${base}-${duplicate++}`;
+    paths.add(normalize(path));
+    source = addActionStep(source, jobId, "checkout");
+    const index = parseActions(source).jobs.find(row => row.id === jobId)!.steps.length - 1;
+    source = editActionStep(source, jobId, index, {id, name: `${workflowText("actions.cloneCode")} · ${repository.name}`});
+    next.push({job_id: jobId, step_id: id, connection_id: repository.connection_id, repository_url: repository.url, ref: repository.default_branch, path});
+  }
+  return {definition: source, checkout_bindings: next};
 }
 
 /** Replace only the chosen dependency; sibling branches and join dependencies survive. */

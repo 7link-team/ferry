@@ -1,8 +1,33 @@
 import { beforeEach,describe,expect,it } from "vitest";
 import { i18n } from "../../shared/i18n/i18n";
 import { artifactNames, outputSources } from "./action-references";
-import { actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,formatActionYaml,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
+import { addActionCheckouts,addActionStep,actionFragment,editActionFragment,addActionJob,connectActionJobs,DEFAULT_ACTIONS,duplicateActionJob,duplicateActionStep,editActionJob,editActionStep,editActionWorkflow,ensureActionCheckout,formatActionYaml,insertActionJob,parseActions,removeActionJob,setActionJobApproval } from "./actions-workflow";
 beforeEach(() => { localStorage.setItem("ui.locale", "zh-CN"); void i18n.changeLanguage("zh-CN"); });
+
+it("creates distinct checkout steps from overlapping groups and preserves comments and unknown YAML", () => {
+ const source='# keep\non: workflow_dispatch\nx-extension: keep\njobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - id: checkout_1\n        uses: actions/checkout@v4\n        with:\n          path: sources/app/child\n      - run: make test\n';
+ const a={connection_id:'7',url:'https://git.example/team/app.git',name:'app',default_branch:'main'};
+ const b={...a,url:'https://git.example/other/app.git',name:'App',default_branch:'release'};
+ const added=addActionCheckouts(source,'build',[a,a,b],[]);
+ expect(added.checkout_bindings).toHaveLength(2);
+ expect(added.checkout_bindings.map(row=>row.step_id)).toEqual(['checkout_2','checkout_3']);
+ expect(added.checkout_bindings.map(row=>row.path.toLowerCase())).toEqual(['sources/app-2','sources/app-3']);
+ expect(added.checkout_bindings[1]?.ref).toBe('release');
+ expect(added.definition).toContain('# keep');expect(added.definition).toContain('x-extension: keep');
+ expect(parseActions(added.definition).jobs[0]?.steps).toHaveLength(4);
+ expect(addActionCheckouts(added.definition,'build',[a,b],added.checkout_bindings)).toEqual(added);
+ const differentConnection=addActionCheckouts(added.definition,'build',[{...a,connection_id:'8'}],added.checkout_bindings);
+ expect(differentConnection.checkout_bindings).toHaveLength(3);
+});
+
+it("avoids a parent checkout directory and exposes separate clone, command and Action types", () => {
+ const source='jobs:\n  build:\n    runs-on: self-hosted\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          path: sources\n';
+ const added=addActionCheckouts(source,'build',[{connection_id:'7',url:'https://git.example/team/a.git',name:'../测试',default_branch:'main'}],[]);
+ expect(added.checkout_bindings[0]?.path).toBe('source-checkout_1');
+ expect(parseActions(addActionStep(source,'build','checkout')).jobs[0]?.steps.at(-1)?.uses).toBe('actions/checkout@v4');
+ expect(parseActions(addActionStep(source,'build','action')).jobs[0]?.steps.at(-1)?.uses).toBe('actions/setup-node@v4');
+ expect(parseActions(addActionStep(source,'build','run')).jobs[0]?.steps.at(-1)?.run).toBeTruthy();
+});
 
 it("expands compact and JSON-shaped YAML without changing scripts, expressions, aliases or comments", () => {
  const compact = '# retained\non: workflow_dispatch\njobs: { build: { runs-on: self-hosted, env: &vars { FLAG: "false" }, steps: [ { run: "echo \\\"{\\\\\\\"ok\\\\\\\":true}\\\"\\necho done" }, { env: *vars, run: "${{ github.job }}" } ] } }\n';

@@ -198,6 +198,7 @@ async fn hold(
             arch,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             managed_updates: cfg.managed,
+            installation_scope: if cfg.managed { cfg.installation_scope.clone() } else { Some("foreground".into()) },
             supports_monitor: true,
             supports_agent: true,
             supports_agent_probe: true,
@@ -333,6 +334,7 @@ mod tests {
         let running = tokio::spawn(run_with_shutdown(
             Config {
                 managed: false,
+                installation_scope: None,
                 confirmation: None,
                 failed_version: None,
                 server: format!("http://{address}"),

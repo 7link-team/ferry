@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Eye, Pencil } from "lucide-react";
 import { api, errorText } from "../../shared/api/api";
-import { AutoField } from "../../shared/forms/auto-form";
+import { AutoField, FieldControl } from "../../shared/forms/auto-form";
 import { commonText } from "../../shared/i18n/i18n";
 import {
   form,
@@ -12,11 +12,80 @@ import {
 import type { FormConfig, ListConfig } from "../../shared/resources/types";
 import { Button } from "../../shared/ui/button";
 import { Input } from "../../shared/ui/input";
-import { WorkflowAIParameters } from "../workflows/WorkflowAIParameters";
-import { WorkflowAssetContext } from "../workflows/WorkflowAssets";
+import { Checkbox } from "../../shared/ui/checkbox";
+import {
+  ProviderFields,
+  type Provider,
+} from "../../shared/forms/ai-provider-fields";
 
 const key = (s: string) => `models:${s}`;
 const t = (s: string) => commonText(key(s));
+const newConnection = (): Omit<Provider, "id"> => ({
+  name: "",
+  protocol: "openai",
+  credential_id: "0",
+  base_url: "https://api.openai.com/v1",
+  currency: "USD",
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  monthly_limit_micros: 0,
+  qps: 1,
+  concurrency: 1,
+  prices: [
+    {
+      model: "",
+      operation: "ai.llm.chat",
+      input_micros: 0,
+      output_micros: 0,
+      unit_size: 1,
+    },
+  ],
+  version: 0,
+});
+function ModelConnection({
+  draft,
+  readOnly,
+  onPatch,
+}: {
+  workspace: string;
+  draft: Partial<AnyRow>;
+  readOnly: boolean;
+  onPatch: (p: Partial<AnyRow>) => void;
+}) {
+  useEffect(() => {
+    if (!draft.connection && draft.kind === "api" && !readOnly)
+      onPatch({ connection: newConnection() });
+  }, [draft.connection, draft.kind, readOnly, onPatch]);
+  return (
+    <div className="space-y-4">
+      {draft.kind === "cli" && !readOnly && (
+        <AutoField label={t("customApi")}>
+          <Checkbox
+            checked={!!draft.connection}
+            onCheckedChange={(checked) =>
+              onPatch({
+                connection: checked ? newConnection() : null,
+                provider_id: "0",
+              })
+            }
+          />
+        </AutoField>
+      )}
+      {draft.connection ? (
+        <ProviderFields
+          draft={{
+            ...draft.connection,
+            id: draft.provider_id === "0" ? "" : draft.provider_id,
+          }}
+          onChange={({ id: _, ...connection }) => onPatch({ connection })}
+          readOnly={readOnly}
+          hideName
+        />
+      ) : (
+        readOnly && <p className="text-sm">{t("nativeDefault")}</p>
+      )}
+    </div>
+  );
+}
 function Catalog({
   workspace,
   draft,
@@ -28,10 +97,43 @@ function Catalog({
   readOnly: boolean;
   onPatch: (p: Partial<AnyRow>) => void;
 }) {
+  const [hosts, setHosts] = useState<{ id: string; name: string }[]>([]);
+  const [hostId, setHostId] = useState("");
+  const native = draft.kind === "cli" && !draft.connection;
+  useEffect(() => {
+    if (!native || readOnly) return;
+    let active = true;
+    (async () => {
+      const items: { id: string; name: string }[] = [];
+      for (let page = 1; ; page++) {
+        const result = await api<{
+          items: { id: string; name: string }[];
+          total: number;
+        }>(
+          `/workspaces/${workspace}/nodes?connection=runner&page=${page}&page_size=200`,
+        );
+        items.push(...result.items);
+        if (page * 200 >= result.total) break;
+      }
+      if (active) {
+        setHosts(items);
+        setHostId((current) =>
+          items.some((h) => h.id === current) ? current : (items[0]?.id ?? ""),
+        );
+      }
+    })().catch((e) => {
+      if (active) setError(errorText(e));
+    });
+    return () => {
+      active = false;
+    };
+  }, [native, readOnly, workspace]);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const latest = useRef(draft),
     alive = useRef(true);
+  const latestHost = useRef(hostId);
+  latestHost.current = hostId;
   latest.current = draft;
   useEffect(() => {
     alive.current = true;
@@ -41,6 +143,8 @@ function Catalog({
   }, []);
   async function discover() {
     const provider = draft.provider_id;
+    const connection = draft.connection;
+    const runtime = draft.runtime;
     setBusy(true);
     setError("");
     try {
@@ -48,17 +152,36 @@ function Catalog({
         `/workspaces/${workspace}/ai-models/model-discoveries`,
         {
           method: "POST",
-          body: JSON.stringify({ provider_id: provider }),
+          body: JSON.stringify({
+            provider_id: provider || "0",
+            ...(native ? { runtime, host_id: hostId } : {}),
+            ...(connection
+              ? { connection: { ...connection, name: draft.name || t("name") } }
+              : {}),
+          }),
         },
       );
-      if (!alive.current || latest.current.provider_id !== provider) return;
+      if (
+        !alive.current ||
+        latestHost.current !== hostId ||
+        latest.current.provider_id !== provider ||
+        latest.current.connection !== connection ||
+        latest.current.runtime !== runtime
+      )
+        return;
       const models = [
         ...new Set([...(latest.current.models ?? []), ...r.models]),
       ];
       onPatch({ models });
       if (r.has_more) setError(t("partialCatalog"));
     } catch (e) {
-      if (alive.current && latest.current.provider_id === provider)
+      if (
+        alive.current &&
+        latestHost.current === hostId &&
+        latest.current.provider_id === provider &&
+        latest.current.connection === connection &&
+        latest.current.runtime === runtime
+      )
         setError(errorText(e));
     } finally {
       if (alive.current) setBusy(false);
@@ -67,18 +190,84 @@ function Catalog({
   return (
     <AutoField label={t("catalog")}>
       <div className="space-y-3">
-        <textarea
-          aria-label={t("catalog")}
-          className="min-h-36 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          disabled={readOnly}
-          value={(draft.models ?? []).join("\n")}
-          onChange={(e) => onPatch({ models: e.target.value.split("\n") })}
-        />
+        {readOnly ? (
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {(draft.models ?? []).join("\n") || "\u2014"}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {(draft.models ?? []).map((model: string, index: number) => (
+              <div key={index} className="flex min-w-0 items-center gap-2">
+                <Input
+                  aria-label={`${t("catalog")} ${index + 1}`}
+                  value={model}
+                  className="min-w-0 flex-1"
+                  onChange={(e) =>
+                    onPatch({
+                      models: draft.models.map((v: string, i: number) =>
+                        i === index ? e.target.value : v,
+                      ),
+                    })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 shrink-0"
+                  aria-label={`${commonText("common.delete")} ${index + 1}`}
+                  onClick={() =>
+                    onPatch({
+                      models: draft.models.filter(
+                        (_: string, i: number) => i !== index,
+                      ),
+                      ...(draft.default_model === model
+                        ? { default_model: "" }
+                        : {}),
+                    })
+                  }
+                >
+                  {commonText("common.delete")}
+                </Button>
+              </div>
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              onClick={() => onPatch({ models: [...(draft.models ?? []), ""] })}
+            >
+              {commonText("common.add")}
+            </Button>
+          </div>
+        )}
+        {!readOnly && native && (
+          <AutoField label={t("catalogRunner")} help={t("nativeCatalogHelp")}>
+            <FieldControl
+              name="catalog_runner"
+              field={{
+                type: "select",
+                name: t("catalogRunner"),
+                width: "full",
+                config: {
+                  options: hosts.map((h) => ({ value: h.id, label: h.name })),
+                },
+              }}
+              value={hostId}
+              onChange={(value) => setHostId(String(value))}
+            />
+          </AutoField>
+        )}
         {!readOnly && (
           <Button
             type="button"
             variant="outline"
-            disabled={busy || !draft.provider_id || draft.provider_id === "0"}
+            disabled={
+              busy ||
+              (native
+                ? !hostId
+                : !draft.connection &&
+                  (!draft.provider_id || draft.provider_id === "0"))
+            }
             onClick={() => void discover()}
           >
             {busy ? t("discovering") : t("discover")}
@@ -105,13 +294,19 @@ function DefaultModel({
   return (
     <AutoField label={t("defaultModel")}>
       <div>
-        <Input
-          aria-label={t("defaultModel")}
-          disabled={readOnly}
-          list="model-catalog-options"
-          value={draft.default_model ?? ""}
-          onChange={(e) => onPatch({ default_model: e.target.value })}
-        />
+        {readOnly ? (
+          <p className="break-words text-sm">
+            {draft.default_model || t("nativeDefault")}
+          </p>
+        ) : (
+          <Input
+            aria-label={t("defaultModel")}
+            disabled={readOnly}
+            list="model-catalog-options"
+            value={draft.default_model ?? ""}
+            onChange={(e) => onPatch({ default_model: e.target.value })}
+          />
+        )}
         <datalist id="model-catalog-options">
           {(draft.models ?? [])
             .filter((m: string) => m.trim())
@@ -155,11 +350,14 @@ export function modelsLists(
           key: "runtime",
           label: "CLI",
           render: (r) =>
-            r.runtime === "claude"
-              ? "Claude Code"
-              : r.runtime === "codex"
-                ? "Codex"
-                : "—",
+            ({
+              codex: "Codex",
+              claude: "Claude Code",
+              gemini: "Gemini CLI",
+              qwen: "Qwen Code",
+              opencode: "OpenCode",
+              pi: "Pi",
+            })[r.runtime as string] ?? "—",
         },
         {
           key: "default_model",
@@ -201,12 +399,14 @@ export function modelsForms({
   return {
     "ai-models": form<AnyRow>({
       resource: "ai-models",
+      width: "full",
       heading: (r) => r.name,
       blank: {
         name: "",
         kind: "api",
         runtime: "",
         provider_id: "0",
+        connection: newConnection(),
         models: [],
         default_model: "",
         tool_version: "",
@@ -226,30 +426,57 @@ export function modelsForms({
               key: "kind",
               label: "Type",
               labelKey: key("kind"),
-              type: "select",
+              type: "custom",
+              width: "full",
               required: true,
-              resetOnChange: [
-                "runtime",
-                "tool_version",
-                "provider_id",
-                "models",
-                "default_model",
-              ],
-              options: [
-                { value: "api", label: "API" },
-                { value: "cli", label: "CLI" },
-              ],
+              render: ({ draft, readOnly, onPatch }) => (
+                <AutoField label={t("kind")} required={!readOnly}>
+                  <FieldControl
+                    name="kind"
+                    field={{
+                      type: "select",
+                      name: t("kind"),
+                      width: "full",
+                      config: {
+                        options: [
+                          { value: "api", label: "API" },
+                          { value: "cli", label: "CLI" },
+                        ],
+                      },
+                    }}
+                    value={draft.kind}
+                    readonly={readOnly}
+                    required
+                    onChange={(kind) =>
+                      onPatch({
+                        kind,
+                        runtime: "",
+                        tool_version: "",
+                        provider_id: "0",
+                        connection: kind === "api" ? newConnection() : null,
+                        models: [],
+                        default_model: "",
+                      })
+                    }
+                  />
+                </AutoField>
+              ),
             },
             {
               key: "runtime",
               label: "CLI tool",
               labelKey: key("runtime"),
               type: "select",
+              width: "full",
               required: true,
               when: (r) => r.kind === "cli",
               options: [
                 { value: "codex", label: "Codex" },
                 { value: "claude", label: "Claude Code" },
+                { value: "gemini", label: "Gemini CLI" },
+                { value: "qwen", label: "Qwen Code" },
+                { value: "opencode", label: "OpenCode" },
+                { value: "pi", label: "Pi" },
               ],
             },
             {
@@ -265,30 +492,13 @@ export function modelsForms({
               labelKey: key("provider"),
               type: "custom",
               span: 2,
-              render: ({ workspace, draft, readOnly, onPatch }) =>
+              render: (props) =>
                 !permissions?.has("credentials.read") ? (
                   <AutoField label={t("provider")}>
-                    <p>
-                      {draft.provider_id && draft.provider_id !== "0"
-                        ? draft.provider_id
-                        : t("nativeDefault")}
-                    </p>
+                    <p>{t("connectionRestricted")}</p>
                   </AutoField>
                 ) : (
-                  <WorkflowAssetContext.Provider
-                    value={{ workspace, workflow: "" }}
-                  >
-                    <WorkflowAIParameters
-                      type="ai.llm.chat"
-                      providerOnly
-                      value={{
-                        provider_id: draft.provider_id,
-                        model: draft.default_model,
-                      }}
-                      readOnly={readOnly}
-                      change={(v) => onPatch({ provider_id: v.provider_id })}
-                    />
-                  </WorkflowAssetContext.Provider>
+                  <ModelConnection {...props} />
                 ),
             },
             {
@@ -311,6 +521,7 @@ export function modelsForms({
               label: "State",
               labelKey: key("state"),
               type: "select",
+              width: "full",
               options: ["enabled", "disabled"].map((value) => ({
                 value,
                 label: value,

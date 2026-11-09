@@ -8,6 +8,23 @@ use serde_json::Value;
 pub enum Runtime {
     Codex,
     Claude,
+    Gemini,
+    Qwen,
+    Opencode,
+    Pi,
+}
+impl Runtime {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "codex" => Some(Self::Codex),
+            "claude" => Some(Self::Claude),
+            "gemini" => Some(Self::Gemini),
+            "qwen" => Some(Self::Qwen),
+            "opencode" => Some(Self::Opencode),
+            "pi" => Some(Self::Pi),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +35,9 @@ pub struct Probe {
     pub execution_identity: String,
     pub executable: Option<String>,
     pub version: Option<String>,
+    /// Model identifiers from this execution user's native CLI catalog only.
+    #[serde(default)]
+    pub models: Vec<String>,
     /// logged_in / logged_out / unknown; presence never proves authentication.
     pub authentication: String,
     pub directory_exists: bool,

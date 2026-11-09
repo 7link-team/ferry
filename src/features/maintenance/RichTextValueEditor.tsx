@@ -50,7 +50,7 @@ export default function RichTextValueEditor({ value, readOnly, onChange, insertR
       config: { readOnly, onChange: current => { const html = sanitizeRichText(current.getHtml()); lastHtml.current = html; changeRef.current(html); } },
     });
     editorRef.current = editor;
-    createToolbar({ editor, selector: toolbarContainer.current, mode: "simple" });
+    createToolbar({ editor, selector: toolbarContainer.current, mode: "simple", config: { insertKeys: { index: 1, keys: ["fontSize"] } } });
     const labelEditable = () => {
       const textbox = editorContainer.current?.querySelector('[data-slate-editor]');
       if (!textbox) return;

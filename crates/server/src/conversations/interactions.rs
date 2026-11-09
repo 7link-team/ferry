@@ -302,12 +302,12 @@ async fn unsave(
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Members {
+pub(super) struct Members {
     version: Id,
     member_ids: Vec<Id>,
     agent_ids: Vec<Id>,
 }
-async fn members(
+pub(super) async fn members(
     State(s): State<AppState>,
     scope: Scope,
     Path((_, id)): Path<(String, Id)>,
@@ -366,6 +366,9 @@ async fn members(
         return Err(error(StatusCode::CONFLICT, "conversations.busy"));
     }
     for user in &body.member_ids {
+        if *user == scope.user.id && scope.user.is_superadmin {
+            continue;
+        }
         if workspace_members::Entity::find()
             .filter(workspace_members::Column::WorkspaceId.eq(scope.workspace_id))
             .filter(workspace_members::Column::UserId.eq(*user))

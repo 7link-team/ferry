@@ -347,7 +347,7 @@ async fn execute(s: AppState, id: Id, mut stop: watch::Receiver<bool>) -> Result
         {
             return Err(error(StatusCode::CONFLICT, "conversations.bindingChanged"));
         }
-        if probe.authentication != "logged_in" {
+        if !config.authentication_usable(&probe.authentication) {
             return Err(error(StatusCode::CONFLICT, "conversations.loginRequired"));
         }
         let mut prompt = String::new();

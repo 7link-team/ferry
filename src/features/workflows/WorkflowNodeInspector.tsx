@@ -315,7 +315,7 @@ export function WorkflowNodeInspector({
           }}
         >
           <header className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3 lg:px-6">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 basis-full lg:basis-0 lg:flex-1">
               <Dialog.Title className="truncate text-base font-semibold">
                 {node.name}{" "}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
@@ -440,11 +440,11 @@ export function WorkflowNodeInspector({
             </Dialog.Close>
           </header>
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-muted/20 px-4 py-2 text-xs">
-            <label className="flex min-w-0 flex-1 items-center gap-2 lg:flex-none">
-              <FieldCaption label={t("inspector.execution")} />
+            <label className="flex min-w-0 basis-full items-center gap-2 sm:basis-auto sm:flex-1 lg:flex-none">
+              <span className="shrink-0 whitespace-nowrap"><FieldCaption label={t("inspector.execution")} /></span>
               <select
                 aria-label={t("inspector.execution")}
-                className="h-8 min-w-0 max-w-60 rounded border bg-background px-2 text-xs"
+                className="h-8 min-w-0 flex-1 rounded border bg-background px-2 text-xs sm:max-w-60"
                 value={execution}
                 onChange={(event) => setExecution(event.target.value)}
               >
@@ -459,7 +459,7 @@ export function WorkflowNodeInspector({
             {!!attempts.length && (
               <select
                 aria-label={t("attempt")}
-                className="h-8 rounded border bg-background px-2 text-xs"
+                className="h-8 min-w-0 max-w-full flex-1 rounded border bg-background px-2 text-xs sm:flex-none"
                 value={attempt}
                 onChange={(event) => setAttempt(event.target.value)}
               >
@@ -703,6 +703,7 @@ export function WorkflowNodeInspector({
                         )}
                       </div>
                     )}
+                    {node.type === "host.command" && <WorkflowExecutionTarget workspace={workspace} value={node.settings ?? {}} change={settings => update({settings})} readOnly={readOnly} hostOnly inherit />}
                     <WorkflowInputFields.Provider value={inputFields}>
                       <WorkflowNodeParameters
                         key={node.id}

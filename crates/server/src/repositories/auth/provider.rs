@@ -904,11 +904,28 @@ pub(crate) struct MonitorAccess {
     personal: bool,
     organization: String,
 }
+/// Server-only connection material for authenticated API consumers. Never serialize.
+pub(crate) struct RepositoryApiAccess {
+    pub credential_id: Id,
+    pub api: reqwest::Url,
+    pub token: String,
+    pub organization: String,
+    pub personal: bool,
+}
 pub(crate) struct MonitorPage {
     pub rows: Vec<Value>,
     pub has_more: bool,
 }
 impl MonitorAccess {
+    pub(super) fn into_api_access(self, credential_id: Id) -> RepositoryApiAccess {
+        RepositoryApiAccess {
+            credential_id,
+            api: self.config.api,
+            token: self.access,
+            organization: self.organization,
+            personal: self.personal,
+        }
+    }
     /// A bounded, best-effort comparison for one notification, using the same
     /// authenticated endpoint and diff parser as code insights.
     pub(crate) async fn change_stats(

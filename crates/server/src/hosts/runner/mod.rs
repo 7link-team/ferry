@@ -84,6 +84,7 @@ struct Live {
     control: mpsc::Sender<wire::Control>,
     disconnect: watch::Sender<bool>,
     managed: bool,
+    installation_scope: Option<String>,
     supports_monitor: bool,
     supports_agent: bool,
     supports_agent_probe: bool,

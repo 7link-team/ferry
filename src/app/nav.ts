@@ -63,7 +63,6 @@ export const nav: NavGroup[] = [
       { key: "workflows", get label() { return workflowText("kind.nodes"); }, resource: "workflows", permission: "workflows.read" },
       { key: "pipelines", get label() { return workflowText("kind.actions"); }, resource: "pipelines", permission: "pipelines.read" },
       { key: "credentials", get label() { return commonText("nav.credentials"); }, resource: "credentials", permission: "credentials.read" },
-      { key: "ai-credentials", get label() { return workflowText("aiCredentials"); }, resource: "credentials", params: { scope: "ai", kind: "token" }, hidden: true, parent: "credentials", permission: "credentials.read" },
       { key: "integration-credentials", get label() { return workflowText("integration.credentials"); }, resource: "credentials", params: { scope: "integration", kind: "token" }, hidden: true, parent: "credentials", permission: "credentials.read" },
       { key: "workflow-groups", get label() { return commonText("table.groups"); }, resource: "workflow-groups", permission: "workflow-groups.read", hidden: true, parent: "workflows" },
       {key:"pipeline-groups",get label() { return commonText("table.groups"); },resource:"pipeline-groups",permission:"pipeline-groups.read",hidden:true,parent:"pipelines"},

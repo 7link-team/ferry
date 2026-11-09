@@ -96,7 +96,7 @@
   "mail.testSubject": "メール設定テスト",
   "mail.testBody": "メール設定のテストメッセージです。",
   "mail.codeSubject": "登録確認コード",
-  "mail.codeBody": "登録コードは {code} です。有効期限は10分です。他人に教えないでください。",
+  "mail.codeBody": "登録コードは {code} です。有効期限は{expires_minutes}分です。他人に教えないでください。",
   "monitor.nodeChanged": "応答サーバーが表示中のノードと異なります。統計を更新して再試行してください。リセットは実行されていません。",
   "auth.captchaRequired": "新しいセキュリティ認証を完了してからログインしてください。",
   "auth.loginRateLimit": "ログイン試行が多すぎます。1分後に再試行してください。",

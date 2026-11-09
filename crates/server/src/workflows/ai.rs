@@ -17,7 +17,8 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ferry_protocol::sandbox::{Asset, Item};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+    TransactionTrait, sea_query::ExprTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -111,13 +112,17 @@ struct Price {
     output_micros: i64,
     unit_size: i64,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Body {
-    name: String,
-    credential_id: Id,
-    base_url: String,
-    protocol: String,
+pub(crate) struct Body {
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) credential_id: Id,
+    /// Input only: never serialize into revisions, audit or responses.
+    #[serde(default, skip_serializing)]
+    pub(crate) api_key: Option<String>,
+    pub(crate) base_url: String,
+    pub(crate) protocol: String,
     currency: String,
     timezone: String,
     monthly_limit_micros: i64,
@@ -127,7 +132,7 @@ struct Body {
     #[serde(default)]
     version: i64,
 }
-fn view(row: &providers::Model) -> Value {
+pub(crate) fn view(row: &providers::Model) -> Value {
     json!({"id":Id::from(row.id),"name":row.name,"credential_id":Id::from(row.credential_id),"base_url":row.base_url,"protocol":row.protocol,"currency":row.currency,"timezone":row.timezone,"monthly_limit_micros":row.monthly_limit_micros,"qps":row.qps,"concurrency":row.concurrency,"prices":serde_json::from_str::<Value>(&row.prices).unwrap_or(Value::Null),"version":row.version})
 }
 async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
@@ -140,7 +145,7 @@ async fn list(State(s): State<AppState>, scope: Scope) -> Result<Json<Value>> {
         json!({"items":rows.iter().map(view).collect::<Vec<_>>()}),
     ))
 }
-async fn validate(s: &AppState, workspace: Id, body: &Body) -> Result<()> {
+async fn validate(conn: &impl ConnectionTrait, workspace: Id, body: &Body) -> Result<()> {
     let url = reqwest::Url::parse(&body.base_url).map_err(|_| invalid())?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str().is_none()
@@ -177,13 +182,13 @@ async fn validate(s: &AppState, workspace: Id, body: &Body) -> Result<()> {
             return Err(invalid());
         }
     }
-    credential(s, workspace.into(), body.credential_id.into()).await?;
+    credential(conn, workspace.into(), body.credential_id.into()).await?;
     Ok(())
 }
-async fn credential(s: &AppState, workspace: i64, id: i64) -> Result<()> {
+async fn credential(conn: &impl ConnectionTrait, workspace: i64, id: i64) -> Result<()> {
     let row = credentials::Entity::find_by_id(id)
         .filter(credentials::Column::WorkspaceId.eq(workspace))
-        .one(&s.db)
+        .one(conn)
         .await?
         .ok_or_else(invalid)?;
     if row.scope != "ai" || row.kind != "token" || row.secret.is_empty() {
@@ -196,48 +201,8 @@ async fn create(
     scope: Scope,
     Json(body): Json<Body>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    scope.require("credentials.create")?;
-    scope.require("credentials.update_price")?;
-    scope.require("credentials.update_budget")?;
-    validate(&s, scope.workspace_id, &body).await?;
-    let now = db::now();
-    let id: i64 = s.next_id()?.into();
-    let row = providers::Model {
-        id,
-        workspace_id: scope.workspace_id.into(),
-        name: body.name.trim().into(),
-        credential_id: body.credential_id.into(),
-        base_url: body.base_url.trim_end_matches('/').into(),
-        protocol: body.protocol,
-        currency: body.currency,
-        timezone: body.timezone,
-        monthly_limit_micros: body.monthly_limit_micros,
-        qps: body.qps,
-        concurrency: body.concurrency,
-        prices: serde_json::to_string(&body.prices).map_err(|_| invalid())?,
-        created_at: now,
-        created_by: scope.user.id.into(),
-        updated_at: now,
-        updated_by: scope.user.id.into(),
-        version: 1,
-    };
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.create").await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.update_price").await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.update_budget").await?;
-    providers::Entity::insert(row.clone().into_active_model())
-        .exec(&tx)
-        .await?;
-    crate::hosts::activity_in(
-        &s,
-        &tx,
-        &scope,
-        "create",
-        "ai-providers",
-        &Id::from(id),
-        json!({"name":row.name}),
-    )
-    .await?;
+    let row = save_in(&s, &scope, &tx, None, body).await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(view(&row))))
 }
@@ -247,56 +212,184 @@ async fn update(
     Path((_, id)): Path<(String, Id)>,
     Json(body): Json<Body>,
 ) -> Result<Json<Value>> {
-    scope.require("credentials.update")?;
-    scope.require("credentials.update_price")?;
-    scope.require("credentials.update_budget")?;
-    validate(&s, scope.workspace_id, &body).await?;
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.update").await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.update_price").await?;
-    crate::accounts::workspace_admin::authorize(&tx, &scope, "credentials.update_budget").await?;
-    let row = providers::Entity::find_by_id(id)
-        .filter(providers::Column::WorkspaceId.eq(scope.workspace_id))
-        .one(&tx)
-        .await?
-        .ok_or_else(ApiError::missing)?;
-    if row.version != body.version {
-        return Err(ApiError::localized(
-            StatusCode::CONFLICT,
-            crate::i18n::Message::new("resource.conflict"),
-        ));
-    }
-    // A provider's credential/currency/timezone identity cannot move existing reservations.
-    if row.credential_id != i64::from(body.credential_id)
-        || row.currency != body.currency
-        || row.timezone != body.timezone
-    {
-        return Err(invalid());
-    }
-    let mut active = row.into_active_model();
-    active.name = Set(body.name.trim().into());
-    active.base_url = Set(body.base_url.trim_end_matches('/').into());
-    active.protocol = Set(body.protocol);
-    active.monthly_limit_micros = Set(body.monthly_limit_micros);
-    active.qps = Set(body.qps);
-    active.concurrency = Set(body.concurrency);
-    active.prices = Set(serde_json::to_string(&body.prices).map_err(|_| invalid())?);
-    active.version = Set(body.version + 1);
-    active.updated_at = Set(db::now());
-    active.updated_by = Set(scope.user.id.into());
-    let row = active.update(&tx).await?;
-    crate::hosts::activity_in(
-        &s,
-        &tx,
-        &scope,
-        "update",
-        "ai-providers",
-        &id,
-        json!({"name":row.name}),
-    )
-    .await?;
+    let row = save_in(&s, &scope, &tx, Some(id), body).await?;
     tx.commit().await?;
     Ok(Json(view(&row)))
+}
+pub(crate) async fn save_in(
+    s: &AppState,
+    scope: &Scope,
+    tx: &sea_orm::DatabaseTransaction,
+    id: Option<Id>,
+    mut body: Body,
+) -> Result<providers::Model> {
+    let permission = if id.is_some() {
+        "credentials.update"
+    } else {
+        "credentials.create"
+    };
+    for permission in [
+        permission,
+        "credentials.update_price",
+        "credentials.update_budget",
+    ] {
+        scope.require(permission)?;
+        crate::accounts::workspace_admin::authorize(tx, scope, permission).await?;
+    }
+    // Keep the existing encrypted-store identity: reservations are keyed by it.
+    // An omitted key on edit retains the secret; no stored secret is returned.
+    if let Some(id) = id {
+        let existing = providers::Entity::find_by_id(id)
+            .filter(providers::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(tx)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if existing.version != body.version {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("resource.conflict"),
+            ));
+        }
+        if i64::from(body.credential_id) == 0 {
+            body.credential_id = Id::from(existing.credential_id);
+        }
+        if body.credential_id != Id::from(existing.credential_id) {
+            return Err(invalid());
+        }
+    }
+    if let Some(key) = body
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    {
+        if key.len() > 16_384 || key.chars().any(char::is_control) {
+            return Err(invalid());
+        }
+        if id.is_none() {
+            let created = crate::credentials::create_in(
+                s,
+                tx,
+                scope,
+                serde_json::from_value(
+                    json!({"scope":"ai", "name":body.name.chars().take(60).collect::<String>(),
+                    "kind":"token", "secret":key}),
+                )
+                .map_err(|_| invalid())?,
+            )
+            .await?;
+            body.credential_id =
+                serde_json::from_value(created.1.0["id"].clone()).map_err(|_| invalid())?;
+        } else {
+            let sealed = s.vault.seal(
+                key,
+                &crate::vault::aad(
+                    &scope.workspace_id.to_string(),
+                    "credentials",
+                    &body.credential_id.to_string(),
+                ),
+            )?;
+            credentials::Entity::update_many()
+                .col_expr(
+                    credentials::Column::Secret,
+                    sea_orm::sea_query::Expr::value(sealed),
+                )
+                .col_expr(
+                    credentials::Column::UpdatedAt,
+                    sea_orm::sea_query::Expr::value(db::now()),
+                )
+                .col_expr(
+                    credentials::Column::Version,
+                    sea_orm::sea_query::Expr::col(credentials::Column::Version).add(1),
+                )
+                .filter(credentials::Column::Id.eq(body.credential_id))
+                .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
+                .filter(credentials::Column::Scope.eq("ai"))
+                .exec(tx)
+                .await?;
+        }
+    }
+    validate(tx, scope.workspace_id, &body).await?;
+    if let Some(id) = id {
+        let row = providers::Entity::find_by_id(id)
+            .filter(providers::Column::WorkspaceId.eq(scope.workspace_id))
+            .one(tx)
+            .await?
+            .ok_or_else(ApiError::missing)?;
+        if row.version != body.version {
+            return Err(ApiError::localized(
+                StatusCode::CONFLICT,
+                crate::i18n::Message::new("resource.conflict"),
+            ));
+        }
+        // A provider's credential/currency/timezone identity cannot move existing reservations.
+        if row.credential_id != i64::from(body.credential_id)
+            || row.currency != body.currency
+            || row.timezone != body.timezone
+        {
+            return Err(invalid());
+        }
+        let mut active = row.into_active_model();
+        active.name = Set(body.name.trim().into());
+        active.base_url = Set(body.base_url.trim_end_matches('/').into());
+        active.protocol = Set(body.protocol);
+        active.monthly_limit_micros = Set(body.monthly_limit_micros);
+        active.qps = Set(body.qps);
+        active.concurrency = Set(body.concurrency);
+        active.prices = Set(serde_json::to_string(&body.prices).map_err(|_| invalid())?);
+        active.version = Set(body.version + 1);
+        active.updated_at = Set(db::now());
+        active.updated_by = Set(scope.user.id.into());
+        let row = active.update(tx).await?;
+        crate::hosts::activity_in(
+            s,
+            tx,
+            scope,
+            "update",
+            "ai-providers",
+            &id,
+            json!({"name":row.name}),
+        )
+        .await?;
+        Ok(row)
+    } else {
+        let now = db::now();
+        let id: i64 = s.next_id()?.into();
+        let row = providers::Model {
+            id,
+            workspace_id: scope.workspace_id.into(),
+            name: body.name.trim().into(),
+            credential_id: body.credential_id.into(),
+            base_url: body.base_url.trim_end_matches('/').into(),
+            protocol: body.protocol,
+            currency: body.currency,
+            timezone: body.timezone,
+            monthly_limit_micros: body.monthly_limit_micros,
+            qps: body.qps,
+            concurrency: body.concurrency,
+            prices: serde_json::to_string(&body.prices).map_err(|_| invalid())?,
+            created_at: now,
+            created_by: scope.user.id.into(),
+            updated_at: now,
+            updated_by: scope.user.id.into(),
+            version: 1,
+        };
+        providers::Entity::insert(row.clone().into_active_model())
+            .exec(tx)
+            .await?;
+        crate::hosts::activity_in(
+            s,
+            tx,
+            scope,
+            "create",
+            "ai-providers",
+            &Id::from(id),
+            json!({"name":row.name}),
+        )
+        .await?;
+        Ok(row)
+    }
 }
 fn operations() -> [&'static str; 4] {
     [
@@ -605,7 +698,7 @@ async fn prepare(
     if workflow.lifecycle != "active" || current.state != "running" {
         return Err(ApiError::forbidden());
     }
-    credential(s, run.workspace_id, provider.credential_id).await?;
+    credential(&s.db, run.workspace_id, provider.credential_id).await?;
     let (_, _, secret) = crate::credentials::unseal(
         s,
         &Id::from(run.workspace_id),
