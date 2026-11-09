@@ -74,6 +74,10 @@ type Request struct {
 	Vars              map[string]string    `json:"vars"`
 	Inputs            map[string]string    `json:"inputs"`
 	TimeoutSeconds    int                  `json:"timeout_seconds"`
+	// ferry/preview@v1: the marker nonce and the directory the service
+	// answers in. Both reach only the rewritten preview steps.
+	PreviewNonce string `json:"preview_nonce"`
+	PreviewDir   string `json:"preview_dir"`
 }
 
 // act masks the message, but structured fields (for example set-output's arg)
@@ -240,7 +244,7 @@ func executeInstance(ctx context.Context, request Request, output io.Writer, ind
 	ctx = runner.WithJobLoggerFactory(ctx, factory)
 	config := &runner.Config{Actor: request.Actor, Token: request.Secrets["GITHUB_TOKEN"], Workdir: request.Workdir, ActionCacheDir: filepath.Join(filepath.Dir(request.Workdir), "action-cache", strconv.Itoa(index)), EventName: request.EventName, EventPath: request.EventPath, Platforms: request.Platforms,
 		Env: request.Env, Secrets: request.Secrets, Vars: request.Vars, Inputs: request.Inputs, LogOutput: true, JSONLogger: true, AutoRemove: true,
-		GitHubInstance: "github.com", RemoteName: "origin", ConcurrentJobs: 4, FerryRewriteStep: rewriteBuiltinArtifactStep}
+		GitHubInstance: "github.com", RemoteName: "origin", ConcurrentJobs: 4, FerryRewriteStep: builtinStepRewriter(request.PreviewNonce, request.PreviewDir)}
 	if request.ArtifactDir != "" {
 		config.ArtifactServerPath = request.ArtifactDir
 		if strings.Contains(request.Env["ACTIONS_RUNTIME_URL"], "host.docker.internal") {
@@ -367,6 +371,13 @@ func main() {
 	if len(os.Args) == 3 && os.Args[1] == "artifact" {
 		if err := runArtifactHelper(os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "Artifact error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "preview" {
+		if err := runPreviewHelper(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "Preview error:", err)
 			os.Exit(1)
 		}
 		return

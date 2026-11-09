@@ -111,6 +111,7 @@
   "execution.choiceKind": "以下選項之一：{options}",
   "execution.dispatchFailed": "執行或憑據清理失敗，請檢查主機連線與配置。\n",
   "execution.jobFailed": "任務 {job} 執行或清理失敗：{error}\n",
+  "execution.previewFailed": "任務 {job} 的預覽失敗：{error}\n",
   "execution.matrixAssigned": "任務 {job} 的矩陣例項 {name} 分配到主機 {host}\n",
   "execution.matrixFailed": "任務 {job} 的矩陣例項 {name} 執行失敗：{error}\n",
   "runnerExtra.protocolMismatch": "通訊協定版本不符：伺服器要求 {expected}，代理程式為 {actual}。請升級 ferry-runner。",

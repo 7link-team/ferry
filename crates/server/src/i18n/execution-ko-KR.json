@@ -111,6 +111,7 @@
   "execution.choiceKind": "다음 옵션 중 하나: {options}",
   "execution.dispatchFailed": "실행 또는 자격 증명 정리에 실패했습니다. 호스트 연결 및 구성을 확인하세요.\n",
   "execution.jobFailed": "작업 {job} 실행 또는 정리 실패: {error}\n",
+  "execution.previewFailed": "작업 {job} 미리보기 실패: {error}\n",
   "execution.matrixAssigned": "작업 {job}의 매트릭스 인스턴스 {name}을(를) 호스트 {host}에 할당했습니다\n",
   "execution.matrixFailed": "작업 {job}의 매트릭스 인스턴스 {name} 실패: {error}\n",
   "runnerExtra.protocolMismatch": "프로토콜 버전이 일치하지 않습니다. 서버는 {expected}, Runner는 {actual}입니다. ferry-runner를 업그레이드하세요.",

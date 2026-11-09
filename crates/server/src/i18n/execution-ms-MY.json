@@ -111,6 +111,7 @@
   "execution.choiceKind": "salah satu pilihan ini: {options}",
   "execution.dispatchFailed": "Pelaksanaan atau pembersihan kelayakan gagal. Semak sambungan dan konfigurasi hos.\n",
   "execution.jobFailed": "Pelaksanaan atau pembersihan tugas {job} gagal: {error}\n",
+  "execution.previewFailed": "Pratonton untuk tugas {job} gagal: {error}\n",
   "execution.matrixAssigned": "Contoh matriks {name} bagi tugas {job} diberikan kepada hos {host}\n",
   "execution.matrixFailed": "Contoh matriks {name} bagi tugas {job} gagal: {error}\n",
   "runnerExtra.protocolMismatch": "Versi protokol tidak sepadan: pelayan memerlukan {expected}, tetapi runner menggunakan {actual}. Naik taraf ferry-runner.",

@@ -111,6 +111,7 @@
   "execution.choiceKind": "以下选项之一：{options}",
   "execution.dispatchFailed": "执行或凭据清理失败，请检查主机连接与配置。\n",
   "execution.jobFailed": "任务 {job} 执行或清理失败：{error}\n",
+  "execution.previewFailed": "任务 {job} 的预览失败：{error}\n",
   "execution.matrixAssigned": "任务 {job} 的矩阵实例 {name} 分配到主机 {host}\n",
   "execution.matrixFailed": "任务 {job} 的矩阵实例 {name} 执行失败：{error}\n",
   "runnerExtra.protocolMismatch": "协议版本不匹配：服务要求 {expected}，代理为 {actual}。请升级 ferry-runner。",

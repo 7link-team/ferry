@@ -216,7 +216,36 @@ pub async fn get(
             "host_id":Id::from(job.host_id),"state":job.state,"started_at":job.started_at,"finished_at":job.finished_at})
     }).collect::<Vec<_>>());
     v["artifacts"] = crate::pipelines::artifacts::for_run_in(&tx, r.workspace_id, r.id).await?;
+    let previews = {
+        use crate::entities::holes;
+        holes::Entity::find()
+            .filter(holes::Column::WorkspaceId.eq(r.workspace_id))
+            .filter(holes::Column::SourceKind.eq("pipeline"))
+            .filter(holes::Column::SourceId.eq(r.id))
+            .order_by_asc(holes::Column::CreatedAt)
+            .order_by_asc(holes::Column::Id)
+            .all(&tx)
+            .await?
+    };
     tx.commit().await?;
+    // The holes view gives the link and derived state; only what the run
+    // page shows is passed on.
+    let previews = if previews.is_empty() {
+        Vec::new()
+    } else {
+        crate::holes::views(&s, &scope, previews).await?
+    };
+    v["previews"] = json!(
+        previews
+            .iter()
+            .map(
+                |preview| json!({"id": preview["id"], "job": preview["source_ref"],
+                "name": preview["name"], "url": preview["url"], "state": preview["state"],
+                "review_state": preview["review_state"], "probe_state": preview["probe_state"],
+                "expires_at": preview["expires_at"]})
+            )
+            .collect::<Vec<_>>()
+    );
     Ok(Json(v))
 }
 fn display_step_name(
@@ -979,7 +1008,7 @@ pub async fn cancel(
     let tx = crate::variables::transaction(&s, scope.workspace_id).await?;
     let scope = workspace_admin::authorize(&tx, &scope, "pipelines.run").await?;
     let r = scoped(&tx, &scope, &id, Operation::Run).await?;
-    request_cancel_in(&tx, &r).await?;
+    let revoked = request_cancel_in(&tx, &r).await?;
     crate::hosts::activity_in(
         &s,
         &tx,
@@ -991,25 +1020,28 @@ pub async fn cancel(
     )
     .await?;
     tx.commit().await?;
+    crate::holes::close_all(&revoked);
     Ok(Json(json!({"ok":true})))
 }
 /// A queued run ends as cancelled; a running Actions run moves to
 /// cancelling so its scheduler stops workers and cleans up.
 pub(crate) async fn request_cancel(s: &AppState, r: &runs::Model) -> Result<()> {
     let tx = s.db.begin().await?;
-    request_cancel_in(&tx, r).await?;
+    let revoked = request_cancel_in(&tx, r).await?;
     tx.commit().await?;
+    crate::holes::close_all(&revoked);
     Ok(())
 }
-async fn request_cancel_in(conn: &impl ConnectionTrait, r: &runs::Model) -> Result<()> {
+/// Returns the previews it revoked, for `close_all` after commit.
+async fn request_cancel_in(conn: &impl ConnectionTrait, r: &runs::Model) -> Result<Vec<i64>> {
     if crate::pipelines::actions::snapshot(&r.definition).is_some() {
         if mark_cancelling(conn, r).await? {
-            finish_in(conn, r.id, "cancelled").await?;
+            return finish_in(conn, r.id, "cancelled").await;
         }
+        Ok(Vec::new())
     } else {
-        finish_in(conn, r.id, "cancelled").await?;
+        finish_in(conn, r.id, "cancelled").await
     }
-    Ok(())
 }
 /// Persist cancellation inside a caller's transaction; running Actions cleanup
 /// remains owned by the existing scheduler. The caller finishes queued runs.
@@ -1109,11 +1141,14 @@ pub async fn approve(
 }
 pub(crate) async fn finish(s: &AppState, id: i64, state: &str) -> Result<()> {
     let tx = s.db.begin().await?;
-    finish_in(&tx, id, state).await?;
+    let revoked = finish_in(&tx, id, state).await?;
     tx.commit().await?;
+    crate::holes::close_all(&revoked);
     Ok(())
 }
-async fn finish_in(conn: &impl ConnectionTrait, id: i64, state: &str) -> Result<()> {
+/// Returns the previews it revoked; the caller cuts their connections once
+/// the transaction has committed.
+async fn finish_in(conn: &impl ConnectionTrait, id: i64, state: &str) -> Result<Vec<i64>> {
     let changed = runs::Entity::update_many()
         .col_expr(runs::Column::State, Expr::value(state))
         .col_expr(runs::Column::FinishedAt, Expr::value(db::now()))
@@ -1173,8 +1208,9 @@ async fn finish_in(conn: &impl ConnectionTrait, id: i64, state: &str) -> Result<
             .filter(steps::Column::State.eq("queued"))
             .exec(conn)
             .await?;
+        return crate::holes::revoke_source(conn, "pipeline", id, None).await;
     }
-    Ok(())
+    Ok(Vec::new())
 }
 pub(crate) async fn active(s: &AppState, id: i64) -> Result<bool> {
     Ok(runs::Entity::find_by_id(id)
@@ -1622,6 +1658,7 @@ mod tests {
             schema.create_table_from_entity(steps::Entity),
             schema.create_table_from_entity(crate::entities::pipeline_run_jobs::Entity),
             schema.create_table_from_entity(crate::entities::pipeline_artifacts::Entity),
+            schema.create_table_from_entity(crate::entities::holes::Entity),
         ] {
             db.execute(&table).await.unwrap();
         }
@@ -1761,6 +1798,7 @@ mod tests {
                 "explicit identical user name stays literal"
             );
             assert_eq!(value["steps"][2]["name"], "engine evaluated name {name}");
+            assert_eq!(value["previews"], json!([]));
         }
         let mut legacy: Value = serde_json::from_str(&definition).unwrap();
         for job in legacy["jobs"].as_array_mut().unwrap() {
@@ -1793,6 +1831,201 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stored[0].name, "Run command");
+    }
+
+    /// A run's previews (docs/preview-automation-design.md section 5): the run
+    /// page lists them, and the run's terminal write revokes them.
+    #[tokio::test]
+    async fn run_lists_its_previews_and_revokes_them_when_it_ends() {
+        use crate::entities::{holes, hosts};
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let scope = crate::agents::tests::admin(1);
+        // Object visibility (definition ACLs) is not what this test is about.
+        let mut reader = scope.clone();
+        reader.user.is_superadmin = true;
+        s.db.execute_unprepared("UPDATE users SET is_superadmin = 1 WHERE id = 1")
+            .await
+            .unwrap();
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(11),
+            workspace_id: Set(1),
+            name: Set("Runner".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            enroll_token: Set(String::new()),
+            enroll_token_hash: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        pipelines::Entity::insert(pipelines::ActiveModel {
+            id: Set(1),
+            workspace_id: Set(1),
+            owner_id: Set(Some(1)),
+            name: Set("Preview pipeline".into()),
+            group_id: Set(0),
+            application_id: Set(0),
+            repository_id: Set(0),
+            definition: Set("{}".into()),
+            target_kind: Set("host".into()),
+            target_ref: Set(11),
+            description: Set(String::new()),
+            created_at: Set(1),
+            updated_at: Set(1),
+            version: Set(1),
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        for id in [70, 71] {
+            let mut run = super::lease_tests::run(id);
+            run.workspace_id = 1;
+            run.host_id = 11;
+            run.state = "running".into();
+            runs::Entity::insert(runs::ActiveModel::from(run))
+                .exec(&s.db)
+                .await
+                .unwrap();
+        }
+        let open = |run: i64, job: &str, review: Option<i64>| {
+            let (s, scope, job) = (s.clone(), scope.clone(), job.to_owned());
+            async move {
+                crate::holes::open_owned(
+                    &s,
+                    &scope,
+                    crate::holes::OwnedRequest {
+                        host_id: Id::from(11),
+                        port: 5173,
+                        name: format!("{job} preview"),
+                        strip_prefix: true,
+                        source_kind: "pipeline",
+                        source_id: run,
+                        source_ref: job,
+                        review_minutes: review,
+                    },
+                )
+                .await
+                .unwrap()
+            }
+        };
+        let build = open(70, "build", Some(30)).await;
+        let deploy = open(70, "deploy", None).await;
+        let other = open(71, "build", None).await;
+
+        let Json(value) = get(
+            State(s.clone()),
+            reader.clone(),
+            Path(("1".into(), "70".into())),
+        )
+        .await
+        .unwrap();
+        let previews = value["previews"].as_array().unwrap();
+        assert_eq!(previews.len(), 2, "only this run's previews: {previews:?}");
+        assert_eq!(previews[0]["id"], json!(Id::from(build.id)));
+        assert_eq!(previews[0]["job"], "build");
+        assert_eq!(previews[0]["name"], "build preview");
+        assert_eq!(previews[0]["state"], "active");
+        assert_eq!(previews[0]["review_state"], "waiting");
+        assert_eq!(previews[0]["probe_state"], build.probe_state);
+        assert_eq!(previews[0]["expires_at"], build.expires_at);
+        let url = previews[0]["url"].as_str().unwrap();
+        assert!(url.starts_with("/holes/") && url.ends_with('/') && url.len() > 10);
+        assert_ne!(previews[0]["url"], previews[1]["url"]);
+        assert_eq!(previews[1]["job"], "deploy");
+        assert_eq!(previews[1]["review_state"], "none");
+        let keys = previews[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            [
+                "expires_at",
+                "id",
+                "job",
+                "name",
+                "probe_state",
+                "review_state",
+                "state",
+                "url"
+            ]
+        );
+
+        // The terminal write revokes the run's previews in its transaction.
+        finish(&s, 70, "failed").await.unwrap();
+        for hole in [build.id, deploy.id] {
+            let row = holes::Entity::find_by_id(hole)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(row.revoked_at > 0);
+            assert_eq!(row.revoked_by, 0, "revoked by the system");
+        }
+        let row = holes::Entity::find_by_id(other.id)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.revoked_at, 0, "another run's preview stays open");
+        let Json(value) = get(
+            State(s.clone()),
+            reader.clone(),
+            Path(("1".into(), "70".into())),
+        )
+        .await
+        .unwrap();
+        assert!(
+            value["previews"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|preview| preview["state"] == "revoked")
+        );
+        // A run that already ended changes nothing and revokes nothing more.
+        finish(&s, 70, "succeeded").await.unwrap();
+
+        // Cancelling a queued run finishes it the same way.
+        let queued = open(71, "deploy", None).await;
+        runs::Entity::update_many()
+            .col_expr(runs::Column::State, Expr::value("queued"))
+            .filter(runs::Column::Id.eq(71))
+            .exec(&s.db)
+            .await
+            .unwrap();
+        let run = runs::Entity::find_by_id(71)
+            .one(&s.db)
+            .await
+            .unwrap()
+            .unwrap();
+        request_cancel(&s, &run).await.unwrap();
+        for hole in [other.id, queued.id] {
+            let row = holes::Entity::find_by_id(hole)
+                .one(&s.db)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(row.revoked_at > 0);
+        }
     }
 
     #[test]

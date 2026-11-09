@@ -24,6 +24,18 @@ export interface PipelineRun {
   definition_snapshot?: { workflow: string; executor_bindings: unknown[]; checkout_bindings: unknown[] } | null;
   jobs?: { key: string; name?: string; step_indices?: number[]; host_id: string; state: string; started_at: number; finished_at: number }[];
   variables?: { environment: string; name: string; scope: string; scope_ref: string; version: number; secret: boolean }[];
+  /** Previews opened by `ferry/preview@v1` steps; `url` is root-relative. */
+  previews?: RunPreview[];
+}
+export interface RunPreview {
+  id: string;
+  job: string;
+  name: string;
+  url: string;
+  state: string;
+  review_state: string;
+  probe_state: string;
+  expires_at: number;
 }
 export interface PipelineStep {
   index: number;
