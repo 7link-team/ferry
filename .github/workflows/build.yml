@@ -94,7 +94,7 @@ jobs:
       - run: ACTIONS_WORKER_TARGETS=linux/amd64 bash scripts/build-actions-workers.sh
       - run: cargo build --locked -p ferry-server -p ferry-runner
       # Test-only DNS: exact token hosts are registered in /etc/hosts by the
-      # request helper; Chromium also uses a wildcard loopback resolver rule.
+      # request helper; both Node and Chromium resolve those exact system hosts.
       # These checks exercise routing and isolation, not public DNS or TLS.
       - name: Real Runner preview domains and HMR
         env:

@@ -15,7 +15,7 @@ pub(super) fn label(token: &str) -> Result<String> {
         .encode(&bytes)
         .to_ascii_lowercase())
 }
-pub(super) fn token(label: &str) -> Option<String> {
+pub(crate) fn token(label: &str) -> Option<String> {
     if label.len() != 52
         || !label
             .bytes()

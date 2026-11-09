@@ -140,7 +140,6 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
     env = dict(os.environ, FERRY_DATA_DIR=directory, FERRY_BIND=f'127.0.0.1:{port}')
     env.pop('FERRY_DATABASE_URL', None)
     if os.environ.get('FERRY_TEST_DATABASE_URL'): env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
-    env['REPOSITORY_OAUTH_PUBLIC_URL']=base[:-4]
     for provider in ['github','gitlab','gitee']:
         prefix='REPOSITORY_OAUTH_'+provider.upper()
         env[prefix+'_CLIENT_ID']=provider+'-client'
@@ -178,6 +177,8 @@ with tempfile.TemporaryDirectory(prefix='repository-auth-test-') as directory:
         password = 'fixture8'
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':'1234567','token':(data/'setup-token').read_text(encoding='utf8').strip()}, expected=400)
         request(admin, '/setup', {'email':'admin@example.invalid','name':'Admin','password':password,'token':(data/'setup-token').read_text(encoding='utf8').strip()})
+        access=request(admin,'/platform/settings/1')
+        request(admin,'/platform/settings/1',{'version':access['version'],'registration_enabled':True,'public_url':base[:-4]},'PATCH')
         request(owner, '/users', {'name':'Short','email':'short@example.invalid','password':'1234567'}, expected=400)
         for c, name in [(owner,'Owner'),(guest,'Guest'),(outsider,'Outsider')]:
             request(c, '/users', {'name':name,'email':name.lower()+'@example.invalid','password':password})

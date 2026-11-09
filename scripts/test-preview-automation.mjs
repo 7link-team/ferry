@@ -292,7 +292,7 @@ try {
 
   browser = await chromium.launch({
     headless: true,
-    args: [`--host-resolver-rules=${previewResolverRules}`],
+    args: previewResolverRules ? [`--host-resolver-rules=${previewResolverRules}`] : [],
     ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}),
   });
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });

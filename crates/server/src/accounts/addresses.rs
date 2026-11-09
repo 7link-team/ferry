@@ -66,6 +66,11 @@ impl Configuration {
                 || url.fragment().is_some()
                 || url.path() != "/"
                 || self.public_url.len() > 2048
+                || url
+                    .host_str()
+                    .and_then(|host| host.split('.').next())
+                    .and_then(crate::holes::preview_token)
+                    .is_some()
             {
                 return Err(invalid());
             }
@@ -149,6 +154,7 @@ mod tests {
             c.preview_origin("abc").unwrap(),
             "https://abc.preview.example.test"
         );
+        assert!(c.update(json!({"public_url":format!("https://{}.preview.example.test", "a".repeat(52)),"preview_domain":"preview.example.test"}).as_object().unwrap()).is_err(), "A preview token host must never become the console address");
         for domain in [
             "*.example.test",
             "https://example.test",

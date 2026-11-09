@@ -11,7 +11,7 @@ mod proxy;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use domain::dispatch;
+pub(crate) use domain::{dispatch, token as preview_token};
 pub(crate) use owned::{OwnedRequest, open_owned, revoke_source, wait_ready, wait_review};
 pub use proxy::{redact, serve, serve_root};
 

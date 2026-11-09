@@ -100,7 +100,6 @@ def main():
         public = until(endpoint, 'quick tunnel URL', 90)
         # Public deployments must explicitly allow the published hostname. Keep
         # the normal Host defence enabled instead of rewriting forwarded Host.
-        env['FERRY_ALLOWED_HOSTS'] = urllib.parse.urlparse(public).hostname
         service.terminate()
         service.wait(timeout=30)
         service = start([server], 'server', env)

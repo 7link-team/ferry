@@ -197,13 +197,14 @@ document.getElementById('report').textContent = JSON.stringify(report);
   });
 
   assert.equal((await fetch(vite.url)).status,200);
+  assert.equal((await fetch(echoHole.url)).status,200);
   const probed = await api(`${root}/holes/${vite.id}/probes`, {});
   assert.equal(probed.probe_state, 'reachable');
   pass('explicit_probe_reachable');
 
   browser = await chromium.launch({
     headless: true,
-    args: [`--host-resolver-rules=${previewResolverRules}`],
+    args: previewResolverRules ? [`--host-resolver-rules=${previewResolverRules}`] : [],
     ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}),
   });
   // The visitor is logged in to the console in the same browser: the case the

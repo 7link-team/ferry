@@ -121,7 +121,7 @@ def main():
         return json.loads(data) if data else None
 
     def launch_server():
-        env = dict(os.environ, FERRY_DATA_DIR=str(work / 'data'), FERRY_BIND=f'0.0.0.0:{server_port}', FERRY_ALLOWED_HOSTS='host.docker.internal')
+        env = dict(os.environ, FERRY_DATA_DIR=str(work / 'data'), FERRY_BIND=f'0.0.0.0:{server_port}')
         env.pop('FERRY_DATABASE_URL', None)
         if os.environ.get('FERRY_TEST_DATABASE_URL'):
             env['FERRY_DATABASE_URL'] = os.environ['FERRY_TEST_DATABASE_URL']
