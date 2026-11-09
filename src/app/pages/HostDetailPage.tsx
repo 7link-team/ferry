@@ -56,7 +56,7 @@ export function HostDetail({
   const canConnect = canEnroll && connection?.workspace === workspace && connection.hostId === hostId && connection.kind === "runner";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
     <ResourceHeading name={connection?.name || hostId} />
 
     <div className="flex flex-wrap items-center justify-between gap-2 border-b">
@@ -72,8 +72,8 @@ export function HostDetail({
       {permissions.has("hosts.update") && <Button asChild variant="outline" size="sm"><a href={href({ workspace, group: "host", item: "hosts", id: hostId, mode: "edit" }, {})}><Pencil className="size-4" />{commonText("common.edit")}</a></Button>}
       </div>
     </div>
-      <div role="tabpanel" aria-label={tab === "monitor" ? commonText("shell.monitor") : tab === "alerts" ? commonText("shell.alerts") : tab === "holes" ? commonText("holes:title") : commonText("common.basic")} className={cn("min-h-0 overflow-auto pt-5", (tab === "alerts" || tab === "holes") && "flex flex-1 flex-col")}>
-        {tab === "monitor" ? <HostMonitor workspace={workspace} hostId={hostId} /> : tab === "holes" && holes && permissions.has("holes.read") ? <div className="flex min-h-0 flex-1 flex-col gap-3">
+      <div role="tabpanel" aria-label={tab === "monitor" ? commonText("shell.monitor") : tab === "alerts" ? commonText("shell.alerts") : tab === "holes" ? commonText("holes:title") : commonText("common.basic")} className={cn("min-h-0 min-w-0 overflow-auto pt-5", (tab === "alerts" || tab === "holes") && "flex flex-1 flex-col")}>
+        {tab === "monitor" ? <HostMonitor workspace={workspace} hostId={hostId} /> : tab === "holes" && holes && permissions.has("holes.read") ? <div className="flex min-h-[32rem] min-w-0 flex-1 flex-col gap-3">
           {holeForm && permissions.has("holes.create") && <div className="flex justify-end"><Button asChild size="sm"><a href={href({workspace,group:"host",item:"holes",mode:"new"},{host_id:hostId,return_to:location.pathname+location.search+location.hash})}><Plus className="size-4" />{commonText("holes:create")}</a></Button></div>}
           <ResourceTable key={`${hostId}/holes`} config={{ ...holes, fixed: { host_id: hostId }, filters: (holes.filters ?? []).filter(filter => filter.key !== "host_id"), toolbar: { ...holes.toolbar, create: false }, actions: holes.actions?.map(action => action.to ? { ...action, to: (row: Parameters<NonNullable<typeof action.to>>[0]) => ({ group: "host", item: "holes", ...action.to!(row) }) } : action) ?? [] }} workspace={workspace} permissions={permissions} />
         </div> : tab === "alerts" && alerts && alertEvents ? <div className="flex min-h-0 flex-1 flex-col gap-3">

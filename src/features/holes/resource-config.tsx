@@ -364,6 +364,12 @@ export function holesLists({
       columns: [
         { key: "name", label: "Name", labelKey: key("name"), sortable: true },
         {
+          key: "source_kind",
+          label: "Source",
+          labelKey: key("source"),
+          render: (row) => <SourceCell row={row} workspace={workspace} href={href} navigate={navigate} />,
+        },
+        {
           key: "host_name",
           label: "Host",
           labelKey: key("host"),
@@ -405,12 +411,6 @@ export function holesLists({
           width: 180,
           sortable: true,
           render: (row) => cronDate(row.expires_at),
-        },
-        {
-          key: "source_kind",
-          label: "Source",
-          labelKey: key("source"),
-          render: (row) => <SourceCell row={row} workspace={workspace} href={href} navigate={navigate} />,
         },
         {
           key: "review_state",

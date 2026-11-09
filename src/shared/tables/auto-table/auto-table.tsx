@@ -129,7 +129,7 @@ function AutoTableInner<T>(
       )}
       <div
         ref={options.scrollRef}
-        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background"
+        className="min-h-0 min-w-0 flex-1 overflow-auto rounded-lg border border-border bg-background [contain:paint]"
         style={{ containerType: "inline-size" }}
         aria-busy={loading}
       >

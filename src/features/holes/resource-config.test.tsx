@@ -49,7 +49,7 @@ it("lists the required columns with a 5-second default refresh", () => {
   expect(config.resource).toBe("holes");
   expect(config.defaultRefresh).toBe(5);
   expect(config.columns.map((column) => column.key)).toEqual([
-    "name", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "source_kind", "review_state", "created_by_name",
+    "name", "source_kind", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "review_state", "created_by_name",
   ]);
   expect(config.filters!.map((filter) => filter.key)).toEqual(["q", "host_id", "state"]);
   expect(config.emptyKey).toBe("holes:empty");

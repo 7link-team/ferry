@@ -779,7 +779,7 @@ export function WorkflowEditor({
       { key: "started_at", label: t("execution.startedAt"), sortable:true, render: row => Number(row.started_at)>0 ? new Date(Number(row.started_at)).toLocaleString() : "—" },
       { key: "finished_at", label: t("execution.finishedAt"), sortable:true, render: row => Number(row.finished_at)>0 ? new Date(Number(row.finished_at)).toLocaleString() : "—" },
       { key: "duration", label: t("execution.duration"), render: row => Number(row.started_at)>0 ? `${Math.max(0,(Number(row.finished_at)||Date.now())-Number(row.started_at))} ms` : "—" },
-      { key: "end_reason", label: t("history.endReason") },
+      { key: "end_reason", label: t("history.endReason"), render: row => row.end_reason === "node_wait" ? t("execution.state.waiting") : String(row.end_reason ?? "") },
     ],
     actions: [
       {
@@ -848,7 +848,7 @@ export function WorkflowEditor({
                     }}>{t(execution.state === "cancelling" ? "execution.cancelling" : "execution.cancel")}</Button>
                   </div>
                 )}
-                {execution.end_reason ? (
+                {execution.end_reason && execution.end_reason !== "node_wait" ? (
                   <p className="mb-3 text-sm text-destructive">
                     {execution.end_reason === "integration_unknown" ? t("integration.failure.unknown") : execution.end_reason === "integration_remote" ? t("integration.failure.remote") : execution.end_reason === "integration_invalid" ? t("integration.failure.invalid") : String(execution.end_reason)}
                   </p>

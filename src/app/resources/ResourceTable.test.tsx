@@ -41,6 +41,21 @@ it("renders report metadata from the fetched envelope and hides stale charts aft
   expect(element.textContent).toContain("Report unavailable");
   expect(element.textContent).not.toContain("Report Full series");
 });
+it("reserves action space for the largest visible row action set instead of mutually exclusive actions", async () => {
+  const config: ListConfig<{id:string;name:string}> = {
+    resource:"executions",rowKey:row=>row.id,columns:[{key:"name",label:"Name"}],toolbar:{create:false},
+    actions:[
+      {label:"View",action:async()=>{}},
+      {label:"Approve",when:row=>row.id==="1",action:async()=>{}},
+      {label:"Edit",when:row=>row.id==="2",action:async()=>{}},
+    ],
+  };
+  await act(async()=>root.render(<ResourceTable config={config} workspace="ops" permissions={new Set()} />));
+  expect(element.querySelector<HTMLElement>('thead th:last-child')!.style.width).toBe("96px");
+  expect(element.querySelectorAll('button[aria-label="Approve"]')).toHaveLength(1);
+  expect(element.querySelectorAll('button[aria-label="Edit"]')).toHaveLength(1);
+});
+
 it("opens configured read-only details from the row or an explicit labeled action", async () => {
   const open = vi.fn();
   const config: ListConfig<{id:string;name:string}> = {

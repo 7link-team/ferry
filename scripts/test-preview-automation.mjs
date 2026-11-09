@@ -85,13 +85,14 @@ async function until(label, check, seconds = 60) {
   throw new Error(`${label} timed out (${last ?? 'no value'})`);
 }
 
-/** Processes started for this run: anything naming the evidence dir or the binaries. */
+/** Processes started for this run and their descendants, never unrelated users of the binaries. */
 function leftovers() {
   if (process.platform !== 'win32') return Promise.resolve([]);
-  const needles = [work, serverBinary, runnerBinary].map((path) => path.replaceAll("'", "''"));
-  const script = `$n=@(${needles.map((path) => `'${path}'`).join(',')});` +
-    'Get-CimInstance Win32_Process | Where-Object { $c=$_.CommandLine; $p=$_.ExecutablePath; ' +
-    '$c -and ($n | Where-Object { $c.Contains($_) -or ($p -and $p -eq $_) }) -and $_.ProcessId -ne $PID } | ' +
+  const roots = processes.map(child=>child.pid).filter(pid=>Number.isInteger(pid));
+  const needle = work.replaceAll("'", "''");
+  const script = `$ids=@(${roots.join(',')});$work='${needle}';$all=@(Get-CimInstance Win32_Process);` +
+    'do { $changed=$false; foreach($p in $all) { if(($ids -contains $p.ParentProcessId) -and ($ids -notcontains $p.ProcessId)) { $ids+= $p.ProcessId; $changed=$true } } } while($changed);' +
+    '$all | Where-Object { (($_.CommandLine -and $_.CommandLine.Contains($work)) -or ($ids -contains $_.ProcessId)) -and $_.ProcessId -ne $PID } | ' +
     'ForEach-Object { "$($_.ProcessId) $($_.Name)" }';
   return new Promise((done) => {
     execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true },
@@ -418,6 +419,7 @@ try {
   const panel = page.getByRole('region', { name: '预览', exact: true });
   const workflowApprove = panel.getByRole('button', { name: '通过', exact: true });
   await workflowApprove.waitFor({ timeout: 30000 });
+  assert.equal(await page.getByText('node_wait', { exact: true }).count(), 0, 'Waiting for review must not display an internal control code as an error');
   assert.equal(await panel.getByRole('link', { name: '打开预览' }).count(), 1);
   await shots(page, 'workflow-execution-preview', async () => {
     await nodeSelect.waitFor({ timeout: 30000 });
@@ -461,7 +463,7 @@ try {
   await tabPanel.getByText(`流水线运行 · web`).first().waitFor({ timeout: 30000 });
   await tabPanel.getByText(`工作流执行 · preview`).first().waitFor({ timeout: 30000 });
   assert.equal(await tabPanel.getByText('流水线运行 · web').count(), 2, 'both pipeline previews listed');
-  // Recorded, not asserted: the table may scroll inside its own container.
+  // Desktop source links must remain visible beside the sticky actions.
   result.host_tab_source_cell = await tabPanel.getByText('工作流执行 · preview').first().evaluate((cell) => {
     const box = cell.getBoundingClientRect();
     let clip = { left: 0, right: window.innerWidth };
@@ -476,7 +478,21 @@ try {
       within_clip: box.left >= clip.left && box.right <= clip.right, topmost: !!atPoint && cell.contains(atPoint) };
   });
   pass('host_tab_lists_sources');
-  await shots(page, 'host-holes-tab', () => tabPanel.getByText('工作流执行 · preview').first().waitFor({ timeout: 30000 }));
+  assert.ok(result.host_tab_source_cell.within_clip && result.host_tab_source_cell.topmost, 'Desktop source link must be visible and not hidden by sticky actions');
+  await shots(page, 'host-holes-tab', async () => {
+    await tabPanel.getByText('工作流执行 · preview').first().waitFor({ timeout: 30000 });
+    const table=tabPanel.locator('table').first();
+    assert(await table.evaluate(element=>element.parentElement.clientHeight>=120),'Preview table viewport must leave room to see and operate rows');
+    assert(await table.evaluate(element => {
+      const viewport = element.parentElement;
+      if (viewport.scrollWidth <= viewport.clientWidth) return true;
+      viewport.scrollLeft = viewport.scrollWidth;
+      const reachable = viewport.scrollLeft > 0;
+      viewport.scrollLeft = 0;
+      return reachable;
+    }), 'Wide preview table must remain scrollable inside its own viewport');
+    await tabPanel.evaluate(element=>{element.scrollTop=element.scrollHeight;});
+  });
   await tabPanel.getByRole('link', { name: '新建预览穿透' }).click();
   await page.waitForURL(/\/holes\/new\?/, { timeout: 30000 });
   const formUrl = new URL(page.url());
@@ -528,12 +544,41 @@ try {
   await page.screenshot({ path: join(work, 'nav-hosts-1440.png'), fullPage: true });
   result.screenshots.push('nav-hosts-1440.png');
 
+  // The rejected outlet and cancellation must release the same real service.
+  step('workflow_reject_and_cancel');
+  const branchGraph = structuredClone(graph);
+  branchGraph.nodes.push(node('rejected_done', 'core.no_op', {}, 3));
+  branchGraph.connections.push({from:{node:'preview',port:'rejected',index:0},to:{node:'rejected_done',port:'main',index:0}});
+  const branchWorkflow = await api(`${root}/workflows`, {name:'Preview reject and cancel',definition:JSON.stringify(branchGraph)});
+  for (const decision of ['rejected','cancelled']) {
+    const run = (await api(`${root}/workflows/${branchWorkflow.id}/executions`, {mode:'manual',revision:'draft',version:branchWorkflow.version,entry_node_id:'start',inputs:{}})).id;
+    const opened = await until(`${decision} preview waiting`, async()=>{
+      const rows = await api(`${root}/holes?source_kind=workflow&source_id=${run}`);
+      return rows.items.find(row=>row.review_state==='waiting' && row.probe_state==='reachable');
+    },180);
+    assert.ok(await listening(ports.workflow));
+    if (decision==='rejected') await api(`${root}/holes/${opened.id}/reviews`,{decision});
+    else await api(`${root}/workflow-executions/${run}/cancellations`,{});
+    const ended = await until(`${decision} execution ends`, async()=>{const row=await api(`${root}/workflow-executions/${run}`);return finished(row.state)&&row;},120);
+    assert.equal(ended.state,decision==='rejected'?'succeeded':'cancelled');
+    if (decision==='rejected') {
+      const rows=(await api(`${root}/workflow-executions/${run}/node-runs`)).items;
+      assert.equal(rows.find(row=>row.node_id==='rejected_done')?.state,'succeeded');
+      assert.notEqual(rows.find(row=>row.node_id==='done')?.state,'succeeded');
+    }
+    await until(`${decision} preview revoked`,async()=> (await hole(opened.id)).state==='revoked',30);
+    assert.equal((await fetch(base+opened.url)).status,404);
+    await until(`${decision} service port closed`,async()=>!(await listening(ports.workflow)),60);
+    pass(`workflow_${decision}_routes_and_releases_service`);
+  }
+
   // 6. No page scrolls sideways at any width.
   step('overflow');
   result.checks.page_overflow_px = overflow;
   assert.ok(Object.values(overflow).every((px) => px <= 0), `page scrolls sideways: ${JSON.stringify(overflow)}`);
   pass('three_pages_three_widths_no_page_overflow', overflow);
   result.page_errors = pageErrors;
+  assert.deepEqual(pageErrors, [], 'Preview pages must not raise browser script errors');
 
   result.result = 'PASS';
 } catch (error) {

@@ -430,7 +430,7 @@ export function ResourceTable<T>({
         onToggleSelect={row => setSelected(current => { const next = new Set(current); const key = config.rowKey(row); if (next.has(key)) next.delete(key); else next.add(key); return next; })}
         rowClickable={row => !!config.onRowClick || !!detailAction(row)}
         onRowClick={row => { if (config.onRowClick) { config.onRowClick(row); return; } const action = detailAction(row); if (action?.to) navigate({ ...route, ...action.to(row) }, action.query?.(row) ?? {}); }}
-        actionWidth={Math.max(80, visibleActions.reduce((width, action) => width + (action.showLabel ? 120 : 36), 24))}
+        actionWidth={Math.max(80, ...rows.map(row => visibleActions.filter(action => !action.when || action.when(row)).reduce((width, action) => width + (action.showLabel ? 120 : 36), 24)))}
         actionsContent={visibleActions.length ? row => { const key = config.rowKey(row); return <>                          {visibleActions
                             .filter((action) => !action.when || action.when(row))
                             .map((action) => (
