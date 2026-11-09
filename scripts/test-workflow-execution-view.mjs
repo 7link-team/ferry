@@ -19,7 +19,8 @@ for(const key of ['FERRY_DATABASE_URL','FERRY_NATS_URL','FERRY_CLUSTER_NAMESPACE
 const log=await open(join(work,'server.log'),'w');
 let server,runner,browser,page;
 const sockets=new Set();
-const stalled=createServer(socket=>{sockets.add(socket);socket.on('error',()=>{});socket.on('close',()=>sockets.delete(socket));socket.write('SSH-2.0-ExecutionAcceptance\r\n');});
+// Keep the HTTP Git request pending until cancellation; do not send an SSH banner.
+const stalled=createServer(socket=>{sockets.add(socket);socket.on('error',()=>{});socket.on('close',()=>sockets.delete(socket));});
 const startServer=()=>spawn(resolve(process.env.FERRY_BINARY||`target/debug/ferry-server${process.platform==='win32'?'.exe':''}`),[],{env,windowsHide:true,stdio:['ignore',log.fd,log.fd]});
 const ready=()=>wait(async()=>{assert.equal(server.exitCode,null);try{return (await fetch(origin+'/api/status')).ok;}catch{return false;}});
 const stop=async process=>{if(process?.exitCode===null && process.signalCode===null){const ended=once(process,'exit');process.kill();await ended;}};
