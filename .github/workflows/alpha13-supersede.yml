@@ -19,3 +19,5 @@ jobs:
               core.info(`${run_id}: ${run.status}/${run.conclusion}`);
               if(run.status !== 'completed') await github.rest.actions.cancelWorkflowRun({...context.repo,run_id});
             }
+
+# Retry infrastructure failure c4b33f99-a138-43a0-a055-0eb2bafc3853.
