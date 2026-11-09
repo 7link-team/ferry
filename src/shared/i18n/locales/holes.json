@@ -111,5 +111,17 @@
     "アクティブ接続数はこのリクエストに応答したサーバーノードでの数です。クラスター構成では他のノードは含まれません。",
     "활성 연결 수는 이 요청에 응답한 서버 노드 기준이며, 클러스터에서는 다른 노드가 포함되지 않습니다.",
     "Sambungan aktif dikira pada nod pelayan yang menjawab permintaan ini; dalam kluster, nod lain tidak termasuk."
-  ]
+  ],
+  "source": ["Source", "来源", "來源", "作成元", "출처", "Sumber"],
+  "source.manual": ["Manual", "手动", "手動", "手動", "수동", "Manual"],
+  "source.pipeline": ["Pipeline run · {{ref}}", "流水线运行 · {{ref}}", "流水線執行 · {{ref}}", "パイプライン実行 · {{ref}}", "파이프라인 실행 · {{ref}}", "Larian saluran paip · {{ref}}"],
+  "source.workflow": ["Workflow execution · {{ref}}", "工作流执行 · {{ref}}", "工作流程執行 · {{ref}}", "ワークフロー実行 · {{ref}}", "워크플로 실행 · {{ref}}", "Pelaksanaan aliran kerja · {{ref}}"],
+  "review": ["Review", "验收", "驗收", "レビュー", "검수", "Semakan"],
+  "review.none": ["Not required", "无需验收", "無需驗收", "不要", "필요 없음", "Tidak diperlukan"],
+  "review.waiting": ["Waiting", "待验收", "待驗收", "レビュー待ち", "검수 대기", "Menunggu"],
+  "review.approved": ["Approved", "已通过", "已通過", "承認済み", "승인됨", "Diluluskan"],
+  "review.rejected": ["Rejected", "已驳回", "已駁回", "却下済み", "반려됨", "Ditolak"],
+  "review.timed_out": ["Timed out", "已超时", "已逾時", "タイムアウト", "시간 초과", "Tamat masa"],
+  "approve": ["Approve", "通过", "通過", "承認", "승인", "Luluskan"],
+  "reject": ["Reject", "驳回", "駁回", "却下", "반려", "Tolak"]
 }

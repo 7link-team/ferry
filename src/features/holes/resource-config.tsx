@@ -1,6 +1,6 @@
-import { Ban, Copy, ExternalLink, Eye, Pencil, Radar, Trash2 } from "lucide-react";
+import { Ban, Check, Copy, ExternalLink, Eye, Pencil, Radar, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "../../shared/api/api";
+import { api, errorText } from "../../shared/api/api";
 import { base, deleteResource, named } from "../../shared/api/resource";
 import { AutoField } from "../../shared/forms/auto-form";
 import { commonText } from "../../shared/i18n/i18n";
@@ -14,7 +14,8 @@ import {
   type AnyRow,
   type ResourceConfigContext,
 } from "../../shared/resources/config";
-import type { FormConfig, ListConfig, Option } from "../../shared/resources/types";
+import type { FormConfig, ListConfig, Option, RowAction } from "../../shared/resources/types";
+import type { Navigation } from "../../shared/routing/types";
 import { Badge } from "../../shared/ui/badge";
 import { Button } from "../../shared/ui/button";
 import {
@@ -48,6 +49,15 @@ export interface Hole {
   updated_at: number;
   updated_by: string;
   version: number;
+  /** Who owns the lifetime: a person, or the pipeline run / workflow execution that opened it. */
+  source_kind: "manual" | "pipeline" | "workflow";
+  /** Pipeline run id or workflow execution id; empty for manual tunnels. */
+  source_id: string;
+  /** Job key or node id inside the source. */
+  source_ref: string;
+  review_state: "none" | "waiting" | "approved" | "rejected" | "timed_out";
+  reviewed_at: number;
+  reviewed_by: string;
   /** Write-only: present on create, and on edit only to extend from now. */
   ttl_hours?: number | undefined;
 }
@@ -66,6 +76,13 @@ export const PROBE_STATES: Option[] = [
   "runner_offline",
   "unsupported",
 ].map((value) => ({ value, label: value, labelKey: key(`probe.${value}`) }));
+export const REVIEW_STATES: Option[] = [
+  "none",
+  "waiting",
+  "approved",
+  "rejected",
+  "timed_out",
+].map((value) => ({ value, label: value, labelKey: key(`review.${value}`) }));
 export const TTL_HOURS = [1, 8, 24, 168] as const;
 export const DEFAULT_TTL_HOURS = 24;
 
@@ -132,6 +149,104 @@ function Reachability({ row }: { row: Hole }) {
     </div>
   );
 }
+
+/** Rows without a source predate automatic previews and are manual. */
+const manual = (row: Partial<Hole>) => (row.source_kind ?? "manual") === "manual";
+
+/** Opens the run or execution that owns an automatic preview. */
+function SourceCell({
+  row,
+  workspace,
+  href,
+  navigate,
+}: {
+  row: Hole;
+  workspace: string;
+  href: Navigation["href"] | undefined;
+  navigate: Navigation["navigate"];
+}) {
+  if (manual(row)) return <span>{text("source.manual")}</span>;
+  const caption = text(`source.${row.source_kind}`, { ref: row.source_ref });
+  const className = "line-clamp-2 break-all text-left text-primary underline underline-offset-4";
+  if (row.source_kind === "pipeline") {
+    const route = { workspace, group: "workflow", item: "runs", id: row.source_id, mode: "view" as const };
+    return (
+      <a
+        className={className}
+        href={href?.(route, {}) ?? "#"}
+        title={caption}
+        onClick={(event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          navigate(route, {});
+        }}
+      >
+        {caption}
+      </a>
+    );
+  }
+  // An execution is shown inside its workflow, which the preview does not record.
+  return (
+    <button
+      type="button"
+      className={className}
+      title={caption}
+      onClick={async () => {
+        try {
+          const execution = await api<{ workflow_id: string }>(
+            `/workspaces/${encodeURIComponent(workspace)}/workflow-executions/${encodeURIComponent(row.source_id)}`,
+          );
+          navigate(
+            { workspace, group: "workflow", item: "workflows", id: execution.workflow_id, mode: "view" },
+            { execution: row.source_id },
+          );
+        } catch (cause) {
+          toast.error(errorText(cause));
+        }
+      }}
+    >
+      {caption}
+    </button>
+  );
+}
+
+function ReviewBadge({ state }: { state: string }) {
+  if (state === "none") return <span className="text-muted-foreground">{label(REVIEW_STATES, state)}</span>;
+  return (
+    <Badge
+      variant={
+        state === "approved"
+          ? "default"
+          : state === "waiting"
+            ? "outline"
+            : state === "rejected"
+              ? "destructive"
+              : "secondary"
+      }
+    >
+      {label(REVIEW_STATES, state)}
+    </Badge>
+  );
+}
+
+/** A waiting review is decided by whoever may run the owning source. */
+const reviewActions = (workspace: string): RowAction<Hole>[] =>
+  (["pipeline", "workflow"] as const).flatMap((source) =>
+    (["approved", "rejected"] as const).map((decision) => ({
+      label: decision === "approved" ? "通过" : "驳回",
+      labelKey: key(decision === "approved" ? "approve" : "reject"),
+      icon: decision === "approved" ? <Check className="size-4" /> : <X className="size-4" />,
+      permission: source === "pipeline" ? "pipelines.run" : "workflows.run",
+      destructive: decision === "rejected",
+      when: (row: Hole) => row.review_state === "waiting" && row.source_kind === source,
+      action: async (row: Hole) => {
+        await api(itemPath(workspace, row, "reviews"), {
+          method: "POST",
+          body: JSON.stringify({ decision }),
+        });
+      },
+    })),
+  );
 
 /** Required on create (suggested 24h); optional on edit, where a choice extends from now. */
 function Validity({
@@ -221,6 +336,8 @@ const itemPath = (workspace: string, row: Hole, operation: string) =>
 
 export function holesLists({
   workspace,
+  href,
+  navigate,
 }: ResourceConfigContext): Record<string, ListConfig<AnyRow>> {
   return {
     holes: list<Hole>({
@@ -290,6 +407,19 @@ export function holesLists({
           render: (row) => cronDate(row.expires_at),
         },
         {
+          key: "source_kind",
+          label: "Source",
+          labelKey: key("source"),
+          render: (row) => <SourceCell row={row} workspace={workspace} href={href} navigate={navigate} />,
+        },
+        {
+          key: "review_state",
+          label: "Review",
+          labelKey: key("review"),
+          width: 120,
+          render: (row) => <ReviewBadge state={row.review_state ?? "none"} />,
+        },
+        {
           key: "created_by_name",
           label: "Created by",
           labelKey: key("createdBy"),
@@ -332,6 +462,7 @@ export function holesLists({
             await api(itemPath(workspace, row, "revocations"), { method: "POST" });
           },
         },
+        ...reviewActions(workspace),
         {
           label: "查看",
           labelKey: "common-domain:common.view",
@@ -344,7 +475,8 @@ export function holesLists({
           labelKey: "common-domain:common.edit",
           icon: <Pencil className="size-4" />,
           permission: "holes.update",
-          when: (row) => row.state !== "revoked",
+          // Automatic previews live as long as their source; the server rejects edits (holes.automatic).
+          when: (row) => row.state !== "revoked" && manual(row),
           to: (row) => ({ id: row.id, mode: "edit" }),
         },
         {
@@ -380,6 +512,8 @@ export function holesForms({
         strip_prefix: true,
         ttl_hours: DEFAULT_TTL_HOURS,
       },
+      /** The host detail tab opens creation with its host preset and locked. */
+      queryDefaults: ["host_id"],
       /** Edit sends name/strip_prefix/version; ttl_hours only when the user extends. */
       editValues: (row) => ({
         name: row.name,
@@ -388,8 +522,8 @@ export function holesForms({
         ttl_hours: undefined,
         url: undefined,
       }),
-      /** Revoked is terminal: the server rejects edits, so the detail page offers none. */
-      readOnly: (row) => row.state === "revoked",
+      /** Revoked is terminal and automatic previews belong to their source: the server rejects both edits. */
+      readOnly: (row) => row.state === "revoked" || !manual(row),
       pollMs: () => 5000,
       sections: [
         {

@@ -230,6 +230,8 @@ export interface FormConfig<T> {
   heading: (row: T) => string;
   /** Values a create form starts from. */
   blank: Partial<T>;
+  /** Create-form fields a caller may preset through the URL query; a preset value is locked. */
+  queryDefaults?: string[];
   readOnly?: (row: Partial<T>) => boolean;
   copy?: (row: T) => Partial<T>;
   /** Normalize persisted values for the edit form, retaining the row version. */

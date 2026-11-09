@@ -67,5 +67,6 @@ export type ResourceConfigContext = {
   permissions?: Set<string> | undefined;
   onChanged?: (() => void) | undefined;
   navigate: Navigation["navigate"];
+  href?: Navigation["href"] | undefined;
   dictionaries?: Record<string, Option[]>;
 };

@@ -6,7 +6,7 @@ import messages from "../../shared/i18n/locales/holes.json";
 import { label } from "../../shared/resources/config";
 import { nav } from "../../app/nav";
 import { href, parse } from "../../app/router";
-import { HOLE_STATES, holesForms, holesLists, PROBE_STATES, type Hole } from "./resource-config";
+import { HOLE_STATES, holesForms, holesLists, PROBE_STATES, REVIEW_STATES, type Hole } from "./resource-config";
 
 vi.mock("../../shared/api/api", async (original) => ({
   ...(await original<typeof import("../../shared/api/api")>()),
@@ -22,7 +22,8 @@ const row = (patch: Partial<Hole> = {}): Hole => ({
   id: "7", host_id: "3", host_name: "build-01", host_online: true, name: "Web", target_port: 5173,
   strip_prefix: true, url: "/holes/abc/", state: "active", expires_at: 1, revoked_at: 0,
   probe_state: "unreachable", probe_error: "connection refused", probed_at: 0, active_connections: 2,
-  created_at: 1, created_by: "1", created_by_name: "Ada", updated_at: 1, updated_by: "1", version: 4, ...patch,
+  created_at: 1, created_by: "1", created_by_name: "Ada", updated_at: 1, updated_by: "1", version: 4,
+  source_kind: "manual", source_id: "0", source_ref: "", review_state: "none", reviewed_at: 0, reviewed_by: "0", ...patch,
 });
 
 beforeEach(async () => {
@@ -32,11 +33,10 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); });
 
-it("adds a holes.read nav entry right after hosts and derives list, create, detail and edit routes", () => {
+it("keeps holes out of the menu but routable under hosts for list, create, detail and edit", () => {
   const host = nav.find((group) => group.key === "host")!;
-  const index = host.items.findIndex((item) => item.key === "hosts");
-  expect(host.items[index + 1]).toMatchObject({ key: "holes", resource: "holes", permission: "holes.read" });
-  expect(host.items[index + 1]!.label).toBe("Preview tunnels");
+  expect(host.items.filter((item) => !item.hidden).map((item) => item.key)).not.toContain("holes");
+  expect(host.items.find((item) => item.key === "holes")).toMatchObject({ resource: "holes", permission: "holes.read", hidden: true, parent: "hosts" });
   for (const suffix of ["", "/new", "/9", "/9/edit"]) {
     const path = `/workspaces/ops/holes${suffix}`;
     expect(parse(path, "")).toMatchObject({ group: "host", item: "holes" });
@@ -49,7 +49,7 @@ it("lists the required columns with a 5-second default refresh", () => {
   expect(config.resource).toBe("holes");
   expect(config.defaultRefresh).toBe(5);
   expect(config.columns.map((column) => column.key)).toEqual([
-    "name", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "created_by_name",
+    "name", "host_name", "target_port", "state", "probe_state", "active_connections", "expires_at", "source_kind", "review_state", "created_by_name",
   ]);
   expect(config.filters!.map((filter) => filter.key)).toEqual(["q", "host_id", "state"]);
   expect(config.emptyKey).toBe("holes:empty");
@@ -60,6 +60,7 @@ it("gates row actions by permission and state", () => {
   const permissions = Object.fromEntries(listConfig().actions!.map((candidate) => [candidate.labelKey, candidate.permission]));
   expect(permissions).toEqual({
     "holes:copyLink": undefined, "holes:open": undefined, "holes:probe": "holes.update", "holes:revoke": "holes.update",
+    "holes:approve": "workflows.run", "holes:reject": "workflows.run",
     "common-domain:common.view": "holes.read", "common-domain:common.edit": "holes.update", "common-domain:common.delete": "holes.delete",
   });
   const visible = (labelKey: string, state: Hole["state"]) => { const candidate = action(labelKey); return !candidate.when || candidate.when(row({ state })); };
@@ -70,6 +71,46 @@ it("gates row actions by permission and state", () => {
   expect(action("holes:revoke").destructive).toBe(true);
   expect(action("common-domain:common.delete").destructive).toBe(true);
   expect(action("holes:copyLink").destructive).toBeFalsy();
+});
+
+it("offers approve and reject only on waiting reviews, gated by the source's run permission", () => {
+  const reviews = listConfig().actions!.filter((candidate) => ["holes:approve", "holes:reject"].includes(candidate.labelKey!));
+  expect(reviews.map((candidate) => [candidate.labelKey, candidate.permission])).toEqual([
+    ["holes:approve", "pipelines.run"], ["holes:reject", "pipelines.run"], ["holes:approve", "workflows.run"], ["holes:reject", "workflows.run"],
+  ]);
+  const shown = (patch: Partial<Hole>, permissions: string[]) => reviews
+    .filter((candidate) => permissions.includes(candidate.permission!) && candidate.when!(row(patch)))
+    .map((candidate) => candidate.labelKey);
+  expect(shown({ source_kind: "pipeline", review_state: "waiting" }, ["pipelines.run"])).toEqual(["holes:approve", "holes:reject"]);
+  expect(shown({ source_kind: "pipeline", review_state: "waiting" }, ["workflows.run"])).toEqual([]);
+  expect(shown({ source_kind: "workflow", review_state: "waiting" }, ["workflows.run"])).toEqual(["holes:approve", "holes:reject"]);
+  expect(shown({ source_kind: "workflow", review_state: "waiting" }, ["pipelines.run"])).toEqual([]);
+  for (const review_state of ["none", "approved", "rejected", "timed_out"] as const)
+    expect(shown({ source_kind: "pipeline", review_state }, ["pipelines.run", "workflows.run"]), review_state).toEqual([]);
+  expect(shown({ source_kind: "manual", review_state: "waiting" }, ["pipelines.run", "workflows.run"])).toEqual([]);
+  expect(reviews.map((candidate) => !!candidate.destructive)).toEqual([false, true, false, true]);
+});
+
+it("posts the review decision to the reviews subresource", async () => {
+  const [approve, reject] = listConfig().actions!.filter((candidate) => ["holes:approve", "holes:reject"].includes(candidate.labelKey!));
+  await approve!.action!(row({ source_kind: "pipeline", review_state: "waiting" }));
+  await reject!.action!(row({ source_kind: "pipeline", review_state: "waiting" }));
+  expect(api).toHaveBeenNthCalledWith(1, "/workspaces/ops/holes/7/reviews", { method: "POST", body: JSON.stringify({ decision: "approved" }) });
+  expect(api).toHaveBeenNthCalledWith(2, "/workspaces/ops/holes/7/reviews", { method: "POST", body: JSON.stringify({ decision: "rejected" }) });
+});
+
+it("hides editing and renewal for previews owned by a run or execution", () => {
+  const edit = action("common-domain:common.edit");
+  expect(edit.when!(row({ source_kind: "manual" }))).toBe(true);
+  expect(edit.when!(row({ source_kind: "pipeline" }))).toBe(false);
+  expect(edit.when!(row({ source_kind: "workflow" }))).toBe(false);
+  expect(formConfig().readOnly!(row({ source_kind: "pipeline" }))).toBe(true);
+  expect(formConfig().readOnly!(row({ source_kind: "workflow" }))).toBe(true);
+  expect(formConfig().readOnly!(row({ source_kind: "manual" }))).toBe(false);
+});
+
+it("lets the host tab preset and lock the host through the create query", () => {
+  expect(formConfig().queryDefaults).toEqual(["host_id"]);
 });
 
 it("copies and opens the absolute link built from the root-relative url", async () => {
@@ -130,12 +171,14 @@ it("ships every holes message in six non-empty locales", () => {
 });
 
 it.each([
-  ["en-US", "Preview tunnels", "Revoked", "Runner offline"],
-  ["zh-CN", "预览穿透", "已撤销", "Runner 离线"],
-  ["ms-MY", "Terowong pratonton", "Dibatalkan", "Runner luar talian"],
-])("translates the page in %s", async (locale, title, revoked, offline) => {
+  ["en-US", "Preview tunnels", "Revoked", "Runner offline", "Waiting", "Pipeline run · build"],
+  ["zh-CN", "预览穿透", "已撤销", "Runner 离线", "待验收", "流水线运行 · build"],
+  ["ms-MY", "Terowong pratonton", "Dibatalkan", "Runner luar talian", "Menunggu", "Larian saluran paip · build"],
+])("translates the page in %s", async (locale, title, revoked, offline, waiting, pipeline) => {
   await i18n.changeLanguage(locale);
   expect(i18n.t("title", { ns: "holes" })).toBe(title);
   expect(label(HOLE_STATES, "revoked")).toBe(revoked);
   expect(label(PROBE_STATES, "runner_offline")).toBe(offline);
+  expect(label(REVIEW_STATES, "waiting")).toBe(waiting);
+  expect(i18n.t("source.pipeline", { ns: "holes", ref: "build" })).toBe(pipeline);
 });

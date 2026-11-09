@@ -223,7 +223,7 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
   });
 
   const parentItem = item.parent ? findItem(group.key, item.parent)! : item;
-  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
+  const relatedItems = group.items.filter(i => i.resource !== "pipeline-groups" && i.resource !== "host-groups" && i.resource !== "holes" && (i.key === parentItem.key || i.parent === parentItem.key) && (!i.permission || permissions.has(i.permission)));
   const listConfig = lists[item.key === "workflow-templates" ? "workflow-templates" : item.resource];
   const nodeCatalogPending = needsNodeCatalog && nodeCatalogWorkspace !== workspaceId;
   const nodeCatalogFeedback = nodeCatalogError
@@ -388,6 +388,8 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
               alerts={lists["alert-rules"]}
               alertForm={forms["alert-rules"]}
               alertEvents={lists["alert-events"]}
+              holes={lists.holes}
+              holeForm={forms.holes}
             />
           ) : formConfig ? (
             <div className="min-h-0 overflow-auto">
