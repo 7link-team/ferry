@@ -1,6 +1,6 @@
 # 预览穿透自动托管设计（流水线内置步骤 + 工作流穿透节点）
 
-> 2026-11-10: ??????token?????preview-holes-design.md ?17????strip-prefix?????????????????
+> 2026-11-10：预览地址使用 token 子域名，以 preview-holes-design.md 第17节为准。strip-prefix 仅保留历史协议兼容，不再控制路径。
 
 状态：IMPLEMENTATION。用户确认（2026-11-09）：流水线与工作流一起做；验收可由人工或 AI 完成；驳回语义、审批权限、等待超时按推荐；去掉左侧菜单。
 前置：`docs/preview-holes-design.md`（基础穿透、代理、沙箱、连接释放）。本文只写增量。

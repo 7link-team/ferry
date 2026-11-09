@@ -69,7 +69,7 @@ docker compose exec ferry cat /data/setup-token
 | `FERRY_DATA_DIR` | 数据目录；容器内为 `/data` |
 | `FERRY_DATABASE_URL` | 留空使用 SQLite；也支持 MySQL 8+、PostgreSQL |
 | `FERRY_MASTER_KEY` | 64 位十六进制加密主密钥；未指定时在数据目录生成并复用 `master.key` |
-| ???? ? ???? | ??????URL?????????????????IP/?????????? |
+| 平台设置 → 访问地址 | 可选主要公开 URL 和预览根域名；控制台允许网络可达的 IP/域名，仍需登录和权限 |
 | `FERRY_TRUSTED_PROXIES` | 可信代理 CIDR，控制登录 IP 等记录是否采信转发头 |
 | `FERRY_REDIS_URL` | 可选 Redis 连接，系统监控读取该实例 |
 | `FERRY_NATS_URL` | 可选 NATS JetStream 连接，启用多实例节点通信 |

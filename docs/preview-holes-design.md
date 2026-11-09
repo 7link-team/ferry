@@ -1,6 +1,6 @@
 # 预览穿透（Preview Holes）设计
 
-> 2026-11-10: ?17????????MEMORY.md?????Figma???????Host????strip_prefix????????MEMORY.md?????Figma?????
+> 2026-11-10：第17节为当前实现契约；前文路径代理、Host白名单和strip_prefix为历史设计，不再用于新预览。实际验收状态以MEMORY.md为准。
 
 状态：IMPLEMENTATION。设计自审通过，用户授权按推荐实施（2026-11-09），§15 Q1–Q4 按推荐采纳。
 日期：2026-11-09
@@ -397,13 +397,13 @@ CREATE INDEX holes_expires ON holes (expires_at);
 
 ### 17.2 配置与兼容评审边界
 
-- 公开部署需运维配置预览根域名、通配DNS和对应TLS；本地验收使用可指向回环地址的 `*.localhost`。域名不能从页面语言、工作空间名或用户输入的完整URL随意派生。
+- 公开部署需运维配置预览根域名、通配DNS和对应TLS；本地验收使用 `*.preview.test` 测试解析；CI逐个写入实际token域名到hosts，并由Node和浏览器使用系统解析。域名不能从页面语言、工作空间名或用户输入的完整URL随意派生。
 - 配置归组（2026-11-10用户要求）：现有“平台公开访问地址”从“仓库关联”迁至独立、中立的“访问地址”分区，保留原配置值及已有回调/通知等消费者。同区提供独立“预览根域名”，不以控制台URL自动推导；输入纯域名，不带协议、`*.`、端口或路径。显示生成地址示例与所需通配DNS/TLS；保存不表示DNS/证书已就绪，不自动更改外部DNS或证书。具体新增配置键、后端存储及升级规则在实施时按项目内配置模型补齐，本段不代表已有入口。
 - 用户确认兼容两种根域名：配置 `domain.xx` 时生成 `token.domain.xx/path`；配置 `subdomain.domain.xx` 时生成 `token.subdomain.domain.xx/path`。根域名可包含多级标签，token固定为其左侧紧邻的一段标签；不通过截取注册域名推导预览根域名。DNS/TLS须覆盖实际预览根域名对应的通配域名；`*.domain.xx`证书不能覆盖`token.subdomain.domain.xx`，后者须覆盖`*.subdomain.domain.xx`。分别测试两种有效域名、错误后缀、跨根域名token请求与TLS配置提示，不将保存配置等同证书验证成功。
-- 控制台域名保留：项目现有 `main.rs::guard` 按显式允许的完整Host识别控制台。预览根域名采用 `domain.xx` 时，已登记的控制台Host（例如 `console.domain.xx`）继续进入控制台，不被通配分流吞掉；其余预览根域名下的单标签Host进入预览校验，未知或非法token返回404，不回退控制台。禁止生成与已登记控制台Host相同的预览链接；新增/修改配置不能让现有预览链接变成控制台地址。验收包括控制台与预览同父域、独立预览子域、控制台/API不受影响、未知子域/API不能回退控制台。
+- 控制台域名保留：控制台不再使用Host白名单，主要公开URL的完整Host保留为控制台。预览根域名采用 `domain.xx` 时，已登记的控制台Host（例如 `console.domain.xx`）继续进入控制台，不被通配分流吞掉；其余预览根域名下的单标签Host进入预览校验，未知或非法token返回404，不回退控制台。禁止生成与已登记控制台Host相同的预览链接；新增/修改配置不能让现有预览链接变成控制台地址。验收包括控制台与预览同父域、独立预览子域、控制台/API不受影响、未知子域/API不能回退控制台。
 - 只接受配置域名下恰好一段合法token标签；拒绝后缀伪装、额外标签、非法端口、非法编码、未知token。未知、过期、撤销维持相同404语义，不回退控制台。
 - 旧 `/holes/<hex>/path?query` 在已配置域名时验证记录后重定向至该记录域名的原路径。旧非剥离模式对应应用曾配置base path，不能声称无配置修改即可无缝迁移。
-- 未配置公开预览域名时的新建行为与旧路径兼容窗口仍需在实现前定稿；不能把“已填域名”当作DNS/TLS验证成功，不静默宣称公网可用。
+- 未配置时新建返回409，旧路径和token域名返回404；配置后旧路径按有效记录返回308；不能把“已填域名”当作DNS/TLS验证成功，不静默宣称公网可用。
 - 数据模型：优先保持现有表、token哈希唯一索引和审计字段，无DDL变更；若实现引入持久配置，必须列出该配置的现有存储载体及up/down说明后再修改。
 
 ### 17.3 验收与交付边界
@@ -418,15 +418,16 @@ CREATE INDEX holes_expires ON holes (expires_at);
 | 异常 | 未配置、DNS/TLS未就绪、端口不可达、Runner离线和重连分别覆盖；不给未知域名返回控制台壳 |
 | UI | 列表/查看保持完整资源标题；创建/编辑无路径前缀开关；六语；1440/900/390/320长域名可换行或截断并可复制，无整页横向溢出 |
 | 数据/审计 | 不删除历史记录、不重放执行；新增配置变更按既有平台审计；无逐请求落库扩容 |
-| 设计追踪 | Figma暂缺，实际截图与测试证据待实现；当前仅设计，不冒称已验收 |
+| 设计追踪 | Figma暂缺，实际截图与测试证据待实现；实际测试与截图以MEMORY.md记录为准，Figma未交付 |
 
-实施顺序：定稿配置与兼容边界 → Host分流/编码/链接与代理回归 → UI和两类自动来源统一 → 真实Runner/静态资源/HMR/隔离及四宽度验收。本节为后续改造设计，不包含在当前发布候选中。
+实施顺序：定稿配置与兼容边界 → Host分流/编码/链接与代理回归 → UI和两类自动来源统一 → 真实Runner/静态资源/HMR/隔离及四宽度验收。实现和发布状态分别见MEMORY.md，未经公开产物核验不视为发布完成。
 
-### 17.4 ???????
 
-- ??platform_state????????MEMORY.md?????Figma????????access_config TEXT NULL?JSON?public_url?preview_domain????????MEMORY.md?????Figma???????????MEMORY.md?????Figma??????????
-- up: ALTER TABLE platform_state ADD COLUMN access_config TEXT NULL;???NULL??????repository_oauth.public_url????????MEMORY.md?????Figma?????????down: ALTER TABLE platform_state DROP COLUMN access_config;???SeaQuery????????MEMORY.md?????Figma?????????????holes??/token???
-- public_url???HTTP(S)?URL???2048???????/query/hash/?????????token?????????Host?preview_domain??200???ASCII DNS??????IP????/??/??/????????MEMORY.md?????Figma???????????MEMORY.md?????Figma???URL???????????HTTPS?
-- ?????Host??????????/??????????token Host????????MEMORY.md?????Figma?????30????????
-- ??Desktop/Pad??????Phone?????CRUD???help??URL????????/??/???????????/????????Figma???App????
-- ?????test-preview-holes.mjs?test-preview-automation.mjs?Actions preview-domains??????????DNS???????DNS/??????
+### 17.4 配置存储与升级
+
+- 复用platform_state单例行、平台设置版本锁和审计。新增access_config TEXT NULL，JSON内public_url和preview_domain均默认为空字符串。无新时间字段、索引、金额计算、删除策略或灰度。
+- up：ALTER TABLE platform_state ADD COLUMN access_config TEXT NULL; 该值为NULL时读取原加密repository_oauth.public_url，首次保存写入新配置，不丢弃原地址。down：ALTER TABLE platform_state DROP COLUMN access_config; 三库由SeaQuery生成方言；降级丢失新地址配置，必须先备份。原holes数据/token不变。
+- public_url为可选HTTP(S)根URL，最多2048字节，禁止凭据、query、hash、子路径及预览token标签作为控制台Host。preview_domain最多200字节，使用合法ASCII DNS标签，非IP、无协议/端口/路径/星号；空值禁用预览。预览协议及显式端口取主要公开URL，未配置主要地址时使用HTTPS。
+- 主要控制台Host保留控制台路由；变更/清空预览根域名后，原token Host不回退控制台。已建连接按既有30秒重验周期断开。
+- 设置Desktop/Pad短字段两列、Phone单列，复用CRUD与六语help，长URL可换行；预览列表/查看/编辑保留原响应式、错误/空态与权限策略。Figma和原生App未提供。
+- 验收脚本：test-preview-holes.mjs、test-preview-automation.mjs；Actions preview-domains任务是发布门禁。CI使用hosts测试DNS解析，不代表公网DNS/证书已验证。
