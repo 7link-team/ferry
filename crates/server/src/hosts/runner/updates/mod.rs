@@ -131,7 +131,7 @@ mod tests {
                 control,
                 disconnect,
                 managed: true,
-            installation_scope: None,
+                installation_scope: None,
                 supports_monitor: true,
                 supports_agent: false,
                 supports_agent_probe: false,

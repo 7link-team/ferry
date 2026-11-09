@@ -379,7 +379,7 @@ mod tests {
             arch: "x86_64".into(),
             agent_version: "0.1.0".into(),
             managed_updates: false,
-                installation_scope: None,
+            installation_scope: None,
             supports_monitor: true,
             supports_agent: true,
             supports_agent_probe: false,

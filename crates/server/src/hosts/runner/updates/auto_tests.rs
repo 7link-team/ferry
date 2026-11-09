@@ -513,7 +513,7 @@ async fn automatic_drain_holds_new_work_until_healthy_target_reconnects() {
         control: f.peer.control.clone(),
         disconnect: f.peer.disconnect.clone(),
         managed: true,
-            installation_scope: None,
+        installation_scope: None,
         supports_monitor: true,
         supports_agent: false,
         supports_agent_probe: false,

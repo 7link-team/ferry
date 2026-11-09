@@ -505,7 +505,7 @@ mod tests {
             arch: "amd64".into(),
             agent_version: String::new(),
             managed_updates: false,
-                installation_scope: None,
+            installation_scope: None,
             supports_monitor: false,
             supports_agent: false,
             supports_agent_probe: false,

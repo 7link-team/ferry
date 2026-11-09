@@ -876,7 +876,10 @@ pub(crate) async fn repository_api_access(
     scope.require("repositories.read")?;
     scope.require("credentials.use")?;
     let row = owned_connection(&s.db, scope, connection_id).await?;
-    if row.provider != provider || !matches!(row.state.as_str(), "connected" | "refreshing") || row.credential_id == 0 {
+    if row.provider != provider
+        || !matches!(row.state.as_str(), "connected" | "refreshing")
+        || row.credential_id == 0
+    {
         return Err(ApiError::localized(
             StatusCode::BAD_REQUEST,
             crate::i18n::Message::new("repository.auth.connectionAuthorizationInvalid"),

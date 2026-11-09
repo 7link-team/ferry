@@ -137,7 +137,11 @@ async fn control(s: AppState, mut socket: Socket) {
         control,
         disconnect,
         managed: hello.managed_updates,
-        installation_scope: hello.installation_scope.as_deref().filter(|scope| matches!(*scope, "system" | "user" | "foreground")).map(str::to_owned),
+        installation_scope: hello
+            .installation_scope
+            .as_deref()
+            .filter(|scope| matches!(*scope, "system" | "user" | "foreground"))
+            .map(str::to_owned),
         supports_monitor: hello.supports_monitor,
         supports_agent: hello.supports_agent,
         supports_agent_probe: hello.supports_agent_probe,

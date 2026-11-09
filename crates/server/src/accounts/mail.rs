@@ -362,7 +362,9 @@ impl Configuration {
         let body = if body.trim().is_empty() {
             crate::i18n::render(
                 locale,
-                &crate::i18n::Message::new(body_key).with("code", code.unwrap_or("")).with("expires_minutes", &minutes),
+                &crate::i18n::Message::new(body_key)
+                    .with("code", code.unwrap_or(""))
+                    .with("expires_minutes", &minutes),
             )
         } else {
             render_template(body, email, code.unwrap_or(""), &minutes)
@@ -380,7 +382,12 @@ impl Configuration {
                 content
             }
         } else {
-            render_template(html, &escape_html(email), &escape_html(code.unwrap_or("")), &minutes)
+            render_template(
+                html,
+                &escape_html(email),
+                &escape_html(code.unwrap_or("")),
+                &minutes,
+            )
         };
         let document = include_str!("../../../../src/shared/mail/layout.html")
             .replacen("{{title}}", &escape_html(&subject), 1)
@@ -549,7 +556,9 @@ pub async fn request_code(
             .await?;
         return Err(e);
     }
-    Ok(Json(json!({"retry_after":60,"expires_in":config.code_minutes() * 60})))
+    Ok(Json(
+        json!({"retry_after":60,"expires_in":config.code_minutes() * 60}),
+    ))
 }
 /// Called under the same singleton lock/transaction as user creation.
 pub async fn consume(
@@ -588,18 +597,34 @@ mod template_tests {
     use super::*;
     #[test]
     fn registration_switch_and_validity_keep_legacy_defaults_and_render_current_configuration() {
-        let mut config = Configuration { enabled:true,verified_at:Some(1),..Configuration::default() };
-        assert!(config.required()); assert_eq!(config.code_minutes(),10);
-        config.code_enabled=Some(false); assert!(!config.required());
-        config.code_enabled=Some(true);config.code_valid_minutes=Some(17);
+        let mut config = Configuration {
+            enabled: true,
+            verified_at: Some(1),
+            ..Configuration::default()
+        };
+        assert!(config.required());
+        assert_eq!(config.code_minutes(), 10);
+        config.code_enabled = Some(false);
+        assert!(!config.required());
+        config.code_enabled = Some(true);
+        config.code_valid_minutes = Some(17);
         assert!(config.required());
         for locale in crate::i18n::Locale::ALL {
-            let html=config.message_in("receiver@example.invalid",Some("123456"),locale,None).1;
-            assert!(html.contains("17"));assert!(!html.contains("expires_minutes"));
+            let html = config
+                .message_in("receiver@example.invalid", Some("123456"), locale, None)
+                .1;
+            assert!(html.contains("17"));
+            assert!(!html.contains("expires_minutes"));
         }
-        config.code_html="<p>{{expires_minutes}}</p>".into();
-        assert!(config.message("receiver@example.invalid",Some("123456")).1.contains("<p>17</p>"));
-        config.verified_at=None;assert!(!config.required());
+        config.code_html = "<p>{{expires_minutes}}</p>".into();
+        assert!(
+            config
+                .message("receiver@example.invalid", Some("123456"))
+                .1
+                .contains("<p>17</p>")
+        );
+        config.verified_at = None;
+        assert!(!config.required());
     }
 
     #[test]
@@ -705,7 +730,8 @@ mod template_tests {
             render_template(
                 "{{email}} {{code}} {{expires_minutes}}",
                 "{{code}}@example.com",
-                "123456", "10"
+                "123456",
+                "10"
             ),
             "{{code}}@example.com 123456 10"
         );

@@ -53,7 +53,9 @@ fn catalog() -> &'static Value {
 }
 
 pub(super) fn supports(node: &Value) -> bool {
-    node["type"] == "host.command" || graph::manifest(node).is_some_and(|spec| spec["http"].is_object() || spec["git"].is_object())
+    node["type"] == "host.command"
+        || graph::manifest(node)
+            .is_some_and(|spec| spec["http"].is_object() || spec["git"].is_object())
 }
 
 fn client() -> Result<reqwest::Client> {
@@ -93,7 +95,8 @@ fn request_with_connection_origin(
     let origin = http["origin"].as_str().ok_or_else(invalid)?;
     let mut url = reqwest::Url::parse(origin).map_err(|_| invalid())?;
     if (url.scheme() != "https"
-        && !(url.scheme() == "http" && (connection_origin || (cfg!(test) && url.host_str() == Some("127.0.0.1")))))
+        && !(url.scheme() == "http"
+            && (connection_origin || (cfg!(test) && url.host_str() == Some("127.0.0.1")))))
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
@@ -382,9 +385,16 @@ fn connection_http(
     http["path"] = json!(format!("{base}{suffix}"));
     if profile == "codeup" {
         if access.organization.is_empty() {
-            http["path"] = json!(http["path"].as_str().ok_or_else(invalid)?
-                .replace("/organizations/{organization_id}", ""));
-            params.as_object_mut().ok_or_else(invalid)?.remove("organization_id");
+            http["path"] = json!(
+                http["path"]
+                    .as_str()
+                    .ok_or_else(invalid)?
+                    .replace("/organizations/{organization_id}", "")
+            );
+            params
+                .as_object_mut()
+                .ok_or_else(invalid)?
+                .remove("organization_id");
         } else {
             params["organization_id"] = json!(access.organization);
         }
@@ -403,10 +413,17 @@ async fn resolve_http(
     params: &Value,
 ) -> Result<(Value, Value, Id, String)> {
     if let Some(id) = params.get("connection_id") {
-        let id = id.as_str().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+        let id = id
+            .as_str()
+            .ok_or_else(invalid)?
+            .parse()
+            .map_err(|_| invalid())?;
         let profile = http["auth"]["profile"].as_str().ok_or_else(invalid)?;
-        if !matches!(profile, "github" | "gitlab" | "codeup") { return Err(invalid()); }
-        let access = crate::repositories::auth::repository_api_access(s, scope, id, profile).await?;
+        if !matches!(profile, "github" | "gitlab" | "codeup") {
+            return Err(invalid());
+        }
+        let access =
+            crate::repositories::auth::repository_api_access(s, scope, id, profile).await?;
         let (http, params) = connection_http(http, params, &access)?;
         Ok((http, params, access.credential_id, access.token))
     } else {
@@ -426,53 +443,93 @@ pub(super) async fn validate_connections(
     let mut layers = vec![&graph];
     while let Some(graph) = layers.pop() {
         for node in graph["nodes"].as_array().into_iter().flatten() {
-            if node["type"] == "core.loop" { layers.push(&node["params"]["body"]); }
-            let Some(id) = node["params"].get("connection_id") else { continue; };
-            let Some(spec) = graph::manifest(node) else { continue; };
-            let api = spec["http"]["auth"]["profile"].as_str().filter(|profile| matches!(*profile,"github"|"gitlab"|"codeup"));
-            if api.is_none() && !spec["git"].is_object() { continue; }
+            if node["type"] == "core.loop" {
+                layers.push(&node["params"]["body"]);
+            }
+            let Some(id) = node["params"].get("connection_id") else {
+                continue;
+            };
+            let Some(spec) = graph::manifest(node) else {
+                continue;
+            };
+            let api = spec["http"]["auth"]["profile"]
+                .as_str()
+                .filter(|profile| matches!(*profile, "github" | "gitlab" | "codeup"));
+            if api.is_none() && !spec["git"].is_object() {
+                continue;
+            }
             scope.require("repositories.read")?;
             scope.require("credentials.use")?;
             let id = id.as_str().ok_or_else(invalid)?;
             // Expressions are resolved and authorized again immediately before execution.
-            if id.starts_with('=') { continue; }
+            if id.starts_with('=') {
+                continue;
+            }
             let id: Id = id.parse().map_err(|_| invalid())?;
             let row = crate::repositories::auth::owned_connection(conn, scope, id).await?;
-            if spec["git"]["provider"].as_str().is_some_and(|provider| row.provider != provider)
+            if spec["git"]["provider"]
+                .as_str()
+                .is_some_and(|provider| row.provider != provider)
                 || !matches!(row.state.as_str(), "connected" | "refreshing")
-                || api.is_some_and(|provider| row.provider != provider || row.credential_id == 0) {
+                || api.is_some_and(|provider| row.provider != provider || row.credential_id == 0)
+            {
                 return Err(invalid());
             }
             if row.credential_id != 0 {
                 credentials::Entity::find_by_id(row.credential_id)
                     .filter(credentials::Column::WorkspaceId.eq(scope.workspace_id))
-                    .one(conn).await?.ok_or_else(invalid)?;
+                    .one(conn)
+                    .await?
+                    .ok_or_else(invalid)?;
             }
         }
     }
     Ok(())
 }
 
-async fn git_credential(s: &AppState, scope: &Scope, params: &Value, provider: Option<&str>) -> Result<(Id, Option<(String, String, String)>)> {
-    if provider.is_some() && (params.get("connection_id").is_none() || params["auth_mode"] == "anonymous") {
+async fn git_credential(
+    s: &AppState,
+    scope: &Scope,
+    params: &Value,
+    provider: Option<&str>,
+) -> Result<(Id, Option<(String, String, String)>)> {
+    if provider.is_some()
+        && (params.get("connection_id").is_none() || params["auth_mode"] == "anonymous")
+    {
         return Err(invalid());
     }
     if params["auth_mode"] == "anonymous"
-        && (params.get("connection_id").is_some() || !graph::anonymous_git_url(params["url"].as_str().unwrap_or_default())) {
+        && (params.get("connection_id").is_some()
+            || !graph::anonymous_git_url(params["url"].as_str().unwrap_or_default()))
+    {
         return Err(invalid());
     }
-    let Some(connection) = params.get("connection_id") else { return Ok((0.into(),None)); };
+    let Some(connection) = params.get("connection_id") else {
+        return Ok((0.into(), None));
+    };
     scope.require("repositories.read")?;
     scope.require("credentials.use")?;
-    let id = connection.as_str().ok_or_else(invalid)?.parse().map_err(|_| invalid())?;
+    let id = connection
+        .as_str()
+        .ok_or_else(invalid)?
+        .parse()
+        .map_err(|_| invalid())?;
     if let Some(provider) = provider {
         let row = crate::repositories::auth::owned_connection(&s.db, scope, id).await?;
-        if row.provider != provider { return Err(invalid()); }
+        if row.provider != provider {
+            return Err(invalid());
+        }
     }
     let url = params["url"].as_str().ok_or_else(invalid)?;
-    let (_, credential) = crate::repositories::auth::resolve_connection(s, &s.db, scope, id, url).await?;
-    if credential == 0.into() { return Ok((credential,None)); }
-    Ok((credential,Some(crate::credentials::unseal(s,&scope.workspace_id,&credential).await?)))
+    let (_, credential) =
+        crate::repositories::auth::resolve_connection(s, &s.db, scope, id, url).await?;
+    if credential == 0.into() {
+        return Ok((credential, None));
+    }
+    Ok((
+        credential,
+        Some(crate::credentials::unseal(s, &scope.workspace_id, &credential).await?),
+    ))
 }
 
 pub(super) async fn execute(
@@ -489,8 +546,12 @@ pub(super) async fn execute(
     let command = node["type"] == "host.command";
     // Commands run once per batch; preserve input lineage without rerunning a build per item.
     let command_items = [Item {
-        json: Map::new(), binary: Default::default(),
-        paired: items.iter().flat_map(|item| item.paired.iter().cloned()).collect(),
+        json: Map::new(),
+        binary: Default::default(),
+        paired: items
+            .iter()
+            .flat_map(|item| item.paired.iter().cloned())
+            .collect(),
     }];
     let items = if command { &command_items[..] } else { items };
     let client = client()?;
@@ -512,7 +573,11 @@ pub(super) async fn execute(
         if workflow.lifecycle != "active" || current.state != "running" {
             return Err(ApiError::forbidden());
         }
-        let (git_id, git_auth) = if git.is_some() { git_credential(s,&scope,params,manifest["git"]["provider"].as_str()).await? } else { (0.into(),None) };
+        let (git_id, git_auth) = if git.is_some() {
+            git_credential(s, &scope, params, manifest["git"]["provider"].as_str()).await?
+        } else {
+            (0.into(), None)
+        };
         let (http, params, credential_id, secret) = if git.is_some() || command {
             (http.clone(), params.clone(), git_id, String::new())
         } else {
@@ -521,7 +586,13 @@ pub(super) async fn execute(
         let builder = if git.is_some() || command {
             None
         } else {
-            Some(request_with_connection_origin(&client, &http, &params, &secret, params.get("connection_id").is_some())?)
+            Some(request_with_connection_origin(
+                &client,
+                &http,
+                &params,
+                &secret,
+                params.get("connection_id").is_some(),
+            )?)
         };
         let canonical = crate::definitions::canonical(
             &json!({"http":http,"git":git,"params":params,"execution":node.get("settings")})
@@ -560,30 +631,43 @@ pub(super) async fn execute(
         }
         let result = if command {
             let script = super::host::command_script(&params)?;
-            super::host::execute(s, run, node, &script, true).await.map(|mut value| {
-                value["exit_code"] = json!(0);
-                value
-            })
+            super::host::execute(s, run, node, &script, true)
+                .await
+                .map(|mut value| {
+                    value["exit_code"] = json!(0);
+                    value
+                })
         } else if let Some(operation) = git {
             let script = super::host::git_script(operation, &params)?;
             // Authenticated transport output is redacted as a whole so a token
             // split across output chunks cannot escape into live node logs.
-            super::host::execute_with_credential(s, run, node, &script, git_auth.is_none(), git_auth.as_ref())
-                .await
-                .map(|mut value| {
-                    if let Some(text) = value["stdout"].as_str() {
-                        value["stdout"] = json!(crate::pipelines::runs::redact(text.to_owned(),git_auth.as_ref(),&Default::default()));
-                    }
-                    value["operation"] = json!(operation);
-                    value["lines"] = json!(
-                        value["stdout"]
-                            .as_str()
-                            .unwrap_or_default()
-                            .lines()
-                            .collect::<Vec<_>>()
-                    );
-                    value
-                })
+            super::host::execute_with_credential(
+                s,
+                run,
+                node,
+                &script,
+                git_auth.is_none(),
+                git_auth.as_ref(),
+            )
+            .await
+            .map(|mut value| {
+                if let Some(text) = value["stdout"].as_str() {
+                    value["stdout"] = json!(crate::pipelines::runs::redact(
+                        text.to_owned(),
+                        git_auth.as_ref(),
+                        &Default::default()
+                    ));
+                }
+                value["operation"] = json!(operation);
+                value["lines"] = json!(
+                    value["stdout"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .lines()
+                        .collect::<Vec<_>>()
+                );
+                value
+            })
         } else if super::host::requested(node) {
             host_request(s, run, node, &http, builder.ok_or_else(invalid)?, &secret).await
         } else {

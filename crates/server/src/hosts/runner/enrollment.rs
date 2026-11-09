@@ -100,10 +100,16 @@ pub async fn connection_command(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost");
     let scheme = if s.secure_cookie { "https" } else { "http" };
-    let mut installation_scope = live().get(&id.to_string()).and_then(|live| live.installation_scope.clone());
+    let mut installation_scope = live()
+        .get(&id.to_string())
+        .and_then(|live| live.installation_scope.clone());
     if installation_scope.is_none() {
         if let Some(cluster) = &s.cluster {
-            installation_scope = cluster.owner(&id.to_string()).await?.and_then(|owner| owner.info).and_then(|info| info.installation_scope);
+            installation_scope = cluster
+                .owner(&id.to_string())
+                .await?
+                .and_then(|owner| owner.info)
+                .and_then(|info| info.installation_scope);
         }
     }
     Ok(Json(
