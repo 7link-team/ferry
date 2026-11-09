@@ -1,5 +1,10 @@
 ## 当前事项清单（2026-11-09）
 
+| PREVIEW-CLEANUP-31 | 受阻 | 预览四分支已合并并删除，四个worktree登记均已移除；preview-auto目录已删除。manual/pipeline/workflow残留目录含node_modules联接，Git删除失败；自动审批拒绝后续递归清理（blocked by policy），未继续删除。解除条件：安全解除联接后允许清理三个残留目录。证据已完整保全，不影响main源码。 |
+
+预览自动托管交付（PREVIEW-AUTO-26 / HANDOFF-ARCHIVE-30，2026-11-09）：main@89b6e98已快进合并流水线ferry/preview@v1、工作流host.preview及主机详情预览入口，完成来源绑定、人工通过/驳回与终态回收；本轮修复来源列遮挡、互斥操作栏占宽、node_wait误报及手机列表高度/固定列绘制溢出。Rust工作区（server593/runner52/protocol7/sandbox16）、Go worker全量PASS；前端564PASS/1既有skip，最后55项回归与前后端构建PASS。真实Runner/Chrome最终20项PASS，三页面×三宽度无整页溢出且表格内部可滚动，浏览器无错误；流水线通过/驳回、工作流通过/驳回/取消、服务停止/预览404及无残留进程端口通过。证据data/maintenance/preview-automation-integration-20261109/auto/preview-automation-20261109-103304/result.json；全部496份历史/失败证据已复制并SHA256核对，清单evidence-manifest.json，前轮全量日志integration-logs。TXT转存docs/archive/2026-11-09-preview-runner-handoff.md，正文SHA256与原文件一致，根TXT已删除。直接执行，自审/本期需求核对PASS，待用户体验；仅隔离实例验证，4291/PID76440未更新，未发新版本。边界：流水线只支持宿主job、url为根相对路径、工作流服务不占slot、重启断连后回收；会话面板/内部AI工具/MCP仍为后续独立范围。合并提交/归档待推送，清理残留见31。
+
+
 | SETTINGS-TABS-FONT-28 | 待验证 | 同registration键多个分区归入单Tab，富文本原生字号下拉保留选区格式并同步HTML预览；41项相关测试与真实Chrome四宽度/六语/SMTP验收PASS（settings-tab-font-acceptance.json）。4291已备份更新/PID76440/index-DFd0-wHd.js，36类表/密钥/环境保全；待用户验收。 |
 提交推送交付（COMMIT-PUSH-29，2026-11-09）：main@f5a2c0d已通过现有SSH认证推送GitHub，124个源码/文档文件，无密钥/本地数据/构建产物；HTTPS凭据管理器等待认证后停止，未改远程配置。包含此前模型/CLI/凭据边界、Git克隆/节点构建/分支与Runner连接提示、注册验证码配置及本轮重复Tab/字号修复；方案与未验收事项仍按原状态保留。前端535PASS/1既有skip、41项相关回归、前后端构建、真实Chrome四宽度/六语/SMTP验收PASS；最新证据git-capabilities-20261109/settings-tab-font-{acceptance.json,tests-final.log,local-update.json}。4291/PID76440/index-DFd0-wHd.js已备份更新，36类数据/密钥/实例/环境保全。直接执行，自审/需求核对通过。本记录覆盖下文旧“未提交/未推送”检查点的提交状态，不覆盖用户验收结论；未合并独立preview-holes分支、未发新版本。
 
@@ -8,6 +13,7 @@
 
 验证码配置交付检查点（2026-11-09 14:18）：直接执行，现有实现/真实邮件证据核对完成，无重复实现。前端534PASS/1既有skip、server570PASS/9既有ignored、相关Runner/协议/Sandbox通过；typecheck、前后端build及diff检查通过。隔离SMTP证据git-capabilities-20261109/registration-code-e2e.log及Temp/mail-template-workspace-fvXNWv；实际更新/备份/36类表、密钥、实例和环境保全见registration-code-local-update.json，无迁移。默认模板使用{{expires_minutes}}；历史自定义模板的字面10分钟不强制改写，需插入变量或恢复默认模板。自审/本期需求核对通过；实际4291超管UI未覆盖，不能把非超管会话烟测超时记为通过。其余分支拖动/Runner事项不在本次验证码交付中冒称验收。
 
+| PLATFORM-AI-27 | 待设计（未确认未实现） | 用户2026-11-09提出：平台对外提供MCP；对内AI可调用平台功能（会话中创建主机/流水线等）；会话中发进度与预览验收卡片（带预览地址、跳转到流水线节点等审核位置）；会话右侧预览面板（iframe/webview，独立前进后退，多tab区分web/API/远程文件/目录等预览产物），参照主流会话+预览设计。顺序建议：先完成PREVIEW-AUTO-26（提供url输出/验收API/来源跳转）→预览面板+会话卡片→统一工具注册表（对内AI调用含权限与确认）→对外MCP。约束：预览为沙箱opaque origin，浏览器iframe跨源不可读history，独立前进后退需代理注入导航脚本或Tauri原生webview。每块需单独设计并经用户确认。 |
 | PREVIEW-HOLES-25 | 已交付 | 用户2026-11-09验收通过（独立实例4295，已停止并删除演示目录）。main：合并a45f97d（feat/preview-holes@403a5b6，分支与worktree已删除）+ style提交修复a2a1ad4遗留的16个rustfmt文件（逐文件去空白比对确认仅格式），推送origin/main。验证：cargo test --workspace PASS（server577、runner52）、tsc/vitest548/build PASS、fmt PASS；端到端12项PASS，证据data/maintenance/preview-holes-20261109-061002。当前语义：每条预览需人工创建（选Runner+端口），有效期1h/8h/24h/7d可续期、可撤销，过期后不可访问但记录保留；非自动发现/自动托管。已知小问题：不可达原因带英文前缀（探测错误用ApiError默认文本）；手机窄屏操作列挤压名称列（共享表格）。待决PREVIEW-AUTO-26：用户询问是否自动代理Runner上的服务并全托管生命周期，已给出方案建议，未确认未实现。 |
 | PIPELINE-CHECKOUT-22 | 待验证 | 独立克隆类型、多仓库/多组/跨连接选择已实现；分组编辑时展开快照，去重生成独立步骤ID与目录，原生YAML保留。前端526PASS/1skip、Chrome四宽度分组→生成→保存回读PASS。4291已备份更新/PID25120，实际四宽度空白新建/任务/连接入口及401PASS；证据git-capabilities-20261109/{connection-batch-reviewed,local-update.json,local-smoke.json}。待用户体验，未提交推送发版。 |
 | MODEL-CATALOG-SYNC-23 | 待处理 | 用户询问模型清单定时更新；建议可选自动同步、最近成功时间/结果/立即更新，区分手工模型与发现模型，保留默认及历史引用，CLI指定Runner/API指定连接。当前仅建议，周期、不可用模型语义和调度/离线规则待设计，不算已实现。 |
