@@ -1,0 +1,21 @@
+name: Supersede alpha13 release candidate
+on:
+  push:
+    branches: [ci/release-alpha13-supersede-20261110]
+permissions:
+  actions: write
+  contents: read
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const targets = [[42668524898,"main","Build and release"],[42668642990,"v0.3.0-alpha.13","Build and release"],[42668525046,"main","Server container"],[42668642393,"v0.3.0-alpha.13","Server container"]];
+            for (const [run_id, branch, name] of targets) {
+              const {data: run} = await github.rest.actions.getWorkflowRun({...context.repo,run_id});
+              if(run.head_sha !== "46284b35bab4dfa173231ccbba5d8300c45577e3" || run.head_branch !== branch || run.name !== name) throw Error('Source mismatch '+run_id);
+              core.info(`${run_id}: ${run.status}/${run.conclusion}`);
+              if(run.status !== 'completed') await github.rest.actions.cancelWorkflowRun({...context.repo,run_id});
+            }
