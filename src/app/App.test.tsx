@@ -154,6 +154,56 @@ it("shows alert rules and events for the current host", async () => {
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/alert-events?") && String(url).includes("target_ref=42"))).toBe(true);
 });
 
+it("shows the host's preview tunnels in a host tab and creates them with the host locked", async () => {
+  required = false;
+  permissions = ["hosts.read", "holes.read", "holes.create"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/nodes/42?tab=holes");
+  await act(async () => root.render(<App />));
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === "预览穿透")!;
+  expect(tab.getAttribute("aria-selected")).toBe("true");
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/holes?") && String(url).includes("host_id=42"))).toBe(true);
+  const create = [...host.querySelectorAll("a")].find(link => link.textContent === "新建预览穿透")!;
+  const target = new URL(create.getAttribute("href")!, location.origin);
+  expect(target.pathname).toBe("/zh-CN/workspaces/2/holes/new");
+  expect(target.searchParams.get("host_id")).toBe("42");
+  expect(target.searchParams.get("return_to")).toBe("/zh-CN/workspaces/2/nodes/42?tab=holes");
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  history.replaceState({}, "", target.pathname + target.search);
+  await act(async () => root.render(<App />));
+  const hostField = [...host.querySelectorAll("label")].find(label => label.textContent?.startsWith("主机"))!.closest("div")!.parentElement!;
+  expect(hostField.querySelector("button[role=combobox]:disabled, select:disabled, [data-disabled]")).not.toBeNull();
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  history.replaceState({}, "", "/zh-CN/workspaces/2/holes/new");
+  await act(async () => root.render(<App />));
+  const openField = [...host.querySelectorAll("label")].find(label => label.textContent?.startsWith("主机"))!.closest("div")!.parentElement!;
+  expect(openField.querySelector("button[role=combobox]:disabled, select:disabled, [data-disabled]")).toBeNull();
+});
+it("keeps preview tunnels out of the host menu and hides the tab without holes.read", async () => {
+  required = false;
+  permissions = ["hosts.read", "holes.read"];
+  await act(async () => root.render(<App />));
+  expect(host.textContent).not.toContain("预览穿透");
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  permissions = ["hosts.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/nodes/42?tab=holes");
+  await act(async () => root.render(<App />));
+  expect([...host.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).not.toContain("预览穿透");
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/holes?"))).toBe(false);
+});
+it("opens a preview tunnel detail by direct link under hosts", async () => {
+  required = false;
+  permissions = ["hosts.read", "holes.read"];
+  history.replaceState({}, "", "/zh-CN/workspaces/2/holes/9");
+  await act(async () => root.render(<App />));
+  expect(host.querySelector('nav[aria-label="主机页面"]')).toBeNull();
+  expect(host.querySelector("h1")?.textContent).toBe("预览穿透");
+  expect(host.querySelector('[aria-current="page"]')?.textContent).toBe("主机");
+  expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === "/api/workspaces/2/holes/9")).toBe(true);
+});
+
 it("keeps connection details in basic information and paged repository tabs", async () => {
   required = false;
   permissions = ["repositories.read", "repositories.update"];

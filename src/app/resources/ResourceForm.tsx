@@ -126,6 +126,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
     : creating && !createInPlace && config.resource === "host-groups"
       ? { ...config.blank, parent_id: new URLSearchParams(location.search).get("parent_id") ?? "" } as Partial<T>
       : config.blank;
+  const [queryPresets] = useState(() => creating && !createInPlace
+    ? Object.fromEntries((config.queryDefaults ?? []).map(key => [key, new URLSearchParams(location.search).get(key) ?? ""]).filter(([, value]) => value))
+    : {});
   const [defaultWorkflowName] = useState(() => {
     if (!["workflows", "pipelines"].includes(config.resource)) return "";
     const now = new Date();
@@ -133,8 +136,9 @@ export function ResourceForm<T extends Record<string, unknown>>({
     const suffix = Array.from(crypto.getRandomValues(new Uint8Array(3)), value => value.toString(16).padStart(2,"0")).join("");
     return `${workflowText("newWorkflow")}-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${suffix}`;
   });
+  const presetBlankDraft = { ...baseBlankDraft, ...queryPresets } as Partial<T>;
   const blankDraft = creating && ["workflows", "pipelines"].includes(config.resource)
-    ? { ...baseBlankDraft, name: defaultWorkflowName } as Partial<T> : baseBlankDraft;
+    ? { ...presetBlankDraft, name: defaultWorkflowName } as Partial<T> : presetBlankDraft;
   const [draft, setDraft] = useState<Partial<T>>(blankDraft);
   const [draftAssets] = useState(createWorkflowDraftAssets);
   const [pendingWorkflow, setPendingWorkflow] = useState<T | null>(null);
@@ -195,7 +199,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
     timer=setTimeout(load,delay);
     return ()=>{live=false;clearTimeout(timer);};
   },[route.mode,route.id,workspace,config,draft]);
-  const returnPath = ["host-groups", "pipeline-groups", "alert-rules", "code-connection-monitors", "code-insights"].includes(config.resource)
+  const returnPath = ["host-groups", "pipeline-groups", "alert-rules", "code-connection-monitors", "code-insights", "holes"].includes(config.resource)
     ? safeLoginRedirect(new URLSearchParams(location.search).get("return_to")) : undefined;
   const returnUrl = returnPath ? new URL(returnPath, location.origin) : undefined;
   const returnRoute = returnUrl ? parse(returnUrl.pathname, returnUrl.search) : undefined;
@@ -216,7 +220,7 @@ export function ResourceForm<T extends Record<string, unknown>>({
       creating={creating}
       draft={draft}
       permissions={permissions}
-      readOnly={readOnly || (!creating && !!field.immutable) || !!field.disabled?.(draft)}
+      readOnly={readOnly || (!creating && !!field.immutable) || (creating && field.key in queryPresets) || !!field.disabled?.(draft)}
       asText={readOnly}
       fillHeight={workspaceEditor && (["actions-editor", "actions-template-editor"].includes(field.type) || config.editor?.field === field.key)}
       {...(workspaceEditor ? { editorMode, onEditorModeChange: setEditorMode } : {})}

@@ -58,7 +58,7 @@ import {
 import type { AnyRow } from "../shared/resources/config";
 import type { FormConfig, ListConfig, Option } from "../shared/resources/types";
 import { exportResources, importResources } from "./resources/ResourceTransfer";
-import { navigate } from "./router";
+import { href, navigate } from "./router";
 import { ResourceTable } from "./resources/ResourceTable";
 export type { Activity } from "../features/activity/resource-config";
 export type { Credential } from "../features/credentials/types";
@@ -73,7 +73,7 @@ export function listConfigs(
   hostStates: Option[] = STATES,
   dictionaries: Record<string, Option[]> = {},
 ): Record<string, ListConfig<AnyRow>> {
-  const context = { workspace, permissions, onChanged, hostStates, dictionaries, navigate };
+  const context = { workspace, permissions, onChanged, hostStates, dictionaries, navigate, href };
   const configs = {
     ...marketplaceLists(context),
     ...alertsLists(context),
@@ -115,7 +115,7 @@ export function formConfigs(
   workspace: string,
   permissions?: Set<string>,
 ): Record<string, FormConfig<AnyRow>> {
-  const context = { workspace, permissions, hostStates: STATES, navigate,
+  const context = { workspace, permissions, hostStates: STATES, navigate, href,
     renderTable: (config: ListConfig<Record<string, unknown>>, refreshKey = 0) => <ResourceTable config={config} workspace={workspace} permissions={permissions ?? new Set()} refreshKey={refreshKey} />,
   };
   return {
