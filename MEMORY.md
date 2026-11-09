@@ -1,5 +1,7 @@
 ## 当前事项清单（2026-11-09）
 
+| RELEASE-ALPHA9-34 | 进行中 | 用户明确授权发版；统一升级v0.3.0-alpha.9，核对版本/锁文件并推送main与标签；等待完整发布CI、附件和多架构镜像核验。既有4291保持运行，不执行生产部署；功能用户验收边界仍保留。 |
+
 | PIPELINE-CHECKOUT-22 | 待验证 | 4291已更新PID35224/index-DNAdtqaS.js：流水线克隆步骤内可批量选择仓库/组并原位展开，保留原仓库分支/目录/首个ID/条件/环境/checkout参数/YAML引用；节点克隆支持同连接多仓库/整组含子组，完整分页快照去重、独立编号目录、逐仓库授权/发送账本。相关前端60PASS及最终checkout36PASS，集成10PASS、图13PASS/1原有ignore，前后端构建PASS。真实HTTP Git+Runner双仓库克隆、Actions双checkout→构建、跨空间拒绝及四宽度选择/保存回读PASS，repository-batch-clone-20261109/reviewed；Codeup分页多组组件回归PASS，商业Codeup未实连。待用户刷新验收；分组为快照、500仓库上限、不自动重试；未发版。 |
 | CONVERSATION-INTERRUPTION-33 | 待验证 | 私聊中断可继续输入/显式重试，错误及重试紧贴失败消息，移除底部整条中断提示；4291已更新PID35224/index-DNAdtqaS.js。后端19/前端6PASS，构建通过；实际构建前端+API夹具四宽度行内错误/重试PATCH→POST/草稿保留PASS，证据conversation-interruption-20261109/inline-ui.json及截图。原会话真实推理未验证：旧测试登录归另一账号返回404，浏览器工具无用户登录页面；不改所有权、不自动重放。待用户本人刷新验收，未发版。 |
 

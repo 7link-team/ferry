@@ -157,6 +157,8 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed |= {'code-insights.'+verb for verb in ['read','create','update','delete','sync']}
                     allowed |= {'workflows.'+verb for verb in ['read','create','update','delete','run']}
                     allowed |= {'workflow-groups.'+verb for verb in ['read','create','update','delete']}
+                    # holes_v1 grants preview CRUD to the existing workspace owner.
+                    allowed |= {'holes.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
                     allowed |= AI_MANAGER_PERMISSIONS
                     old_spaces={w['id']:w for w in before[path]['workspaces']}

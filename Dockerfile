@@ -29,6 +29,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY src/shared/workflow-contracts ./src/shared/workflow-contracts
 COPY src/shared/mail ./src/shared/mail
+COPY src/shared/i18n/locales ./src/shared/i18n/locales
 COPY examples/workflow-extensions/public-repository.json ./examples/workflow-extensions/public-repository.json
 COPY desktop/tauri.conf.json ./desktop/tauri.conf.json
 COPY scripts/runner-install.sh scripts/runner-install.ps1 ./scripts/

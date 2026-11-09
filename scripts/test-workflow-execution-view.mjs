@@ -40,7 +40,7 @@ try{
   const terminal=id=>wait(async()=>{const run=await api(root+'/workflow-executions/'+id);return ['succeeded','failed','cancelled'].includes(run.state)&&run;});
   page=await context.newPage();const pageErrors=[];page.on('pageerror',error=>pageErrors.push(error.message));
   await new Promise(r=>stalled.listen(0,'127.0.0.1',r));
-  const blocked=await make('Running graph','integration.git.repository.remote_refs',{url:`ssh://127.0.0.1:${stalled.address().port}/repository`});
+  const blocked=await make('Running graph','integration.git.repository.remote_refs',{auth_mode:'anonymous',url:`http://127.0.0.1:${stalled.address().port}/repository`});
   await page.goto(`${origin}/zh-CN${root}/workflows/${blocked.id}/edit`);
   await page.getByRole('button',{name:t('saveAndRun'),exact:true}).click();
   const submitted=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/executions'));
