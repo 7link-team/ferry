@@ -477,6 +477,7 @@ mod tests {
             schema.create_table_from_entity(runs::Entity),
             schema.create_table_from_entity(jobs::Entity),
             schema.create_table_from_entity(steps::Entity),
+            schema.create_table_from_entity(crate::entities::holes::Entity),
         ] {
             db.execute(&statement).await.unwrap();
         }
@@ -626,6 +627,7 @@ mod tests {
         for statement in [
             schema.create_table_from_entity(runs::Entity),
             schema.create_table_from_entity(jobs::Entity),
+            schema.create_table_from_entity(crate::entities::holes::Entity),
         ] {
             db.execute(&statement).await.unwrap();
         }

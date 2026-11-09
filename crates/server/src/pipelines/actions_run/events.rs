@@ -14,6 +14,8 @@ pub(super) async fn stream_events(
     worker: bool,
     // Cleanup jobs of a cancelled run stop only with the service.
     watch_run: bool,
+    // The worker invocation's `ferry/preview@v1` channel, if it has one.
+    preview: Option<&Preview<'_>>,
 ) -> Result<(i32, Option<Outcome>, bool)> {
     let (output, mut receiver) = tokio::sync::mpsc::channel(64);
     let (cancel, cancelled) = tokio::sync::watch::channel(false);
@@ -28,6 +30,8 @@ pub(super) async fn stream_events(
         std::collections::VecDeque::new();
     let mut processing = FuturesUnordered::new();
     let mut checks = FuturesUnordered::new();
+    // Preview requests live as long as the worker invocation that made them.
+    let mut previews = FuturesUnordered::new();
     let mut stop_open = true;
     while exit.is_none() || !closed || !lines.is_empty() || !processing.is_empty() {
         if *stop.borrow() {
@@ -42,6 +46,18 @@ pub(super) async fn stream_events(
         if processing.is_empty()
             && let Some((stream, line)) = lines.pop_front()
         {
+            if worker
+                && stream == "stdout"
+                && let Some(preview) = preview
+                && let Some(request) = preview_request(&line, preview)
+            {
+                // Not logged: the marker carries the nonce. The step prints
+                // its own progress lines.
+                previews.push(serve_preview(
+                    s, run, job, seq, ch, preview, request, credential, variables,
+                ));
+                continue;
+            }
             let previous = outcome.take();
             processing.push(async move {
                 let mut outcome = previous;
@@ -105,6 +121,7 @@ pub(super) async fn stream_events(
                     Err(error)=>{failure=Some(error);cancel.send_replace(true);},
                 }
             },
+            _=previews.next(), if !previews.is_empty()=>{},
             changed=stop.changed(), if stop_open=>{
                 if changed.is_err() { stop_open=false; }
                 if !stop_open || *stop.borrow() { cancel.send_replace(true); }
@@ -115,6 +132,7 @@ pub(super) async fn stream_events(
     // next poll. Release it before flushing a trailing partial output line.
     drop(checks);
     drop(processing);
+    drop(previews);
     // Process completion/termination is acknowledged before errors propagate
     // and the caller removes credentials and the job workspace.
     if let Some(error) = failure {
@@ -245,6 +263,160 @@ async fn event(
     Ok(())
 }
 
+/// A worker invocation's side of `ferry/preview@v1`
+/// (docs/preview-automation-design.md section 5).
+pub(super) struct Preview<'a> {
+    /// Known only to this invocation's rewritten preview steps.
+    pub nonce: &'a str,
+    /// `<job private dir>/ferry-preview`, the only place answers go.
+    pub dir: &'a str,
+    pub host_id: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct PreviewRequest {
+    id: String,
+    port: i64,
+    #[serde(default)]
+    name: String,
+    strip_prefix: bool,
+    hold: String,
+    ready_timeout_seconds: u64,
+    timeout_minutes: i64,
+    response: String,
+}
+
+/// The answer file for request `id`: exactly `<dir>/<id>.json`, with an id
+/// that cannot name any other path.
+fn preview_path(dir: &str, id: &str) -> Option<String> {
+    (!id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'))
+    .then(|| format!("{dir}/{id}.json"))
+}
+
+/// A preview request marker (`::ferry-preview::<nonce>::<json>`) in a worker
+/// log record. Lines without the right nonce, with an unusable id, or naming
+/// another answer path are not requests; they are logged like any output.
+fn preview_request(line: &[u8], preview: &Preview<'_>) -> Option<PreviewRequest> {
+    let value: Value = serde_json::from_slice(line).ok()?;
+    let text = value["raw"].as_str().or_else(|| value["msg"].as_str())?;
+    let prefix = format!("::ferry-preview::{}::", preview.nonce);
+    let start = text.find(&prefix)?;
+    let request: PreviewRequest =
+        serde_json::from_str(text[start + prefix.len()..].trim_end()).ok()?;
+    (preview_path(preview.dir, &request.id)? == request.response).then_some(request)
+}
+
+/// Opens the requested preview as the run's initiator and waits until the
+/// local service answers; returns the hole and its root-relative link.
+async fn open_preview(
+    s: &AppState,
+    run: &runs::Model,
+    job: &Job,
+    host_id: i64,
+    request: &PreviewRequest,
+) -> Result<(i64, String)> {
+    if !matches!(request.hold.as_str(), "approval" | "none")
+        || !(1..=600).contains(&request.ready_timeout_seconds)
+    {
+        return Err(ApiError::localized(
+            StatusCode::BAD_REQUEST,
+            Message::new("holes.invalid"),
+        ));
+    }
+    let scope = crate::accounts::workspace::Scope::for_actor(
+        s,
+        Id::from(run.workspace_id),
+        Id::from(run.triggered_by),
+    )
+    .await?;
+    let row = crate::holes::open_owned(
+        s,
+        &scope,
+        crate::holes::OwnedRequest {
+            host_id: Id::from(host_id),
+            port: request.port,
+            name: request.name.clone(),
+            strip_prefix: request.strip_prefix,
+            source_kind: "pipeline",
+            source_id: run.id,
+            source_ref: job.key.clone(),
+            review_minutes: (request.hold == "approval").then_some(request.timeout_minutes),
+        },
+    )
+    .await?;
+    crate::holes::wait_ready(s, &row, Duration::from_secs(request.ready_timeout_seconds)).await?;
+    let id = row.id;
+    let view = crate::holes::views(s, &scope, vec![row]).await?;
+    let url = view
+        .first()
+        .and_then(|view| view["url"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    Ok((id, url))
+}
+
+async fn answer_preview(ch: &dyn HostChannel, path: &str, answer: Value) {
+    if let Err(error) = upload(ch, path, answer.to_string(), 0o600).await {
+        // The step gives up at its own deadline; the job's end revokes it.
+        tracing::warn!(%error, "预览结果写回失败");
+    }
+}
+
+/// Serves one request: the link (or the reason there is none), then, when
+/// the step holds for review, the decision.
+#[allow(clippy::too_many_arguments)]
+async fn serve_preview(
+    s: &AppState,
+    run: &runs::Model,
+    job: &Job,
+    seq: &tokio::sync::Mutex<i64>,
+    ch: &dyn HostChannel,
+    preview: &Preview<'_>,
+    request: PreviewRequest,
+    credential: Option<&(String, String, String)>,
+    variables: &BTreeMap<String, String>,
+) {
+    let path = request.response.clone();
+    match open_preview(s, run, job, preview.host_id, &request).await {
+        Ok((hole, url)) => {
+            answer_preview(ch, &path, json!({"url": url})).await;
+            if request.hold == "approval" {
+                match crate::holes::wait_review(s, hole).await {
+                    Ok(decision) => {
+                        answer_preview(ch, &path, json!({"url": url, "decision": decision})).await;
+                    }
+                    Err(error) => tracing::warn!(%error, "预览验收状态读取失败"),
+                }
+            }
+        }
+        Err(error) => {
+            let text = error.render(crate::i18n::current_locale());
+            let message = Message::new("execution.previewFailed").with("job", job.key.clone());
+            let message = match error.2 {
+                Some(cause) => message.with_message("error", cause),
+                None => message.with("error", error.1),
+            };
+            if let Err(error) = append_message(
+                s,
+                run.id,
+                -1,
+                &mut *seq.lock().await,
+                "stderr",
+                redact_message(message, credential, variables),
+            )
+            .await
+            {
+                tracing::warn!(%error, "预览失败日志写入失败");
+            }
+            answer_preview(ch, &path, json!({"error": text})).await;
+        }
+    }
+}
+
 /// A failed run step's exit status as the engine reports it: `exit status N`
 /// on hosts, `exitcode 'N': failure` in containers.
 fn step_exit_code(message: &str) -> Option<i32> {
@@ -359,6 +531,7 @@ mod tests {
             60,
             false,
             true,
+            None,
         );
         let (result, _) = tokio::time::timeout(Duration::from_secs(2), async {
             tokio::join!(stream, controller)
@@ -408,6 +581,7 @@ mod tests {
             60,
             false,
             true,
+            None,
         );
         let (result, _) = tokio::time::timeout(Duration::from_secs(2), async {
             tokio::join!(stream, controller)
@@ -560,6 +734,316 @@ mod tests {
             i18n::render_text_stored(Locale::EnUs, localized),
             i18n::render_text_stored(Locale::JaJp, localized)
         );
+    }
+
+    /// Only a marker with this invocation's nonce, a plain id and exactly the
+    /// expected answer path is a preview request.
+    #[test]
+    fn preview_markers_need_the_nonce_and_their_own_answer_path() {
+        use super::{Preview, preview_path, preview_request};
+        let preview = Preview {
+            nonce: "n0nce",
+            dir: "/tmp/actions-1/ferry-preview",
+            host_id: 11,
+        };
+        let request = |id: &str, response: &str| {
+            json!({"id": id, "port": 5173, "name": "Web", "strip_prefix": true, "hold": "approval",
+                   "ready_timeout_seconds": 60, "timeout_minutes": 30, "response": response})
+            .to_string()
+        };
+        // As act logs an unknown workflow command: the line is in `raw`, and
+        // `msg` carries it behind a prefix.
+        let record = |nonce: &str, body: &str| {
+            let line = format!("::ferry-preview::{nonce}::{body}\n");
+            json!({"level": "info", "stepID": ["preview"], "command": "ferry-preview",
+                   "msg": format!("  \u{2753}  {line}"), "raw": line})
+            .to_string()
+            .into_bytes()
+        };
+        let good = request(
+            "preview-0a1b",
+            "/tmp/actions-1/ferry-preview/preview-0a1b.json",
+        );
+        let parsed = preview_request(&record("n0nce", &good), &preview).unwrap();
+        assert_eq!(parsed.id, "preview-0a1b");
+        assert_eq!(parsed.port, 5173);
+        assert_eq!(parsed.name, "Web");
+        assert!(parsed.strip_prefix);
+        assert_eq!(parsed.hold, "approval");
+        assert_eq!(parsed.ready_timeout_seconds, 60);
+        assert_eq!(parsed.timeout_minutes, 30);
+        // Without `raw`, the message still identifies the request.
+        let mut only_msg: Value = serde_json::from_slice(&record("n0nce", &good)).unwrap();
+        only_msg.as_object_mut().unwrap().remove("raw");
+        assert!(preview_request(only_msg.to_string().as_bytes(), &preview).is_some());
+
+        // Forgeries and anything that could name another file are not requests.
+        assert!(preview_request(&record("guess", &good), &preview).is_none());
+        assert!(preview_request(&record("", &good), &preview).is_none());
+        assert!(
+            preview_request(good.as_bytes(), &preview).is_none(),
+            "not a log record"
+        );
+        assert!(preview_request(b"::ferry-preview::n0nce::{}", &preview).is_none());
+        assert!(preview_request(&record("n0nce", "{not json"), &preview).is_none());
+        for (id, response) in [
+            ("../escape", "/tmp/actions-1/ferry-preview/../escape.json"),
+            ("a/b", "/tmp/actions-1/ferry-preview/a/b.json"),
+            ("Upper", "/tmp/actions-1/ferry-preview/Upper.json"),
+            ("", "/tmp/actions-1/ferry-preview/.json"),
+            ("dot.dot", "/tmp/actions-1/ferry-preview/dot.dot.json"),
+            (
+                "back\\slash",
+                "/tmp/actions-1/ferry-preview/back\\slash.json",
+            ),
+            ("preview-0a1b", "/etc/passwd"),
+            (
+                "preview-0a1b",
+                "/tmp/actions-2/ferry-preview/preview-0a1b.json",
+            ),
+            (
+                "preview-0a1b",
+                "/tmp/actions-1/ferry-preview/../preview-0a1b.json",
+            ),
+        ] {
+            assert!(
+                preview_request(&record("n0nce", &request(id, response)), &preview).is_none(),
+                "{id} -> {response}"
+            );
+        }
+
+        assert_eq!(
+            preview_path("C:/Temp/ferry-actions-1/ferry-preview", "preview-9"),
+            Some("C:/Temp/ferry-actions-1/ferry-preview/preview-9.json".into())
+        );
+        for id in [
+            "",
+            "..",
+            "../x",
+            "x/y",
+            "x\\y",
+            "X",
+            "a.b",
+            "a b",
+            "\u{e9}",
+            &"a".repeat(65),
+        ] {
+            assert_eq!(preview_path("/d", id), None, "{id}");
+        }
+        assert!(preview_path("/d", &"a".repeat(64)).is_some());
+    }
+
+    /// A worker that asks for a preview, then exits once it has an answer.
+    struct PreviewWorker {
+        lines: Vec<u8>,
+        answered: tokio::sync::Notify,
+        written: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HostChannel for PreviewWorker {
+        async fn exec_stream(
+            &self,
+            _: &str,
+            _: Duration,
+            output: tokio::sync::mpsc::Sender<(String, Vec<u8>)>,
+            _: tokio::sync::watch::Receiver<bool>,
+        ) -> Result<i32> {
+            output
+                .send(("stdout".into(), self.lines.clone()))
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(20), self.answered.notified())
+                .await
+                .expect("the service answers the request");
+            Ok(0)
+        }
+        async fn write_file(
+            &self,
+            path: &str,
+            _: u32,
+            body: crate::hosts::channel::ByteStream,
+        ) -> Result<()> {
+            let body: Vec<_> = body.collect().await;
+            let body = body
+                .into_iter()
+                .map(|chunk| String::from_utf8(chunk.unwrap().to_vec()).unwrap())
+                .collect::<String>();
+            self.written.lock().unwrap().push((path.into(), body));
+            self.answered.notify_one();
+            Ok(())
+        }
+        async fn read_file(
+            &self,
+            _: &str,
+        ) -> Result<(
+            crate::hosts::channel::FileMeta,
+            crate::hosts::channel::ByteStream,
+        )> {
+            panic!("unexpected read")
+        }
+        async fn monitor(&self) -> Result<ferry_protocol::HostMonitor> {
+            panic!("unexpected monitor")
+        }
+        async fn exec(&self, _: &str, _: Duration) -> Result<crate::hosts::channel::Output> {
+            panic!("unexpected exec")
+        }
+        async fn open_pty(
+            &self,
+            _: crate::hosts::channel::PtySize,
+        ) -> Result<Box<dyn crate::hosts::channel::Pty>> {
+            panic!("unexpected pty")
+        }
+        async fn list_dir(&self, _: &str) -> Result<Vec<crate::hosts::channel::DirEntry>> {
+            panic!("unexpected list")
+        }
+        async fn create_file(&self, _: &str) -> Result<()> {
+            panic!("unexpected create file")
+        }
+        async fn create_dir(&self, _: &str) -> Result<()> {
+            panic!("unexpected create directory")
+        }
+        async fn delete_file(&self, _: &str) -> Result<()> {
+            panic!("unexpected delete")
+        }
+    }
+
+    /// The marker opens a preview as the run's initiator; a service that never
+    /// comes up gets the step a localized error, in exactly its answer file,
+    /// and the run log says why. A forged marker is just output.
+    #[tokio::test]
+    async fn preview_requests_are_answered_in_their_own_file() {
+        use crate::entities::{holes, hosts, pipeline_run_logs as logs};
+        use sea_orm::{ActiveValue::Set, ConnectionTrait};
+        let (_dir, s) = crate::agents::tests::setup().await;
+        s.db.execute_unprepared("UPDATE users SET is_superadmin = 1 WHERE id = 1")
+            .await
+            .unwrap();
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(11),
+            workspace_id: Set(1),
+            name: Set("Runner".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            enroll_token: Set(String::new()),
+            enroll_token_hash: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        let mut run = crate::pipelines::runs::lease_tests::run(70);
+        run.workspace_id = 1;
+        let job = super::super::tests::test_job("build", &[]);
+        let dir = "/tmp/actions-1/ferry-preview";
+        let marker = |nonce: &str| {
+            let line = format!(
+                "::ferry-preview::{nonce}::{}\n",
+                json!({"id": "preview-1", "port": 5173, "name": "Web", "strip_prefix": true,
+                       "hold": "none", "ready_timeout_seconds": 1, "timeout_minutes": 60,
+                       "response": format!("{dir}/preview-1.json")})
+            );
+            format!(
+                "{}\n",
+                json!({"level": "info", "msg": format!("  \u{2753}  {line}"), "raw": line})
+            )
+        };
+        let channel = PreviewWorker {
+            lines: format!("{}{}", marker("forged"), marker("n0nce")).into_bytes(),
+            answered: Default::default(),
+            written: Default::default(),
+        };
+        let seq = tokio::sync::Mutex::new(0);
+        let variables = BTreeMap::new();
+        let (_cancel, mut stopped) = tokio::sync::watch::channel(false);
+        let (code, _, cancelled) = stream_events(
+            &s,
+            &run,
+            &job,
+            &seq,
+            None,
+            &variables,
+            &mut stopped,
+            &channel,
+            "worker",
+            60,
+            true,
+            false,
+            Some(&Preview {
+                nonce: "n0nce",
+                dir,
+                host_id: 11,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!((code, cancelled), (0, false));
+
+        let written = channel.written.lock().unwrap().clone();
+        assert_eq!(written.len(), 1, "{written:?}");
+        assert_eq!(written[0].0, "/tmp/actions-1/ferry-preview/preview-1.json");
+        let answer: Value = serde_json::from_str(&written[0].1).unwrap();
+        assert!(
+            answer["error"]
+                .as_str()
+                .unwrap()
+                .contains("did not become reachable"),
+            "{answer}"
+        );
+        assert!(answer.get("url").is_none());
+
+        // Opened as the run's initiator for this job, then revoked.
+        let rows = holes::Entity::find().all(&s.db).await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (
+                rows[0].source_kind.as_str(),
+                rows[0].source_id,
+                rows[0].source_ref.as_str()
+            ),
+            ("pipeline", 70, "build")
+        );
+        assert_eq!((rows[0].host_id, rows[0].target_port), (11, 5173));
+        assert_eq!(rows[0].name, "Web");
+        assert!(rows[0].revoked_at > 0);
+
+        let chunks = logs::Entity::find()
+            .filter(logs::Column::RunId.eq(70))
+            .order_by_asc(logs::Column::Seq)
+            .all(&s.db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.chunk)
+            .collect::<Vec<_>>();
+        assert_eq!(chunks.len(), 2, "{chunks:?}");
+        assert!(
+            chunks[0].contains("::ferry-preview::forged::"),
+            "forgery is plain output"
+        );
+        assert!(
+            chunks.iter().all(|chunk| !chunk.contains("n0nce")),
+            "the nonce is never logged"
+        );
+        assert!(chunks[1].contains("execution.previewFailed"));
+        let shown = crate::i18n::render_text_stored(crate::i18n::Locale::ZhCn, &chunks[1]);
+        assert!(shown.contains("任务 build 的预览失败"), "{shown}");
     }
 
     #[test]

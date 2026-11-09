@@ -147,3 +147,37 @@ it("links the source pipeline and opens the saved configuration via a shareable 
   expect(host.querySelector('pre')?.textContent).toBe(snapshot.workflow);
   expect(fetchMock.mock.calls.filter(([url]) => !String(url).includes("/logs?"))).toHaveLength(1);
 });
+
+it("lists the run's previews with absolute links, states and review actions", async () => {
+  const previews = [
+    { id: "71", job: "web", name: "Frontend prototype", url: "/holes/tok-1/", state: "active", review_state: "waiting", probe_state: "reachable", expires_at: 9e12 },
+    { id: "72", job: "api", name: "API docs", url: "/holes/tok-2/", state: "revoked", review_state: "approved", probe_state: "unknown", expires_at: 1 },
+  ];
+  fetchMock.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes("/logs?") ? { items: [], next_seq: 0 } : { ...detail(), previews } }));
+  await mount();
+  const section = host.querySelector('[aria-label="预览"]')!;
+  expect(section.querySelectorAll("li")).toHaveLength(2);
+  const link = section.querySelector<HTMLAnchorElement>("a")!;
+  expect(link.href).toBe(`${location.origin}/holes/tok-1/`);
+  expect(link.target).toBe("_blank");
+  expect(link.rel).toBe("noreferrer");
+  expect(section.querySelectorAll("a")).toHaveLength(1);
+  expect(section.textContent).toContain("任务 web · 生效中 · 可访问 · 等待验收");
+  expect(section.textContent).toContain("任务 api · 已撤销 · 未检测 · 已通过");
+  // Reviewing needs pipelines.run.
+  expect(section.querySelectorAll("button")).toHaveLength(0);
+
+  await act(async () => root.unmount()); root = createRoot(host);
+  await mount(new Set(["pipelines.run"]));
+  const buttons = [...host.querySelectorAll<HTMLButtonElement>('[aria-label="预览"] button')];
+  expect(buttons.map(button => button.textContent)).toEqual(["通过", "驳回"]);
+  await act(async () => buttons[1]!.click());
+  const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/reviews"))!;
+  expect(call[0]).toBe("/api/workspaces/ops/holes/71/reviews");
+  expect(call[1]).toMatchObject({ method: "POST", body: JSON.stringify({ decision: "rejected" }) });
+});
+
+it("shows no preview section for a run without previews", async () => {
+  await mount(new Set(["pipelines.run"]));
+  expect(host.querySelector('[aria-label="预览"]')).toBeNull();
+});

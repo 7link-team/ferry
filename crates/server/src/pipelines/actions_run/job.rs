@@ -169,6 +169,11 @@ pub(super) async fn job_state(
     if changed == 0 && crate::executions::current().is_some() {
         return Err(crate::executions::ownership_lost());
     }
+    if !matches!(state, "running" | "waiting") {
+        // The job's previews end with it (docs/preview-automation-design.md).
+        let revoked = crate::holes::revoke_source(&s.db, "pipeline", run, Some(key)).await?;
+        crate::holes::close_all(&revoked);
+    }
     Ok(())
 }
 
@@ -579,6 +584,7 @@ async fn execute_private(
         1800,
         false,
         !run_cancelled,
+        None,
     )
     .await?;
     if cancelled {
@@ -794,6 +800,9 @@ async fn execute_private(
     )
     .await?;
     let timeout_seconds = workflow_timeout(&workflow, &job.key);
+    // ferry/preview@v1: only this invocation's preview steps learn the nonce.
+    let preview_nonce = uuid::Uuid::new_v4().simple().to_string();
+    let preview_dir = format!("{private}/ferry-preview");
     let request = json!({"workflow":workflow,"job":job.key,"workdir":workdir,
         "event_name":context.event_name,"event_path":format!("{private}/event.json"),
         "actor":context.actor,"run_number":run.number,"run_attempt":1,"ref":context.git_ref,
@@ -802,7 +811,8 @@ async fn execute_private(
         "run_cancelled":run_cancelled,"timeout_seconds":timeout_seconds,
         "run_id":run.id.to_string(),"artifact_dir":artifact_dir,
         "execution_host":lease.host.to_string(),"execution_slot":lease.slot,"execution_capacity":lease.capacity,
-        "mode":if leg.plan { "plan" } else { "" },"matrix":leg.matrix});
+        "mode":if leg.plan { "plan" } else { "" },"matrix":leg.matrix,
+        "preview_nonce":preview_nonce,"preview_dir":preview_dir});
     upload(
         ch,
         &format!("{private}/request"),
@@ -829,6 +839,11 @@ async fn execute_private(
         timeout_seconds + 75,
         true,
         !run_cancelled,
+        Some(&events::Preview {
+            nonce: &preview_nonce,
+            dir: &preview_dir,
+            host_id: job.host_id,
+        }),
     )
     .await?;
     if cancelled {
@@ -1125,6 +1140,102 @@ pub(super) async fn execute_legs(
 mod lease_polling_tests {
     use super::*;
     use sea_orm::{ConnectionTrait, TransactionTrait};
+
+    /// A job's terminal state revokes the previews it opened, and only those.
+    #[tokio::test]
+    async fn a_finished_job_revokes_its_own_previews() {
+        use crate::entities::holes;
+        use sea_orm::ActiveValue::Set;
+        let (_dir, s) = crate::agents::tests::setup().await;
+        let scope = crate::agents::tests::admin(1);
+        hosts::Entity::insert(hosts::ActiveModel {
+            id: Set(11),
+            workspace_id: Set(1),
+            name: Set("Runner".into()),
+            address: Set(String::new()),
+            port: Set(0),
+            username: Set(String::new()),
+            connection: Set("runner".into()),
+            state: Set("offline".into()),
+            group_id: Set(0),
+            description: Set(String::new()),
+            host_key: Set(String::new()),
+            runner_key_hash: Set(String::new()),
+            enroll_token: Set(String::new()),
+            enroll_token_hash: Set(String::new()),
+            seen_at: Set(0),
+            created_at: Set(0),
+            updated_at: Set(0),
+            version: Set(1),
+            os: Set(String::new()),
+            arch: Set(String::new()),
+            agent_version: Set(String::new()),
+            metrics: Set(String::new()),
+            credential_id: Set(0),
+            ..Default::default()
+        })
+        .exec(&s.db)
+        .await
+        .unwrap();
+        for (id, key) in [(1, "build"), (2, "deploy")] {
+            jobs::Entity::insert(jobs::ActiveModel {
+                id: Set(id),
+                run_id: Set(70),
+                job_key: Set(key.into()),
+                host_id: Set(11),
+                state: Set("queued".into()),
+                outputs: Set(None),
+                concurrency_group: Set(String::new()),
+                started_at: Set(0),
+                finished_at: Set(0),
+            })
+            .exec(&s.db)
+            .await
+            .unwrap();
+        }
+        let mut opened = BTreeMap::new();
+        for key in ["build", "deploy"] {
+            let row = crate::holes::open_owned(
+                &s,
+                &scope,
+                crate::holes::OwnedRequest {
+                    host_id: Id::from(11),
+                    port: 5173,
+                    name: String::new(),
+                    strip_prefix: true,
+                    source_kind: "pipeline",
+                    source_id: 70,
+                    source_ref: key.into(),
+                    review_minutes: Some(10),
+                },
+            )
+            .await
+            .unwrap();
+            opened.insert(key, row.id);
+        }
+        let revoked = |key: &'static str| {
+            let (s, id) = (s.clone(), opened[key]);
+            async move {
+                holes::Entity::find_by_id(id)
+                    .one(&s.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .revoked_at
+                    > 0
+            }
+        };
+        job_state(&s, 70, "build", "running", None).await.unwrap();
+        job_state(&s, 70, "build", "waiting", None).await.unwrap();
+        assert!(!revoked("build").await, "a running job keeps its preview");
+        job_state(&s, 70, "build", "failed", None).await.unwrap();
+        assert!(revoked("build").await);
+        assert!(!revoked("deploy").await, "another job's preview stays");
+        job_state(&s, 70, "deploy", "cancelled", None)
+            .await
+            .unwrap();
+        assert!(revoked("deploy").await);
+    }
 
     #[tokio::test]
     async fn a_replaced_execution_cannot_publish_job_outputs() {

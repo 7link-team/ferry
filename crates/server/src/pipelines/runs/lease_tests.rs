@@ -76,6 +76,7 @@ pub(crate) async fn fixture(limit: i64) -> (tempfile::TempDir, AppState, AppStat
         schema.create_table_from_entity(settings::Entity),
         schema.create_table_from_entity(crate::entities::pipeline_artifacts::Entity),
         schema.create_table_from_entity(crate::entities::platform_state::Entity),
+        schema.create_table_from_entity(crate::entities::holes::Entity),
     ] {
         a.execute(&statement).await.unwrap();
     }

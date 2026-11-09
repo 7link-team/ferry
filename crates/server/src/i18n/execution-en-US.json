@@ -111,6 +111,7 @@
   "execution.choiceKind": "one of these options: {options}",
   "execution.dispatchFailed": "Execution or credential cleanup failed. Check the host connection and configuration.\n",
   "execution.jobFailed": "Job {job} execution or cleanup failed: {error}\n",
+  "execution.previewFailed": "Preview for job {job} failed: {error}\n",
   "execution.matrixAssigned": "Matrix instance {name} of job {job} assigned to host {host}\n",
   "execution.matrixFailed": "Matrix instance {name} of job {job} failed: {error}\n",
   "runnerExtra.protocolMismatch": "Protocol version mismatch: the server requires {expected}, but the runner uses {actual}. Upgrade ferry-runner.",

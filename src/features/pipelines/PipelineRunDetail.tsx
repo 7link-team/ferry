@@ -126,6 +126,18 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
     }
   };
 
+  const review = async (id: string, decision: "approved" | "rejected") => {
+    setBusy(true);
+    try {
+      await api(`${base(workspace, "holes")}/${encodeURIComponent(id)}/reviews`, { method: "POST", body: JSON.stringify({ decision }) });
+      reload.current();
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const currentJob = run?.jobs?.find(job => job.key === selectedJob) ?? run?.jobs?.find(job => job.state === "failed" || job.state === "running" || job.state === "waiting") ?? run?.jobs?.[0];
   const visibleSteps = currentJob?.step_indices ? run?.steps.filter(step => currentJob.step_indices!.includes(step.index)) ?? [] : run?.steps ?? [];
   const otherLogs = logs.filter(log => log.step_index < 0);
@@ -155,6 +167,22 @@ export function PipelineRunDetail({ navigation, workspace, runId, permissions, t
           <a className="inline-flex min-h-8 items-center text-sm text-primary underline" href={navigation.href({ workspace, group: "build", item: "artifacts", mode: "list" }, { run_id: run.id })}>{executionText("run.artifacts")}</a>
           {isActive(run.state) && <p className="text-xs text-muted-foreground">{cancelNotice}</p>}
         </section>
+        {!!run.previews?.length && <section aria-label={executionText("run.previews")} className="max-h-[30dvh] shrink-0 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card p-4">
+          <h2 className="mb-2 text-sm font-semibold">{executionText("run.previews")}</h2>
+          <ul className="divide-y">{run.previews.map(preview => <li key={preview.id} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 py-2 text-sm">
+            <div className="min-w-0 flex-1 basis-48">
+              <p className="break-words font-medium [overflow-wrap:anywhere]">{preview.name}</p>
+              <p className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">{executionText("run.previewJob", { job: preview.job })} · {executionText(`run.previewState.${preview.state}`, { defaultValue: preview.state })} · {executionText(`run.previewProbe.${preview.probe_state}`, { defaultValue: preview.probe_state })} · {executionText(`run.previewReview.${preview.review_state}`, { defaultValue: preview.review_state })}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {preview.state === "active" && <a className="inline-flex min-h-8 items-center text-primary underline" href={new URL(preview.url, location.origin).href} target="_blank" rel="noreferrer">{executionText("run.previewOpen")}</a>}
+              {preview.review_state === "waiting" && permissions.has("pipelines.run") && <>
+                <Button type="button" size="sm" disabled={busy} onClick={() => void review(preview.id, "approved")}>{executionText("run.previewApprove")}</Button>
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void review(preview.id, "rejected")}>{executionText("run.previewReject")}</Button>
+              </>}
+            </div>
+          </li>)}</ul>
+        </section>}
         <Tabs.Root value={tab === "snapshot" ? "snapshot" : "logs"} onValueChange={onTabChange} className="flex min-h-0 flex-1 flex-col gap-3">
           <Tabs.List aria-label={executionText("run.views")} className="flex shrink-0 gap-4 border-b">
             {(["logs", "snapshot"] as const).map(value => <Tabs.Trigger key={value} value={value} className="border-b-2 border-transparent px-1 py-2 text-sm text-muted-foreground data-[state=active]:border-primary data-[state=active]:text-primary">{executionText(value === "logs" ? "run.stepsAndLogs" : "run.configurationSnapshot")}</Tabs.Trigger>)}

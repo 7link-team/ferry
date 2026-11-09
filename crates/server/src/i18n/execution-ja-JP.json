@@ -111,6 +111,7 @@
   "execution.choiceKind": "次のいずれか：{options}",
   "execution.dispatchFailed": "実行または認証情報のクリーンアップに失敗しました。ホスト接続と設定を確認してください。\n",
   "execution.jobFailed": "ジョブ {job} の実行またはクリーンアップに失敗しました：{error}\n",
+  "execution.previewFailed": "ジョブ {job} のプレビューに失敗しました：{error}\n",
   "execution.matrixAssigned": "ジョブ {job} のマトリックスインスタンス {name} をホスト {host} に割り当てました\n",
   "execution.matrixFailed": "ジョブ {job} のマトリックスインスタンス {name} に失敗しました：{error}\n",
   "runnerExtra.protocolMismatch": "プロトコルのバージョンが一致しません。サーバーは {expected}、ランナーは {actual} です。ferry-runner を更新してください。",

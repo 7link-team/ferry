@@ -100,7 +100,11 @@ async fn find(conn: &impl ConnectionTrait, scope: &Scope, id: Id) -> Result<hole
         .ok_or_else(ApiError::missing)
 }
 
-async fn views(s: &AppState, scope: &Scope, rows: Vec<holes::Model>) -> Result<Vec<Value>> {
+pub(crate) async fn views(
+    s: &AppState,
+    scope: &Scope,
+    rows: Vec<holes::Model>,
+) -> Result<Vec<Value>> {
     use crate::resources::names::{self, Kind, of};
     let now = db::now();
     let host_ids = rows.iter().map(|row| row.host_id).collect::<Vec<_>>();
