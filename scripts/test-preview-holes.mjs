@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {previewFetch as fetch, previewResolverRules} from './preview-test-network.mjs';
 // Live preview-hole check: an isolated server, a real Runner, a real Vite dev
 // server and a real browser (docs/preview-holes-design.md section 14).
 // Build first: `cargo build -p ferry-server -p ferry-runner` and `npm run build`.
@@ -106,6 +107,7 @@ try {
     await api('/api/sessions', { email: 'preview@example.invalid', password: 'isolated-preview-password' });
   }
   assert.ok(cookie, 'console session cookie');
+  const access = await api('/api/platform/settings/1');
   const ws = (await api('/api/workspaces', { name: 'Preview test', slug: 'preview' })).id;
   const root = `/api/workspaces/${ws}`;
   const host = (await api(`${root}/nodes`, { name: 'Preview Runner', connection: 'runner' })).id;
@@ -116,7 +118,23 @@ try {
   await until('runner online', async () => (await api(`${root}/nodes/${host}`)).state === 'online');
   pass('real_runner_online');
 
-  // A Vite app served under its hole path (keep-prefix mode).
+  const configure = async (domain) => {
+    const settings = await api('/api/platform/settings/1');
+    return api('/api/platform/settings/1', {version:settings.version, registration_enabled:settings.registration_enabled, public_url:base, preview_domain:domain}, 'PATCH');
+  };
+  const createBody = {name:'Domain check',host_id:host,target_port:echoPort,ttl_hours:1};
+  const createStatus = async () => (await fetch(base+root+'/holes', {method:'POST',headers:{'content-type':'application/json','x-ferry-request':'1',cookie},body:JSON.stringify(createBody)})).status;
+  assert.equal(await createStatus(),409);
+  assert.equal((await fetch(base+'/holes/'+'a'.repeat(64)+'/')).status,404);
+  for (const alias of ['localhost:'+serverPort, 'lan-alias.test:'+serverPort]) {
+    assert.equal((await fetch(base+'/api/status', {headers:{host:alias}})).status,200);
+  }
+  pass('unconfigured_preview_disabled_and_console_aliases_allowed');
+  await configure('preview.test');
+  assert.equal((await fetch(`http://unknown.preview.test:${serverPort}/api/me`)).status,404);
+  pass('unknown_preview_host_never_reaches_console');
+
+  // A Vite app served at the root of its token domain.
   const vite = await api(`${root}/holes`, {
     name: 'Vite preview', host_id: host, target_port: vitePort, strip_prefix: false, ttl_hours: 1,
   });
@@ -162,12 +180,12 @@ document.getElementById('report').textContent = JSON.stringify(report);
   await writeFile(join(app, 'main.js'), mainSource('v1'));
   const viteProcess = () => start('vite', process.execPath, [
     resolve('node_modules/vite/bin/vite.js'), app,
-    '--base', vite.url, '--port', String(vitePort), '--strictPort', '--host', '127.0.0.1',
+    '--base', '/', '--port', String(vitePort), '--strictPort', '--host', '127.0.0.1',
   ]);
   let viteServer = await viteProcess();
-  await until('vite ready', async () => (await fetch(`http://127.0.0.1:${vitePort}${vite.url}`)).ok);
+  await until('vite ready', async () => (await fetch(`http://127.0.0.1:${vitePort}/`)).ok);
 
-  // A local JSON service that reports the headers it received (strip mode).
+  // A local JSON service that reports original paths and received headers.
   echo = http.createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
     response.setHeader('set-cookie', 'upstream=1; Path=/');
@@ -178,12 +196,14 @@ document.getElementById('report').textContent = JSON.stringify(report);
     name: 'Echo API', host_id: host, target_port: echoPort, strip_prefix: true, ttl_hours: 1,
   });
 
+  assert.equal((await fetch(vite.url)).status,200);
   const probed = await api(`${root}/holes/${vite.id}/probes`, {});
   assert.equal(probed.probe_state, 'reachable');
   pass('explicit_probe_reachable');
 
   browser = await chromium.launch({
     headless: true,
+    args: [`--host-resolver-rules=${previewResolverRules}`],
     ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}),
   });
   // The visitor is logged in to the console in the same browser: the case the
@@ -194,7 +214,7 @@ document.getElementById('report').textContent = JSON.stringify(report);
   const page = await context.newPage();
   const consoleLines = [];
   page.on('console', (message) => consoleLines.push(message.text()));
-  await page.goto(`${base}${vite.url}`);
+  await page.goto(`${vite.url}`);
   await page.waitForFunction(() => document.getElementById('report')?.textContent !== 'pending', null, { timeout: 30000 });
   const report = JSON.parse(await page.locator('#report').textContent());
   result.checks.sandbox_report = report;
@@ -219,12 +239,17 @@ document.getElementById('report').textContent = JSON.stringify(report);
 
   // The console cookie never reaches the previewed service.
   const echoPage = await context.newPage();
-  await echoPage.goto(`${base}${echoHole.url}data?x=1`);
+  await echoPage.goto(`${echoHole.url}data?x=1`);
   const echoed = JSON.parse(await echoPage.locator('body').textContent());
   assert.equal(echoed.path, '/data?x=1');
   assert.equal(echoed.headers.cookie, undefined, 'console cookie forwarded');
   assert.equal(echoed.headers.host, `localhost:${echoPort}`);
   pass('upstream_never_sees_console_cookie');
+  const upstreamApi = await fetch(echoHole.url+'api/me?scope=preview');
+  assert.equal((await upstreamApi.json()).path,'/api/me?scope=preview');
+  const another = await api('/api/workspaces',{name:'Other preview workspace',slug:'other-preview'});
+  assert.equal((await fetch(`${base}/api/workspaces/${another.id}/holes/${echoHole.id}`,{headers:{cookie}})).status,404);
+  pass('preview_api_is_upstream_and_workspace_details_remain_isolated');
   await echoPage.close();
 
   // Monitoring: the list follows the local service going down and up.
@@ -266,18 +291,40 @@ document.getElementById('report').textContent = JSON.stringify(report);
   const live = await context.newPage();
   const liveLines = [];
   live.on('console', (message) => liveLines.push(message.text()));
-  await live.goto(`${base}${vite.url}`);
+  await live.goto(`${vite.url}`);
   await until('HMR connected', async () => liveLines.some((line) => /\[vite\] connected/i.test(line)), 30);
   assert.ok((await api(`${root}/holes/${vite.id}`)).active_connections > 0);
   const revokedAt = Date.now();
   await api(`${root}/holes/${vite.id}/revocations`, {});
   await until('HMR socket cut', async () => liveLines.some((line) => /connection lost/i.test(line)), 40);
   result.checks.revoke_cut_ms = Date.now() - revokedAt;
-  const after = await fetch(`${base}${vite.url}`);
+  const after = await fetch(`${vite.url}`);
   assert.equal(after.status, 404);
   pass('revoke_cuts_live_socket_and_link');
   assert.equal((await api(`${root}/holes/${vite.id}`)).active_connections, 0);
   pass('no_connections_left_after_revoke');
+
+  // Changing the root keeps the record/token, but does not expose the old host.
+  const oldUrl = echoHole.url;
+  await configure('nested.preview.test');
+  const changed = await api(`${root}/holes/${echoHole.id}`);
+  assert.ok(new URL(changed.url).hostname.endsWith('.nested.preview.test'));
+  assert.equal((await fetch(changed.url+'api/me')).status,200);
+  assert.equal((await fetch(oldUrl+'api/me')).status,404);
+  const label = new URL(changed.url).hostname.split('.')[0];
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  const bits = [...label].map(c=>alphabet.indexOf(c).toString(2).padStart(5,'0')).join('').slice(0,256);
+  const hex = Buffer.from(bits.match(/.{8}/g).map(b=>parseInt(b,2))).toString('hex');
+  const legacy = await fetch(`${base}/holes/${hex}/api/me?x=1`, {redirect:'manual'});
+  assert.equal(legacy.status,308);
+  assert.equal(legacy.headers.get('location'),changed.url+'api/me?x=1');
+  pass('nested_preview_domain_and_legacy_redirect_preserve_path_query');
+  await configure('');
+  assert.equal(await createStatus(),409);
+  assert.equal((await fetch(changed.url)).status,404);
+  assert.equal((await fetch(`${base}/holes/${hex}/api/me`,{redirect:'manual'})).status,404);
+  pass('clearing_domain_disables_existing_and_new_links');
+  await configure('preview.test');
 
   // Runner offline is reported.
   stop(runner);

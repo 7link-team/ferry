@@ -12,7 +12,7 @@
   "error.database": "儲存或讀取資料失敗，請稍後重試；已填寫的內容不會清空。",
   "error.file": "檔案操作失敗，請檢查磁碟空間和目錄權限。",
   "server.draining": "服務正在安全關閉，請稍後重試。",
-  "guard.host": "此主機位址不在允許清單中。",
+  "guard.host": "請求的主機位址無效。",
   "guard.request": "缺少操作驗證標頭。",
   "guard.origin": "不允許此來源發起操作。",
   "assets.not_built": "介面檔案尚未建置，請先執行 npm run build。",

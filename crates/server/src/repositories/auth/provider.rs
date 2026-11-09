@@ -32,7 +32,7 @@ struct ProviderSettings {
 }
 #[derive(Serialize, Deserialize)]
 pub(crate) struct OAuthSettings {
-    public_url: String,
+    pub(crate) public_url: String,
     providers: std::collections::BTreeMap<String, ProviderSettings>,
 }
 fn default_base(kind: &str) -> &str {
@@ -100,7 +100,7 @@ impl OAuthSettings {
             );
         }
         Ok(Self {
-            public_url: std::env::var("REPOSITORY_OAUTH_PUBLIC_URL").unwrap_or_default(),
+            public_url: String::new(),
             providers,
         })
     }
@@ -109,7 +109,9 @@ impl OAuthSettings {
             .one(conn)
             .await?
             .ok_or_else(ApiError::missing)?;
-        Self::read(s, row.repository_oauth.as_deref())
+        let mut config = Self::read(s, row.repository_oauth.as_deref())?;
+        config.public_url = crate::accounts::addresses::Configuration::read(s, &row)?.public_url;
+        Ok(config)
     }
     pub(crate) fn view(&self, s: &AppState, saved: bool) -> Value {
         let mut view = json!({"oauth_public_url":self.public_url,
@@ -294,11 +296,14 @@ impl OAuthSettings {
         })
     }
     pub(super) fn callback(&self, s: &AppState) -> Result<String> {
-        let base = if self.public_url.is_empty() {
-            format!("http://{}", s.bind)
-        } else {
-            self.public_url.clone()
-        };
+        let _ = s;
+        let base = self.public_url.clone();
+        if base.is_empty() {
+            return Err(ApiError::localized(
+                axum::http::StatusCode::BAD_REQUEST,
+                crate::i18n::Message::new("repository.auth.publicUrlRequired"),
+            ));
+        }
         let url = parse_endpoint(&base)?;
         if url
             .host_str()

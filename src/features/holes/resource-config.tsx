@@ -560,14 +560,6 @@ export function holesForms({
               helpKey: key("portHelp"),
             },
             {
-              key: "strip_prefix",
-              label: "Strip path prefix",
-              labelKey: key("stripPrefix"),
-              type: "switch",
-              span: 2,
-              helpKey: key("stripPrefixHelp"),
-            },
-            {
               key: "ttl_hours",
               label: "Validity",
               labelKey: key("ttl"),

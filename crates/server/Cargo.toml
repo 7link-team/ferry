@@ -32,6 +32,7 @@ hmac = "0.12"
 subtle = "2"
 chacha20poly1305 = "0.11"
 hex = "0.4"
+data-encoding = "2.11.1"
 rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"
 fs2 = "0.4"

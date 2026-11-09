@@ -399,7 +399,12 @@ async fn connect(uri: Uri) -> Result<Pipe, Refused> {
 
 /// Still servable: exists, not revoked, not expired. A database error keeps
 /// the connection; the next check decides.
-async fn valid(s: &AppStateInner, hole: i64) -> bool {
+async fn valid(s: &AppState, hole: i64, domain: &str) -> bool {
+    if let Ok(config) = crate::accounts::addresses::Configuration::load(s, &s.db).await
+        && (config.preview_domain.is_empty() || config.preview_domain != domain)
+    {
+        return false;
+    }
     match holes::Entity::find_by_id(hole).one(&s.db).await {
         Ok(Some(row)) => state(&row, db::now()) == "active",
         Ok(None) => false,
@@ -416,6 +421,10 @@ async fn pump(
     mut closing: watch::Receiver<bool>,
 ) {
     let (mut reader, mut writer) = tokio::io::split(io);
+    let domain = crate::accounts::addresses::Configuration::load(&s, &s.db)
+        .await
+        .map(|c| c.preview_domain)
+        .unwrap_or_default();
     let mut buffer = vec![0u8; CHUNK];
     let mut check = tokio::time::interval_at(tokio::time::Instant::now() + REVALIDATE, REVALIDATE);
     loop {
@@ -436,7 +445,7 @@ async fn pump(
                 _ => break,
             },
             _ = closing.changed() => break,
-            _ = check.tick() => if !valid(&s, hole).await { break },
+            _ = check.tick() => if !valid(&s, hole, &domain).await { break },
         }
     }
     let _ = writer.shutdown().await;
@@ -472,7 +481,7 @@ fn refuse(status: StatusCode, key: &str) -> Response {
     response
 }
 
-fn not_found() -> Response {
+pub(super) fn not_found() -> Response {
     refuse(StatusCode::NOT_FOUND, "holes.notFound")
 }
 
@@ -488,17 +497,12 @@ pub fn redact(path: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// `/holes/{token}`: relative URLs only resolve under the trailing slash.
-pub async fn serve_root(Path(token): Path<String>, request: Request) -> Response {
-    let query = request
-        .uri()
-        .query()
-        .map(|query| format!("?{query}"))
-        .unwrap_or_default();
-    let mut response = StatusCode::PERMANENT_REDIRECT.into_response();
-    if let Ok(location) = HeaderValue::from_str(&format!("/holes/{token}/{query}")) {
-        response.headers_mut().insert(header::LOCATION, location);
-    }
-    response
+pub async fn serve_root(
+    State(s): State<AppState>,
+    Path(_token): Path<String>,
+    request: Request,
+) -> Response {
+    serve(State(s), request).await
 }
 
 /// `/holes/{token}/` and everything below it.
@@ -508,11 +512,43 @@ pub async fn serve(State(s): State<AppState>, request: Request) -> Response {
         return not_found();
     };
     let (token, tail) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let row = match holes::Entity::find()
+        .filter(holes::Column::TokenHash.eq(crate::hosts::runner::fingerprint(token)))
+        .one(&s.db)
+        .await
+    {
+        Ok(Some(row)) if state(&row, db::now()) == "active" => row,
+        _ => return not_found(),
+    };
+    let url = match super::link(&s, &row).await {
+        Ok(url) if !url.is_empty() => url,
+        _ => return not_found(),
+    };
+    let query = request
+        .uri()
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
+    let location = format!(
+        "{}{}{query}",
+        url.trim_end_matches('/'),
+        if tail.is_empty() { "/" } else { tail }
+    );
+    let Ok(location) = HeaderValue::from_str(&location) else {
+        return not_found();
+    };
+    let mut response = StatusCode::PERMANENT_REDIRECT.into_response();
+    response.headers_mut().insert(header::LOCATION, location);
+    response
+}
+
+pub(super) async fn serve_domain(s: AppState, request: Request, token: String) -> Response {
+    let path = request.uri().path().to_owned();
     if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return not_found();
     }
     let row = match holes::Entity::find()
-        .filter(holes::Column::TokenHash.eq(crate::hosts::runner::fingerprint(token)))
+        .filter(holes::Column::TokenHash.eq(crate::hosts::runner::fingerprint(&token)))
         .one(&s.db)
         .await
     {
@@ -546,12 +582,8 @@ pub async fn serve(State(s): State<AppState>, request: Request) -> Response {
         target.hole,
         (std::sync::Arc::downgrade(&s), tokio::time::Instant::now()),
     );
-    let prefix = format!("/holes/{token}");
-    let forwarded_path = if row.strip_prefix {
-        if tail.is_empty() { "/" } else { tail }.to_owned()
-    } else {
-        path.clone()
-    };
+    let prefix = String::new();
+    let forwarded_path = path;
     let query = request
         .uri()
         .query()
@@ -719,7 +751,10 @@ fn rewrite_request(
         HeaderName::from_static("x-forwarded-host"),
         external_host.clone(),
     );
-    if let Ok(value) = HeaderValue::from_str(prefix) {
+    headers.remove("x-forwarded-prefix");
+    if !prefix.is_empty()
+        && let Ok(value) = HeaderValue::from_str(prefix)
+    {
         headers.insert(HeaderName::from_static("x-forwarded-prefix"), value);
     }
 }

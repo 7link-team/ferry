@@ -51,7 +51,7 @@ it("reuses workspace preferences during ordinary navigation and refreshes after 
   const original = vi.mocked(fetch).getMockImplementation()!;
   let preferenceReads = 0, failRefresh = false;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.endsWith("/preferences")) { preferenceReads++; if (failRefresh) throw new TypeError("offline"); }
+    if (url === "/api/workspaces/2/preferences") { preferenceReads++; if (failRefresh) throw new TypeError("offline"); }
     return original(url);
   }));
   await act(async () => root.render(<App />));

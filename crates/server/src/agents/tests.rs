@@ -19,6 +19,10 @@ pub(crate) async fn setup() -> (tempfile::TempDir, AppState) {
         monitor: Default::default(),
         cluster: None,
     });
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(crate::entities::platform_state::Column::AccessConfig,
+            sea_orm::sea_query::Expr::value(json!({"public_url":"http://console.localhost", "preview_domain":"preview.localhost"}).to_string()))
+        .exec(&s.db).await.unwrap();
     for id in [1, 2] {
         crate::entities::workspaces::Entity::insert(crate::entities::workspaces::ActiveModel {
             id: Set(id),

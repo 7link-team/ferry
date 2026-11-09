@@ -61,7 +61,7 @@ check '[ -f "$work/ferry/compose.production.yaml" ] && [ -f "$work/ferry/compose
 check 'cmp -s "$work/ferry/compose.production.yaml" "$repo/compose.production.yaml" && [ ! -e "$work/ferry/compose.https.yaml" ] && [ ! -e "$work/ferry/caddy/Caddyfile" ]' 'downloaded files are the release files byte for byte; no HTTPS proxy without a domain'
 check 'has "$env" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.9"' 'deploys the image of the latest published release, never a stale pin'
 check 'grep -q "/releases.atom$" "$work/curl.log" && ! grep -q "api.github.com" "$work/curl.log"' 'resolves the newest release from the releases feed without the rate-limited API'
-check 'has "$env" "FERRY_BIND_ADDRESS=0.0.0.0" && has "$env" "FERRY_ALLOWED_HOSTS=localhost,127.0.0.1" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'publishes on all interfaces with an explicit host allowlist, the port and Redis; no public URL setting'
+check 'has "$env" "FERRY_BIND_ADDRESS=0.0.0.0" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$env" && has "$env" "FERRY_SECURE_COOKIE=false" && has "$env" "FERRY_PORT=4399" && has "$env" "FERRY_DOMAINS=" && has "$env" "FERRY_REDIS=true" && ! grep -q PUBLIC_URL "$env"' 'publishes on all interfaces with an explicit host allowlist, the port and Redis; no public URL setting'
 secrets=$(secrets_of "$env" | cut -d= -f2)
 check '[ "$(printf "%s\n" "$secrets" | grep -cE "^[0-9a-f]{64}$")" = 6 ] && [ "$(printf "%s\n" "$secrets" | sort -u | wc -l | tr -d " ")" = 6 ]' 'generates six distinct 256-bit hex secrets'
 check 'grep -q "compose version" "$work/docker.log" && grep -q "compose.postgres.yaml --profile redis -f compose.storage.yaml config --quiet" "$work/docker.log" && grep -q "up -d --wait --wait-timeout 300" "$work/docker.log" && ! grep -q -- "--profile https" "$work/docker.log"' 'validates the configuration before starting and waits for health'
@@ -85,13 +85,13 @@ check '[ ! -e "$work/bad" ]' 'rejects malformed domains and hosts, and HTTPS mix
 : > "$work/docker.log"
 output=$(run --dir secure --domain OPS.example.com --domain ops.example.org --domain ops.example.com --without-redis --version v9.9.8)
 senv="$work/secure/.env.production"
-check 'has "$senv" "FERRY_DOMAINS=ops.example.com, ops.example.org" && has "$senv" "FERRY_ALLOWED_HOSTS=ops.example.com,ops.example.org,localhost,127.0.0.1" && has "$senv" "FERRY_SECURE_COOKIE=true"' 'several domains are recorded once each, lower-cased, allowed, with secure cookies'
+check 'has "$senv" "FERRY_DOMAINS=ops.example.com, ops.example.org" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$senv" && has "$senv" "FERRY_SECURE_COOKIE=true"' 'several domains are recorded once each, lower-cased, allowed, with secure cookies'
 check 'grep -qx "ops.example.com, ops.example.org {" "$work/secure/caddy/Caddyfile" && grep -q "reverse_proxy ferry:4290" "$work/secure/caddy/Caddyfile" && grep -q "caddy-data:/data" "$work/secure/compose.https.yaml" && grep -q "compose.postgres.yaml -f compose.https.yaml -f compose.storage.yaml up -d" "$work/docker.log" && ! grep -q -- "--profile redis" "$work/docker.log"' 'domains generate the HTTPS proxy for every site; --without-redis omits Redis'
 check 'printf "%s" "$output" | grep -q "https://ops.example.com" && printf "%s" "$output" | grep -q "https://ops.example.org" && printf "%s" "$output" | grep -q "logs caddy"' 'prints every HTTPS address and where to look for certificate errors'
 check 'has "$senv" "FERRY_IMAGE=ghcr.io/7link-team/ferry-server:v9.9.8" && ! grep -q "api.github.com" "$work/curl.log"' 'an explicit --version is used without querying releases'
 ssecrets=$(secrets_of "$senv")
 run --dir secure --domain new.example.net --init-only >/dev/null
-check 'has "$senv" "FERRY_DOMAINS=new.example.net" && has "$senv" "FERRY_ALLOWED_HOSTS=new.example.net,localhost,127.0.0.1" && grep -qx "new.example.net {" "$work/secure/caddy/Caddyfile" && [ "$ssecrets" = "$(secrets_of "$senv")" ]' 'rerunning with --domain replaces the domains and the proxy sites, keeping every secret'
+check 'has "$senv" "FERRY_DOMAINS=new.example.net" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$senv" && grep -qx "new.example.net {" "$work/secure/caddy/Caddyfile" && [ "$ssecrets" = "$(secrets_of "$senv")" ]' 'rerunning with --domain replaces the domains and the proxy sites, keeping every secret'
 : > "$work/docker.log"
 run --dir secure --domain other.example.net >/dev/null
 check 'grep -q "compose.https.yaml -f compose.storage.yaml restart caddy" "$work/docker.log"' 'a running proxy restarts when its domains change'
@@ -100,12 +100,12 @@ run --dir secure --domain other.example.net >/dev/null
 check '! grep -q "restart caddy" "$work/docker.log"' 'an unchanged domain list does not restart the proxy'
 : > "$work/docker.log"
 run --dir secure --allow-host 192.168.0.10 --bind 0.0.0.0 --port 8080 >/dev/null
-check 'has "$senv" "FERRY_DOMAINS=" && has "$senv" "FERRY_SECURE_COOKIE=false" && has "$senv" "FERRY_ALLOWED_HOSTS=192.168.0.10,localhost,127.0.0.1" && has "$senv" "FERRY_BIND_ADDRESS=0.0.0.0" && has "$senv" "FERRY_PORT=8080" && [ "$ssecrets" = "$(secrets_of "$senv")" ]' 'switching to plain-HTTP LAN access turns HTTPS off and keeps every secret'
+check 'has "$senv" "FERRY_DOMAINS=" && has "$senv" "FERRY_SECURE_COOKIE=false" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$senv" && has "$senv" "FERRY_BIND_ADDRESS=0.0.0.0" && has "$senv" "FERRY_PORT=8080" && [ "$ssecrets" = "$(secrets_of "$senv")" ]' 'switching to plain-HTTP LAN access turns HTTPS off and keeps every secret'
 check 'grep -q "compose.https.yaml -f compose.storage.yaml rm -s -f caddy" "$work/docker.log" && [ ! -e "$work/secure/compose.https.yaml" ] && [ ! -e "$work/secure/caddy/Caddyfile" ] && ! grep -q "compose.https.yaml up" "$work/docker.log"' 'removing the domains stops and removes the HTTPS proxy'
 
 : > "$work/docker.log"
 run --dir mysql --database mysql --allow-host fd00::10 --bind 0.0.0.0 --init-only >/dev/null
-check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql" && has "$work/mysql/.env.production" "FERRY_ALLOWED_HOSTS=fd00::10,localhost,127.0.0.1" && has "$work/mysql/.env.production" "FERRY_BIND_ADDRESS=0.0.0.0"' 'MySQL, an IPv6 host and LAN bind are recorded'
+check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$work/mysql/.env.production" && has "$work/mysql/.env.production" "FERRY_BIND_ADDRESS=0.0.0.0"' 'MySQL, an IPv6 host and LAN bind are recorded'
 check '! grep -qE "compose .*(config|up|pull|exec|rm|restart)" "$work/docker.log"' '--init-only only queries Docker and never starts or changes anything'
 run --dir mysql --allow-host 10.0.0.2 --init-only >/dev/null
 check 'has "$work/mysql/.env.production" "FERRY_DATABASE_ENGINE=mysql"' 'reruns of a MySQL deployment need no --database'
@@ -121,12 +121,12 @@ check 'has "$work/signed-fallback/.env.production" "FERRY_IMAGE=ghcr.io/7link-te
 run --dir tunnel --proxy-domain Ops.Example.COM --proxy-domain ops.example.org --init-only >/dev/null
 tenv="$work/tunnel/.env.production"
 tsecrets=$(secrets_of "$tenv")
-check 'has "$tenv" "FERRY_DOMAINS=" && has "$tenv" "FERRY_ALLOWED_HOSTS=ops.example.com,ops.example.org,localhost,127.0.0.1" && has "$tenv" "FERRY_SECURE_COOKIE=true" && has "$tenv" "FERRY_BIND_ADDRESS=0.0.0.0" && [ ! -f "$work/tunnel/compose.https.yaml" ]' 'external HTTPS allows the proxy domains, enables secure cookies and does not start Caddy'
+check 'has "$tenv" "FERRY_DOMAINS=" && ! grep -q "^FERRY_ALLOWED_HOSTS=" "$tenv" && has "$tenv" "FERRY_SECURE_COOKIE=true" && has "$tenv" "FERRY_BIND_ADDRESS=0.0.0.0" && [ ! -f "$work/tunnel/compose.https.yaml" ]' 'external HTTPS allows the proxy domains, enables secure cookies and does not start Caddy'
 output=$(run --dir tunnel)
 check 'printf "%s" "$output" | grep -q "https://ops.example.com" && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'external HTTPS reruns retain the access settings and secrets and print the public HTTPS address'
 run --dir tunnel --domain old.example.com --init-only >/dev/null
 run --dir tunnel --proxy-domain new.example.com --bind 0.0.0.0 >/dev/null
-check 'has "$tenv" "FERRY_ALLOWED_HOSTS=new.example.com,localhost,127.0.0.1" && has "$tenv" "FERRY_SECURE_COOKIE=true" && [ ! -f "$work/tunnel/compose.https.yaml" ] && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'switching from Caddy to external HTTPS removes Caddy and preserves existing credentials'
+check '! grep -q "^FERRY_ALLOWED_HOSTS=" "$tenv" && has "$tenv" "FERRY_SECURE_COOKIE=true" && [ ! -f "$work/tunnel/compose.https.yaml" ] && [ "$tsecrets" = "$(secrets_of "$tenv")" ]' 'switching from Caddy to external HTTPS removes Caddy and preserves existing credentials'
 run --dir tunnel --bind 127.0.0.1 --init-only >/dev/null
 run --dir tunnel --proxy-domain new.example.com --init-only >/dev/null
 check 'has "$tenv" "FERRY_BIND_ADDRESS=0.0.0.0"' 'external proxy setup also replaces an old loopback default without requiring --bind'

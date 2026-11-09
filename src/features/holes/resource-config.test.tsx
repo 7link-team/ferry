@@ -138,7 +138,7 @@ it("starts creation with a 24-hour validity and prefix stripping, and locks host
   expect(byKey("target_port")[0]).toMatchObject({ type: "number", required: true, immutable: true, min: 1, max: 65535 });
   expect(byKey("name")[0]).toMatchObject({ required: true });
   expect(byKey("name")[0]!.immutable).toBeUndefined();
-  expect(byKey("strip_prefix")[0]).toMatchObject({ type: "switch", helpKey: "holes:stripPrefixHelp" });
+  expect(byKey("strip_prefix")).toEqual([]);
   const [createTtl, editTtl] = byKey("ttl_hours");
   expect(createTtl!.required).toBe(true);
   expect(createTtl!.when!(config.blank)).toBe(true);
@@ -152,10 +152,10 @@ it("edits only name, path mode and validity, and treats revoked records as read-
   expect(edit).toMatchObject({ name: "Web", strip_prefix: true, version: 4 });
   expect(edit.ttl_hours).toBeUndefined();
   const visible = (draft: Partial<Hole>) => fields().filter((field) => !field.when || field.when(draft)).map((field) => field.key);
-  expect(visible(edit)).toEqual(["name", "host_id", "target_port", "strip_prefix", "ttl_hours"]);
-  expect(visible(config.blank)).toEqual(["name", "host_id", "target_port", "strip_prefix", "ttl_hours"]);
+  expect(visible(edit)).toEqual(["name", "host_id", "target_port", "ttl_hours"]);
+  expect(visible(config.blank)).toEqual(["name", "host_id", "target_port", "ttl_hours"]);
   expect(visible(row())).toEqual([
-    "name", "host_id", "target_port", "strip_prefix", "url", "state", "probe_state", "probe_error",
+    "name", "host_id", "target_port", "url", "state", "probe_state", "probe_error",
     "active_connections", "expires_at", "created_by_name", "created_at", "updated_at", "usage",
   ]);
   expect(visible(row({ state: "revoked", revoked_at: 5, probe_error: "" }))).toContain("revoked_at");

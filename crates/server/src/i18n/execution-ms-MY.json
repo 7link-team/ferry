@@ -185,5 +185,7 @@
   "workflow.integrationUnknown": "Hasil integrasi tidak diketahui. Semak penyedia sebelum menjalankan semula; permintaan tidak dihantar semula secara automatik.",
   "workflow.integrationRemote": "Aplikasi menolak permintaan. Semak izin, parameter dan had kadar penyedia.",
   "workflow.hostExecutionFailed": "Pelaksanaan hos gagal: semak sambungan, Git/curl, laluan dan kebenaran akaun.",
-  "workflow.hostTargetRequired": "Pilih hos pelaksanaan pada nod atau aliran kerja."
+  "workflow.hostTargetRequired": "Pilih hos pelaksanaan pada nod atau aliran kerja.",
+  "holes.domainRequired": "Konfigurasikan domain akar pratonton dalam tetapan platform ? Alamat akses dahulu.",
+  "platform.addressInvalid": "Masukkan URL utama HTTP(S) yang sah dan domain pratonton tanpa protokol, kad bebas atau laluan."
 }

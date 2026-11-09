@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {previewFetch as fetch, previewResolverRules} from './preview-test-network.mjs';
 // Live preview-automation check (docs/preview-automation-design.md section 9):
 // an isolated server, a real Runner, real local services and a real browser
 // drive ferry/preview@v1 (approve and reject), the host.preview workflow node
@@ -189,9 +190,9 @@ async function previewPipeline(name, port) {
         steps: [
           {
             name: 'Start service',
-            shell: 'powershell',
-            env: { SERVICE_NODE: process.execPath, SERVICE_SCRIPT: serviceScript, SERVICE_PORT: String(port) },
-            run: 'Start-Process -WindowStyle Hidden -FilePath $env:SERVICE_NODE -ArgumentList @($env:SERVICE_SCRIPT, $env:SERVICE_PORT, "pipeline")',
+            shell: process.platform === 'win32' ? 'powershell' : 'bash',
+            env: { SERVICE_NODE: process.execPath, SERVICE_SCRIPT: serviceScript, SERVICE_PORT: String(port), SERVICE_PID_FILE: join(work, `service-${port}.pid`) },
+            run: process.platform === 'win32' ? 'Start-Process -WindowStyle Hidden -FilePath $env:SERVICE_NODE -ArgumentList @($env:SERVICE_SCRIPT, $env:SERVICE_PORT, "pipeline")' : 'nohup "$SERVICE_NODE" "$SERVICE_SCRIPT" "$SERVICE_PORT" pipeline > /dev/null 2>&1 & echo $! > "$SERVICE_PID_FILE"',
           },
           {
             id: 'preview',
@@ -201,9 +202,16 @@ async function previewPipeline(name, port) {
           },
           {
             name: 'After review',
-            shell: 'powershell',
-            run: 'Write-Output "AFTER_REVIEW url=${{ steps.preview.outputs.url }}"',
+            shell: process.platform === 'win32' ? 'powershell' : 'bash',
+            run: process.platform === 'win32' ? 'Write-Output "AFTER_REVIEW url=${{ steps.preview.outputs.url }}"' : 'echo "AFTER_REVIEW url=${{ steps.preview.outputs.url }}"',
           },
+          ...(process.platform === 'win32' ? [] : [{
+            name: 'Stop fixture service',
+            if: 'always()',
+            shell: 'bash',
+            env: { SERVICE_PID_FILE: join(work, `service-${port}.pid`) },
+            run: 'if test -f "$SERVICE_PID_FILE"; then cat "$SERVICE_PID_FILE" | xargs -r kill; rm "$SERVICE_PID_FILE"; fi',
+          }]),
         ],
       },
     },
@@ -230,7 +238,7 @@ async function waitingPreview(run) {
 async function serves(url) {
   let last = '';
   return until(`preview ${url} serves the page`, async () => {
-    const response = await fetch(base + url);
+    const response = await fetch(url);
     last = `${response.status} ${await response.text()}`;
     if (response.status !== 200) throw new Error(last);
     return last.slice(4);
@@ -267,6 +275,8 @@ try {
     await api('/api/sessions', { email: 'preview-auto@example.invalid', password: 'isolated-preview-auto-password' });
   }
   assert.ok(cookie, 'console session cookie');
+  const access = await api('/api/platform/settings/1');
+  await api('/api/platform/settings/1', {version:access.version,registration_enabled:access.registration_enabled,public_url:base,preview_domain:'preview.test'}, 'PATCH');
   ws = (await api('/api/workspaces', { name: 'Preview automation', slug: 'preview-auto' })).id;
   root = `/api/workspaces/${ws}`;
   host = (await api(`${root}/nodes`, { name: 'Preview Runner', connection: 'runner' })).id;
@@ -282,6 +292,7 @@ try {
 
   browser = await chromium.launch({
     headless: true,
+    args: [`--host-resolver-rules=${previewResolverRules}`],
     ...(process.env.PLAYWRIGHT_CHROME_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROME_PATH } : {}),
   });
   context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-CN' });
@@ -299,7 +310,7 @@ try {
   result.approve_preview = approvePreview;
   assert.equal(approvePreview.job, 'web');
   assert.equal(approvePreview.state, 'active');
-  assert.match(approvePreview.url, /^\/holes\/[^/]+\/$/);
+  assert.match(approvePreview.url, /^http:\/\/[a-z2-7]{52}\.preview\.test:\d+\/$/);
   pass('pipeline_preview_waiting_in_run_detail', { id: approvePreview.id, url: approvePreview.url });
   // The row exists from the request on; the step gets the link once the port answers.
   const servedText = await serves(approvePreview.url);
@@ -330,7 +341,7 @@ try {
     return row.state === 'revoked' && row;
   }, 30);
   assert.equal(approvedHole.review_state, 'approved');
-  assert.equal((await fetch(base + approvePreview.url)).status, 404);
+  assert.equal((await fetch(approvePreview.url)).status, 404);
   pass('pipeline_approve_preview_revoked_and_404', { review_state: approvedHole.review_state });
   await page.goto(runUrl);
   await previews.getByText('已撤销').first().waitFor({ timeout: 30000 });
@@ -361,7 +372,7 @@ try {
     return row.state === 'revoked' && row;
   }, 30);
   assert.equal(rejectedHole.review_state, 'rejected');
-  assert.equal((await fetch(base + rejectPreview.url)).status, 404);
+  assert.equal((await fetch(rejectPreview.url)).status, 404);
   pass('pipeline_reject_fails_job_and_revokes', { run: rejected.state, review_state: rejectedHole.review_state });
 
   // 3. Workflow: host.preview starts the service and waits for a person.
@@ -406,7 +417,7 @@ try {
   }, 180);
   assert.equal(workflowPreview.source_ref, 'preview');
   assert.ok(await listening(ports.workflow), 'service port open while waiting');
-  const workflowServed = await fetch(base + workflowPreview.url);
+  const workflowServed = await fetch(workflowPreview.url);
   const workflowText = await workflowServed.text();
   assert.equal(workflowServed.status, 200, workflowText);
   assert.ok(workflowText.includes(marker(ports.workflow, 'workflow')), workflowText);
@@ -448,7 +459,7 @@ try {
     const row = await hole(workflowPreview.id);
     return row.state === 'revoked' && row;
   }, 30);
-  assert.equal((await fetch(base + workflowPreview.url)).status, 404);
+  assert.equal((await fetch(workflowPreview.url)).status, 404);
   const closedAfter = Date.now();
   await until('workflow service port closed', async () => !(await listening(ports.workflow)), 60);
   pass('workflow_preview_revoked_and_service_stopped', {
@@ -567,7 +578,7 @@ try {
       assert.notEqual(rows.find(row=>row.node_id==='done')?.state,'succeeded');
     }
     await until(`${decision} preview revoked`,async()=> (await hole(opened.id)).state==='revoked',30);
-    assert.equal((await fetch(base+opened.url)).status,404);
+    assert.equal((await fetch(opened.url)).status,404);
     await until(`${decision} service port closed`,async()=>!(await listening(ports.workflow)),60);
     pass(`workflow_${decision}_routes_and_releases_service`);
   }

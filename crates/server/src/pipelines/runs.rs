@@ -1946,7 +1946,13 @@ mod tests {
         assert_eq!(previews[0]["probe_state"], build.probe_state);
         assert_eq!(previews[0]["expires_at"], build.expires_at);
         let url = previews[0]["url"].as_str().unwrap();
-        assert!(url.starts_with("/holes/") && url.ends_with('/') && url.len() > 10);
+        let parsed = reqwest::Url::parse(url).unwrap();
+        assert!(parsed.host_str().unwrap().ends_with(".preview.localhost"));
+        assert_eq!(
+            parsed.host_str().unwrap().split('.').next().unwrap().len(),
+            52
+        );
+        assert_eq!(parsed.path(), "/");
         assert_ne!(previews[0]["url"], previews[1]["url"]);
         assert_eq!(previews[1]["job"], "deploy");
         assert_eq!(previews[1]["review_state"], "none");

@@ -13,6 +13,7 @@ import { commonText,workflowText,useCommonTranslation } from "../shared/i18n/i18
 import { LanguageSwitcher } from "../shared/i18n/LanguageSwitcher";
 import { stripLocalePrefix } from "../shared/i18n/locale";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
+import { useAccountPreferences } from "../shared/theme/useAccountPreferences";
 import { Button } from "../shared/ui/button";
 import {
 DropdownMenu,
@@ -47,6 +48,7 @@ export function App() {
   useCommonTranslation();
   const route = useRoute();
   const [identity, setIdentity] = useState<Identity>();
+  useAccountPreferences(identity?.user.id);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);

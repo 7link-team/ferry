@@ -4,6 +4,8 @@
 
 use sea_orm::DbBackend;
 use sea_orm_migration::prelude::*;
+mod access_addresses;
+mod account_preferences;
 mod agent_models;
 mod ai_agents;
 mod ai_models;
@@ -158,6 +160,8 @@ impl MigratorTrait for Migrator {
             Box::new(chat_interactions::Migration),
             Box::new(holes::Migration),
             Box::new(holes_sources::Migration),
+            Box::new(account_preferences::Migration),
+            Box::new(access_addresses::Migration),
         ]
     }
 }

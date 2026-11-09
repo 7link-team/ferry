@@ -12,7 +12,7 @@
   "error.database": "Data tidak dapat disimpan atau dibaca. Sila cuba lagi kemudian; kandungan yang anda masukkan akan dikekalkan.",
   "error.file": "Operasi fail gagal. Sila semak ruang cakera dan kebenaran direktori.",
   "server.draining": "Perkhidmatan sedang ditutup dengan selamat. Sila cuba lagi kemudian.",
-  "guard.host": "Alamat hos ini tiada dalam senarai dibenarkan.",
+  "guard.host": "Alamat hos permintaan tidak sah.",
   "guard.request": "Pengepala pengesahan operasi tiada.",
   "guard.origin": "Permintaan operasi daripada asal ini tidak dibenarkan.",
   "assets.not_built": "Fail antara muka belum dibina. Sila jalankan npm run build dahulu.",

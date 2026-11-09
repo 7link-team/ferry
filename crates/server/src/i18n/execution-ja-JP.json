@@ -185,5 +185,7 @@
   "workflow.integrationUnknown": "連携結果が不明です。再実行前にサービス側を確認してください。自動再送は行っていません。",
   "workflow.integrationRemote": "アプリが要求を拒否しました。権限・パラメータ・レート制限を確認してください。",
   "workflow.hostExecutionFailed": "ホストでの実行に失敗しました。接続、Git/curl、パスとアカウントの権限を確認してください。",
-  "workflow.hostTargetRequired": "ノードまたはワークフローで実行ホストを選択してください。"
+  "workflow.hostTargetRequired": "ノードまたはワークフローで実行ホストを選択してください。",
+  "holes.domainRequired": "プラットフォーム設定のアクセスアドレスでプレビュー用ルートドメインを設定してください。",
+  "platform.addressInvalid": "有効なHTTP(S)の主要URLと、プロトコル・ワイルドカード・パスのないプレビュードメインを入力してください。"
 }

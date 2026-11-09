@@ -5,11 +5,13 @@
 //! probe) and the background reachability monitor; `proxy` is the public
 //! route and everything that keeps its connections bounded.
 
+mod domain;
 mod owned;
 mod proxy;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use domain::dispatch;
 pub(crate) use owned::{OwnedRequest, open_owned, revoke_source, wait_ready, wait_review};
 pub use proxy::{redact, serve, serve_root};
 
@@ -118,7 +120,7 @@ pub(crate) async fn views(
         .collect::<HashMap<_, _>>();
     let mut values = Vec::with_capacity(rows.len());
     for row in rows {
-        let url = link(s, &row)?;
+        let url = link(s, &row).await?;
         values.push(json!({
             "id": Id::from(row.id),
             "host_id": Id::from(row.host_id),
@@ -161,9 +163,16 @@ pub(crate) async fn views(
 }
 
 /// Root-relative: only the browser knows the external scheme and host.
-pub(crate) fn link(s: &AppState, row: &holes::Model) -> Result<String> {
+pub(crate) async fn link(s: &AppState, row: &holes::Model) -> Result<String> {
+    let config = crate::accounts::addresses::Configuration::load(s, &s.db).await?;
+    if config.preview_domain.is_empty() {
+        return Ok(String::new());
+    }
     let token = s.vault.open_secret(&row.token_sealed, &aad(row))?;
-    Ok(format!("/holes/{token}/"))
+    Ok(format!(
+        "{}/",
+        config.preview_origin(&domain::label(&token)?)?
+    ))
 }
 
 async fn view(s: &AppState, scope: &Scope, id: Id) -> Result<Value> {
@@ -250,6 +259,9 @@ pub async fn create(
     Json(body): Json<CreateBody>,
 ) -> Result<(StatusCode, Json<Value>)> {
     scope.require("holes.create")?;
+    crate::accounts::addresses::Configuration::load(&s, &s.db)
+        .await?
+        .require_preview()?;
     let name = checked_name(&body.name)?;
     let ttl = checked_ttl(body.ttl_hours)?;
     if !(1..=65535).contains(&body.target_port) {

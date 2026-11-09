@@ -185,5 +185,7 @@
   "workflow.integrationUnknown": "The integration result is unknown. Check the provider before running again; the request was not automatically resent.",
   "workflow.integrationRemote": "The application rejected the request. Check permissions, parameters and provider rate limits.",
   "workflow.hostExecutionFailed": "Host execution failed: check connectivity, Git/curl, paths and account permissions.",
-  "workflow.hostTargetRequired": "Select an execution host on the node or workflow."
+  "workflow.hostTargetRequired": "Select an execution host on the node or workflow.",
+  "holes.domainRequired": "Configure a preview root domain in Platform settings ? Access addresses before using preview tunnels.",
+  "platform.addressInvalid": "Enter a valid HTTP(S) primary URL and a plain preview domain without protocol, wildcard or path."
 }

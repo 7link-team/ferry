@@ -813,7 +813,11 @@
     "template.formPreview": "Usage form preview",
     "template.formPreviewHelp": "Preview the parameter form users fill in when using this template. Preview inputs are not saved; the server validates parameters and the full application definition when generating configuration.",
     "template.bindParameter": "Choose template parameter…",
-    "template.bindField": "Choose template parameter for {{field}}"
+    "template.bindField": "Choose template parameter for {{field}}",
+    "platform.accessAddresses": "Access addresses",
+    "platform.previewDomain": "Preview root domain",
+    "platform.publicAddressHelp": "Optional primary URL for callbacks and shared links. Other reachable IPs and domains remain accessible.",
+    "platform.previewDomainHelp": "Optional; leave empty to disable preview tunnels. Enter a domain without protocol, *. or path, e.g. preview.example.com. Configure wildcard DNS, TLS and proxy forwarding separately. Preview URLs use the primary URL scheme/port, or HTTPS by default."
   },
   "zh-CN": {
     "runner.scopeUnknown": "请选择安装范围后生成命令。旧版或离线代理可能未上报安装方式。",
@@ -1629,7 +1633,11 @@
     "template.formPreview": "使用表单预览",
     "template.formPreviewHelp": "此处展示用户使用模板时填写的参数表单。预览输入不保存；生成配置时由服务器校验参数和完整应用定义。",
     "template.bindParameter": "选择模板参数…",
-    "template.bindField": "为“{{field}}”选择模板参数"
+    "template.bindField": "为“{{field}}”选择模板参数",
+    "platform.accessAddresses": "访问地址",
+    "platform.previewDomain": "预览根域名",
+    "platform.publicAddressHelp": "可选，用于回调和分享链接的主要地址，不限制其他可达 IP 或域名访问。",
+    "platform.previewDomainHelp": "可选，留空禁用预览穿透。填写纯域名，不带协议、*. 或路径；另行配置通配 DNS、TLS 和代理转发。预览使用主要地址的协议和端口，无主要地址时使用 HTTPS。"
   },
   "zh-TW": {
     "runner.scopeUnknown": "請選擇安裝範圍以產生命令；舊版或離線代理可能未回報。",
@@ -2445,7 +2453,11 @@
     "template.formPreview": "使用表單預覽",
     "template.formPreviewHelp": "此處顯示使用者使用範本時填寫的參數表單。預覽輸入不儲存；產生設定時由伺服器驗證參數和完整應用定義。",
     "template.bindParameter": "選擇範本參數…",
-    "template.bindField": "為「{{field}}」選擇範本參數"
+    "template.bindField": "為「{{field}}」選擇範本參數",
+    "platform.accessAddresses": "存取位址",
+    "platform.previewDomain": "預覽根網域",
+    "platform.publicAddressHelp": "選填，用於回呼和分享連結的主要位址，不限制其他可達 IP 或網域存取。",
+    "platform.previewDomainHelp": "選填，留空停用預覽穿透。填寫純網域，不帶協定、*. 或路徑；另行設定萬用 DNS、TLS 和代理轉送。預覽使用主要位址的協定和連接埠，無主要位址時使用 HTTPS。"
   },
   "ja-JP": {
     "runner.scopeUnknown": "コマンドを生成するにはインストール範囲を選択してください。旧版・オフラインのエージェントは未報告の場合があります。",
@@ -3261,7 +3273,11 @@
     "template.formPreview": "利用フォームのプレビュー",
     "template.formPreviewHelp": "テンプレート利用時のパラメーターフォームです。プレビューの入力は保存されません。設定生成時にサーバーがパラメーターとアプリケーション定義全体を検証します。",
     "template.bindParameter": "テンプレートパラメーターを選択…",
-    "template.bindField": "{{field}}のテンプレートパラメーターを選択"
+    "template.bindField": "{{field}}のテンプレートパラメーターを選択",
+    "platform.accessAddresses": "アクセスアドレス",
+    "platform.previewDomain": "プレビューのルートドメイン",
+    "platform.publicAddressHelp": "コールバックと共有リンクに使用する任意の主要URL。他の到達可能なIPやドメインからもアクセスできます。",
+    "platform.previewDomainHelp": "任意。空欄でプレビュー無効。プロトコル、*.、パスを含まないドメインを指定し、DNS、TLS、プロキシを別途設定します。主要URLの方式とポート、未設定ならHTTPSを使用します。"
   },
   "ko-KR": {
     "runner.scopeUnknown": "명령을 생성하려면 설치 범위를 선택하세요. 이전 버전 또는 오프라인 에이전트는 보고하지 않을 수 있습니다.",
@@ -4077,7 +4093,11 @@
     "template.formPreview": "사용 양식 미리 보기",
     "template.formPreviewHelp": "템플릿을 사용할 때 입력하는 매개변수 양식입니다. 미리 보기 입력은 저장되지 않으며 구성 생성 시 서버에서 매개변수와 전체 애플리케이션 정의를 검증합니다.",
     "template.bindParameter": "템플릿 매개변수 선택…",
-    "template.bindField": "{{field}}의 템플릿 매개변수 선택"
+    "template.bindField": "{{field}}의 템플릿 매개변수 선택",
+    "platform.accessAddresses": "접속 주소",
+    "platform.previewDomain": "미리보기 루트 도메인",
+    "platform.publicAddressHelp": "콜백 및 공유 링크의 기본 URL입니다. 다른 접근 가능한 IP와 도메인도 허용됩니다.",
+    "platform.previewDomainHelp": "선택 사항입니다. 비워 두면 미리보기가 비활성화됩니다. 프로토콜, *., 경로 없이 도메인을 입력하고 DNS, TLS, 프록시를 별도 설정하세요. 기본 URL의 프로토콜/포트 또는 HTTPS를 사용합니다."
   },
   "ms-MY": {
     "runner.scopeUnknown": "Pilih skop pemasangan untuk menjana arahan. Ejen lama atau luar talian mungkin tidak melaporkannya.",
@@ -4893,6 +4913,10 @@
     "template.formPreview": "Pratonton borang penggunaan",
     "template.formPreviewHelp": "Pratonton borang parameter yang diisi pengguna semasa menggunakan templat ini. Input pratonton tidak disimpan; pelayan mengesahkan parameter dan definisi aplikasi penuh apabila menjana konfigurasi.",
     "template.bindParameter": "Pilih parameter templat…",
-    "template.bindField": "Pilih parameter templat untuk {{field}}"
+    "template.bindField": "Pilih parameter templat untuk {{field}}",
+    "platform.accessAddresses": "Alamat akses",
+    "platform.previewDomain": "Domain akar pratonton",
+    "platform.publicAddressHelp": "URL utama pilihan untuk panggil balik dan pautan perkongsian. IP dan domain lain yang boleh dicapai kekal dibenarkan.",
+    "platform.previewDomainHelp": "Pilihan; kosongkan untuk melumpuhkan terowong pratonton. Masukkan domain tanpa protokol, *. atau laluan. Konfigurasikan DNS kad bebas, TLS dan proksi secara berasingan. Menggunakan protokol/port URL utama atau HTTPS secara lalai."
   }
 }

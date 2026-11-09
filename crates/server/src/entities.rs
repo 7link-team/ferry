@@ -315,6 +315,7 @@ pub mod platform_state {
         pub registration_enabled: i64,
         pub runner_auto_update: i64,
         pub repository_oauth: Option<String>,
+        pub access_config: Option<String>,
         pub file_storage: Option<String>,
         pub footer_html: Option<String>,
         pub page_scripts: Option<String>,

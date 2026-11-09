@@ -12,7 +12,7 @@
   "error.database": "Could not save or read data. Please try again later; your entered content will be kept.",
   "error.file": "The file operation failed. Please check disk space and directory permissions.",
   "server.draining": "The service is shutting down safely. Please try again later.",
-  "guard.host": "This host address is not in the allowlist.",
+  "guard.host": "The request host address is invalid.",
   "guard.request": "The operation verification header is missing.",
   "guard.origin": "Requests from this origin are not allowed.",
   "assets.not_built": "The interface assets have not been built. Please run npm run build first.",

@@ -211,7 +211,7 @@ async fn settle(s: &AppState, hole: i64, human: bool) -> Result<Step> {
     };
     let (url, host) = match &row {
         Some(row) => (
-            crate::holes::link(s, row)?,
+            crate::holes::link(s, row).await?,
             hosts::Entity::find_by_id(row.host_id).one(&s.db).await?,
         ),
         None => (String::new(), None),

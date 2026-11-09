@@ -1,6 +1,9 @@
 ## 当前事项清单（2026-11-10）
 
-| PREVIEW-DOMAIN-35 | 待处理 | 预览改为token.<根域名>/path，移除前缀开关；根域名支持domain.xx/subdomain.domain.xx，保留显式控制台Host，DNS/TLS覆盖对应通配域名。64位hex token无损Base32为52字符单标签，复用记录/撤销与隔离。docs/preview-holes-design.md §17已补设计及双域名/控制台共父域验收；下一步定稿未配置域名和旧非剥离应用迁移行为，再实现与真实测试。尚未实现，不纳入当前发布。 |
+| ACCOUNT-APPEARANCE-36 | 待验证 | 账号云端偏好已实现：主题/明暗/自定义变量/六语，复用现有切换器、Account认证，匿名本地使用，登录读取/切换保存，PATCH字段独立更新；新表account_preferences迁移。前端47/后端2PASS、前后端build PASS；独立真实HTTP+Chrome7组PASS（双账号隔离、401/422/400、全新会话回读、实际切换器写入、第二浏览器读取、四宽度无横溢出/JS错误），证据data/maintenance/account-preferences-20261110。直接执行，自审/本期需求核对PASS，待用户验收；未提交推送、未更新4291/线上、未发版；PG/MySQL未实测。 |
+
+| PREVIEW-DOMAIN-35 | ??? | ??????????????????????571PASS/1??skip?quickstart/build PASS???Runner???????PASS?preview-holes-20261109-174433??HMR/??/????/??/???308/?????Actions??worker?????/???PASS???????????CI??preview-domains???????hosts+?????????????DNS/TLS?????603PASS/9??ignored???????PASS?preview-automation-20261109-174755???worker????174450????worker?????????????HTTP/Chrome7???PASS????/??/??? |
+| RELEASE-ALPHA13-37 | 待处理 | 用户明确授权本轮完成测试后直接提交推送发版；包含个人偏好36和预览域名35。完成真实Runner/双层域名/权限/三尺寸与CI后递增alpha版本，按现有Build/publish-verified/公开附件核验流程发布。当前仍alpha.12，4291未改；不能把方案或编译通过当完成。 |
 
 发布交付（RELEASE-ALPHA9-34，2026-11-10）：v0.3.0-alpha.12已公开预发布，源码/tag为bb464698343ee11209984c6bc923bea094042978，地址https://github.com/7link-team/ferry/releases/tag/v0.3.0-alpha.12。Build42642463234全部28SUCCESS（全量测试、三库、四平台安装包、跨平台Runner升级回滚、部署与完整界面回归），源镜像42642449065/版本镜像42642463068均SUCCESS。21个公开附件共565142257字节全部实际下载，SHA256/GitHub摘要、6签名、Runner目录及amd64/arm64版本/source/revision核验PASS；证据data/maintenance/030-alpha12-public-release/{VERIFIED.txt,review.json,release-metadata.json,jobs.json,run-*.json}。alpha.11镜像站E500证据保留030-alpha11-public-release/diagnose-annotations.json；alpha.12将327下载URL转官方源，依赖版本/integrity不变，隔离npm ci与清单4项PASS。alpha.9/10/11失败候选标签和原始证据保留，不移动标签；所有操作临时分支已按精确租约删除。直接执行，源码自审与发布交付核验PASS；此记录覆盖下方旧“未发版”检查点，不代表用户验收。4291仍运行PID35224/index-DNAdtqaS.js，本轮未重启、未部署远程生产，临时Runner未改；原会话真实推理、商业Codeup与域名改造仍未验收/实现，保留对应待办。
 

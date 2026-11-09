@@ -41,9 +41,9 @@ Usage: quickstart.sh [options]
   --database NAME       postgres (default) or mysql; fixed at first start
   --domain NAME         Serve HTTPS on NAME with an automatic, auto-renewed certificate;
                         repeat for several domains (needs DNS to this host and ports 80/443)
-  --proxy-domain NAME   Use external HTTPS (e.g. cloudflared); allow NAME with secure
+  --proxy-domain NAME   Use external HTTPS (e.g. cloudflared); record NAME with secure
                         cookies, without starting Caddy; repeatable
-  --allow-host NAME     Allow plain-HTTP access by NAME or IP, e.g. a LAN address with
+  --allow-host NAME     Compatibility option for plain HTTP; all reachable hosts are allowed
                         --bind 0.0.0.0; repeatable; cannot be combined with --domain
   --bind ADDRESS        Published Ferry listener address (default: 0.0.0.0)
   --port PORT           Published Ferry port (default: 4290)
@@ -287,11 +287,11 @@ addresses() {
     if [ -n "$names" ]; then
         for name in $names; do printf '  https://%s\n' "$name"; done
     elif [ "$(env_get FERRY_SECURE_COOKIE)" = true ]; then
-        for name in $(env_get FERRY_ALLOWED_HOSTS | tr ',' ' '); do
+        for name in $(env_get FERRY_PROXY_DOMAINS | tr ',' ' '); do
             case "$name" in localhost|127.0.0.1) ;; *) printf '  https://%s\n' "$name" ;; esac
         done
     else
-        for name in $(env_get FERRY_ALLOWED_HOSTS | tr ',' ' '); do
+        for name in $hosts; do
             case "$name" in localhost|127.0.0.1) ;; *:*) printf '  http://[%s]:%s\n' "$name" "$(env_get FERRY_PORT)" ;; *) printf '  http://%s:%s\n' "$name" "$(env_get FERRY_PORT)" ;; esac
         done
         printf '  http://localhost:%s (from this machine)\n' "$(env_get FERRY_PORT)"
@@ -687,7 +687,6 @@ if [ ! -f "$env_file" ]; then
         printf 'COMPOSE_PROJECT_NAME=ferry\n'
         printf 'FERRY_IMAGE=%s:%s\n' "$image_repository" "$version"
         printf 'FERRY_DOMAINS=\n'
-        printf 'FERRY_ALLOWED_HOSTS=localhost,127.0.0.1\n'
         printf 'FERRY_SECURE_COOKIE=false\n'
         printf 'FERRY_BIND_ADDRESS=0.0.0.0\n'
         printf 'FERRY_PORT=4290\n'
@@ -708,13 +707,16 @@ fi
 if [ -n "$domains$proxy_domains$hosts" ]; then
     names=$(printf '%s\n' $domains $proxy_domains $hosts | awk '!seen[$0]++' | tr '\n' ',')
     env_set FERRY_DOMAINS "$(printf '%s\n' $domains | awk '!seen[$0]++' | sed 's/$/, /' | tr -d '\n' | sed 's/, $//')"
-    env_set FERRY_ALLOWED_HOSTS "${names}localhost,127.0.0.1"
+    env_set FERRY_PROXY_DOMAINS "$(printf '%s\n' $proxy_domains | awk '!seen[$0]++' | tr '\n' ',')"
     if [ -n "$domains$proxy_domains" ]; then env_set FERRY_SECURE_COOKIE true; else env_set FERRY_SECURE_COOKIE false; fi
 fi
 [ -z "$bind" ] || env_set FERRY_BIND_ADDRESS "$bind"
 [ -z "$port" ] || env_set FERRY_PORT "$port"
 [ -z "$redis" ] || env_set FERRY_REDIS "$redis"
 public_url_compat
+if grep -q '^FERRY_ALLOWED_HOSTS=' "$env_file" && ! grep -q 'FERRY_ALLOWED_HOSTS' compose.production.yaml; then
+    grep -v '^FERRY_ALLOWED_HOSTS=' "$env_file" > "$env_file.new"; mv "$env_file.new" "$env_file"
+fi
 https_files
 storage_files
 

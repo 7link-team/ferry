@@ -1652,7 +1652,7 @@ mod tests {
                 get(|| async { ([(header::VARY, "Accept-Encoding")], "ok").into_response() }),
             )
             .layer(middleware::from_fn(|request, next| async {
-                crate::guard(request, next, &["127.0.0.1".into()]).await
+                crate::guard(request, next).await
             }))
             .layer(middleware::from_fn(super::middleware));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1741,7 +1741,7 @@ mod tests {
 
         let denied = client
             .get(format!("{url}/auth"))
-            .header(header::HOST, "untrusted.invalid")
+            .header(header::HOST, "invalid/host")
             .header(header::ACCEPT_LANGUAGE, "zh-CN")
             .send()
             .await
@@ -1749,7 +1749,7 @@ mod tests {
         assert_eq!(denied.status(), StatusCode::FORBIDDEN);
         assert_eq!(denied.headers()[header::CONTENT_LANGUAGE], "zh-CN");
         assert_eq!(denied.headers()[header::VARY], "Accept-Language");
-        assert_eq!(denied.text().await.unwrap(), "此主机地址未在允许列表中。");
+        assert_eq!(denied.text().await.unwrap(), "请求的主机地址无效。");
 
         let plain = client
             .get(format!("{url}/plain"))

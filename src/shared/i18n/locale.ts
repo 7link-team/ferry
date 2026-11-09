@@ -14,6 +14,7 @@ export const localeNames: Record<Locale, string> = {"en-US": "English", "zh-CN":
 export const DEFAULT_LOCALE: Locale = "en-US";
 const preferenceKey = "ui.locale";
 export const LOCALE_EVENT = "ui:locale-change";
+export const LOCALE_PREFERENCE_EVENT = "ui:locale-preference";
 
 /** RFC language ranges, ordered by quality; unsupported ranges never hide later matches. */
 export function negotiateLocale(header: string | readonly string[] | undefined, supported: readonly string[] = supportedLocales): string {
@@ -84,6 +85,7 @@ export function setLocale(locale: Locale, persist = true): void {
   document.documentElement.lang = locale;
   document.documentElement.dir = locale.startsWith("ar-") ? "rtl" : "ltr";
   window.dispatchEvent(new Event(LOCALE_EVENT));
+  if (persist) window.dispatchEvent(new CustomEvent(LOCALE_PREFERENCE_EVENT, { detail: locale }));
 }
 
 export function initLocale(): void {

@@ -81,9 +81,6 @@ struct Config {
     /// Owned desktop sidecar: closing the private stdin pipe drains work and exits.
     #[arg(long, hide = true)]
     desktop_control: bool,
-    /// Hostnames browsers may reach this server on. localhost is always allowed.
-    #[arg(long, env = "FERRY_ALLOWED_HOSTS", value_delimiter = ',')]
-    allowed_hosts: Vec<String>,
     /// Trusted reverse-proxy networks allowed to supply X-Forwarded-For.
     #[arg(long, env = "FERRY_TRUSTED_PROXIES")]
     trusted_proxies: Option<String>,
@@ -296,9 +293,7 @@ async fn main() -> anyhow::Result<()> {
     });
     let alerts_task = tokio::spawn(notifications::alerts::scheduler(s.clone(), drain_rx));
 
-    let mut hosts = cfg.allowed_hosts;
-    hosts.extend(["localhost".into(), "127.0.0.1".into(), "[::1]".into()]);
-    let hosts = Arc::new(hosts);
+    let access_state = s.clone();
 
     // Workspace resources all sit under /api/workspaces/{workspace}/..., which
     // is what makes the Scope extractor the only way to obtain a workspace id.
@@ -974,6 +969,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/sessions/challenge", post(accounts::login_guard::challenge))
         .route("/api/sessions/challenge/verify", post(accounts::login_guard::verify))
         .route("/api/me", get(accounts::auth::me))
+        .route("/api/me/preferences", get(accounts::preferences::read).patch(accounts::preferences::update))
         .route(
             "/api/profile/1",
             get(accounts::auth::profile).patch(accounts::auth::update_profile),
@@ -987,7 +983,7 @@ async fn main() -> anyhow::Result<()> {
         .layer(axum::Extension(accounts::auth::TrustedProxies(trusted_proxies)))
         .layer(DefaultBodyLimit::max(256 * 1024))
         .layer(middleware::from_fn(move |req: Request, next: Next| {
-            let hosts = hosts.clone();
+            let access_state = access_state.clone();
             let draining = draining.clone();
             async move {
                 // Runner transport must remain available until all steps and cleanup finish.
@@ -998,7 +994,10 @@ async fn main() -> anyhow::Result<()> {
                     )
                         .into_response();
                 }
-                guard(req, next, &hosts).await
+                match holes::dispatch(&access_state, req).await {
+                    Ok(req) => guard(req, next).await,
+                    Err(response) => response,
+                }
             }
         }))
         .layer(middleware::from_fn(i18n::middleware))
@@ -1132,9 +1131,9 @@ async fn shutdown() {
 }
 
 /// Request-shape defences that belong in one place rather than per handler:
-/// a Host allowlist, a same-origin check, a header no cross-site form can set,
+/// a valid Host, a same-origin check, a header no cross-site form can set,
 /// and the response headers.
-async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
+async fn guard(req: Request, next: Next) -> Response {
     let host = req
         .headers()
         .get(header::HOST)
@@ -1145,7 +1144,7 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
         .parse::<axum::http::uri::Authority>()
         .map(|a| a.host().to_string())
         .unwrap_or_default();
-    if !allowed.iter().any(|h| h.eq_ignore_ascii_case(&hostname)) {
+    if hostname.is_empty() {
         return (StatusCode::FORBIDDEN, i18n::message("guard.host")).into_response();
     }
     let mutating = !matches!(
@@ -1160,12 +1159,9 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
             .path()
             .strip_prefix("/api/repository-events/")
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
-    // A previewed app cannot send the console's header, and its sandboxed
-    // documents send `Origin: null`; the hole sandbox is the boundary there.
-    let preview = req.uri().path().starts_with("/holes/");
+    // Domain previews are dispatched before this console-only guard.
     if mutating
         && !provider_event
-        && !preview
         && req
             .headers()
             .get("x-ferry-request")
@@ -1174,11 +1170,10 @@ async fn guard(req: Request, next: Next, allowed: &[String]) -> Response {
     {
         return (StatusCode::FORBIDDEN, i18n::message("guard.request")).into_response();
     }
-    if !preview
-        && let Some(origin) = req
-            .headers()
-            .get(header::ORIGIN)
-            .and_then(|v| v.to_str().ok())
+    if let Some(origin) = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
         && origin != format!("http://{host}")
         && origin != format!("https://{host}")
     {

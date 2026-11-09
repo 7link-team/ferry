@@ -690,9 +690,14 @@ pub async fn get_settings(State(s): State<AppState>, _: Admin) -> Result<Json<Va
         .one(&s.db)
         .await?
         .ok_or_else(ApiError::missing)?;
-    let mut view =
-        crate::repositories::auth::OAuthSettings::read(&s, row.repository_oauth.as_deref())?
-            .view(&s, row.repository_oauth.is_some());
+    let addresses = super::addresses::Configuration::read(&s, &row)?;
+    let mut oauth =
+        crate::repositories::auth::OAuthSettings::read(&s, row.repository_oauth.as_deref())?;
+    oauth.public_url = addresses.public_url.clone();
+    let mut view = oauth.view(&s, row.repository_oauth.is_some());
+    view.as_object_mut()
+        .unwrap()
+        .extend(addresses.view().as_object().unwrap().clone());
     view["id"] = json!("1");
     view["registration_enabled"] = json!(row.registration_enabled != 0);
     view["runner_auto_update"] = json!(row.runner_auto_update != 0);
@@ -834,6 +839,9 @@ pub async fn update_settings(
         .map(i64::from)
         .unwrap_or(row.runner_auto_update);
     let mut repository_oauth = row.repository_oauth.clone();
+    let mut addresses = super::addresses::Configuration::read(&s, &row)?;
+    addresses.update(&body.oauth)?;
+    let access_config = serde_json::to_string(&addresses).map_err(std::io::Error::other)?;
     let file_storage = crate::artifact_store::Configuration::update(
         &s,
         &tx,
@@ -850,10 +858,15 @@ pub async fn update_settings(
     if oauth_changed {
         let mut config =
             crate::repositories::auth::OAuthSettings::read(&s, repository_oauth.as_deref())?;
+        config.public_url = addresses.public_url.clone();
         config.update(&s, &body.oauth)?;
         repository_oauth = Some(config.seal(&s)?);
     }
     platform_state::Entity::update_many()
+        .col_expr(
+            platform_state::Column::AccessConfig,
+            Expr::value(access_config),
+        )
         .col_expr(platform_state::Column::FooterHtml, Expr::value(footer_html))
         .col_expr(
             platform_state::Column::LoginSecurity,

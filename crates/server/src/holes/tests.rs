@@ -125,12 +125,10 @@ async fn resource_lifecycle_validation_and_isolation() {
     assert_eq!(created["created_by_name"], "Owner 1");
     assert_eq!(created["host_name"], "Runner 11");
     let url = created["url"].as_str().unwrap();
-    let token = url
-        .strip_prefix("/holes/")
-        .unwrap()
-        .strip_suffix('/')
-        .unwrap();
-    assert_eq!(token.len(), 64);
+    let parsed = reqwest::Url::parse(url).unwrap();
+    let label = parsed.host_str().unwrap().split('.').next().unwrap();
+    assert_eq!(label.len(), 52);
+    let token = super::domain::token(label).unwrap();
     let expires = created["expires_at"].as_i64().unwrap();
     assert!(expires >= before + 24 * HOUR_MS && expires <= db::now() + 24 * HOUR_MS);
     // Only the hash and a sealed copy are stored.
@@ -139,8 +137,8 @@ async fn resource_lifecycle_validation_and_isolation() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row.token_hash, crate::hosts::runner::fingerprint(token));
-    assert!(!row.token_sealed.contains(token));
+    assert_eq!(row.token_hash, crate::hosts::runner::fingerprint(&token));
+    assert!(!row.token_sealed.contains(&token));
 
     let list_of = |state: &str| {
         let s = s.clone();
@@ -667,7 +665,6 @@ async fn upstream() -> u16 {
 }
 
 async fn server(s: AppState) -> SocketAddr {
-    let allowed = vec!["127.0.0.1".to_owned()];
     let app = axum::Router::new()
         .route("/api/runners/connect", get(crate::hosts::runner::connect))
         .route(
@@ -679,15 +676,26 @@ async fn server(s: AppState) -> SocketAddr {
         .route("/holes/{token}/{*rest}", any(serve))
         .route("/other", post(|| async { "ok" }))
         .layer(middleware::from_fn(
-            move |request: Request, next: middleware::Next| {
-                let allowed = allowed.clone();
-                async move { crate::guard(request, next, &allowed).await }
+            move |request: Request, next: middleware::Next| async move {
+                crate::guard(request, next).await
             },
         ))
         .layer(middleware::from_fn(crate::i18n::middleware))
-        .with_state(s);
+        .layer(middleware::from_fn_with_state(
+            s.clone(),
+            |State(s): State<AppState>, request: Request, next: middleware::Next| async move {
+                match super::dispatch(&s, request).await {
+                    Ok(request) => next.run(request).await,
+                    Err(response) => response,
+                }
+            },
+        ))
+        .with_state(s.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    crate::entities::platform_state::Entity::update_many()
+        .col_expr(crate::entities::platform_state::Column::AccessConfig, sea_orm::sea_query::Expr::value(json!({"public_url":format!("http://{address}"),"preview_domain":"preview.localhost"}).to_string()))
+        .exec(&s.db).await.unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     address
 }
@@ -816,8 +824,18 @@ async fn forward_session(address: SocketAddr, session: String, host: i64, key: S
 }
 
 fn http() -> reqwest::Client {
+    struct Resolver;
+    impl reqwest::dns::Resolve for Resolver {
+        fn resolve(&self, _name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            Box::pin(async {
+                Ok(Box::new(std::iter::once("127.0.0.1:0".parse().unwrap()))
+                    as reqwest::dns::Addrs)
+            })
+        }
+    }
     reqwest::Client::builder()
         .no_proxy()
+        .dns_resolver(std::sync::Arc::new(Resolver))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap()
@@ -835,11 +853,14 @@ async fn until(what: &str, mut check: impl AsyncFnMut() -> bool) {
 
 /// Sends a raw HTTP/1.1 upgrade and returns the stream once `101` arrives.
 async fn upgraded(address: SocketAddr, path: &str) -> tokio::net::TcpStream {
+    let url = reqwest::Url::parse(path).unwrap();
+    let host = format!("{}:{}", url.host_str().unwrap(), address.port());
+    let path = url.path();
     let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
     stream
         .write_all(
             format!(
-                "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: upgrade\r\nUpgrade: echo\r\n\r\n"
+                "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: upgrade\r\nUpgrade: echo\r\n\r\n"
             )
             .as_bytes(),
         )
@@ -876,16 +897,25 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
     fake_runner(&s, address, 23, OLD_KEY, false).await;
     let port = upstream().await;
     let client = http();
-    let base = format!("http://{address}");
+    let base = "";
 
     let hole = create_hole(&s, 21, port).await;
     let id = i64::from(hole_id(&hole));
     let path = hole["url"].as_str().unwrap().to_owned();
     let prefix = path.trim_end_matches('/').to_owned();
 
-    // The root without its slash redirects so relative URLs resolve.
+    // Old token links migrate to the domain while preserving the query.
+    let stored = holes::Entity::find_by_id(id)
+        .one(&s.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let old_token = s
+        .vault
+        .open_secret(&stored.token_sealed, &super::aad(&stored))
+        .unwrap();
     let root = client
-        .get(format!("{base}{prefix}?a=1"))
+        .get(format!("http://{address}/holes/{old_token}?a=1"))
         .send()
         .await
         .unwrap();
@@ -930,11 +960,22 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         upstream_headers["origin"],
         format!("http://localhost:{port}")
     );
-    assert_eq!(upstream_headers["x-forwarded-prefix"], prefix);
-    assert_eq!(upstream_headers["x-forwarded-host"], address.to_string());
+    assert!(!upstream_headers.contains_key("x-forwarded-prefix"));
+    assert_eq!(
+        upstream_headers["x-forwarded-host"],
+        format!(
+            "{}:{}",
+            reqwest::Url::parse(&path).unwrap().host_str().unwrap(),
+            address.port()
+        )
+    );
 
     // The exemption is scoped to holes: the console still demands its header.
-    let other = client.post(format!("{base}/other")).send().await.unwrap();
+    let other = client
+        .post(format!("http://{address}/other"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(other.status(), 403);
 
     // Redirects from the local origin stay under the hole.
@@ -944,7 +985,7 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         .await
         .unwrap();
     assert_eq!(redirect.status(), 302);
-    assert_eq!(redirect.headers()["location"], format!("{prefix}/target"));
+    assert_eq!(redirect.headers()["location"], "/target");
 
     // Preflights are answered here, never forwarded.
     let preflight = client
@@ -963,7 +1004,7 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         "content-type"
     );
 
-    // Keep-prefix mode forwards the full path.
+    // Historic strip_prefix=false no longer changes domain-mode paths.
     holes::Entity::update_many()
         .col_expr(
             holes::Column::StripPrefix,
@@ -981,13 +1022,15 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         .json()
         .await
         .unwrap();
-    assert_eq!(kept["path"], format!("{path}assets/app.js"));
+    assert_eq!(kept["path"], "/assets/app.js");
 
     // Oversized bodies are refused before anything is forwarded.
     let mut raw = tokio::net::TcpStream::connect(address).await.unwrap();
     raw.write_all(
         format!(
-            "POST {path}upload HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\n\r\n",
+            "POST /upload HTTP/1.1\r\nHost: {}:{}\r\nContent-Length: {}\r\n\r\n",
+            reqwest::Url::parse(&path).unwrap().host_str().unwrap(),
+            address.port(),
             64 * 1024 * 1024 + 1
         )
         .as_bytes(),
@@ -1042,7 +1085,12 @@ async fn proxy_isolates_the_console_and_releases_every_connection() {
         }
     };
     let revoked_body = body_of(format!("{base}{path}")).await;
-    let unknown_body = body_of(format!("{base}/holes/{}/", "0".repeat(64))).await;
+    let unknown_body = body_of(format!(
+        "http://{}.preview.localhost:{}/",
+        "a".repeat(52),
+        address.port()
+    ))
+    .await;
     let expired = create_hole(&s, 21, port).await;
     let expired_id = i64::from(hole_id(&expired));
     let expired_path = expired["url"].as_str().unwrap().to_owned();

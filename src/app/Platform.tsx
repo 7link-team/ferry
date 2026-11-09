@@ -123,8 +123,11 @@ const forms: Record<string, FormConfig<Row>> = {
     ...([ ["endpoint","S3 Endpoint"], ["bucket","Bucket"], ["region","Region"], ["access_key","Access Key ID"] ] as const).map(([key,label])=>({key:`storage_${key}`,label,type:"text" as const,when:(d:Partial<Row>)=>d.storage_kind==="s3",disabled:(d:Partial<Row>)=>d.storage_source==="environment"})),
     {key:"storage_secret_key",label:"Secret Access Key",type:"secret",stored:"storage_has_secret_key",replaceOnEdit:true,when:d=>d.storage_kind==="s3",disabled:d=>d.storage_source==="environment",helpKey:"resource-domain:platform.storageSecretHelp"},
   ] },
+{ title: "访问地址", titleKey: "resource-domain:platform.accessAddresses", group: "访问地址", groupKey: "resource-domain:platform.accessAddresses", fields: [
+    { key: "public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://console.example.com", helpKey: "resource-domain:platform.publicAddressHelp" },
+    { key: "preview_domain", label: "预览根域名", labelKey: "resource-domain:platform.previewDomain", type: "text", placeholder: "preview.example.com", helpKey: "resource-domain:platform.previewDomainHelp" },
+  ] },
 { title: "公共配置", titleKey: "resource-domain:platform.publicConfig", group: "仓库关联", groupKey: "resource-domain:platform.repositoryIntegration", fields: [
-    { key: "oauth_public_url", label: "平台公开访问地址", labelKey: "resource-domain:platform.publicUrl", type: "text", placeholder: "https://ops.example.com", span: 2, help: "填写用户浏览器可访问的平台地址。保存后立即生效，无需重启；各工作空间仍分别授权自己的账号。", helpKey: "resource-domain:platform.publicUrlHelp" },
     { key: "oauth_callback_url", label: "当前回调地址", labelKey: "resource-domain:platform.callbackUrl", type: "text", immutable: true, copyable: true, span: 2, help: "将此地址登记到代码平台的 OAuth 应用。修改公开访问地址并保存后，这里会显示新的回调地址。", helpKey: "resource-domain:platform.callbackHelp" },
     { key: "oauth_source", label: "配置来源", labelKey: "resource-domain:platform.configSource", type: "text", immutable: true, span: 2 },
   ] },

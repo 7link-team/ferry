@@ -222,8 +222,13 @@ async fn review_routes_approved_and_everything_else_to_rejected() {
         vec![("main".into(), false, Some("none".into()))]
     );
     let item = &output.ports[0].items[0].json;
-    assert_eq!(item["url"], json!(crate::holes::link(&s, &plain).unwrap()));
-    assert!(item["url"].as_str().unwrap().starts_with("/holes/"));
+    assert_eq!(
+        item["url"],
+        json!(crate::holes::link(&s, &plain).await.unwrap())
+    );
+    let url = reqwest::Url::parse(item["url"].as_str().unwrap()).unwrap();
+    assert!(url.host_str().unwrap().ends_with(".preview.localhost"));
+    assert_eq!(url.host_str().unwrap().split('.').next().unwrap().len(), 52);
     assert_eq!(item["hole_id"], json!(plain.id.to_string()));
     assert_eq!(
         item["execution_host"],

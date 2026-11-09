@@ -11,7 +11,8 @@ export const PALETTES = [
 ] as const;
 export type Palette = (typeof PALETTES)[number]["value"];
 export type Mode = "light" | "dark" | "system";
-type ThemeState = { palette: Palette; mode: Mode; customLight: ThemeVariables; customDark: ThemeVariables };
+export type ThemeState = { palette: Palette; mode: Mode; customLight: ThemeVariables; customDark: ThemeVariables };
+export const THEME_PREFERENCE_EVENT = "ui:theme-preference";
 const KEY = "ferry.theme";
 const DEFAULT: ThemeState = { palette: "modern", mode: "system", customLight: {}, customDark: {} };
 let current: ThemeState | undefined;
@@ -49,11 +50,21 @@ export function initTheme() {
   applyTheme(state.palette, state.mode);
 }
 const listeners = new Set<() => void>();
-function update(next: Partial<ThemeState>) {
+function update(next: Partial<ThemeState>, persist = true) {
   current = { ...read(), ...next };
   try { localStorage.setItem(KEY, JSON.stringify(current)); } catch { /* Keep the in-memory preference when storage is unavailable. */ }
   applyTheme(current.palette, current.mode);
   listeners.forEach(fn => fn());
+  if (persist) window.dispatchEvent(new CustomEvent(THEME_PREFERENCE_EVENT, { detail: { ...current } }));
+}
+/** Cloud data passes through the same allowlists as browser preferences. */
+export function restoreTheme(value?: Partial<ThemeState> | null) {
+  update({
+    palette: PALETTES.some(p => p.value === value?.palette) ? value!.palette! : DEFAULT.palette,
+    mode: ["light", "dark", "system"].includes(value?.mode ?? "") ? value!.mode! : DEFAULT.mode,
+    customLight: sanitizeCustomThemeVariables(value?.customLight),
+    customDark: sanitizeCustomThemeVariables(value?.customDark),
+  }, false);
 }
 export function useTheme() {
   const [state, setState] = useState(read);

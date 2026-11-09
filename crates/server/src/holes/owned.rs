@@ -45,6 +45,9 @@ pub(crate) async fn open_owned(
     request: OwnedRequest,
 ) -> Result<holes::Model> {
     scope.require("holes.create")?;
+    crate::accounts::addresses::Configuration::load(s, &s.db)
+        .await?
+        .require_preview()?;
     let name = checked_name(if request.name.trim().is_empty() {
         &request.source_ref
     } else {

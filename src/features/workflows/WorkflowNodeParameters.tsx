@@ -834,7 +834,6 @@ export function WorkflowNodeParameters({
         <StructuredValue label={t("commandInputEnv")} value={p.input_env??{}} readOnly={readOnly} change={value=>patch({input_env:value})}/>
         {number("port", "previewPort", 1)}
         {text("name", "previewName")}
-        <Check label={t("previewStripPrefix")} value={p.strip_prefix !== false} readOnly={readOnly} change={strip_prefix=>patch({strip_prefix})}/>
         {number("ready_timeout_seconds", "previewReadyTimeout", 1)}
         <Field label={t("previewReview")}>
           <select aria-label={t("previewReview")} className={control} disabled={readOnly} value={p.review === "human" ? "human" : "none"} onChange={event=>patch({review:event.target.value})}>

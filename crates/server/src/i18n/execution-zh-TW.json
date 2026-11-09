@@ -185,5 +185,7 @@
   "workflow.integrationUnknown": "整合呼叫結果未知。再次執行前請核對服務商記錄；系統未自動重送。",
   "workflow.integrationRemote": "應用拒絕了請求，請檢查權限、參數及服務商限流。",
   "workflow.hostExecutionFailed": "主機執行失敗：請檢查主機連線、Git/curl 安裝、目錄和帳號權限。",
-  "workflow.hostTargetRequired": "请选择节点或工作流的执行主机。"
+  "workflow.hostTargetRequired": "请选择节点或工作流的执行主机。",
+  "holes.domainRequired": "請先在平台設定 → 存取位址設定預覽根網域，再使用預覽穿透。",
+  "platform.addressInvalid": "請填寫有效的 HTTP(S) 主要位址；預覽根網域不能包含協定、萬用字元或路徑。"
 }

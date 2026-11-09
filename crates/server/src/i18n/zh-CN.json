@@ -12,7 +12,7 @@
   "error.database": "保存或读取数据失败，请稍后重试；已填写内容不会清空。",
   "error.file": "文件操作失败，请检查磁盘空间和目录权限。",
   "server.draining": "服务正在安全关闭，请稍后重试。",
-  "guard.host": "此主机地址未在允许列表中。",
+  "guard.host": "请求的主机地址无效。",
   "guard.request": "缺少操作校验标识。",
   "guard.origin": "不允许此来源发起操作。",
   "assets.not_built": "界面文件未构建，请先运行 npm run build。",
