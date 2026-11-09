@@ -8,10 +8,7 @@ async function chooseNative(control, value) {
   { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
   assert(index >= 0, `Missing option ${value}`);
-  await control.click();
-  await control.press('Home');
-  for (let i = 0; i < index; i++) await control.press('ArrowDown');
-  await control.press('Enter');
+  await control.selectOption(value);
   assert.equal(await control.inputValue(), value, 'Native selection must persist');
 }
 
@@ -367,8 +364,8 @@ try {
   await p.locator('.react-flow__node[data-id="job_1"]').getByRole('button',{name:'新任务',exact:true}).click();
   await chooseNative(p.getByLabel('任务执行器',{exact:true}), buildHost.id);
   await p.getByRole('button',{name:'添加步骤',exact:true}).click();
-  await chooseNative(p.getByLabel('步骤类型',{exact:true}), 'action');
-  await p.getByRole('textbox',{name:'Action 引用',exact:true}).fill('actions/checkout@v4');
+  await p.getByRole('menuitem',{name:'克隆代码',exact:true}).click();
+  assert.equal(await p.getByLabel('步骤类型',{exact:true}).inputValue(),'checkout');
   await chooseNative(p.getByLabel('仓库连接',{exact:true}), codeupConnection.id);
   await chooseNative(p.getByLabel('节点仓库',{exact:true}), providerOrigin+'/test-org/team/test-repo.git');
   assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),'');
@@ -391,7 +388,7 @@ try {
   const binding=build.checkout_bindings.find(row=>row.job_id==='job_1'&&row.step_id===checkout.id);assert(binding);assert.equal(binding.connection_id,codeupConnection.id);assert.equal(binding.repository_url,providerOrigin+'/test-org/team/test-repo.git');assert.equal(binding.ref,sourceCommit);
   assert.equal(build.executor_bindings.find(row=>row.job_id==='job_1').target_ref,buildHost.id);
   await p.goto(origin+`/workspaces/${workspace_tenant}/pipelines/`+build.id+'/edit');
-  await p.locator('.react-flow__node[data-id="job_1"]').getByRole('button',{name:/步骤2/}).click();
+  await p.locator('.react-flow__node[data-id="job_1"] [data-action-step="0"]').click();
   assert.equal(await p.getByLabel('仓库连接',{exact:true}).inputValue(),codeupConnection.id);assert.equal(await p.getByLabel('节点仓库',{exact:true}).inputValue(),providerOrigin+'/test-org/team/test-repo.git');assert.equal(await p.getByLabel('分支 / 标签 / Commit',{exact:true}).inputValue(),sourceCommit);
   const run=await post(owner,root+'/pipelines/'+build.id+'/runs',{});
   let result;

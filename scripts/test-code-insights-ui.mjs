@@ -5,10 +5,7 @@ async function chooseNative(control, value) {
   await control.page().waitForFunction(({ element, expected }) => !element.disabled && [...element.options].some(option => option.value === expected), { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
   assert(index >= 0, `Missing option ${value}`);
-  await control.click();
-  await control.press('Home');
-  for (let i = 0; i < index; i++) await control.press('ArrowDown');
-  await control.press('Enter');
+  await control.selectOption(value);
   assert.equal(await control.inputValue(), value, 'Native selection must persist');
 }
 
@@ -98,7 +95,7 @@ await page.route("**/api/**", async (route) => {
     body = {
       items: [
         { id: "11", name: "Codeup team", provider: "codeup", state: "connected" },
-        { id: "12", name: "Git source", provider: "git" },
+        { id: "12", name: "Git source", provider: "git", state: "connected" },
       ],
       total: 2,
       page_size: 200,
@@ -165,10 +162,10 @@ try {
   await chooseNative(connection, '11');
   await page.getByText('此连接没有可访问的仓库。请检查授权范围，或更换连接后重试。', { exact: true }).waitFor();
   repositoryMode = 'error';
-  await page.getByRole('button', { name: '刷新连接', exact: true }).click();
+  await connection.locator('..').getByRole('button').click();
   await page.getByRole('alert').filter({ hasText: 'Provider unavailable' }).waitFor();
   repositoryMode = 'secondPageError';
-  const refreshConnection=page.getByRole('button',{name:'刷新连接',exact:true});
+  const refreshConnection=connection.locator('..').getByRole('button');
   assert.equal((await refreshConnection.textContent()).trim(),'','Refresh has an icon without an outside text button');
   assert.equal(await refreshConnection.evaluate(element=>!!element.closest('[data-slot="select-refresh"]')?.querySelector('select[aria-label="仓库连接"]')),true,'Refresh is embedded beside its corresponding select');
   await refreshConnection.click();

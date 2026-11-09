@@ -174,6 +174,8 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     # New archive metadata is additive; old runs have no archived files.
                     assert after.get('artifacts') == []
                     before[path]['artifacts'] = []
+                    assert after.get('previews') == []
+                    before[path]['previews'] = []
                 if '/repositories/' in path:
                     assert after['provider'] == before[path].get('provider', 'git')
                     before[path]['provider'] = before[path].get('provider', 'git')
@@ -241,6 +243,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                 expected |= {'code-insights.'+verb for verb in (['read','create','update','delete','sync'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'workflows.'+verb for verb in (['read','create','update','delete','run'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
                 expected |= {'workflow-groups.'+verb for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员','开发'] else ['read'] if role['name']=='只读' else [])}
+                expected |= {'holes.'+verb for verb in (['read','create','update','delete'] if role['name'] in ['拥有者','管理员','开发','运维'] else ['read'] if role['name']=='只读' else [])}
                 if role['name'] in ['拥有者','管理员']:
                     expected |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
                     expected |= AI_MANAGER_PERMISSIONS

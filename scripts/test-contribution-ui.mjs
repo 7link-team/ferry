@@ -13,10 +13,8 @@ async function chooseNative(control, value) {
   await control.waitFor();
   await control.page().waitForFunction(({ element, expected }) => !element.disabled && [...element.options].some(option => option.value === expected), { element: await control.elementHandle(), expected: value });
   const index = await control.evaluate((element, expected) => [...element.options].findIndex(option => option.value === expected), value);
-  await control.click();
-  await control.press('Home');
-  for (let i = 0; i < index; i++) await control.press('ArrowDown');
-  await control.press('Enter');
+  assert(index >= 0, `Missing option ${value}`);
+  await control.selectOption(value);
   assert.equal(await control.inputValue(), value, 'Native selection must persist');
 }
 
