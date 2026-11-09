@@ -160,6 +160,7 @@ try {
  const serialBox=await page.locator('.react-flow__node[data-id="job_1"]').boundingBox(),parallelBox=await page.locator('.react-flow__node[data-id="job_2"]').boundingBox();
  assert(parallelBox.y>=serialBox.y+serialBox.height-1,'parallel task should be placed below its sibling');
  await page.getByRole('button',{name:'添加步骤',exact:true}).last().click();
+ await page.getByRole('menuitem',{name:'执行命令',exact:true}).click();
  await page.locator('summary').filter({hasText:'高级 YAML'}).evaluate(el=>{el.parentElement.open=true});
  await page.getByRole('button',{name:'步骤 YAML',exact:true}).click();
  await page.getByRole('dialog').locator('.monaco-editor .view-lines').click();

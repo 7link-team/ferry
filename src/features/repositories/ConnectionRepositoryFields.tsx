@@ -68,7 +68,7 @@ export function RepositoryConnectionSelect({workspace,data,value,onChange,provid
   return <div className="min-w-0 space-y-2">
     <AutoField label={t("integration.connection")} className="block space-y-2">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <SelectRefresh label={t("integration.refresh")} loading={data.connectionsLoading} onRefresh={()=>data.setRevision(n=>n+1)} className="min-w-0 flex-1">
+        <SelectRefresh label={hostRepositoryText("repository.021")} loading={data.connectionsLoading} onRefresh={()=>data.setRevision(n=>n+1)} className="min-w-0 flex-1">
           <select aria-label={t("integration.connection")} className={selectClass} value={value==='0'?'':value} disabled={readOnly||data.connectionsLoading} onChange={event=>onChange(event.target.value,rows.find(row=>row.id===event.target.value))}>
             <option value="">{data.connectionsLoading?commonText("common.loading"):hostRepositoryText("repository.018")}</option>
             {value&&value!=='0'&&!rows.some(row=>row.id===value)&&<option value={value}>{commonText("form.unavailableReference",{id:value})}</option>}

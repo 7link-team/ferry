@@ -1,6 +1,8 @@
 ## 当前事项清单（2026-11-09）
 
-| RELEASE-ALPHA9-34 | 进行中 | 用户授权发版；alpha.9/41d03dc的CI42626689909因旧浏览器/升级夹具失败，未公开、不移动标签。alpha.10候选修复：连接夹具补connected状态、原生selectOption保留断言、当前刷新/添加步骤/首个checkout选择；升级严格检查previews空列表与角色预览CRUD/read。真实SQLite旧版升级、贡献/洞察/市场/仓库授权及私有checkout构建产物四套浏览器复验PASS。前端567PASS/1既有skip、typecheck、清单4PASS；Rust592PASS/5缺sh，补测试进程Shell路径后host12/checkout4PASS。Docker/升级夹具翻译文件补齐，真实Agent执行视图4项PASS。证据conversation-interruption-20261109/release-*及alpha9-*；等待最终完整CI/附件/镜像，4291保持运行，不执行生产部署，用户验收边界保留。 |
+| PREVIEW-DOMAIN-35 | 待处理 | 用户要求预览由/holes/token改为token.<预览域名>/path，移除剥离前缀开关；正在核对域名配置、完整路径/跳转/WebSocket、旧链接兼容和隔离边界。现token为64位hex，超DNS标签63字节限制，需无损DNS安全编码；已补docs/preview-holes-design.md §17设计/事实依据；配置缺失行为与旧非剥离应用迁移需定稿，未实现，不纳入alpha.10候选。 |
+
+| RELEASE-ALPHA9-34 | 进行中 | alpha.11候选：补画布添加步骤菜单选择，修正连接刷新误用凭据翻译，Runner夹具补OS/安装范围。完整canvas及后续15套UI现全部PASS（初次2FAIL及修复日志保留），前端567PASS/1既有skip、build与更新清单4PASS；证据030-alpha10-public-release/local-*及conversation-interruption-20261109/release-*-final.log、release-frontend-raw.log。alpha.10/2afb7cd的CI42629816296为26SUCCESS/1旧脚本FAIL，Release跳过，双架构镜像已发布；alpha.9/10标签不移动。清理CI42632134986成功且临时分支已按租约删除。下一步推送alpha.11并核验完整CI/公开附件/签名/镜像；4291未重启、未部署生产，预览域名方案不冒称实现。 |
 
 | PIPELINE-CHECKOUT-22 | 待验证 | 4291已更新PID35224/index-DNAdtqaS.js：流水线克隆步骤内可批量选择仓库/组并原位展开，保留原仓库分支/目录/首个ID/条件/环境/checkout参数/YAML引用；节点克隆支持同连接多仓库/整组含子组，完整分页快照去重、独立编号目录、逐仓库授权/发送账本。相关前端60PASS及最终checkout36PASS，集成10PASS、图13PASS/1原有ignore，前后端构建PASS。真实HTTP Git+Runner双仓库克隆、Actions双checkout→构建、跨空间拒绝及四宽度选择/保存回读PASS，repository-batch-clone-20261109/reviewed；Codeup分页多组组件回归PASS，商业Codeup未实连。待用户刷新验收；分组为快照、500仓库上限、不自动重试；未发版。 |
 | CONVERSATION-INTERRUPTION-33 | 待验证 | 私聊中断可继续输入/显式重试，错误及重试紧贴失败消息，移除底部整条中断提示；4291已更新PID35224/index-DNAdtqaS.js。后端19/前端6PASS，构建通过；实际构建前端+API夹具四宽度行内错误/重试PATCH→POST/草稿保留PASS，证据conversation-interruption-20261109/inline-ui.json及截图。原会话真实推理未验证：旧测试登录归另一账号返回404，浏览器工具无用户登录页面；不改所有权、不自动重放。待用户本人刷新验收，未发版。 |

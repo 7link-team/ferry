@@ -34,7 +34,7 @@ try {
     else if (path === '/api/workspaces/109124796398174208/nodes/h1/metrics') body = { cpu_percent: 12.5, load1: 0.2, memory_used: 1024, memory_total: 4096, disks: [{ name: 'system', mount: '/', used: 1024, total: 4096 }], networks: [{ name: 'eth0', received: 10, transmitted: 20 }] };
     else if (path === '/api/workspaces/109124796398174208/nodes/h1/connection-credentials') {
       if (request.method() === 'POST') { resets++; currentToken = `fixture-reset-${resets}`; online = false; }
-      body = { token: currentToken, server: 'https://fixture.example:8443', state: online ? 'online' : 'offline' };
+      body = { token: currentToken, server: 'https://fixture.example:8443', state: online ? 'online' : 'offline', os: 'linux', installation_scope: 'system' };
     }
     else if (path === '/api/workspaces/109124796398174208/runner-tokens' && request.method() === 'POST') {
       creates++;
