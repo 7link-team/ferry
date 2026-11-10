@@ -613,7 +613,8 @@ pub(super) async fn execute(
     params: &[Value],
 ) -> Result<Vec<Item>> {
     if node["type"] == "notification.send" {
-        return execute_notification(s, run, node_run, items, params).await;
+        // SMTP/provider futures must not inflate every Git/HTTP integration task.
+        return Box::pin(execute_notification(s, run, node_run, items, params)).await;
     }
     let manifest = graph::manifest(node).ok_or_else(invalid)?;
     let http = &manifest["http"];

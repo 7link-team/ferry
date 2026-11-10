@@ -1163,14 +1163,14 @@ async fn dispatch_inner(
                 }],
                 "data.set" => set(&items[..selected], &active.snapshot.params)?,
                 _ if super::integration::supports(spec) => {
-                    super::integration::execute(
+                    Box::pin(super::integration::execute(
                         s,
                         &run,
                         node_id,
                         spec,
                         &items[..selected],
                         &active.snapshot.params,
-                    )
+                    ))
                     .await?
                 }
                 _ if super::ai::supports(spec) => {

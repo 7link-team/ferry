@@ -48,7 +48,7 @@ try{
   await page.getByRole('dialog',{name:t('run'),exact:true}).getByRole('button',{name:t('confirm'),exact:true}).click();
   const response=await submitted;assert.equal(response.status(),201);const running=await response.json();
   const results=page.getByRole('dialog',{name:t('results'),exact:true}),view=results.locator('[data-workflow-execution-view]');await view.waitFor();
-  await wait(()=>sockets.size>0);
+  await wait(()=>{assert.equal(server.exitCode,null,'Workflow server exited before the Git request');assert.equal(server.signalCode,null,'Workflow server terminated before the Git request');return sockets.size>0;});
   await view.locator('.react-flow__node[data-id="remote"]').getByText(t('execution.state.running'),{exact:true}).waitFor();
   await view.locator('.react-flow__edge.animated').first().waitFor();
   assert(await view.locator('.react-flow__edge.animated').count()>0,'Running edges animate');
@@ -110,5 +110,5 @@ try{
   report.checks.push('Draft and published executions share readable version numbers; exact per-version node counts/latest execution, actor/time metadata; explicit eye/details, row click, revision latest link and URL reload restore details');
   await stop(runner);await stop(server);server=startServer();await ready();assert.equal((await api(dataPath)).logs,recorded.logs);
   report.checks.push('Successful Agent stdout and output recorded; failed stderr survives server restart');report.result='PASS';
-}catch(error){report.result='FAIL';report.error=String(error);if(page){await page.screenshot({path:join(work,'failure.png'),fullPage:true});await writeFile(join(work,'failure.html'),await page.content());}throw error;}
+}catch(error){report.result='FAIL';report.error=String(error);report.serverExit={code:server?.exitCode,signal:server?.signalCode};report.serverLogTail=(await readFile(join(work,'server.log'),'utf8')).slice(-8000);if(page){await page.screenshot({path:join(work,'failure.png'),fullPage:true});await writeFile(join(work,'failure.html'),await page.content());}throw error;}
 finally{await writeFile(join(work,'acceptance.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));await browser?.close();await stop(runner);await stop(server);for(const socket of sockets)socket.destroy();if(stalled.listening)await new Promise(r=>stalled.close(r));await log.close();}
