@@ -276,7 +276,11 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
           ))}
         </nav>
         <span className="flex-1" />
-        <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={onSignedOut} />
+        <div className="flex min-w-0 max-w-full items-center gap-1">
+          <WorkspaceSwitcher identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} />
+          {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
+        </div>
+        <WorkspaceHeaderActions identity={identity} onSignedOut={onSignedOut} />
       </header>
 
       {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
@@ -438,9 +442,8 @@ function AppearanceActions({ floating = false }: { floating?: boolean }) {
   return <div className={floating ? "fixed end-3 top-2 z-40 flex items-center gap-1 rounded-md bg-card" : "flex shrink-0 items-center gap-1"}><LanguageSwitcher /><ThemeSwitcher /></div>;
 }
 
-function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void; onSignedOut: () => void }) {
+function WorkspaceHeaderActions({ identity, onWorkspaces, onSignedOut }: { identity: Identity; onWorkspaces?: () => void; onSignedOut: () => void }) {
   const { t } = useTranslation();
-  const route = useRoute();
   return <>
         <AppearanceActions />
 
@@ -459,7 +462,14 @@ function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <div className="flex min-w-0 max-w-full items-center gap-1">
+        {onWorkspaces && <WorkspaceSwitcher identity={identity} onWorkspaces={onWorkspaces} />}
+  </>;
+}
+
+function WorkspaceSwitcher({ identity, current, onWorkspaces }: { identity: Identity; current?: Identity["workspaces"][number]; onWorkspaces: () => void }) {
+  const { t } = useTranslation();
+  const route = useRoute();
+  return (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5" aria-label={workflowText("switchWorkspace")}>
@@ -492,7 +502,5 @@ function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }
             <DropdownMenuItem onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        {current && identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
-        </div>
-  </>;
+  );
 }
