@@ -277,7 +277,6 @@ function Workspace({ identity, reload, onSignedOut }: { identity: Identity; relo
         </nav>
         <span className="flex-1" />
         <WorkspaceHeaderActions identity={identity} current={current} onWorkspaces={() => navigate({workspace:"_workspaces"}, {})} onSignedOut={onSignedOut} />
-        {identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
       </header>
 
       {item.resource === "conversations" ? <ConversationsWorkspace key={current.id} workspace={current.id} permissions={permissions} form={formConfig} /> : <div className="grid min-h-0 min-w-0 grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)]">
@@ -448,10 +447,27 @@ function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm">
-              {(current?.name ?? t("app.platform"))} · {identity.user.name}
+              {identity.user.name}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>{t("app.account")}</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
+            >
+              <LogOut /> {t("app.signOut")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <div className="flex min-w-0 max-w-full items-center gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="min-w-0 max-w-[min(18rem,calc(100vw-2rem))] shrink gap-1.5" aria-label={workflowText("switchWorkspace")}>
+              <span className="truncate">{current?.name ?? workflowText("switchWorkspace")}</span>
+              <ChevronDown className="size-4 shrink-0" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" collisionPadding={8}>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>{workflowText("switchWorkspace")}</DropdownMenuSubTrigger>
               <DropdownMenuPortal>
@@ -474,13 +490,9 @@ function WorkspaceHeaderActions({ identity, current, onWorkspaces, onSignedOut }
               </DropdownMenuPortal>
             </DropdownMenuSub>
             <DropdownMenuItem onClick={() => onWorkspaces()}>{t("app.workspaces")}</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => navigate(accountRoute, {})}>{t("app.account")}</DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => void api("/sessions", { method: "DELETE" }).then(onSignedOut)}
-            >
-              <LogOut /> {t("app.signOut")}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {current && identity.user.is_superadmin && <Button variant="ghost" onClick={() => navigate({ workspace: "_platform", group: "platform", item: "workspaces", mode: "list" }, {})}>{t("app.platform")}</Button>}
+        </div>
   </>;
 }
