@@ -15,7 +15,7 @@ const origin='http://127.0.0.1:'+port;
 const log=await open(join(work,'server.log'),'w');
 const env={...process.env,FERRY_DATA_DIR:work,FERRY_BIND:'127.0.0.1:'+port,FERRY_TRUSTED_PROXIES:'127.0.0.1/32,::1/128'};
 for(const key of ['FERRY_DATABASE_URL','FERRY_NATS_URL','FERRY_CLUSTER_NAMESPACE'])delete env[key];
-const server=spawn(resolve('target/debug/ferry-server'+(process.platform==='win32'?'.exe':'')),[],{env,stdio:['ignore',log.fd,log.fd],windowsHide:true});
+const server=spawn(resolve(process.env.FERRY_BINARY||'target/debug/ferry-server'+(process.platform==='win32'?'.exe':'')),[],{env,stdio:['ignore',log.fd,log.fd],windowsHide:true});
 const report={work,checks:[]};let browser;
 try {
  for(let i=0;;i++){
@@ -55,7 +55,8 @@ try {
  assert.equal(settings.system_version,status.version);assert.equal(settings.system_instance,status.instance_id);
  assert.equal(settings.system_protocol,String(status.protocol));assert(settings.system_runtime);
  const anonymous=await browser.newContext();
- const publicFooter=await api(anonymous,'/platform/footer');assert.deepEqual(publicFooter,{content:''});
+ const publicSite={site_name:'',site_title_prefix_enabled:false,site_title_visible_prefix:'☀️',site_title_hidden_prefix:'🌙'};
+ const publicFooter=await api(anonymous,'/platform/footer');assert.deepEqual(publicFooter,{...publicSite,content:''});
  await api(regular,'/platform/settings/1',{version:settings.version,registration_enabled:true,footer_html:'forbidden'},'PATCH',403);
  const patchSettings=async(patch,expected=200)=>{
   const current=await api(admin,'/platform/settings/1');
@@ -70,7 +71,7 @@ try {
  await patchSettings({analytics_origins:'https://analytics.example.com/path'},400);
  await patchSettings({analytics_origins:'https://analytics.example.com;unsafe-inline'},400);
  await patchSettings({analytics_origins:'https://user:password@example.com'},400);
- assert.deepEqual(await api(anonymous,'/platform/footer'),{content:''});
+ assert.deepEqual(await api(anonymous,'/platform/footer'),{...publicSite,content:''});
  report.checks.push('only successful sign-in records client IP/time; failed login/logout preserve metadata; admin-only APIs; actual system values match status');
  const page=await admin.newPage();const errors=[];report.browserErrors=errors;page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/zh-CN/platform/users');
@@ -84,14 +85,14 @@ try {
  await page.screenshot({path:join(work,'system-info.png')});
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  assert.equal(await page.getByLabel('系统版本',{exact:true}).count(),0,'versions belong to individual server nodes');
- await page.getByRole('button',{name:'页脚设置',exact:true}).click();
+ await page.goto(origin+'/zh-CN/platform/settings/1/edit?section=site&form_tab=footer');
  const richEditor=page.locator('[data-slate-editor]');
  await richEditor.waitFor();await richEditor.fill('© 2026 Example · contact@example.invalid');
  await page.getByRole('button',{name:'保存',exact:true}).click();
  const footer=page.locator('footer[data-platform-footer]');
  await footer.getByText('© 2026 Example · contact@example.invalid',{exact:true}).waitFor();
  assert((await api(anonymous,'/platform/footer')).content.includes('contact@example.invalid'));
- await page.getByRole('button',{name:'页脚设置',exact:true}).click();
+ await page.getByRole('tab',{name:'页脚设置',exact:true}).click();
  await page.getByRole('tab',{name:'高级 HTML',exact:true}).click();
  const footerHtml='<div>© 2026 Example · <a href="https://beian.miit.gov.cn/">示例备案号</a> · <a href="mailto:contact@example.invalid">联系我们</a></div><script>window.footerPwned=true</script><a href="javascript:window.footerPwned=true">unsafe</a>';
  await page.getByRole('textbox',{name:'高级 HTML',exact:true}).fill(footerHtml);
@@ -100,27 +101,25 @@ try {
  assert.equal(await footer.getByRole('link',{name:'联系我们',exact:true}).getAttribute('href'),'mailto:contact@example.invalid');
  assert.equal(await footer.locator('script,[href^="javascript:"]').count(),0);
  assert.equal(await page.evaluate(()=>window.footerPwned),undefined);
- assert.deepEqual(await api(anonymous,'/platform/footer'),{content:footerHtml});
+ assert.deepEqual(await api(anonymous,'/platform/footer'),{...publicSite,content:footerHtml});
  await patchSettings({});assert.equal((await api(anonymous,'/platform/footer')).content,footerHtml,'unrelated settings update preserves footer');
  await page.reload();await footer.getByRole('link',{name:'示例备案号',exact:true}).waitFor();
  await page.screenshot({path:join(work,'footer-settings.png')});
  await page.setViewportSize({width:390,height:844});
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await page.screenshot({path:join(work,'system-info-mobile.png')});
- const footerBox=await footer.boundingBox();const saveBox=await page.getByRole('button',{name:'保存',exact:true}).boundingBox();
- assert(saveBox.y+saveBox.height<=footerBox.y+1,'footer must not overlay form actions');
+ assert.equal(await footer.isVisible(),false,'phone business pages reserve the bottom for app navigation');
+ assert(await page.getByRole('button',{name:'保存',exact:true}).isVisible());
  await page.screenshot({path:join(work,'footer-mobile.png')});
  const exampleWorkspace=await api(admin,'/workspaces',{name:'Footer layout',slug:'footer-layout'});
  await page.goto(origin+'/zh-CN/workspaces/'+exampleWorkspace.id+'/workflows/new');
   await startBlank(page);
  const canvas=page.locator('.react-flow');await canvas.waitFor();
- const canvasBox=await canvas.boundingBox();const graphFooter=await footer.boundingBox();
+ const canvasBox=await canvas.boundingBox();
  assert(canvasBox.height>200);
- const contentBox=await page.locator('[data-platform-content]').boundingBox();
- assert(contentBox.y+contentBox.height<=graphFooter.y+1,'scrollable content must stop before the footer');
- assert(await footer.evaluate(node=>node.contains(document.elementFromPoint(node.getBoundingClientRect().x+20,node.getBoundingClientRect().y+5))),'canvas overflow must be clipped before footer');
+ assert.equal(await footer.isVisible(),false,'phone editors do not render the site footer');
  await canvas.evaluate(node=>node.scrollIntoView({block:'end'}));
- const visibleCanvas=await canvas.boundingBox();assert(visibleCanvas.y+visibleCanvas.height<=graphFooter.y+1,'bottom of the canvas must remain reachable by scrolling');
+ const visibleCanvas=await canvas.boundingBox();assert(visibleCanvas.y+visibleCanvas.height<=844+1,'bottom of the canvas must remain reachable by scrolling');
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
  report.checks.push('footer rich text and advanced HTML save; public allowlist response; admin-only write; limits/unknown-setting preservation; script removal; mobile/form/canvas layout');
  // Active logout clears the target and browser Back cannot expose a protected URL.
@@ -164,11 +163,11 @@ try {
  await patchSettings({footer_html:''});await page.reload();
  await page.getByRole('button',{name:/ · Admin$/}).waitFor();
  assert.equal(await footer.count(),0,'empty footer must not consume layout space');
- assert.deepEqual(await api(anonymous,'/platform/footer'),{content:''});
+ assert.deepEqual(await api(anonymous,'/platform/footer'),{...publicSite,content:''});
  report.checks.push('configured footer remains on login; clearing footer removes its entire layout row');
  // Exercise a non-Google SDK, inline code, network reporting and GA loader under real CSP.
  await page.goto(origin+'/zh-CN/platform/settings/1/edit');
- await page.getByRole('button',{name:'页面脚本',exact:true}).click();
+ await page.goto(origin+'/zh-CN/platform/settings/1/edit?section=site&form_tab=scripts');
  await page.getByRole('checkbox',{name:'启用页面脚本',exact:true}).check();
  await page.getByLabel('Google Analytics 测量 ID（可选）',{exact:true}).fill('G-TEST12345');
  await page.getByLabel('自定义 JavaScript',{exact:true}).fill('window.customScriptRuns=(window.customScriptRuns||0)+1;var sdk=document.createElement("script");sdk.src="https://analytics.example.com/sdk.js";document.head.appendChild(sdk);');

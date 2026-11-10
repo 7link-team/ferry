@@ -161,6 +161,8 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     allowed |= {'holes.'+verb for verb in ['read','create','update','delete']}
                     allowed |= {'credentials.use', 'credentials.update_price', 'credentials.update_budget'}
                     allowed |= AI_MANAGER_PERMISSIONS
+                    # accounts/workspace.rs grants notification CRUD/send only to owners/admins.
+                    allowed |= {'notifications.'+verb for verb in ['read','create','update','delete','send']}
                     old_spaces={w['id']:w for w in before[path]['workspaces']}
                     for migrated in after['workspaces']:
                         original=old_spaces[migrated['id']]
@@ -251,6 +253,7 @@ with tempfile.TemporaryDirectory(prefix='server-upgrade-') as directory:
                     expected |= AI_USER_PERMISSIONS
                 elif role['name'] == '只读':
                     expected |= AI_VIEWER_PERMISSIONS
+                expected |= {'notifications.'+verb for verb in (['read','create','update','delete','send'] if role['name'] in ['拥有者','管理员'] else ['read'] if role['name']=='只读' else [])}
                 expected -= set(role['permissions'])
                 assert added==expected and set(role['permissions'])<=set(migrated['permissions']), (role['name'], sorted(added), sorted(expected))
                 assert migrated['version'] == role.get('version', 1)+bool(added)
